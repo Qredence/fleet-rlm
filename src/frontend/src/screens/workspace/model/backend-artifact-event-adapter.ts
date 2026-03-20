@@ -354,6 +354,7 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       appendIntoLlmStep({ bucket: "reasoning", text, timestamp: epoch });
       return;
     case "status":
+    case "warning":
       markLiveTraceSeen();
       appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
       return;

@@ -54,6 +54,16 @@ Runtime settings behavior:
 - Daytona-specific source controls are `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 
+Daytona SDK and volume behavior:
+
+- The backend Daytona integration is implemented on the official Daytona Python SDK.
+- `DAYTONA_TARGET` is treated as Daytona SDK config only; it is not used as a workspace id,
+  sandbox id, or persistent volume name.
+- The Daytona Volumes page path browses a workspace-scoped persistent Daytona volume whose name is
+  derived from the authenticated workspace/tenant claim.
+- That persistent volume is attached to temporary Daytona sandboxes through the Python SDK
+  `volume.get(..., create=True)` + `VolumeMount(...)` flow.
+
 Deprecated/planned surfaces removed from backend:
 
 - `/api/v1/chat`
@@ -83,14 +93,49 @@ Deprecated/planned surfaces removed from backend:
 
 - Accepts `message`, `cancel`, and `command` payloads.
 - Emits `event`, `command_result`, and `error` envelopes.
+- Canonical purpose: conversational turn streaming only. The transcript should stay focused on
+  user/assistant exchange plus lightweight live trace.
 - Auth claims are canonical tenant/user authority.
 - `runtime_mode` selects the top-level runtime:
   - `modal_chat` for the default product path
-  - `daytona_pilot` for the experimental workbench path
+  - `daytona_pilot` for the Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
 - Daytona `message` frames may also carry `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 - Daytona requests reject request-side `max_depth`, and `repo_ref` requires
   `repo_url`.
+- Canonical event kinds:
+  - `assistant_token`
+  - `reasoning_step`
+  - `trajectory_step`
+  - `status`
+  - `warning`
+  - `tool_call`
+  - `tool_result`
+  - `plan_update`
+  - `rlm_executing`
+  - `memory_update`
+  - `hitl_request`
+  - `hitl_resolved`
+  - `command_ack`
+  - `command_reject`
+  - terminal: `final`, `cancelled`, `error`
+- Every chat event payload should carry normalized runtime metadata under `payload.runtime` when
+  runtime state is known. The stable keys are:
+  - `runtime_mode`
+  - `execution_mode`
+  - `depth`
+  - `max_depth`
+  - `execution_profile`
+  - `sandbox_active`
+  - `sandbox_id`
+  - `effective_max_iters`
+  - optional `volume_name`
+  - optional `run_id`
+- For Daytona, `payload.runtime.volume_name` refers to the workspace-scoped persistent Daytona
+  volume when that volume is in use for the run.
+- `final` is transcript-oriented. It may include the final assistant text, reasoning summary,
+  citations/sources, attachments, and terminal runtime metadata, but it is no longer the canonical
+  workbench hydration source for Daytona.
 
 ### Chat Trace Render Contract
 
@@ -117,14 +162,56 @@ Trajectory payload handling:
 
 ### `/api/v1/ws/execution`
 
-- Dedicated execution stream for artifact/step visualization.
+- Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
 - Filters by subscription identity (`workspace_id`, `user_id`, `session_id`).
 - Emits `execution_started`, `execution_step`, `execution_completed`.
+- `execution_completed.summary` is the canonical canvas/workbench summary for both runtimes.
+  Frontend workbench state should hydrate from this summary rather than scraping Daytona-only
+  fields from `/ws/chat final`.
 - `execution_step.step` now carries additive actor metadata:
   - `depth` (optional)
   - `actor_kind` (`root_rlm | sub_agent | delegate | unknown`, optional)
   - `actor_id` (optional)
   - `lane_key` (optional)
+- `execution_completed.summary` should be shaped so both Modal/ReAct and Daytona/RLM can hydrate
+  the same frontend canvas shell. Stable top-level fields include:
+  - `run_id`
+  - `runtime_mode`
+  - `task`
+  - `status`
+  - `termination_reason`
+  - `duration_ms`
+  - `iterations`
+  - `callbacks`
+  - `prompt_handles` / `prompts`
+  - `context_sources`
+  - `sources`
+  - `attachments`
+  - `final_artifact`
+  - `warnings`
+- `execution_step.step.type` remains runtime-agnostic with the current `llm | tool | repl | memory
+  | output` lane model.
+
+### Unified Workspace Canvas Contract
+
+- Frontend transcript state and workbench state should reduce into a canonical per-turn record keyed
+  by assistant turn / session / run identity.
+- The chat transcript remains compact:
+  - user message
+  - assistant streaming/final answer
+  - lightweight trace/status/tool summaries
+- The canvas is the primary place for verbose execution detail:
+  - `Answer`
+  - `Reasoning`
+  - `Plan / Trajectory`
+  - `Tools / Execution`
+  - `Evidence`
+  - `Artifacts`
+- Daytona-specific iteration/callback/prompt detail is additive inside the canvas. It is not the
+  primary cross-runtime reasoning model.
+- Daytona live trace should expose the guide-relevant milestones in realtime:
+  iteration start, planner/reasoning preview, extracted code preview, sandbox observation, recursive
+  child spawn / child synthesis, and terminal completion or failure.
 
 ### Execution Graph Semantics
 

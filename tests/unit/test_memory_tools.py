@@ -215,3 +215,15 @@ def test_core_memory_replace_success(monkeypatch):
 
     assert "Updated block 'scratchpad'" in result
     assert agent._core_memory["scratchpad"] == "New Code"
+
+
+def test_set_core_memory_copies_external_mapping(monkeypatch):
+    """set_core_memory should snapshot external mappings instead of aliasing them."""
+    fake_interpreter = FakeInterpreter()
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    external_memory = {"scratchpad": "First draft"}
+    agent.set_core_memory(external_memory)
+    external_memory["scratchpad"] = "Mutated later"
+
+    assert agent._core_memory["scratchpad"] == "First draft"

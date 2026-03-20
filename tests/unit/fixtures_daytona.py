@@ -72,9 +72,10 @@ class FakeRunSession:
         *,
         steps: list[FakeStep] | None = None,
         context_sources: list[ContextSource] | None = None,
+        sandbox_id: str = "sbx-root",
     ) -> None:
         self.workspace_path = "/workspace/repo"
-        self.sandbox_id = "sbx-root"
+        self.sandbox_id = sandbox_id
         self.context_sources = list(context_sources or [])
         self.steps = list(steps or [])
         self.reset_calls = 0
@@ -172,6 +173,7 @@ class FakeRuntime:
         sessions = session if isinstance(session, list) else [session]
         self._sessions = list(sessions)
         self.workspace_calls: list[tuple[str | None, str | None, list[str] | None]] = []
+        self.workspace_call_details: list[dict[str, Any]] = []
 
     def create_workspace_session(
         self,
@@ -179,8 +181,17 @@ class FakeRuntime:
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None,
+        volume_name: str | None = None,
     ):
         self.workspace_calls.append((repo_url, ref, context_paths))
+        self.workspace_call_details.append(
+            {
+                "repo_url": repo_url,
+                "ref": ref,
+                "context_paths": context_paths,
+                "volume_name": volume_name,
+            }
+        )
         if not self._sessions:
             raise AssertionError("Unexpected extra workspace session request.")
         return self._sessions.pop(0)

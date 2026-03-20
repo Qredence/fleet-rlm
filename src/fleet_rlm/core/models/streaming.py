@@ -63,6 +63,7 @@ class TranscriptEvent(BaseModel):
 StreamEventKind = Literal[
     "assistant_token",
     "status",
+    "warning",
     "reasoning_step",
     "tool_call",
     "tool_result",
@@ -129,6 +130,14 @@ class TurnState:
                 self.status_lines.append(event.text)
                 self.status_messages.append(event.text)
                 self.reasoning_lines.append(event.text)
+            return
+
+        if event.kind == "warning":
+            if event.text:
+                self.status_lines.append(event.text)
+                self.status_messages.append(event.text)
+                self.reasoning_lines.append(event.text)
+                self.tool_timeline.append(event.text)
             return
 
         if event.kind == "reasoning_step":

@@ -9,16 +9,17 @@ escape hatch for advanced delegation.
 from __future__ import annotations
 
 import logging
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import dspy
-
+from fleet_rlm.core.agent.delegation_policy import (
+    RuntimeModuleExecutionRequest,
+    invoke_runtime_module,
+)
 from fleet_rlm.core.agent.rlm_agent import spawn_delegate_sub_agent_async
 from fleet_rlm.core.agent.tool_delegation import _sync_compatible_tool_callable
 
-from . import (
+from .shared import (
     build_trajectory_payload,
     chunk_text,
     chunk_to_text,
@@ -69,109 +70,19 @@ def _prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
     return getattr(prediction, field_name, default)
 
 
-def _claim_delegate_slot_or_error(agent: RLMReActChatAgent) -> dict[str, Any] | None:
-    if agent._current_depth >= agent._max_depth:
-        return {
-            "status": "error",
-            "error": (
-                f"Max recursion depth ({agent._max_depth}) reached. "
-                "Cannot run delegate operation."
-            ),
-        }
-
-    claim_slot = getattr(agent, "_claim_delegate_slot", None)
-    if not callable(claim_slot):
-        return None
-
-    claim_result = claim_slot()
-    if (
-        isinstance(claim_result, tuple)
-        and len(claim_result) == 2
-        and isinstance(claim_result[0], bool)
-    ):
-        allowed = bool(claim_result[0])
-        limit = _coerce_int(claim_result[1], default=1, minimum=1)
-        if not allowed:
-            return {
-                "status": "error",
-                "error": (
-                    "Delegate call budget reached for this turn. "
-                    f"Maximum delegate calls per turn is {limit}."
-                ),
-                "delegate_max_calls_per_turn": limit,
-            }
-
-    return None
-
-
 def _run_runtime_module(
     ctx: _DelegateToolContext,
     module_name: str,
     **kwargs: Any,
 ) -> tuple[Any | None, dict[str, Any] | None, bool]:
-    guard_error = _claim_delegate_slot_or_error(ctx.agent)
-    if guard_error is not None:
-        return None, guard_error, False
-
-    ctx.agent.start()
-
-    try:
-        module = ctx.agent.get_runtime_module(module_name)
-    except Exception as exc:
-        return (
-            None,
-            {
-                "status": "error",
-                "error": (
-                    f"Failed to load runtime module '{module_name}': "
-                    f"{type(exc).__name__}: {exc}"
-                ),
-            },
-            False,
+    result = invoke_runtime_module(
+        RuntimeModuleExecutionRequest(
+            agent=ctx.agent,
+            module_name=module_name,
+            module_kwargs=kwargs,
         )
-
-    delegate_lm = getattr(ctx.agent, "delegate_lm", None)
-    parent_lm = getattr(dspy.settings, "lm", None)
-
-    fallback_used = False
-    if delegate_lm is None:
-        fallback_used = True
-        record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
-        if callable(record_fallback):
-            record_fallback()
-
-    try:
-        if delegate_lm is not None:
-            lm_context = dspy.context(lm=delegate_lm)
-        elif parent_lm is not None:
-            lm_context = dspy.context(lm=parent_lm)
-        else:
-            lm_context = nullcontext()
-
-        with lm_context:
-            prediction = module(**kwargs)
-    except Exception as exc:
-        if delegate_lm is not None and parent_lm is not None:
-            record_fallback = getattr(ctx.agent, "_record_delegate_fallback", None)
-            if callable(record_fallback):
-                record_fallback()
-            fallback_used = True
-            with dspy.context(lm=parent_lm):
-                prediction = module(**kwargs)
-        else:
-            return (
-                None,
-                {
-                    "status": "error",
-                    "error": (
-                        f"Runtime module '{module_name}' failed: "
-                        f"{type(exc).__name__}: {exc}"
-                    ),
-                },
-                fallback_used,
-            )
-
-    return prediction, None, fallback_used
+    )
+    return result.prediction, result.error, result.fallback_used
 
 
 def _runtime_metadata(

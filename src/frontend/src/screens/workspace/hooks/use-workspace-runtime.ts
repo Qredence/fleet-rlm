@@ -104,7 +104,6 @@ export function useWorkspaceRuntime(): ChatRuntime {
     turnArtifactsByMessageId,
     isStreaming,
     sessionId,
-    runtimeMode,
     streamMessage,
     stopStreaming,
     resetSession,
@@ -153,23 +152,37 @@ export function useWorkspaceRuntime(): ChatRuntime {
   }, [sessionRevision, resetRuntime]);
 
   useEffect(() => {
-    if (!sessionRevision) return;
+    if (!sessionId) return;
 
-    const unsubscribe = subscribeToExecutionStream(sessionRevision, {
-      onFrame: (frame) => applyWsFrameToArtifacts(frame),
+    const unsubscribe = subscribeToExecutionStream(sessionId, {
+      onFrame: (frame) => {
+        setIsTyping(false);
+        useRunWorkbenchStore.getState().applyFrame(frame);
+        applyWsFrameToArtifacts(frame);
+
+        if (isTerminalFrame(frame)) {
+          const turnId = latestAssistantTurnId(useChatStore.getState().messages);
+          if (turnId) {
+            snapshotTurnArtifacts(turnId, useArtifactStore.getState().steps);
+          }
+          if (isErrorFrame(frame)) {
+            setPhase("idle");
+            setCreationPhase("idle");
+          } else {
+            setPhase("complete");
+            setCreationPhase("complete");
+          }
+        }
+      },
     });
 
     return () => unsubscribe();
-  }, [sessionRevision]);
+  }, [sessionId, setCreationPhase, snapshotTurnArtifacts]);
 
   const onFrame = useCallback(
     (frame: WsServerMessage) => {
       // Any backend frame means the server started responding.
       setIsTyping(false);
-
-      useRunWorkbenchStore.getState().applyFrame(frame);
-
-      applyWsFrameToArtifacts(frame);
 
       if (isTerminalFrame(frame)) {
         const turnId = latestAssistantTurnId(useChatStore.getState().messages);
@@ -202,28 +215,22 @@ export function useWorkspaceRuntime(): ChatRuntime {
 
       setInputValue("");
       addMessage(toUserMessage(text));
-      const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
-      if (resolvedRuntimeMode === "daytona_pilot") {
-        useRunWorkbenchStore.getState().beginRun({
-          task: text,
-          repoUrl: options?.repoUrl,
-          repoRef: options?.repoRef,
-          contextPaths: options?.contextPaths,
-        });
-      }
+      useRunWorkbenchStore.getState().beginRun({
+        task: text,
+        repoUrl: options?.repoUrl,
+        repoRef: options?.repoRef,
+        contextPaths: options?.contextPaths,
+      });
       setPhase("understanding");
       setCreationPhase("understanding");
       setIsTyping(true);
       clearArtifactSteps();
 
       let terminalSeen = false;
-      let receivedFrame = false;
-
       try {
         await streamMessage(
           text,
           (frame) => {
-            receivedFrame = true;
             if (isTerminalFrame(frame)) terminalSeen = true;
             onFrame(frame);
           },
@@ -241,23 +248,8 @@ export function useWorkspaceRuntime(): ChatRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
-          if (resolvedRuntimeMode === "daytona_pilot") {
-            useRunWorkbenchStore.getState().failRun(message);
-          } else if (!receivedFrame) {
-            resetRunWorkbench();
-          }
+          useRunWorkbenchStore.getState().failRun(message);
           applyWsFrameToArtifacts({ type: "error", message });
-          if (resolvedRuntimeMode !== "daytona_pilot") {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: createLocalMessageId("sys"),
-                type: "system",
-                content: `Backend error: ${message}`,
-                phase: 1,
-              },
-            ]);
-          }
           setPhase("idle");
           setCreationPhase("idle");
         }
@@ -277,12 +269,9 @@ export function useWorkspaceRuntime(): ChatRuntime {
       isStreaming,
       onFrame,
       queryClient,
-      resetRunWorkbench,
       streamMessage,
-      runtimeMode,
       setCreationPhase,
       addMessage,
-      setMessages,
     ],
   );
 

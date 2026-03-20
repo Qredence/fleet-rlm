@@ -62,6 +62,7 @@ def _build_execution_event(
     user_id: str,
     session_id: str,
     step: ExecutionStep | None = None,
+    summary: dict[str, Any] | None = None,
 ) -> ExecutionEvent:
     return ExecutionEvent(
         type=event_type,
@@ -70,6 +71,7 @@ def _build_execution_event(
         user_id=user_id,
         session_id=session_id,
         step=step,
+        summary=summary,
     )
 
 
@@ -116,6 +118,7 @@ class ExecutionLifecycleManager:
         self,
         event_type: ExecutionEventType,
         step: ExecutionStep | None = None,
+        summary: dict[str, Any] | None = None,
     ) -> ExecutionEvent:
         return _build_execution_event(
             event_type=event_type,
@@ -124,6 +127,7 @@ class ExecutionLifecycleManager:
             user_id=self.user_id,
             session_id=self.session_id,
             step=step,
+            summary=summary,
         )
 
     @property
@@ -238,6 +242,7 @@ class ExecutionLifecycleManager:
         *,
         step: ExecutionStep | None = None,
         error_json: dict | None = None,
+        summary: dict[str, Any] | None = None,
     ) -> None:
         if self.run_completed:
             return
@@ -277,6 +282,6 @@ class ExecutionLifecycleManager:
                     "Failed to persist run status: %s", _sanitize_for_log(exc)
                 )
         await self.execution_emitter.emit(
-            self._build_event("execution_completed", step=step)
+            self._build_event("execution_completed", step=step, summary=summary)
         )
         self.run_completed = True

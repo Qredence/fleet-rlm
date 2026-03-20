@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 
@@ -72,7 +73,15 @@ vi.mock("@/screens/workspace/model/chat-store", () => ({
 }));
 
 vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
-  useRunWorkbenchStore: vi.fn(),
+  useRunWorkbenchStore: (
+    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+  ) =>
+    selector({
+      status: "idle",
+      activity: [],
+      iterations: [],
+      callbacks: [],
+    }),
 }));
 
 vi.mock("@/screens/workspace/components/workspace-message-list", () => ({
@@ -102,6 +111,14 @@ vi.mock("@/screens/workspace/components/workspace-composer", () => ({
 }));
 
 describe("WorkspaceScreen run workbench mode", () => {
+  function renderScreen() {
+    return renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkspaceScreen />
+      </QueryClientProvider>,
+    );
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     capturedOnSend = null;
@@ -114,7 +131,7 @@ describe("WorkspaceScreen run workbench mode", () => {
   });
 
   it("keeps the chat body visible and shows source setup above the composer", () => {
-    const html = renderToStaticMarkup(<WorkspaceScreen />);
+    const html = renderScreen();
 
     expect(html).toContain("WorkspaceMessageList");
     expect(html).toContain(
@@ -125,7 +142,7 @@ describe("WorkspaceScreen run workbench mode", () => {
   });
 
   it("still renders the chat composer without Daytona setup gating", () => {
-    const html = renderToStaticMarkup(<WorkspaceScreen />);
+    const html = renderScreen();
 
     expect(html).toContain("Send");
     expect(html).not.toContain("Repository URL");
@@ -136,7 +153,7 @@ describe("WorkspaceScreen run workbench mode", () => {
     backendRuntimeState.inputValue =
       "Analyze https://github.com/qredence/fleet-rlm/tree/main with /Users/zocho/Documents/spec.pdf.";
 
-    renderToStaticMarkup(<WorkspaceScreen />);
+    renderScreen();
     expect(capturedOnSend).not.toBeNull();
 
     capturedOnSend?.([]);

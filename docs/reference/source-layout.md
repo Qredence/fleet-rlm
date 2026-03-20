@@ -167,7 +167,7 @@ Infrastructure packages provide configuration, persistence, providers, and MCP.
 | `config/` | App config, env parsing, and runtime settings. |
 | `database/` | `DatabaseManager`, SQLModel models, repository, and DB-facing types. |
 | `mcp/` | FastMCP server surface. |
-| `providers/daytona/` | Experimental Daytona runtime, chat agent, and host-loop orchestration. |
+| `providers/daytona/` | Experimental Daytona interpreter backend, sandbox runtime, and thin chat wrapper. |
 | `providers/modal/` | Modal provider helpers. |
 
 ## Features (`features/`)
@@ -189,7 +189,6 @@ core runtime loop itself.
 | Path | Description |
 | --- | --- |
 | `conf/` | Hydra config package and default config file. |
-| `daytona_rlm/` | Daytona pilot compatibility surface used by the CLI. |
 | `ui/` | Packaged frontend assets for installed distributions. |
 | `utils/` | Modal helpers, regex helpers, scaffold installers, and small utilities. |
 | `_scaffold/` | Legacy packaged scaffold assets kept for compatibility. |

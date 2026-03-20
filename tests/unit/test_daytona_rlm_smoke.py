@@ -161,8 +161,9 @@ class _FakeRuntime:
         repo_url: str | None,
         ref: str | None,
         context_paths: list[str] | None = None,
+        volume_name: str | None = None,
     ):
-        del context_paths
+        del context_paths, volume_name
         self.session.repo_url = repo_url
         self.session.ref = ref
         return self.session
@@ -196,7 +197,7 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch):
         raise DaytonaConfigError("Missing DAYTONA_API_URL.")
 
     monkeypatch.setattr(
-        "fleet_rlm.daytona_rlm.smoke.DaytonaSandboxRuntime",
+        "fleet_rlm.infrastructure.providers.daytona.smoke.DaytonaSandboxRuntime",
         _broken_runtime,
     )
 
@@ -215,8 +216,9 @@ def test_run_daytona_smoke_reports_clone_failures():
             repo_url: str | None,
             ref: str | None,
             context_paths: list[str] | None = None,
+            volume_name: str | None = None,
         ):
-            del repo_url, ref, context_paths
+            del repo_url, ref, context_paths, volume_name
             raise DaytonaDiagnosticError(
                 "Daytona repo clone failure: bad ref",
                 category="sandbox_create_clone_error",

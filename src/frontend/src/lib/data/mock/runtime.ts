@@ -29,7 +29,7 @@ function clone<T>(value: T): T {
 }
 
 function buildConnectivityTest(
-  kind: "modal" | "lm",
+  kind: "modal" | "lm" | "daytona",
   overrides?: Partial<RuntimeConnectivityTestResponse>,
 ): RuntimeConnectivityTestResponse {
   return {
@@ -119,4 +119,8 @@ export function getMockModalTest(): RuntimeConnectivityTestResponse {
 
 export function getMockLmTest(): RuntimeConnectivityTestResponse {
   return buildConnectivityTest("lm");
+}
+
+export function getMockDaytonaTest(): RuntimeConnectivityTestResponse {
+  return buildConnectivityTest("daytona");
 }

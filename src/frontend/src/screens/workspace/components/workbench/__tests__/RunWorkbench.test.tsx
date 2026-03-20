@@ -117,7 +117,7 @@ describe("RunWorkbench", () => {
   it("renders the analyst-oriented tabs and hides legacy tree framing", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);
 
-    expect(html).toContain("Daytona analyst workspace");
+    expect(html).toContain("Workspace execution");
     expect(html).toContain("Iterations");
     expect(html).toContain("Evidence");
     expect(html).toContain("Callbacks");

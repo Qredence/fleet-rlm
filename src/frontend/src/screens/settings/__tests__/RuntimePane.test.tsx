@@ -37,6 +37,7 @@ vi.mock("@/screens/settings/hooks/use-runtime-settings", () => ({
         app_env: "local",
         write_enabled: true,
         ready: false,
+        sandbox_provider: "modal",
         active_models: {
           planner: "openai/gemini-3-flash-preview",
           delegate: "openai/gemini-3-flash-preview",
@@ -69,6 +70,11 @@ vi.mock("@/screens/settings/hooks/use-runtime-settings", () => ({
     },
     saveSettings: { isPending: false, mutate: vi.fn() },
     testModalConnection: { isPending: false, mutate: vi.fn() },
+    testDaytonaConnection: {
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    },
     testLmConnection: {
       isPending: false,
       mutate: vi.fn(),
@@ -112,6 +118,7 @@ describe("RuntimePane", () => {
     expect(html).toContain("Test Credentials + Connection");
     expect(html).toContain("Test Modal");
     expect(html).toContain("Test LM");
+    expect(html).toContain("Test Daytona");
     expect(html).toContain("Test All Connections");
   });
 });

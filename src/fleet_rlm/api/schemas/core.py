@@ -11,6 +11,7 @@ from fleet_rlm import __version__
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 RuntimeMode = Literal["modal_chat", "daytona_pilot"]
+VolumeProvider = Literal["modal", "daytona"]
 
 
 class ChatRequest(BaseModel):
@@ -190,7 +191,7 @@ class RuntimeSettingsUpdateResponse(BaseModel):
 
 
 class RuntimeConnectivityTestResponse(BaseModel):
-    kind: Literal["modal", "lm"]
+    kind: Literal["modal", "lm", "daytona"]
     ok: bool
     preflight_ok: bool
     checked_at: str
@@ -204,6 +205,7 @@ class RuntimeConnectivityTestResponse(BaseModel):
 class RuntimeTestCache(BaseModel):
     modal: RuntimeConnectivityTestResponse | None = None
     lm: RuntimeConnectivityTestResponse | None = None
+    daytona: RuntimeConnectivityTestResponse | None = None
 
 
 class RuntimeActiveModels(BaseModel):
@@ -217,6 +219,7 @@ class RuntimeStatusResponse(BaseModel):
     write_enabled: bool
     ready: bool
     active_models: RuntimeActiveModels
+    sandbox_provider: VolumeProvider = "modal"
     llm: dict[str, Any] = Field(default_factory=dict)
     modal: dict[str, Any] = Field(default_factory=dict)
     daytona: dict[str, Any] = Field(default_factory=dict)
@@ -239,6 +242,7 @@ class VolumeTreeNode(BaseModel):
 class VolumeTreeResponse(BaseModel):
     """Response for the volume tree listing endpoint."""
 
+    provider: VolumeProvider
     volume_name: str
     root_path: str
     nodes: list[VolumeTreeNode]
@@ -250,6 +254,7 @@ class VolumeTreeResponse(BaseModel):
 class VolumeFileContentResponse(BaseModel):
     """Response for runtime volume file-content preview endpoint."""
 
+    provider: VolumeProvider
     path: str
     mime: str
     size: int

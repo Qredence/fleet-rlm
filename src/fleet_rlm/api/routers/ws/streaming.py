@@ -29,6 +29,105 @@ from .runtime_options import DaytonaChatRequestOptions
 logger = logging.getLogger(__name__)
 
 
+def _as_record(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return None
+
+
+def _canonical_run_status(kind: str) -> str:
+    if kind == "final":
+        return "completed"
+    if kind == "cancelled":
+        return "cancelled"
+    return "error"
+
+
+def _build_execution_completion_summary(
+    *,
+    event: StreamEvent,
+    request_message: str,
+    run_id: str,
+) -> dict[str, Any]:
+    payload = _as_record(event.payload)
+    runtime = _as_record(payload.get("runtime"))
+    run_result = _as_record(payload.get("run_result"))
+    summary_payload = _as_record(payload.get("summary"))
+    runtime_mode = (
+        _as_text(payload.get("runtime_mode"))
+        or _as_text(runtime.get("runtime_mode"))
+        or _as_text(run_result.get("runtime_mode"))
+        or "modal_chat"
+    )
+    terminal_status = _canonical_run_status(event.kind)
+    warnings = list(
+        summary_payload.get("warnings") or payload.get("guardrail_warnings") or []
+    )
+
+    if run_result:
+        normalized = dict(run_result)
+        normalized.setdefault(
+            "run_id", run_result.get("run_id") or runtime.get("run_id") or run_id
+        )
+        normalized.setdefault("runtime_mode", runtime_mode)
+        normalized.setdefault("task", run_result.get("task") or request_message)
+        normalized.setdefault("status", terminal_status)
+        normalized.setdefault(
+            "termination_reason",
+            summary_payload.get("termination_reason") or event.kind,
+        )
+        normalized.setdefault("duration_ms", summary_payload.get("duration_ms"))
+        normalized.setdefault("warnings", warnings)
+        if summary_payload:
+            nested_summary = dict(summary_payload)
+            if warnings and "warnings" not in nested_summary:
+                nested_summary["warnings"] = warnings
+            normalized["summary"] = nested_summary
+        return normalized
+
+    error_text = event.text if event.kind == "error" else None
+    final_artifact = None
+    if event.kind == "final":
+        final_artifact = {
+            "kind": "assistant_response",
+            "value": {
+                "text": event.text,
+                "final_markdown": event.text,
+                "summary": event.text,
+            },
+            "finalization_mode": "RETURN",
+        }
+
+    return {
+        "run_id": _as_text(runtime.get("run_id")) or run_id,
+        "runtime_mode": runtime_mode,
+        "task": request_message,
+        "status": terminal_status,
+        "termination_reason": summary_payload.get("termination_reason") or event.kind,
+        "duration_ms": summary_payload.get("duration_ms"),
+        "iterations": [],
+        "callbacks": [],
+        "prompts": [],
+        "context_sources": [],
+        "sources": list(payload.get("sources") or []),
+        "attachments": list(payload.get("attachments") or []),
+        "final_artifact": final_artifact,
+        "summary": {
+            "termination_reason": summary_payload.get("termination_reason")
+            or event.kind,
+            "duration_ms": summary_payload.get("duration_ms"),
+            "warnings": warnings,
+            "error": error_text,
+        },
+        "warnings": warnings,
+    }
+
+
 async def run_streaming_turn(
     *,
     websocket: WebSocket,
@@ -68,6 +167,7 @@ async def run_streaming_turn(
             await _stream_agent_events(
                 websocket=websocket,
                 agent=agent,
+                request_message=message,
                 message=message,
                 docs_path=docs_path,
                 trace=trace,
@@ -83,6 +183,7 @@ async def run_streaming_turn(
                 await _stream_agent_events(
                     websocket=websocket,
                     agent=agent,
+                    request_message=message,
                     message=message,
                     docs_path=docs_path,
                     trace=trace,
@@ -101,6 +202,7 @@ async def run_streaming_turn(
             lifecycle=lifecycle,
             step_builder=step_builder,
             exc=exc,
+            request_message=message,
         )
     finally:
         await repl_hook_bridge.stop()
@@ -112,6 +214,7 @@ async def _stream_agent_events(
     *,
     websocket: WebSocket,
     agent: ChatAgentProtocol,
+    request_message: str,
     message: str,
     docs_path: str | None,
     trace: bool,
@@ -131,6 +234,7 @@ async def _stream_agent_events(
                 docs_path=docs_path,
             )
         else:
+            workspace_volume_name = daytona_request.workspace_id
             event_stream = agent.aiter_chat_turn_stream(
                 message=message,
                 trace=trace,
@@ -140,6 +244,7 @@ async def _stream_agent_events(
                 repo_ref=daytona_request.repo_ref,
                 context_paths=daytona_request.context_paths,
                 batch_concurrency=daytona_request.batch_concurrency,
+                volume_name=workspace_volume_name,
             )
 
         async for event in event_stream:
@@ -149,6 +254,7 @@ async def _stream_agent_events(
                 step_builder=step_builder,
                 event=event,
                 persist_session_state=persist_session_state,
+                request_message=request_message,
             )
 
     if not lifecycle.run_completed:
@@ -163,6 +269,7 @@ async def _emit_stream_event(
     step_builder: ExecutionStepBuilder,
     event: StreamEvent,
     persist_session_state: LocalPersistFn,
+    request_message: str,
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
@@ -197,7 +304,15 @@ async def _emit_stream_event(
 
     if event.kind == "final":
         await persist_session_state(include_volume_save=True)
-        await lifecycle.complete_run(RunStatus.COMPLETED, step=step)
+        await lifecycle.complete_run(
+            RunStatus.COMPLETED,
+            step=step,
+            summary=_build_execution_completion_summary(
+                event=event,
+                request_message=request_message,
+                run_id=lifecycle.run_id,
+            ),
+        )
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
         return
@@ -220,7 +335,16 @@ async def _emit_stream_event(
         error_json = (
             {"error": event.text, "kind": event.kind} if event.kind == "error" else None
         )
-        await lifecycle.complete_run(status, step=step, error_json=error_json)
+        await lifecycle.complete_run(
+            status,
+            step=step,
+            error_json=error_json,
+            summary=_build_execution_completion_summary(
+                event=event,
+                request_message=request_message,
+                run_id=lifecycle.run_id,
+            ),
+        )
 
 
 async def _handle_stream_error(
@@ -229,6 +353,7 @@ async def _handle_stream_error(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     exc: Exception,
+    request_message: str,
 ) -> None:
     error_code = _classify_stream_failure(exc)
     logger.error(
@@ -270,6 +395,18 @@ async def _handle_stream_error(
             "error_type": type(exc).__name__,
             "code": error_code,
         },
+        summary=_build_execution_completion_summary(
+            event=StreamEvent(
+                kind="error",
+                text=f"Streaming error: {exc}",
+                payload={
+                    "error_type": type(exc).__name__,
+                    "error_code": error_code,
+                },
+            ),
+            request_message=request_message,
+            run_id=lifecycle.run_id,
+        ),
     )
 
 

@@ -22,6 +22,7 @@ export const RUNTIME_EDITABLE_KEYS = [
   "DAYTONA_TARGET",
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
+  "SANDBOX_PROVIDER",
   "SECRET_NAME",
   "VOLUME_NAME",
 ] as const;
@@ -158,17 +159,34 @@ export function useRuntimeSettings() {
     },
   });
 
+  const testDaytonaConnection = useMutation({
+    mutationFn: () => runtimeEndpoints.testDaytona(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: runtimeKeys.status() });
+    },
+  });
+
   const testAllConnections = useCallback(async () => {
     const modal = await testModalConnection.mutateAsync();
     const lm = await testLmConnection.mutateAsync();
-    return { modal, lm };
-  }, [testLmConnection, testModalConnection]);
+    const daytona =
+      statusQuery.data?.sandbox_provider === "daytona"
+        ? await testDaytonaConnection.mutateAsync()
+        : null;
+    return { modal, lm, daytona };
+  }, [
+    statusQuery.data?.sandbox_provider,
+    testDaytonaConnection,
+    testLmConnection,
+    testModalConnection,
+  ]);
 
   return {
     settingsQuery,
     statusQuery,
     saveSettings,
     testModalConnection,
+    testDaytonaConnection,
     testLmConnection,
     testAllConnections,
   };

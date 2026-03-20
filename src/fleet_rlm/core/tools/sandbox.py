@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from . import execute_submit
 from .delegate import build_rlm_delegate_tools
 from .memory_intelligence import build_memory_intelligence_tools
 from .sandbox_helpers import _resolve_volume_path
+from .shared import execute_submit
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
@@ -54,6 +55,21 @@ def _resolve_path_or_error(
         )
     except ValueError as exc:
         return None, {"status": "error", "error": str(exc)}
+
+
+def _persistent_roots(ctx: _SandboxToolContext) -> tuple[str, str, str]:
+    """Return the allowed root plus memory/workspace defaults for the backend."""
+    mount_root = str(
+        getattr(ctx.agent.interpreter, "volume_mount_path", "/data") or "/data"
+    ).rstrip("/")
+    if mount_root.endswith("/memory"):
+        memory_root = mount_root
+        workspace_root = str(PurePosixPath(mount_root) / "workspace")
+        return mount_root, memory_root, workspace_root
+    allowed_root = mount_root or "/data"
+    memory_root = str(PurePosixPath(allowed_root) / "memory")
+    workspace_root = str(PurePosixPath(allowed_root) / "workspace")
+    return allowed_root, memory_root, workspace_root
 
 
 def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
@@ -155,9 +171,11 @@ else:
 
     def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
         """Persist a sandbox buffer to Modal Volume storage as JSON."""
+        allowed_root, _memory_root, workspace_root = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root="/data/workspace/buffers",
+            default_root=str(PurePosixPath(workspace_root) / "buffers"),
+            allowed_root=allowed_root,
         )
         if error is not None:
             return error
@@ -180,9 +198,11 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
         """Load text from Modal Volume into host-side document memory."""
+        allowed_root, _memory_root, workspace_root = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root="/data/workspace",
+            default_root=workspace_root,
+            allowed_root=allowed_root,
         )
         if error is not None:
             return error
@@ -229,9 +249,11 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     def memory_read(path: str) -> dict[str, Any]:
         """Read a file from persistent memory (Modal Volume)."""
+        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root="/data/memory",
+            default_root=memory_root,
+            allowed_root=allowed_root,
         )
         if error is not None:
             return error
@@ -252,9 +274,11 @@ except Exception as e:
 
     def memory_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in persistent memory (Modal Volume)."""
+        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root="/data/memory",
+            default_root=memory_root,
+            allowed_root=allowed_root,
         )
         if error is not None:
             return error
@@ -299,9 +323,11 @@ except Exception as e:
         if not append:
             return memory_write(path=path, content=content)
 
+        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root="/data/memory",
+            default_root=memory_root,
+            allowed_root=allowed_root,
         )
         if error is not None:
             return error
@@ -367,18 +393,20 @@ except Exception as e:
 
     def memory_list(path: str = ".") -> dict[str, Any]:
         """List files and directories in persistent memory."""
+        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
         try:
             if path.strip() in {"", ".", "./"}:
-                resolved_path = "/data/memory"
+                resolved_path = memory_root
             else:
                 resolved_path, error = _resolve_path_or_error(
                     path=path,
-                    default_root="/data/memory",
+                    default_root=memory_root,
+                    allowed_root=allowed_root,
                 )
                 if error is not None:
                     return error
         except AttributeError:
-            resolved_path = "/data/memory"
+            resolved_path = memory_root
 
         _reload_volume_best_effort(ctx)
 

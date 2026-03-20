@@ -21,7 +21,6 @@ __all__ = [
     "__version__",
     # Core planner / interpreter
     "configure_planner_from_env",
-    "daytona_rlm",
     "fleet_cli",
     "get_planner_lm_from_env",
     # Lazy sub-modules (accessed as fleet_rlm.runners, fleet_rlm.fleet_cli)
@@ -50,7 +49,6 @@ _LAZY_MODULES: dict[str, str] = {
     "scaffold": "fleet_rlm.scaffold",
     "runners": "fleet_rlm.runners",
     "fleet_cli": "fleet_rlm.cli.main",
-    "daytona_rlm": "fleet_rlm.daytona_rlm",
 }
 
 # Annotate lazily loaded module exports so static analyzers can see the names
@@ -58,7 +56,6 @@ _LAZY_MODULES: dict[str, str] = {
 runners: Any
 fleet_cli: Any
 scaffold: Any
-daytona_rlm: Any
 
 
 def __getattr__(name: str) -> Any:

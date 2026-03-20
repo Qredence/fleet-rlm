@@ -85,6 +85,11 @@ vi.mock("@/screens/settings/hooks/use-runtime-settings", () => ({
       mutate: vi.fn(),
       mutateAsync: vi.fn(),
     },
+    testDaytonaConnection: {
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    },
     testLmConnection: {
       isPending: false,
       mutate: vi.fn(),

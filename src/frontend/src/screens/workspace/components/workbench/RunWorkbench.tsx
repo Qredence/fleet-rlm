@@ -2,6 +2,8 @@ import { FileQuestion, MessagesSquare, SearchSlash, TriangleAlert } from "lucide
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
+import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/prompt-kit/reasoning";
 import {
   Empty,
   EmptyContent,
@@ -121,7 +123,7 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
     return (
       <EmptyPanel
         title="No final output yet"
-        description="The final typed DSPy output will appear here when the run completes."
+        description="The final structured output for this run will appear here when execution completes."
         icon={SearchSlash}
       />
     );
@@ -145,9 +147,12 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
           <CardContent className="pt-4 text-sm text-foreground">{artifact.textPreview}</CardContent>
         </Card>
       ) : null}
-      <pre className="max-h-96 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
-        {renderedArtifactText ?? stringifyValue(artifact.value)}
-      </pre>
+      <CodeBlock className="border-border-subtle/80 bg-muted/15">
+        <CodeBlockCode
+          code={renderedArtifactText ?? stringifyValue(artifact.value)}
+          language="json"
+        />
+      </CodeBlock>
     </div>
   );
 }
@@ -217,23 +222,25 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {iteration.reasoningSummary ? (
-          <section className="flex flex-col gap-2">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Planner summary
-            </div>
-            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
+          <Reasoning className="mb-0" defaultOpen>
+            <ReasoningTrigger
+              getThinkingMessage={() => (
+                <span className="text-sm font-medium">Planner reasoning</span>
+              )}
+            />
+            <ReasoningContent className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap">
               {iteration.reasoningSummary}
-            </div>
-          </section>
+            </ReasoningContent>
+          </Reasoning>
         ) : null}
         {iteration.code ? (
           <section className="flex flex-col gap-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Executed code
             </div>
-            <pre className="max-h-64 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
-              {iteration.code}
-            </pre>
+            <CodeBlock className="border-border-subtle/80 bg-muted/15">
+              <CodeBlockCode code={iteration.code} language="python" />
+            </CodeBlock>
           </section>
         ) : null}
         {iteration.stdout ? (
@@ -241,9 +248,9 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               STDOUT
             </div>
-            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
-              {iteration.stdout}
-            </pre>
+            <CodeBlock className="border-border-subtle/80 bg-muted/15">
+              <CodeBlockCode code={iteration.stdout} language="text" />
+            </CodeBlock>
           </section>
         ) : null}
         {iteration.stderr ? (
@@ -251,9 +258,9 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               STDERR
             </div>
-            <pre className="max-h-56 overflow-auto rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-xs text-muted-foreground whitespace-pre-wrap overflow-wrap-break-word">
-              {iteration.stderr}
-            </pre>
+            <CodeBlock className="border-border-subtle/80 bg-destructive/5 border-destructive/20">
+              <CodeBlockCode code={iteration.stderr} language="text" />
+            </CodeBlock>
           </section>
         ) : null}
         {iteration.error ? (
@@ -460,29 +467,33 @@ export function RunWorkbench() {
         </Alert>
       ) : null}
 
-      <Card className="shrink-0 border-border-subtle/80 bg-card/80">
-        <CardHeader className="gap-2">
+      <div className="shrink-0 rounded-xl border border-border-subtle/80 bg-card/80 px-3 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-foreground">
+              {task ?? "Workspace execution"}
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {repoUrl ? repoUrl : "No repository configured"}
+              {repoRef ? ` @ ${repoRef}` : ""}
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Daytona analyst workspace</Badge>
+            <Badge variant="secondary">Workspace execution</Badge>
             <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
             {summary?.terminationReason ? (
               <Badge variant="secondary">{summary.terminationReason}</Badge>
             ) : null}
           </div>
-          <CardTitle className="text-sm leading-6">{task ?? "Corpus-grounded analysis"}</CardTitle>
-          <CardDescription>
-            {repoUrl ? repoUrl : "No repository configured"}
-            {repoRef ? ` @ ${repoRef}` : ""}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
           <span>{iterations.length} iterations</span>
           <span>{callbacks.length} callbacks</span>
           <span>{promptHandles.length} prompt objects</span>
           <span>{sources.length + attachments.length} evidence items</span>
           {summary?.durationMs != null ? <span>{summary.durationMs}ms</span> : null}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <Card className="flex min-h-0 flex-1 flex-col" data-testid="detail-tabs">
         <CardContent className="min-h-0 flex-1 pb-4">
@@ -493,7 +504,7 @@ export function RunWorkbench() {
               selectTab(value as "iterations" | "evidence" | "callbacks" | "prompts" | "final")
             }
           >
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl border border-border-subtle/70 bg-card/70 p-1 sm:grid-cols-5">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-lg border border-border-subtle/70 bg-muted/40 p-1 sm:grid-cols-5">
               <TabsTrigger value="iterations" className="px-3 py-2 text-xs sm:text-sm">
                 Iterations
               </TabsTrigger>
@@ -556,7 +567,7 @@ export function RunWorkbench() {
                   ) : (
                     <EmptyPanel
                       title="No iterations yet"
-                      description="Iteration summaries will appear here once the Daytona host loop starts producing observations."
+                      description="Execution summaries will appear here once the runtime starts producing observations."
                       icon={SearchSlash}
                     />
                   )}

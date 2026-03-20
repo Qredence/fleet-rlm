@@ -64,6 +64,7 @@ import {
 } from "@/components/prompt-kit/task";
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/prompt-kit/tool";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import {
   Queue,
   QueueItem,
@@ -286,12 +287,9 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
             <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Code
             </div>
-            <pre
-              className="overflow-x-auto rounded-md border-subtle/80 bg-muted/20 px-2.5 py-2 text-foreground"
-              style={MONO_BASE_STYLE}
-            >
-              <code>{item.part.code}</code>
-            </pre>
+            <CodeBlock className="border-subtle/80 bg-muted/20">
+              <CodeBlockCode code={item.part.code} language="python" />
+            </CodeBlock>
           </div>
         ) : null}
       </div>
@@ -556,12 +554,9 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
               </SandboxTabContent>
               <SandboxTabContent value="code">
                 {code ? (
-                  <pre
-                    className="overflow-x-auto rounded-md border-subtle bg-muted/30 p-2"
-                    style={MONO_BASE_STYLE}
-                  >
-                    <code>{code}</code>
-                  </pre>
+                  <CodeBlock className="border-subtle bg-muted/30">
+                    <CodeBlockCode code={code} language="python" />
+                  </CodeBlock>
                 ) : (
                   <div className="text-muted-foreground typo-label-regular">No code captured</div>
                 )}

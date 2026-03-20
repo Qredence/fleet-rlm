@@ -157,48 +157,41 @@ export function MessageInspectorPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="px-4 py-2">
-        <Card className="gap-0 rounded-xl border-border-subtle/80 bg-card/75 shadow-none">
-          <CardHeader className="space-y-3 px-3 py-3">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
-                {turnStatus.label}
-              </Badge>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {model.summary.trajectoryCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                  {model.summary.trajectoryCount} trajector
-                  {model.summary.trajectoryCount === 1 ? "y" : "ies"}
-                </Badge>
-              ) : null}
-              {model.summary.toolSessionCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                  {model.summary.toolSessionCount} tool session
-                  {model.summary.toolSessionCount === 1 ? "" : "s"}
-                </Badge>
-              ) : null}
-              {model.summary.sourceCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                  {model.summary.sourceCount} source
-                  {model.summary.sourceCount === 1 ? "" : "s"}
-                </Badge>
-              ) : null}
-              {model.summary.attachmentCount > 0 ? (
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                  {model.summary.attachmentCount} attachment
-                  {model.summary.attachmentCount === 1 ? "" : "s"}
-                </Badge>
-              ) : null}
-            </div>
-
-            {summaryBadges.length > 0 ? renderBadges(summaryBadges, "secondary") : null}
-          </CardHeader>
-        </Card>
+      <div className="border-b border-border-subtle/70 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">Assistant turn</div>
+          <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
+            {turnStatus.label}
+          </Badge>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {model.summary.trajectoryCount > 0 ? (
+            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+              {model.summary.trajectoryCount} trajector
+              {model.summary.trajectoryCount === 1 ? "y" : "ies"}
+            </Badge>
+          ) : null}
+          {model.summary.toolSessionCount > 0 ? (
+            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+              {model.summary.toolSessionCount} tool session
+              {model.summary.toolSessionCount === 1 ? "" : "s"}
+            </Badge>
+          ) : null}
+          {model.summary.sourceCount > 0 ? (
+            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+              {model.summary.sourceCount} source
+              {model.summary.sourceCount === 1 ? "" : "s"}
+            </Badge>
+          ) : null}
+          {model.summary.attachmentCount > 0 ? (
+            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+              {model.summary.attachmentCount} attachment
+              {model.summary.attachmentCount === 1 ? "" : "s"}
+            </Badge>
+          ) : null}
+          {summaryBadges.length > 0 ? renderBadges(summaryBadges, "secondary") : null}
+        </div>
       </div>
-
-      <Separator className="bg-border-subtle/70" />
 
       <Tabs
         value={currentTab}
@@ -206,7 +199,7 @@ export function MessageInspectorPanel() {
         className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
       >
         <div className="px-4 py-2">
-          <TabsList className="inline-flex rounded-xl border border-border-subtle/70 bg-card/70 p-1">
+          <TabsList className="inline-flex rounded-lg border border-border-subtle/70 bg-muted/40 p-1">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
                 {tab.label}

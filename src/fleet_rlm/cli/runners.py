@@ -293,28 +293,17 @@ def build_daytona_workbench_chat_agent(
     timeout: int = 900,
     max_depth: int = 2,
     history_max_turns: int | None = None,
-    output_dir: Path | str = "results/daytona-rlm",
     planner_lm: Any | None = None,
     delegate_lm: Any | None = None,
 ) -> Any:
-    """Build the Daytona DSPy workbench chat runtime used by websocket chat."""
-    from fleet_rlm.infrastructure.providers.daytona import (
-        DaytonaSandboxRuntime,
-        RolloutBudget,
-    )
+    """Build the Daytona chat runtime on the shared ReAct + RLM backbone."""
     from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
         DaytonaWorkbenchChatAgent,
     )
 
-    runtime = DaytonaSandboxRuntime()
-    budget = RolloutBudget(
-        max_depth=max_depth,
-        global_timeout=timeout,
-    )
     return DaytonaWorkbenchChatAgent(
-        runtime=runtime,
-        budget=budget,
-        output_dir=output_dir,
+        max_depth=max_depth,
+        timeout=timeout,
         history_max_turns=history_max_turns,
         planner_lm=planner_lm,
         delegate_lm=delegate_lm,

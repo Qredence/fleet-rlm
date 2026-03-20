@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils/cn";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
-  useWorkspaceCanvasTitle,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
 import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
@@ -64,17 +63,12 @@ function navLabel(nav: string): string {
   }
 }
 
-function getHeaderLabel(
-  mode: CanvasMode,
-  labels?: {
-    workspace: string;
-  },
-): string {
+function getHeaderLabel(mode: CanvasMode): string {
   switch (mode) {
     case "volumes":
-      return "File Preview";
+      return "Preview";
     case "workspace":
-      return labels?.workspace ?? "Message Inspector";
+      return "Canvas";
     default:
       return "Canvas";
   }
@@ -83,7 +77,6 @@ function getHeaderLabel(
 export function ShellSidepanel() {
   const activeNav = useNavigationStore((state) => state.activeNav);
   const isMobile = useIsMobile();
-  const workspaceCanvasTitle = useWorkspaceCanvasTitle();
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
@@ -91,19 +84,17 @@ export function ShellSidepanel() {
     activeNav === "workspace" ? "workspace" : activeNav === "volumes" ? "volumes" : "empty";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-muted/15">
+    <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">
       <div
         className={cn(
-          "shrink-0 border-b border-border-subtle/80 bg-card/80 py-3 backdrop-blur-sm",
-          isMobile ? "px-4" : "px-4 py-4 md:px-6",
+          "shrink-0 border-b border-border-subtle/80 bg-card/95 backdrop-blur-sm",
+          isMobile ? "px-4 py-3" : "px-4 py-3",
         )}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-foreground">
-              {getHeaderLabel(canvasMode, {
-                workspace: workspaceCanvasTitle,
-              })}
+            <div className="truncate text-sm font-medium tracking-tight text-foreground">
+              {getHeaderLabel(canvasMode)}
             </div>
           </div>
         </div>

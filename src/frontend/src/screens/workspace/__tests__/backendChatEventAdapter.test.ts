@@ -147,6 +147,21 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("uses payload reasoning labels for live reasoning rows", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("reasoning_step", "Planner prompt preview", {
+        reasoning_label: "prompt_iter_1",
+      }),
+    );
+
+    const reasoning = findFirstPart(messages, (part) => part.kind === "reasoning");
+    expect(reasoning).toBeDefined();
+    if (reasoning?.kind === "reasoning") {
+      expect(reasoning.label).toBe("prompt_iter_1");
+    }
+  });
+
   it("uses trajectory as fallback primary rows when live events are absent", () => {
     const { messages } = applyWsFrameToMessages(
       [],
@@ -439,6 +454,40 @@ describe("applyWsFrameToMessages", () => {
         sandboxId: "sb-status-1",
       });
     }
+  });
+
+  it("renders Daytona sandbox progress status events as sandbox trace parts", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("status", "Sandbox stdout: loading repository metadata", {
+        phase: "sandbox_output",
+        iteration: 2,
+        stream: "stdout",
+        stream_text: "loading repository metadata\n",
+        runtime: {
+          depth: 0,
+          max_depth: 3,
+          execution_profile: "DAYTONA_PILOT_HOST_LOOP",
+          sandbox_active: true,
+          effective_max_iters: 30,
+          runtime_mode: "daytona_pilot",
+          sandbox_id: "sbx-live-1",
+        },
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (part) => part.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.title).toBe("Sandbox stdout");
+      expect(sandbox.state).toBe("running");
+      expect(sandbox.stepIndex).toBe(2);
+      expect(sandbox.output).toBe("loading repository metadata");
+      expect(sandbox.runtimeContext?.runtimeMode).toBe("daytona_pilot");
+    }
+
+    const statusNote = findFirstPart(messages, (part) => part.kind === "status_note");
+    expect(statusNote).toBeUndefined();
   });
 
   it("treats payload-level tool failures as errors even when text says finished", () => {

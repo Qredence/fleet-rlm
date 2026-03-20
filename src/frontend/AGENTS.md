@@ -20,6 +20,8 @@ Frontend source-of-truth files:
 - Keep legacy `taxonomy`, `skills`, `memory`, and `analytics` routes as redirects unless the shared product contract is intentionally changed.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
+- Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical canvas/workbench stream. Frontend workbench state should hydrate from `execution_completed.summary`, not Daytona-only chat-final payloads.
+- Daytona `sandbox_output` status frames should render as sandbox/debug trace cards in the transcript, while `trajectory_step` and `reasoning_step` remain the primary live trace surfaces.
 - Prefer existing design tokens and component conventions over introducing one-off patterns.
 
 ## Tooling and Framework
@@ -61,8 +63,10 @@ State management:
 - TanStack Query for backend-backed state
 - Zustand for ephemeral client state, with cross-app shell state in `src/stores/`
 - `src/screens/workspace/model/chat-store.ts` remains part of the live streaming contract with the backend
+- `src/screens/workspace/model/run-workbench-store.ts` and `workspace-canvas-panel.tsx` own the unified canvas shell; keep canvas sections data-driven instead of branching by runtime mode
 - Workspace-owned inspector/session state lives in `src/screens/workspace/model/workspace-ui-store.ts`
 - Volumes file-selection state lives in `src/screens/volumes/model/volumes-selection-store.ts`
+- The Volumes page has a local provider switcher for `modal` vs `daytona`; keep that selector page-scoped and do not route it through global runtime settings.
 - `src/stores/navigation-types.ts` owns the shared `NavItem` type used by shell navigation and route helpers
 
 Backend integration:

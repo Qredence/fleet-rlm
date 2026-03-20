@@ -35,7 +35,7 @@ import {
 } from "@/screens/settings/hooks/use-runtime-settings";
 import { shouldHydrateRuntimeForm } from "@/screens/settings/runtime-pane-hydration";
 import { errorMessage } from "@/screens/settings/settings-errors";
-import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
+import type { RuntimeConnectivityTestResponse, RuntimeStatusResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
   key: RuntimeEditableKey;
@@ -56,6 +56,22 @@ const RUNTIME_FIELDS: RuntimeField[] = [
     label: "LM API Key",
     description: "Primary provider key for LM calls. Leave unchanged to keep current value.",
     isSecret: true,
+  },
+  {
+    key: "DAYTONA_API_KEY",
+    label: "Daytona API Key",
+    description: "API Key for Daytona Workspace provisioning.",
+    isSecret: true,
+  },
+  {
+    key: "DAYTONA_API_URL",
+    label: "Daytona API URL",
+    description: "URL for Daytona API (e.g. http://127.0.0.1:3000).",
+  },
+  {
+    key: "DAYTONA_TARGET",
+    label: "Daytona Target",
+    description: "Target workspace provider for Daytona (e.g. local).",
   },
   {
     key: "DSPY_LM_API_BASE",
@@ -85,6 +101,12 @@ const RUNTIME_FIELDS: RuntimeField[] = [
     label: "Modal Secret Name",
     description: "Modal secret mounted into sandbox sessions.",
     placeholder: "LITELLM",
+  },
+  {
+    key: "SANDBOX_PROVIDER",
+    label: "Sandbox Provider",
+    description: "Primary sandbox and volume backend (modal or daytona).",
+    placeholder: "modal",
   },
   {
     key: "VOLUME_NAME",
@@ -122,7 +144,7 @@ function testSummary(test: RuntimeConnectivityTestResponse | null | undefined) {
 
 function testVariant(test: RuntimeConnectivityTestResponse | null | undefined) {
   if (!test) return "outline" as const;
-  return test.ok ? ("success" as const) : ("destructive-subtle" as const);
+  return test.ok ? ("default" as const) : ("destructive" as const);
 }
 
 function testLabel(test: RuntimeConnectivityTestResponse | null | undefined) {
@@ -143,6 +165,7 @@ export function RuntimePane() {
     statusQuery,
     saveSettings,
     testModalConnection,
+    testDaytonaConnection,
     testLmConnection,
     testAllConnections,
   } = useRuntimeSettings();
@@ -180,6 +203,7 @@ export function RuntimePane() {
   const hasUnsavedRuntimeChanges = dirtyKeys.length > 0;
   const status = statusQuery.data;
   const modalTest = status?.tests?.modal;
+  const daytonaTest = status?.tests?.daytona;
   const lmTest = status?.tests?.lm;
   const activeModels = status?.active_models;
 
@@ -219,6 +243,13 @@ export function RuntimePane() {
       (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
     );
   }, [statusQuery.data?.modal]);
+
+  const daytonaChecks = useMemo(() => {
+    const source: RuntimeStatusResponse["daytona"] = statusQuery.data?.daytona ?? {};
+    return Object.entries(source).filter(
+      (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+    );
+  }, [statusQuery.data]);
 
   const handleSave = () => {
     if (dirtyKeys.length === 0) {
@@ -274,6 +305,28 @@ export function RuntimePane() {
     });
   };
 
+  const handleTestDaytona = () => {
+    if (hasUnsavedRuntimeChanges) {
+      showUnsavedRuntimeTestWarning();
+      return;
+    }
+
+    testDaytonaConnection.mutate(undefined, {
+      onSuccess: (result) => {
+        toast[result.ok ? "success" : "error"]("Daytona test completed", {
+          description: result.ok
+            ? `Latency ${result.latency_ms ?? 0}ms`
+            : result.error || "Daytona connectivity failed.",
+        });
+      },
+      onError: (error) => {
+        toast.error("Daytona test failed", {
+          description: errorMessage(error),
+        });
+      },
+    });
+  };
+
   const handleTestLm = () => {
     if (hasUnsavedRuntimeChanges) {
       showUnsavedRuntimeTestWarning();
@@ -302,12 +355,12 @@ export function RuntimePane() {
 
     try {
       const result = await testAllConnections();
-      if (result.modal.ok && result.lm.ok) {
+      if (result.modal.ok && result.lm.ok && (result.daytona?.ok ?? true)) {
         toast.success("Runtime checks passed");
         return;
       }
       toast.error("Runtime checks reported failures", {
-        description: "Review Modal/LM test results below.",
+        description: "Review test results below.",
       });
     } catch (error) {
       toast.error("Runtime checks failed", {
@@ -355,7 +408,7 @@ export function RuntimePane() {
                 : "Loading runtime status…"}
             </FieldDescription>
           </FieldContent>
-          <Badge variant={status?.ready ? "success" : "warning"}>
+          <Badge variant={status?.ready ? "default" : "secondary"}>
             {status?.ready ? "Ready" : "Needs Attention"}
           </Badge>
         </Field>
@@ -382,7 +435,7 @@ export function RuntimePane() {
                 Runtime settings updates are disabled because APP_ENV is not local.
               </FieldDescription>
             </FieldContent>
-            <Badge variant="destructive-subtle">Read-only</Badge>
+            <Badge variant="destructive">Read-only</Badge>
           </Field>
         ) : null}
       </FieldGroup>
@@ -497,11 +550,24 @@ export function RuntimePane() {
                 {testLmConnection.isPending ? "Testing LM…" : "Test LM"}
               </Button>
               <Button
+                variant="outline"
+                size="lg"
+                className="rounded-lg"
+                onClick={handleTestDaytona}
+                disabled={testDaytonaConnection.isPending}
+              >
+                {testDaytonaConnection.isPending ? "Testing Daytona…" : "Test Daytona"}
+              </Button>
+              <Button
                 variant="secondary"
                 size="lg"
                 className="rounded-lg"
                 onClick={handleTestAll}
-                disabled={testModalConnection.isPending || testLmConnection.isPending}
+                disabled={
+                  testModalConnection.isPending ||
+                  testLmConnection.isPending ||
+                  testDaytonaConnection.isPending
+                }
               >
                 Test All Connections
               </Button>
@@ -545,6 +611,32 @@ export function RuntimePane() {
 
         <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
           <FieldContent>
+            <FieldTitle>Daytona Smoke</FieldTitle>
+            <FieldDescription>{`Last result: ${testSummary(daytonaTest)}`}</FieldDescription>
+          </FieldContent>
+          <div className="flex min-w-0 flex-col items-end gap-1 text-right">
+            <Badge variant={testVariant(daytonaTest)}>
+              {daytonaTest?.checked_at ? (
+                daytonaTest.ok ? (
+                  <BadgeCheckIcon />
+                ) : (
+                  <AlertCircleIcon />
+                )
+              ) : (
+                <Clock3Icon />
+              )}
+              {testLabel(daytonaTest)}
+            </Badge>
+            {daytonaTest?.checked_at ? (
+              <span className="text-xs text-muted-foreground">
+                {formatCheckedAt(daytonaTest.checked_at)}
+              </span>
+            ) : null}
+          </div>
+        </Field>
+
+        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+          <FieldContent>
             <FieldTitle>LM Smoke</FieldTitle>
             <FieldDescription>{`Last result: ${testSummary(lmTest)}`}</FieldDescription>
           </FieldContent>
@@ -578,7 +670,7 @@ export function RuntimePane() {
             {llmChecks.map(([key, ok]) => (
               <Badge
                 key={`llm-${key}`}
-                variant={ok ? "outline" : "destructive-subtle"}
+                variant={ok ? "outline" : "destructive"}
                 className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
@@ -588,11 +680,21 @@ export function RuntimePane() {
             {modalChecks.map(([key, ok]) => (
               <Badge
                 key={`modal-${key}`}
-                variant={ok ? "outline" : "destructive-subtle"}
+                variant={ok ? "outline" : "destructive"}
                 className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
                 Modal {formatCheckLabel(key)}
+              </Badge>
+            ))}
+            {daytonaChecks.map(([key, ok]) => (
+              <Badge
+                key={`daytona-${key}`}
+                variant={ok ? "outline" : "destructive"}
+                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
+              >
+                {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
+                Daytona {formatCheckLabel(key)}
               </Badge>
             ))}
           </div>

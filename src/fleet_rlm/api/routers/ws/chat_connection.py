@@ -99,7 +99,7 @@ async def _process_chat_message(
     runtime_mode = msg.runtime_mode
     execution_mode = msg.execution_mode
     agent.set_execution_mode(execution_mode)
-    daytona_request = normalize_daytona_chat_request(msg)
+    daytona_request = normalize_daytona_chat_request(msg, workspace_id=workspace_id)
 
     await local_persist(include_volume_save=True, latest_user_message=message)
     session.cancel_flag["cancelled"] = False

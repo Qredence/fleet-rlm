@@ -87,7 +87,8 @@ plans/walkthrough.md
 TASKS.md
 
 .neon
-
+opencode.json
+.playwright-cli/
 .playwright-mcp/
 src/frontend/.tanstack/
 

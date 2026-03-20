@@ -108,6 +108,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
+  /api/v1/runtime/tests/daytona:
+    post:
+      tags:
+        - runtime
+      summary: Test Daytona Connection
+      operationId: test_daytona_connection_api_v1_runtime_tests_daytona_post
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
   /api/v1/runtime/tests/lm:
     post:
       tags:
@@ -139,7 +152,7 @@ paths:
       tags:
         - runtime
       summary: Get Volume Tree
-      description: List the file tree of the configured Modal Volume.
+      description: List the file tree of the configured runtime volume.
       operationId: get_volume_tree_api_v1_runtime_volume_tree_get
       parameters:
         - name: root_path
@@ -158,6 +171,14 @@ paths:
             minimum: 1
             default: 3
             title: Max Depth
+        - name: provider
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - $ref: "#/components/schemas/VolumeProvider"
+              - type: "null"
+            title: Provider
       responses:
         "200":
           description: Successful Response
@@ -195,6 +216,14 @@ paths:
             minimum: 1
             default: 200000
             title: Max Bytes
+        - name: provider
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - $ref: "#/components/schemas/VolumeProvider"
+              - type: "null"
+            title: Provider
       responses:
         "200":
           description: Successful Response
@@ -350,6 +379,7 @@ components:
           enum:
             - modal
             - lm
+            - daytona
           title: Kind
         ok:
           type: boolean
@@ -450,6 +480,10 @@ components:
           title: Ready
         active_models:
           $ref: "#/components/schemas/RuntimeActiveModels"
+        sandbox_provider:
+          type: string
+          title: Sandbox Provider
+          default: modal
         llm:
           additionalProperties: true
           type: object
@@ -484,6 +518,10 @@ components:
             - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
             - type: "null"
         lm:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
+            - type: "null"
+        daytona:
           anyOf:
             - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
             - type: "null"
@@ -630,8 +668,16 @@ components:
         - msg
         - type
       title: ValidationError
+    VolumeProvider:
+      type: string
+      enum:
+        - modal
+        - daytona
+      title: VolumeProvider
     VolumeFileContentResponse:
       properties:
+        provider:
+          $ref: "#/components/schemas/VolumeProvider"
         path:
           type: string
           title: Path
@@ -650,6 +696,7 @@ components:
           default: false
       type: object
       required:
+        - provider
         - path
         - mime
         - size
@@ -699,6 +746,8 @@ components:
       description: A single node in the volume file tree.
     VolumeTreeResponse:
       properties:
+        provider:
+          $ref: "#/components/schemas/VolumeProvider"
         volume_name:
           type: string
           title: Volume Name
@@ -724,6 +773,7 @@ components:
           default: false
       type: object
       required:
+        - provider
         - volume_name
         - root_path
         - nodes

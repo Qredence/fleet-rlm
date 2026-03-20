@@ -17,34 +17,42 @@ enabling bidirectional communication for tool calls and structured output.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import inspect
-import json
 import queue
 import threading
-import time
-from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Sequence
 
 import dspy
 import modal
-from dspy.primitives.code_interpreter import CodeInterpreterError, FinalOutput
+from dspy.primitives import FinalOutput
 
-from fleet_rlm.core.execution.core_driver import sandbox_driver
-
-# Re-export from profiles to maintain backwards compatibility
 from fleet_rlm.core.execution.profiles import ExecutionProfile  # noqa: F811
 from fleet_rlm.core.tools.llm_tools import LLMQueryMixin
-from fleet_rlm.core.tools.output_utils import (
-    _redact_sensitive_text,
-)
-from fleet_rlm.core.tools.output_utils import (
-    _summarize_stdout as _summarize_stdout_util,
-)
 from fleet_rlm.core.tools.volume_ops import VolumeOpsMixin
-from fleet_rlm.features.logs.execution_limits import execution_max_text_chars
 
-from . import driver_factories
+from .interpreter_events import emit_execution_event as _emit_execution_event_impl
+from .interpreter_events import summarize_code as _summarize_code_impl
+from .interpreter_lifecycle import (
+    aresolve_app as _aresolve_app_impl,
+    ashutdown as _ashutdown_impl,
+    astart as _astart_impl,
+    build_driver_command_and_sandbox_kwargs as _build_driver_command_and_sandbox_kwargs_impl,
+    module_source_for_sandbox as _module_source_for_sandbox_impl,
+    resolve_app as _resolve_app_impl,
+    shutdown as _shutdown_impl,
+    start as _start_impl,
+    start_stdout_reader as _start_stdout_reader_impl,
+)
+from .interpreter_session import (
+    drain_or_flush_stdin as _drain_or_flush_stdin_impl,
+    execute as _execute_impl,
+    execution_profile as _execution_profile_impl,
+    is_recoverable_exec_channel_error as _is_recoverable_exec_channel_error_impl,
+    is_recoverable_start_error as _is_recoverable_start_error_impl,
+    output_names as _output_names_impl,
+    summarize_stdout as _summarize_stdout_impl,
+    tool_names as _tool_names_impl,
+    write_line as _write_line_impl,
+)
 
 
 def _build_default_image(
@@ -199,44 +207,32 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
     @staticmethod
     def _summarize_code(code: str) -> tuple[str, str]:
         """Return deterministic code hash and compact preview text."""
-        digest = hashlib.sha256((code or "").encode("utf-8")).hexdigest()[:16]
-        compact = " ".join((code or "").split())
-        limit = execution_max_text_chars()
-        if len(compact) > limit:
-            compact = f"{compact[:limit]}...[truncated]"
-        return digest, compact
+        return _summarize_code_impl(code)
 
     def _emit_execution_event(self, payload: dict[str, Any]) -> None:
         """Best-effort execution hook dispatch for observability callbacks."""
-        callback = self.execution_event_callback
-        if callback is None:
-            return
-        try:
-            callback(payload)
-        except Exception:
-            # Hook errors must not interfere with interpreter execution.
-            return
+        from .interpreter_events import InterpreterExecutionEventData
+
+        event = InterpreterExecutionEventData(
+            phase=str(payload.get("phase", "")),
+            timestamp=float(payload.get("timestamp", 0.0)),
+            execution_profile=str(payload.get("execution_profile", "")),
+            code_hash=str(payload.get("code_hash", "")),
+            code_preview=str(payload.get("code_preview", "")),
+            duration_ms=payload.get("duration_ms"),
+            success=payload.get("success"),
+            result_kind=payload.get("result_kind"),
+            output_keys=payload.get("output_keys"),
+            stdout_preview=payload.get("stdout_preview"),
+            stderr_preview=payload.get("stderr_preview"),
+            error_type=payload.get("error_type"),
+            error=payload.get("error"),
+        )
+        _emit_execution_event_impl(self, event)
 
     def _start_stdout_reader(self) -> None:
         """Start a background thread to read sandbox stdout."""
-        if self._stdout_iter is None:
-            return
-
-        self._stdout_queue = queue.Queue()
-        q = self._stdout_queue
-        it = self._stdout_iter
-
-        def _reader() -> None:
-            try:
-                for line in it:
-                    q.put(line)
-            except Exception:
-                pass
-            finally:
-                q.put(None)
-
-        self._stdout_reader_thread = threading.Thread(target=_reader, daemon=True)
-        self._stdout_reader_thread.start()
+        _start_stdout_reader_impl(self)
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
@@ -249,129 +245,42 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
 
     def _resolve_app(self) -> modal.App:
         """Return a fresh App handle."""
-        if self._app_obj is not None:
-            return self._app_obj
-        return modal.App.lookup(self._app_name, create_if_missing=True)
+        return _resolve_app_impl(self)
 
     async def _aresolve_app(self) -> modal.App:
         """Return a fresh App handle (async)."""
-        if self._app_obj is not None:
-            return self._app_obj
-        return await modal.App.lookup.aio(self._app_name, create_if_missing=True)
+        return await _aresolve_app_impl(self)
 
     @staticmethod
     def _module_source_for_sandbox(module: Any) -> str:
         """Return module source with future-import lines stripped for embedding."""
-        source = inspect.getsource(module)
-        return "\n".join(
-            line
-            for line in source.splitlines()
-            if line.strip() != "from __future__ import annotations"
-        )
+        return _module_source_for_sandbox_impl(module)
 
     def _build_driver_command_and_sandbox_kwargs(
         self, *, app: modal.App
     ) -> tuple[str, dict[str, Any]]:
         """Build sandbox driver command and kwargs shared by start/astart."""
-        with self._llm_call_lock:
-            self._llm_call_count = 0
-
-        # Deferred imports to break circular dependency:
-        # interpreter → core.tools → interpreter (for ExecutionProfile)
-        from fleet_rlm.core.tools import sandbox_tools
-        from fleet_rlm.core.agent import session_history
-        from fleet_rlm.core.tools import volume_tools
-
-        bundled_sources = [
-            self._module_source_for_sandbox(driver_factories),
-            self._module_source_for_sandbox(sandbox_tools),
-            self._module_source_for_sandbox(session_history),
-            self._module_source_for_sandbox(volume_tools),
-            inspect.getsource(sandbox_driver),
-            "sandbox_driver()",
-        ]
-        driver_command = "\n\n".join(bundled_sources)
-
-        sandbox_kwargs: dict[str, Any] = {
-            "app": app,
-            "image": self.image,
-            "secrets": self.secrets,
-            "timeout": self.timeout,
-        }
-        if self.idle_timeout is not None:
-            sandbox_kwargs["idle_timeout"] = self.idle_timeout
-        if self.volume_name:
-            self._volume = self._resolve_volume()
-            sandbox_kwargs["volumes"] = {self.volume_mount_path: self._volume}
-
-        return driver_command, sandbox_kwargs
+        return _build_driver_command_and_sandbox_kwargs_impl(self, app=app)
 
     def start(self) -> None:
         """Start the Modal sandbox and initialize the driver process."""
-        if self._sandbox is not None:
-            return
-
-        app = self._resolve_app()
-        driver_command, sandbox_kwargs = self._build_driver_command_and_sandbox_kwargs(
-            app=app
-        )
-
-        self._sandbox = modal.Sandbox.create(**sandbox_kwargs)
-        self._proc = self._sandbox.exec(
-            "python", "-u", "-c", driver_command, bufsize=1, timeout=self.timeout
-        )
-
-        self._stdin = self._proc.stdin
-        self._stdout_iter = iter(self._proc.stdout)
-        self._stderr_iter = iter(getattr(self._proc, "stderr", []))
-        self._start_stdout_reader()
+        _start_impl(self)
 
     async def astart(self) -> None:
         """Start the Modal sandbox and initialize the driver process (async)."""
-        if self._sandbox is not None:
-            return
-
-        app = await self._aresolve_app()
-        driver_command, sandbox_kwargs = self._build_driver_command_and_sandbox_kwargs(
-            app=app
-        )
-
-        self._sandbox = await modal.Sandbox.create.aio(**sandbox_kwargs)
-        self._proc = await self._sandbox.exec.aio(
-            "python", "-u", "-c", driver_command, bufsize=1, timeout=self.timeout
-        )
-
-        self._stdin = self._proc.stdin
-        self._stdout_iter = iter(self._proc.stdout)
-        self._stderr_iter = iter(getattr(self._proc, "stderr", []))
-        self._start_stdout_reader()
+        await _astart_impl(self)
 
     def _tool_names(self) -> list[str]:
         """Get the list of registered tool names."""
-        tools = ["llm_query", "llm_query_batched"]
-        if self._tools:
-            tools.extend(self._tools.keys())
-        return tools
+        return _tool_names_impl(self)
 
     def _output_names(self) -> list[str]:
         """Get the list of output field names."""
-        if not self.output_fields:
-            return []
-        return [
-            field["name"]
-            for field in self.output_fields
-            if isinstance(field, dict) and field.get("name")
-        ]
+        return _output_names_impl(self)
 
     def _summarize_stdout(self, stdout: str) -> str:
         """Summarize stdout output to prevent context window pollution."""
-        if not self.summarize_stdout:
-            return stdout
-        return _summarize_stdout_util(
-            stdout,
-            threshold=self.stdout_summary_threshold,
-            prefix_len=self.stdout_summary_prefix_len,
-        )
+        return _summarize_stdout_impl(self, stdout)
 
     def _drain_or_flush_stdin(self) -> None:
         """Flush sandbox stdin, preferring Modal's async drain when available.
@@ -381,95 +290,53 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         so bridging to Modal's async stream API with ``asyncio.run(...)`` is safe
         and avoids Modal's AsyncUsageWarning for blocking ``drain()`` calls.
         """
-        if self._stdin is None:
-            raise CodeInterpreterError("Sandbox input stream is not initialized")
-
-        def _drain_or_flush_impl() -> None:
-            drain = getattr(self._stdin, "drain", None)
-            if callable(drain):
-                drain_aio = getattr(drain, "aio", None)
-                if callable(drain_aio):
-                    asyncio.run(drain_aio())
-                    return
-                drain()
-                return
-
-            flush = getattr(self._stdin, "flush", None)
-            if callable(flush):
-                flush()
-
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            _drain_or_flush_impl()
-            return
-
-        # If execute() is invoked from a thread that already owns a running
-        # event loop, avoid touching Modal's blocking ``drain`` interface on
-        # that thread. Run the resolution + drain/flush in a helper thread.
-        thread_exc: Exception | None = None
-
-        def _run_async_drain() -> None:
-            nonlocal thread_exc
-            try:
-                _drain_or_flush_impl()
-            except Exception as exc:  # pragma: no cover - exercised via caller
-                thread_exc = exc
-
-        drain_thread = threading.Thread(
-            target=_run_async_drain,
-            name="modal-stdin-drain",
-            daemon=True,
-        )
-        drain_thread.start()
-        drain_thread.join()
-        if thread_exc is not None:
-            raise thread_exc
+        _drain_or_flush_stdin_impl(self)
 
     def _write_line(self, payload: dict[str, Any]) -> None:
         """Write a JSON payload to the sandbox stdin."""
-        if self._stdin is None:
-            raise CodeInterpreterError("Sandbox input stream is not initialized")
-        self._stdin.write(json.dumps(payload) + "\n")
-        self._drain_or_flush_stdin()
+        _write_line_impl(self, payload)
 
     @staticmethod
     def _is_recoverable_exec_channel_error(exc: Exception) -> bool:
         """Return ``True`` when an exec transport error is likely transient."""
-        text = str(exc).lower()
-        recoverable_signatures = (
-            "failed to write to exec stdin",
-            "broken pipe",
-            "sandbox input stream is not initialized",
-            "sandbox process exited unexpectedly",
-        )
-        return any(sig in text for sig in recoverable_signatures)
+        return _is_recoverable_exec_channel_error_impl(exc)
 
     @staticmethod
     def _is_recoverable_start_error(exc: Exception) -> bool:
         """Return ``True`` when sandbox startup failures are likely transient."""
-        text = str(exc).lower()
-        recoverable_signatures = (
-            "timed out",
-            "temporarily unavailable",
-            "connection reset",
-            "connection aborted",
-            "service unavailable",
-            "rate limit",
-            "429",
-            "resource exhausted",
-        )
-        return any(sig in text for sig in recoverable_signatures)
+        return _is_recoverable_start_error_impl(exc)
 
-    @contextmanager
     def execution_profile(self, profile: ExecutionProfile):
         """Temporarily override the default execution profile."""
-        previous = self.default_execution_profile
-        self.default_execution_profile = profile
-        try:
-            yield self
-        finally:
-            self.default_execution_profile = previous
+        return _execution_profile_impl(self, profile)
+
+    def build_delegate_child(self, *, remaining_llm_budget: int) -> "ModalInterpreter":
+        """Build a child interpreter for recursive RLM delegation."""
+        child = ModalInterpreter(
+            image=self.image,
+            app=getattr(self, "_app_obj", None),
+            secrets=list(self.secrets),
+            timeout=self.timeout,
+            idle_timeout=self.idle_timeout,
+            execute_timeout=self.execute_timeout,
+            app_name=getattr(self, "_app_name", "dspy-rlm-interpreter"),
+            volume_name=self.volume_name,
+            volume_mount_path=self.volume_mount_path,
+            summarize_stdout=self.summarize_stdout,
+            stdout_summary_threshold=self.stdout_summary_threshold,
+            stdout_summary_prefix_len=self.stdout_summary_prefix_len,
+            sub_lm=self.sub_lm,
+            max_llm_calls=remaining_llm_budget,
+            llm_call_timeout=self.llm_call_timeout,
+            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+            async_execute=self.async_execute,
+        )
+        setattr(
+            child,
+            "_check_and_increment_llm_calls",
+            self._check_and_increment_llm_calls,
+        )
+        return child
 
     def execute(
         self,
@@ -479,233 +346,11 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         execution_profile: ExecutionProfile | None = None,
     ) -> str | FinalOutput:
         """Execute Python code in the Modal sandbox."""
-        safe_vars: dict[str, Any] = {}
-        for key, value in (variables or {}).items():
-            try:
-                json.dumps(value)
-                safe_vars[key] = value
-            except TypeError:
-                safe_vars[key] = str(value)
-
-        request_payload = {
-            "code": code,
-            "variables": safe_vars,
-            "tool_names": self._tool_names(),
-            "output_names": self._output_names(),
-            "execution_profile": (
-                execution_profile or self.default_execution_profile
-            ).value,
-        }
-        profile_value = str(request_payload["execution_profile"])
-        code_hash, code_preview = self._summarize_code(code)
-        started_at = time.time()
-        self._emit_execution_event(
-            {
-                "phase": "start",
-                "timestamp": started_at,
-                "execution_profile": profile_value,
-                "code_hash": code_hash,
-                "code_preview": code_preview,
-            }
-        )
-
-        # Modal startup/exec channels can occasionally flap; retry with bounded
-        # backoff for known transient startup/transport failures.
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            if self._sandbox is None:
-                try:
-                    self.start()
-                except Exception as exc:
-                    can_retry = attempt < (max_attempts - 1) and (
-                        self._is_recoverable_start_error(exc)
-                    )
-                    if can_retry:
-                        self.shutdown()
-                        time.sleep(0.25 * (2**attempt))
-                        continue
-                    raise CodeInterpreterError(
-                        f"[sandbox_unavailable] Failed to start sandbox: {exc}"
-                    ) from exc
-
-            try:
-                self._write_line(request_payload)
-                deadline = (
-                    time.monotonic() + self.execute_timeout
-                    if self.execute_timeout
-                    else None
-                )
-
-                while True:
-                    remaining = (
-                        None
-                        if deadline is None
-                        else max(0.0, deadline - time.monotonic())
-                    )
-                    if remaining is not None and remaining <= 0:
-                        self.shutdown()
-                        raise CodeInterpreterError(
-                            f"Timed out waiting for sandbox response after {self.execute_timeout}s"
-                        )
-
-                    try:
-                        if self._stdout_queue is None:
-                            raise CodeInterpreterError(
-                                "Sandbox output queue is not initialized"
-                            )
-                        line = self._stdout_queue.get(timeout=remaining)
-                    except queue.Empty as exc:
-                        self.shutdown()
-                        raise CodeInterpreterError(
-                            f"Timed out waiting for sandbox response after {self.execute_timeout}s"
-                        ) from exc
-
-                    if line is None:
-                        stderr_tail = ""
-                        try:
-                            if self._stderr_iter is not None:
-                                stderr_tail = "".join(list(self._stderr_iter)[:50])
-                        except Exception:
-                            stderr_tail = ""
-                        msg = "Modal sandbox process exited unexpectedly."
-                        if stderr_tail:
-                            msg += f"\nStderr: {_redact_sensitive_text(stderr_tail)}"
-                        raise CodeInterpreterError(msg)
-
-                    try:
-                        message = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if "tool_call" in message:
-                        call = message["tool_call"] or {}
-                        name = call.get("name")
-                        args = call.get("args") or []
-                        kwargs = call.get("kwargs") or {}
-
-                        try:
-                            if name == "llm_query":
-                                result = self.llm_query(*args, **kwargs)
-                            elif name == "llm_query_batched":
-                                result = self.llm_query_batched(*args, **kwargs)
-                            elif name and name in self._tools:
-                                result = self._tools[name](*args, **kwargs)
-                            else:
-                                raise CodeInterpreterError(f"Unknown tool: {name}")
-
-                            try:
-                                json.dumps(result)
-                                reply = {"tool_result": result}
-                            except TypeError:
-                                reply = {"tool_result": str(result)}
-                        except Exception as exc:
-                            reply = {"tool_error": f"{type(exc).__name__}: {exc}"}
-
-                        self._write_line(reply)
-                        continue
-
-                    if "stdout" in message or "stderr" in message or "final" in message:
-                        stdout = message.get("stdout", "") or ""
-                        stderr = message.get("stderr", "") or ""
-                        final_obj = message.get("final")
-
-                        if final_obj is not None:
-                            output_keys = (
-                                list(final_obj.keys())[:50]
-                                if isinstance(final_obj, dict)
-                                else None
-                            )
-                            self._emit_execution_event(
-                                {
-                                    "phase": "complete",
-                                    "timestamp": time.time(),
-                                    "duration_ms": int(
-                                        (time.time() - started_at) * 1000
-                                    ),
-                                    "execution_profile": profile_value,
-                                    "code_hash": code_hash,
-                                    "code_preview": code_preview,
-                                    "success": True,
-                                    "result_kind": "final_output",
-                                    "output_keys": output_keys,
-                                }
-                            )
-                            return FinalOutput(final_obj)
-
-                        if stderr:
-                            summarized_stdout = self._summarize_stdout(stdout)
-                            self._emit_execution_event(
-                                {
-                                    "phase": "complete",
-                                    "timestamp": time.time(),
-                                    "duration_ms": int(
-                                        (time.time() - started_at) * 1000
-                                    ),
-                                    "execution_profile": profile_value,
-                                    "code_hash": code_hash,
-                                    "code_preview": code_preview,
-                                    "success": False,
-                                    "result_kind": "stderr",
-                                    "stderr_preview": _redact_sensitive_text(stderr),
-                                }
-                            )
-                            return (
-                                summarized_stdout
-                                + ("\n" if summarized_stdout else "")
-                                + stderr
-                            )
-                        self._emit_execution_event(
-                            {
-                                "phase": "complete",
-                                "timestamp": time.time(),
-                                "duration_ms": int((time.time() - started_at) * 1000),
-                                "execution_profile": profile_value,
-                                "code_hash": code_hash,
-                                "code_preview": code_preview,
-                                "success": True,
-                                "result_kind": "stdout",
-                                "stdout_preview": self._summarize_stdout(stdout),
-                            }
-                        )
-                        return self._summarize_stdout(stdout)
-            except Exception as exc:
-                can_retry = attempt < (max_attempts - 1) and (
-                    self._is_recoverable_exec_channel_error(exc)
-                )
-                if can_retry:
-                    self.shutdown()
-                    time.sleep(0.25 * (2**attempt))
-                    continue
-                self._emit_execution_event(
-                    {
-                        "phase": "complete",
-                        "timestamp": time.time(),
-                        "duration_ms": int((time.time() - started_at) * 1000),
-                        "execution_profile": profile_value,
-                        "code_hash": code_hash,
-                        "code_preview": code_preview,
-                        "success": False,
-                        "result_kind": "exception",
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    }
-                )
-                raise
-
-        self._emit_execution_event(
-            {
-                "phase": "complete",
-                "timestamp": time.time(),
-                "duration_ms": int((time.time() - started_at) * 1000),
-                "execution_profile": profile_value,
-                "code_hash": code_hash,
-                "code_preview": code_preview,
-                "success": False,
-                "result_kind": "retry_exhausted",
-            }
-        )
-        raise CodeInterpreterError(
-            "[sandbox_unavailable] Unexpected execute retry exhaustion"
+        return _execute_impl(
+            self,
+            code,
+            variables,
+            execution_profile=execution_profile,
         )
 
     async def aexecute(
@@ -727,51 +372,11 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
 
     def shutdown(self) -> None:
         """Terminate the sandbox and clean up all resources."""
-        if self._sandbox is not None:
-            try:
-                self._sandbox.terminate()
-            except Exception:
-                pass
-
-        self._sandbox = None
-        self._proc = None
-        self._stdin = None
-        self._stdout_iter = None
-        self._stdout_queue = None
-        self._stdout_reader_thread = None
-        self._stderr_iter = None
-        self._volume = None
-        with self._sub_lm_executor_lock:
-            if self._sub_lm_executor is not None:
-                self._sub_lm_executor.shutdown(wait=False, cancel_futures=True)
-                self._sub_lm_executor = None
+        _shutdown_impl(self)
 
     async def ashutdown(self) -> None:
         """Terminate the sandbox and clean up all resources (async)."""
-        if self._sandbox is not None:
-            try:
-                if hasattr(self._sandbox.terminate, "aio"):
-                    await self._sandbox.terminate.aio()
-                else:
-                    self._sandbox.terminate()
-            except Exception:
-                pass
-
-        if self._stdout_reader_thread is not None:
-            self._stdout_reader_thread.join(timeout=2.0)
-            self._stdout_reader_thread = None
-
-        self._sandbox = None
-        self._proc = None
-        self._stdin = None
-        self._stdout_iter = None
-        self._stdout_queue = None
-        self._stderr_iter = None
-        self._volume = None
-        with self._sub_lm_executor_lock:
-            if self._sub_lm_executor is not None:
-                self._sub_lm_executor.shutdown(wait=False, cancel_futures=True)
-                self._sub_lm_executor = None
+        await _ashutdown_impl(self)
 
     def __enter__(self) -> "ModalInterpreter":
         """Start the interpreter and return it for use as a context manager."""

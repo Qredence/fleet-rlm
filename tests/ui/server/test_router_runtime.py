@@ -87,6 +87,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
                 "DSPY_LLM_API_KEY": "sk-test",
                 "SECRET_NAME": "ALT_SECRET",
                 "VOLUME_NAME": "alt-volume",
+                "SANDBOX_PROVIDER": "daytona",
             }
         },
     )
@@ -100,6 +101,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         "DSPY_LLM_API_KEY",
         "SECRET_NAME",
         "VOLUME_NAME",
+        "SANDBOX_PROVIDER",
     }
     state = _server_state(local_client)
     assert state.config.agent_model == "openai/gpt-4o-mini"
@@ -107,6 +109,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     assert state.config.agent_delegate_small_model == "openai/gpt-4.1-nano"
     assert state.config.secret_name == "ALT_SECRET"
     assert state.config.volume_name == "alt-volume"
+    assert state.config.sandbox_provider == "daytona"
     assert state.planner_lm is planner
     assert state.delegate_lm is delegate
     assert planner_calls[-1] == "openai/gpt-4o-mini"
@@ -324,6 +327,7 @@ def test_runtime_status_uses_cached_results(
     monkeypatch: pytest.MonkeyPatch,
 ):
     state = _server_state(local_client)
+    monkeypatch.delenv("SANDBOX_PROVIDER", raising=False)
     state.config.agent_model = None
     state.config.agent_delegate_model = None
     state.config.agent_delegate_small_model = None
@@ -367,6 +371,7 @@ def test_runtime_status_uses_cached_results(
     payload = response.json()
 
     assert payload["ready"] is True
+    assert payload["daytona"]["sandbox_provider_set"] is True
     assert payload["tests"]["modal"]["ok"] is True
     assert payload["tests"]["lm"]["ok"] is True
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
@@ -375,11 +380,27 @@ def test_runtime_status_uses_cached_results(
     assert payload["daytona"]["configured"] is True
 
 
+def test_runtime_daytona_volume_name_uses_workspace_claim(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api.runtime_services.volumes import resolve_daytona_volume_name
+
+    state = _server_state(local_client)
+    monkeypatch.setenv("DAYTONA_TARGET", "local")
+
+    identity = SimpleNamespace(tenant_claim="tenant/a", user_claim="user-a")
+
+    assert resolve_daytona_volume_name(identity=identity, state=state) == "tenant-a"
+
+
 def test_runtime_volume_tree_maps_backend_errors_to_502(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _server_state(local_client).config.volume_name = "test-volume"
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.tools.volume_ops.list_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
@@ -391,11 +412,232 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
     assert "Volume listing failed" in response.json().get("detail", "")
 
 
+def test_runtime_volume_tree_uses_explicit_modal_provider_override(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    state.config.volume_name = "test-volume"
+    captured: dict[str, object] = {}
+
+    def _fake_list_volume_tree(volume_name: str, root_path: str, max_depth: int):
+        captured.update(
+            {
+                "volume_name": volume_name,
+                "root_path": root_path,
+                "max_depth": max_depth,
+            }
+        )
+        return {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "nodes": [],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        _fake_list_volume_tree,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/tree",
+        params={"provider": "modal"},
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "modal"
+    assert captured == {
+        "volume_name": "test-volume",
+        "root_path": "/",
+        "max_depth": 3,
+    }
+
+
+def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
+    captured: dict[str, object] = {}
+
+    def _fake_list_daytona_volume_tree(
+        volume_name: str,
+        root_path: str,
+        max_depth: int,
+    ):
+        captured.update(
+            {
+                "volume_name": volume_name,
+                "root_path": root_path,
+                "max_depth": max_depth,
+            }
+        )
+        return {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "nodes": [],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.core.tools.volume_ops.list_daytona_volume_tree",
+        _fake_list_daytona_volume_tree,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/tree",
+        params={"provider": "daytona"},
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "daytona"
+    assert captured == {
+        "volume_name": "tenant-a",
+        "root_path": "/",
+        "max_depth": 3,
+    }
+
+
+def test_runtime_volume_file_uses_explicit_daytona_provider_override(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
+    captured: dict[str, object] = {}
+
+    def _fake_read_daytona_volume_file_text(
+        volume_name: str,
+        path: str,
+        max_bytes: int,
+    ):
+        captured.update(
+            {
+                "volume_name": volume_name,
+                "path": path,
+                "max_bytes": max_bytes,
+            }
+        )
+        return {
+            "path": path,
+            "mime": "text/plain",
+            "size": 5,
+            "content": "hello",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.core.tools.volume_ops.read_daytona_volume_file_text",
+        _fake_read_daytona_volume_file_text,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"provider": "daytona", "path": "/notes.txt"},
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "daytona"
+    assert captured == {
+        "volume_name": "tenant-a",
+        "path": "/notes.txt",
+        "max_bytes": 200000,
+    }
+
+
+def test_runtime_volume_file_uses_explicit_modal_provider_override(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    state.config.volume_name = "test-volume"
+    captured: dict[str, object] = {}
+
+    def _fake_read_volume_file_text(volume_name: str, path: str, max_bytes: int):
+        captured.update(
+            {
+                "volume_name": volume_name,
+                "path": path,
+                "max_bytes": max_bytes,
+            }
+        )
+        return {
+            "path": path,
+            "mime": "text/plain",
+            "size": 7,
+            "content": "content",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        _fake_read_volume_file_text,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"provider": "modal", "path": "/notes.txt"},
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "modal"
+    assert captured == {
+        "volume_name": "test-volume",
+        "path": "/notes.txt",
+        "max_bytes": 200000,
+    }
+
+
+def test_runtime_volume_tree_defaults_to_active_provider(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        lambda volume_name, root_path, max_depth: {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "nodes": [],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+        },
+    )
+
+    response = local_client.get("/api/v1/runtime/volume/tree")
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == "modal"
+
+
 def test_runtime_volume_file_maps_not_found_errors_to_404(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _server_state(local_client).config.volume_name = "test-volume"
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
@@ -411,7 +653,9 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _server_state(local_client).config.volume_name = "test-volume"
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
@@ -430,7 +674,9 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _server_state(local_client).config.volume_name = "test-volume"
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
     monkeypatch.setattr(
         "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),

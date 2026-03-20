@@ -9,9 +9,13 @@ let contentState: {
   isLoading: boolean;
   error: Error | null;
 };
+let fileContentCalls: Array<{ path: string | null; provider: string }> = [];
 
 vi.mock("@/screens/volumes/hooks/use-volumes-filesystem", () => ({
-  useFileContent: () => contentState,
+  useFileContent: (path: string | null, provider: string) => {
+    fileContentCalls.push({ path, provider });
+    return contentState;
+  },
 }));
 
 vi.mock("@/hooks/useIsMobile", () => ({
@@ -31,6 +35,7 @@ describe("VolumeFileDetail markdown rendering", () => {
       isLoading: false,
       error: null,
     };
+    fileContentCalls = [];
   });
 
   it("renders markdown files with formatted markdown output", () => {
@@ -56,6 +61,10 @@ describe("VolumeFileDetail markdown rendering", () => {
     expect(html).toContain("Release Notes");
     expect(html).toContain("Added feature");
     expect(html).not.toContain("<pre");
+    expect(fileContentCalls[0]).toEqual({
+      path: "/docs/release-notes.md",
+      provider: "modal",
+    });
   });
 
   it("renders non-markdown text files in preformatted mode", () => {
@@ -79,5 +88,31 @@ describe("VolumeFileDetail markdown rendering", () => {
 
     expect(html).toContain("<pre");
     expect(html).toContain("plain text preview");
+  });
+
+  it("requests API content using the file provider when present", () => {
+    contentState = {
+      content: "daytona preview",
+      isLoading: false,
+      error: null,
+    };
+
+    const file: FsNode = {
+      id: "py-1",
+      name: "notes.py",
+      path: "/workspace/notes.py",
+      provider: "daytona",
+      type: "file",
+      children: [],
+      size: 16,
+      modifiedAt: "2026-03-03T00:00:00Z",
+    };
+
+    renderToStaticMarkup(<VolumeFileDetail file={file} />);
+
+    expect(fileContentCalls[0]).toEqual({
+      path: "/workspace/notes.py",
+      provider: "daytona",
+    });
   });
 });
