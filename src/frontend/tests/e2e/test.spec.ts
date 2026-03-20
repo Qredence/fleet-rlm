@@ -1,38 +1,32 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-test("analyze chat container and canvas formatting", async ({ page }) => {
-  test.setTimeout(180000); // 3 minutes for complex multi-step processing
-  console.log("Navigating to /app/workspace ...");
-  await page.goto("/app/workspace", { waitUntil: "networkidle" });
-  await page.waitForTimeout(5000);
+test("workspace chat container renders without errors", async ({ page }) => {
+  await page.goto("/app/workspace");
+  await page.waitForURL(/\/app\/workspace$/);
 
-  // Type a complex message that triggers multiple events
-  const inputSelector =
-    'textarea, input[type="text"][placeholder*="Message"], [contenteditable="true"]';
-  await page.fill(
-    inputSelector,
-    "Create a complex data processing task: 1. Generate a large random CSV file. 2. Write a Python script to filter rows based on a condition. 3. Run the script. 4. Show me each step in detail.",
+  // Core shell elements must be present
+  await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(
+    0,
   );
-  await page.press(inputSelector, "Enter");
+  await expect(page.getByText("We hit a rendering issue on this route")).toHaveCount(0);
 
-  console.log("Message sent. Waiting 2 minutes for multi-step processing and event rendering...");
-  // We wait longer to ensure we see the sequence of events
-  for (let i = 0; i < 6; i++) {
-    await page.waitForTimeout(20000);
-    console.log(`Waited ${20 * (i + 1)} seconds. Capturing intermediate screenshot...`);
-    await page.screenshot({
-      path: `/tmp/phase_22_event_progress_${i}.png`,
-      fullPage: true,
-    });
-  }
+  // Chat input area must be reachable
+  const chatInput = page
+    .locator('textarea, input[type="text"]')
+    .filter({ hasText: "" })
+    .or(page.locator('[placeholder*="Message"], [placeholder*="message"]'))
+    .or(page.locator('[role="textbox"]'))
+    .first();
 
-  // Final capture
-  await page.screenshot({
-    path: "/tmp/phase_22_final_formatting.png",
-    fullPage: true,
-  });
+  await expect(chatInput).toBeVisible({ timeout: 10_000 });
 
-  const bodyText = await page.evaluate(() => document.body.innerText);
-  console.log("--- FINAL FORMATTING ANALYSIS ---");
-  console.log(`Length of UI text: ${bodyText.length}`);
+  // Filling the input should not cause an error
+  await chatInput.fill(
+    "Create a data processing task: generate a CSV, filter rows, run the script.",
+  );
+  await expect(chatInput).not.toBeEmpty();
+
+  // Clear the input and verify the empty state returns
+  await chatInput.clear();
+  await expect(chatInput).toBeEmpty();
 });
