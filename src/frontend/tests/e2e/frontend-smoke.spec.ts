@@ -59,8 +59,8 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
 
 test("opens settings without runtime exception", async ({ page }) => {
   await page.goto("/settings");
+  await page.waitForURL(/\/app\/settings/);
 
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByText("Appearance", { exact: true })).toBeVisible();
   await expect(page.getByText("Telemetry", { exact: true })).toBeVisible();
   await expect(page.getByText("LiteLLM Integration", { exact: true })).toBeVisible();

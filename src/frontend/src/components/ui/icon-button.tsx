@@ -58,7 +58,9 @@ function IconButton({
       className={cn(
         "rounded-lg focus-visible:ring-2",
         resolvedVariant === "ghost" && "border border-transparent bg-transparent",
-        isActive ? "text-accent" : "text-foreground",
+        // When active, match the semantic foreground text token.
+        // This ensures the computed `color` is driven by `--color-text`.
+        "text-foreground",
         className,
       )}
       {...props}

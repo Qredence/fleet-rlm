@@ -6,7 +6,7 @@
  */
 
 import type { ToolUIPart } from "ai";
-import type { ChatRenderToolState } from "@/lib/data/types";
+import type { ChatRenderToolState } from "@/screens/workspace/model/workspace-types";
 
 /**
  * Maps our custom ChatRenderToolState to AI SDK ToolUIPart["state"].

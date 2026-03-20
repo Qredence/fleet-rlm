@@ -59,8 +59,11 @@ Routing:
 State management:
 
 - TanStack Query for backend-backed state
-- Zustand for ephemeral client state in `src/stores/`
-- `src/stores/chatStore.ts` is part of the live streaming contract with the backend
+- Zustand for ephemeral client state, with cross-app shell state in `src/stores/`
+- `src/screens/workspace/model/chat-store.ts` remains part of the live streaming contract with the backend
+- Workspace-owned inspector/session state lives in `src/screens/workspace/model/workspace-ui-store.ts`
+- Volumes file-selection state lives in `src/screens/volumes/model/volumes-selection-store.ts`
+- `src/stores/navigation-types.ts` owns the shared `NavItem` type used by shell navigation and route helpers
 
 Backend integration:
 
@@ -70,18 +73,21 @@ Backend integration:
 
 Feature layout:
 
-- `src/features/rlm-workspace/` for the main chat and runtime experience
-- `src/features/artifacts/` for artifact canvas, graph, timeline, and REPL views
-- `src/features/volumes/` for volume browsing
-- `src/features/settings/` for settings UI
-- `src/features/shell/` for app shell and navigation
+- `src/screens/workspace/` is the dominant product slice for chat, runtime, inspector, workbench, and workspace artifacts
+- `src/screens/shell/` owns the route shell, shell chrome, and standalone auth/error screens
+- `src/screens/volumes/` owns the volume browser, file preview, and file-selection helpers
+- `src/screens/settings/` owns runtime and app settings
+- Thin route wrappers under `src/routes/` should render screen modules rather than page-layer wrappers
+- Shell code should consume workspace/volumes through top-level screen contracts like `workspace-shell-contract.ts`, `workspace-canvas-panel.tsx`, `volumes-shell-contract.ts`, and `volumes-canvas-panel.tsx` instead of reaching into deep `components/`, `model/`, or `hooks/` paths
 
 Component layout:
 
 - `src/components/ui/` for shared UI primitives
 - `src/components/prompt-kit/` for AI SDK prompt and message components
-- `src/components/chat/` for chat-specific controls
+- `src/screens/workspace/components/` for workspace-specific UI controls and message rendering
 - `src/components/shared/` for shared utilities
+- Prefer shadcn field composition (`FieldGroup`, `Field`, `FieldContent`, `FieldLabel`, `FieldDescription`, `FieldTitle`, `Switch`, `ToggleGroup`) over bespoke settings row wrappers when building forms
+- Prefer behavior-bearing screen subcomponents over micro-wrappers; tiny layout-only wrappers should usually be inlined back into the screen component
 
 ## UI and Runtime Rules
 
@@ -97,6 +103,7 @@ React/runtime rules:
 - `modal_chat` is the default runtime path and sends `execution_mode`
 - `daytona_pilot` is the experimental workbench path and sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 - Runtime labels shown to users are `"Modal chat"` and `"Daytona pilot"`
+- Shared runtime status queries belong in `src/hooks/useRuntimeStatus.ts`; settings should compose that hook rather than own the query contract
 
 ## Environment and Contract Sync
 
@@ -123,6 +130,14 @@ OpenAPI sync:
 
 - `pnpm run api:sync` copies the root spec and regenerates frontend types
 - `pnpm run api:check` verifies that committed generated artifacts match `openapi.yaml`
+- If `api:check` produces formatting-only diffs in `openapi/fleet-rlm.openapi.yaml` or `src/lib/rlm-api/generated/openapi.ts`, keep those sync artifacts in the same change rather than hand-editing generated output
+
+Lint and boundary enforcement:
+
+- Frontend lint rules are configured in `src/frontend/vite.config.ts` via Vite+ (`vp`) overrides, not a standalone ESLint config
+- `src/components/ui/*` and `src/components/prompt-kit/*` must not import from `src/screens/*`
+- `src/screens/*/model/*` must not import from `src/screens/*/components/*`
+- `src/screens/shell/*` must import workspace and volumes behavior through top-level screen contracts only
 
 ## Validation by Change Type
 
