@@ -5,9 +5,7 @@ test("workspace chat container renders without errors", async ({ page }) => {
   await page.waitForURL(/\/app\/workspace$/);
 
   // Core shell elements must be present
-  await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(0);
   await expect(page.getByText("We hit a rendering issue on this route")).toHaveCount(0);
 
   // Chat input area must be reachable

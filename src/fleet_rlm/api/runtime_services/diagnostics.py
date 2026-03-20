@@ -417,7 +417,9 @@ def build_runtime_status_response(
         app_env=state.config.app_env,
         write_enabled=state.config.app_env == "local",
         ready=ready,
-        sandbox_provider=state.config.sandbox_provider,
+        sandbox_provider=(
+            "daytona" if state.config.sandbox_provider == "daytona" else "modal"
+        ),
         active_models=RuntimeActiveModels(
             planner=resolve_active_model(state.config.agent_model, "DSPY_LM_MODEL"),
             delegate=resolve_active_model(
