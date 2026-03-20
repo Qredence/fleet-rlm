@@ -157,7 +157,7 @@ async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | No
                     proc.pid,
                 )
         return None
-    except Exception:
+    except (ValueError, OSError): # Catch specific exceptions
         logger.warning("Failed to start MLflow tracking server", exc_info=True)
         return None
 
