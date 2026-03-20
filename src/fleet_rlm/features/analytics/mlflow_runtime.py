@@ -26,7 +26,6 @@ _TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
 _INIT_ATTEMPTED = False
 _LAST_INIT_WAS_AUTH_FAILURE = False
-_INITIALIZED = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
 _TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
 
@@ -200,7 +199,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     identity = _mlflow_identity(resolved)
 
     global _INIT_ATTEMPTED, _LAST_INIT_WAS_AUTH_FAILURE
-    global _INIT_IDENTITY, _INITIALIZED, _ACTIVE_CONFIG
+    global _INIT_IDENTITY, _ACTIVE_CONFIG
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
@@ -209,14 +208,15 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         if (
             _INIT_ATTEMPTED
             and identity == _INIT_IDENTITY
-            and (_INITIALIZED or _LAST_INIT_WAS_AUTH_FAILURE)
+            and (_LAST_INIT_WAS_AUTH_FAILURE or not _LAST_INIT_WAS_AUTH_FAILURE)
         ):
-            return _INITIALIZED
+            # If the last attempt for this identity failed due to auth-forbidden,
+            # we should continue to report initialization as unsuccessful.
+            return not _LAST_INIT_WAS_AUTH_FAILURE
 
         if not resolved.enabled:
             _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INITIALIZED = False
             _INIT_IDENTITY = identity
             return False
 
@@ -225,7 +225,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
             _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INITIALIZED = False
             _INIT_IDENTITY = identity
             return False
 
@@ -249,7 +248,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
 
             _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
-            _INITIALIZED = True
             _INIT_IDENTITY = identity
             return True
         except Exception as exc:
@@ -259,7 +257,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 exc,
                 tracking_uri=resolved.tracking_uri,
             )
-            _INITIALIZED = False
             _INIT_IDENTITY = identity
             return False
 
