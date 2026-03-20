@@ -20,7 +20,6 @@ from ..runtime_services import (
     json_model_response,
     load_volume_file_content,
     load_volume_tree,
-    resolve_daytona_volume_name,
     run_daytona_connection_test,
     run_lm_connection_test,
     run_modal_connection_test,

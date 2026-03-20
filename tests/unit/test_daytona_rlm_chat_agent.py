@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import dspy
 from typing import Any, cast
+
+import dspy
 
 from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
     DaytonaWorkbenchChatAgent,
-    _render_final_text,
 )
+from fleet_rlm.infrastructure.providers.daytona.chat_state import render_final_text
 
 
 def _build_agent() -> DaytonaWorkbenchChatAgent:
@@ -15,12 +16,12 @@ def _build_agent() -> DaytonaWorkbenchChatAgent:
 
 def test_render_final_text_prefers_nested_summary_fields() -> None:
     assert (
-        _render_final_text({"final_markdown": "## Final\n\nHello there!"})
+        render_final_text({"final_markdown": "## Final\n\nHello there!"})
         == "## Final\n\nHello there!"
     )
-    assert _render_final_text({"summary": "Hello there!"}) == "Hello there!"
+    assert render_final_text({"summary": "Hello there!"}) == "Hello there!"
     assert (
-        _render_final_text({"value": {"final_markdown": "Nested hello."}})
+        render_final_text({"value": {"final_markdown": "Nested hello."}})
         == "Nested hello."
     )
 

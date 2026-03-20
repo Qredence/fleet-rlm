@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import queue
 import threading
-import logging
 from typing import TYPE_CHECKING, Any
-import logging
 
 import modal
 
@@ -179,7 +178,9 @@ async def ashutdown(interpreter: "ModalInterpreter") -> None:
             else:
                 interpreter._sandbox.terminate()
         except Exception:
-            pass
+            logger.exception(
+                "Error while terminating Modal sandbox during async shutdown"
+            )
 
     if interpreter._stdout_reader_thread is not None:
         interpreter._stdout_reader_thread.join(timeout=2.0)

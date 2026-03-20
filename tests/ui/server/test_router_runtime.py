@@ -384,14 +384,14 @@ def test_runtime_daytona_volume_name_uses_workspace_claim(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.routers.runtime import _resolve_daytona_volume_name
+    from fleet_rlm.api.runtime_services.volumes import resolve_daytona_volume_name
 
     state = _server_state(local_client)
     monkeypatch.setenv("DAYTONA_TARGET", "local")
 
     identity = SimpleNamespace(tenant_claim="tenant/a", user_claim="user-a")
 
-    assert _resolve_daytona_volume_name(identity=identity, state=state) == "tenant-a"
+    assert resolve_daytona_volume_name(identity=identity, state=state) == "tenant-a"
 
 
 def test_runtime_volume_tree_maps_backend_errors_to_502(
