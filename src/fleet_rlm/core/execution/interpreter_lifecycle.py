@@ -6,6 +6,7 @@ import inspect
 import queue
 import threading
 from typing import TYPE_CHECKING, Any
+import logging
 
 import modal
 
@@ -15,6 +16,9 @@ from . import driver_factories
 
 if TYPE_CHECKING:
     from .interpreter import ModalInterpreter
+
+
+logger = logging.getLogger(__name__)
 
 
 def start_stdout_reader(interpreter: "ModalInterpreter") -> None:
@@ -31,7 +35,7 @@ def start_stdout_reader(interpreter: "ModalInterpreter") -> None:
             for line in it:
                 q.put(line)
         except Exception:
-            pass
+            logger.exception("Error while reading from sandbox stdout iterator")
         finally:
             q.put(None)
 
