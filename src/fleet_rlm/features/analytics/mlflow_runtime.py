@@ -223,7 +223,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         mlflow = _import_mlflow()
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
