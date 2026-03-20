@@ -2,6 +2,7 @@
 
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from importlib import import_module
 from pathlib import Path
@@ -14,12 +15,12 @@ from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
 from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.features.analytics import shutdown_mlflow
+from fleet_rlm.features.analytics import initialize_mlflow, shutdown_mlflow
 from fleet_rlm.features.analytics.client import (
     get_posthog_client,
     shutdown_posthog_client,
 )
-from fleet_rlm.features.analytics.config import PostHogConfig
+from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
 from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
 from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
@@ -38,6 +39,109 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MLFLOW_SERVER_PROCESS: subprocess.Popen | None = None
+
+
+def _start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
+    """Start a local MLflow tracking server if configured and not already running.
+
+    Returns the subprocess handle if a server was started, None otherwise.
+    """
+    mlflow_cfg = MlflowConfig.from_env()
+
+    if not mlflow_cfg.enabled:
+        logger.info("MLflow integration disabled; skipping server startup.")
+        return None
+
+    tracking_uri = mlflow_cfg.tracking_uri.strip()
+
+    # Only auto-start for localhost URIs
+    if not tracking_uri.startswith("http://127.0.0.1") and not tracking_uri.startswith(
+        "http://localhost"
+    ):
+        logger.debug(
+            "MLflow tracking URI is not localhost; skipping auto-start: %s",
+            tracking_uri,
+        )
+        return None
+
+    # Parse port from URI
+    try:
+        import re
+
+        match = re.search(r":(\d+)", tracking_uri)
+        port = int(match.group(1)) if match else 5001
+    except (ValueError, AttributeError):
+        port = 5001
+
+    # Check if server is already running
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    try:
+        result = sock.connect_ex(("127.0.0.1", port))
+        if result == 0:
+            logger.info("MLflow tracking server already running at %s", tracking_uri)
+            return None
+    finally:
+        sock.close()
+
+    # Start the MLflow server
+    logger.info("Starting MLflow tracking server on port %d...", port)
+    try:
+        # Don't capture stdout/stderr - let MLflow write to its own logs
+        proc = subprocess.Popen(
+            [
+                "uv",
+                "run",
+                "mlflow",
+                "server",
+                "--backend-store-uri",
+                "sqlite:///mlruns.db",
+                "--port",
+                str(port),
+            ],
+            start_new_session=True,
+        )
+
+        # Wait for server to become ready (MLflow takes ~12-15s to initialize workers)
+        import time
+
+        max_attempts = 20
+        for attempt in range(max_attempts):
+            time.sleep(1)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                result = sock.connect_ex(("127.0.0.1", port))
+                if result == 0:
+                    logger.info(
+                        "MLflow tracking server started (pid=%d) at %s",
+                        proc.pid,
+                        tracking_uri,
+                    )
+                    return proc
+            finally:
+                sock.close()
+            logger.info(
+                "Waiting for MLflow server... (attempt %d/%d)",
+                attempt + 1,
+                max_attempts,
+            )
+
+        # Server didn't start in time
+        logger.warning(
+            "MLflow server process started but port %d not responding after %ds",
+            port,
+            max_attempts,
+        )
+        proc.terminate()
+        return None
+    except Exception:
+        logger.warning("Failed to start MLflow tracking server", exc_info=True)
+        return None
 
 
 def _prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
@@ -216,10 +320,18 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        global _MLFLOW_SERVER_PROCESS
         state = _build_server_state(cfg)
         app.state.server_state = state
 
         _prime_runtime_env(cfg)
+
+        # Start MLflow server if enabled and not already running
+        _MLFLOW_SERVER_PROCESS = _start_mlflow_server(cfg)
+
+        # Initialize MLflow integration
+        initialize_mlflow(MlflowConfig.from_env())
+
         await _initialize_persistence(state, cfg)
         _initialize_lms(state, cfg)
 
@@ -229,6 +341,20 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         state.delegate_lm = None
         shutdown_mlflow()
         shutdown_posthog_client()
+
+        # Stop MLflow server if we started it
+        if _MLFLOW_SERVER_PROCESS is not None:
+            logger.info(
+                "Stopping MLflow tracking server (pid=%d)...",
+                _MLFLOW_SERVER_PROCESS.pid,
+            )
+            _MLFLOW_SERVER_PROCESS.terminate()
+            try:
+                _MLFLOW_SERVER_PROCESS.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _MLFLOW_SERVER_PROCESS.kill()
+            _MLFLOW_SERVER_PROCESS = None
+
         if state.db_manager is not None:
             await state.db_manager.dispose()
         state.db_manager = None

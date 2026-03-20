@@ -63,7 +63,7 @@ class MlflowConfig(BaseModel):
     """
 
     enabled: bool = Field(default=True)
-    tracking_uri: str = Field(default="http://127.0.0.1:5000")
+    tracking_uri: str = Field(default="http://127.0.0.1:5001")
     experiment: str = Field(default="fleet-rlm")
     active_model_id: str | None = Field(default=None)
     dspy_log_traces_from_compile: bool = Field(default=False)
@@ -75,7 +75,7 @@ class MlflowConfig(BaseModel):
     def from_env(cls) -> MlflowConfig:
         """Load MLflow configuration from environment variables."""
         tracking_uri = (
-            os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5000"
+            os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5001"
         ).strip()
         experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
         active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
