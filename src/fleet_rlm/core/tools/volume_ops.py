@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import modal  # noqa: F401
 from .modal_volumes import VolumeOpsMixin, list_volume_tree, read_volume_file_text
 from fleet_rlm.infrastructure.providers.daytona.volumes import (
     list_daytona_volume_tree,
