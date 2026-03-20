@@ -33,8 +33,6 @@ from .execution import ExecutionEventEmitter
 
 logger = logging.getLogger(__name__)
 
-_MLFLOW_SERVER_PROCESS: subprocess.Popen | None = None
-
 
 def resolve_runtime_config(
     config: ServerRuntimeConfig | None = None,
@@ -254,7 +252,6 @@ def initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
 
 async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Run startup initialization for server state and runtime services."""
-    global _MLFLOW_SERVER_PROCESS
 
     prime_runtime_env(cfg)
 
@@ -266,9 +263,13 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
     should_auto_start_mlflow_server = auto_start_enabled and cfg.app_env == "local"
 
     if should_auto_start_mlflow_server:
-        _MLFLOW_SERVER_PROCESS = await start_mlflow_server(cfg)
+        mlflow_proc = await start_mlflow_server(cfg)
     else:
-        _MLFLOW_SERVER_PROCESS = None
+        mlflow_proc = None
+
+    # Store the MLflow server process handle on the server state so it can be
+    # accessed during shutdown without relying on a module-level global.
+    setattr(state, "mlflow_server_process", mlflow_proc)
 
     initialize_mlflow(mlflow_cfg)
     await initialize_persistence(state, cfg)
@@ -278,27 +279,27 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
 
 async def shutdown_server_state(state: ServerState) -> None:
     """Tear down runtime services and persistence resources."""
-    global _MLFLOW_SERVER_PROCESS
 
     state.planner_lm = None
     state.delegate_lm = None
     shutdown_mlflow()
     shutdown_posthog_client()
 
-    if _MLFLOW_SERVER_PROCESS is not None:
-        proc = _MLFLOW_SERVER_PROCESS
-        _MLFLOW_SERVER_PROCESS = None
+    mlflow_proc = getattr(state, "mlflow_server_process", None)
+    if mlflow_proc is not None:
+        # Clear the reference on state before attempting shutdown.
+        setattr(state, "mlflow_server_process", None)
         logger.info(
             "Stopping MLflow tracking server (pid=%d)...",
-            proc.pid,
+            mlflow_proc.pid,
         )
         try:
-            if proc.poll() is None:
-                proc.terminate()
+            if mlflow_proc.poll() is None:
+                mlflow_proc.terminate()
                 try:
-                    proc.wait(timeout=5)
+                    mlflow_proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    mlflow_proc.kill()
         except ProcessLookupError:
             logger.debug("MLflow tracking server process already exited")
 
