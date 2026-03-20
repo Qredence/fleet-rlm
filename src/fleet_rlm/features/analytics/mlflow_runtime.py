@@ -247,13 +247,17 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
             _INIT_IDENTITY = identity
             return True
         except Exception as exc:
-            _INIT_ATTEMPTED = True
-            _LAST_INIT_WAS_AUTH_FAILURE = _is_auth_forbidden_failure(exc)
+            is_auth_failure = _is_auth_forbidden_failure(exc)
+            _LAST_INIT_WAS_AUTH_FAILURE = is_auth_failure
+            # Only cache auth failures to avoid hammering the endpoint with bad creds.
+            # Non-auth failures (transient errors) are not cached so the next call retries.
+            if is_auth_failure:
+                _INIT_ATTEMPTED = True
+                _INIT_IDENTITY = identity
             _log_mlflow_initialization_failure(
                 exc,
                 tracking_uri=resolved.tracking_uri,
             )
-            _INIT_IDENTITY = identity
             return False
 
 
