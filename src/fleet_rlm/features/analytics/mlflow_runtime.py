@@ -205,11 +205,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
 
         # Preserve idempotency after success, and avoid hammering the same
         # tracking endpoint after an auth-forbidden failure until auth changes.
-        if (
-            _INIT_ATTEMPTED
-            and identity == _INIT_IDENTITY
-            and (_LAST_INIT_WAS_AUTH_FAILURE or not _LAST_INIT_WAS_AUTH_FAILURE)
-        ):
+        if _INIT_ATTEMPTED and identity == _INIT_IDENTITY:
             # If the last attempt for this identity failed due to auth-forbidden,
             # we should continue to report initialization as unsuccessful.
             return not _LAST_INIT_WAS_AUTH_FAILURE
@@ -223,6 +219,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         mlflow = _import_mlflow()
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
+            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False

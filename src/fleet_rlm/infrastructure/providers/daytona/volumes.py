@@ -176,7 +176,17 @@ def read_daytona_volume_file_text(
 
     max_bytes = max(1, min(max_bytes, 1_000_000))
     normalized_path = path if path.startswith("/") else f"/{path}"
+
+    # Reject path traversal attempts.
+    parts = PurePosixPath(normalized_path).parts
+    if ".." in parts:
+        raise ValueError(f"Path traversal not allowed: {normalized_path!r}")
+
+    # Verify the resolved actual path stays within the mounted volume.
     actual_path = _daytona_actual_path(normalized_path)
+    if not actual_path.startswith(str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)):
+        raise ValueError(f"Path resolves outside mounted volume: {path!r}")
+
     client, sandbox = _mount_daytona_volume(volume_name)
 
     try:

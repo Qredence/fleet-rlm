@@ -257,8 +257,20 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
     global _MLFLOW_SERVER_PROCESS
 
     prime_runtime_env(cfg)
-    _MLFLOW_SERVER_PROCESS = await start_mlflow_server(cfg)
-    initialize_mlflow(MlflowConfig.from_env())
+
+    # Always initialize MLflow client-side tracing, but only auto-start a local
+    # MLflow tracking server when explicitly enabled and in a local environment.
+    mlflow_cfg = MlflowConfig.from_env()
+    auto_start_env = (os.getenv("MLFLOW_AUTO_START") or "").strip().lower()
+    auto_start_enabled = auto_start_env in {"1", "true", "yes"}
+    should_auto_start_mlflow_server = auto_start_enabled and cfg.app_env == "local"
+
+    if should_auto_start_mlflow_server:
+        _MLFLOW_SERVER_PROCESS = await start_mlflow_server(cfg)
+    else:
+        _MLFLOW_SERVER_PROCESS = None
+
+    initialize_mlflow(mlflow_cfg)
     await initialize_persistence(state, cfg)
     initialize_lms(state, cfg)
     emit_posthog_startup_event(cfg)
