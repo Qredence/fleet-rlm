@@ -282,7 +282,12 @@ class VolumeOpsMixin:
                     if entry.path == name:
                         return True
             except Exception:
-                pass
+                logger.warning(
+                    "Volume existence check failed for parent=%s remote_path=%s",
+                    parent,
+                    remote_path,
+                    exc_info=True,
+                )
             return False
 
         with vol.batch_upload(force=True) as batch:
