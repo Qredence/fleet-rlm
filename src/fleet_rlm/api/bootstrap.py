@@ -60,6 +60,31 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
     )
 
 
+def _terminate_process(proc: subprocess.Popen) -> None:
+    """Terminate a subprocess, escalating to kill() if needed, then reap it."""
+    try:
+        if proc.poll() is not None:
+            return
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Process (pid=%d) did not exit after terminate(); sending kill()",
+                proc.pid,
+            )
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Process (pid=%d) did not exit promptly after kill()",
+                    proc.pid,
+                )
+    except ProcessLookupError:
+        logger.debug("Process (pid=%d) already exited", proc.pid)
+
+
 async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
     """Start a local MLflow tracking server if configured and not already running."""
     mlflow_cfg = MlflowConfig.from_env()
@@ -139,40 +164,7 @@ async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | No
             port,
             max_attempts,
         )
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "MLflow server process (pid=%d) did not exit after terminate(); "
-                "sending kill()",
-                proc.pid,
-            )
-            proc.kill()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # Give up; process should be gone or will be reaped on interpreter exit.
-                logger.warning(
-                    "MLflow server process (pid=%d) did not exit promptly after kill()",
-                    proc.pid,
-                )
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "MLflow server process (pid=%d) did not exit after terminate(); "
-                "sending kill()",
-                proc.pid,
-            )
-            proc.kill()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    "MLflow server process (pid=%d) did not exit promptly after kill()",
-                    proc.pid,
-                )
+        _terminate_process(proc)
         return None
     except (ValueError, OSError):  # Catch specific exceptions
         logger.warning("Failed to start MLflow tracking server", exc_info=True)
@@ -310,15 +302,7 @@ async def shutdown_server_state(state: ServerState) -> None:
             "Stopping MLflow tracking server (pid=%d)...",
             mlflow_proc.pid,
         )
-        try:
-            if mlflow_proc.poll() is None:
-                mlflow_proc.terminate()
-                try:
-                    mlflow_proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    mlflow_proc.kill()
-        except ProcessLookupError:
-            logger.debug("MLflow tracking server process already exited")
+        _terminate_process(mlflow_proc)
 
     if state.db_manager is not None:
         await state.db_manager.dispose()
