@@ -14,7 +14,6 @@ from tests.unit.fixtures_env import clear_env
 @pytest.fixture(autouse=True)
 def _reset_mlflow_integration_state(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mlflow_integration, "_INIT_IDENTITY", None)
-    monkeypatch.setattr(mlflow_integration, "_INIT_ATTEMPTED", False)
     monkeypatch.setattr(mlflow_integration, "_LAST_INIT_WAS_AUTH_FAILURE", False)
     monkeypatch.setattr(mlflow_integration, "_ACTIVE_CONFIG", None)
     yield

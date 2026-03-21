@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 _CLIENT_LOCK = Lock()
 _TRACE_ID_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
-_INIT_ATTEMPTED = False
 _LAST_INIT_WAS_AUTH_FAILURE = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
 _TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
@@ -198,20 +197,21 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
-    global _INIT_ATTEMPTED, _LAST_INIT_WAS_AUTH_FAILURE
-    global _INIT_IDENTITY, _ACTIVE_CONFIG
+    global _LAST_INIT_WAS_AUTH_FAILURE, _INIT_IDENTITY, _ACTIVE_CONFIG
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
         # Preserve idempotency after success, and avoid hammering the same
         # tracking endpoint after an auth-forbidden failure until auth changes.
-        if _INIT_ATTEMPTED and identity == _INIT_IDENTITY:
-            # If the last attempt for this identity failed due to auth-forbidden,
-            # we should continue to report initialization as unsuccessful.
-            return not _LAST_INIT_WAS_AUTH_FAILURE
+        if identity == _INIT_IDENTITY:
+            if _LAST_INIT_WAS_AUTH_FAILURE or not resolved.enabled:
+                return False
+            mlflow = _import_mlflow()
+            if mlflow is None:
+                return False
+            return True
 
         if not resolved.enabled:
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
@@ -219,7 +219,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         mlflow = _import_mlflow()
         if mlflow is None:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return False
@@ -242,7 +241,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
                 dspy.configure(callbacks=[*callbacks, FleetMlflowTraceCallback()])
 
-            _INIT_ATTEMPTED = True
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
             return True
@@ -252,7 +250,6 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
             # Only cache auth failures to avoid hammering the endpoint with bad creds.
             # Non-auth failures (transient errors) are not cached so the next call retries.
             if is_auth_failure:
-                _INIT_ATTEMPTED = True
                 _INIT_IDENTITY = identity
             _log_mlflow_initialization_failure(
                 exc,

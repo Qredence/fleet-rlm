@@ -157,7 +157,7 @@ async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | No
                     proc.pid,
                 )
         return None
-    except (ValueError, OSError): # Catch specific exceptions
+    except (ValueError, OSError):  # Catch specific exceptions
         logger.warning("Failed to start MLflow tracking server", exc_info=True)
         return None
 
@@ -263,16 +263,18 @@ async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> 
     should_auto_start_mlflow_server = auto_start_enabled and cfg.app_env == "local"
 
     if should_auto_start_mlflow_server:
-        mlflow_proc = await start_mlflow_server(cfg)
+        state.mlflow_server_process = await start_mlflow_server(cfg)
     else:
-        mlflow_proc = None
+        state.mlflow_server_process = None
 
-    # Store the MLflow server process handle on the server state so it can be
-    # accessed during shutdown without relying on a module-level global.
     try:
-        initialize_mlflow(MlflowConfig.from_env())
+        initialize_mlflow(mlflow_cfg)
     except Exception:
         logger.warning("Failed to initialize MLflow", exc_info=True)
+
+    await initialize_persistence(state, cfg)
+    initialize_lms(state, cfg)
+    emit_posthog_startup_event(cfg)
 
 
 async def shutdown_server_state(state: ServerState) -> None:
