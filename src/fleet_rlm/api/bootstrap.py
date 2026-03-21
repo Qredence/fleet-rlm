@@ -152,6 +152,23 @@ async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | No
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
+                # Give up; process should be gone or will be reaped on interpreter exit.
+                logger.warning(
+                    "MLflow server process (pid=%d) did not exit promptly after kill()",
+                    proc.pid,
+                )
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "MLflow server process (pid=%d) did not exit after terminate(); "
+                "sending kill()",
+                proc.pid,
+            )
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
                 logger.warning(
                     "MLflow server process (pid=%d) did not exit promptly after kill()",
                     proc.pid,
