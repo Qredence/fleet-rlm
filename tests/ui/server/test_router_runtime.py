@@ -402,7 +402,7 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
     )
 
@@ -439,7 +439,7 @@ def test_runtime_volume_tree_uses_explicit_modal_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         _fake_list_volume_tree,
     )
 
@@ -490,7 +490,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_daytona_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_daytona_volume_tree",
         _fake_list_daytona_volume_tree,
     )
 
@@ -540,7 +540,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_daytona_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
         _fake_read_daytona_volume_file_text,
     )
 
@@ -586,7 +586,7 @@ def test_runtime_volume_file_uses_explicit_modal_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         _fake_read_volume_file_text,
     )
 
@@ -614,7 +614,7 @@ def test_runtime_volume_tree_defaults_to_active_provider(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         lambda volume_name, root_path, max_depth: {
             "volume_name": volume_name,
             "root_path": root_path,
@@ -639,7 +639,7 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
     )
 
@@ -657,7 +657,7 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
     )
 
@@ -678,7 +678,7 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
     )
 

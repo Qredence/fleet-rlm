@@ -1,32 +1,26 @@
 """FastAPI application factory with lifespan and Scalar docs."""
 
+from __future__ import annotations
+
 import logging
-import os
 from contextlib import asynccontextmanager
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
-from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.features.analytics import shutdown_mlflow
-from fleet_rlm.features.analytics.client import (
-    get_posthog_client,
-    shutdown_posthog_client,
-)
-from fleet_rlm.features.analytics.config import PostHogConfig
-from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
 
-from .auth import build_auth_provider
+from .bootstrap import (
+    build_server_state,
+    resolve_runtime_config,
+    shutdown_server_state,
+    startup_server_state,
+)
 from .config import ServerRuntimeConfig
-from .dependencies import ServerState
-from .execution import ExecutionEventEmitter
 from .middleware import add_middlewares
 from .routers import (
     auth,
@@ -38,18 +32,6 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
-    """Load configured .env into process env before runtime initialization.
-
-    Local app sessions prioritize `.env` values to prevent stale inherited shell
-    variables from overriding persisted runtime settings.
-    """
-    load_dotenv(
-        dotenv_path=str(cfg.env_path),
-        override=cfg.app_env == "local",
-    )
 
 
 def _resolve_ui_dist_dir() -> Path | None:
@@ -68,98 +50,6 @@ def _resolve_ui_dist_dir() -> Path | None:
         if candidate.exists():
             return candidate
     return None
-
-
-def _emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
-    """Emit a startup event when PostHog runtime analytics is configured.
-
-    This uses the shared analytics client lifecycle so runtime and LLM analytics
-    don't create duplicate PostHog clients.
-    """
-    posthog_cfg = PostHogConfig.from_env()
-    client = get_posthog_client(posthog_cfg)
-    if client is None:
-        return False
-
-    try:
-        client.capture(
-            "posthog_analytics_initialized",
-            distinct_id=(os.getenv("POSTHOG_DISTINCT_ID") or "fleet-server").strip(),
-            properties={
-                "component": "server",
-                "app_env": cfg.app_env,
-                "auth_mode": cfg.auth_mode,
-                "database_required": cfg.database_required,
-                "version": __version__,
-            },
-        )
-        return True
-    except Exception:
-        logger.warning("posthog_startup_event_failed", exc_info=True)
-        return False
-
-
-def _build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
-    """Build initialized in-memory server state container."""
-    state = ServerState(
-        config=cfg,
-        execution_event_emitter=ExecutionEventEmitter(
-            max_queue=cfg.ws_execution_max_queue,
-            drop_policy=cfg.ws_execution_drop_policy,
-        ),
-    )
-    state.runtime_test_results = {}
-    state.auth_provider = build_auth_provider(
-        auth_mode=cfg.auth_mode,
-        dev_jwt_secret=cfg.dev_jwt_secret,
-        allow_debug_auth=cfg.allow_debug_auth,
-        allow_query_auth_tokens=cfg.allow_query_auth_tokens,
-        entra_jwks_url=cfg.entra_jwks_url,
-        entra_issuer_template=cfg.entra_issuer_template,
-        entra_audience=cfg.entra_audience,
-    )
-    state.db_manager = None
-    state.repository = None
-    return state
-
-
-async def _initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -> None:
-    """Initialize Neon persistence paths based on runtime config."""
-    if cfg.database_url:
-        db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
-        if cfg.db_validate_on_startup or cfg.database_required:
-            await db_manager.ping()
-        state.db_manager = db_manager
-        state.repository = FleetRepository(db_manager)
-        return
-
-    if cfg.database_required:
-        raise RuntimeError("DATABASE_URL is required when database_required=true")
-
-    logger.warning(
-        "runtime_persistence_disabled",
-        extra={
-            "database_required": cfg.database_required,
-            "app_env": cfg.app_env,
-        },
-    )
-
-
-def _initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
-    """Load planner/delegate LMs into process state."""
-    model_name = cfg.agent_model
-    if model_name is None:
-        state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
-    else:
-        state.planner_lm = get_planner_lm_from_env(
-            env_file=cfg.env_path,
-            model_name=model_name,
-        )
-    state.delegate_lm = get_delegate_lm_from_env(
-        env_file=cfg.env_path,
-        model_name=cfg.agent_delegate_model,
-        default_max_tokens=cfg.agent_delegate_max_tokens,
-    )
 
 
 def _register_api_routes(app: FastAPI) -> None:
@@ -199,40 +89,17 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
-    if config is None:
-        env_path = resolve_env_path(
-            start_paths=[
-                Path(__file__).resolve().parent,
-                Path.cwd(),
-            ]
-        )
-        app_env = (os.getenv("APP_ENV") or "local").strip().lower()
-        load_dotenv(dotenv_path=str(env_path), override=app_env == "local")
-        cfg = ServerRuntimeConfig(env_path=env_path)
-    else:
-        cfg = config
+    cfg = resolve_runtime_config(config)
 
     cfg.validate_startup_or_raise()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        state = _build_server_state(cfg)
+        state = build_server_state(cfg)
         app.state.server_state = state
-
-        _prime_runtime_env(cfg)
-        await _initialize_persistence(state, cfg)
-        _initialize_lms(state, cfg)
-
-        _emit_posthog_startup_event(cfg)
+        await startup_server_state(state, cfg)
         yield
-        state.planner_lm = None
-        state.delegate_lm = None
-        shutdown_mlflow()
-        shutdown_posthog_client()
-        if state.db_manager is not None:
-            await state.db_manager.dispose()
-        state.db_manager = None
-        state.repository = None
+        await shutdown_server_state(state)
 
     app = FastAPI(
         title="fleet-rlm",

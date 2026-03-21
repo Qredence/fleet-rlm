@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.features.analytics import (
+from fleet_rlm.features.analytics.mlflow_runtime import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,

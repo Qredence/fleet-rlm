@@ -17,6 +17,14 @@ from ..schemas.core import (
     VolumeTreeResponse,
 )
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
+from fleet_rlm.core.tools.modal_volumes import (
+    list_volume_tree,
+    read_volume_file_text,
+)
+from fleet_rlm.infrastructure.providers.daytona.volumes import (
+    list_daytona_volume_tree,
+    read_daytona_volume_file_text,
+)
 
 
 def resolve_daytona_volume_name(
@@ -81,8 +89,6 @@ async def load_volume_tree(
             identity=identity,
             state=state,
         )
-        from fleet_rlm.core.tools.volume_ops import list_daytona_volume_tree
-
         try:
             result = await run_blocking(
                 list_daytona_volume_tree,
@@ -102,9 +108,6 @@ async def load_volume_tree(
             ) from exc
 
         return VolumeTreeResponse(provider=effective_provider, **result)
-
-    from fleet_rlm.core.tools.volume_ops import list_volume_tree
-
     try:
         result = await run_blocking(
             list_volume_tree,
@@ -142,8 +145,6 @@ async def load_volume_file_content(
             identity=identity,
             state=state,
         )
-        from fleet_rlm.core.tools.volume_ops import read_daytona_volume_file_text
-
         try:
             result = await run_blocking(
                 read_daytona_volume_file_text,
@@ -161,9 +162,6 @@ async def load_volume_file_content(
             raise_volume_file_error(exc)
 
         return VolumeFileContentResponse(provider=effective_provider, **result)
-
-    from fleet_rlm.core.tools.volume_ops import read_volume_file_text
-
     try:
         result = await run_blocking(
             read_volume_file_text,

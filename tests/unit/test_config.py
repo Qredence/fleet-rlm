@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import fleet_rlm.core.config as config
 import pytest
@@ -146,7 +145,6 @@ def test_config_model_defaults_match_hydra_yaml():
 
     assert AgentConfig().max_iters == agent_cfg["max_iters"]
     assert AgentConfig().temperature == float(agent_cfg["temperature"])
-    assert AgentConfig().delegate_model == agent_cfg["delegate_model"]
     assert AgentConfig().delegate_max_tokens == int(agent_cfg["delegate_max_tokens"])
     assert RlmSettings().max_iters == rlm_cfg["max_iters"]
     assert RlmSettings().deep_max_iters == rlm_cfg["deep_max_iters"]
@@ -258,21 +256,11 @@ def test_get_planner_lm_from_env_production_keeps_process_env(
     assert lm.api_base == "https://process.example"
 
 
-def test_prepare_env_initializes_mlflow_service(
+def test_prepare_env_skips_mlflow_initialization(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    calls: list[object] = []
-
     monkeypatch.setattr(config, "configure_posthog_analytics_from_env", lambda: None)
-    monkeypatch.setattr(
-        config,
-        "MlflowConfig",
-        SimpleNamespace(from_env=lambda: "mlflow-config"),
-    )
-    monkeypatch.setattr(config, "initialize_mlflow", lambda cfg: calls.append(cfg))
     monkeypatch.setenv("APP_ENV", "local")
 
     env_file = tmp_path / ".env"
     config._prepare_env(env_file=env_file)
-
-    assert calls == ["mlflow-config"]

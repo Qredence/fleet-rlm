@@ -8,7 +8,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-
 # Module-level session history storage
 _session_history: list[dict[str, Any]] = []
 

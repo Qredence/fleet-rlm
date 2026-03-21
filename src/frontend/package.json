@@ -24,7 +24,7 @@
     "test:coverage": "vp test run --coverage",
     "api:sync-spec": "mkdir -p openapi && OPENAPI_SPEC_PATH=\"${OPENAPI_SPEC_PATH:-../../openapi.yaml}\" && cp \"$OPENAPI_SPEC_PATH\" openapi/fleet-rlm.openapi.yaml",
     "api:types": "openapi-typescript openapi/fleet-rlm.openapi.yaml -o src/lib/rlm-api/generated/openapi.ts",
-    "api:sync": "pnpm run api:sync-spec && pnpm run api:types",
+    "api:sync": "pnpm run api:sync-spec && pnpm run api:types && pnpm exec vp check --fix openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
     "api:check": "pnpm run api:sync && git diff --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts && git diff --cached --exit-code -- openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
     "check": "pnpm run type-check && pnpm run lint && pnpm run test:unit && pnpm run build && pnpm run test:e2e"
   },
@@ -128,6 +128,7 @@
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
     "overrides": {
+      "flatted": "3.4.2",
       "undici": "6.24.0"
     }
   },

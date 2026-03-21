@@ -105,7 +105,7 @@ Use this alongside:
 - `tools/`
   - `document.py`, `filesystem.py`, `sandbox.py`, `delegate.py`,
     `memory_intelligence.py`, `chunking.py`, `llm_tools.py`,
-    `volume_ops.py`, `volume_tools.py`
+    `modal_volumes.py`, `volume_ops.py`, `volume_tools.py`
 - `models/`
   - `streaming.py`, `rlm_runtime_modules.py`
 
@@ -161,7 +161,7 @@ Use this alongside:
 - `mcp/`
   - `server.py`: FastMCP server surface
 - `providers/daytona/`
-  - `chat_agent.py`, `interpreter.py`, `sandbox.py`, `config.py`, `protocol.py`
+  - `agent.py`, `state.py`, `interpreter.py`, `sandbox/`, `volumes.py`, `config.py`, `smoke.py`
 - `providers/modal/`
   - Modal provider helpers
 
@@ -180,7 +180,7 @@ Use this alongside:
 **Key subpackages**
 
 - `analytics/`
-  - PostHog lifecycle, MLflow tracing, trace context, sanitization
+  - PostHog lifecycle, MLflow runtime/bootstrap, trace lookup/export, trace context
 - `chunking/`
   - header, size, timestamp, and JSON-key chunking helpers
 - `document_ingestion/`
@@ -188,7 +188,7 @@ Use this alongside:
 - `logs/`
   - execution-limit and logging helpers
 - `terminal/`
-  - standalone terminal chat UI, slash-command plumbing, local settings
+  - standalone terminal chat UI, slash-command plumbing, local settings, and split session helpers
 - `scaffold/`
   - packaged skills, agents, hooks, and team config
 
@@ -203,6 +203,7 @@ Use this alongside:
 
 - `main.py`: `fleet` command
 - `fleet_cli.py`: `fleet-rlm` Typer command surface
+- `runtime_builders.py`: shared server and MCP runtime config assembly
 - `runners.py`: shared runner assembly
 - `commands/init_cmd.py`, `commands/serve_cmds.py`: extracted command
   registration

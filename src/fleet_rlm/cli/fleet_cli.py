@@ -33,15 +33,8 @@ from .commands.serve_cmds import register_serve_commands
 # We use a global variable to store the hydra config so Typer commands can access it
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
 _CONFIG: AppConfig | None = None
-DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
 app = typer.Typer(help="Run fleet-rlm demos and experimental runtimes.")
-
-
-def _resolve_server_volume_name(config: AppConfig) -> str | None:
-    """Resolve the volume name from config, falling back to default."""
-    volume_name = config.interpreter.volume_name
-    return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
 def _print_result(result: dict[str, Any], *, verbose: bool) -> None:

@@ -154,7 +154,8 @@ tool surfaces, and shared models.
 | `llm_tools.py` | LLM query helpers. |
 | `chunking.py` | Chunking tool entrypoints. |
 | `memory_intelligence.py` | Memory tree/audit/migration helpers. |
-| `volume_ops.py` | Host-side volume operations. |
+| `modal_volumes.py` | Canonical host-side Modal volume operations. |
+| `volume_ops.py` | Compatibility shim for volume helper imports. |
 | `volume_tools.py` | Volume traversal/manipulation helpers. |
 | `output_utils.py` | Output normalization utilities. |
 

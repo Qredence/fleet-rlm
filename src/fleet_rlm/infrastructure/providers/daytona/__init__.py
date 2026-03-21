@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "DaytonaWorkbenchChatAgent": (".chat_agent", "DaytonaWorkbenchChatAgent"),
+    "DaytonaWorkbenchChatAgent": (".agent", "DaytonaWorkbenchChatAgent"),
     "DaytonaConfigError": (".config", "DaytonaConfigError"),
     "ResolvedDaytonaConfig": (".config", "ResolvedDaytonaConfig"),
     "resolve_daytona_config": (".config", "resolve_daytona_config"),

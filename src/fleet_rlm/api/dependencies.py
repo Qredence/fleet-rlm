@@ -36,6 +36,7 @@ class ServerState:
         self.db_manager: DatabaseManager | None = None
         self.repository: FleetRepository | None = None
         self.auth_provider: AuthProvider | None = None
+        self.mlflow_server_process: Any | None = None
 
     @property
     def is_ready(self) -> bool:

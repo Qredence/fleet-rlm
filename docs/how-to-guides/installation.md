@@ -150,7 +150,7 @@ The `.env.example` file contains all configurable environment variables. Key cat
 | Variable              | Description                | Default                 |
 | --------------------- | -------------------------- | ----------------------- |
 | `MLFLOW_ENABLED`      | Enable MLflow tracing      | `true`                  |
-| `MLFLOW_TRACKING_URI` | MLflow server URL          | `http://127.0.0.1:5000` |
+| `MLFLOW_TRACKING_URI` | MLflow server URL          | `http://127.0.0.1:5001` |
 | `MLFLOW_EXPERIMENT`   | Experiment name for traces | `fleet-rlm`             |
 
 ### Optional: Analytics

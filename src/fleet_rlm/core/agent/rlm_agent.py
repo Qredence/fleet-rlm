@@ -4,23 +4,15 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import dspy
 from dspy.streaming.streaming_listener import StreamListener
 
-from fleet_rlm.core.execution.profiles import ExecutionProfile
 from fleet_rlm.core.execution.interpreter import ModalInterpreter
-from fleet_rlm.core.models.streaming import StreamEvent
-
-from .delegation_policy import (
-    build_child_interpreter,
-    claim_delegate_slot_or_error,
-    normalize_delegate_result,
-    record_delegate_fallback,
-    remaining_llm_budget,
-)
+from fleet_rlm.core.execution.profiles import ExecutionProfile
 
 # NOTE: fleet_rlm.core.models.rlm_runtime_modules is imported lazily inside
 # spawn_delegate_sub_agent_async to avoid the circular import:
@@ -32,6 +24,15 @@ from fleet_rlm.core.execution.streaming import (
 )
 from fleet_rlm.core.execution.streaming_citations import _normalize_trajectory
 from fleet_rlm.core.execution.streaming_context import StreamingContext
+from fleet_rlm.core.models.streaming import StreamEvent
+
+from .delegation_policy import (
+    build_child_interpreter,
+    claim_delegate_slot_or_error,
+    normalize_delegate_result,
+    record_delegate_fallback,
+    remaining_llm_budget,
+)
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent

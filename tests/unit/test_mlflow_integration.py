@@ -14,9 +14,7 @@ from tests.unit.fixtures_env import clear_env
 @pytest.fixture(autouse=True)
 def _reset_mlflow_integration_state(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mlflow_integration, "_INIT_IDENTITY", None)
-    monkeypatch.setattr(mlflow_integration, "_INIT_ATTEMPTED", False)
     monkeypatch.setattr(mlflow_integration, "_LAST_INIT_WAS_AUTH_FAILURE", False)
-    monkeypatch.setattr(mlflow_integration, "_INITIALIZED", False)
     monkeypatch.setattr(mlflow_integration, "_ACTIVE_CONFIG", None)
     yield
 
@@ -341,7 +339,8 @@ def test_resolve_trace_by_client_request_id_uses_server_filter(
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
     monkeypatch.setattr(
-        mlflow_integration, "_trace_experiment_ids", lambda config=None: ["exp-1"]
+        "fleet_rlm.features.analytics.mlflow_traces._trace_experiment_ids",
+        lambda config=None: ["exp-1"],
     )
 
     resolved = mlflow_integration.resolve_trace_by_client_request_id("req-123")

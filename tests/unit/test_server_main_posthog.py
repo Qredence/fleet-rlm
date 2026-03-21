@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fleet_rlm.api.config import ServerRuntimeConfig
-from fleet_rlm.api import main as server_main
+from fleet_rlm.api import bootstrap as server_bootstrap
 
 
 class _CaptureClient:
@@ -19,9 +19,9 @@ class _CaptureClient:
 
 
 def test_emit_posthog_startup_event_returns_false_without_client(monkeypatch):
-    monkeypatch.setattr(server_main, "get_posthog_client", lambda _: None)
+    monkeypatch.setattr(server_bootstrap, "get_posthog_client", lambda _: None)
 
-    emitted = server_main._emit_posthog_startup_event(
+    emitted = server_bootstrap.emit_posthog_startup_event(
         ServerRuntimeConfig(database_required=False)
     )
 
@@ -31,9 +31,9 @@ def test_emit_posthog_startup_event_returns_false_without_client(monkeypatch):
 def test_emit_posthog_startup_event_captures_event(monkeypatch):
     client = _CaptureClient()
     monkeypatch.setenv("POSTHOG_DISTINCT_ID", "runtime-user")
-    monkeypatch.setattr(server_main, "get_posthog_client", lambda _: client)
+    monkeypatch.setattr(server_bootstrap, "get_posthog_client", lambda _: client)
 
-    emitted = server_main._emit_posthog_startup_event(
+    emitted = server_bootstrap.emit_posthog_startup_event(
         ServerRuntimeConfig(
             app_env="staging",
             auth_mode="dev",
@@ -56,9 +56,11 @@ def test_emit_posthog_startup_event_handles_capture_error(monkeypatch):
         def capture(self, *_args, **_kwargs) -> None:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(server_main, "get_posthog_client", lambda _: _FailingClient())
+    monkeypatch.setattr(
+        server_bootstrap, "get_posthog_client", lambda _: _FailingClient()
+    )
 
-    emitted = server_main._emit_posthog_startup_event(
+    emitted = server_bootstrap.emit_posthog_startup_event(
         ServerRuntimeConfig(database_required=False)
     )
 

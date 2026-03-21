@@ -57,7 +57,7 @@ graph TB
         INTERPRETER["ModalInterpreter<br/>(interpreter.py)"]
         DRIVER["Sandbox Driver<br/>(core_driver.py)"]
         LLM_TOOLS["LLM Tools<br/>(llm_tools.py)"]
-        VOLUME_OPS["Volume Operations<br/>(volume_ops.py)"]
+        VOLUME_OPS["Volume Operations<br/>(modal_volumes.py)"]
         SANDBOX_TOOLS["Sandbox Tools<br/>(sandbox_tools.py)"]
     end
 
@@ -199,7 +199,8 @@ The execution layer handles remote code execution in Modal:
 | `driver_factories.py` | Factory functions for driver configuration           |
 | `llm_tools.py`        | LLM-backed tools for the sandbox                     |
 | `sandbox_tools.py`    | Helper tools for sandbox operations                  |
-| `volume_ops.py`       | Modal volume operations for persistence              |
+| `modal_volumes.py`    | Canonical Modal volume persistence and browsing helpers |
+| `volume_ops.py`       | Compatibility shim for volume helper imports         |
 | `volume_tools.py`     | Tools for volume management                          |
 
 ### 4a. Experimental Daytona Pilot (`infrastructure/providers/daytona/`)
@@ -210,10 +211,17 @@ The Daytona pilot is an experimental interpreter backend for the shared runtime 
 | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `types.py`            | Rollout budget, execution observations, agent tree nodes, final artifact types                                      |
 | `config.py`           | Explicit native Daytona env resolution and preflight validation                                                     |
-| `sandbox.py`          | Daytona SDK client bootstrap, stateful workspace sessions, local context staging, and persistent driver execution   |
+| `sandbox/__init__.py` | Compatibility facade that preserves the canonical Daytona sandbox import surface                                      |
+| `sandbox/runtime.py`  | Daytona SDK client bootstrap, workspace bootstrap, repo clone orchestration, and local context staging               |
+| `sandbox/session.py`  | Stateful workspace sessions, persistent driver execution, framed callbacks, prompt helpers, and log handling         |
+| `sandbox/sdk.py`      | Shared Daytona SDK import/compat helpers and async-to-sync wrappers                                                  |
+| `sandbox/protocol.py` | Framed callback/event transport types                                                                                 |
+| `sandbox/driver.py`   | Sandbox-side Python REPL driver source                                                                                |
 | `smoke.py`            | CLI-first Daytona smoke workflow with phase-aware live diagnostics for sandbox clone + persistent driver validation |
 | `interpreter.py`      | Daytona interpreter backend compatible with the shared ReAct + `dspy.RLM` flow                                      |
-| `chat_agent.py`       | Thin Daytona compatibility wrapper over the shared ReAct agent                                                      |
+| `agent.py`            | Thin Daytona compatibility wrapper over the shared ReAct agent                                                      |
+| `state.py`            | Daytona chat/session normalization helpers                                                                           |
+| `volumes.py`          | Daytona volume browsing helpers                                                                                      |
 
 Important scope notes:
 
@@ -231,7 +239,7 @@ The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a wo
 
 | Module                                                              | Purpose                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `infrastructure/providers/daytona/chat_agent.py`                    | `DaytonaWorkbenchChatAgent` - thin Daytona compatibility wrapper over the shared ReAct agent                                                                                                                                    |
+| `infrastructure/providers/daytona/agent.py`                         | `DaytonaWorkbenchChatAgent` - thin Daytona compatibility wrapper over the shared ReAct agent                                                                                                                                    |
 | `api/schemas/core.py`                                               | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; request-side `max_depth` is explicitly rejected for Daytona chat |
 | `api/routers/ws/api.py` / `api/routers/ws/chat_runtime.py`          | Select the top-level websocket chat agent from the first message so Daytona sessions do not require Modal startup                                                                                                               |
 | `api/routers/ws/chat_connection.py` / `api/routers/ws/streaming.py` | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch                                                                                                          |
@@ -315,7 +323,8 @@ The service layer provides HTTP and WebSocket APIs:
 | `infrastructure/database/engine.py`        | Async database engine with connection pooling           |
 | `infrastructure/database/models.py`        | SQLModel definitions for runs, steps, artifacts, memory |
 | `infrastructure/database/repository.py`    | Repository pattern for database operations              |
-| `features/analytics/mlflow_integration.py` | MLflow tracing for DSPy optimization                    |
+| `features/analytics/mlflow_runtime.py`     | MLflow lifecycle, callbacks, and request-context wiring |
+| `features/analytics/mlflow_traces.py`      | MLflow trace lookup, feedback logging, and dataset export |
 | `features/analytics/posthog_callback.py`   | PostHog telemetry callback                              |
 
 ## Data Flow Diagrams
@@ -457,7 +466,7 @@ sequenceDiagram
     autonumber
     participant Tool as Tool<br/>(core/tools/)
     participant Interp as ModalInterpreter<br/>(interpreter.py)
-    participant VolOps as VolumeOpsMixin<br/>(volume_ops.py)
+    participant VolOps as VolumeOpsMixin<br/>(modal_volumes.py)
     participant Driver as sandbox_driver<br/>(driver.py)
     participant Sandbox as Modal.Sandbox
     participant Volume as Modal.Volume
@@ -546,7 +555,7 @@ The driver communicates via JSON over stdin/stdout:
 | ------------------------ | ------------------------------- | ---------------------------------------------------------------- |
 | `ModalInterpreter`       | `core/execution/interpreter.py` | Main interpreter class, manages sandbox lifecycle                |
 | `sandbox_driver`         | `core/execution/core_driver.py` | Long-lived JSON protocol driver inside sandbox                   |
-| `VolumeOpsMixin`         | `core/volume_ops.py`            | Volume persistence operations (upload, commit, reload)           |
+| `VolumeOpsMixin`         | `core/tools/modal_volumes.py`   | Volume persistence operations (upload, commit, reload)           |
 | `ExecutionProfile`       | `core/execution/profiles.py`    | Enum controlling sandbox helper/tool exposure                    |
 | `inject_sandbox_helpers` | `core/driver_factories.py`      | Inject `SUBMIT`, `Final`, `llm_query`, etc. into sandbox globals |
 

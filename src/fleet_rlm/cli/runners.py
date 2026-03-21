@@ -31,7 +31,7 @@ from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.core.agent.signatures import AnalyzeLongDocument, SummarizeLongDocument
 from fleet_rlm.core.config import configure_planner_from_env
 from fleet_rlm.core.execution.interpreter import ModalInterpreter
-from fleet_rlm.features.analytics import (
+from fleet_rlm.features.analytics.mlflow_runtime import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,
@@ -297,7 +297,7 @@ def build_daytona_workbench_chat_agent(
     delegate_lm: Any | None = None,
 ) -> Any:
     """Build the Daytona chat runtime on the shared ReAct + RLM backbone."""
-    from fleet_rlm.infrastructure.providers.daytona.chat_agent import (
+    from fleet_rlm.infrastructure.providers.daytona.agent import (
         DaytonaWorkbenchChatAgent,
     )
 
