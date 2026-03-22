@@ -454,11 +454,15 @@ function isExecutionCompletedPayload(payload?: Record<string, unknown>): boolean
   return asText(payload?.source_type ?? payload?.sourceType) === "execution_completed";
 }
 
-function getCanonicalRunSummary(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
+function getCanonicalRunSummary(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   return asRecord(payload?.run_summary ?? payload?.runSummary);
 }
 
-function getCompatRunResult(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
+function getCompatRunResult(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   return asRecord(payload?.run_result ?? payload?.runResult);
 }
 
@@ -719,9 +723,7 @@ export function applyFrameToRunWorkbenchState(
   const isTerminalCompatFrame =
     !isCanonicalCompletion &&
     frame.type === "event" &&
-    (frame.data.kind === "final" ||
-      frame.data.kind === "cancelled" ||
-      frame.data.kind === "error");
+    (frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error");
 
   const payloadPrompts = !isTerminalCompatFrame
     ? dedupePromptHandles([

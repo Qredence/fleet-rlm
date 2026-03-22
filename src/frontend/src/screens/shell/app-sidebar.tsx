@@ -161,9 +161,9 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
             "text-muted-foreground",
           )}
         >
-            <Plus className="min-w-5 size-5" strokeWidth={1.5} />
-            <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-              New Session
+          <Plus className="min-w-5 size-5" strokeWidth={1.5} />
+          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
+            New Session
           </span>
         </Button>
         <Button

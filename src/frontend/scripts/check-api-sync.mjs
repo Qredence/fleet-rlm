@@ -1,10 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
-const GENERATED_FILES = [
-  "openapi/fleet-rlm.openapi.yaml",
-  "src/lib/rlm-api/generated/openapi.ts",
-];
+const GENERATED_FILES = ["openapi/fleet-rlm.openapi.yaml", "src/lib/rlm-api/generated/openapi.ts"];
 
 async function readSnapshot(path) {
   try {
@@ -19,9 +16,7 @@ async function readSnapshot(path) {
 
 async function main() {
   const before = new Map(
-    await Promise.all(
-      GENERATED_FILES.map(async (path) => [path, await readSnapshot(path)]),
-    ),
+    await Promise.all(GENERATED_FILES.map(async (path) => [path, await readSnapshot(path)])),
   );
 
   const result = spawnSync("pnpm", ["run", "api:sync"], {
