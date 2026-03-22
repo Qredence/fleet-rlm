@@ -23,7 +23,7 @@ function makeEvent(kind: string, text: string, payload?: Record<string, unknown>
 }
 
 describe("runWorkbenchAdapter", () => {
-  it("hydrates a rich final run_result into analyst-oriented sections", () => {
+  it("uses chat final run_result only as a narrow summary and final artifact backfill", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze the diligence corpus",
       repoUrl: "https://github.com/qredence/fleet-rlm.git",
@@ -143,13 +143,23 @@ describe("runWorkbenchAdapter", () => {
     expect(next.runId).toBe("run-123");
     expect(next.daytonaMode).toBe("host_loop_rlm");
     expect(next.contextSources[0]?.hostPath).toBe("/Users/zocho/Documents/spec.pdf");
-    expect(next.iterations).toHaveLength(1);
-    expect(next.iterations[0]?.reasoningSummary).toContain("grounded");
-    expect(next.callbacks[0]?.source?.path).toBe("src/fleet_rlm/analytics/scorers.py");
-    expect(next.promptHandles[0]?.handleId).toBe("prompt-1");
-    expect(next.sources[0]?.displayUrl).toBe("/Users/zocho/Documents/spec.pdf");
-    expect(next.attachments[0]?.name).toBe("spec.pdf");
+    expect(next.iterations).toEqual([]);
+    expect(next.callbacks).toEqual([]);
+    expect(next.promptHandles).toEqual([]);
+    expect(next.sources).toEqual([]);
+    expect(next.attachments).toEqual([]);
     expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
+    expect(next.summary).toMatchObject({
+      durationMs: 1234,
+      sandboxesUsed: 1,
+      terminationReason: "completed",
+    });
+    expect(next.compatBackfillCount).toBe(1);
+    expect(next.lastCompatBackfill).toMatchObject({
+      runtimeMode: "daytona_pilot",
+      usedSummary: true,
+      usedFinalArtifact: true,
+    });
   });
 
   it("hydrates execution_completed run_summary payloads without relying on chat final run_result", () => {
@@ -199,6 +209,204 @@ describe("runWorkbenchAdapter", () => {
     });
     expect(next.summary?.warnings).toEqual(["One warning"]);
     expect(next.attachments[0]?.name).toBe("result.md");
+  });
+
+  it("hydrates a rich modal execution_completed summary without relying on chat final run_result", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Summarize the runtime",
+    });
+
+    const next = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("final", "Modal summary complete", {
+        source_type: "execution_completed",
+        run_summary: {
+          run_id: "run-modal-1",
+          runtime_mode: "modal_chat",
+          task: "Summarize the runtime",
+          status: "completed",
+          context_sources: [
+            {
+              source_id: "ctx-modal-1",
+              kind: "file",
+              host_path: "/workspace/runtime.md",
+              staged_path: "/workspace/context/runtime.md",
+            },
+          ],
+          prompts: [
+            {
+              handle_id: "prompt-modal-1",
+              label: "Planner prompt",
+              preview: "Summarize the runtime shape",
+            },
+          ],
+          iterations: [
+            {
+              iteration: 1,
+              status: "completed",
+              reasoning_summary: "Planner synthesized a modal summary.",
+              callback_count: 1,
+              finalized: true,
+            },
+          ],
+          callbacks: [
+            {
+              id: "callback-modal-1",
+              callback_name: "llm_query",
+              iteration: 1,
+              status: "completed",
+              task: "Summarize the runtime",
+              result_preview: "Runtime summarized.",
+            },
+          ],
+          sources: [
+            {
+              source_id: "src-modal-1",
+              kind: "file",
+              title: "runtime.md",
+              display_url: "/workspace/runtime.md",
+            },
+          ],
+          attachments: [
+            {
+              attachment_id: "attachment-modal-1",
+              name: "runtime.md",
+            },
+          ],
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              summary: "Modal execution summary",
+              final_markdown: "## Modal\nSummary",
+            },
+          },
+          summary: {
+            termination_reason: "final",
+            warnings: ["Modal warning"],
+            duration_ms: 321,
+          },
+          warnings: ["Modal warning"],
+        },
+      }),
+    );
+
+    expect(next.status).toBe("completed");
+    expect(next.runId).toBe("run-modal-1");
+    expect(next.contextSources[0]?.hostPath).toBe("/workspace/runtime.md");
+    expect(next.promptHandles[0]?.handleId).toBe("prompt-modal-1");
+    expect(next.iterations[0]?.reasoningSummary).toContain("modal");
+    expect(next.callbacks[0]?.callbackName).toBe("llm_query");
+    expect(next.sources[0]?.sourceId).toBe("src-modal-1");
+    expect(next.attachments[0]?.name).toBe("runtime.md");
+    expect(next.finalArtifact?.value).toMatchObject({
+      summary: "Modal execution summary",
+    });
+    expect(next.summary).toMatchObject({
+      terminationReason: "final",
+      durationMs: 321,
+      warnings: ["Modal warning"],
+    });
+  });
+
+  it("hydrates a rich Daytona execution_completed summary without relying on chat final run_result", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze the repo",
+      contextPaths: ["/workspace/docs/overview.md"],
+    });
+
+    const next = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("final", "Daytona summary complete", {
+        source_type: "execution_completed",
+        runtime_mode: "daytona_pilot",
+        daytona_mode: "host_loop_rlm",
+        run_summary: {
+          run_id: "run-daytona-1",
+          runtime_mode: "daytona_pilot",
+          task: "Analyze the repo",
+          status: "completed",
+          context_sources: [
+            {
+              source_id: "ctx-daytona-1",
+              kind: "file",
+              host_path: "/workspace/docs/overview.md",
+              staged_path: "/workspace/context/overview.md",
+            },
+          ],
+          prompts: [
+            {
+              handle_id: "prompt-daytona-1",
+              kind: "task",
+              label: "Root task",
+              preview: "Inspect the repo",
+            },
+          ],
+          iterations: [
+            {
+              iteration: 1,
+              status: "completed",
+              reasoning_summary: "Daytona completed repo analysis.",
+              callback_count: 2,
+              finalized: true,
+            },
+          ],
+          callbacks: [
+            {
+              id: "callback-daytona-1",
+              callback_name: "llm_query_batched",
+              iteration: 1,
+              status: "completed",
+              task: "Inspect sources",
+              result_preview: "Inspected repo sources.",
+            },
+          ],
+          sources: [
+            {
+              source_id: "src-daytona-1",
+              kind: "file",
+              title: "overview.md",
+              display_url: "/workspace/docs/overview.md",
+            },
+          ],
+          attachments: [
+            {
+              attachment_id: "attachment-daytona-1",
+              name: "overview.md",
+            },
+          ],
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              summary: "Daytona execution summary",
+              final_markdown: "## Daytona\nSummary",
+            },
+            finalization_mode: "SUBMIT",
+          },
+          summary: {
+            termination_reason: "completed",
+            warnings: ["Daytona warning"],
+            duration_ms: 654,
+          },
+          warnings: ["Daytona warning"],
+        },
+      }),
+    );
+
+    expect(next.status).toBe("completed");
+    expect(next.runId).toBe("run-daytona-1");
+    expect(next.daytonaMode).toBe("host_loop_rlm");
+    expect(next.contextSources[0]?.hostPath).toBe("/workspace/docs/overview.md");
+    expect(next.promptHandles[0]?.handleId).toBe("prompt-daytona-1");
+    expect(next.iterations[0]?.reasoningSummary).toContain("Daytona");
+    expect(next.callbacks[0]?.callbackName).toBe("llm_query_batched");
+    expect(next.sources[0]?.sourceId).toBe("src-daytona-1");
+    expect(next.attachments[0]?.name).toBe("overview.md");
+    expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
+    expect(next.summary).toMatchObject({
+      terminationReason: "completed",
+      durationMs: 654,
+      warnings: ["Daytona warning"],
+    });
   });
 
   it("tracks incremental iteration and callback activity before final hydration", () => {
@@ -375,8 +583,9 @@ describe("runWorkbenchAdapter", () => {
     const next = applyFrameToRunWorkbenchState(
       started,
       makeEvent("final", "Done", {
+        source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
-        run_result: {
+        run_summary: {
           run_id: "run-456",
           repo: "https://github.com/qredence/fleet-rlm.git",
           task: "Analyze the repo",
@@ -421,12 +630,13 @@ describe("runWorkbenchAdapter", () => {
         task: "Analyze the repo",
       }),
       makeEvent("final", "Done", {
+        source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
         runtime: {
           runtime_mode: "daytona_pilot",
           run_id: "run-789",
         },
-        run_result: {
+        run_summary: {
           run_id: "run-789",
           repo: "https://github.com/qredence/fleet-rlm.git",
           task: "Analyze the repo",

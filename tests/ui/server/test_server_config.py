@@ -158,7 +158,7 @@ def test_server_state_init() -> None:
     state = ServerState()
     assert state.planner_lm is None
     assert state.config is not None
-    assert state.is_ready is False
+    assert state.is_ready is True
     assert state.sessions == {}
     assert state.repository is None
     assert state.auth_provider is None

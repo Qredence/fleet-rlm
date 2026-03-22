@@ -25,9 +25,7 @@ async def ready(state: ServerStateDep) -> ReadyResponse:
     else:
         database_status = "disabled"
 
-    overall_ready = planner_ready and (
-        database_status == "ready" or not cfg.database_required
-    )
+    overall_ready = database_status == "ready" or not cfg.database_required
 
     return ReadyResponse(
         ready=overall_ready,

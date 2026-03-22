@@ -1,22 +1,20 @@
-"""WebSocket command dispatch handler."""
+"""WebSocket command dispatch helpers."""
 
+from collections.abc import Awaitable, Callable
 import logging
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from fastapi import WebSocket
 
-from fleet_rlm import runners
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-from fleet_rlm.infrastructure.database import FleetRepository
-from fleet_rlm.infrastructure.database.models import ArtifactKind
-from fleet_rlm.infrastructure.database.types import (
-    ArtifactCreateRequest,
-    IdentityUpsertResult,
-)
+from fleet_rlm.integrations.database import FleetRepository
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
-from .helpers import _now_iso, _sanitize_for_log
-from .lifecycle import PersistenceRequiredError
+from .artifacts import track_command_artifact_if_needed
+from .helpers import _sanitize_for_log
+from .hitl import handle_resolve_hitl
+from .types import ChatAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -42,71 +40,6 @@ def _extract_command_and_args(
     raw_args = payload.get("args", {})
     args = raw_args if isinstance(raw_args, dict) else None
     return command, args
-
-
-def _is_artifact_tracking_command(command: str) -> bool:
-    return command in {"save_buffer", "load_volume", "write_to_file"}
-
-
-def _append_session_artifact(
-    *,
-    session_record: dict[str, Any],
-    command: str,
-    args: dict[str, Any],
-    result: dict[str, Any],
-) -> str:
-    manifest = session_record.get("manifest")
-    if not isinstance(manifest, dict):
-        manifest = {}
-        session_record["manifest"] = manifest
-
-    artifacts = manifest.get("artifacts")
-    if not isinstance(artifacts, list):
-        artifacts = []
-        manifest["artifacts"] = artifacts
-
-    artifact_uri = str(
-        result.get("saved_path") or args.get("path") or result.get("alias") or ""
-    )
-    artifacts.append(
-        {
-            "timestamp": _now_iso(),
-            "command": command,
-            "path": artifact_uri or None,
-        }
-    )
-    return artifact_uri
-
-
-async def _persist_artifact_metadata(
-    *,
-    repository: FleetRepository,
-    identity_rows: IdentityUpsertResult,
-    session_record: dict[str, Any],
-    command: str,
-    args: dict[str, Any],
-    artifact_uri: str,
-) -> None:
-    run_id_raw = session_record.get("last_run_db_id")
-    if not run_id_raw:
-        return
-
-    run_id = uuid.UUID(str(run_id_raw))
-    step_id = session_record.get("last_step_db_id")
-    step_uuid = uuid.UUID(str(step_id)) if step_id else None
-    await repository.store_artifact(
-        ArtifactCreateRequest(
-            tenant_id=identity_rows.tenant_id,
-            run_id=run_id,
-            step_id=step_uuid,
-            kind=ArtifactKind.FILE,
-            uri=artifact_uri or "memory://unknown",
-            metadata_json={
-                "command": command,
-                "args": args,
-            },
-        )
-    )
 
 
 def _normalize_command_result(result: Any) -> dict[str, Any]:
@@ -138,63 +71,9 @@ async def _send_command_args_error(
     )
 
 
-async def _try_handle_resolve_hitl(
-    *,
-    websocket: WebSocket,
-    command: str,
-    args: dict[str, Any],
-) -> bool:
-    if command != "resolve_hitl":
-        return False
-
-    message_id = str(args.get("message_id", "")).strip()
-    action_label = str(args.get("action_label", "")).strip()
-    if not message_id or not action_label:
-        await websocket.send_json(
-            _command_response(
-                command=command,
-                result={
-                    "status": "error",
-                    "error": "resolve_hitl requires message_id and action_label",
-                    "message_id": message_id or None,
-                },
-            )
-        )
-        return True
-
-    hitl_event_id = str(uuid.uuid4())
-    await websocket.send_json(
-        {
-            "type": "event",
-            "data": {
-                "kind": "hitl_resolved",
-                "text": action_label,
-                "payload": {
-                    "message_id": message_id,
-                    "resolution": action_label,
-                    "source": "command",
-                },
-                "version": 1,
-                "event_id": hitl_event_id,
-            },
-        }
-    )
-    await websocket.send_json(
-        _command_response(
-            command=command,
-            result={
-                "status": "ok",
-                "message_id": message_id,
-                "resolution": action_label,
-            },
-        )
-    )
-    return True
-
-
 async def _handle_command(
     websocket: WebSocket,
-    agent: "runners.RLMReActChatAgent",
+    agent: ChatAgentProtocol,
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
     *,
@@ -214,46 +93,32 @@ async def _handle_command(
         await _send_command_args_error(websocket=websocket, command=command)
         return
 
-    if await _try_handle_resolve_hitl(websocket=websocket, command=command, args=args):
+    if await handle_resolve_hitl(
+        websocket=websocket,
+        command=command,
+        args=args,
+        command_response=_command_response,
+    ):
         return
 
     try:
-        with agent.interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+        interpreter = agent.interpreter
+        if interpreter is None:
             result = await agent.execute_command(command, args)
+        else:
+            with interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+                result = await agent.execute_command(command, args)
         normalized_result = _normalize_command_result(result)
 
-        # Track likely artifact writes as session metadata.
-        if (
-            session_record is not None
-            and isinstance(result, dict)
-            and _is_artifact_tracking_command(command)
-        ):
-            artifact_uri = _append_session_artifact(
-                session_record=session_record,
-                command=command,
-                args=args,
-                result=result,
-            )
-            if repository is not None and identity_rows is not None:
-                try:
-                    await _persist_artifact_metadata(
-                        repository=repository,
-                        identity_rows=identity_rows,
-                        session_record=session_record,
-                        command=command,
-                        args=args,
-                        artifact_uri=artifact_uri,
-                    )
-                except Exception as exc:
-                    if persistence_required:
-                        raise PersistenceRequiredError(
-                            "artifact_persist_failed",
-                            f"Failed to persist artifact metadata: {exc}",
-                        ) from exc
-                    logger.warning(
-                        "Failed to persist artifact metadata: %s",
-                        _sanitize_for_log(exc),
-                    )
+        await track_command_artifact_if_needed(
+            session_record=session_record,
+            command=command,
+            args=args,
+            result=cast(Any, result),
+            repository=repository,
+            identity_rows=identity_rows,
+            persistence_required=persistence_required,
+        )
 
         await websocket.send_json(
             _command_response(command=command, result=normalized_result)
@@ -290,3 +155,27 @@ async def _handle_command(
                 },
             )
         )
+
+
+async def handle_command_with_persist(
+    *,
+    websocket: WebSocket,
+    agent: Any,
+    payload: dict[str, Any],
+    session_record: dict[str, Any] | None,
+    repository: FleetRepository | None,
+    identity_rows: IdentityUpsertResult | None,
+    persistence_required: bool,
+    local_persist: Callable[..., Awaitable[None]],
+) -> None:
+    """Dispatch command payload and persist session state afterward."""
+    await _handle_command(
+        websocket,
+        agent,
+        payload,
+        session_record,
+        repository=repository,
+        identity_rows=identity_rows,
+        persistence_required=persistence_required,
+    )
+    await local_persist(include_volume_save=True)

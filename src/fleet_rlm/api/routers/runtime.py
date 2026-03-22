@@ -7,9 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.infrastructure.providers.daytona import resolve_daytona_config
-from fleet_rlm.infrastructure.providers.daytona.sandbox.sdk import build_daytona_client
+from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.utils.modal import load_modal_config
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep, require_http_identity
@@ -53,11 +51,11 @@ async def patch_runtime_settings(
     request: RuntimeSettingsUpdateRequest,
 ) -> JSONResponse:
     return json_model_response(
-        apply_runtime_settings_patch(
+        await apply_runtime_settings_patch(
             state=state,
             request=request,
-            planner_lm_factory=get_planner_lm_from_env,
-            delegate_lm_factory=get_delegate_lm_from_env,
+            planner_loader=get_planner_lm_from_env,
+            delegate_loader=get_delegate_lm_from_env,
         )
     )
 
@@ -79,21 +77,15 @@ async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
     return json_model_response(
         await run_lm_connection_test(
             state=state,
-            planner_lm_factory=get_planner_lm_from_env,
-            delegate_lm_factory=get_delegate_lm_from_env,
+            planner_loader=get_planner_lm_from_env,
+            delegate_loader=get_delegate_lm_from_env,
         )
     )
 
 
 @router.post("/tests/daytona", response_model=RuntimeConnectivityTestResponse)
 async def test_daytona_connection(state: ServerStateDep) -> JSONResponse:
-    return json_model_response(
-        await run_daytona_connection_test(
-            state=state,
-            resolve_daytona_config=resolve_daytona_config,
-            build_daytona_client_factory=build_daytona_client,
-        )
-    )
+    return json_model_response(await run_daytona_connection_test(state=state))
 
 
 @router.get("/status", response_model=RuntimeStatusResponse)
@@ -102,7 +94,6 @@ async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
         build_runtime_status_response(
             state=state,
             load_modal_config=load_modal_config,
-            resolve_daytona_config=resolve_daytona_config,
         )
     )
 

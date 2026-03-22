@@ -1,4 +1,4 @@
-"""Runtime diagnostics and status service helpers."""
+"""Runtime diagnostics, connectivity tests, and status assembly."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ import os
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from functools import partial
 from typing import Any, Literal
 
-from fleet_rlm.infrastructure.providers.daytona import DaytonaConfigError
+from fleet_rlm.integrations.providers.daytona import DaytonaConfigError
 
 from ..dependencies import ServerState
 from ..schemas.core import (
@@ -26,13 +27,16 @@ from .common import (
     sanitize_error,
     utc_now_iso,
 )
-from .settings import resolve_active_model
 
 LoadModalConfig = Callable[[], Any]
-PlannerFactory = Callable[..., Any]
-DelegateFactory = Callable[..., Any]
-ResolveDaytonaConfig = Callable[[], Any]
-BuildDaytonaClient = Callable[[], Any]
+
+
+def resolve_active_model(value: str | None, env_key: str) -> str:
+    direct = (value or "").strip()
+    if direct:
+        return direct
+    fallback = (os.environ.get(env_key) or "").strip()
+    return fallback
 
 
 def cache_runtime_test(
@@ -111,7 +115,6 @@ def lm_preflight() -> tuple[dict[str, bool], list[str]]:
 def daytona_preflight(
     *,
     sandbox_provider: str | None = None,
-    resolve_daytona_config: ResolveDaytonaConfig,
 ) -> tuple[dict[str, bool], list[str]]:
     api_key = (os.environ.get("DAYTONA_API_KEY") or "").strip()
     api_url = (os.environ.get("DAYTONA_API_URL") or "").strip()
@@ -131,6 +134,8 @@ def daytona_preflight(
 
     guidance: list[str] = []
     try:
+        from fleet_rlm.integrations.providers.daytona import resolve_daytona_config
+
         resolve_daytona_config()
         checks["configured"] = True
     except DaytonaConfigError as exc:
@@ -166,6 +171,12 @@ def preflight_failure_result(
         guidance=guidance,
         error=error,
     )
+
+
+async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | None]:
+    from ..bootstrap import ensure_runtime_models
+
+    return await ensure_runtime_models(state, state.config)
 
 
 async def run_modal_connection_test(
@@ -238,8 +249,8 @@ async def run_modal_connection_test(
 async def run_lm_connection_test(
     *,
     state: ServerState,
-    planner_lm_factory: PlannerFactory,
-    delegate_lm_factory: DelegateFactory,
+    planner_loader=None,
+    delegate_loader=None,
 ) -> RuntimeConnectivityTestResponse:
     checks, guidance = lm_preflight()
     checked_at = utc_now_iso()
@@ -261,14 +272,37 @@ async def run_lm_connection_test(
 
     started = time.perf_counter()
     try:
-        planner_lm = planner_lm_factory(
-            env_file=state.config.env_path,
-            model_name=state.config.agent_model,
-        )
-        if planner_lm is None:
-            raise RuntimeError(
-                "Failed to construct planner LM from environment settings."
+        if planner_loader is None and delegate_loader is None:
+            planner_lm, delegate_lm = await _ensure_runtime_models(state)
+            if planner_lm is None:
+                raise RuntimeError(
+                    "Failed to construct planner LM from environment settings."
+                )
+        else:
+            assert planner_loader is not None  # type narrowing for mypy/pyright
+            planner_lm = await run_blocking(
+                partial(
+                    planner_loader,
+                    env_file=state.config.env_path,
+                    model_name=state.config.agent_model,
+                ),
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
+            if planner_lm is None:
+                raise RuntimeError(
+                    "Failed to construct planner LM from environment settings."
+                )
+            delegate_lm = None
+            if delegate_loader is not None:
+                delegate_lm = await run_blocking(
+                    partial(
+                        delegate_loader,
+                        env_file=state.config.env_path,
+                        model_name=state.config.agent_delegate_model,
+                        default_max_tokens=state.config.agent_delegate_max_tokens,
+                    ),
+                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+                )
 
         def _invoke() -> str:
             response = planner_lm("Reply with exactly OK")
@@ -281,11 +315,7 @@ async def run_lm_connection_test(
 
         ok = bool(output_preview)
         state.planner_lm = planner_lm
-        state.delegate_lm = delegate_lm_factory(
-            env_file=state.config.env_path,
-            model_name=state.config.agent_delegate_model,
-            default_max_tokens=state.config.agent_delegate_max_tokens,
-        )
+        state.delegate_lm = delegate_lm
     except asyncio.TimeoutError:
         error = (
             f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
@@ -317,12 +347,9 @@ async def run_lm_connection_test(
 async def run_daytona_connection_test(
     *,
     state: ServerState,
-    resolve_daytona_config: ResolveDaytonaConfig,
-    build_daytona_client_factory: BuildDaytonaClient,
 ) -> RuntimeConnectivityTestResponse:
     checks, guidance = daytona_preflight(
         sandbox_provider=state.config.sandbox_provider,
-        resolve_daytona_config=resolve_daytona_config,
     )
     checked_at = utc_now_iso()
     if not checks["configured"]:
@@ -343,8 +370,18 @@ async def run_daytona_connection_test(
 
     started = time.perf_counter()
     try:
-        resolve_daytona_config()
-        client = build_daytona_client_factory()
+        from daytona import Daytona, DaytonaConfig
+
+        from fleet_rlm.integrations.providers.daytona import resolve_daytona_config
+
+        config = resolve_daytona_config()
+        client = Daytona(
+            DaytonaConfig(
+                api_key=config.api_key,
+                api_url=config.api_url.rstrip("/"),
+                target=config.target,
+            )
+        )
 
         def _fetch() -> Any:
             return client.list(limit=1)
@@ -387,7 +424,6 @@ def build_runtime_status_response(
     *,
     state: ServerState,
     load_modal_config: LoadModalConfig,
-    resolve_daytona_config: ResolveDaytonaConfig,
 ) -> RuntimeStatusResponse:
     llm_checks, llm_guidance = lm_preflight()
     modal_checks, modal_guidance = modal_preflight(
@@ -396,18 +432,20 @@ def build_runtime_status_response(
     )
     daytona_checks, daytona_guidance = daytona_preflight(
         sandbox_provider=state.config.sandbox_provider,
-        resolve_daytona_config=resolve_daytona_config,
     )
 
     modal_test = connectivity_result_from_cache(state=state, kind="modal")
     lm_test = connectivity_result_from_cache(state=state, kind="lm")
     daytona_test = connectivity_result_from_cache(state=state, kind="daytona")
 
-    ready = bool(modal_test and modal_test.ok and lm_test and lm_test.ok)
+    ready = state.is_ready and bool(
+        modal_test is not None and modal_test.ok and lm_test is not None and lm_test.ok
+    )
 
     guidance: list[str] = []
     guidance.extend(llm_guidance)
     guidance.extend(modal_guidance)
+    guidance.extend(daytona_guidance)
     if modal_test is None or lm_test is None:
         guidance.append(
             "Run Runtime connection tests to validate live provider connectivity."
@@ -434,6 +472,10 @@ def build_runtime_status_response(
         llm={
             **llm_checks,
             "planner_configured": state.planner_lm is not None,
+            "startup_status": state.optional_service_status.get(
+                "planner_lm", "pending"
+            ),
+            "startup_error": state.optional_service_errors.get("planner_lm"),
         },
         modal={
             **modal_checks,

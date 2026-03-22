@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleet_rlm.infrastructure.database.models import SandboxProvider
+from fleet_rlm.integrations.database.models import SandboxProvider
 
 
 def parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:

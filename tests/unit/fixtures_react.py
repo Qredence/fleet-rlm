@@ -36,6 +36,7 @@ class FakeInterpreter:
         self.reload_calls = 0
         self.execute_calls: list[tuple[str, dict[str, Any]]] = []
         self.default_execution_profile = "RLM_DELEGATE"
+        self.volume_mount_path = "/data"
         self._volume = object() if has_volume else None
         self._execute_result_factory = execute_result_factory
 
@@ -126,7 +127,7 @@ def make_fake_react(
 def react_records(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.ReAct",
+        "fleet_rlm.runtime.agent.chat_agent.dspy.ReAct",
         make_fake_react(records),
     )
     return records

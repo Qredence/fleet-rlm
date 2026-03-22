@@ -380,6 +380,64 @@ def test_runtime_status_uses_cached_results(
     assert payload["daytona"]["configured"] is True
 
 
+def test_runtime_status_stays_degraded_until_modal_and_lm_smoke_pass(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.runtime_test_results = {}
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.load_modal_config",
+        lambda: {},
+    )
+
+    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert payload["llm"]["model_set"] is False
+    assert payload["modal"]["credentials_available"] is False
+    assert (
+        "Run Runtime connection tests to validate live provider connectivity."
+        in payload["guidance"]
+    )
+
+
+def test_runtime_status_keeps_daytona_guidance_nested(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.providers.daytona.config import DaytonaConfigError
+
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_API_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.resolve_daytona_config",
+        lambda: (_ for _ in ()).throw(
+            DaytonaConfigError(
+                "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
+            )
+        ),
+    )
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["daytona"]["configured"] is False
+    assert payload["daytona"]["guidance"] == [
+        "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
+    ]
+
+
 def test_runtime_daytona_volume_name_uses_workspace_claim(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -407,6 +465,26 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
     )
 
     response = local_client.get("/api/v1/runtime/volume/tree")
+
+    assert response.status_code == 502
+    assert "Volume listing failed" in response.json().get("detail", "")
+
+
+def test_runtime_daytona_volume_tree_maps_backend_errors_to_502(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.list_daytona_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/tree",
+        headers=_staging_bearer_headers(),
+    )
 
     assert response.status_code == 502
     assert "Volume listing failed" in response.json().get("detail", "")
@@ -649,6 +727,27 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
     assert response.json().get("detail") == "File not found."
 
 
+def test_runtime_daytona_volume_file_maps_not_found_errors_to_404(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/x"},
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 404
+    assert response.json().get("detail") == "File not found."
+
+
 def test_runtime_volume_file_maps_directory_errors_to_400(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -664,6 +763,27 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     response = local_client.get(
         "/api/v1/runtime/volume/file",
         params={"path": "/folder"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Path must point to a file."
+
+
+def test_runtime_daytona_volume_file_maps_directory_errors_to_400(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/folder"},
+        headers=_staging_bearer_headers(),
     )
 
     assert response.status_code == 400
