@@ -1,14 +1,12 @@
-"""Runtime settings service helpers used by the runtime router."""
+"""Runtime settings helpers for the runtime router."""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
-from typing import Any
+import asyncio
 
 from fastapi import HTTPException
 
-from fleet_rlm.infrastructure.config.runtime_settings import (
+from fleet_rlm.integrations.config.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     RUNTIME_SETTINGS_KEYS,
     apply_env_updates,
@@ -16,15 +14,17 @@ from fleet_rlm.infrastructure.config.runtime_settings import (
     normalize_updates,
 )
 
+from ..bootstrap import (
+    cancel_optional_runtime_startup,
+    ensure_runtime_models,
+    schedule_optional_runtime_startup,
+)
 from ..dependencies import ServerState
 from ..schemas.core import (
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
 )
-
-PlannerFactory = Callable[..., Any]
-DelegateFactory = Callable[..., Any]
 
 
 def runtime_setting_overrides(
@@ -34,14 +34,6 @@ def runtime_setting_overrides(
         "SECRET_NAME": secret_name,
         "VOLUME_NAME": volume_name or "",
     }
-
-
-def resolve_active_model(value: str | None, env_key: str) -> str:
-    direct = (value or "").strip()
-    if direct:
-        return direct
-    fallback = (os.environ.get(env_key) or "").strip()
-    return fallback
 
 
 def apply_runtime_settings_to_config(
@@ -77,24 +69,6 @@ def apply_runtime_settings_to_config(
             config.sandbox_provider = resolved_sandbox_provider
 
 
-def refresh_runtime_models(
-    *,
-    state: ServerState,
-    planner_lm_factory: PlannerFactory,
-    delegate_lm_factory: DelegateFactory,
-) -> None:
-    config = state.config
-    state.planner_lm = planner_lm_factory(
-        env_file=config.env_path,
-        model_name=config.agent_model,
-    )
-    state.delegate_lm = delegate_lm_factory(
-        env_file=config.env_path,
-        model_name=config.agent_delegate_model,
-        default_max_tokens=config.agent_delegate_max_tokens,
-    )
-
-
 def build_runtime_settings_snapshot(*, state: ServerState) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
@@ -107,12 +81,12 @@ def build_runtime_settings_snapshot(*, state: ServerState) -> RuntimeSettingsSna
     return RuntimeSettingsSnapshot(**snapshot)
 
 
-def apply_runtime_settings_patch(
+async def apply_runtime_settings_patch(
     *,
     state: ServerState,
     request: RuntimeSettingsUpdateRequest,
-    planner_lm_factory: PlannerFactory,
-    delegate_lm_factory: DelegateFactory,
+    planner_loader=None,
+    delegate_loader=None,
 ) -> RuntimeSettingsUpdateResponse:
     config = state.config
     if config.app_env != "local":
@@ -130,10 +104,32 @@ def apply_runtime_settings_patch(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     result = apply_env_updates(updates=normalized, env_path=config.env_path)
+    await cancel_optional_runtime_startup(state)
     apply_runtime_settings_to_config(state=state, normalized=normalized)
-    refresh_runtime_models(
-        state=state,
-        planner_lm_factory=planner_lm_factory,
-        delegate_lm_factory=delegate_lm_factory,
-    )
+    saved_delegate = state.delegate_lm
+    state.planner_lm = None
+    state.delegate_lm = None
+    if planner_loader is None and delegate_loader is None:
+        await ensure_runtime_models(state, config)
+    else:
+        planner_model_name = config.agent_model
+        delegate_model_name = config.agent_delegate_model
+        if planner_loader is None:
+            await ensure_runtime_models(state, config)
+        else:
+            state.planner_lm = await asyncio.to_thread(
+                planner_loader,
+                env_file=config.env_path,
+                model_name=planner_model_name,
+            )
+        if delegate_loader is None:
+            state.delegate_lm = saved_delegate
+        else:
+            state.delegate_lm = await asyncio.to_thread(
+                delegate_loader,
+                env_file=config.env_path,
+                model_name=delegate_model_name,
+                default_max_tokens=config.agent_delegate_max_tokens,
+            )
+    schedule_optional_runtime_startup(state, config)
     return RuntimeSettingsUpdateResponse(**result)

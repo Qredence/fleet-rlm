@@ -6,7 +6,7 @@ import inspect
 import json
 import sys
 
-from fleet_rlm.core.execution.core_driver import sandbox_driver
+from fleet_rlm.runtime.execution.core_driver import sandbox_driver
 
 
 def _run_driver(monkeypatch, lines: list[str]) -> list[dict]:

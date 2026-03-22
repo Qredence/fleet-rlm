@@ -78,7 +78,7 @@ class TestContextManager:
 
     def test_enter_calls_start(self, mock_modal):
         """__enter__ should call start() and return self."""
-        from fleet_rlm.core.execution.interpreter import ModalInterpreter
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -93,7 +93,7 @@ class TestContextManager:
 
     def test_exit_calls_shutdown(self, mock_modal):
         """__exit__ should call shutdown()."""
-        from fleet_rlm.core.execution.interpreter import ModalInterpreter
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -104,7 +104,7 @@ class TestContextManager:
 
     def test_exit_returns_false(self, mock_modal):
         """__exit__ should return False (don't suppress exceptions)."""
-        from fleet_rlm.core.execution.interpreter import ModalInterpreter
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -115,7 +115,7 @@ class TestContextManager:
 
     def test_exit_called_on_exception(self, mock_modal):
         """__exit__ should be called even when exception occurs."""
-        from fleet_rlm.core.execution.interpreter import ModalInterpreter
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -131,7 +131,7 @@ class TestContextManager:
 
     def test_context_manager_full_lifecycle(self, mock_modal):
         """Test the full with-block lifecycle."""
-        from fleet_rlm.core.execution.interpreter import ModalInterpreter
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
         interp = ModalInterpreter(timeout=10)
 
@@ -161,7 +161,7 @@ class TestContextManager:
 @pytest.mark.asyncio
 async def test_aexecute_uses_to_thread_when_enabled(mock_modal, monkeypatch):
     """aexecute() should dispatch execute() via asyncio.to_thread by default."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10, async_execute=True)
     calls: dict[str, object] = {}
@@ -179,7 +179,9 @@ async def test_aexecute_uses_to_thread_when_enabled(mock_modal, monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(interp, "execute", fake_execute)
-    monkeypatch.setattr("fleet_rlm.core.interpreter.asyncio.to_thread", fake_to_thread)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.asyncio.to_thread", fake_to_thread
+    )
 
     result = await interp.aexecute("print('hi')", {"x": 1})
     assert result == "ok"
@@ -190,7 +192,7 @@ async def test_aexecute_uses_to_thread_when_enabled(mock_modal, monkeypatch):
 @pytest.mark.asyncio
 async def test_aexecute_runs_sync_directly_when_disabled(mock_modal, monkeypatch):
     """aexecute() should call execute() directly when async_execute is disabled."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10, async_execute=False)
     calls: dict[str, object] = {}
@@ -205,7 +207,9 @@ async def test_aexecute_runs_sync_directly_when_disabled(mock_modal, monkeypatch
         )
 
     monkeypatch.setattr(interp, "execute", fake_execute)
-    monkeypatch.setattr("fleet_rlm.core.interpreter.asyncio.to_thread", fail_to_thread)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.asyncio.to_thread", fail_to_thread
+    )
 
     result = await interp.aexecute("x = 1")
     assert result == "sync-ok"
@@ -215,7 +219,7 @@ async def test_aexecute_runs_sync_directly_when_disabled(mock_modal, monkeypatch
 @pytest.mark.asyncio
 async def test_async_context_manager_calls_start_and_shutdown(mock_modal):
     """__aenter__/__aexit__ should mirror sync lifecycle semantics."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10, async_execute=False)
 
@@ -233,7 +237,7 @@ async def test_async_context_manager_calls_start_and_shutdown(mock_modal):
 
 def test_write_line_prefers_drain_aio_when_available(mock_modal, monkeypatch):
     """_write_line should use drain.aio() when Modal-style async drain is present."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     calls: dict[str, object] = {"writes": []}
@@ -258,7 +262,7 @@ def test_write_line_prefers_drain_aio_when_available(mock_modal, monkeypatch):
         raise RuntimeError("no running loop")
 
     monkeypatch.setattr(
-        "fleet_rlm.core.interpreter.asyncio.get_running_loop",
+        "fleet_rlm.runtime.execution.interpreter.asyncio.get_running_loop",
         _raise_no_running_loop,
     )
 
@@ -271,7 +275,7 @@ def test_write_line_prefers_drain_aio_when_available(mock_modal, monkeypatch):
 
 def test_write_line_falls_back_to_sync_drain_when_aio_missing(mock_modal):
     """_write_line should use blocking drain() when drain.aio() is unavailable."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     calls: dict[str, object] = {"writes": []}
@@ -292,7 +296,7 @@ def test_write_line_falls_back_to_sync_drain_when_aio_missing(mock_modal):
 
 def test_write_line_falls_back_to_flush_when_drain_missing(mock_modal):
     """_write_line should use flush() when no drain() method exists."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     calls: dict[str, object] = {"writes": []}
@@ -315,7 +319,7 @@ def test_write_line_raises_when_stdin_missing(mock_modal):
     """_write_line should error clearly when sandbox stdin is unavailable."""
     from dspy.primitives.code_interpreter import CodeInterpreterError
 
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     interp._stdin = None
@@ -330,7 +334,7 @@ def test_write_line_does_not_call_asyncio_run_when_event_loop_present(
     mock_modal, monkeypatch
 ):
     """_write_line should still use drain.aio() via helper thread when loop is running."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     calls: dict[str, object] = {"writes": []}
@@ -351,7 +355,7 @@ def test_write_line_does_not_call_asyncio_run_when_event_loop_present(
 
     interp._stdin = _Writer()
     monkeypatch.setattr(
-        "fleet_rlm.core.interpreter.asyncio.get_running_loop",
+        "fleet_rlm.runtime.execution.interpreter.asyncio.get_running_loop",
         object,
     )
 
@@ -363,7 +367,7 @@ def test_write_line_does_not_call_asyncio_run_when_event_loop_present(
 
 def test_start_bundles_driver_dependencies_in_exec_command(mock_modal, monkeypatch):
     """start() should embed helper module sources so sandbox needn't import fleet_rlm."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
     import modal
 
     captured: dict[str, object] = {}
@@ -393,7 +397,7 @@ def test_start_bundles_driver_dependencies_in_exec_command(mock_modal, monkeypat
 
 def test_execute_retries_once_on_modal_exec_stdin_failure(mock_modal, monkeypatch):
     """execute() should restart sandbox and retry once on transient stdin channel errors."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     starts = {"count": 0}
@@ -437,7 +441,7 @@ def test_execute_emits_repl_hook_start_and_complete(mock_modal, monkeypatch):
     """execute() should emit start/complete hook payloads for REPL observability."""
     from dspy.primitives.code_interpreter import FinalOutput
 
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     hook_events: list[dict[str, object]] = []
@@ -463,7 +467,7 @@ def test_execute_emits_repl_hook_start_and_complete(mock_modal, monkeypatch):
 
 def test_execute_does_not_retry_non_channel_errors(mock_modal, monkeypatch):
     """execute() should surface non-transport failures immediately."""
-    from fleet_rlm.core.execution.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=10)
     starts = {"count": 0}

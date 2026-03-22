@@ -154,20 +154,6 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
       <div className="mb-4 flex flex-col gap-px px-2">
         <Button
           size="sm"
-          variant={isWorkspace ? "secondary" : "ghost"}
-          onClick={handleOpenWorkspace}
-          className={cn(
-            "group w-full justify-start rounded-md! pl-1.5 text-left transition-colors duration-0",
-            !isWorkspace && "text-muted-foreground",
-          )}
-        >
-          <MessageSquare className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            RLM Workspace
-          </span>
-        </Button>
-        <Button
-          size="sm"
           variant="ghost"
           onClick={handleNewSession}
           className={cn(
@@ -180,6 +166,21 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
             New Session
           </span>
         </Button>
+        <Button
+          size="sm"
+          variant={isWorkspace ? "secondary" : "ghost"}
+          onClick={handleOpenWorkspace}
+          className={cn(
+            "group w-full justify-start rounded-md! pl-1.5 text-left transition-colors duration-0",
+            !isWorkspace && "text-muted-foreground",
+          )}
+        >
+          <MessageSquare className="min-w-5 size-5" strokeWidth={1.5} />
+          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
+            RLM Workspace
+          </span>
+        </Button>
+
         <Button
           size="sm"
           variant="ghost"

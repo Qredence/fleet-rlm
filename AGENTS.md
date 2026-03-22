@@ -53,7 +53,7 @@ Supported app surfaces:
 - `Volumes`
 - `Settings`
 
-Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes remain in the route tree only as redirects. Do not reintroduce them as first-class product surfaces without updating the backend/frontend contract and docs.
+Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally unsupported in the live app surface and should fall through to `/404`. Do not reintroduce them as first-class product surfaces without updating the backend/frontend contract and docs.
 
 Shared runtime contract:
 
@@ -79,9 +79,9 @@ Cross-stack source-of-truth boundaries:
 - Frontend route/runtime UX and redirect behavior live under `src/frontend/src/routes/*`
 - Live chat and streaming event shaping are a shared contract across:
   - `src/fleet_rlm/api/routers/ws/*`
-  - `src/fleet_rlm/core/execution/streaming_context.py`
-  - `src/frontend/src/features/rlm-workspace/*`
-  - `src/frontend/src/stores/chatStore.ts`
+  - `src/fleet_rlm/runtime/execution/streaming_context.py`
+  - `src/frontend/src/lib/rlm-api/*`
+  - `src/frontend/src/screens/workspace/model/*`
 
 ## Agent Operating Rules
 

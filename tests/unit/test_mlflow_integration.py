@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.features.analytics.config import MlflowConfig
-import fleet_rlm.features.analytics.mlflow_integration as mlflow_integration
+from fleet_rlm.integrations.observability.config import MlflowConfig
+import fleet_rlm.integrations.observability.mlflow_integration as mlflow_integration
 from tests.unit.fixtures_env import clear_env
 
 
@@ -244,6 +244,23 @@ def test_trace_result_metadata_returns_empty_when_mlflow_disabled():
         assert mlflow_integration.trace_result_metadata() == {}
 
 
+def test_trace_result_metadata_respects_disabled_env_even_with_cached_enabled_config(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+    monkeypatch.setattr(
+        mlflow_integration,
+        "_import_mlflow",
+        lambda: None,
+    )
+
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-env-off")
+    ):
+        assert mlflow_integration.trace_result_metadata() == {}
+
+
 def test_trace_result_metadata_includes_trace_and_client_request_id(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -253,8 +270,7 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
         mlflow_integration, "initialize_mlflow", lambda config=None: True
     )
     monkeypatch.setattr(
-        mlflow_integration,
-        "update_current_mlflow_trace",
+        "fleet_rlm.integrations.observability.mlflow_context.update_current_mlflow_trace",
         lambda response_preview=None: "trace-123",
     )
 
@@ -339,7 +355,7 @@ def test_resolve_trace_by_client_request_id_uses_server_filter(
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
     monkeypatch.setattr(
-        "fleet_rlm.features.analytics.mlflow_traces._trace_experiment_ids",
+        "fleet_rlm.integrations.observability.mlflow_traces._trace_experiment_ids",
         lambda config=None: ["exp-1"],
     )
 

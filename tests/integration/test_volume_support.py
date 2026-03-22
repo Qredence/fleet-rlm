@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 
 class _FakeReloadVolumes:
@@ -85,8 +85,10 @@ class _FakeImage:
 
 def test_modal_interpreter_volume_initialization(monkeypatch):
     """Test ModalInterpreter initializes with volume_name."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     image = _FakeImage(python_version="3.12")
     app = _FakeApp("test-app")
@@ -106,8 +108,10 @@ def test_modal_interpreter_volume_initialization(monkeypatch):
 
 def test_modal_interpreter_without_volume(monkeypatch):
     """Test ModalInterpreter works without volume_name."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     image = _FakeImage(python_version="3.12")
     app = _FakeApp("test-app")
@@ -125,8 +129,10 @@ def test_modal_interpreter_without_volume(monkeypatch):
 
 def test_volume_commit_reload_methods(monkeypatch):
     """Test commit() and reload() methods exist and can be called."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     image = _FakeImage(python_version="3.12")
     app = _FakeApp("test-app")
@@ -145,8 +151,10 @@ def test_volume_commit_reload_methods(monkeypatch):
 
 def test_volume_reload_uses_sandbox_refresh(monkeypatch):
     """reload() should refresh mounted volumes via the running sandbox."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     interpreter = ModalInterpreter(
         image=_FakeImage(python_version="3.12"),
@@ -163,8 +171,10 @@ def test_volume_reload_uses_sandbox_refresh(monkeypatch):
 
 def test_volume_areload_uses_async_sandbox_refresh(monkeypatch):
     """areload() should use Sandbox.reload_volumes.aio when available."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     interpreter = ModalInterpreter(
         image=_FakeImage(python_version="3.12"),
@@ -181,8 +191,10 @@ def test_volume_areload_uses_async_sandbox_refresh(monkeypatch):
 
 def test_volume_reload_noops_without_running_sandbox(monkeypatch):
     """reload helpers should be safe no-ops before the sandbox starts."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     interpreter = ModalInterpreter(
         image=_FakeImage(python_version="3.12"),
@@ -197,8 +209,10 @@ def test_volume_reload_noops_without_running_sandbox(monkeypatch):
 
 def test_resolve_app_with_explicit_app(monkeypatch):
     """Test _resolve_app returns the explicit app when provided."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     app = _FakeApp("test-app")
     interpreter = ModalInterpreter(image=_FakeImage(), app=app)
@@ -218,9 +232,11 @@ def test_resolve_app_deferred_lookup(monkeypatch):
             return _FakeApp(name)
 
     monkeypatch.setattr(
-        "fleet_rlm.core.execution.interpreter.modal.App", _MockAppModule
+        "fleet_rlm.runtime.execution.interpreter.modal.App", _MockAppModule
     )
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     interpreter = ModalInterpreter(image=_FakeImage(), app_name="my-app")
     # No lookup happens at __init__
@@ -241,10 +257,12 @@ def test_upload_to_volume(monkeypatch):
         created_volumes.append(vol)
         return vol
 
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
     monkeypatch.setattr(
-        "fleet_rlm.core.execution.interpreter.modal.Volume.from_name",
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Volume.from_name",
         fake_volume_from_name,
     )
 
@@ -269,8 +287,10 @@ def test_upload_to_volume(monkeypatch):
 
 def test_upload_to_volume_no_volume_raises(monkeypatch):
     """Test upload_to_volume raises when no volume_name configured."""
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.App", _FakeApp)
-    monkeypatch.setattr("fleet_rlm.core.execution.interpreter.modal.Image", _FakeImage)
+    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal.App", _FakeApp)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.execution.interpreter.modal.Image", _FakeImage
+    )
 
     interpreter = ModalInterpreter(image=_FakeImage(), app=_FakeApp("test"))
     try:

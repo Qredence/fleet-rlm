@@ -3,35 +3,95 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
-import socket
-import subprocess
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from fleet_rlm import __version__
-from fleet_rlm.core.config import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.features.analytics.mlflow_runtime import (
-    initialize_mlflow,
-    shutdown_mlflow,
-)
-from fleet_rlm.features.analytics.client import (
-    get_posthog_client,
-    shutdown_posthog_client,
-)
-from fleet_rlm.features.analytics.config import MlflowConfig, PostHogConfig
-from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
+from fleet_rlm.integrations.observability.config import PostHogConfig
+from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
 from .dependencies import ServerState
 from .execution import ExecutionEventEmitter
+from .bootstrap_observability import (
+    initialize_mlflow_runtime_service,
+    initialize_posthog_runtime_service,
+    set_optional_service_status,
+    terminate_process,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _runtime_config_helpers():
+    from fleet_rlm.runtime.config import (
+        configure_posthog_analytics_from_env,
+        get_delegate_lm_from_env,
+        get_planner_lm_from_env,
+    )
+
+    return (
+        configure_posthog_analytics_from_env,
+        get_planner_lm_from_env,
+        get_delegate_lm_from_env,
+    )
+
+
+def configure_posthog_analytics_from_env() -> object | None:
+    """Compatibility shim for callers/tests patching bootstrap runtime hooks."""
+    configure_posthog, _, _ = _runtime_config_helpers()
+    return configure_posthog()
+
+
+def get_planner_lm_from_env(*args, **kwargs):
+    """Compatibility shim for lazy planner LM loading."""
+    _, planner_loader, _ = _runtime_config_helpers()
+    return planner_loader(*args, **kwargs)
+
+
+def get_delegate_lm_from_env(*args, **kwargs):
+    """Compatibility shim for lazy delegate LM loading."""
+    _, _, delegate_loader = _runtime_config_helpers()
+    return delegate_loader(*args, **kwargs)
+
+
+def get_posthog_client(config: PostHogConfig):
+    """Compatibility shim for PostHog client lookup used by tests and startup."""
+    from fleet_rlm.integrations.observability.client import (
+        get_posthog_client as _impl,
+    )
+
+    return _impl(config)
+
+
+def emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
+    """Compatibility wrapper for tests patching bootstrap observability hooks."""
+    client = get_posthog_client(PostHogConfig.from_env())
+    if client is None:
+        return False
+
+    try:
+        client.capture(
+            "posthog_analytics_initialized",
+            distinct_id=(os.getenv("POSTHOG_DISTINCT_ID") or "fleet-server").strip(),
+            properties={
+                "component": "server",
+                "app_env": cfg.app_env,
+                "auth_mode": cfg.auth_mode,
+                "database_required": cfg.database_required,
+                "version": __version__,
+            },
+        )
+        return True
+    except Exception:
+        logger.warning("posthog_startup_event_failed", exc_info=True)
+        return False
 
 
 def resolve_runtime_config(
@@ -58,142 +118,6 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
         dotenv_path=str(cfg.env_path),
         override=cfg.app_env == "local",
     )
-
-
-def _terminate_process(proc: subprocess.Popen) -> None:
-    """Terminate a subprocess, escalating to kill() if needed, then reap it."""
-    try:
-        if proc.poll() is not None:
-            return
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "Process (pid=%d) did not exit after terminate(); sending kill()",
-                proc.pid,
-            )
-            proc.kill()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    "Process (pid=%d) did not exit promptly after kill()",
-                    proc.pid,
-                )
-    except ProcessLookupError:
-        logger.debug("Process (pid=%d) already exited", proc.pid)
-
-
-async def start_mlflow_server(cfg: ServerRuntimeConfig) -> subprocess.Popen | None:
-    """Start a local MLflow tracking server if configured and not already running."""
-    mlflow_cfg = MlflowConfig.from_env()
-
-    if not mlflow_cfg.enabled:
-        logger.info("MLflow integration disabled; skipping server startup.")
-        return None
-
-    tracking_uri = mlflow_cfg.tracking_uri.strip()
-    if not tracking_uri.startswith("http://127.0.0.1") and not tracking_uri.startswith(
-        "http://localhost"
-    ):
-        logger.debug(
-            "MLflow tracking URI is not localhost; skipping auto-start: %s",
-            tracking_uri,
-        )
-        return None
-
-    try:
-        import re
-
-        match = re.search(r":(\d+)", tracking_uri)
-        port = int(match.group(1)) if match else 5001
-    except (ValueError, AttributeError):
-        port = 5001
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    try:
-        result = sock.connect_ex(("127.0.0.1", port))
-        if result == 0:
-            logger.info("MLflow tracking server already running at %s", tracking_uri)
-            return None
-    finally:
-        sock.close()
-
-    logger.info("Starting MLflow tracking server on port %d...", port)
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "mlflow",
-                "server",
-                "--backend-store-uri",
-                "sqlite:///mlruns.db",
-                "--port",
-                str(port),
-            ],
-            start_new_session=True,
-        )
-
-        max_attempts = 20
-        for attempt in range(max_attempts):
-            await asyncio.sleep(1)
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            try:
-                result = sock.connect_ex(("127.0.0.1", port))
-                if result == 0:
-                    logger.info(
-                        "MLflow tracking server started (pid=%d) at %s",
-                        proc.pid,
-                        tracking_uri,
-                    )
-                    return proc
-            finally:
-                sock.close()
-            logger.info(
-                "Waiting for MLflow server... (attempt %d/%d)",
-                attempt + 1,
-                max_attempts,
-            )
-
-        logger.warning(
-            "MLflow server process started but port %d not responding after %ds",
-            port,
-            max_attempts,
-        )
-        _terminate_process(proc)
-        return None
-    except (ValueError, OSError):  # Catch specific exceptions
-        logger.warning("Failed to start MLflow tracking server", exc_info=True)
-        return None
-
-
-def emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
-    """Emit a startup event when PostHog runtime analytics is configured."""
-    posthog_cfg = PostHogConfig.from_env()
-    client = get_posthog_client(posthog_cfg)
-    if client is None:
-        return False
-
-    try:
-        client.capture(
-            "posthog_analytics_initialized",
-            distinct_id=(os.getenv("POSTHOG_DISTINCT_ID") or "fleet-server").strip(),
-            properties={
-                "component": "server",
-                "app_env": cfg.app_env,
-                "auth_mode": cfg.auth_mode,
-                "database_required": cfg.database_required,
-                "version": __version__,
-            },
-        )
-        return True
-    except Exception:
-        logger.warning("posthog_startup_event_failed", exc_info=True)
-        return False
 
 
 def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
@@ -244,6 +168,7 @@ async def initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -
 
 def initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Load planner/delegate LMs into process state."""
+    configure_posthog_analytics_from_env()
     model_name = cfg.agent_model
     if model_name is None:
         state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
@@ -259,38 +184,138 @@ def initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     )
 
 
+async def ensure_runtime_models(
+    state: ServerState,
+    cfg: ServerRuntimeConfig | None = None,
+) -> tuple[object | None, object | None]:
+    """Initialize planner/delegate LMs on demand without blocking server startup."""
+    if state.planner_lm is not None:
+        return state.planner_lm, state.delegate_lm
+
+    resolved_cfg = cfg or state.config
+    async with state.runtime_model_lock:
+        if state.planner_lm is not None:
+            return state.planner_lm, state.delegate_lm
+
+        try:
+            await asyncio.to_thread(initialize_lms, state, resolved_cfg)
+        except Exception as exc:
+            set_optional_service_status(
+                state,
+                "planner_lm",
+                "degraded",
+                error=str(exc),
+            )
+            set_optional_service_status(
+                state,
+                "delegate_lm",
+                "degraded",
+                error=str(exc),
+            )
+            raise
+
+        set_optional_service_status(
+            state,
+            "planner_lm",
+            "ready" if state.planner_lm is not None else "missing",
+        )
+        set_optional_service_status(
+            state,
+            "delegate_lm",
+            "ready" if state.delegate_lm is not None else "missing",
+        )
+        return state.planner_lm, state.delegate_lm
+
+
+async def _initialize_mlflow_runtime(
+    state: ServerState,
+    cfg: ServerRuntimeConfig,
+) -> None:
+    await initialize_mlflow_runtime_service(
+        state,
+        app_env=cfg.app_env,
+    )
+
+
+async def _initialize_posthog_runtime(
+    state: ServerState,
+    cfg: ServerRuntimeConfig,
+) -> None:
+    await initialize_posthog_runtime_service(
+        state,
+        app_env=cfg.app_env,
+        auth_mode=cfg.auth_mode,
+        database_required=cfg.database_required,
+    )
+
+
+async def _warm_optional_runtime_services(
+    state: ServerState,
+    cfg: ServerRuntimeConfig,
+) -> None:
+    for service_name, initializer in (
+        ("mlflow", _initialize_mlflow_runtime),
+        ("posthog", _initialize_posthog_runtime),
+    ):
+        try:
+            await initializer(state, cfg)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("%s optional startup failed", service_name, exc_info=True)
+            set_optional_service_status(state, service_name, "degraded", error=str(exc))
+
+    try:
+        await ensure_runtime_models(state, cfg)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("Runtime model warmup failed", exc_info=True)
+
+
+def schedule_optional_runtime_startup(
+    state: ServerState,
+    cfg: ServerRuntimeConfig,
+) -> asyncio.Task[None]:
+    """Start optional runtime warmup in the background and keep the task on state."""
+    task = asyncio.create_task(
+        _warm_optional_runtime_services(state, cfg),
+        name="fleet-optional-startup",
+    )
+    state.optional_startup_task = task
+    return task
+
+
+async def cancel_optional_runtime_startup(state: ServerState) -> None:
+    """Cancel the current optional startup task, if it is still running."""
+    optional_task = state.optional_startup_task
+    state.optional_startup_task = None
+    if optional_task is None or optional_task.done():
+        return
+    optional_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await optional_task
+
+
 async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> None:
     """Run startup initialization for server state and runtime services."""
 
     prime_runtime_env(cfg)
 
-    # Always initialize MLflow client-side tracing, but only auto-start a local
-    # MLflow tracking server when explicitly enabled and in a local environment.
-    mlflow_cfg = MlflowConfig.from_env()
-    auto_start_env = (os.getenv("MLFLOW_AUTO_START") or "").strip().lower()
-    auto_start_enabled = auto_start_env in {"1", "true", "yes"}
-    should_auto_start_mlflow_server = auto_start_enabled and cfg.app_env == "local"
-
-    if should_auto_start_mlflow_server:
-        state.mlflow_server_process = await start_mlflow_server(cfg)
-    else:
-        state.mlflow_server_process = None
-
-    try:
-        initialize_mlflow(mlflow_cfg)
-    except Exception:
-        logger.warning("Failed to initialize MLflow", exc_info=True)
-
     await initialize_persistence(state, cfg)
-    initialize_lms(state, cfg)
-    emit_posthog_startup_event(cfg)
+    schedule_optional_runtime_startup(state, cfg)
 
 
 async def shutdown_server_state(state: ServerState) -> None:
     """Tear down runtime services and persistence resources."""
 
+    await cancel_optional_runtime_startup(state)
+
     state.planner_lm = None
     state.delegate_lm = None
+    from fleet_rlm.integrations.observability.client import shutdown_posthog_client
+    from fleet_rlm.integrations.observability.mlflow_runtime import shutdown_mlflow
+
     shutdown_mlflow()
     shutdown_posthog_client()
 
@@ -302,7 +327,7 @@ async def shutdown_server_state(state: ServerState) -> None:
             "Stopping MLflow tracking server (pid=%d)...",
             mlflow_proc.pid,
         )
-        _terminate_process(mlflow_proc)
+        terminate_process(mlflow_proc)
 
     if state.db_manager is not None:
         await state.db_manager.dispose()

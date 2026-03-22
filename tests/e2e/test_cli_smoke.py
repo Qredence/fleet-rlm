@@ -7,8 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
-from fleet_rlm.cli.runtime_builders import resolve_server_volume_name
-from fleet_rlm.infrastructure.config.env import AppConfig
+from fleet_rlm.cli.runtime_factory import resolve_server_volume_name
+from fleet_rlm.integrations.config.env import AppConfig
 
 
 runner = CliRunner()

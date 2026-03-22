@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
+from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
@@ -37,12 +38,20 @@ class ServerState:
         self.repository: FleetRepository | None = None
         self.auth_provider: AuthProvider | None = None
         self.mlflow_server_process: Any | None = None
+        self.optional_startup_task: asyncio.Task[None] | None = None
+        self.runtime_model_lock: asyncio.Lock = asyncio.Lock()
+        self.optional_service_status: dict[str, str] = {
+            "mlflow": "pending",
+            "posthog": "pending",
+            "planner_lm": "pending",
+            "delegate_lm": "pending",
+        }
+        self.optional_service_errors: dict[str, str] = {}
 
     @property
     def is_ready(self) -> bool:
-        planner_ready = self.planner_lm is not None
         db_ready = not self.config.database_required or self.repository is not None
-        return planner_ready and db_ready
+        return db_ready
 
 
 def _require_server_state(app: Any) -> ServerState:

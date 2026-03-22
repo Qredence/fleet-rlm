@@ -185,6 +185,10 @@ export function useWorkspaceRuntime(): ChatRuntime {
       setIsTyping(false);
 
       if (isTerminalFrame(frame)) {
+        useRunWorkbenchStore.getState().applyFrame(frame);
+      }
+
+      if (isTerminalFrame(frame)) {
         const turnId = latestAssistantTurnId(useChatStore.getState().messages);
         if (turnId) {
           snapshotTurnArtifacts(turnId, useArtifactStore.getState().steps);

@@ -6,9 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
+from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
+from fleet_rlm.integrations.config.env import AppConfig
 
-from .fleet_cli import _initialize_config
+from .config import initialize_app_config, split_hydra_overrides
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -58,6 +59,11 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _initialize_config(overrides: list[str]) -> AppConfig:
+    """Compatibility shim for tests and callers patching the old helper name."""
+    return initialize_app_config(overrides)
+
+
 def main() -> None:
     # Quick check for 'web' subcommand before strict parsing
     if len(sys.argv) > 1 and sys.argv[1] == "web":
@@ -100,13 +106,7 @@ def main() -> None:
     parser = _build_parser()
     args, remainder = parser.parse_known_args(sys.argv[1:])
 
-    hydra_overrides: list[str] = []
-    unknown_args: list[str] = []
-    for token in remainder:
-        if "=" in token and not token.startswith("-"):
-            hydra_overrides.append(token)
-        else:
-            unknown_args.append(token)
+    hydra_overrides, unknown_args = split_hydra_overrides(remainder)
 
     if unknown_args:
         parser.error(f"Unknown arguments: {' '.join(unknown_args)}")

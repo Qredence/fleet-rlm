@@ -10,8 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
-from fleet_rlm.infrastructure.database.models import (
+from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
+from fleet_rlm.integrations.database.models import (
     ArtifactKind,
     JobType,
     MemoryKind,
@@ -19,7 +19,7 @@ from fleet_rlm.infrastructure.database.models import (
     MemorySource,
     RunStepType,
 )
-from fleet_rlm.infrastructure.database.types import (
+from fleet_rlm.integrations.database.types import (
     ArtifactCreateRequest,
     JobCreateRequest,
     JobLeaseRequest,

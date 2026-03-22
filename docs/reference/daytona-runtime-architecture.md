@@ -21,19 +21,22 @@ The current implementation treats these Daytona docs as the normative baseline:
 ## What Is Directly Based On Daytona Docs
 
 - Daytona clients are created through the official Python SDK entrypoints:
-  - `Daytona()` when environment-based configuration is sufficient
-  - `Daytona(DaytonaConfig(...))` when an explicit resolved config override is required
-- The sandbox adapter is async-first internally:
-  - `AsyncDaytona` is the canonical sandbox runtime client
-  - sandbox creation/resume, filesystem operations, volume lookup, session-command execution, and log streaming use the official async SDK surface
-  - sync runtime/session methods are compatibility wrappers over the async implementation
+  - `from daytona import Daytona`
+  - `from daytona import DaytonaConfig`
+- Sandbox bootstrap and resume use the native Daytona SDK surface directly:
+  - `DaytonaSandboxRuntime` creates or resumes sandboxes
+  - repo clone uses `sandbox.git.clone(...)`
+  - local context staging uses `sandbox.fs.*`
 - Persistent Daytona storage is modeled as a real Daytona volume:
   - volume lookup/creation uses `client.volume.get(volume_name, create=True)`
   - sandboxes attach that volume through `CreateSandboxFromSnapshotParams(... volumes=[VolumeMount(...)])`
-- Live REPL/session progress uses the documented async session-command log streaming path rather than a custom transport:
-  - the repo uses Daytona process sessions plus `get_session_command_logs_async(...)` for stdout/stderr follow mode
-  - async session-command log streaming must stay on the owning request event loop; the runtime must not move the same `AsyncDaytona` client across loops or helper threads
-  - sync compatibility wrappers fall back to snapshot polling via `get_session_command_logs(...)` instead of cross-thread async streaming
+- Stateful execution uses Daytona's built-in Python execution context:
+  - `sandbox.code_interpreter.create_context(...)` provides persistent Python state
+  - `sandbox.code_interpreter.run_code(...)` is the primary execution path for `DaytonaInterpreter`
+- Process sessions are still used where Daytona's RLM guide needs a host-callback broker:
+  - `sandbox.process.create_session(...)`
+  - `sandbox.process.execute_session_command(...)`
+  - `sandbox.get_preview_link(...)`
 - Daytona-backed recursive work follows the guide's core invariants through the
   shared `dspy.RLM` path:
   - `RLMReActChatAgent` remains the top-level conversational runtime
@@ -50,48 +53,54 @@ The current implementation treats these Daytona docs as the normative baseline:
 - The backend difference is the interpreter implementation:
   - Modal uses `ModalInterpreter`
   - Daytona uses `DaytonaInterpreter`
-- `DaytonaWorkbenchChatAgent` remains only as a thin compatibility wrapper that
-  configures the shared agent with Daytona-specific workspace/session metadata.
-- The Daytona sandbox layer is now split internally:
-  - `sandbox/__init__.py` preserves the stable `...daytona.sandbox` import surface
-  - `sandbox/runtime.py` owns workspace bootstrap and context staging
-  - `sandbox/session.py` owns the persistent REPL/session lifecycle
-  - `sandbox/protocol.py` owns framed callback/event transport types
-  - `sandbox/driver.py` holds the sandbox-side REPL driver source
-  - `sandbox/sdk.py` owns Daytona SDK loading, client builders, and async/sync compatibility helpers
-- Daytona volume browsing now lives in `volumes.py`, while `agent.py` and `state.py` replace the older top-level `chat_agent.py` / `chat_state.py` pair.
+- Websocket session switching must use the async agent/session reset path (`agent.areset(...)`) when clearing Daytona sandbox buffers for a fresh or restored session without saved state.
+- `DaytonaWorkbenchChatAgent` remains the focused Daytona-specific agent layer
+  that configures the shared runtime with Daytona workspace/session metadata.
+- The Daytona provider now exposes its canonical implementation modules directly
+  at the provider root:
+  - `runtime.py` owns workspace bootstrap and context staging
+  - `interpreter.py` owns the `dspy.RLM` interpreter backend and result translation
+  - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
+  - `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, and `types_serialization.py` own provider-local result, context, and recursion contracts
+  - `volumes.py` owns provider-specific volume browsing helpers
+- `agent.py` and `state.py` remain the Daytona-specific agent/session adapters over the shared runtime.
+- Shared runtime control is intentionally split across three paths:
+  - `RLMReActChatAgent` for ordinary user-facing interaction
+  - recursive `dspy.RLM` child execution for deeper delegated work
+  - cached runtime-module execution for non-recursive helper reuse
 
 ## Project-Specific Extensions
 
 The repo intentionally extends Daytona's published guide shape with:
 
-- a custom long-lived Python REPL bridge inside the sandbox instead of using
-  Daytona's built-in code interpreter as the primary execution engine
-- host callbacks for semantic and recursive subcalls
-- prompt-handle storage and preview slicing
+- a minimal sandbox-side broker server for host callbacks
+- injected sandbox helpers for file reads, shell execution, and durable workspace/volume writes
 - richer websocket trace emission for the workspace transcript and canvas
+- result shaping that preserves the shared interpreter contract used by the rest of the backend
 
 These are intentional project behaviors, not alternative Daytona SDK semantics.
 
-## Why The Interpreter Does Not Use `code_interpreter.run_code()`
+## Why The Interpreter Uses `code_interpreter.run_code()`
 
-The official async code interpreter supports stateful execution contexts and is
-useful for simpler Python execution flows. The current `fleet-rlm-dspy`
-Daytona interpreter does not use it as the primary execution engine because the
-shared `dspy.RLM` runtime still requires sandbox-side capabilities that are
-already implemented in the custom REPL bridge:
+The current `fleet-rlm-dspy` Daytona backend now follows the official DSPy/RLM
+integration shape more closely:
+
+- `sandbox.code_interpreter.run_code(...)` is the primary execution path
+- the persistent Daytona context is the source of in-sandbox Python state
+- a small broker process is started only when host callbacks are needed
+
+This keeps the provider aligned with the Daytona SDK while preserving the extra
+RLM contract the shared runtime still needs:
 
 - host callback requests from sandbox to host
-- structured execution events during one code block
-- prompt-handle persistence and prompt-slice reads
+- custom tool dispatch
 - custom `SUBMIT(...)` final-artifact capture
+- stable result translation into the shared interpreter API
 
-This means the repo is intentionally hybrid:
+In practice the provider is intentionally hybrid:
 
-- official async Daytona SDK for client, sandbox, volume, filesystem, and log-stream operations
-- custom REPL protocol for the Daytona interpreter backend
-
-If a future refactor can move those capabilities onto Daytona's built-in code interpreter cleanly, that should be treated as a separate architecture change rather than an incidental cleanup.
+- direct Daytona SDK for client, sandbox, volume, filesystem, preview, process-session, and code-interpreter operations
+- a minimal guide-style broker bridge for host callbacks only
 
 ## Workspace Volume Contract
 
@@ -107,11 +116,11 @@ If a future refactor can move those capabilities onto Daytona's built-in code in
 
 There are two distinct persistence layers in the Daytona runtime:
 
-- Volatile REPL/session state:
-  - Python globals, imports, helper functions, and in-memory objects live inside the long-running sandbox-side REPL process
-  - this state persists across multiple host-loop `execute_code` calls only while that driver process remains alive
+- Volatile execution-context state:
+  - Python globals, imports, helper functions, and in-memory objects live inside the Daytona code-interpreter context
+  - this state persists across multiple `run_code(...)` calls while that context remains alive
 - Durable workspace memory:
   - files written to the mounted Daytona volume under `/home/daytona/memory`
-  - this state is the persistence mechanism that survives driver restart, sandbox restart, or session resume
+  - this state is the persistence mechanism that survives context reset, sandbox restart, or session resume
 
 When code needs durable memory, it must write to the mounted Daytona volume rather than relying on in-process globals.

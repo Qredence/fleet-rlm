@@ -1,81 +1,24 @@
-"""Execution run lifecycle manager and error classification."""
+"""Execution lifecycle helpers for websocket chat turns."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from typing import Any
 
-from fleet_rlm.infrastructure.database import FleetRepository
-from fleet_rlm.infrastructure.database.models import RunStatus
-from fleet_rlm.infrastructure.database.types import (
+from fleet_rlm.integrations.database import FleetRepository
+from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database.types import (
     IdentityUpsertResult,
     RunStepCreateRequest,
 )
 
-from ...execution import (
-    ExecutionEvent,
-    ExecutionEventType,
-    ExecutionStep,
-    ExecutionStepBuilder,
-)
-from .helpers import _map_execution_step_type, _sanitize_for_log
+from ...execution import ExecutionEventType, ExecutionStep, ExecutionStepBuilder
+from .execution_support import build_execution_event, map_execution_step_type
+from .failures import PersistenceRequiredError
+from .helpers import _sanitize_for_log
 
 logger = logging.getLogger(__name__)
-
-
-# ── Error types ────────────────────────────────────────────────────────
-
-
-class PersistenceRequiredError(RuntimeError):
-    """Raised when durable writes fail in strict-persistence mode."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
-def _classify_stream_failure(exc: Exception) -> str:
-    if isinstance(exc, PersistenceRequiredError):
-        return exc.code
-
-    lowered = str(exc).lower()
-    if "planner lm not configured" in lowered:
-        return "planner_missing"
-    if "llm call timed out" in lowered or "timed out" in lowered and "llm" in lowered:
-        return "llm_timeout"
-    if "rate limit" in lowered or "429" in lowered:
-        return "llm_rate_limited"
-    if "sandbox" in lowered or "modal" in lowered:
-        return "sandbox_unavailable"
-    return "internal_error"
-
-
-# ── Event builders ─────────────────────────────────────────────────────
-
-
-def _build_execution_event(
-    *,
-    event_type: ExecutionEventType,
-    run_id: str,
-    workspace_id: str,
-    user_id: str,
-    session_id: str,
-    step: ExecutionStep | None = None,
-    summary: dict[str, Any] | None = None,
-) -> ExecutionEvent:
-    return ExecutionEvent(
-        type=event_type,
-        run_id=run_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        session_id=session_id,
-        step=step,
-        summary=summary,
-    )
-
-
-# ── Lifecycle manager ──────────────────────────────────────────────────
 
 
 class ExecutionLifecycleManager:
@@ -92,7 +35,7 @@ class ExecutionLifecycleManager:
         step_builder: ExecutionStepBuilder,
         repository: FleetRepository | None = None,
         identity_rows: IdentityUpsertResult | None = None,
-        active_run_db_id: uuid.UUID | None = None,
+        active_run_db_id: Any = None,
         strict_persistence: bool = False,
         session_record: dict[str, Any] | None = None,
     ) -> None:
@@ -108,7 +51,7 @@ class ExecutionLifecycleManager:
         self.strict_persistence = strict_persistence
         self._session_record = session_record
         self._step_index = 0
-        self._last_step_db_id: uuid.UUID | None = None
+        self._last_step_db_id: Any = None
         self._persist_queue: asyncio.Queue[ExecutionStep | None] | None = None
         self._persist_worker_task: asyncio.Task[None] | None = None
         self._persistence_error: Exception | None = None
@@ -119,8 +62,8 @@ class ExecutionLifecycleManager:
         event_type: ExecutionEventType,
         step: ExecutionStep | None = None,
         summary: dict[str, Any] | None = None,
-    ) -> ExecutionEvent:
-        return _build_execution_event(
+    ) -> Any:
+        return build_execution_event(
             event_type=event_type,
             run_id=self.run_id,
             workspace_id=self.workspace_id,
@@ -164,7 +107,7 @@ class ExecutionLifecycleManager:
                         tenant_id=self.identity_rows.tenant_id,
                         run_id=self.active_run_db_id,
                         step_index=self._step_index,
-                        step_type=_map_execution_step_type(step.type),
+                        step_type=map_execution_step_type(step.type),
                         input_json=step.input
                         if isinstance(step.input, dict)
                         else {"value": step.input}

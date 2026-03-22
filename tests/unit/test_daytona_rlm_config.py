@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.infrastructure.providers.daytona.config import (
+from fleet_rlm.integrations.providers.daytona.config import (
     DaytonaConfigError,
     resolve_daytona_config,
     resolve_daytona_lm_runtime_config,

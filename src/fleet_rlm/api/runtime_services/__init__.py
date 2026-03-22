@@ -7,7 +7,10 @@ from .diagnostics import (
     run_lm_connection_test,
     run_modal_connection_test,
 )
-from .settings import apply_runtime_settings_patch, build_runtime_settings_snapshot
+from .settings import (
+    apply_runtime_settings_patch,
+    build_runtime_settings_snapshot,
+)
 from .volumes import (
     load_volume_file_content,
     load_volume_tree,

@@ -6,9 +6,9 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from fleet_rlm.core.config import configure_planner_from_env
-from fleet_rlm.infrastructure.providers.daytona.config import resolve_daytona_config
-from fleet_rlm.infrastructure.database import DatabaseManager, FleetRepository
+from fleet_rlm.runtime.config import configure_planner_from_env
+from fleet_rlm.integrations.providers.daytona.config import resolve_daytona_config
+from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 
 def _lm_configured() -> bool:
@@ -31,7 +31,7 @@ def _modal_credentials_present() -> bool:
 def check_litellm_secret() -> bool:
     """Check whether Modal LITELLM secret is configured and complete."""
     try:
-        from fleet_rlm.runners import check_secret_presence
+        from fleet_rlm.cli.runners import check_secret_presence
 
         result = check_secret_presence()
         return all(result.values())

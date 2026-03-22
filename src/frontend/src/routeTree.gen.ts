@@ -20,13 +20,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppWorkspaceRouteImport } from './routes/app/workspace'
 import { Route as AppVolumesRouteImport } from './routes/app/volumes'
-import { Route as AppTaxonomyRouteImport } from './routes/app/taxonomy'
-import { Route as AppSkillsRouteImport } from './routes/app/skills'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
-import { Route as AppMemoryRouteImport } from './routes/app/memory'
-import { Route as AppAnalyticsRouteImport } from './routes/app/analytics'
-import { Route as AppTaxonomySkillIdRouteImport } from './routes/app/taxonomy.$skillId'
-import { Route as AppSkillsSkillIdRouteImport } from './routes/app/skills.$skillId'
+import { Route as AppSplatRouteImport } from './routes/app/$'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -83,40 +78,15 @@ const AppVolumesRoute = AppVolumesRouteImport.update({
   path: '/volumes',
   getParentRoute: () => AppRoute,
 } as any)
-const AppTaxonomyRoute = AppTaxonomyRouteImport.update({
-  id: '/taxonomy',
-  path: '/taxonomy',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSkillsRoute = AppSkillsRouteImport.update({
-  id: '/skills',
-  path: '/skills',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
-const AppMemoryRoute = AppMemoryRouteImport.update({
-  id: '/memory',
-  path: '/memory',
+const AppSplatRoute = AppSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => AppRoute,
-} as any)
-const AppAnalyticsRoute = AppAnalyticsRouteImport.update({
-  id: '/analytics',
-  path: '/analytics',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTaxonomySkillIdRoute = AppTaxonomySkillIdRouteImport.update({
-  id: '/$skillId',
-  path: '/$skillId',
-  getParentRoute: () => AppTaxonomyRoute,
-} as any)
-const AppSkillsSkillIdRoute = AppSkillsSkillIdRouteImport.update({
-  id: '/$skillId',
-  path: '/$skillId',
-  getParentRoute: () => AppSkillsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -128,16 +98,11 @@ export interface FileRoutesByFullPath {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
-  '/app/analytics': typeof AppAnalyticsRoute
-  '/app/memory': typeof AppMemoryRoute
+  '/app/$': typeof AppSplatRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/skills': typeof AppSkillsRouteWithChildren
-  '/app/taxonomy': typeof AppTaxonomyRouteWithChildren
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
   '/app/': typeof AppIndexRoute
-  '/app/skills/$skillId': typeof AppSkillsSkillIdRoute
-  '/app/taxonomy/$skillId': typeof AppTaxonomySkillIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -147,16 +112,11 @@ export interface FileRoutesByTo {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
-  '/app/analytics': typeof AppAnalyticsRoute
-  '/app/memory': typeof AppMemoryRoute
+  '/app/$': typeof AppSplatRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/skills': typeof AppSkillsRouteWithChildren
-  '/app/taxonomy': typeof AppTaxonomyRouteWithChildren
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
   '/app': typeof AppIndexRoute
-  '/app/skills/$skillId': typeof AppSkillsSkillIdRoute
-  '/app/taxonomy/$skillId': typeof AppTaxonomySkillIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -168,16 +128,11 @@ export interface FileRoutesById {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
-  '/app/analytics': typeof AppAnalyticsRoute
-  '/app/memory': typeof AppMemoryRoute
+  '/app/$': typeof AppSplatRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/skills': typeof AppSkillsRouteWithChildren
-  '/app/taxonomy': typeof AppTaxonomyRouteWithChildren
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
   '/app/': typeof AppIndexRoute
-  '/app/skills/$skillId': typeof AppSkillsSkillIdRoute
-  '/app/taxonomy/$skillId': typeof AppTaxonomySkillIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -190,16 +145,11 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
-    | '/app/analytics'
-    | '/app/memory'
+    | '/app/$'
     | '/app/settings'
-    | '/app/skills'
-    | '/app/taxonomy'
     | '/app/volumes'
     | '/app/workspace'
     | '/app/'
-    | '/app/skills/$skillId'
-    | '/app/taxonomy/$skillId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -209,16 +159,11 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
-    | '/app/analytics'
-    | '/app/memory'
+    | '/app/$'
     | '/app/settings'
-    | '/app/skills'
-    | '/app/taxonomy'
     | '/app/volumes'
     | '/app/workspace'
     | '/app'
-    | '/app/skills/$skillId'
-    | '/app/taxonomy/$skillId'
   id:
     | '__root__'
     | '/'
@@ -229,16 +174,11 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
-    | '/app/analytics'
-    | '/app/memory'
+    | '/app/$'
     | '/app/settings'
-    | '/app/skills'
-    | '/app/taxonomy'
     | '/app/volumes'
     | '/app/workspace'
     | '/app/'
-    | '/app/skills/$skillId'
-    | '/app/taxonomy/$skillId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -331,20 +271,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVolumesRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/taxonomy': {
-      id: '/app/taxonomy'
-      path: '/taxonomy'
-      fullPath: '/app/taxonomy'
-      preLoaderRoute: typeof AppTaxonomyRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/skills': {
-      id: '/app/skills'
-      path: '/skills'
-      fullPath: '/app/skills'
-      preLoaderRoute: typeof AppSkillsRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/app/settings': {
       id: '/app/settings'
       path: '/settings'
@@ -352,78 +278,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/memory': {
-      id: '/app/memory'
-      path: '/memory'
-      fullPath: '/app/memory'
-      preLoaderRoute: typeof AppMemoryRouteImport
+    '/app/$': {
+      id: '/app/$'
+      path: '/$'
+      fullPath: '/app/$'
+      preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
-    }
-    '/app/analytics': {
-      id: '/app/analytics'
-      path: '/analytics'
-      fullPath: '/app/analytics'
-      preLoaderRoute: typeof AppAnalyticsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/taxonomy/$skillId': {
-      id: '/app/taxonomy/$skillId'
-      path: '/$skillId'
-      fullPath: '/app/taxonomy/$skillId'
-      preLoaderRoute: typeof AppTaxonomySkillIdRouteImport
-      parentRoute: typeof AppTaxonomyRoute
-    }
-    '/app/skills/$skillId': {
-      id: '/app/skills/$skillId'
-      path: '/$skillId'
-      fullPath: '/app/skills/$skillId'
-      preLoaderRoute: typeof AppSkillsSkillIdRouteImport
-      parentRoute: typeof AppSkillsRoute
     }
   }
 }
 
-interface AppSkillsRouteChildren {
-  AppSkillsSkillIdRoute: typeof AppSkillsSkillIdRoute
-}
-
-const AppSkillsRouteChildren: AppSkillsRouteChildren = {
-  AppSkillsSkillIdRoute: AppSkillsSkillIdRoute,
-}
-
-const AppSkillsRouteWithChildren = AppSkillsRoute._addFileChildren(
-  AppSkillsRouteChildren,
-)
-
-interface AppTaxonomyRouteChildren {
-  AppTaxonomySkillIdRoute: typeof AppTaxonomySkillIdRoute
-}
-
-const AppTaxonomyRouteChildren: AppTaxonomyRouteChildren = {
-  AppTaxonomySkillIdRoute: AppTaxonomySkillIdRoute,
-}
-
-const AppTaxonomyRouteWithChildren = AppTaxonomyRoute._addFileChildren(
-  AppTaxonomyRouteChildren,
-)
-
 interface AppRouteChildren {
-  AppAnalyticsRoute: typeof AppAnalyticsRoute
-  AppMemoryRoute: typeof AppMemoryRoute
+  AppSplatRoute: typeof AppSplatRoute
   AppSettingsRoute: typeof AppSettingsRoute
-  AppSkillsRoute: typeof AppSkillsRouteWithChildren
-  AppTaxonomyRoute: typeof AppTaxonomyRouteWithChildren
   AppVolumesRoute: typeof AppVolumesRoute
   AppWorkspaceRoute: typeof AppWorkspaceRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAnalyticsRoute: AppAnalyticsRoute,
-  AppMemoryRoute: AppMemoryRoute,
+  AppSplatRoute: AppSplatRoute,
   AppSettingsRoute: AppSettingsRoute,
-  AppSkillsRoute: AppSkillsRouteWithChildren,
-  AppTaxonomyRoute: AppTaxonomyRouteWithChildren,
   AppVolumesRoute: AppVolumesRoute,
   AppWorkspaceRoute: AppWorkspaceRoute,
   AppIndexRoute: AppIndexRoute,

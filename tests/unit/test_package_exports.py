@@ -12,7 +12,5 @@ def test_root_all_exports_are_resolvable() -> None:
 
 
 def test_root_all_matches_declared_lazy_exports() -> None:
-    expected_exports = (
-        {"__version__"} | set(fleet_rlm._LAZY_ATTRS) | set(fleet_rlm._LAZY_MODULES)
-    )
+    expected_exports = {"__version__"} | set(fleet_rlm._LAZY_ATTRS)
     assert set(fleet_rlm.__all__) == expected_exports

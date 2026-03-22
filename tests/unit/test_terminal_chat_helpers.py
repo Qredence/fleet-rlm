@@ -6,13 +6,9 @@ from pathlib import Path
 
 from prompt_toolkit.document import Document
 
-from fleet_rlm.features.terminal import (
-    _FleetCompleter,
-    _coerce_value,
-    _iter_mention_paths,
-    _parse_command_payload,
-    _write_env_updates,
-)
+from fleet_rlm.cli.terminal.commands import _coerce_value, _parse_command_payload
+from fleet_rlm.cli.terminal.settings import _write_env_updates
+from fleet_rlm.cli.terminal.ui import _FleetCompleter, _iter_mention_paths
 
 
 def test_coerce_value_basic_types() -> None:

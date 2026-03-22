@@ -6,13 +6,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from fleet_rlm.features.analytics.mlflow_evaluation import (
+from fleet_rlm.integrations.observability.mlflow_evaluation import (
     evaluate_trace_rows,
     export_annotated_trace_rows,
     load_trace_rows,
     save_evaluation_result,
 )
-from fleet_rlm.features.analytics.mlflow_optimization import optimize_program_with_mipro
+from fleet_rlm.integrations.observability.mlflow_optimization import (
+    optimize_program_with_mipro,
+)
 
 
 def do_export(args: argparse.Namespace) -> int:

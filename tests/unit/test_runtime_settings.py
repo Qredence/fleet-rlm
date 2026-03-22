@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.infrastructure.config.runtime_settings import (
+from fleet_rlm.integrations.config.runtime_settings import (
     RUNTIME_SETTINGS_ALLOWLIST,
     apply_env_updates,
     get_settings_snapshot,

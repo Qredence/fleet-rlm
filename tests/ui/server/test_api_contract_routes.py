@@ -55,6 +55,7 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
     assert response.status_code == 200
     payload = response.json()
     assert payload["ready"] is False
+    assert payload["planner_configured"] is False
     assert payload["planner"] == "missing"
     assert payload["database"] in {"disabled", "missing", "ready"}
     assert "sandbox_provider" in payload
@@ -63,16 +64,50 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
 def test_ws_router_split_modules_import() -> None:
     """Regression guard for ws module decomposition import stability."""
     import fleet_rlm.api.routers.ws as ws
+    import fleet_rlm.api.routers.ws.artifacts as ws_artifacts
     import fleet_rlm.api.routers.ws.commands as ws_commands
-    import fleet_rlm.api.routers.ws.helpers as ws_helpers
+    import fleet_rlm.api.routers.ws.completion as ws_completion
+    import fleet_rlm.api.routers.ws.execution_support as ws_execution_support
+    import fleet_rlm.api.routers.ws.endpoint as ws_endpoint
+    import fleet_rlm.api.routers.ws.errors as ws_errors
+    import fleet_rlm.api.routers.ws.failures as ws_failures
+    import fleet_rlm.api.routers.ws.hitl as ws_hitl
     import fleet_rlm.api.routers.ws.lifecycle as ws_lifecycle
+    import fleet_rlm.api.routers.ws.loop_exit as ws_loop_exit
+    import fleet_rlm.api.routers.ws.manifest as ws_manifest
+    import fleet_rlm.api.routers.ws.messages as ws_messages
+    import fleet_rlm.api.routers.ws.persistence as ws_persistence
+    import fleet_rlm.api.routers.ws.runtime as ws_runtime
     import fleet_rlm.api.routers.ws.session as ws_session
+    import fleet_rlm.api.routers.ws.stream as ws_stream
+    import fleet_rlm.api.routers.ws.task_control as ws_task_control
+    import fleet_rlm.api.routers.ws.terminal as ws_terminal
+    import fleet_rlm.api.routers.ws.turn_lifecycle as ws_turn_lifecycle
+    import fleet_rlm.api.routers.ws.turn_setup as ws_turn_setup
+    import fleet_rlm.api.routers.ws.types as ws_types
 
     assert ws.router is not None
+    assert ws_endpoint.chat_streaming is not None
+    assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
-    assert ws_helpers._error_envelope is not None
+    assert ws_completion.build_execution_completion_summary is not None
+    assert ws_execution_support.get_execution_emitter is not None
+    assert ws_errors.handle_stream_error is not None
+    assert ws_failures.classify_stream_failure is not None
+    assert ws_hitl.handle_resolve_hitl is not None
     assert ws_lifecycle.ExecutionLifecycleManager is not None
-    assert ws_session._manifest_path is not None
+    assert ws_loop_exit.handle_chat_disconnect is not None
+    assert ws_manifest._manifest_path is not None
+    assert ws_messages.parse_ws_message_or_send_error is not None
+    assert ws_persistence.persist_session_state is not None
+    assert ws_runtime._prepare_chat_runtime is not None
+    assert ws_session.switch_session_if_needed is not None
+    assert ws_stream._chat_message_loop is not None
+    assert ws_task_control.cancel_task is not None
+    assert ws_terminal.handle_terminal_stream_event is not None
+    assert ws_turn_lifecycle.initialize_turn_lifecycle is not None
+    assert ws_turn_setup.prepare_chat_message_turn is not None
+    assert ws_types.ChatAgentProtocol is not None
 
 
 def test_ws_router_registers_expected_websocket_routes() -> None:

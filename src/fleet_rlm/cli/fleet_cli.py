@@ -23,10 +23,9 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from omegaconf import OmegaConf
 
-from fleet_rlm.infrastructure.config.env import AppConfig
-
+from fleet_rlm.integrations.config.env import AppConfig
+from .config import initialize_app_config, split_hydra_overrides
 from .commands.init_cmd import register_init_command
 from .commands.serve_cmds import register_serve_commands
 
@@ -88,7 +87,7 @@ def chat(
     ),
 ) -> None:
     """Start standalone in-process interactive terminal chat."""
-    from fleet_rlm.features.terminal.chat import TerminalChatOptions, run_terminal_chat
+    from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
 
     global _CONFIG
     if _CONFIG is None:
@@ -124,7 +123,7 @@ def daytona_smoke(
 ) -> None:
     """Run a native Daytona smoke validation without invoking an LM."""
     try:
-        from fleet_rlm.infrastructure.providers.daytona import run_daytona_smoke
+        from fleet_rlm.integrations.providers.daytona import run_daytona_smoke
 
         result = run_daytona_smoke(
             repo=repo,
@@ -141,36 +140,15 @@ def daytona_smoke(
     typer.echo(payload)
 
 
-def _initialize_config(overrides: list[str] | None = None) -> AppConfig:
-    """Initialize Hydra config manually without taking over argument parsing."""
-    from hydra import compose, initialize_config_module
-
-    with initialize_config_module(config_module="fleet_rlm.conf", version_base=None):
-        cfg = compose(config_name="config", overrides=overrides or [])
-        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-        if not isinstance(cfg_dict, dict):
-            raise ValueError("Hydra config must resolve to a mapping")
-        normalized_cfg = {str(k): v for k, v in cfg_dict.items()}
-        return AppConfig(**normalized_cfg)
-
-
 def main() -> None:
     """Entry point that runs Typer with optional Hydra config initialization."""
     global _CONFIG
 
-    # Parse args to find Hydra overrides (key=value) and separate from Typer args
-    hydra_overrides: list[str] = []
-    typer_args: list[str] = []
-
-    for arg in sys.argv[1:]:
-        if "=" in arg and not arg.startswith("-"):
-            hydra_overrides.append(arg)
-        else:
-            typer_args.append(arg)
+    hydra_overrides, typer_args = split_hydra_overrides(sys.argv[1:])
 
     # Initialize config (with optional overrides)
     try:
-        _CONFIG = _initialize_config(hydra_overrides)
+        _CONFIG = initialize_app_config(hydra_overrides)
     except Exception as e:
         print(f"Configuration Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1)

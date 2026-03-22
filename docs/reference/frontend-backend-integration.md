@@ -13,9 +13,10 @@ The live frontend shell supports only:
 - `/app/volumes`
 - `/app/settings`
 
-Legacy `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics`
-routes remain redirect-only compatibility entrypoints and are not active
-product surfaces.
+Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics`
+paths are no longer compatibility entrypoints; the frontend should route them
+through the not-found flow instead of redirecting them into active product
+surfaces.
 
 ## API Base and Routing
 
@@ -78,6 +79,9 @@ Deprecated/planned surfaces removed from backend:
 ## Auth Contract
 
 - Frontend SPA auth uses Microsoft Entra via MSAL Browser.
+- Browser token storage uses the canonical `fleet-rlm:access-token` key only.
+  The legacy `fleet_access_token` localStorage migration path is no longer
+  supported.
 - Default frontend authority is `https://login.microsoftonline.com/organizations`.
 - Frontend login/logout callback path is `/login`.
 - The SPA requests `api://<api-app-client-id>/access_as_user`.
@@ -136,6 +140,10 @@ Deprecated/planned surfaces removed from backend:
 - `final` is transcript-oriented. It may include the final assistant text, reasoning summary,
   citations/sources, attachments, and terminal runtime metadata, but it is no longer the canonical
   workbench hydration source for Daytona.
+- During the current compatibility window, chat-final payloads may still include legacy
+  `run_result` / `final_artifact` data.
+- Frontend workbench state may use chat-final only to backfill missing `summary` and
+  `final_artifact` after the turn; it must not hydrate rich analyst sections from chat-final.
 
 ### Chat Trace Render Contract
 
@@ -174,10 +182,15 @@ Trajectory payload handling:
   - `actor_id` (optional)
   - `lane_key` (optional)
 - `execution_completed.summary` should be shaped so both Modal/ReAct and Daytona/RLM can hydrate
-  the same frontend canvas shell. Stable top-level fields include:
+  the same frontend canvas shell.
+- Minimum required top-level fields across both runtime modes:
   - `run_id`
   - `runtime_mode`
   - `task`
+  - `final_artifact`
+  - `summary`
+- `summary` should carry the final termination/error/warnings/duration metadata the workbench needs.
+- Richer completion sections remain allowed but optional in this phase:
   - `status`
   - `termination_reason`
   - `duration_ms`
@@ -187,7 +200,6 @@ Trajectory payload handling:
   - `context_sources`
   - `sources`
   - `attachments`
-  - `final_artifact`
   - `warnings`
 - `execution_step.step.type` remains runtime-agnostic with the current `llm | tool | repl | memory
   | output` lane model.
@@ -212,6 +224,9 @@ Trajectory payload handling:
 - Daytona live trace should expose the guide-relevant milestones in realtime:
   iteration start, planner/reasoning preview, extracted code preview, sandbox observation, recursive
   child spawn / child synthesis, and terminal completion or failure.
+- Daytona sandbox/debug transcript cards are driven by `status` frames whose payload carries
+  `phase="sandbox_output"` plus stream text metadata. Treat that wire shape as part of the
+  transcript rendering contract while it remains in use.
 
 ### Execution Graph Semantics
 
@@ -281,6 +296,6 @@ If backend routes or payload shapes change, update this file in the same PR as t
 - Canonical backend contracts for runtime/chat/auth should use `src/frontend/src/lib/rlm-api/*`.
 - Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers have been removed. Do not reintroduce auth/chat contracts in that layer.
 - Canonical frontend feature ownership now lives in:
-  - `src/frontend/src/features/rlm-workspace/*` for the live chat/runtime surface
-  - `src/frontend/src/features/volumes/*` for the Modal Volume browser
-  - `src/frontend/src/features/shell/*` for composed shell navigation widgets
+  - `src/frontend/src/screens/workspace/*` for the live chat/runtime surface
+  - `src/frontend/src/screens/volumes/*` for the volumes browser
+  - `src/frontend/src/screens/shell/*` for composed shell navigation widgets
