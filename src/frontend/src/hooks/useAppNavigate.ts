@@ -34,10 +34,6 @@ export function pathToNav(pathname: string): NavItem | null {
     "": "workspace",
     workspace: "workspace",
     volumes: "volumes",
-    taxonomy: "volumes",
-    skills: "workspace",
-    memory: "workspace",
-    analytics: "workspace",
     settings: "settings",
   };
   return PATH_TO_NAV[section] ?? null;

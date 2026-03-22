@@ -33,8 +33,8 @@ describe("Input primitives", () => {
 
     expect(html).toContain('data-slot="input-group"');
     expect(html).toContain("border-border-subtle/70");
-    expect(html).toContain("focus-within:border-ring");
-    expect(html).toContain('data-slot="input-group-input"');
+    expect(html).toContain("has-[[data-slot=input-group-control]:focus-visible]:border-ring");
+    expect(html).toContain('data-slot="input-group-control"');
     expect(html).toContain("min-w-0");
   });
 });
