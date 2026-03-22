@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import posixpath
 from pathlib import PurePosixPath
 from typing import Any
 
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
-from .helpers import _sanitize_id
+from ...server_utils import sanitize_id as _sanitize_id
 from .types import ChatAgentProtocol
 
 
@@ -37,15 +38,23 @@ async def _aget_daytona_session(agent: ChatAgentProtocol) -> Any | None:
     interpreter = getattr(agent, "interpreter", None)
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
-    return await interpreter._aensure_session()
+    aget_session = getattr(interpreter, "aget_session", None)
+    if aget_session is None or not callable(aget_session):
+        return None
+    return await aget_session()
 
 
 def _persistent_storage_path(interpreter: Any, path: str) -> str:
+    raw_root = str(getattr(interpreter, "volume_mount_path", "/data") or "/data")
+    mount_root = posixpath.normpath(raw_root)
     candidate = PurePosixPath(path)
     if candidate.is_absolute():
-        return str(candidate)
-    mount_root = str(getattr(interpreter, "volume_mount_path", "/data") or "/data")
-    return str(PurePosixPath(mount_root) / candidate)
+        resolved = posixpath.normpath(str(candidate))
+    else:
+        resolved = posixpath.normpath(str(PurePosixPath(mount_root) / candidate))
+    if not resolved.startswith(mount_root + "/") and resolved != mount_root:
+        raise ValueError(f"Path {path!r} resolves outside volume mount path.")
+    return resolved
 
 
 async def load_manifest_from_volume(agent: ChatAgentProtocol, path: str) -> dict:

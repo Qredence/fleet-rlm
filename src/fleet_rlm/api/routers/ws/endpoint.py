@@ -19,6 +19,7 @@ from ...dependencies import get_server_state_from_websocket
 from ...execution import (
     ExecutionSubscription,
 )
+from ...server_utils import sanitize_id as _sanitize_id
 from .execution_support import get_execution_emitter
 from .failures import chat_startup_error_payload
 from .helpers import (
@@ -26,7 +27,6 @@ from .helpers import (
     _close_websocket_safely,
     _error_envelope,
     _sanitize_for_log,
-    _sanitize_id,
     _try_send_json,
 )
 from .messages import parse_ws_message_or_send_error

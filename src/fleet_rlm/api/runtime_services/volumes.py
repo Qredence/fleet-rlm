@@ -26,6 +26,7 @@ from ..schemas.core import (
     VolumeProvider,
     VolumeTreeResponse,
 )
+from ..server_utils import sanitize_id as _sanitize_id
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 
 VolumeOperation = Callable[[str, str, int], dict[str, Any]]
@@ -37,16 +38,6 @@ class _ResolvedVolumeBackend:
     volume_name: str
     list_tree: VolumeOperation
     read_file_text: VolumeOperation
-
-
-def _sanitize_id(value: str, default_value: str) -> str:
-    candidate = (value or "").strip()
-    if not candidate:
-        return default_value
-    cleaned = "".join(
-        char if char.isalnum() or char in "_.-" else "-" for char in candidate
-    )
-    return cleaned[:128] or default_value
 
 
 def resolve_daytona_volume_name(

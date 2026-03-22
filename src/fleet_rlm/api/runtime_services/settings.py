@@ -106,6 +106,7 @@ async def apply_runtime_settings_patch(
     result = apply_env_updates(updates=normalized, env_path=config.env_path)
     await cancel_optional_runtime_startup(state)
     apply_runtime_settings_to_config(state=state, normalized=normalized)
+    saved_delegate = state.delegate_lm
     state.planner_lm = None
     state.delegate_lm = None
     if planner_loader is None and delegate_loader is None:
@@ -122,7 +123,7 @@ async def apply_runtime_settings_patch(
                 model_name=planner_model_name,
             )
         if delegate_loader is None:
-            state.delegate_lm = None
+            state.delegate_lm = saved_delegate
         else:
             state.delegate_lm = await asyncio.to_thread(
                 delegate_loader,
