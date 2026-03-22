@@ -160,7 +160,7 @@ async def _handle_command(
 async def handle_command_with_persist(
     *,
     websocket: WebSocket,
-    agent: Any,
+    agent: ChatAgentProtocol,
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
     repository: FleetRepository | None,

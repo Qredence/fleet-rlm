@@ -18,6 +18,9 @@ def sanitize_id(value: str, default_value: str) -> str:
         return default_value
     cleaned = re.sub(r"[^a-zA-Z0-9_.-]", "-", candidate)
     cleaned = re.sub(r"\.{2,}", "-", cleaned)
+    cleaned = cleaned.strip(".")
+    if not re.search(r"[A-Za-z0-9]", cleaned):
+        return default_value
     return cleaned[:128] or default_value
 
 

@@ -51,7 +51,11 @@ class ServerState:
     @property
     def is_ready(self) -> bool:
         db_ready = not self.config.database_required or self.repository is not None
-        return db_ready
+        planner_ready = (
+            self.planner_lm is not None
+            or self.optional_service_status.get("planner_lm") == "ready"
+        )
+        return db_ready and planner_ready
 
 
 def _require_server_state(app: Any) -> ServerState:

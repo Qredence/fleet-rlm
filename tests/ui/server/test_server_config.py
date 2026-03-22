@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
+from fleet_rlm.api.server_utils import sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
     ChatRequest,
@@ -158,7 +159,7 @@ def test_server_state_init() -> None:
     state = ServerState()
     assert state.planner_lm is None
     assert state.config is not None
-    assert state.is_ready is True
+    assert state.is_ready is False
     assert state.sessions == {}
     assert state.repository is None
     assert state.auth_provider is None
@@ -168,6 +169,13 @@ def test_server_state_ready() -> None:
     state = ServerState()
     state.config.database_required = False
     state.planner_lm = "mock_lm"
+    assert state.is_ready is True
+
+
+def test_server_state_ready_from_optional_planner_status() -> None:
+    state = ServerState()
+    state.config.database_required = False
+    state.optional_service_status["planner_lm"] = "ready"
     assert state.is_ready is True
 
 
@@ -181,6 +189,16 @@ def test_get_server_state_missing_raises_http_503() -> None:
 def test_session_key() -> None:
     assert session_key("workspace", "user") == "workspace:user:__default__"
     assert session_key("workspace", "user", "session-1") == "workspace:user:session-1"
+
+
+def test_sanitize_id_rejects_dot_only_segments() -> None:
+    assert sanitize_id(".", "default") == "default"
+    assert sanitize_id("...", "default") == "default"
+    assert sanitize_id("---", "default") == "default"
+
+
+def test_sanitize_id_strips_boundary_dots() -> None:
+    assert sanitize_id(".workspace.", "default") == "workspace"
 
 
 def test_chat_request_defaults() -> None:
