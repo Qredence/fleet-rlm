@@ -10,6 +10,8 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.ui.conftest import STAGING_TEST_JWT_SECRET
+
 
 def _server_state(local_client: TestClient) -> Any:
     return cast(Any, local_client.app).state.server_state
@@ -23,10 +25,14 @@ def _staging_bearer_headers() -> dict[str, str]:
             "email": "alice@example.com",
             "name": "Alice",
         },
-        "staging-test-secret",
+        STAGING_TEST_JWT_SECRET,
         algorithm="HS256",
     )
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_staging_test_jwt_secret_meets_hs256_guidance() -> None:
+    assert len(STAGING_TEST_JWT_SECRET) >= 32
 
 
 def test_runtime_settings_masks_secrets(
@@ -814,6 +820,29 @@ def test_runtime_volume_tree_rejects_invalid_max_depth(
     response = local_client.get("/api/v1/runtime/volume/tree", params={"max_depth": 0})
 
     assert response.status_code == 422
+
+
+def test_runtime_volume_tree_rejects_path_traversal(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("volume backend should not be called")
+        ),
+    )
+
+    response = local_client.get(
+        "/api/v1/runtime/volume/tree",
+        params={"root_path": "/../etc"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Invalid root path."
 
 
 def test_runtime_volume_file_rejects_invalid_max_bytes(

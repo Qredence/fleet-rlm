@@ -74,6 +74,14 @@ def normalize_volume_file_path(path: str) -> str:
     return normalized_path
 
 
+def normalize_volume_tree_path(root_path: str) -> str:
+    normalized_path = root_path if root_path.startswith("/") else f"/{root_path}"
+    normalized_path = normalized_path.rstrip("/") or "/"
+    if ".." in PurePosixPath(normalized_path).parts:
+        raise HTTPException(status_code=400, detail="Invalid root path.")
+    return normalized_path
+
+
 def raise_volume_file_error(exc: Exception) -> NoReturn:
     message = str(exc).lower()
     if "no such file" in message or "not found" in message:
@@ -143,11 +151,12 @@ async def load_volume_tree(
     root_path: str,
     max_depth: int,
 ) -> VolumeTreeResponse:
+    normalized_root_path = normalize_volume_tree_path(root_path)
     backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
     result = await _run_volume_operation(
         operation=backend.list_tree,
         volume_name=backend.volume_name,
-        path=root_path,
+        path=normalized_root_path,
         limit=max_depth,
         timeout_detail="Volume listing timed out.",
         error_prefix="Volume listing failed",
