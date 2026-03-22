@@ -1,8 +1,7 @@
 """Utility functions and helpers.
 
-Provides utility functions that don't belong in core:
+Provides small utility functions that don't belong in runtime/integrations:
 - Modal volume/config helpers
-- Scaffold installation utilities
 - Regex extraction tools
 """
 
@@ -18,14 +17,6 @@ from .modal import (
     sanitize_key,
     setup_modal_env,
 )
-from .scaffold import (
-    get_scaffold_dir,
-    install_agents,
-    install_all,
-    install_skills,
-    list_agents,
-    list_skills,
-)
 from .regex import regex_extract
 
 __all__ = [
@@ -38,13 +29,6 @@ __all__ = [
     "load_modal_config",
     "sanitize_key",
     "setup_modal_env",
-    # Scaffold
-    "get_scaffold_dir",
-    "install_agents",
-    "install_all",
-    "install_skills",
-    "list_agents",
-    "list_skills",
     # Tools
     "regex_extract",
 ]

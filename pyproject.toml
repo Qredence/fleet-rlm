@@ -123,8 +123,8 @@ include = ["fleet_rlm*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"fleet_rlm._scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
-"fleet_rlm.conf" = ["*.yaml", "*.yml"]
+"fleet_rlm.scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
+"fleet_rlm.integrations.config" = ["*.yaml", "*.yml"]
 "fleet_rlm" = ["py.typed"]
 "fleet_rlm.ui" = ["dist/**/*", "dist/*"]
 

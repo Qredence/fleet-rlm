@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 import typer
 
-from ..runtime_builders import build_mcp_runtime_config, build_server_runtime_config
+from ..runtime_factory import build_mcp_runtime_config, build_server_runtime_config
 
 
 def register_serve_commands(
@@ -84,7 +84,7 @@ def register_serve_commands(
                 )
                 raise typer.Exit(code=2)
 
-            from fleet_rlm.infrastructure.mcp.server import (
+            from fleet_rlm.integrations.mcp.server import (
                 create_mcp_server,
             )
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.core.agent.commands import _resolve_tool, execute_command
+from fleet_rlm.runtime.agent.commands import _resolve_tool, execute_command
 
 
 class _FakeAgent:

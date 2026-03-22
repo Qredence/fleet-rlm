@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from fleet_rlm import runners
-from fleet_rlm.core.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.infrastructure.database import FleetRepository
 from fleet_rlm.infrastructure.database.models import ArtifactKind
 from fleet_rlm.infrastructure.database.types import (

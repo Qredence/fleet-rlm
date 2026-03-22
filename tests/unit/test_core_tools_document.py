@@ -1,6 +1,6 @@
 """Unit tests for document tool wrappers at their new location.
 
-Covers fleet_rlm.core.tools.document.build_document_tools factory —
+Covers fleet_rlm.runtime.tools.document.build_document_tools factory —
 the closure-based DSPy tool builder that binds document ops to an agent.
 """
 
@@ -39,7 +39,7 @@ def _make_fake_agent(tmp_path: Path) -> Any:
 
 def test_build_document_tools_returns_dspy_tools():
     """build_document_tools should return a non-empty list of dspy.Tool objects."""
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(Path("/tmp"))
     tools = build_document_tools(agent)
@@ -52,7 +52,7 @@ def test_build_document_tools_returns_dspy_tools():
 
 def test_build_document_tools_includes_expected_names():
     """The factory should expose load_document, fetch_web_document, set_active_document, list_documents."""
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(Path("/tmp"))
     tools = build_document_tools(agent)
@@ -74,7 +74,7 @@ def test_build_document_tools_includes_expected_names():
 
 def test_load_document_local_file(tmp_path: Path):
     """load_document with a local file path should populate agent._document_cache."""
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     readme = tmp_path / "readme.md"
     readme.write_text("# Hello\nThis is the readme.")
@@ -85,7 +85,7 @@ def test_load_document_local_file(tmp_path: Path):
 
     # Patch the read_document_content dependency to avoid real parser
     with patch(
-        "fleet_rlm.core.tools.document._read_document_content",
+        "fleet_rlm.runtime.tools.document._read_document_content",
         return_value=("# Hello\nThis is the readme.", {"source_type": "text"}),
     ):
         result = load_fn(str(readme))
@@ -97,7 +97,7 @@ def test_load_document_local_file(tmp_path: Path):
 
 def test_load_document_missing_file_raises(tmp_path: Path):
     """load_document with a non-existent path should raise FileNotFoundError."""
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)
@@ -109,7 +109,7 @@ def test_load_document_missing_file_raises(tmp_path: Path):
 
 def test_load_document_directory_returns_listing(tmp_path: Path):
     """load_document with a directory returns a file listing, not content."""
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     (tmp_path / "a.txt").write_text("A")
     (tmp_path / "b.txt").write_text("B")
@@ -131,7 +131,7 @@ def test_load_document_directory_returns_listing(tmp_path: Path):
 
 
 def test_list_documents_empty_cache(tmp_path: Path):
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)
@@ -144,7 +144,7 @@ def test_list_documents_empty_cache(tmp_path: Path):
 
 
 def test_list_documents_populated_cache(tmp_path: Path):
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     agent._document_cache["doc1"] = "content one"
@@ -167,7 +167,7 @@ def test_list_documents_populated_cache(tmp_path: Path):
 
 
 def test_set_active_document_valid_alias(tmp_path: Path):
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     agent._document_cache["myfile"] = "some content"
@@ -182,7 +182,7 @@ def test_set_active_document_valid_alias(tmp_path: Path):
 
 
 def test_set_active_document_invalid_alias_raises(tmp_path: Path):
-    from fleet_rlm.core.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)

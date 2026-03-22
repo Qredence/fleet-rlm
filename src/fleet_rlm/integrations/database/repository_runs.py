@@ -1,0 +1,161 @@
+"""Run and artifact repository operations."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Sequence
+
+from sqlalchemy import and_, select, update
+from sqlalchemy.dialects.postgresql import insert
+
+from .models import Artifact, ArtifactKind, Run, RunStatus, RunStep, RunStepType
+from .repository_shared import RepositoryContextMixin, _utc_now
+from .types import ArtifactCreateRequest, RunCreateRequest, RunStepCreateRequest
+
+
+class RepositoryRunsMixin(RepositoryContextMixin):
+    async def create_run(self, request: RunCreateRequest) -> Run:
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(
+                session,
+                request.tenant_id,
+                request.created_by_user_id,
+            )
+            stmt = insert(Run).values(
+                tenant_id=request.tenant_id,
+                external_run_id=request.external_run_id,
+                created_by_user_id=request.created_by_user_id,
+                status=request.status,
+                model_provider=request.model_provider,
+                model_name=request.model_name,
+                sandbox_provider=request.sandbox_provider,
+                sandbox_session_id=request.sandbox_session_id,
+                error_json=request.error_json,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[Run.tenant_id, Run.external_run_id],
+                set_={
+                    "created_by_user_id": request.created_by_user_id,
+                    "status": request.status,
+                    "model_provider": request.model_provider,
+                    "model_name": request.model_name,
+                    "sandbox_provider": request.sandbox_provider,
+                    "sandbox_session_id": request.sandbox_session_id,
+                    "error_json": request.error_json,
+                    "updated_at": _utc_now(),
+                },
+            ).returning(Run)
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def update_run_status(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        status: RunStatus,
+        error_json: dict | None = None,
+    ) -> Run | None:
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id)
+            values: dict[str, object] = {
+                "status": status,
+                "updated_at": _utc_now(),
+            }
+            if status in {
+                RunStatus.COMPLETED,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            }:
+                values["completed_at"] = _utc_now()
+            if error_json is not None:
+                values["error_json"] = error_json
+
+            stmt = (
+                update(Run)
+                .where(and_(Run.id == run_id, Run.tenant_id == tenant_id))
+                .values(**values)
+                .returning(Run)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def append_step(self, request: RunStepCreateRequest) -> RunStep:
+        step_type = (
+            request.step_type
+            if isinstance(request.step_type, RunStepType)
+            else RunStepType(request.step_type)
+        )
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, request.tenant_id)
+            stmt = insert(RunStep).values(
+                tenant_id=request.tenant_id,
+                run_id=request.run_id,
+                step_index=request.step_index,
+                step_type=step_type,
+                input_json=request.input_json,
+                output_json=request.output_json,
+                tokens_in=request.tokens_in,
+                tokens_out=request.tokens_out,
+                latency_ms=request.latency_ms,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    RunStep.tenant_id,
+                    RunStep.run_id,
+                    RunStep.step_index,
+                ],
+                set_={
+                    "step_type": step_type,
+                    "input_json": request.input_json,
+                    "output_json": request.output_json,
+                    "tokens_in": request.tokens_in,
+                    "tokens_out": request.tokens_out,
+                    "latency_ms": request.latency_ms,
+                    "updated_at": _utc_now(),
+                },
+            ).returning(RunStep)
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def store_artifact(self, request: ArtifactCreateRequest) -> Artifact:
+        kind = (
+            request.kind
+            if isinstance(request.kind, ArtifactKind)
+            else ArtifactKind(request.kind)
+        )
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, request.tenant_id)
+            stmt = (
+                insert(Artifact)
+                .values(
+                    tenant_id=request.tenant_id,
+                    run_id=request.run_id,
+                    step_id=request.step_id,
+                    kind=kind,
+                    uri=request.uri,
+                    mime_type=request.mime_type,
+                    size_bytes=request.size_bytes,
+                    checksum=request.checksum,
+                    metadata_json=request.metadata_json,
+                )
+                .returning(Artifact)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def get_run_steps(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+    ) -> Sequence[RunStep]:
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id)
+            stmt = (
+                select(RunStep)
+                .where(and_(RunStep.tenant_id == tenant_id, RunStep.run_id == run_id))
+                .order_by(RunStep.step_index.asc())
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
