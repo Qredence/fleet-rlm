@@ -91,7 +91,7 @@ Common overrides include:
 ## Tools Exposed by MCP
 
 The MCP server exposes the following tools from
-`src/fleet_rlm/infrastructure/mcp/server.py`:
+`src/fleet_rlm/integrations/mcp/server.py`:
 
 | Tool | Description |
 |------|-------------|

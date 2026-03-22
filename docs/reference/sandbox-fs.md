@@ -28,8 +28,8 @@ Sandbox-side helpers exposed by the driver include:
 - `load_from_volume(path)`
 - workspace helpers for local ephemeral file access
 
-These are wired through `src/fleet_rlm/core/execution/core_driver.py` and bundled from
-`src/fleet_rlm/core/tools/volume_tools.py`.
+These are wired through `src/fleet_rlm/runtime/execution/core_driver.py` and bundled from
+`src/fleet_rlm/runtime/execution/sandbox_assets.py`.
 
 ## Operational Notes
 

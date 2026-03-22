@@ -39,7 +39,7 @@ Basic liveness check.
 ```json
 {
   "ok": true,
-  "version": "0.4.98"
+  "version": "0.4.99"
 }
 ```
 

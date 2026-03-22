@@ -78,7 +78,7 @@ NVIDIA_NIM_API_KEY=your-nvidia-key
 
 Model configuration is managed through Hydra/OmegaConf settings, not this document. See:
 
-- `src/fleet_rlm/conf/config.yaml` - Active runtime configuration
+- `src/fleet_rlm/integrations/config/config.yaml` - Active runtime configuration
 - `.env` - Environment variables for API keys and model defaults
 
 To override the model:

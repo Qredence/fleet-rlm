@@ -6,10 +6,10 @@ Fleet-RLM uses **Neon/PostgreSQL** as its primary persistence layer with SQLAlch
 
 | Component | Location |
 |-----------|----------|
-| Engine/session management | `src/fleet_rlm/infrastructure/database/engine.py` |
-| Repository layer | `src/fleet_rlm/infrastructure/database/repository.py` |
-| Domain models | `src/fleet_rlm/infrastructure/database/models.py` |
-| Type definitions | `src/fleet_rlm/infrastructure/database/types.py` |
+| Engine/session management | `src/fleet_rlm/integrations/database/engine.py` |
+| Repository layer | `src/fleet_rlm/integrations/database/repository.py` |
+| Domain models | `src/fleet_rlm/integrations/database/models.py` |
+| Type definitions | `src/fleet_rlm/integrations/database/types.py` |
 | Migrations | `migrations/` (Alembic) |
 
 ## Environment Variables
@@ -34,7 +34,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/dbname
 The `DatabaseManager` class in `engine.py` handles async database connections:
 
 ```python
-from fleet_rlm.infrastructure.database.engine import DatabaseManager
+from fleet_rlm.integrations.database.engine import DatabaseManager
 
 # Initialize with connection URL
 db = DatabaseManager(database_url)
@@ -55,7 +55,7 @@ The engine provides helpers for driver compatibility:
 
 ## Model Classes
 
-All models inherit from `Base` and are defined in `src/fleet_rlm/infrastructure/database/models.py`.
+All models inherit from `Base` and are defined in `src/fleet_rlm/integrations/database/models.py`.
 
 ### Core Models
 
@@ -397,7 +397,7 @@ async def _set_request_context(
 
 ## Repository Methods
 
-The `FleetRepository` class in `src/fleet_rlm/infrastructure/database/repository.py` provides typed, tenant-scoped database operations.
+The `FleetRepository` class in `src/fleet_rlm/integrations/database/repository.py` provides typed, tenant-scoped database operations.
 
 ### Identity & Authentication
 
