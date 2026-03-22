@@ -27,6 +27,11 @@ def test_list_volume_tree_raises_when_listdir_fails(
         list_volume_tree("test-volume")
 
 
+def test_list_volume_tree_rejects_path_traversal() -> None:
+    with pytest.raises(ValueError, match="Path traversal not allowed"):
+        list_volume_tree("test-volume", "/../etc")
+
+
 def test_read_volume_file_text_stops_after_preview_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -83,3 +88,8 @@ def test_read_volume_file_text_uses_metadata_size_when_truncated(
     assert payload["content"] == "abcdefghijkl"
     assert payload["truncated"] is True
     assert payload["size"] == 128
+
+
+def test_read_volume_file_text_rejects_path_traversal() -> None:
+    with pytest.raises(ValueError, match="Path traversal not allowed"):
+        read_volume_file_text("test-volume", "/../etc/passwd")

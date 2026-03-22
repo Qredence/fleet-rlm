@@ -16,6 +16,15 @@ from .volume_helpers import entry_name, stable_tree_id
 logger = logging.getLogger(__name__)
 
 
+def _normalize_modal_volume_path(path: str, *, default_path: str = "/") -> str:
+    candidate = (path or default_path).strip() or default_path
+    normalized_path = candidate if candidate.startswith("/") else f"/{candidate}"
+    pure_path = PurePosixPath(normalized_path)
+    if ".." in pure_path.parts:
+        raise ValueError(f"Path traversal not allowed: {candidate!r}")
+    return str(pure_path)
+
+
 def _is_directory_entry(entry: Any) -> bool:
     entry_type = getattr(entry, "type", None)
     return entry_type in (2, "DIRECTORY") or getattr(entry_type, "value", None) == 2
@@ -59,7 +68,9 @@ def list_volume_tree(
 ) -> dict[str, Any]:
     """List the file tree of a Modal Volume."""
     max_depth = max(1, min(max_depth, 10))
-    root_path = root_path.rstrip("/") or "/"
+    root_path = (
+        _normalize_modal_volume_path(root_path, default_path="/").rstrip("/") or "/"
+    )
 
     vol = modal.Volume.from_name(volume_name, create_if_missing=False)
 
@@ -148,11 +159,8 @@ def read_volume_file_text(
     max_bytes: int = 200_000,
 ) -> dict[str, Any]:
     """Read file bytes from a Modal Volume and decode as UTF-8 text."""
-    if not path:
-        raise ValueError("path is required")
-
     max_bytes = max(1, min(max_bytes, 1_000_000))
-    normalized_path = path if path.startswith("/") else f"/{path}"
+    normalized_path = _normalize_modal_volume_path(path)
 
     vol = modal.Volume.from_name(volume_name, create_if_missing=False)
     size_from_metadata = _lookup_file_size_from_metadata(vol, normalized_path)
