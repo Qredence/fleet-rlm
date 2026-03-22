@@ -15,10 +15,10 @@ from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from ...auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ...config import ServerRuntimeConfig
 from ...dependencies import ServerState
+from ...server_utils import sanitize_id as _sanitize_id
 from .helpers import (
     _close_websocket_safely,
     _error_envelope,
-    _sanitize_id,
     _try_send_json,
 )
 from .lifecycle import ExecutionLifecycleManager

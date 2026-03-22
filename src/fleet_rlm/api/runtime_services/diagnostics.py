@@ -279,7 +279,11 @@ async def run_lm_connection_test(
                     "Failed to construct planner LM from environment settings."
                 )
         else:
-            assert planner_loader is not None  # type narrowing for mypy/pyright
+            if planner_loader is None:
+                raise ValueError(
+                    "delegate_loader was provided without planner_loader; "
+                    "both must be supplied when overriding LM loaders."
+                )
             planner_lm = await run_blocking(
                 partial(
                     planner_loader,

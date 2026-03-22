@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -23,15 +22,6 @@ _WEBSOCKET_CLOSED_ERROR_FRAGMENTS = (
 def _sanitize_for_log(value: object) -> str:
     """Normalize untrusted values to a single log line."""
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
-
-
-def _sanitize_id(value: str, default_value: str) -> str:
-    """Restrict workspace/user IDs to a safe path/key subset."""
-    candidate = (value or "").strip()
-    if not candidate:
-        return default_value
-    cleaned = re.sub(r"[^a-zA-Z0-9_.-]", "-", candidate)
-    return cleaned[:128] or default_value
 
 
 def _is_closed_websocket_runtime_error(exc: RuntimeError) -> bool:

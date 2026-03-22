@@ -54,7 +54,7 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
     response = local_client.get("/ready")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["ready"] is True
+    assert payload["ready"] is False
     assert payload["planner_configured"] is False
     assert payload["planner"] == "missing"
     assert payload["database"] in {"disabled", "missing", "ready"}

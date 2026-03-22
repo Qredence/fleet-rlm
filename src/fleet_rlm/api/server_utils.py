@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+import re
+
 from fleet_rlm.integrations.database.models import SandboxProvider
+
+
+def sanitize_id(value: str, default_value: str) -> str:
+    """Restrict IDs to a safe path/key character subset (alphanumeric, ``_``, ``.``, ``-``).
+
+    Consecutive dots (e.g. ``..``) are collapsed to ``-`` to prevent directory
+    traversal when the result is embedded in a file path.
+    """
+    candidate = (value or "").strip()
+    if not candidate:
+        return default_value
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]", "-", candidate)
+    cleaned = re.sub(r"\.{2,}", "-", cleaned)
+    return cleaned[:128] or default_value
 
 
 def parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:
