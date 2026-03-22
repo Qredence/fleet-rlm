@@ -660,11 +660,10 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
 
 export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMessage): boolean {
   const acceptsTerminalCompat =
-    state.status === "bootstrapping" ||
-    state.status === "running" ||
-    state.status === "completed";
+    state.status === "bootstrapping" || state.status === "running" || state.status === "completed";
+  const acceptsRawError = state.status === "bootstrapping" || state.status === "running";
   if (frame.type === "error") {
-    return acceptsTerminalCompat;
+    return acceptsRawError;
   }
   if (
     (frame.data.kind === "final" ||

@@ -663,6 +663,42 @@ describe("runWorkbenchAdapter", () => {
     expect(shouldApplyRunFrame(completed, modalFrame)).toBe(false);
   });
 
+  it("ignores raw websocket error envelopes after a completed run", () => {
+    const completed = applyFrameToRunWorkbenchState(
+      startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+        task: "Analyze the repo",
+      }),
+      makeEvent("final", "Done", {
+        source_type: "execution_completed",
+        runtime_mode: "modal_chat",
+        runtime: {
+          runtime_mode: "modal_chat",
+          run_id: "run-790",
+        },
+        run_summary: {
+          run_id: "run-790",
+          task: "Analyze the repo",
+          iterations: [],
+          callbacks: [],
+          prompts: [],
+          sources: [],
+          attachments: [],
+          summary: {
+            duration_ms: 120,
+            termination_reason: "completed",
+          },
+        },
+      }),
+    );
+
+    const lateErrorFrame: WsServerMessage = {
+      type: "error",
+      message: "WebSocket reconnect failed",
+    };
+
+    expect(shouldApplyRunFrame(completed, lateErrorFrame)).toBe(false);
+  });
+
   it("marks a pending Daytona run as errored without dropping source context", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze local docs",
