@@ -6,7 +6,7 @@ import uuid
 import jwt
 import pytest
 
-from fleet_rlm.infrastructure.database import TenantStatus
+from fleet_rlm.integrations.database import TenantStatus
 from fleet_rlm.api.auth import (
     DevAuthProvider,
     EntraAuthProvider,

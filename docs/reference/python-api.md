@@ -4,9 +4,10 @@ This page documents the current, maintained Python interfaces for building on `f
 
 ## Core Runtime Classes
 
-### `fleet_rlm.core.interpreter.ModalInterpreter`
+### `fleet_rlm.ModalInterpreter`
 
-Primary sandbox execution runtime.
+Primary sandbox execution runtime. The maintained implementation lives in
+`fleet_rlm.runtime.execution.interpreter`.
 
 Typical usage:
 
@@ -23,7 +24,7 @@ Key capabilities:
 - sync/async execution (`execute`, `aexecute`)
 - execution profile support used by server and delegate workflows
 
-### `fleet_rlm.core.agent.chat_agent.RLMReActChatAgent`
+### `fleet_rlm.runtime.agent.chat_agent.RLMReActChatAgent`
 
 Interactive ReAct orchestration module used by CLI and server chat surfaces.
 
@@ -34,7 +35,7 @@ Key behaviors:
 - sync/async chat turn helpers
 - streaming event generation for WebSocket clients
 
-## Runner Functions (`fleet_rlm.runners`)
+## Runner Functions (`fleet_rlm.cli.runners`)
 
 Current maintained runner surface:
 
@@ -81,7 +82,7 @@ Modes:
 
 These execute Modal-side checks for required environment keys.
 
-## Signatures (`fleet_rlm.core.agent.signatures`)
+## Signatures (`fleet_rlm.runtime.agent.signatures`)
 
 Current maintained signatures include:
 
@@ -101,7 +102,7 @@ Current maintained signatures include:
 ## Minimal Example
 
 ```python
-from fleet_rlm.runners import run_long_context
+from fleet_rlm.cli.runners import run_long_context
 
 result = run_long_context(
     docs_path="README.md",
@@ -114,6 +115,6 @@ print(result["answer"])
 ## Import Verification
 
 ```bash
-uv run python -c "from fleet_rlm.runners import run_long_context, run_react_chat_once"
-uv run python -c "from fleet_rlm.core.agent.signatures import AnalyzeLongDocument"
+uv run python -c "from fleet_rlm.cli.runners import run_long_context, run_react_chat_once"
+uv run python -c "from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument"
 ```

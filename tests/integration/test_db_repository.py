@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
-from fleet_rlm.infrastructure.database import FleetRepository
-from fleet_rlm.infrastructure.database.models import (
+from fleet_rlm.integrations.database import FleetRepository
+from fleet_rlm.integrations.database.models import (
     ArtifactKind,
     BillingSource,
     JobStatus,
@@ -25,7 +25,7 @@ from fleet_rlm.infrastructure.database.models import (
     TenantStatus,
     TenantSubscription,
 )
-from fleet_rlm.infrastructure.database.types import (
+from fleet_rlm.integrations.database.types import (
     ArtifactCreateRequest,
     JobCreateRequest,
     JobLeaseRequest,

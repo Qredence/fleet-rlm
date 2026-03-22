@@ -12,7 +12,7 @@ try:
 except ImportError:
     from dspy import FinalOutput
 
-from fleet_rlm.core.models import StreamEvent
+from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
 
@@ -27,6 +27,11 @@ class _FakeAgentInterpreter:
         self.default_execution_profile = "ROOT_INTERLOCUTOR"
         self._volume_store: dict[str, str] = {}
         self.execution_event_callback = None
+        self.repo_url: str | None = None
+        self.repo_ref: str | None = None
+        self.context_paths: list[str] = []
+        self.volume_name: str | None = None
+        self.workspace_config_calls: list[dict[str, Any]] = []
 
     @contextmanager
     def execution_profile(self, profile):
@@ -58,6 +63,45 @@ class _FakeAgentInterpreter:
     ):
         return self.execute(code, variables, **kwargs)
 
+    def configure_workspace(
+        self,
+        *,
+        repo_url: str | None,
+        repo_ref: str | None,
+        context_paths: list[str] | None,
+        volume_name: str | None,
+        force_new_session: bool = False,
+    ) -> None:
+        _ = force_new_session
+        payload = {
+            "repo_url": repo_url,
+            "repo_ref": repo_ref,
+            "context_paths": list(context_paths or []),
+            "volume_name": volume_name,
+        }
+        self.workspace_config_calls.append(payload)
+        self.repo_url = repo_url
+        self.repo_ref = repo_ref
+        self.context_paths = list(context_paths or [])
+        self.volume_name = volume_name
+
+    async def aconfigure_workspace(
+        self,
+        *,
+        repo_url: str | None,
+        repo_ref: str | None,
+        context_paths: list[str] | None,
+        volume_name: str | None,
+        force_new_session: bool = False,
+    ) -> None:
+        self.configure_workspace(
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+            context_paths=context_paths,
+            volume_name=volume_name,
+            force_new_session=force_new_session,
+        )
+
 
 class FakeChatAgent:
     """Fake agent for testing WebSocket streaming."""
@@ -72,6 +116,10 @@ class FakeChatAgent:
         self.last_stream_kwargs: dict[str, Any] = {}
         self.interpreter = _FakeAgentInterpreter()
         self._live_event_callback = None
+        self.reset_calls = 0
+        self.areset_calls = 0
+        self.import_session_state_calls = 0
+        self.aimport_session_state_calls = 0
 
     def __enter__(self):
         return self
@@ -148,6 +196,12 @@ class FakeChatAgent:
         return len(messages)
 
     def reset(self, *, clear_sandbox_buffers: bool = True):
+        self.reset_calls += 1
+        self.history = SimpleNamespace(messages=[])
+        return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
+
+    async def areset(self, *, clear_sandbox_buffers: bool = True):
+        self.areset_calls += 1
         self.history = SimpleNamespace(messages=[])
         return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
 
@@ -155,6 +209,11 @@ class FakeChatAgent:
         return dict(self._session_state)
 
     def import_session_state(self, state: dict[str, Any]) -> None:
+        self.import_session_state_calls += 1
+        self._session_state = dict(state)
+
+    async def aimport_session_state(self, state: dict[str, Any]) -> None:
+        self.aimport_session_state_calls += 1
         self._session_state = dict(state)
 
     def clear_test_state(self) -> None:
@@ -164,8 +223,17 @@ class FakeChatAgent:
         self.execution_mode = "auto"
         self.last_stream_kwargs = {}
         self.history = SimpleNamespace(messages=[])
+        self.reset_calls = 0
+        self.areset_calls = 0
+        self.import_session_state_calls = 0
+        self.aimport_session_state_calls = 0
         self.interpreter._volume_store.clear()
         self.interpreter.execution_event_callback = None
+        self.interpreter.repo_url = None
+        self.interpreter.repo_ref = None
+        self.interpreter.context_paths = []
+        self.interpreter.volume_name = None
+        self.interpreter.workspace_config_calls = []
 
 
 class DelayedRepository:
@@ -263,9 +331,15 @@ def build_ws_test_app(monkeypatch, fake_agent: FakeChatAgent):
         _ = kwargs
         return fake_agent
 
-    monkeypatch.setattr("fleet_rlm.runners.build_react_chat_agent", _fake_build_agent)
     monkeypatch.setattr(
-        "fleet_rlm.runners.build_daytona_workbench_chat_agent",
+        "fleet_rlm.cli.runners.build_chat_agent_for_runtime_mode",
+        _fake_build_agent,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.cli.runners.build_react_chat_agent", _fake_build_agent
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.cli.runners.build_daytona_workbench_chat_agent",
         _fake_build_agent,
     )
     return create_app(

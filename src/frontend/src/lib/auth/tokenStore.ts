@@ -1,5 +1,4 @@
 const ACCESS_TOKEN_KEY = "fleet-rlm:access-token";
-const LEGACY_LOCAL_STORAGE_KEYS = ["fleet_access_token"] as const;
 
 function safeSessionStorage(): Storage | undefined {
   if (typeof sessionStorage === "undefined") return undefined;
@@ -50,19 +49,7 @@ function loadAccessTokenFromStorage(): string | null {
   if (fromCanonicalLocal) {
     writeTokenToStorage(session, ACCESS_TOKEN_KEY, fromCanonicalLocal);
     removeTokenFromStorage(local, ACCESS_TOKEN_KEY);
-    for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS) {
-      removeTokenFromStorage(local, legacyKey);
-    }
     return fromCanonicalLocal;
-  }
-
-  for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS) {
-    const legacyToken = readTokenFromStorage(local, legacyKey);
-    if (legacyToken) {
-      writeTokenToStorage(session, ACCESS_TOKEN_KEY, legacyToken);
-      removeTokenFromStorage(local, legacyKey);
-      return legacyToken;
-    }
   }
 
   return null;
@@ -83,10 +70,6 @@ export function setAccessToken(token: string | null): void {
   } else {
     removeTokenFromStorage(session, ACCESS_TOKEN_KEY);
     removeTokenFromStorage(local, ACCESS_TOKEN_KEY);
-  }
-
-  for (const legacyKey of LEGACY_LOCAL_STORAGE_KEYS) {
-    removeTokenFromStorage(local, legacyKey);
   }
 }
 

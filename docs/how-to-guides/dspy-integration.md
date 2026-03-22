@@ -13,7 +13,7 @@ Fleet-rlm extends DSPy with `dspy.RLM`, a recursive language model runtime that 
 
 ## Signatures
 
-Signatures define the input/output contract for DSPy modules. Fleet-rlm keeps all production signatures centralized in `src/fleet_rlm/core/agent/signatures.py`.
+Signatures define the input/output contract for DSPy modules. Fleet-rlm keeps all production signatures centralized in `src/fleet_rlm/runtime/agent/signatures.py`.
 
 ### Signature Structure
 
@@ -47,7 +47,7 @@ Fleet-rlm provides several production-ready signatures:
 #### Long-Document Analysis
 
 ```python
-from fleet_rlm.core.agent.signatures import AnalyzeLongDocument
+from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument
 
 class AnalyzeLongDocument(dspy.Signature):
     """Analyze a long document by navigating, querying, and synthesizing.
@@ -64,7 +64,7 @@ class AnalyzeLongDocument(dspy.Signature):
 ```
 
 ```python
-from fleet_rlm.core.agent.signatures import SummarizeLongDocument
+from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 
 class SummarizeLongDocument(dspy.Signature):
     """Summarize a long document with controllable focus.
@@ -82,7 +82,7 @@ class SummarizeLongDocument(dspy.Signature):
 #### Log Analysis
 
 ```python
-from fleet_rlm.core.agent.signatures import ExtractFromLogs, IncidentTriageFromLogs
+from fleet_rlm.runtime.agent.signatures import ExtractFromLogs, IncidentTriageFromLogs
 
 class ExtractFromLogs(dspy.Signature):
     """Extract patterns from log-style text."""
@@ -107,7 +107,7 @@ class IncidentTriageFromLogs(dspy.Signature):
 #### Grounded Answers with Citations
 
 ```python
-from fleet_rlm.core.agent.signatures import GroundedAnswerWithCitations
+from fleet_rlm.runtime.agent.signatures import GroundedAnswerWithCitations
 
 class GroundedAnswerWithCitations(dspy.Signature):
     """Answer questions using chunked evidence and explicit citations.
@@ -131,7 +131,7 @@ class GroundedAnswerWithCitations(dspy.Signature):
 #### Code Planning
 
 ```python
-from fleet_rlm.core.agent.signatures import CodeChangePlan
+from fleet_rlm.runtime.agent.signatures import CodeChangePlan
 
 class CodeChangePlan(dspy.Signature):
     """Generate a structured implementation plan for a code change."""
@@ -149,7 +149,7 @@ class CodeChangePlan(dspy.Signature):
 #### Memory Operations
 
 ```python
-from fleet_rlm.core.agent.signatures import (
+from fleet_rlm.runtime.agent.signatures import (
     VolumeFileTreeSignature,
     MemoryActionIntentSignature,
     CoreMemoryUpdateProposal,
@@ -202,7 +202,7 @@ class MyCustomSignature(dspy.Signature):
     output_field: str = dspy.OutputField(desc="Description of output")
 ```
 
-Place custom signatures in `src/fleet_rlm/core/agent/signatures.py` to integrate with the runtime module registry.
+Place custom signatures in `src/fleet_rlm/runtime/agent/signatures.py` to integrate with the runtime module registry.
 
 ## Module Construction
 
@@ -213,9 +213,9 @@ Modules wrap signatures with execution logic. Fleet-rlm provides factory functio
 Use `create_runtime_rlm()` for canonical RLM construction:
 
 ```python
-from fleet_rlm.core.models.rlm_runtime_modules import create_runtime_rlm
+from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
 from fleet_rlm.react.signatures import AnalyzeLongDocument
-from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 # Set up the Modal interpreter
 interpreter = ModalInterpreter(
@@ -248,8 +248,8 @@ print(result.findings)
 For production use, prefer registry-based module construction:
 
 ```python
-from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
-from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=600, secret_name="LITELLM")
 
@@ -285,8 +285,8 @@ Available module names:
 For delegated sub-problems, use the recursive query pattern:
 
 ```python
-from fleet_rlm.core.models.rlm_runtime_modules import build_recursive_subquery_rlm
-from fleet_rlm.core.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.models.rlm_runtime_modules import build_recursive_subquery_rlm
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=300, secret_name="LITELLM")
 
@@ -309,11 +309,25 @@ print(result.answer)
 
 The `dspy.RLM` class extends DSPy with Modal sandbox execution. Configure it through `ModalInterpreter`.
 
+### Adapter Overrides
+
+Structured runtime modules default to `JSONAdapter`, while non-runtime-module DSPy contexts use
+ the optional `DSPY_ADAPTER` override when configured.
+
+- `DSPY_STRUCTURED_OUTPUT_ADAPTER=chat|json|none`
+- `DSPY_ADAPTER=chat|json|none`
+- `DSPY_STRUCTURED_OUTPUT_ADAPTER_USE_NATIVE_FUNCTION_CALLING=true|false`
+- `DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING=true|false`
+
+The native function-calling flags are experimental and remain off by default. They exist only as
+ opt-in adapter prototypes and should not be enabled as the product default until streaming and
+ trajectory compatibility are proven.
+
 ### ModalInterpreter Options
 
 ```python
-from fleet_rlm.core.execution.interpreter import ModalInterpreter
-from fleet_rlm.core.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 interpreter = ModalInterpreter(
     # Core settings
@@ -352,7 +366,8 @@ Fleet-rlm uses execution profiles to categorize sandbox behavior:
 Set the profile explicitly:
 
 ```python
-from fleet_rlm.core.interpreter import ExecutionProfile
+from fleet_rlm import ModalInterpreter
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 # During interpreter creation
 interpreter = ModalInterpreter(
@@ -399,7 +414,7 @@ async for value in stream_rlm(prompt="Analyze this document", context="..."):
 The `RLMReActChatAgent` delegates to child RLMs via the `rlm_query` tool:
 
 ```python
-from fleet_rlm.core.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 
 agent = RLMReActChatAgent(
     react_max_iters=10,

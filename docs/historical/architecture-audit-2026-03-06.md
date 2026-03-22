@@ -88,7 +88,7 @@ Implementation note:
 - Runtime factory: `src/fleet_rlm/react/runtime_factory.py`
 - Tool assembly: `src/fleet_rlm/react/tools/__init__.py`
 - Delegate/memory runtime tools: `src/fleet_rlm/react/tools/delegate.py`, `memory_intelligence.py`
-- Interpreter: `src/fleet_rlm/core/interpreter.py`
+- Interpreter: `src/fleet_rlm/runtime/interpreter.py`
 
 #### Persistence and analytics
 

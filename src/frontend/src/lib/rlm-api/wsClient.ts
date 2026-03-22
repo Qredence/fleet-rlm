@@ -105,6 +105,9 @@ export function subscribeToExecutionStream(
   if (rlmApiConfig.workspaceId) {
     urlObj.searchParams.set("workspace_id", rlmApiConfig.workspaceId);
   }
+  if (rlmApiConfig.userId) {
+    urlObj.searchParams.set("user_id", rlmApiConfig.userId);
+  }
 
   createReconnectingWs(null, {
     ...options,

@@ -1,6 +1,13 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("@/lib/telemetry/client", () => ({
+  telemetryClient: {
+    capture: vi.fn(),
+  },
+}));
 
 import { useRunWorkbenchStore } from "@/screens/workspace/model/run-workbench-store";
+import { telemetryClient } from "@/lib/telemetry/client";
 
 function resetWorkbenchStore() {
   useRunWorkbenchStore.setState({
@@ -24,12 +31,15 @@ function resetWorkbenchStore() {
     summary: undefined,
     errorMessage: null,
     lastFrame: null,
+    compatBackfillCount: 0,
+    lastCompatBackfill: null,
   });
 }
 
 describe("useRunWorkbenchStore", () => {
   beforeEach(() => {
     resetWorkbenchStore();
+    vi.clearAllMocks();
   });
 
   it("clears a stale error banner when a new Daytona run begins", () => {
@@ -78,5 +88,56 @@ describe("useRunWorkbenchStore", () => {
     expect(state.selectedCallbackId).toBeNull();
     expect(state.contextSources).toEqual([]);
     expect(state.activity).toEqual([]);
+  });
+
+  it("tracks telemetry when terminal chat frames backfill only summary and final artifact", () => {
+    useRunWorkbenchStore.getState().beginRun({
+      task: "Inspect the repo",
+    });
+
+    useRunWorkbenchStore.getState().applyFrame({
+      type: "event",
+      data: {
+        kind: "final",
+        text: "Done",
+        event_id: "evt-compat-final",
+        payload: {
+          runtime_mode: "daytona_pilot",
+          run_result: {
+            run_id: "run-123",
+            task: "Inspect the repo",
+            iterations: [{ iteration: 1, status: "completed", summary: "Should stay ignored" }],
+            final_artifact: {
+              kind: "markdown",
+              value: { summary: "Compatibility summary" },
+            },
+            summary: {
+              termination_reason: "completed",
+              warnings: ["late execution summary"],
+            },
+          },
+        },
+      },
+    });
+
+    const state = useRunWorkbenchStore.getState();
+    expect(state.finalArtifact?.value).toMatchObject({ summary: "Compatibility summary" });
+    expect(state.summary?.warnings).toEqual(["late execution summary"]);
+    expect(state.iterations).toEqual([]);
+    expect(state.compatBackfillCount).toBe(1);
+    expect(state.lastCompatBackfill).toMatchObject({
+      eventId: "evt-compat-final",
+      runtimeMode: "daytona_pilot",
+      usedSummary: true,
+      usedFinalArtifact: true,
+    });
+    expect(telemetryClient.capture).toHaveBeenCalledWith(
+      "run_workbench_chat_final_backfill_used",
+      expect.objectContaining({
+        runtime_mode: "daytona_pilot",
+        used_summary: true,
+        used_final_artifact: true,
+      }),
+    );
   });
 });

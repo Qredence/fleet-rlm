@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from fleet_rlm.core.models import StreamEvent
+from fleet_rlm.runtime.models import StreamEvent
 
 from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
 
@@ -143,15 +143,17 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
     assert status["type"] == "event"
     assert status["data"]["kind"] == "status"
     assert status["data"]["payload"]["runtime"]["runtime_mode"] == "daytona_pilot"
-    assert (
-        fake_agent.last_stream_kwargs["repo_url"]
-        == "https://github.com/qredence/fleet-rlm.git"
-    )
-    assert fake_agent.last_stream_kwargs["repo_ref"] == "main"
-    assert fake_agent.last_stream_kwargs["context_paths"] == [
-        "/Users/zocho/Documents/spec.pdf"
-    ]
-    assert fake_agent.last_stream_kwargs["batch_concurrency"] == 5
+    assert fake_agent.last_stream_kwargs == {
+        "message": "analyze the repo",
+        "trace": True,
+        "docs_path": None,
+    }
+    assert fake_agent.interpreter.workspace_config_calls[-1] == {
+        "repo_url": "https://github.com/qredence/fleet-rlm.git",
+        "repo_ref": "main",
+        "context_paths": ["/Users/zocho/Documents/spec.pdf"],
+        "volume_name": "default",
+    }
     assert final["type"] == "event"
     assert final["data"]["kind"] == "final"
     assert final["data"]["text"] == "Daytona done"
@@ -267,11 +269,15 @@ def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
 
     assert event["type"] == "event"
     assert event["data"]["text"] == "Repo only"
+    assert fake_agent.last_stream_kwargs == {
+        "message": "analyze the repo",
+        "trace": True,
+        "docs_path": None,
+    }
     assert (
-        fake_agent.last_stream_kwargs["repo_url"]
-        == "https://github.com/qredence/fleet-rlm.git"
+        fake_agent.interpreter.repo_url == "https://github.com/qredence/fleet-rlm.git"
     )
-    assert fake_agent.last_stream_kwargs["context_paths"] == []
+    assert fake_agent.interpreter.context_paths == []
 
 
 def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_agent(
@@ -311,8 +317,13 @@ def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_ag
 
     assert event["type"] == "event"
     assert event["data"]["text"] == "Local context only"
-    assert fake_agent.last_stream_kwargs["repo_url"] is None
-    assert fake_agent.last_stream_kwargs["context_paths"] == [
+    assert fake_agent.last_stream_kwargs == {
+        "message": "review these docs",
+        "trace": True,
+        "docs_path": None,
+    }
+    assert fake_agent.interpreter.repo_url is None
+    assert fake_agent.interpreter.context_paths == [
         "/Users/zocho/Documents/spec.pdf",
         "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
     ]
@@ -351,9 +362,14 @@ def test_websocket_accepts_daytona_reasoning_only_requests(
 
     assert event["type"] == "event"
     assert event["data"]["kind"] == "final"
-    assert fake_agent.last_stream_kwargs["repo_url"] is None
-    assert fake_agent.last_stream_kwargs["repo_ref"] is None
-    assert fake_agent.last_stream_kwargs["context_paths"] == []
+    assert fake_agent.last_stream_kwargs == {
+        "message": "think through this architecture",
+        "trace": True,
+        "docs_path": None,
+    }
+    assert fake_agent.interpreter.repo_url is None
+    assert fake_agent.interpreter.repo_ref is None
+    assert fake_agent.interpreter.context_paths == []
 
 
 def test_websocket_rejects_daytona_repo_ref_without_repo_url(
@@ -417,9 +433,56 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
         [
             StreamEvent(kind="reasoning_step", text="Thinking...", timestamp=ts(1.0)),
             StreamEvent(
+                kind="tool_call",
+                text="Calling tool: read_file_slice",
+                payload={
+                    "tool_name": "read_file_slice",
+                    "delegate_depth": 2,
+                    "delegate_id": "delegate-42",
+                },
+                timestamp=ts(1.5),
+            ),
+            StreamEvent(
                 kind="final",
                 text="Done",
-                payload={"trajectory": {}, "history_turns": 1},
+                payload={
+                    "trajectory": {},
+                    "history_turns": 1,
+                    "run_result": {
+                        "task": "test execution events",
+                        "status": "completed",
+                        "context_sources": [
+                            {
+                                "source_id": "ctx-1",
+                                "kind": "file",
+                                "host_path": "/workspace/notes.md",
+                            }
+                        ],
+                        "callbacks": [
+                            {
+                                "id": "callback-1",
+                                "callback_name": "llm_query",
+                                "iteration": 1,
+                                "status": "completed",
+                            }
+                        ],
+                        "final_artifact": {
+                            "kind": "markdown",
+                            "value": {"summary": "Execution completed"},
+                        },
+                        "attachments": [
+                            {
+                                "attachment_id": "attachment-1",
+                                "name": "notes.md",
+                            }
+                        ],
+                    },
+                    "summary": {
+                        "warnings": ["Execution warning"],
+                        "termination_reason": "final",
+                        "duration_ms": 42,
+                    },
+                },
                 timestamp=ts(2.0),
             ),
         ]
@@ -468,12 +531,32 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     ]
     assert step_events
     assert any(step["step"]["type"] == "llm" for step in step_events)
+    assert any(
+        step["step"].get("actor_kind") == "delegate"
+        and step["step"].get("actor_id") == "delegate-42"
+        and step["step"].get("lane_key") == "delegate:delegate-42"
+        for step in step_events
+    )
     assert any(step["step"]["type"] == "output" for step in step_events)
     assert execution_events[-1]["type"] == "execution_completed"
     assert execution_events[-1]["summary"]["run_id"].endswith(":1")
     assert execution_events[-1]["summary"]["runtime_mode"] == "modal_chat"
     assert execution_events[-1]["summary"]["task"] == "test execution events"
     assert execution_events[-1]["summary"]["status"] == "completed"
+    assert execution_events[-1]["summary"]["summary"]["warnings"] == [
+        "Execution warning"
+    ]
+    assert execution_events[-1]["summary"]["summary"]["duration_ms"] == 42
+    assert execution_events[-1]["summary"]["context_sources"][0]["host_path"] == (
+        "/workspace/notes.md"
+    )
+    assert (
+        execution_events[-1]["summary"]["callbacks"][0]["callback_name"] == "llm_query"
+    )
+    assert execution_events[-1]["summary"]["attachments"][0]["name"] == "notes.md"
+    assert execution_events[-1]["summary"]["final_artifact"]["value"]["summary"] == (
+        "Execution completed"
+    )
 
 
 def test_websocket_final_event_waits_for_run_completion(
@@ -523,7 +606,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
         ]
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.streaming.merge_trace_result_metadata",
+        "fleet_rlm.api.routers.ws.stream.merge_trace_result_metadata",
         lambda payload, response_preview=None: {
             **(payload or {}),
             "mlflow_trace_id": "trace-123",
@@ -769,7 +852,7 @@ def test_websocket_reports_agent_startup_modal_auth_error(
             return False
 
     monkeypatch.setattr(
-        "fleet_rlm.runners.build_react_chat_agent",
+        "fleet_rlm.cli.runners.build_chat_agent_for_runtime_mode",
         lambda **kwargs: _FailingAgent(),
     )
 

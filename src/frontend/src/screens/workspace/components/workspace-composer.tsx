@@ -190,7 +190,7 @@ function WorkspaceComposer({
               "transition-[background-color,color,box-shadow,opacity]",
             )}
             disabled={isLoading || !canSubmitMessage}
-            size="icon"
+            size="icon-sm"
             variant="ghost"
           >
             {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}

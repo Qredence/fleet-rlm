@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -189,7 +189,7 @@ def _check_modal_app_lookup() -> bool:
 def _check_litellm_secret(secret_name: str) -> dict[str, bool]:
     print("\n📋 Checking LITELLM Secret...")
     try:
-        from fleet_rlm.runners import check_secret_presence
+        from fleet_rlm.cli.runners import check_secret_presence
 
         result = check_secret_presence(secret_name=secret_name)
         total = len(result)

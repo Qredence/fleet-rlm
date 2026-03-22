@@ -10,8 +10,8 @@ import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage, StreamResponse
 
-from fleet_rlm.core.agent import RLMReActChatAgent
-from fleet_rlm.core.execution.streaming import (
+from fleet_rlm.runtime.agent import RLMReActChatAgent
+from fleet_rlm.runtime.execution.streaming import (
     _build_final_payload,
     _normalize_trajectory,
 )
@@ -53,7 +53,7 @@ def test_chat_turn_stream_collects_chunks_and_status(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -80,7 +80,7 @@ def test_iter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(
@@ -100,7 +100,7 @@ def test_chat_turn_stream_falls_back_to_non_streaming_on_error(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _bad_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -139,7 +139,7 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -168,7 +168,7 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -210,7 +210,7 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -244,7 +244,7 @@ async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(
@@ -284,7 +284,7 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     call_count = 0
@@ -317,7 +317,7 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _bad_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _bad_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
@@ -345,7 +345,7 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(
@@ -386,7 +386,7 @@ def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations
         return _stream
 
     monkeypatch.setattr(
-        "fleet_rlm.core.agent.chat_agent.dspy.streamify", _fake_streamify
+        "fleet_rlm.runtime.agent.chat_agent.dspy.streamify", _fake_streamify
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())

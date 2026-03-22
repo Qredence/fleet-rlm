@@ -1,6 +1,8 @@
 # fleet-rlm Concepts
 
-`fleet-rlm` combines a ReAct chat orchestrator with recursive long-context execution in Modal sandboxes.
+`fleet-rlm` combines a ReAct chat orchestrator with recursive long-context
+execution over shared interpreter backends. Daytona is the primary backend
+today, while Modal remains supported.
 
 ## Core Concepts
 
@@ -23,14 +25,19 @@ Examples:
 - `SummarizeLongDocument`
 - `ExtractFromLogs`
 
-## 3. Modal Sandbox Runtime
+## 3. Interpreter Runtime Backends
 
-`ModalInterpreter` provides isolated remote execution.
+Interpreter backends provide isolated remote execution.
 
 Benefits:
 - sandbox isolation from host environment
-- persistent volume integration when configured
+- persistent storage integration when configured
 - controlled execution profiles for root/delegate behavior
+
+Current backend shape:
+- Daytona is the primary workspace/runtime backend
+- Modal remains available for compatible flows
+- both backends feed the same ReAct + recursive `dspy.RLM` runtime
 
 ## 4. Runtime Surfaces
 

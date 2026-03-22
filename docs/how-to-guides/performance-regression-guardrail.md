@@ -33,10 +33,10 @@ uv run pytest -q tests/integration/test_rlm_benchmarks.py
 ## Suggested CI/PR Policy
 
 - Run benchmarks for PRs that change:
-  - `src/fleet_rlm/core/*`
-  - `src/fleet_rlm/core/agent/*`
-  - `src/fleet_rlm/core/execution/*`
-  - `src/fleet_rlm/core/tools/*`
+  - `src/fleet_rlm/runtime/*`
+  - `src/fleet_rlm/runtime/agent/*`
+  - `src/fleet_rlm/runtime/execution/*`
+  - `src/fleet_rlm/runtime/tools/*`
   - `src/fleet_rlm/api/routers/ws/*`
   - `src/fleet_rlm/runners.py`
   - server execution streaming logic

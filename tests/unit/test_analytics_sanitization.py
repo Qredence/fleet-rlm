@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.features.analytics.sanitization import (
+from fleet_rlm.integrations.observability.sanitization import (
     redact_sensitive,
     sanitize_text,
     truncate_text,

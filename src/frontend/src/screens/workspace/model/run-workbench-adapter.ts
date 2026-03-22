@@ -6,6 +6,7 @@ import type {
   ArtifactSummary,
   CallbackSourceSummary,
   CallbackSummary,
+  CompatBackfillInfo,
   ContextSourceSummary,
   IterationSummary,
   PromptHandleSummary,
@@ -449,6 +450,46 @@ function extractRuntime(payload?: Record<string, unknown>): Record<string, unkno
   return asRecord(payload?.runtime) ?? payload;
 }
 
+function isExecutionCompletedPayload(payload?: Record<string, unknown>): boolean {
+  return asText(payload?.source_type ?? payload?.sourceType) === "execution_completed";
+}
+
+function getCanonicalRunSummary(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return asRecord(payload?.run_summary ?? payload?.runSummary);
+}
+
+function getCompatRunResult(
+  payload?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return asRecord(payload?.run_result ?? payload?.runResult);
+}
+
+function resolveCompatSummary(
+  payload?: Record<string, unknown>,
+  compatRunResult?: Record<string, unknown>,
+): RunSummary | undefined {
+  return normalizeSummary(payload?.summary ?? compatRunResult?.summary);
+}
+
+function resolveCompatFinalArtifact(
+  payload?: Record<string, unknown>,
+  compatRunResult?: Record<string, unknown>,
+): ArtifactSummary | null | undefined {
+  return normalizeArtifact(
+    payload?.final_artifact ??
+      payload?.finalArtifact ??
+      compatRunResult?.final_artifact ??
+      compatRunResult?.finalArtifact,
+  );
+}
+
+function compatBackfillEventId(frame: WsServerMessage): string {
+  if (frame.type === "error") return `frame-error-${Date.now()}`;
+  return String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`);
+}
+
 function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
   if (frame.type === "error") {
     return {
@@ -545,6 +586,8 @@ export function createInitialRunWorkbenchState(): RunWorkbenchState {
     summary: undefined,
     errorMessage: null,
     lastFrame: null,
+    compatBackfillCount: 0,
+    lastCompatBackfill: null,
   };
 }
 
@@ -599,7 +642,7 @@ export function failRunWorkbenchRun(
 }
 
 function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
-  if (frame.type === "error") return false;
+  if (frame.type === "error") return true;
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
   const sourceType = asText(payload?.source_type ?? payload?.sourceType);
@@ -612,13 +655,27 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
     payload?.run_summary != null ||
     payload?.run_result != null ||
     payload?.final_artifact != null ||
-    payload?.iterations != null
+    payload?.iterations != null ||
+    frame.data.kind === "final" ||
+    frame.data.kind === "cancelled" ||
+    frame.data.kind === "error"
   );
 }
 
 export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMessage): boolean {
+  const acceptsTerminalCompat =
+    state.status === "bootstrapping" || state.status === "running" || state.status === "completed";
+  const acceptsRawError = state.status === "bootstrapping" || state.status === "running";
   if (frame.type === "error") {
-    return state.status === "bootstrapping" || state.status === "running";
+    return acceptsRawError;
+  }
+  if (
+    (frame.data.kind === "final" ||
+      frame.data.kind === "cancelled" ||
+      frame.data.kind === "error") &&
+    acceptsTerminalCompat
+  ) {
+    return true;
   }
   return isRunWorkbenchFrame(frame);
 }
@@ -655,24 +712,33 @@ export function applyFrameToRunWorkbenchState(
 
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
-  const runSummary = asRecord(
-    payload?.run_summary ?? payload?.runSummary ?? payload?.run_result ?? payload?.runResult,
-  );
+  const runSummary = getCanonicalRunSummary(payload);
+  const compatRunResult = getCompatRunResult(payload);
 
   if (runSummary) {
     next = hydrateFromRunSummary(next, runSummary);
   }
 
-  const payloadPrompts = dedupePromptHandles([
-    ...next.promptHandles,
-    ...collectPromptHandlePayloads(payload)
-      .map((item) => normalizePromptHandle(item))
-      .filter((item): item is PromptHandleSummary => item !== null),
-  ]);
+  const isCanonicalCompletion = isExecutionCompletedPayload(payload);
+  const isTerminalCompatFrame =
+    !isCanonicalCompletion &&
+    frame.type === "event" &&
+    (frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error");
 
-  const payloadContextSources = asArray(payload?.context_sources ?? payload?.contextSources)
-    .map((item) => normalizeContextSource(item))
-    .filter((item): item is ContextSourceSummary => item !== null);
+  const payloadPrompts = !isTerminalCompatFrame
+    ? dedupePromptHandles([
+        ...next.promptHandles,
+        ...collectPromptHandlePayloads(payload)
+          .map((item) => normalizePromptHandle(item))
+          .filter((item): item is PromptHandleSummary => item !== null),
+      ])
+    : next.promptHandles;
+
+  const payloadContextSources = !isTerminalCompatFrame
+    ? asArray(payload?.context_sources ?? payload?.contextSources)
+        .map((item) => normalizeContextSource(item))
+        .filter((item): item is ContextSourceSummary => item !== null)
+    : [];
 
   if (payloadContextSources.length > 0) {
     next = {
@@ -749,18 +815,53 @@ export function applyFrameToRunWorkbenchState(
     };
   }
 
-  const payloadSources = dedupeSources([
-    ...next.sources,
-    ...asArray(payload?.sources)
-      .map((item) => normalizeSource(item))
-      .filter((item): item is ChatSourceItem => item !== null),
-  ]);
-  const payloadAttachments = dedupeAttachments([
-    ...next.attachments,
-    ...asArray(payload?.attachments)
-      .map((item) => normalizeAttachment(item))
-      .filter((item): item is ChatAttachmentItem => item !== null),
-  ]);
+  const payloadSources = !isTerminalCompatFrame
+    ? dedupeSources([
+        ...next.sources,
+        ...asArray(payload?.sources)
+          .map((item) => normalizeSource(item))
+          .filter((item): item is ChatSourceItem => item !== null),
+      ])
+    : next.sources;
+  const payloadAttachments = !isTerminalCompatFrame
+    ? dedupeAttachments([
+        ...next.attachments,
+        ...asArray(payload?.attachments)
+          .map((item) => normalizeAttachment(item))
+          .filter((item): item is ChatAttachmentItem => item !== null),
+      ])
+    : next.attachments;
+
+  const canonicalSummary = isCanonicalCompletion
+    ? normalizeSummary(payload?.summary ?? runSummary?.summary)
+    : undefined;
+  const canonicalFinalArtifact = isCanonicalCompletion
+    ? normalizeArtifact(
+        payload?.final_artifact ??
+          payload?.finalArtifact ??
+          runSummary?.final_artifact ??
+          runSummary?.finalArtifact,
+      )
+    : undefined;
+  const compatSummary = resolveCompatSummary(payload, compatRunResult);
+  const compatFinalArtifact = resolveCompatFinalArtifact(payload, compatRunResult);
+  const useCompatSummary = !isCanonicalCompletion && next.summary == null && compatSummary != null;
+  const useCompatFinalArtifact =
+    !isCanonicalCompletion && next.finalArtifact == null && compatFinalArtifact != null;
+
+  let compatBackfillCount = next.compatBackfillCount;
+  let lastCompatBackfill = next.lastCompatBackfill;
+  if (useCompatSummary || useCompatFinalArtifact) {
+    compatBackfillCount += 1;
+    lastCompatBackfill = {
+      eventId: compatBackfillEventId(frame),
+      runtimeMode:
+        asText(payload?.runtime_mode ?? payload?.runtimeMode) ??
+        asText(runtime?.runtime_mode ?? runtime?.runtimeMode),
+      usedSummary: useCompatSummary,
+      usedFinalArtifact: useCompatFinalArtifact,
+    } satisfies CompatBackfillInfo;
+  }
 
   return {
     ...next,
@@ -774,15 +875,13 @@ export function applyFrameToRunWorkbenchState(
     sources: payloadSources,
     attachments: payloadAttachments,
     finalArtifact:
-      normalizeArtifact(
-        payload?.final_artifact ??
-          payload?.finalArtifact ??
-          runSummary?.final_artifact ??
-          runSummary?.finalArtifact,
-      ) ??
+      canonicalFinalArtifact ??
+      (useCompatFinalArtifact ? compatFinalArtifact : undefined) ??
       next.finalArtifact ??
       null,
-    summary: normalizeSummary(payload?.summary ?? runSummary?.summary) ?? next.summary,
+    summary: canonicalSummary ?? (useCompatSummary ? compatSummary : undefined) ?? next.summary,
     errorMessage: frame.data.kind === "error" ? frame.data.text : (next.errorMessage ?? null),
+    compatBackfillCount,
+    lastCompatBackfill,
   };
 }

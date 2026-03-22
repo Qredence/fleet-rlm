@@ -9,7 +9,7 @@ Consult [src/fleet_rlm/AGENTS.md](../fleet_rlm/AGENTS.md) when your frontend cha
 Frontend source-of-truth files:
 
 - `src/frontend/package.json` for scripts and validation
-- `src/frontend/src/routes/*` for supported app surfaces and redirect behavior
+- `src/frontend/src/routes/*` for supported app surfaces and not-found behavior
 - `src/frontend/src/lib/rlm-api/*` for REST and websocket integration
 - `src/frontend/src/styles.css` for tokens and theme primitives
 - `openapi.yaml` and `src/frontend/src/lib/rlm-api/generated/openapi.ts` for API contract alignment
@@ -17,7 +17,7 @@ Frontend source-of-truth files:
 ## Agent Priorities
 
 - Preserve the supported app surfaces: `RLM Workspace`, `Volumes`, and `Settings`.
-- Keep legacy `taxonomy`, `skills`, `memory`, and `analytics` routes as redirects unless the shared product contract is intentionally changed.
+- Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
 - Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical canvas/workbench stream. Frontend workbench state should hydrate from `execution_completed.summary`, not Daytona-only chat-final payloads.
@@ -56,7 +56,7 @@ Routing:
 
 - `src/router.tsx` owns the router instance
 - `src/routeTree.gen.ts` is generated and should not be edited
-- file-based routes under `src/routes/` define app surfaces and redirect behavior
+- file-based routes under `src/routes/` define app surfaces and catchall/not-found behavior
 
 State management:
 
@@ -133,7 +133,7 @@ Backend startup for frontend work:
 OpenAPI sync:
 
 - `pnpm run api:sync` copies the root spec and regenerates frontend types
-- `pnpm run api:check` verifies that committed generated artifacts match `openapi.yaml`
+- `pnpm run api:check` reruns sync and fails only if that sync changes the frontend OpenAPI snapshot or generated types
 - If `api:check` produces formatting-only diffs in `openapi/fleet-rlm.openapi.yaml` or `src/lib/rlm-api/generated/openapi.ts`, keep those sync artifacts in the same change rather than hand-editing generated output
 
 Lint and boundary enforcement:
@@ -165,4 +165,4 @@ Use the backend AGENTS file or the root AGENTS file when you need wider validati
 - `components.json` defines the `@/*` alias and shadcn registry configuration.
 - The dev server proxies `/api/v1` and `/health` to `localhost:8000`.
 - PostHog initializes in `main.tsx` when `VITE_PUBLIC_POSTHOG_API_KEY` is set.
-- Keep runtime labels, redirect behavior, and endpoint expectations aligned with the backend contract.
+- Keep runtime labels, not-found behavior, and endpoint expectations aligned with the backend contract.
