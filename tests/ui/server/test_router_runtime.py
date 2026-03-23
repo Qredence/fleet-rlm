@@ -483,7 +483,7 @@ def test_runtime_daytona_volume_tree_maps_backend_errors_to_502(
     state = _server_state(staging_client)
     state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_daytona_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
     )
 
@@ -552,7 +552,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
     state.config.volume_name = "test-volume"
     captured: dict[str, object] = {}
 
-    def _fake_list_daytona_volume_tree(
+    async def _fake_list_daytona_volume_tree(
         volume_name: str,
         root_path: str,
         max_depth: int,
@@ -574,7 +574,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_daytona_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         _fake_list_daytona_volume_tree,
     )
 
@@ -603,7 +603,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
     state.config.volume_name = "test-volume"
     captured: dict[str, object] = {}
 
-    def _fake_read_daytona_volume_file_text(
+    async def _fake_read_daytona_volume_file_text(
         volume_name: str,
         path: str,
         max_bytes: int,
@@ -624,7 +624,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         _fake_read_daytona_volume_file_text,
     )
 
@@ -740,7 +740,7 @@ def test_runtime_daytona_volume_file_maps_not_found_errors_to_404(
     state = _server_state(staging_client)
     state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
     )
 
@@ -782,7 +782,7 @@ def test_runtime_daytona_volume_file_maps_directory_errors_to_400(
     state = _server_state(staging_client)
     state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_daytona_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
     )
 

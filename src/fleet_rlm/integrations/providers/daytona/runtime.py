@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
 import subprocess
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 
 from fleet_rlm.runtime.content.document_ingestion.main import read_document_content
 
@@ -23,6 +25,7 @@ DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 
 _REMOTE_REF_RESOLUTION_TIMEOUT_S = 5
 _REMOTE_DIRECTORY_MODE = "755"
+_T = TypeVar("_T")
 
 
 def _daytona_import_error(exc: ImportError) -> RuntimeError:
@@ -33,12 +36,51 @@ def _daytona_import_error(exc: ImportError) -> RuntimeError:
     )
 
 
+def _run_async_compat(
+    async_fn: Callable[..., Awaitable[_T]],
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> _T:
+    """Run an async implementation from sync code, even inside an active loop."""
+
+    def _runner() -> _T:
+        return asyncio.run(cast(Coroutine[Any, Any, _T], async_fn(*args, **kwargs)))
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _runner()
+
+    result: dict[str, _T] = {}
+    error: dict[str, BaseException] = {}
+
+    def _thread_main() -> None:
+        try:
+            result["value"] = _runner()
+        except BaseException as exc:  # pragma: no cover - sync compat thread boundary
+            error["exc"] = exc
+
+    thread = threading.Thread(target=_thread_main, daemon=True)
+    thread.start()
+    thread.join()
+    if "exc" in error:
+        raise error["exc"]
+    return result["value"]
+
+
+async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
+    if inspect.isawaitable(value):
+        return await cast(Awaitable[_T], value)
+    return cast(_T, value)
+
+
 def _build_daytona_client(config: ResolvedDaytonaConfig) -> Any:
     try:
-        from daytona import Daytona, DaytonaConfig
+        from daytona import AsyncDaytona, DaytonaConfig
     except ImportError as exc:  # pragma: no cover - environment specific
         raise _daytona_import_error(exc) from exc
-    return Daytona(
+    return AsyncDaytona(
         DaytonaConfig(
             api_key=config.api_key,
             api_url=config.api_url.rstrip("/"),
@@ -113,6 +155,10 @@ def _resolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
     return normalized
 
 
+async def _aresolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
+    return await asyncio.to_thread(_resolve_clone_ref, repo_url, ref)
+
+
 def _resolve_local_context_path(path: str) -> Path:
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
@@ -133,31 +179,31 @@ def _resolve_local_context_path(path: str) -> Path:
     return resolved
 
 
-def _get_work_dir(sandbox: Any) -> str:
+async def _aget_work_dir(sandbox: Any) -> str:
     if hasattr(sandbox, "get_work_dir"):
-        return str(sandbox.get_work_dir())
+        return str(await _await_if_needed(sandbox.get_work_dir()))
     return "/workspace"
 
 
-def _build_workspace_path(sandbox: Any, repo_url: str | None) -> str:
-    work_dir = _get_work_dir(sandbox)
+async def _abuild_workspace_path(sandbox: Any, repo_url: str | None) -> str:
+    work_dir = await _aget_work_dir(sandbox)
     workspace_name = _safe_workspace_name(repo_url)
     return str(PurePosixPath(work_dir) / "workspace" / workspace_name)
 
 
-def _ensure_remote_directory(fs: Any, remote_path: PurePosixPath) -> None:
+async def _aensure_remote_directory(fs: Any, remote_path: PurePosixPath) -> None:
     directory = str(remote_path)
     if directory and directory not in {".", "/"}:
-        fs.create_folder(directory, _REMOTE_DIRECTORY_MODE)
+        await _await_if_needed(fs.create_folder(directory, _REMOTE_DIRECTORY_MODE))
 
 
-def _ensure_remote_parent(fs: Any, remote_path: PurePosixPath) -> None:
-    _ensure_remote_directory(fs, remote_path.parent)
+async def _aensure_remote_parent(fs: Any, remote_path: PurePosixPath) -> None:
+    await _aensure_remote_directory(fs, remote_path.parent)
 
 
-def _ensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
+async def _aensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
     try:
-        _ensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path))
+        await _aensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona workspace create failure: {exc}",
@@ -181,7 +227,7 @@ def _build_clone_kwargs(
     return clone_kwargs
 
 
-def _clone_repo(
+async def _aclone_repo(
     *,
     sandbox: Any,
     repo_url: str,
@@ -189,12 +235,16 @@ def _clone_repo(
     workspace_path: str,
 ) -> None:
     try:
-        _ensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path).parent)
-        sandbox.git.clone(
-            **_build_clone_kwargs(
-                repo_url=repo_url,
-                ref=ref,
-                workspace_path=workspace_path,
+        await _aensure_remote_directory(
+            sandbox.fs, PurePosixPath(workspace_path).parent
+        )
+        await _await_if_needed(
+            sandbox.git.clone(
+                **_build_clone_kwargs(
+                    repo_url=repo_url,
+                    ref=ref,
+                    workspace_path=workspace_path,
+                )
             )
         )
     except Exception as exc:
@@ -205,9 +255,16 @@ def _clone_repo(
         ) from exc
 
 
-def _upload_remote_text(fs: Any, remote_path: PurePosixPath, content: str) -> None:
-    _ensure_remote_parent(fs, remote_path)
-    fs.upload_file(content.encode("utf-8"), str(remote_path))
+async def _aupload_remote_text(
+    fs: Any, remote_path: PurePosixPath, content: str
+) -> None:
+    await _aensure_remote_parent(fs, remote_path)
+    await _await_if_needed(fs.upload_file(content.encode("utf-8"), str(remote_path)))
+
+
+async def _aread_document_content(path: Path) -> tuple[str, dict[str, Any]]:
+    text, metadata = await asyncio.to_thread(read_document_content, path)
+    return text, metadata if isinstance(metadata, dict) else {}
 
 
 def _build_staged_filename(*, source_path: Path, source_type: str) -> str:
@@ -218,20 +275,20 @@ def _build_staged_filename(*, source_path: Path, source_type: str) -> str:
     )
 
 
-def _stage_local_file(
+async def _astage_local_file(
     *,
     fs: Any,
     resolved_path: Path,
     staged_root: PurePosixPath,
     source_id: str,
 ) -> ContextSource:
-    text, metadata = read_document_content(resolved_path)
+    text, metadata = await _aread_document_content(resolved_path)
     source_type = str(metadata.get("source_type") or "text")
     staged_relative = staged_root / _build_staged_filename(
         source_path=resolved_path,
         source_type=source_type,
     )
-    _upload_remote_text(fs, staged_relative, text)
+    await _aupload_remote_text(fs, staged_relative, text)
     return ContextSource(
         source_id=source_id,
         kind="file",
@@ -243,7 +300,7 @@ def _stage_local_file(
     )
 
 
-def _stage_local_directory(
+async def _astage_local_directory(
     *,
     fs: Any,
     resolved_path: Path,
@@ -261,7 +318,7 @@ def _stage_local_directory(
     ):
         relative_path = local_file.relative_to(resolved_path)
         try:
-            text, metadata = read_document_content(local_file)
+            text, metadata = await _aread_document_content(local_file)
         except Exception as exc:
             skipped_count += 1
             warnings.append(f"Skipped {relative_path.as_posix()}: {exc}")
@@ -277,7 +334,7 @@ def _stage_local_directory(
             source_type=source_type,
         )
         staged_relative = staged_root / relative_path.parent / destination_name
-        _upload_remote_text(fs, staged_relative, text)
+        await _aupload_remote_text(fs, staged_relative, text)
         staged_count += 1
 
     if staged_count == 0:
@@ -308,7 +365,7 @@ def _stage_local_directory(
     )
 
 
-def _stage_context_paths(
+async def _astage_context_paths(
     *,
     sandbox: Any,
     workspace_path: str,
@@ -322,7 +379,7 @@ def _stage_context_paths(
 
     fs = sandbox.fs
     context_root = PurePosixPath(workspace_path) / ".fleet-rlm" / "context"
-    _ensure_remote_directory(fs, context_root)
+    await _aensure_remote_directory(fs, context_root)
     staged_sources: list[ContextSource] = []
 
     for index, raw_path in enumerate(raw_paths, start=1):
@@ -335,7 +392,7 @@ def _stage_context_paths(
         try:
             if resolved.is_dir():
                 staged_sources.append(
-                    _stage_local_directory(
+                    await _astage_local_directory(
                         fs=fs,
                         resolved_path=resolved,
                         staged_root=staged_root,
@@ -344,7 +401,7 @@ def _stage_context_paths(
                 )
             else:
                 staged_sources.append(
-                    _stage_local_file(
+                    await _astage_local_file(
                         fs=fs,
                         resolved_path=resolved,
                         staged_root=staged_root,
@@ -361,7 +418,7 @@ def _stage_context_paths(
             ) from exc
 
     manifest_path = context_root / "manifest.json"
-    _upload_remote_text(
+    await _aupload_remote_text(
         fs,
         manifest_path,
         json.dumps(
@@ -392,35 +449,40 @@ class DaytonaSandboxSession:
     def sandbox_id(self) -> str | None:
         return str(getattr(self.sandbox, "id", "") or "") or None
 
-    def ensure_context(self) -> Any:
+    async def aensure_context(self) -> Any:
         if self._context is not None:
             return self._context
         if self.context_id:
-            for existing in self.sandbox.code_interpreter.list_contexts():
+            existing_contexts = await _await_if_needed(
+                self.sandbox.code_interpreter.list_contexts()
+            )
+            for existing in existing_contexts:
                 if str(getattr(existing, "id", "") or "") == self.context_id:
                     self._context = existing
                     return existing
-        context = self.sandbox.code_interpreter.create_context(cwd=self.workspace_path)
+        context = await _await_if_needed(
+            self.sandbox.code_interpreter.create_context(cwd=self.workspace_path)
+        )
         self._context = context
         self.context_id = str(getattr(context, "id", "") or "") or None
         return context
 
-    async def aensure_context(self) -> Any:
-        return await asyncio.to_thread(self.ensure_context)
-
-    def start_driver(self, *, timeout: float = 30.0) -> None:
-        _ = timeout
-        self.ensure_context()
-        self._driver_started = True
+    def ensure_context(self) -> Any:
+        return _run_async_compat(self.aensure_context)
 
     async def astart_driver(self, *, timeout: float = 30.0) -> None:
-        await asyncio.to_thread(self.start_driver, timeout=timeout)
+        _ = timeout
+        await self.aensure_context()
+        self._driver_started = True
 
-    def close_driver(self) -> None:
-        self._driver_started = False
+    def start_driver(self, *, timeout: float = 30.0) -> None:
+        _run_async_compat(self.astart_driver, timeout=timeout)
 
     async def aclose_driver(self) -> None:
-        await asyncio.to_thread(self.close_driver)
+        self._driver_started = False
+
+    def close_driver(self) -> None:
+        _run_async_compat(self.aclose_driver)
 
     def _resolve_sandbox_path(self, path: str) -> str:
         candidate = PurePosixPath(str(path or "").strip() or ".")
@@ -428,50 +490,62 @@ class DaytonaSandboxSession:
             return str(candidate)
         return str(PurePosixPath(self.workspace_path) / candidate)
 
-    def read_file(self, path: str) -> str:
-        raw = self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
+    async def aread_file(self, path: str) -> str:
+        raw = await _await_if_needed(
+            self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
+        )
         if raw is None:
             return ""
         if isinstance(raw, str):
             return raw
         return bytes(raw).decode("utf-8", errors="replace")
 
-    async def aread_file(self, path: str) -> str:
-        return await asyncio.to_thread(self.read_file, path)
-
-    def write_file(self, path: str, content: str) -> str:
-        resolved_path = self._resolve_sandbox_path(path)
-        self.sandbox.fs.upload_file(content.encode("utf-8"), resolved_path)
-        return resolved_path
+    def read_file(self, path: str) -> str:
+        return _run_async_compat(self.aread_file, path)
 
     async def awrite_file(self, path: str, content: str) -> str:
-        return await asyncio.to_thread(self.write_file, path, content)
+        resolved_path = self._resolve_sandbox_path(path)
+        await _await_if_needed(
+            self.sandbox.fs.upload_file(content.encode("utf-8"), resolved_path)
+        )
+        return resolved_path
 
-    def list_files(self, path: str) -> list[Any]:
-        return list(self.sandbox.fs.list_files(self._resolve_sandbox_path(path)))
+    def write_file(self, path: str, content: str) -> str:
+        return _run_async_compat(self.awrite_file, path, content)
 
     async def alist_files(self, path: str) -> list[Any]:
-        return await asyncio.to_thread(self.list_files, path)
+        entries = await _await_if_needed(
+            self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
+        )
+        return list(entries)
 
-    def delete(self) -> None:
+    def list_files(self, path: str) -> list[Any]:
+        return _run_async_compat(self.alist_files, path)
+
+    async def adelete(self) -> None:
         context = self._context
         self._context = None
         if context is None and self.context_id:
             with suppress(Exception):
-                for existing in self.sandbox.code_interpreter.list_contexts():
+                existing_contexts = await _await_if_needed(
+                    self.sandbox.code_interpreter.list_contexts()
+                )
+                for existing in existing_contexts:
                     if str(getattr(existing, "id", "") or "") == self.context_id:
                         context = existing
                         break
         if context is not None:
             with suppress(Exception):
-                self.sandbox.code_interpreter.delete_context(context)
+                await _await_if_needed(
+                    self.sandbox.code_interpreter.delete_context(context)
+                )
         self.context_id = None
         with suppress(Exception):
-            self.sandbox.delete()
+            await _await_if_needed(self.sandbox.delete())
         self._driver_started = False
 
-    async def adelete(self) -> None:
-        await asyncio.to_thread(self.delete)
+    def delete(self) -> None:
+        _run_async_compat(self.adelete)
 
 
 class DaytonaSandboxRuntime:
@@ -480,32 +554,54 @@ class DaytonaSandboxRuntime:
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
-        self._client = _build_daytona_client(resolved)
+        self._client: Any | None = _build_daytona_client(resolved)
 
-    def _create_volume_mounted_sandbox(self, volume_name: str) -> Any:
+    def _require_client(self) -> Any:
+        client = self._client
+        if client is None:
+            raise RuntimeError("Daytona runtime client is closed")
+        return client
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        if client is None:
+            return
+        close = getattr(client, "close", None)
+        if close is None or not callable(close):
+            return
+        await _await_if_needed(close())
+
+    def close(self) -> None:
+        _run_async_compat(self.aclose)
+
+    async def _acreate_volume_mounted_sandbox(self, volume_name: str) -> Any:
         try:
             from daytona import CreateSandboxFromSnapshotParams, VolumeMount
         except ImportError as exc:  # pragma: no cover - environment specific
             raise _daytona_import_error(exc) from exc
 
-        volume = self._client.volume.get(volume_name, create=True)
-        return self._client.create(
-            CreateSandboxFromSnapshotParams(
-                language="python",
-                volumes=[
-                    VolumeMount(
-                        volume_id=volume.id,
-                        mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
-                    )
-                ],
+        client = self._require_client()
+        volume = await _await_if_needed(client.volume.get(volume_name, create=True))
+        return await _await_if_needed(
+            client.create(
+                CreateSandboxFromSnapshotParams(
+                    language="python",
+                    volumes=[
+                        VolumeMount(
+                            volume_id=volume.id,
+                            mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                        )
+                    ],
+                )
             )
         )
 
-    def _create_sandbox(self, volume_name: str | None = None) -> Any:
+    async def _acreate_sandbox(self, volume_name: str | None = None) -> Any:
         try:
             if volume_name:
-                return self._create_volume_mounted_sandbox(volume_name)
-            return self._client.create()
+                return await self._acreate_volume_mounted_sandbox(volume_name)
+            return await _await_if_needed(self._require_client().create())
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox create failure: {exc}",
@@ -513,9 +609,9 @@ class DaytonaSandboxRuntime:
                 phase="sandbox_create",
             ) from exc
 
-    def _get_sandbox(self, sandbox_id: str) -> Any:
+    async def _aget_sandbox(self, sandbox_id: str) -> Any:
         try:
-            return self._client.get(sandbox_id)
+            return await _await_if_needed(self._require_client().get(sandbox_id))
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox resume failure: {exc}",
@@ -546,7 +642,7 @@ class DaytonaSandboxRuntime:
         session.phase_timings_ms.update(timings)
         return session
 
-    def create_workspace_session(
+    async def acreate_workspace_session(
         self,
         *,
         repo_url: str | None,
@@ -558,16 +654,16 @@ class DaytonaSandboxRuntime:
         sandbox: Any | None = None
         try:
             create_started = time.perf_counter()
-            sandbox = self._create_sandbox(volume_name=volume_name)
+            sandbox = await self._acreate_sandbox(volume_name=volume_name)
             timings["sandbox_create"] = int(
                 (time.perf_counter() - create_started) * 1000
             )
 
-            workspace_path = _build_workspace_path(sandbox, repo_url)
-            resolved_ref = _resolve_clone_ref(repo_url, ref) if repo_url else ref
+            workspace_path = await _abuild_workspace_path(sandbox, repo_url)
+            resolved_ref = await _aresolve_clone_ref(repo_url, ref) if repo_url else ref
             if repo_url:
                 clone_started = time.perf_counter()
-                _clone_repo(
+                await _aclone_repo(
                     sandbox=sandbox,
                     repo_url=repo_url,
                     ref=resolved_ref,
@@ -577,10 +673,13 @@ class DaytonaSandboxRuntime:
                     (time.perf_counter() - clone_started) * 1000
                 )
             else:
-                _ensure_workspace_root(sandbox=sandbox, workspace_path=workspace_path)
+                await _aensure_workspace_root(
+                    sandbox=sandbox,
+                    workspace_path=workspace_path,
+                )
 
             context_started = time.perf_counter()
-            context_sources = _stage_context_paths(
+            context_sources = await _astage_context_paths(
                 sandbox=sandbox,
                 workspace_path=workspace_path,
                 context_paths=context_paths,
@@ -599,10 +698,10 @@ class DaytonaSandboxRuntime:
         except Exception:
             if sandbox is not None:
                 with suppress(Exception):
-                    sandbox.delete()
+                    await _await_if_needed(sandbox.delete())
             raise
 
-    async def acreate_workspace_session(
+    def create_workspace_session(
         self,
         *,
         repo_url: str | None,
@@ -610,15 +709,15 @@ class DaytonaSandboxRuntime:
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
     ) -> DaytonaSandboxSession:
-        return await asyncio.to_thread(
-            self.create_workspace_session,
+        return _run_async_compat(
+            self.acreate_workspace_session,
             repo_url=repo_url,
             ref=ref,
             context_paths=context_paths,
             volume_name=volume_name,
         )
 
-    def resume_workspace_session(
+    async def aresume_workspace_session(
         self,
         *,
         sandbox_id: str,
@@ -629,7 +728,7 @@ class DaytonaSandboxRuntime:
         context_id: str | None = None,
     ) -> DaytonaSandboxSession:
         resumed_started = time.perf_counter()
-        sandbox = self._get_sandbox(sandbox_id)
+        sandbox = await self._aget_sandbox(sandbox_id)
         session = self._build_workspace_session(
             sandbox=sandbox,
             repo_url=repo_url,
@@ -643,7 +742,7 @@ class DaytonaSandboxRuntime:
         )
         return session
 
-    async def aresume_workspace_session(
+    def resume_workspace_session(
         self,
         *,
         sandbox_id: str,
@@ -653,8 +752,8 @@ class DaytonaSandboxRuntime:
         context_sources: list[ContextSource] | None = None,
         context_id: str | None = None,
     ) -> DaytonaSandboxSession:
-        return await asyncio.to_thread(
-            self.resume_workspace_session,
+        return _run_async_compat(
+            self.aresume_workspace_session,
             sandbox_id=sandbox_id,
             repo_url=repo_url,
             ref=ref,
@@ -668,5 +767,7 @@ __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
+    "_await_if_needed",
     "_resolve_clone_ref",
+    "_run_async_compat",
 ]

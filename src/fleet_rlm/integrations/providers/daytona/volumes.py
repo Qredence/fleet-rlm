@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import mimetypes
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -12,20 +12,12 @@ from typing import Any
 from fleet_rlm.runtime.tools.volume_helpers import entry_name, stable_tree_id
 
 from .config import resolve_daytona_config
-from .runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
-
-
-def _build_daytona_client() -> Any:
-    from daytona import Daytona, DaytonaConfig
-
-    config = resolve_daytona_config()
-    return Daytona(
-        DaytonaConfig(
-            api_key=config.api_key,
-            api_url=config.api_url.rstrip("/"),
-            target=config.target,
-        )
-    )
+from .runtime import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    _await_if_needed,
+    _build_daytona_client,
+    _run_async_compat,
+)
 
 
 @dataclass(frozen=True)
@@ -34,28 +26,42 @@ class _ResolvedDaytonaPath:
     mounted_path: PurePosixPath
 
 
-@contextmanager
-def _mounted_daytona_volume(volume_name: str) -> Iterator[Any]:
+@asynccontextmanager
+async def _amounted_daytona_volume(volume_name: str) -> AsyncIterator[Any]:
     from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
-    client = _build_daytona_client()
-    volume = client.volume.get(volume_name, create=True)
-    sandbox = client.create(
-        CreateSandboxFromSnapshotParams(
-            language="python",
-            volumes=[
-                VolumeMount(
-                    volume_id=volume.id,
-                    mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
-                )
-            ],
+    client = _build_daytona_client(resolve_daytona_config())
+    volume = await _await_if_needed(client.volume.get(volume_name, create=True))
+    sandbox = await _await_if_needed(
+        client.create(
+            CreateSandboxFromSnapshotParams(
+                language="python",
+                volumes=[
+                    VolumeMount(
+                        volume_id=volume.id,
+                        mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                    )
+                ],
+            )
         )
     )
     try:
         yield sandbox
     finally:
         with suppress(Exception):
-            client.delete(sandbox)
+            await _await_if_needed(sandbox.delete())
+        with suppress(Exception):
+            await _await_if_needed(client.close())
+
+
+@contextmanager
+def _mounted_daytona_volume(volume_name: str) -> Iterator[Any]:
+    manager = _amounted_daytona_volume(volume_name)
+    sandbox = _run_async_compat(manager.__aenter__)
+    try:
+        yield sandbox
+    finally:
+        _run_async_compat(manager.__aexit__, None, None, None)
 
 
 def _resolve_daytona_path(
@@ -94,7 +100,7 @@ def _entry_modified_iso(entry: Any) -> str | None:
     return str(mod_time)
 
 
-def list_daytona_volume_tree(
+async def alist_daytona_volume_tree(
     volume_name: str,
     root_path: str = "/",
     max_depth: int = 4,
@@ -106,14 +112,16 @@ def list_daytona_volume_tree(
     counters: dict[str, int] = {"files": 0, "dirs": 0}
     truncated = False
 
-    def _walk(
+    async def _walk(
         sandbox: Any,
         location: _ResolvedDaytonaPath,
         depth: int,
     ) -> list[dict[str, Any]]:
         nonlocal truncated
         nodes: list[dict[str, Any]] = []
-        entries = sandbox.fs.list_files(str(location.mounted_path))
+        entries = await _await_if_needed(
+            sandbox.fs.list_files(str(location.mounted_path))
+        )
 
         for entry in entries:
             name = entry_name(getattr(entry, "name", "") or getattr(entry, "path", ""))
@@ -128,7 +136,7 @@ def list_daytona_volume_tree(
                 counters["dirs"] += 1
                 children: list[dict[str, Any]] = []
                 if depth + 1 < max_depth:
-                    children = _walk(sandbox, child, depth + 1)
+                    children = await _walk(sandbox, child, depth + 1)
                 else:
                     truncated = True
                 nodes.append(
@@ -155,8 +163,8 @@ def list_daytona_volume_tree(
                 )
         return nodes
 
-    with _mounted_daytona_volume(volume_name) as sandbox:
-        children = _walk(sandbox, root, 0)
+    async with _amounted_daytona_volume(volume_name) as sandbox:
+        children = await _walk(sandbox, root, 0)
 
     root_node: dict[str, Any] = {
         "id": stable_tree_id(f"daytona-volume:{volume_name}:{root.display_path}"),
@@ -176,7 +184,20 @@ def list_daytona_volume_tree(
     }
 
 
-def read_daytona_volume_file_text(
+def list_daytona_volume_tree(
+    volume_name: str,
+    root_path: str = "/",
+    max_depth: int = 4,
+) -> dict[str, Any]:
+    return _run_async_compat(
+        alist_daytona_volume_tree,
+        volume_name,
+        root_path,
+        max_depth,
+    )
+
+
+async def aread_daytona_volume_file_text(
     volume_name: str,
     path: str,
     max_bytes: int = 200_000,
@@ -188,8 +209,10 @@ def read_daytona_volume_file_text(
     max_bytes = max(1, min(max_bytes, 1_000_000))
     resolved_path = _resolve_daytona_path(path)
 
-    with _mounted_daytona_volume(volume_name) as sandbox:
-        raw = sandbox.fs.download_file(str(resolved_path.mounted_path))
+    async with _amounted_daytona_volume(volume_name) as sandbox:
+        raw = await _await_if_needed(
+            sandbox.fs.download_file(str(resolved_path.mounted_path))
+        )
 
     if raw is None:
         raw_bytes = b""
@@ -211,3 +234,24 @@ def read_daytona_volume_file_text(
         "content": preview_bytes.decode("utf-8", errors="replace"),
         "truncated": truncated,
     }
+
+
+def read_daytona_volume_file_text(
+    volume_name: str,
+    path: str,
+    max_bytes: int = 200_000,
+) -> dict[str, Any]:
+    return _run_async_compat(
+        aread_daytona_volume_file_text,
+        volume_name,
+        path,
+        max_bytes,
+    )
+
+
+__all__ = [
+    "alist_daytona_volume_tree",
+    "aread_daytona_volume_file_text",
+    "list_daytona_volume_tree",
+    "read_daytona_volume_file_text",
+]

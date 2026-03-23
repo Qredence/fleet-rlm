@@ -47,7 +47,7 @@ from .output_utils import _redact_sensitive_text, _summarize_stdout
 logger = logging.getLogger(__name__)
 
 
-def _start_stdout_reader_impl(interpreter: "ModalInterpreter") -> None:
+def _start_stdout_reader_impl(interpreter: ModalInterpreter) -> None:
     """Start a background thread to read sandbox stdout."""
     if interpreter._stdout_iter is None:
         return
@@ -69,13 +69,13 @@ def _start_stdout_reader_impl(interpreter: "ModalInterpreter") -> None:
     interpreter._stdout_reader_thread.start()
 
 
-def _resolve_app_impl(interpreter: "ModalInterpreter") -> modal.App:
+def _resolve_app_impl(interpreter: ModalInterpreter) -> modal.App:
     if interpreter._app_obj is not None:
         return interpreter._app_obj
     return modal.App.lookup(interpreter._app_name, create_if_missing=True)
 
 
-async def _aresolve_app_impl(interpreter: "ModalInterpreter") -> modal.App:
+async def _aresolve_app_impl(interpreter: ModalInterpreter) -> modal.App:
     if interpreter._app_obj is not None:
         return interpreter._app_obj
     return await modal.App.lookup.aio(interpreter._app_name, create_if_missing=True)
@@ -91,7 +91,7 @@ def _module_source_for_sandbox_impl(module: Any) -> str:
 
 
 def _build_driver_command_and_sandbox_kwargs_impl(
-    interpreter: "ModalInterpreter", *, app: modal.App
+    interpreter: ModalInterpreter, *, app: modal.App
 ) -> tuple[str, dict[str, Any]]:
     with interpreter._llm_call_lock:
         interpreter._llm_call_count = 0
@@ -124,7 +124,7 @@ def _build_driver_command_and_sandbox_kwargs_impl(
     return driver_command, sandbox_kwargs
 
 
-def _start_impl(interpreter: "ModalInterpreter") -> None:
+def _start_impl(interpreter: ModalInterpreter) -> None:
     if interpreter._sandbox is not None:
         return
 
@@ -143,7 +143,7 @@ def _start_impl(interpreter: "ModalInterpreter") -> None:
     interpreter._start_stdout_reader()
 
 
-async def _astart_impl(interpreter: "ModalInterpreter") -> None:
+async def _astart_impl(interpreter: ModalInterpreter) -> None:
     if interpreter._sandbox is not None:
         return
 
@@ -162,7 +162,7 @@ async def _astart_impl(interpreter: "ModalInterpreter") -> None:
     interpreter._start_stdout_reader()
 
 
-def _shutdown_impl(interpreter: "ModalInterpreter") -> None:
+def _shutdown_impl(interpreter: ModalInterpreter) -> None:
     if interpreter._sandbox is not None:
         try:
             interpreter._sandbox.terminate()
@@ -183,7 +183,7 @@ def _shutdown_impl(interpreter: "ModalInterpreter") -> None:
             interpreter._sub_lm_executor = None
 
 
-async def _ashutdown_impl(interpreter: "ModalInterpreter") -> None:
+async def _ashutdown_impl(interpreter: ModalInterpreter) -> None:
     if interpreter._sandbox is not None:
         try:
             if hasattr(interpreter._sandbox.terminate, "aio"):
@@ -212,14 +212,14 @@ async def _ashutdown_impl(interpreter: "ModalInterpreter") -> None:
             interpreter._sub_lm_executor = None
 
 
-def _tool_names_impl(interpreter: "ModalInterpreter") -> list[str]:
+def _tool_names_impl(interpreter: ModalInterpreter) -> list[str]:
     tool_names = ["llm_query", "llm_query_batched"]
     if interpreter._tools:
         tool_names.extend(interpreter._tools.keys())
     return tool_names
 
 
-def _output_names_impl(interpreter: "ModalInterpreter") -> list[str]:
+def _output_names_impl(interpreter: ModalInterpreter) -> list[str]:
     if not interpreter.output_fields:
         return []
     return [
@@ -229,7 +229,7 @@ def _output_names_impl(interpreter: "ModalInterpreter") -> list[str]:
     ]
 
 
-def _summarize_stdout_impl(interpreter: "ModalInterpreter", stdout: str) -> str:
+def _summarize_stdout_impl(interpreter: ModalInterpreter, stdout: str) -> str:
     if not interpreter.summarize_stdout:
         return stdout
     return _summarize_stdout(
@@ -239,7 +239,7 @@ def _summarize_stdout_impl(interpreter: "ModalInterpreter", stdout: str) -> str:
     )
 
 
-def _drain_or_flush_stdin_impl(interpreter: "ModalInterpreter") -> None:
+def _drain_or_flush_stdin_impl(interpreter: ModalInterpreter) -> None:
     if interpreter._stdin is None:
         raise CodeInterpreterError("Sandbox input stream is not initialized")
 
@@ -282,7 +282,7 @@ def _drain_or_flush_stdin_impl(interpreter: "ModalInterpreter") -> None:
         raise thread_exc
 
 
-def _write_line_impl(interpreter: "ModalInterpreter", payload: dict[str, Any]) -> None:
+def _write_line_impl(interpreter: ModalInterpreter, payload: dict[str, Any]) -> None:
     if interpreter._stdin is None:
         raise CodeInterpreterError("Sandbox input stream is not initialized")
     interpreter._stdin.write(json.dumps(payload) + "\n")
@@ -316,7 +316,7 @@ def _is_recoverable_start_error_impl(exc: Exception) -> bool:
 
 
 @contextmanager
-def _execution_profile_impl(interpreter: "ModalInterpreter", profile: ExecutionProfile):
+def _execution_profile_impl(interpreter: ModalInterpreter, profile: ExecutionProfile):
     previous = interpreter.default_execution_profile
     interpreter.default_execution_profile = profile
     try:
@@ -326,7 +326,7 @@ def _execution_profile_impl(interpreter: "ModalInterpreter", profile: ExecutionP
 
 
 def _execute_impl(
-    interpreter: "ModalInterpreter",
+    interpreter: ModalInterpreter,
     code: str,
     variables: dict[str, Any] | None = None,
     *,
@@ -804,7 +804,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         """Temporarily override the default execution profile."""
         return _execution_profile_impl(self, profile)
 
-    def build_delegate_child(self, *, remaining_llm_budget: int) -> "ModalInterpreter":
+    def build_delegate_child(self, *, remaining_llm_budget: int) -> ModalInterpreter:
         """Build a child interpreter for recursive RLM delegation."""
         child = ModalInterpreter(
             image=self.image,
@@ -872,7 +872,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         """Terminate the sandbox and clean up all resources (async)."""
         await _ashutdown_impl(self)
 
-    def __enter__(self) -> "ModalInterpreter":
+    def __enter__(self) -> ModalInterpreter:
         """Start the interpreter and return it for use as a context manager."""
         self.start()
         return self
@@ -882,7 +882,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         self.shutdown()
         return False
 
-    async def __aenter__(self) -> "ModalInterpreter":
+    async def __aenter__(self) -> ModalInterpreter:
         """Async context manager entrypoint."""
         if self.async_execute:
             await self.astart()

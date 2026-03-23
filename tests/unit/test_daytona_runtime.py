@@ -35,7 +35,7 @@ class _FakeSandbox:
         self.fs = _FakeFs()
         self.git = _FakeGit()
 
-    def get_work_dir(self) -> str:
+    async def get_work_dir(self) -> str:
         return "/workspace"
 
     def delete(self) -> None:
@@ -56,6 +56,7 @@ class _FakeClient:
         self.volume = _FakeVolumeService()
         self.created_requests: list[object] = []
         self.sandbox = _FakeSandbox()
+        self.close_calls = 0
 
     def create(self, request=None):
         self.created_requests.append(request)
@@ -64,6 +65,9 @@ class _FakeClient:
     def get(self, sandbox_id: str):
         assert sandbox_id == "sbx-123"
         return self.sandbox
+
+    async def close(self) -> None:
+        self.close_calls += 1
 
 
 def test_create_workspace_session_stages_context_and_mounts_volume(
@@ -132,3 +136,21 @@ def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
 
     assert session.sandbox_id == "sbx-123"
     assert session.context_id == "ctx-1"
+
+
+def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    runtime.close()
+    runtime.close()
+
+    assert fake_client.close_calls == 1

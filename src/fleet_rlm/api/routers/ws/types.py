@@ -33,7 +33,7 @@ class ChatAgentProtocol(Protocol):
 
     interpreter: MaintenanceInterpreterProtocol | None
 
-    async def __aenter__(self) -> "ChatAgentProtocol": ...
+    async def __aenter__(self) -> ChatAgentProtocol: ...
 
     async def __aexit__(
         self,

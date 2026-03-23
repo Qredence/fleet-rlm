@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -45,13 +45,13 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
                 ]
             raise AssertionError(f"unexpected list path: {path}")
 
-    @contextmanager
-    def _fake_mounted_daytona_volume(volume_name: str):
+    @asynccontextmanager
+    async def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._mounted_daytona_volume",
+        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -87,13 +87,13 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
             calls.append(path)
             return b"abcdefghij"
 
-    @contextmanager
-    def _fake_mounted_daytona_volume(volume_name: str):
+    @asynccontextmanager
+    async def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._mounted_daytona_volume",
+        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -126,13 +126,13 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
             _ = path
             raise RuntimeError("Is a directory")
 
-    @contextmanager
-    def _fake_mounted_daytona_volume(volume_name: str):
+    @asynccontextmanager
+    async def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._mounted_daytona_volume",
+        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 

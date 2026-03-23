@@ -234,7 +234,7 @@ class VolumeTreeNode(BaseModel):
     name: str
     path: str
     type: Literal["volume", "directory", "file"]
-    children: list["VolumeTreeNode"] = Field(default_factory=list)
+    children: list[VolumeTreeNode] = Field(default_factory=list)
     size: int | None = None
     modified_at: str | None = None
 
@@ -270,7 +270,7 @@ class TraceFeedbackRequest(BaseModel):
     expected_response: str | None = None
 
     @model_validator(mode="after")
-    def validate_trace_lookup_target(self) -> "TraceFeedbackRequest":
+    def validate_trace_lookup_target(self) -> TraceFeedbackRequest:
         if (self.trace_id or "").strip() or (self.client_request_id or "").strip():
             return self
         raise ValueError("trace_id or client_request_id is required")

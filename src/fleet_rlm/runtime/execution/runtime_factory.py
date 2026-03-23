@@ -23,7 +23,7 @@ def build_runtime_module(*args, **kwargs):
     return _impl(*args, **kwargs)
 
 
-def get_runtime_module(agent: "RLMReActChatAgent", name: str) -> dspy.Module:
+def get_runtime_module(agent: RLMReActChatAgent, name: str) -> dspy.Module:
     """Return a cached long-context runtime module by name.
 
     Lazily constructs and caches DSPy modules for long-context operations.

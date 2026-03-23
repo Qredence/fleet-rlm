@@ -57,7 +57,7 @@ def is_terminal_stream_event_kind(kind: str) -> bool:
 
 
 def prepare_streaming_turn(
-    agent: "RLMReActChatAgent", *, message: str, trace: bool
+    agent: RLMReActChatAgent, *, message: str, trace: bool
 ) -> PreparedStreamingTurn:
     """Validate a message and build the shared streaming turn context."""
     if not message or not message.strip():
@@ -79,7 +79,7 @@ def prepare_streaming_turn(
 
 def build_cancelled_stream_event(
     *,
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     message: str,
     assistant_chunks: list[str],
     ctx: StreamingContext,
@@ -131,7 +131,7 @@ def _extract_final_response(
 
 def build_final_stream_event(
     *,
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     message: str,
     final_prediction: dspy.Prediction | None,
     assistant_chunks: list[str],

@@ -21,7 +21,7 @@ class LLMTraceContext:
     parent_trace_id: str | None = None
 
     @classmethod
-    def create(cls, *, call_id: str, parent_trace_id: str | None) -> "LLMTraceContext":
+    def create(cls, *, call_id: str, parent_trace_id: str | None) -> LLMTraceContext:
         return cls(
             trace_id=str(uuid.uuid4()),
             call_id=call_id,

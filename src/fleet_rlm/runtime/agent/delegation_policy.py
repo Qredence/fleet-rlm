@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 class RuntimeModuleExecutionRequest:
     """Typed input for invoking a cached runtime module with fallback rules."""
 
-    agent: "RLMReActChatAgent"
+    agent: RLMReActChatAgent
     module_name: str
     module_kwargs: dict[str, Any]
 
@@ -35,7 +35,7 @@ class RuntimeModuleExecutionResult:
 
 
 def claim_delegate_slot_or_error(
-    agent: "RLMReActChatAgent", *, depth_error_suffix: str
+    agent: RLMReActChatAgent, *, depth_error_suffix: str
 ) -> dict[str, Any] | None:
     """Apply depth and per-turn delegate-call guards."""
     if agent._current_depth >= agent._max_depth:
@@ -77,14 +77,14 @@ def claim_delegate_slot_or_error(
     return None
 
 
-def record_delegate_fallback(agent: "RLMReActChatAgent") -> None:
+def record_delegate_fallback(agent: RLMReActChatAgent) -> None:
     """Increment the delegate fallback counter when available."""
     record_fallback = getattr(agent, "_record_delegate_fallback", None)
     if callable(record_fallback):
         record_fallback()
 
 
-def remaining_llm_budget(agent: "RLMReActChatAgent") -> int:
+def remaining_llm_budget(agent: RLMReActChatAgent) -> int:
     """Compute the remaining parent interpreter sub-LLM budget."""
     interpreter = agent.interpreter
     limit = max(1, int(getattr(interpreter, "max_llm_calls", 1)))
@@ -103,7 +103,7 @@ def share_llm_budget(*, parent: Any, child: Any) -> Any:
 
 
 def build_child_interpreter(
-    agent: "RLMReActChatAgent", *, remaining_llm_budget: int
+    agent: RLMReActChatAgent, *, remaining_llm_budget: int
 ) -> Any:
     """Reuse or create the interpreter for a recursive child run."""
     parent = agent.interpreter
@@ -119,7 +119,7 @@ def build_child_interpreter(
 
 def normalize_delegate_result(
     *,
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     raw_result: dict[str, Any],
     fallback_used: bool,
 ) -> dict[str, Any]:

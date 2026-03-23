@@ -167,7 +167,7 @@ def create_interpreter(
     timeout: int = 600,
     volume_name: str | None = None,
     auto_volume: bool = True,
-) -> "ModalInterpreter":
+) -> ModalInterpreter:
     """Create a ModalInterpreter with sensible defaults.
 
     This helper creates an interpreter with automatic volume management.
