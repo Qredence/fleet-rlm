@@ -40,7 +40,9 @@ class MemoryMigrationOperation(TypedDict):
 
 
 class RLMReActChatSignature(dspy.Signature):
-    """Interactive ReAct chat signature with explicit conversation history."""
+    """Interactive ReAct chat signature with explicit conversation history.
+    You have the ability to spin up long-running daemon servers (like 'npm run dev'). Use `start_background_process` and iteratively check `read_process_logs` to ensure a server boots successfully.
+    """
 
     user_request: str = dspy.InputField(desc="Current user request in the chat session")
     core_memory: str = dspy.InputField(
@@ -56,9 +58,11 @@ class AnalyzeLongDocument(dspy.Signature):
     """Analyze a long document by navigating, querying, and synthesizing.
 
     The LLM should use sandbox helpers (``peek``, ``grep``,
-    ``chunk_by_size``, ``chunk_by_headers``) to explore the document
+    ``chunk_by_size``, ``chunk_by_headers``, ``extract_python_ast``) to explore the document
     programmatically, call ``llm_query`` on relevant sections, and
     aggregate findings via ``SUBMIT``.
+    When analyzing large Python codebases, prefer using the `extract_python_ast` tool
+    to quickly map out structural architectures before dropping down into raw regex grepping.
 
     Input Fields:
         document: Full text of the document loaded into the sandbox
@@ -177,7 +181,10 @@ class IncidentTriageFromLogs(dspy.Signature):
 
 
 class CodeChangePlan(dspy.Signature):
-    """Generate a structured implementation plan for a code change."""
+    """Generate a structured implementation plan for a code change.
+    When analyzing large Python codebases, prefer using the `extract_python_ast` tool to quickly map out structural architectures before dropping down into raw regex grepping.
+    You have the ability to spin up long-running development servers or background processes. Use `start_background_process` and iteratively check `read_process_logs` to ensure a server compiles successfully before declaring a coding task finished.
+    """
 
     task: str = dspy.InputField(desc="Requested coding task")
     repo_context: str = dspy.InputField(

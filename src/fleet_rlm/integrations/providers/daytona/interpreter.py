@@ -40,6 +40,8 @@ _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES: frozenset[str] = frozenset(
 
 def _base_setup_code(*, workspace_path: str, volume_mount_path: str) -> str:
     return f"""
+import ast as _ast
+import glob as _glob
 import json as _json
 import os as _os
 import pathlib as _pathlib
@@ -112,6 +114,67 @@ def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
         end_idx = min(len(lines), index + radius + 1)
         results.append("\\n".join(lines[start_idx:end_idx]))
     return results
+
+def extract_python_ast(path: str) -> str:
+    target = _pathlib.Path(resolve_path(path))
+    if not target.exists():
+        return "File not found."
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        source = f.read()
+    try:
+        tree = _ast.parse(source)
+    except Exception as e:
+        return f"AST Parse Error: {{e}}"
+    results = []
+    for node in tree.body:
+        if isinstance(node, _ast.ClassDef):
+            methods = [m.name for m in node.body if isinstance(m, _ast.FunctionDef)]
+            doc = _ast.get_docstring(node) or ""
+            results.append({{"type": "Class", "name": node.name, "methods": methods, "doc": doc[:200]}})
+        elif isinstance(node, _ast.FunctionDef):
+            doc = _ast.get_docstring(node) or ""
+            results.append({{"type": "Function", "name": node.name, "doc": doc[:200]}})
+    return _json.dumps(results, indent=2)
+
+_processes = globals().get("_processes", {{}})
+
+def start_background_process(process_id: str, command: str) -> str:
+    if process_id in _processes:
+        return f"Process {{process_id}} is already running."
+    import threading as _threading
+    import collections as _collections
+    proc = _subprocess.Popen(
+        command, shell=True, cwd=REPO_PATH,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True
+    )
+    log_buffer = _collections.deque(maxlen=1000)
+    def _read_output():
+        for line in proc.stdout:
+            log_buffer.append(line)
+    t = _threading.Thread(target=_read_output, daemon=True)
+    t.start()
+    _processes[process_id] = {{"proc": proc, "logs": log_buffer}}
+    return f"Started process {{process_id}} (PID {{proc.pid}})"
+
+def read_process_logs(process_id: str, tail: int = 50) -> str:
+    if process_id not in _processes:
+        return f"Process {{process_id}} is not running."
+    pinfo = _processes[process_id]
+    proc = pinfo["proc"]
+    logs = pinfo["logs"]
+    status = "RUNNING" if proc.poll() is None else f"EXITED({{proc.returncode}})"
+    lines = list(logs)[-tail:]
+    return f"Status: {{status}}\\nLogs:\\n" + "".join(lines)
+
+def kill_process(process_id: str) -> str:
+    if process_id not in _processes:
+        return f"Process {{process_id}} is not running."
+    proc = _processes.pop(process_id)["proc"]
+    if proc.poll() is None:
+        proc.terminate()
+        return f"Terminated process {{process_id}}."
+    return f"Process {{process_id}} was already exited."
+
 
 def add_buffer(name: str, item: object) -> dict[str, object]:
     key = str(name or "").strip() or "default"

@@ -1361,6 +1361,26 @@ except Exception as e:
         code = f"SUBMIT(result=workspace_read({path!r}))"
         return await _aexecute_submit_ctx(ctx, code)
 
+    async def extract_python_ast(path: str) -> dict[str, Any]:
+        """Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file"""
+        code = f"SUBMIT(result=extract_python_ast({path!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def start_background_process(process_id: str, command: str) -> dict[str, Any]:
+        """Start a non-blocking background process (daemon) in the sandbox."""
+        code = f"SUBMIT(result=start_background_process({process_id!r}, {command!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def read_process_logs(process_id: str, tail: int = 50) -> dict[str, Any]:
+        """Read the live stdout/stderr logs of an active background process."""
+        code = f"SUBMIT(result=read_process_logs({process_id!r}, tail={tail}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def kill_process(process_id: str) -> dict[str, Any]:
+        """Terminate a running background process by its ID."""
+        code = f"SUBMIT(result=kill_process({process_id!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
     # -- Assemble tool list --------------------------------------------------
 
     from dspy import Tool
@@ -1391,6 +1411,26 @@ except Exception as e:
                 _sync_compatible_tool_callable(workspace_read),
                 name="workspace_read",
                 desc="Read content from a file in the workspace directory",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(extract_python_ast),
+                name="extract_python_ast",
+                desc="Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(start_background_process),
+                name="start_background_process",
+                desc="Start a non-blocking background process (like a live webserver or watch compiler) by passing an arbitrary process ID and the shell command.",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(read_process_logs),
+                name="read_process_logs",
+                desc="Read the latest stdout/stderr logs of an active background process.",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(kill_process),
+                name="kill_process",
+                desc="Terminate a running background process.",
             ),
         ]
     )
