@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 def iter_routed_chat_turn_stream(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
     trace: bool,
@@ -49,7 +49,7 @@ def iter_routed_chat_turn_stream(
 
 
 async def aiter_routed_chat_turn_stream(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
     trace: bool,
@@ -70,7 +70,7 @@ async def aiter_routed_chat_turn_stream(
 
 
 def _iter_forced_rlm_stream(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
     cancel_check: Callable[[], bool] | None = None,

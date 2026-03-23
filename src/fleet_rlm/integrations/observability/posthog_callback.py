@@ -41,7 +41,7 @@ class PostHogLLMCallback(BaseCallback):
         self._lock = threading.RLock()
 
     @classmethod
-    def from_env(cls, *, distinct_id: str | None = None) -> "PostHogLLMCallback":
+    def from_env(cls, *, distinct_id: str | None = None) -> PostHogLLMCallback:
         """Construct callback using POSTHOG_* environment variables."""
         return cls(PostHogConfig.from_env(), distinct_id=distinct_id)
 

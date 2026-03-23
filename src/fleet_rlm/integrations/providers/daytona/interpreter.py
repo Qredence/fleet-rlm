@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import threading
@@ -28,20 +27,27 @@ from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
+    _await_if_needed,
+    _run_async_compat,
 )
 from .state import dedupe_paths, normalized_context_sources
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
+_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES: frozenset[str] = frozenset(
+    {"run", "workspace_write", "workspace_read"}
+)
 
 
 def _base_setup_code(*, workspace_path: str, volume_mount_path: str) -> str:
     return f"""
-import glob as _glob
 import json as _json
 import os as _os
 import pathlib as _pathlib
 import re as _re
 import subprocess as _subprocess
+import fcntl as _fcntl
+import glob as _glob
+from contextlib import contextmanager as _contextmanager
 
 REPO_PATH = {workspace_path!r}
 MEMORY_ROOT = _pathlib.Path({volume_mount_path!r})
@@ -145,9 +151,16 @@ def save_to_volume(path: str, content: str) -> str:
     full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
     if path_error is not None or full is None:
         return path_error or "[error: invalid volume path]"
+    lock_path = full + ".lock"
     _os.makedirs(_os.path.dirname(full) or str(MEMORY_ROOT), exist_ok=True)
-    with open(full, "w", encoding="utf-8") as handle:
-        handle.write(str(content))
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
     return full
 
 def load_from_volume(path: str) -> str:
@@ -163,9 +176,16 @@ def workspace_write(path: str, content: str) -> str:
     full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
     if path_error is not None or full is None:
         return path_error or "[error: invalid workspace path]"
+    lock_path = full + ".lock"
     _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
-    with open(full, "w", encoding="utf-8") as handle:
-        handle.write(str(content))
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
     return full
 
 def workspace_read(path: str) -> str:
@@ -181,9 +201,16 @@ def workspace_append(path: str, content: str) -> str:
     full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
     if path_error is not None or full is None:
         return path_error or "[error: invalid workspace path]"
+    lock_path = full + ".lock"
     _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
-    with open(full, "a", encoding="utf-8") as handle:
-        handle.write(str(content))
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "a", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
     return full
 
 class _FleetFinalOutput(Exception):
@@ -236,6 +263,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         self,
         *,
         runtime: DaytonaSandboxRuntime | None = None,
+        owns_runtime: bool = False,
         timeout: int = 900,
         execute_timeout: int | None = None,
         volume_name: str | None = None,
@@ -249,7 +277,11 @@ class DaytonaInterpreter(LLMQueryMixin):
         default_execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
         async_execute: bool = True,
     ) -> None:
-        self.runtime = runtime or DaytonaSandboxRuntime()
+        provided_runtime = runtime
+        self.runtime = provided_runtime or DaytonaSandboxRuntime()
+        self._owns_runtime = owns_runtime or provided_runtime is None
+        self._runtime_config = getattr(self.runtime, "_resolved_config", None)
+        self._runtime_closed = False
         self.timeout = timeout
         self.execute_timeout = execute_timeout or timeout
         self.volume_name = volume_name
@@ -289,7 +321,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._setup_context_id: str | None = None
         self._submit_signature_key: tuple[tuple[str, str], ...] | None = None
 
-    def __enter__(self) -> "DaytonaInterpreter":
+    def __enter__(self) -> DaytonaInterpreter:
         self.start()
         return self
 
@@ -298,7 +330,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.shutdown()
         return False
 
-    async def __aenter__(self) -> "DaytonaInterpreter":
+    async def __aenter__(self) -> DaytonaInterpreter:
         await self.astart()
         return self
 
@@ -365,13 +397,27 @@ class DaytonaInterpreter(LLMQueryMixin):
         volume_name: str | None,
         force_new_session: bool = False,
     ) -> None:
-        await asyncio.to_thread(
-            self.configure_workspace,
+        (
+            normalized_repo_url,
+            normalized_repo_ref,
+            normalized_context_paths,
+            normalized_volume,
+            source_key,
+        ) = self._normalized_workspace_config(
             repo_url=repo_url,
             repo_ref=repo_ref,
             context_paths=context_paths,
             volume_name=volume_name,
-            force_new_session=force_new_session,
+        )
+        if force_new_session or (
+            self._session is not None and self._session_source_key != source_key
+        ):
+            await self._adetach_session(delete=True)
+        self._apply_workspace_config(
+            repo_url=normalized_repo_url,
+            repo_ref=normalized_repo_ref,
+            context_paths=normalized_context_paths,
+            volume_name=normalized_volume,
         )
 
     def _normalized_workspace_config(
@@ -480,26 +526,34 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._apply_imported_session_state(state)
 
     async def aimport_session_state(self, state: dict[str, Any]) -> None:
-        await asyncio.to_thread(self.import_session_state, state)
+        await self._adetach_session(delete=False)
+        self._apply_imported_session_state(state)
 
     def start(self) -> None:
-        if self._started:
-            return
-        session = self._ensure_session_sync()
-        session.start_driver(timeout=float(self.execute_timeout))
-        self._started = True
+        _run_async_compat(self.astart)
 
     async def astart(self) -> None:
-        await asyncio.to_thread(self.start)
+        if self._started:
+            return
+        session = await self._aensure_session_impl()
+        await session.astart_driver(timeout=float(self.execute_timeout))
+        self._started = True
 
     def shutdown(self) -> None:
-        self._detach_session(delete=self.delete_session_on_shutdown)
-        self._started = False
+        _run_async_compat(self.ashutdown)
 
     async def ashutdown(self) -> None:
-        await asyncio.to_thread(self.shutdown)
+        try:
+            await self._adetach_session(delete=self.delete_session_on_shutdown)
+        finally:
+            self._started = False
+            await self._aclose_runtime()
 
     def _ensure_session_sync(self) -> DaytonaSandboxSession:
+        return _run_async_compat(self._aensure_session_impl)
+
+    async def _aensure_session_impl(self) -> DaytonaSandboxSession:
+        self._ensure_runtime_available()
         source_key = (
             self.repo_url,
             self.repo_ref,
@@ -510,7 +564,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             return self._session
 
         if self._session is not None:
-            self._detach_session(delete=True)
+            await self._adetach_session(delete=True)
 
         if (
             self._persisted_sandbox_id
@@ -518,16 +572,31 @@ class DaytonaInterpreter(LLMQueryMixin):
             and self._session_source_key in {None, source_key}
         ):
             try:
-                self._session = self.runtime.resume_workspace_session(
-                    sandbox_id=self._persisted_sandbox_id,
-                    repo_url=self.repo_url,
-                    ref=self.repo_ref,
-                    workspace_path=self._persisted_workspace_path,
-                    context_sources=self._persisted_context_sources,
-                    context_id=self._persisted_context_id,
-                )
+                async_resume = getattr(self.runtime, "aresume_workspace_session", None)
+                if async_resume is not None and callable(async_resume):
+                    self._session = await _await_if_needed(
+                        async_resume(
+                            sandbox_id=self._persisted_sandbox_id,
+                            repo_url=self.repo_url,
+                            ref=self.repo_ref,
+                            workspace_path=self._persisted_workspace_path,
+                            context_sources=self._persisted_context_sources,
+                            context_id=self._persisted_context_id,
+                        )
+                    )
+                else:
+                    self._session = await _await_if_needed(
+                        self.runtime.resume_workspace_session(
+                            sandbox_id=self._persisted_sandbox_id,
+                            repo_url=self.repo_url,
+                            ref=self.repo_ref,
+                            workspace_path=self._persisted_workspace_path,
+                            context_sources=self._persisted_context_sources,
+                            context_id=self._persisted_context_id,
+                        )
+                    )
                 self._session_source_key = source_key
-                self._reset_execution_state()
+                await self._areset_execution_state()
                 self._persist_session_snapshot()
                 return self._session
             except Exception:
@@ -536,19 +605,32 @@ class DaytonaInterpreter(LLMQueryMixin):
                 self._persisted_context_sources = []
                 self._persisted_context_id = None
 
-        self._session = self.runtime.create_workspace_session(
-            repo_url=self.repo_url,
-            ref=self.repo_ref,
-            context_paths=list(self.context_paths),
-            volume_name=self.volume_name,
-        )
+        async_create = getattr(self.runtime, "acreate_workspace_session", None)
+        if async_create is not None and callable(async_create):
+            self._session = await _await_if_needed(
+                async_create(
+                    repo_url=self.repo_url,
+                    ref=self.repo_ref,
+                    context_paths=list(self.context_paths),
+                    volume_name=self.volume_name,
+                )
+            )
+        else:
+            self._session = await _await_if_needed(
+                self.runtime.create_workspace_session(
+                    repo_url=self.repo_url,
+                    ref=self.repo_ref,
+                    context_paths=list(self.context_paths),
+                    volume_name=self.volume_name,
+                )
+            )
         self._session_source_key = source_key
-        self._reset_execution_state()
+        await self._areset_execution_state()
         self._persist_session_snapshot()
         return self._session
 
     async def _aensure_session(self) -> DaytonaSandboxSession:
-        return await asyncio.to_thread(self._ensure_session_sync)
+        return await self._aensure_session_impl()
 
     async def aget_session(self) -> DaytonaSandboxSession:
         """Public async accessor to ensure and return the active sandbox session."""
@@ -566,6 +648,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._persisted_context_id = active_session.context_id
 
     def _detach_session(self, *, delete: bool) -> None:
+        _run_async_compat(self._adetach_session, delete=delete)
+
+    async def _adetach_session(self, *, delete: bool) -> None:
         active_session = self._session
         if active_session is None:
             if delete:
@@ -573,17 +658,25 @@ class DaytonaInterpreter(LLMQueryMixin):
                 self._persisted_workspace_path = None
                 self._persisted_context_sources = []
                 self._persisted_context_id = None
-            self._reset_execution_state()
+            await self._areset_execution_state()
             self._started = False
             return
 
         self._persist_session_snapshot(active_session)
-        self._close_bridge()
+        await self._aclose_bridge()
         try:
             if delete:
-                active_session.delete()
+                async_delete = getattr(active_session, "adelete", None)
+                if async_delete is not None and callable(async_delete):
+                    await _await_if_needed(async_delete())
+                else:
+                    await _await_if_needed(active_session.delete())
             else:
-                active_session.close_driver()
+                async_close = getattr(active_session, "aclose_driver", None)
+                if async_close is not None and callable(async_close):
+                    await _await_if_needed(async_close())
+                else:
+                    await _await_if_needed(active_session.close_driver())
         finally:
             if delete:
                 self._persisted_sandbox_id = None
@@ -592,19 +685,54 @@ class DaytonaInterpreter(LLMQueryMixin):
                 self._persisted_context_id = None
             self._session = None
             self._session_source_key = None
-            self._reset_execution_state()
+            await self._areset_execution_state()
             self._started = False
 
     def _close_bridge(self) -> None:
+        _run_async_compat(self._aclose_bridge)
+
+    async def _aclose_bridge(self) -> None:
         bridge = self._bridge
         self._bridge = None
         self._bridge_sandbox_id = None
         self._bridge_context_id = None
         if bridge is not None:
-            bridge.close()
+            close = getattr(bridge, "aclose", None)
+            if close is not None and callable(close):
+                await _await_if_needed(close())
+            else:
+                await _await_if_needed(bridge.close())
+
+    async def _aclose_runtime(self) -> None:
+        if not self._owns_runtime or self._runtime_closed:
+            return
+        close = getattr(self.runtime, "aclose", None)
+        if close is not None and callable(close):
+            await _await_if_needed(close())
+        else:
+            close = getattr(self.runtime, "close", None)
+            if close is not None and callable(close):
+                await _await_if_needed(close())
+        self._runtime_closed = True
+
+    def _ensure_runtime_available(self) -> None:
+        runtime = self.runtime
+        if not self._owns_runtime or not isinstance(runtime, DaytonaSandboxRuntime):
+            return
+        if getattr(runtime, "_client", None) is not None:
+            return
+        if self._runtime_config is None:
+            raise RuntimeError(
+                "Owned Daytona runtime cannot be recreated without config"
+            )
+        self.runtime = DaytonaSandboxRuntime(config=self._runtime_config)
+        self._runtime_closed = False
 
     def _reset_execution_state(self) -> None:
-        self._close_bridge()
+        _run_async_compat(self._areset_execution_state)
+
+    async def _areset_execution_state(self) -> None:
+        await self._aclose_bridge()
         self._setup_context_id = None
         self._submit_signature_key = None
 
@@ -612,6 +740,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         runtime = DaytonaSandboxRuntime(config=self.runtime._resolved_config)
         child = DaytonaInterpreter(
             runtime=runtime,
+            owns_runtime=True,
             timeout=self.timeout,
             execute_timeout=self.execute_timeout,
             volume_name=self.volume_name,
@@ -637,8 +766,22 @@ class DaytonaInterpreter(LLMQueryMixin):
         *,
         execution_profile: ExecutionProfile | None = None,
     ) -> str | FinalOutput:
-        session = self._ensure_session_sync()
-        session.start_driver(timeout=float(self.execute_timeout))
+        return _run_async_compat(
+            self.aexecute,
+            code,
+            variables,
+            execution_profile=execution_profile,
+        )
+
+    async def aexecute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> str | FinalOutput:
+        session = await self._aensure_session_impl()
+        await session.astart_driver(timeout=float(self.execute_timeout))
         safe_vars = self._safe_variables(variables)
         profile = execution_profile or self.default_execution_profile
         profile_value = profile.value if hasattr(profile, "value") else str(profile)
@@ -653,7 +796,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             ),
         )
         try:
-            response = self._execute_in_session(
+            response = await self._aexecute_in_session(
                 session=session,
                 code=code,
                 variables=safe_vars,
@@ -681,20 +824,6 @@ class DaytonaInterpreter(LLMQueryMixin):
             code_preview=code_preview,
         )
 
-    async def aexecute(
-        self,
-        code: str,
-        variables: dict[str, Any] | None = None,
-        *,
-        execution_profile: ExecutionProfile | None = None,
-    ) -> str | FinalOutput:
-        return await asyncio.to_thread(
-            self.execute,
-            code,
-            variables,
-            execution_profile=execution_profile,
-        )
-
     def _safe_variables(self, variables: dict[str, Any] | None) -> dict[str, Any]:
         safe_vars: dict[str, Any] = {}
         for key, value in (variables or {}).items():
@@ -717,15 +846,17 @@ class DaytonaInterpreter(LLMQueryMixin):
             normalized.append((name, str(field.get("type") or "").strip()))
         return tuple(normalized) or None
 
-    def _ensure_setup(self, session: DaytonaSandboxSession) -> Any:
-        context = session.ensure_context()
+    async def _aensure_setup(self, session: DaytonaSandboxSession) -> Any:
+        context = await session.aensure_context()
         if self._setup_context_id != session.context_id:
-            result = session.sandbox.code_interpreter.run_code(
-                _base_setup_code(
-                    workspace_path=session.workspace_path,
-                    volume_mount_path=self.volume_mount_path,
-                ),
-                context=context,
+            result = await _await_if_needed(
+                session.sandbox.code_interpreter.run_code(
+                    _base_setup_code(
+                        workspace_path=session.workspace_path,
+                        volume_mount_path=self.volume_mount_path,
+                    ),
+                    context=context,
+                )
             )
             if result.error:
                 raise CodeInterpreterError(
@@ -736,9 +867,11 @@ class DaytonaInterpreter(LLMQueryMixin):
 
         submit_signature = self._submit_signature()
         if submit_signature and submit_signature != self._submit_signature_key:
-            result = session.sandbox.code_interpreter.run_code(
-                _typed_submit_code(self.output_fields or []),
-                context=context,
+            result = await _await_if_needed(
+                session.sandbox.code_interpreter.run_code(
+                    _typed_submit_code(self.output_fields or []),
+                    context=context,
+                )
             )
             if result.error:
                 raise CodeInterpreterError(
@@ -747,21 +880,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             self._submit_signature_key = submit_signature
         return context
 
-    def _bridge_tools(self) -> dict[str, Callable[..., Any]]:
-        tools = dict(self._tools)
-        tools["llm_query"] = self.llm_query
-        tools["llm_query_batched"] = self.llm_query_batched
-        tools["rlm_query"] = self.llm_query
-        tools["rlm_query_batched"] = self.llm_query_batched
-        return tools
-
-    def _requires_bridge(self, code: str, tools: dict[str, Callable[..., Any]]) -> bool:
-        for tool_name in tools:
-            if f"{tool_name}(" in code:
-                return True
-        return False
-
-    def _ensure_bridge(
+    async def _aensure_bridge(
         self,
         *,
         session: DaytonaSandboxSession,
@@ -776,7 +895,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             or self._bridge_sandbox_id != sandbox_id
             or self._bridge_context_id != context_id
         ):
-            self._close_bridge()
+            await self._aclose_bridge()
             bridge = DaytonaToolBridge(
                 sandbox=session.sandbox,
                 context=context,
@@ -786,8 +905,103 @@ class DaytonaInterpreter(LLMQueryMixin):
             self._bridge_context_id = context_id
         else:
             bridge.bind_context(context)
-        bridge.sync_tools(tools)
+        bridge_sync = getattr(bridge, "async_tools", None)
+        if bridge_sync is not None and callable(bridge_sync):
+            await _await_if_needed(bridge_sync(tools))
+        else:
+            await _await_if_needed(bridge.sync_tools(tools))
         return bridge
+
+    async def _aexecute_in_session(
+        self,
+        *,
+        session: DaytonaSandboxSession,
+        code: str,
+        variables: dict[str, Any],
+    ) -> _DaytonaExecutionResponse:
+        context = await self._aensure_setup(session)
+        prepared_code = self._inject_variables(code, variables)
+        tools = self._bridge_tools()
+        if self._requires_bridge(prepared_code, tools):
+            bridge = await self._aensure_bridge(
+                session=session,
+                context=context,
+                tools=tools,
+            )
+            async_execute = getattr(bridge, "aexecute", None)
+            if async_execute is not None and callable(async_execute):
+                execution = await _await_if_needed(
+                    async_execute(
+                        code=prepared_code,
+                        timeout=int(self.execute_timeout),
+                        tool_executor=self._invoke_tool,
+                    )
+                )
+            else:
+                execution = await _await_if_needed(
+                    bridge.execute(
+                        code=prepared_code,
+                        timeout=int(self.execute_timeout),
+                        tool_executor=self._invoke_tool,
+                    )
+                )
+        else:
+            execution = await self._aexecute_direct(
+                session=session,
+                context=context,
+                code=prepared_code,
+            )
+        return self._response_from_execution(execution)
+
+    async def _aexecute_direct(
+        self,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        code: str,
+    ) -> DaytonaBridgeExecution:
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+
+        def _on_stdout(message: Any) -> None:
+            stdout_parts.append(str(getattr(message, "output", "") or ""))
+
+        def _on_stderr(message: Any) -> None:
+            stderr_parts.append(str(getattr(message, "output", "") or ""))
+
+        result = await _await_if_needed(
+            session.sandbox.code_interpreter.run_code(
+                code,
+                context=context,
+                on_stdout=_on_stdout,
+                on_stderr=_on_stderr,
+                timeout=int(self.execute_timeout),
+            )
+        )
+        return DaytonaBridgeExecution(
+            result=result,
+            stdout="".join(stdout_parts),
+            stderr="".join(stderr_parts),
+            callback_count=0,
+        )
+
+    def _bridge_tools(self) -> dict[str, Callable[..., Any]]:
+        tools = {
+            name: tool
+            for name, tool in self._tools.items()
+            if name not in _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES
+        }
+        tools["llm_query"] = self.llm_query
+        tools["llm_query_batched"] = self.llm_query_batched
+        tools["rlm_query"] = self.llm_query
+        tools["rlm_query_batched"] = self.llm_query_batched
+        return tools
+
+    def _requires_bridge(self, code: str, tools: dict[str, Callable[..., Any]]) -> bool:
+        for tool_name in tools:
+            if f"{tool_name}(" in code:
+                return True
+        return False
 
     def _invoke_tool(
         self,
@@ -815,59 +1029,6 @@ class DaytonaInterpreter(LLMQueryMixin):
                 return str(value)
         except Exception as exc:
             return {"error": f"{type(exc).__name__}: {exc}"}
-
-    def _execute_in_session(
-        self,
-        *,
-        session: DaytonaSandboxSession,
-        code: str,
-        variables: dict[str, Any],
-    ) -> _DaytonaExecutionResponse:
-        context = self._ensure_setup(session)
-        prepared_code = self._inject_variables(code, variables)
-        tools = self._bridge_tools()
-        if self._requires_bridge(prepared_code, tools):
-            bridge = self._ensure_bridge(session=session, context=context, tools=tools)
-            execution = bridge.execute(
-                code=prepared_code,
-                timeout=int(self.execute_timeout),
-                tool_executor=self._invoke_tool,
-            )
-        else:
-            execution = self._execute_direct(
-                session=session, context=context, code=prepared_code
-            )
-        return self._response_from_execution(execution)
-
-    def _execute_direct(
-        self,
-        *,
-        session: DaytonaSandboxSession,
-        context: Any,
-        code: str,
-    ) -> DaytonaBridgeExecution:
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-
-        def _on_stdout(message: Any) -> None:
-            stdout_parts.append(str(getattr(message, "output", "") or ""))
-
-        def _on_stderr(message: Any) -> None:
-            stderr_parts.append(str(getattr(message, "output", "") or ""))
-
-        result = session.sandbox.code_interpreter.run_code(
-            code,
-            context=context,
-            on_stdout=_on_stdout,
-            on_stderr=_on_stderr,
-            timeout=int(self.execute_timeout),
-        )
-        return DaytonaBridgeExecution(
-            result=result,
-            stdout="".join(stdout_parts),
-            stderr="".join(stderr_parts),
-            callback_count=0,
-        )
 
     def _response_from_execution(
         self,

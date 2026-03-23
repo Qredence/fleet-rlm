@@ -37,7 +37,7 @@ class ForcedFinalPayloadInput:
 
 
 def prediction_from_forced_rlm_result(
-    agent: "RLMReActChatAgent", result: dict[str, Any]
+    agent: RLMReActChatAgent, result: dict[str, Any]
 ) -> dspy.Prediction:
     """Convert a forced child-RLM result into a DSPy prediction."""
     trajectory = result.get("trajectory", {})
@@ -69,7 +69,7 @@ def prediction_from_forced_rlm_result(
 
 
 def run_forced_rlm_turn(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
 ) -> dspy.Prediction:
@@ -87,7 +87,7 @@ def run_forced_rlm_turn(
 
 
 async def arun_forced_rlm_turn(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
 ) -> dspy.Prediction:
@@ -107,7 +107,7 @@ async def arun_forced_rlm_turn(
 
 
 def forced_stream_final_payload(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     payload_input: ForcedFinalPayloadInput,
     ctx: StreamingContext,
@@ -125,7 +125,7 @@ def forced_stream_final_payload(
 
 
 async def aiter_forced_rlm_turn_stream(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     message: str,
     cancel_check: Callable[[], bool] | None = None,

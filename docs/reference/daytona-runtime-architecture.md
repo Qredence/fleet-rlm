@@ -21,7 +21,7 @@ The current implementation treats these Daytona docs as the normative baseline:
 ## What Is Directly Based On Daytona Docs
 
 - Daytona clients are created through the official Python SDK entrypoints:
-  - `from daytona import Daytona`
+  - `from daytona import AsyncDaytona`
   - `from daytona import DaytonaConfig`
 - Sandbox bootstrap and resume use the native Daytona SDK surface directly:
   - `DaytonaSandboxRuntime` creates or resumes sandboxes
@@ -64,6 +64,12 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, and `types_serialization.py` own provider-local result, context, and recursion contracts
   - `volumes.py` owns provider-specific volume browsing helpers
 - `agent.py` and `state.py` remain the Daytona-specific agent/session adapters over the shared runtime.
+- The provider is now async-first internally:
+  - `AsyncDaytona` drives sandbox/session lifecycle
+  - host-side volume browsing uses async Daytona helpers directly
+  - async sandbox helpers such as `get_work_dir()` and `get_preview_link()` must be awaited before their values are used
+  - owned `AsyncDaytona` clients should be closed when an interpreter/runtime is discarded to avoid leaking HTTP sessions
+  - sync helper methods remain as compatibility shims over the async implementation
 - Shared runtime control is intentionally split across three paths:
   - `RLMReActChatAgent` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
@@ -99,7 +105,7 @@ RLM contract the shared runtime still needs:
 
 In practice the provider is intentionally hybrid:
 
-- direct Daytona SDK for client, sandbox, volume, filesystem, preview, process-session, and code-interpreter operations
+- direct async Daytona SDK for client, sandbox, volume, filesystem, preview, process-session, and code-interpreter operations
 - a minimal guide-style broker bridge for host callbacks only
 
 ## Workspace Volume Contract

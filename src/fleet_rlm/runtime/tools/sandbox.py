@@ -1346,6 +1346,21 @@ except Exception as e:
 """
         return await _aexecute_submit_ctx(ctx, code, variables={"path": resolved_path})
 
+    async def run(command: str) -> dict[str, Any]:
+        """Execute a bash command in the sandbox environment."""
+        code = f"SUBMIT(result=run({command!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def workspace_write(path: str, content: str) -> dict[str, Any]:
+        """Write content to a file in the workspace directory."""
+        code = f"SUBMIT(result=workspace_write({path!r}, {content!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def workspace_read(path: str) -> dict[str, Any]:
+        """Read content from a file in the workspace directory."""
+        code = f"SUBMIT(result=workspace_read({path!r}))"
+        return await _aexecute_submit_ctx(ctx, code)
+
     # -- Assemble tool list --------------------------------------------------
 
     from dspy import Tool
@@ -1357,6 +1372,27 @@ except Exception as e:
             name="edit_file",
             desc="Robustly edit a file by finding and replacing a unique text snippet",
         )
+    )
+
+    # Sandbox execution tools (Mapped from Interpreter Builtins)
+    tools.extend(
+        [
+            Tool(
+                _sync_compatible_tool_callable(run),
+                name="run",
+                desc="Execute a bash command in the sandbox environment",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(workspace_write),
+                name="workspace_write",
+                desc="Write content to a file in the workspace directory",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(workspace_read),
+                name="workspace_read",
+                desc="Read content from a file in the workspace directory",
+            ),
+        ]
     )
 
     # Buffer & volume tools

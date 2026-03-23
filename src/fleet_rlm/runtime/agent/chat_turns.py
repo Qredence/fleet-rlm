@@ -73,7 +73,7 @@ class TurnMetricsSnapshot:
         }
 
 
-def snapshot_turn_metrics(agent: "RLMReActChatAgent") -> TurnMetricsSnapshot:
+def snapshot_turn_metrics(agent: RLMReActChatAgent) -> TurnMetricsSnapshot:
     """Capture the current per-turn counters from *agent*."""
     state = _turn_delegation_state(agent)
     return TurnMetricsSnapshot(
@@ -131,7 +131,7 @@ def prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
 
 
 def build_turn_result(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     assistant_response: str,
     trajectory: dict[str, Any],
@@ -152,7 +152,7 @@ def build_turn_result(
     return payload
 
 
-def prepare_turn(agent: "RLMReActChatAgent", user_request: str) -> int:
+def prepare_turn(agent: RLMReActChatAgent, user_request: str) -> int:
     """Initialize per-turn counters and compute the effective iteration budget."""
     return _turn_delegation_state(agent).reset(
         effective_max_iters=compute_effective_max_iters(agent, user_request)
@@ -160,7 +160,7 @@ def prepare_turn(agent: "RLMReActChatAgent", user_request: str) -> int:
 
 
 def prepare_routed_turn(
-    agent: "RLMReActChatAgent", *, effective_max_iters: int | None = None
+    agent: RLMReActChatAgent, *, effective_max_iters: int | None = None
 ) -> int:
     """Reset per-turn counters for an externally-routed RLM turn."""
     return _turn_delegation_state(agent).reset(
@@ -175,7 +175,7 @@ def prepare_routed_turn(
     )
 
 
-def compute_effective_max_iters(agent: "RLMReActChatAgent", user_request: str) -> int:
+def compute_effective_max_iters(agent: RLMReActChatAgent, user_request: str) -> int:
     """Compute the adaptive ReAct iteration budget for the current request."""
     baseline = max(1, int(agent.react_max_iters))
     if not agent.enable_adaptive_iters:
@@ -204,30 +204,30 @@ def compute_effective_max_iters(agent: "RLMReActChatAgent", user_request: str) -
     return baseline
 
 
-def finalize_turn(agent: "RLMReActChatAgent", trajectory: Any) -> None:
+def finalize_turn(agent: RLMReActChatAgent, trajectory: Any) -> None:
     """Capture post-turn metrics for adaptive follow-up turns."""
     agent._last_tool_error_count = agent._count_tool_errors(trajectory)
 
 
-def claim_delegate_slot(agent: "RLMReActChatAgent") -> tuple[bool, int]:
+def claim_delegate_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
     """Claim one delegate slot from the per-turn budget."""
     return _turn_delegation_state(agent).claim_slot(
         max_calls_per_turn=agent.delegate_max_calls_per_turn
     )
 
 
-def record_delegate_fallback(agent: "RLMReActChatAgent") -> None:
+def record_delegate_fallback(agent: RLMReActChatAgent) -> None:
     """Record one delegate-LM fallback for the active turn."""
     _turn_delegation_state(agent).record_fallback()
 
 
-def record_delegate_truncation(agent: "RLMReActChatAgent") -> None:
+def record_delegate_truncation(agent: RLMReActChatAgent) -> None:
     """Record one truncated delegate result for the active turn."""
     _turn_delegation_state(agent).record_truncation()
 
 
 def process_prediction_to_turn_result(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     prediction: dspy.Prediction,
     message: str,
@@ -262,7 +262,7 @@ def process_prediction_to_turn_result(
     )
 
 
-def _turn_delegation_state(agent: "RLMReActChatAgent") -> TurnDelegationState:
+def _turn_delegation_state(agent: RLMReActChatAgent) -> TurnDelegationState:
     state = getattr(agent, "_turn_delegation_state", None)
     if isinstance(state, TurnDelegationState):
         return state

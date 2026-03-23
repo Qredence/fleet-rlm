@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
 
 
-def history_messages(agent: "RLMReActChatAgent") -> list[Any]:
+def history_messages(agent: RLMReActChatAgent) -> list[Any]:
     """Return chat history messages as a defensive list copy."""
     messages = getattr(agent.history, "messages", None)
     if messages is None:
@@ -21,13 +21,13 @@ def history_messages(agent: "RLMReActChatAgent") -> list[Any]:
         return []
 
 
-def history_turns(agent: "RLMReActChatAgent") -> int:
+def history_turns(agent: RLMReActChatAgent) -> int:
     """Return number of stored history turns safely."""
     return len(history_messages(agent))
 
 
 def append_history(
-    agent: "RLMReActChatAgent", user_request: str, assistant_response: str
+    agent: RLMReActChatAgent, user_request: str, assistant_response: str
 ) -> None:
     """Append one chat turn and enforce the configured history cap."""
     messages = history_messages(agent)
@@ -42,7 +42,7 @@ def append_history(
     agent.history = dspy.History(messages=messages)
 
 
-def export_session_state(agent: "RLMReActChatAgent") -> dict[str, Any]:
+def export_session_state(agent: RLMReActChatAgent) -> dict[str, Any]:
     """Export serializable session state for persistence."""
     payload = {
         "history": history_messages(agent),
@@ -59,7 +59,7 @@ def export_session_state(agent: "RLMReActChatAgent") -> dict[str, Any]:
 
 
 def import_session_state(
-    agent: "RLMReActChatAgent", state: dict[str, Any]
+    agent: RLMReActChatAgent, state: dict[str, Any]
 ) -> dict[str, Any]:
     """Restore session state from a previously exported payload."""
     history = _restore_agent_state(agent, state)
@@ -73,7 +73,7 @@ def import_session_state(
 
 
 async def aimport_session_state(
-    agent: "RLMReActChatAgent", state: dict[str, Any]
+    agent: RLMReActChatAgent, state: dict[str, Any]
 ) -> dict[str, Any]:
     """Async restore variant for interpreters with async session state hooks."""
     history = _restore_agent_state(agent, state)
@@ -90,9 +90,7 @@ async def aimport_session_state(
     return _import_result(agent, history)
 
 
-def _restore_agent_state(
-    agent: "RLMReActChatAgent", state: dict[str, Any]
-) -> list[Any]:
+def _restore_agent_state(agent: RLMReActChatAgent, state: dict[str, Any]) -> list[Any]:
     """Restore shared chat/session state prior to interpreter-specific hooks."""
     history = state.get("history", [])
     if not isinstance(history, list):
@@ -106,7 +104,7 @@ def _restore_agent_state(
     return history
 
 
-def _import_result(agent: "RLMReActChatAgent", history: list[Any]) -> dict[str, Any]:
+def _import_result(agent: RLMReActChatAgent, history: list[Any]) -> dict[str, Any]:
     """Build the canonical import response payload."""
     return {
         "status": "ok",
@@ -117,7 +115,7 @@ def _import_result(agent: "RLMReActChatAgent", history: list[Any]) -> dict[str, 
     }
 
 
-def forced_delegate_context(agent: "RLMReActChatAgent") -> str:
+def forced_delegate_context(agent: RLMReActChatAgent) -> str:
     """Build the compact forced-RLM context payload for recursive delegation."""
     parts: list[str] = []
 

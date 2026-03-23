@@ -71,7 +71,7 @@ TOOL_DELEGATE_NAMES: frozenset[str] = frozenset(
 )
 
 
-def get_tool_by_name(agent: "RLMReActChatAgent", name: str) -> Callable[..., Any]:
+def get_tool_by_name(agent: RLMReActChatAgent, name: str) -> Callable[..., Any]:
     """Look up a tool by name in the agent's tool list.
 
     Handles both raw callables (via ``__name__``) and ``dspy.Tool``

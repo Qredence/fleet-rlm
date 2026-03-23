@@ -69,7 +69,7 @@ def _execution_profile_name(interpreter: Any) -> str:
 
 
 def _delegate_streaming_context(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     interpreter: Any,
     effective_max_iters: int,
@@ -142,7 +142,7 @@ def _delegate_trajectory_events(
 
 
 async def spawn_delegate_sub_agent_async(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     *,
     prompt: str,
     context: str = "",
@@ -276,14 +276,20 @@ async def spawn_delegate_sub_agent_async(
     try:
         with lm_context:
             raw_result = await _execute_child()
-    except Exception:
+    except Exception as exc:
         if delegate_lm is not None and parent_lm is not None:
             record_delegate_fallback(agent)
             fallback_used = True
-            with build_dspy_context(lm=parent_lm):
-                raw_result = await _execute_child()
+            try:
+                with build_dspy_context(lm=parent_lm):
+                    raw_result = await _execute_child()
+            except Exception as fallback_exc:
+                return {
+                    "status": "error",
+                    "error": f"Sub-agent execution failed during fallback: {fallback_exc}",
+                }
         else:
-            raise
+            return {"status": "error", "error": f"Sub-agent execution failed: {exc}"}
 
     return normalize_delegate_result(
         agent=agent,

@@ -214,3 +214,39 @@ def test_daytona_interpreter_exports_context_id_for_resume() -> None:
     restored.start()
 
     assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+
+
+def test_daytona_interpreter_skips_bridge_injection_for_native_sandbox_tools() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.tools = {
+        "run": lambda command: {"command": command},
+        "workspace_write": lambda path, content: {"path": path, "content": content},
+        "workspace_read": lambda path: {"path": path},
+        "custom_tool": lambda value: value,
+    }
+
+    bridge_tools = interpreter._bridge_tools()
+
+    assert "run" not in bridge_tools
+    assert "workspace_write" not in bridge_tools
+    assert "workspace_read" not in bridge_tools
+    assert "custom_tool" in bridge_tools
+    assert "llm_query" in bridge_tools
+
+
+def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
+    runtime = _FakeRuntime()
+    runtime.closed = 0
+
+    async def _aclose() -> None:
+        runtime.closed += 1
+
+    runtime.aclose = _aclose  # type: ignore[attr-defined]
+
+    interpreter = DaytonaInterpreter(runtime=runtime, owns_runtime=True)
+
+    interpreter.shutdown()
+    interpreter.shutdown()
+
+    assert runtime.closed == 1

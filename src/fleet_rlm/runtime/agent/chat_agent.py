@@ -14,9 +14,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import AsyncIterator, Callable, Iterable
+from types import TracebackType
 from typing import Any, Literal
 
 import dspy
+from typing_extensions import Self
 
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
@@ -106,19 +108,19 @@ from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
 from .trajectory_errors import count_tool_errors
 
 
-def _start_agent_session(agent: "RLMReActChatAgent") -> None:
+def _start_agent_session(agent: RLMReActChatAgent) -> None:
     if agent._started:
         return
     agent.interpreter.start()
     agent._started = True
 
 
-def _shutdown_agent_session(agent: "RLMReActChatAgent") -> None:
+def _shutdown_agent_session(agent: RLMReActChatAgent) -> None:
     agent.interpreter.shutdown()
     agent._started = False
 
 
-async def _astart_agent_session(agent: "RLMReActChatAgent") -> None:
+async def _astart_agent_session(agent: RLMReActChatAgent) -> None:
     if agent._started:
         return
     if getattr(agent.interpreter, "async_execute", False) and hasattr(
@@ -130,7 +132,7 @@ async def _astart_agent_session(agent: "RLMReActChatAgent") -> None:
     agent._started = True
 
 
-async def _ashutdown_agent_session(agent: "RLMReActChatAgent") -> None:
+async def _ashutdown_agent_session(agent: RLMReActChatAgent) -> None:
     if getattr(agent.interpreter, "async_execute", False) and hasattr(
         agent.interpreter, "ashutdown"
     ):
@@ -140,13 +142,13 @@ async def _ashutdown_agent_session(agent: "RLMReActChatAgent") -> None:
     agent._started = False
 
 
-def _reset_agent_history_and_cache(agent: "RLMReActChatAgent") -> int:
+def _reset_agent_history_and_cache(agent: RLMReActChatAgent) -> int:
     agent.history = dspy.History(messages=[])
     return agent.clear_document_cache()
 
 
 def _reset_agent_state(
-    agent: "RLMReActChatAgent", *, clear_sandbox_buffers: bool
+    agent: RLMReActChatAgent, *, clear_sandbox_buffers: bool
 ) -> dict[str, Any]:
     docs_count = _reset_agent_history_and_cache(agent)
     if clear_sandbox_buffers:
@@ -170,7 +172,7 @@ def _reset_agent_state(
 
 
 async def _areset_agent_state(
-    agent: "RLMReActChatAgent", *, clear_sandbox_buffers: bool
+    agent: RLMReActChatAgent, *, clear_sandbox_buffers: bool
 ) -> dict[str, Any]:
     docs_count = _reset_agent_history_and_cache(agent)
     if clear_sandbox_buffers:
@@ -186,7 +188,7 @@ async def _areset_agent_state(
 
 
 def _build_react_module(
-    agent: "RLMReActChatAgent", *, signature: type[dspy.Signature]
+    agent: RLMReActChatAgent, *, signature: type[dspy.Signature]
 ) -> dspy.Module:
     agent.react_tools = build_tool_list(agent, agent._extra_tools)
     return dspy.ReAct(
@@ -197,7 +199,7 @@ def _build_react_module(
 
 
 def _collect_chat_turn_stream(
-    agent: "RLMReActChatAgent", *, message: str, trace: bool
+    agent: RLMReActChatAgent, *, message: str, trace: bool
 ) -> dict[str, Any]:
     assistant_chunks: list[str] = []
     thought_chunks: list[str] = []
@@ -237,11 +239,11 @@ def _collect_chat_turn_stream(
     }
 
 
-def _resolve_tool(agent: "RLMReActChatAgent", name: str) -> Callable[..., Any]:
+def _resolve_tool(agent: RLMReActChatAgent, name: str) -> Callable[..., Any]:
     return get_tool_by_name(agent, name)
 
 
-def _resolve_tool_delegate(agent: "RLMReActChatAgent", name: str) -> Callable[..., Any]:
+def _resolve_tool_delegate(agent: RLMReActChatAgent, name: str) -> Callable[..., Any]:
     if name in TOOL_DELEGATE_NAMES:
         return get_tool_by_name(agent, name)
     raise AttributeError(f"{type(agent).__name__!r} object has no attribute {name!r}")
@@ -389,11 +391,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     # Lifecycle
     # -----------------------------------------------------------------
 
-    def __enter__(self) -> "RLMReActChatAgent":
+    def __enter__(self) -> Self:
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool:
         self.shutdown()
         return False
 
@@ -413,11 +420,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         """Shutdown the interpreter and mark this agent session as stopped (async)."""
         await _ashutdown_agent_session(self)
 
-    async def __aenter__(self) -> "RLMReActChatAgent":
+    async def __aenter__(self) -> Self:
         await self.astart()
         return self
 
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool:
         await self.ashutdown()
         return False
 
@@ -475,20 +487,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             assistant_response=assistant_response,
             trajectory=trajectory,
         )
-        setattr(prediction, "assistant_response", assistant_response)
+        prediction.assistant_response = assistant_response
         if warnings:
-            setattr(prediction, "guardrail_warnings", warnings)
-        setattr(prediction, "effective_max_iters", self._current_effective_max_iters)
-        setattr(prediction, "delegate_calls_turn", self._delegate_calls_turn)
-        setattr(
-            prediction,
-            "delegate_fallback_count_turn",
-            self._delegate_fallback_count_turn,
-        )
-        setattr(
-            prediction,
-            "delegate_result_truncated_count_turn",
-            self._delegate_result_truncated_count_turn,
+            prediction.guardrail_warnings = warnings
+        prediction.effective_max_iters = self._current_effective_max_iters
+        prediction.delegate_calls_turn = self._delegate_calls_turn
+        prediction.delegate_fallback_count_turn = self._delegate_fallback_count_turn
+        prediction.delegate_result_truncated_count_turn = (
+            self._delegate_result_truncated_count_turn
         )
         return prediction
 

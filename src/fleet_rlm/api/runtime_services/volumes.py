@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, NoReturn
+from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
 from fleet_rlm.integrations.providers.daytona.volumes import (
-    list_daytona_volume_tree,
-    read_daytona_volume_file_text,
+    alist_daytona_volume_tree,
+    aread_daytona_volume_file_text,
 )
 from fleet_rlm.runtime.tools.modal_volumes import (
     list_volume_tree,
@@ -29,7 +30,7 @@ from ..schemas.core import (
 from ..server_utils import sanitize_id as _sanitize_id
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 
-VolumeOperation = Callable[[str, str, int], dict[str, Any]]
+VolumeOperation = Callable[[str, str, int], dict[str, Any] | Awaitable[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -106,8 +107,8 @@ def _resolve_volume_backend(
         return _ResolvedVolumeBackend(
             provider=effective_provider,
             volume_name=resolve_daytona_volume_name(identity=identity, state=state),
-            list_tree=list_daytona_volume_tree,
-            read_file_text=read_daytona_volume_file_text,
+            list_tree=alist_daytona_volume_tree,
+            read_file_text=aread_daytona_volume_file_text,
         )
     return _ResolvedVolumeBackend(
         provider=effective_provider,
@@ -128,8 +129,14 @@ async def _run_volume_operation(
     error_shaper: Callable[[Exception], NoReturn] | None = None,
 ) -> dict[str, Any]:
     try:
+        result = operation(volume_name, path, limit)
+        if inspect.isawaitable(result):
+            return await asyncio.wait_for(
+                result, timeout=VOLUME_OPERATION_TIMEOUT_SECONDS
+            )
+        sync_operation = cast(Callable[[str, str, int], dict[str, Any]], operation)
         return await run_blocking(
-            operation,
+            sync_operation,
             volume_name,
             path,
             limit,

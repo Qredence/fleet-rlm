@@ -53,7 +53,7 @@ def prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
 
 
 def run_cached_runtime_module(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     module_name: str,
     **kwargs: Any,
 ) -> tuple[Any | None, dict[str, Any] | None, bool]:
@@ -69,7 +69,7 @@ def run_cached_runtime_module(
 
 
 def runtime_metadata(
-    agent: "RLMReActChatAgent",
+    agent: RLMReActChatAgent,
     prediction: Any,
     *,
     fallback_used: bool,
