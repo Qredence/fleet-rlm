@@ -104,10 +104,10 @@ export function AppSidebar() {
                 <SidebarMenuButton
                   isActive={isWorkspace}
                   onClick={() => navigateTo("workspace")}
-                  tooltip="RLM Workspace"
+                  tooltip="Workbench"
                 >
                   <MessageCircle />
-                  <span>RLM Workspace</span>
+                  <span>Workbench</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
