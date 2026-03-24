@@ -1,172 +1,84 @@
 ---
 name: rlm-debug
-description: Debug RLM execution, inspect sandbox state, and troubleshoot failures. Use when diagnosing issues with Modal sandboxes, credential problems, or RLM task errors.
+description: Debug fleet-rlm runtime issues from Claude Code. Use when diagnosing modal_chat or daytona_pilot failures, API and websocket contract problems, sandbox persistence bugs, or runtime readiness drift.
 ---
 
-# RLM Debug — Sandbox Diagnostics
+# RLM Debug — Runtime Diagnostics
 
-Diagnose issues with Modal sandboxes, RLM execution failures, and credential
-problems.
+Use this skill when the question is not "how do I use fleet-rlm?" but
+"why is fleet-rlm not behaving correctly?"
 
-> **Skill + Subagent synergy**: This skill is loaded by the `rlm-specialist` and
-> `modal-interpreter-agent` subagents. Use the skill directly for inline debugging,
-> or delegate to those agents for isolated diagnostic sessions.
+## First Branch: Which Runtime?
 
-## Live Environment Status
+- `modal_chat` means Modal is the interpreter backend
+- `daytona_pilot` means Daytona is the interpreter backend
 
-Current Modal environment (auto-detected):
+If the bug is Daytona-specific, also load `daytona-runtime`.
 
-- Modal version: !`uv run python -c "import modal; print(modal.__version__)" 2>&1`
-- Secret check: !`uv run fleet-rlm check-secret 2>&1 | head -5`
-- Active sandboxes: !`uv run modal sandbox list 2>&1 | head -10`
-- Volumes: !`uv run modal volume list 2>&1 | head -10`
-
-## Run Full Diagnostics
-
-For a comprehensive check, run the bundled diagnostic script:
+## Canonical Checks
 
 ```bash
-uv run python .claude/skills/rlm-debug/scripts/diagnose.py
+# from repo root
+uv run fleet web
+uv run fleet-rlm serve-api --port 8000
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
+make test-fast
 ```
 
-Or the project-level validator:
-
-```bash
-uv run python scripts/validate_env.py modal
-```
-
-## Manual Checks
-
-```bash
-# Check LITELLM secret keys
-uv run fleet-rlm check-secret
-uv run fleet-rlm check-secret-key --key DSPY_LLM_API_KEY
-
-# List active Modal apps
-uv run modal app list
-
-# List volumes
-uv run modal volume list
-```
-
----
-
-## Common Issues
-
-### "Planner LM not configured"
-
-Set `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` in `.env` at project root.
-
-### "Modal sandbox process exited unexpectedly"
+## Modal Checks
 
 ```bash
 uv run modal token set
 uv run modal volume list
+uv run python -c "import modal; print(modal.__version__)"
 ```
 
-Check stderr output — the `ModalInterpreter` redacts sensitive data but
-shows the actual error.
-
-### FinalOutput AttributeError
-
-```python
-# WRONG — treating as dict
-result = interp.execute("SUBMIT(status='ok')")
-status = result['status']  # AttributeError!
-
-# CORRECT — attribute access
-result = interp.execute("SUBMIT(status='ok')")
-status = result.status
-```
-
-### Timeout Errors
-
-Increase timeout:
-
-```python
-interp = ModalInterpreter(timeout=900)  # 15 minutes
-```
-
-Or via CLI:
+## Daytona Checks
 
 ```bash
-uv run fleet-rlm run-long-context --timeout 900 ...
+env | grep DAYTONA
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
 
-### Volume Not Persisting
+Daytona persistent memory should be inspected under `/home/daytona/memory`.
 
-Ensure you use the same `volume_name` across sessions:
+## Contract Checks
 
-```python
-# Session 1
-with ModalInterpreter(volume_name='rlm-volume-dspy') as interp:
-    interp.execute("save_to_volume('test.txt', 'hello')")
+When symptoms involve the workspace UI, focus on these seams:
 
-# Session 2 — same volume_name
-with ModalInterpreter(volume_name='rlm-volume-dspy') as interp:
-    result = interp.execute("print(load_from_volume('test.txt'))")
-    print(result)  # 'hello'
-```
+- `openapi.yaml`
+- `/api/v1/runtime/*`
+- `/api/v1/ws/chat`
+- `/api/v1/ws/execution`
 
-### Credential Issues
+The riskiest backend files are:
 
-```bash
-# Check ~/.modal.toml
-cat ~/.modal.toml
+- `src/fleet_rlm/api/routers/runtime.py`
+- `src/fleet_rlm/api/routers/ws/*`
+- `src/fleet_rlm/runtime/execution/streaming_context.py`
 
-# Re-authenticate
-uv run modal token set
+## Common Failures
 
-# Check environment
-env | grep MODAL_TOKEN
-```
+### Runtime mode mismatch
 
----
+- Frontend requests `daytona_pilot` but backend warnings/readiness assume Modal
+- Fix by tracing `runtime_mode` through the initial websocket request and store state
 
-## Inspect Sandbox State
+### Daytona volume confusion
 
-```python
-from fleet_rlm import ModalInterpreter
+- Do not treat `DAYTONA_TARGET` as a workspace id or volume name
+- Use the mounted workspace volume at `/home/daytona/memory`
 
-with ModalInterpreter(timeout=60, volume_name='rlm-volume-dspy') as interp:
-    result = interp.execute(
-        "import os, sys\n"
-        "SUBMIT(\n"
-        "    python=sys.version,\n"
-        "    cwd=os.getcwd(),\n"
-        "    data_exists=os.path.exists('/data'),\n"
-        "    data_contents=os.listdir('/data') if os.path.exists('/data') else [],\n"
-        "    env_keys=[k for k in os.environ if 'DSPY' in k or 'MODAL' in k],\n"
-        ")"
-    )
-    print(f"Python: {result.python}")
-    print(f"Volume mounted: {result.data_exists}")
-    print(f"Volume contents: {result.data_contents}")
-    print(f"Env vars: {result.env_keys}")
-```
+### UI contract drift
 
----
+- If backend request/response shapes changed, update `openapi.yaml` and re-run frontend API sync checks
 
-## Test Sandbox Creation
+### Sandbox-output confusion
 
-```python
-from fleet_rlm import ModalInterpreter
+- `sandbox_output` frames are transcript/debug traces
+- `/api/v1/ws/execution` remains the canonical workbench stream
 
-with ModalInterpreter(timeout=30) as interp:
-    result = interp.execute("SUBMIT(status='healthy', msg='Sandbox works')")
-    print(f"Status: {result.status}")  # 'healthy'
-```
+## Claude Code Delegation
 
----
-
-## Run Test Suite
-
-```bash
-# All tests
-uv run pytest tests/
-
-# Specific test files
-uv run pytest tests/test_driver_protocol.py -v
-uv run pytest tests/test_context_manager.py -v
-uv run pytest tests/test_volume_support.py -v
-```
+- Use `rlm-specialist` for cross-runtime debugging and architecture fixes
+- Use `modal-interpreter-agent` when the issue is Modal-only

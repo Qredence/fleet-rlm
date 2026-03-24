@@ -1,30 +1,46 @@
 ---
 name: rlm-test-suite
-description: Test and evaluate fleet-rlm RLM workflows. Use when running integration tests, benchmarks, regression tests, evaluating RLM performance, or validating Modal sandbox connectivity.
+description: Validate fleet-rlm with the current repo test lanes. Use when you need the right confidence level for runtime, websocket, frontend-contract, or Daytona-backed changes.
 ---
 
 # RLM Test Suite
 
-Testing and evaluation for fleet-rlm. Validates dspy.RLM + ModalInterpreter pipeline from sandbox connectivity to recursive execution.
+Use the smallest lane that matches the change.
 
-## Running Tests
-
-All tests run via pytest from the repo root:
+## Fast Confidence
 
 ```bash
-# All tests (unit + mocked integration, no Modal credentials needed)
-uv run pytest tests/ -v
+# from repo root
+make test-fast
+```
 
-# Specific test files
-uv run pytest tests/test_rlm_integration.py -v    # Integration (mocked Modal)
-uv run pytest tests/test_rlm_benchmarks.py -v      # Benchmarks (chunking throughput)
-uv run pytest tests/test_rlm_regression.py -v       # Regression edge cases
-uv run pytest tests/test_driver_protocol.py -v      # SUBMIT/tool-call protocol
-uv run pytest tests/test_driver_helpers.py -v        # Sandbox helpers (peek, grep, etc.)
+## Shared Contract Confidence
 
-# Run by keyword
-uv run pytest tests/ -k "benchmark" -v
-uv run pytest tests/ -k "integration" -v
+```bash
+# from repo root
+make quality-gate
+```
+
+## Focused Runtime And Websocket Coverage
+
+```bash
+# from repo root
+uv run pytest -q \
+  tests/ui/server/test_api_contract_routes.py \
+  tests/ui/server/test_router_runtime.py \
+  tests/ui/ws/test_chat_stream.py \
+  tests/unit/test_ws_chat_helpers.py
+```
+
+## Daytona-Focused Coverage
+
+```bash
+# from repo root
+uv run pytest -q \
+  tests/unit/test_daytona_rlm_config.py \
+  tests/unit/test_daytona_rlm_smoke.py \
+  tests/unit/test_daytona_rlm_sandbox.py \
+  tests/unit/test_daytona_workbench_chat_agent.py
 ```
 
 ## Test File Inventory
@@ -43,21 +59,11 @@ uv run pytest tests/ -k "integration" -v
 | `test_tools.py`           | Regex extraction, groups, flags                       | tools.py                        |
 | `test_volume_support.py`  | Volume mount/persistence config                       | Volume integration              |
 
-## Validate Modal Environment
-
-Before running live (non-mocked) tests:
+## Native Daytona Validation
 
 ```bash
-# Check Modal credentials
-uv run modal token set
-uv run modal secret list          # Verify LITELLM secret exists
-
-# Check specific secret key
-uv run fleet-rlm check-secret
-uv run fleet-rlm check-secret-key --key DSPY_LLM_API_KEY
-
-# Verify sandbox connectivity
-uv run python scripts/validate_env.py modal --skip-dspy-rlm
+# from repo root
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
 
 ## Writing New Tests
@@ -131,4 +137,4 @@ def test_benchmark_chunking(benchmark):
 
 ## Troubleshooting
 
-See `rlm-debug` skill for comprehensive diagnostics.
+See `rlm-debug` for runtime failures and `daytona-runtime` for Daytona-specific setup and persistence rules.

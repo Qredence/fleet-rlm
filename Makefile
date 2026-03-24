@@ -28,7 +28,7 @@ help:
 	@echo "  make build-ui          - Build the frontend and sync packaged UI assets"
 	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5001"
 	@echo "  make clean             - Remove caches and local generated artifacts"
-	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
+	@echo "  make sync-scaffold     - Reminder that src/fleet_rlm/scaffold is curated, not auto-synced"
 	@echo "  make release-check     - Run clean + quality-gate + security-check + build + twine checks"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run     - Run pre-commit on all files"
@@ -69,7 +69,7 @@ format:
 
 typecheck:
 	uv run ty check src \
-		--exclude "src/fleet_rlm/_scaffold/**"
+		--exclude "src/fleet_rlm/scaffold/**"
 
 metadata-check:
 	uv run python scripts/validate_release.py hygiene
@@ -81,7 +81,7 @@ docs-check:
 
 security-check:
 	uvx pip-audit
-	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
 dependency-check:
 	uvx deptry .
@@ -104,13 +104,9 @@ mlflow-server:
 	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5001
 
 sync-scaffold:
-	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."
-	mkdir -p src/fleet_rlm/_scaffold/teams src/fleet_rlm/_scaffold/hooks
-	rsync -a --delete .claude/skills/ src/fleet_rlm/_scaffold/skills/
-	rsync -a --delete .claude/agents/ src/fleet_rlm/_scaffold/agents/
-	[ -d .claude/hooks ] && rsync -a --delete .claude/hooks/ src/fleet_rlm/_scaffold/hooks/ || true
-	[ -d .claude/teams ] && rsync -a --delete .claude/teams/ src/fleet_rlm/_scaffold/teams/ || true
-	@echo "Scaffold sync complete"
+	@echo "src/fleet_rlm/scaffold is a curated Claude Code translation layer for fleet-rlm."
+	@echo "It is not auto-synced from .claude."
+	@echo "Update the packaged scaffold assets directly and validate with 'uv run fleet-rlm init --list'."
 
 sync-ui:
 	@echo "Syncing frontend dist to packaged UI assets..."

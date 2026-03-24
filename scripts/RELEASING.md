@@ -56,11 +56,11 @@ All commands below assume zsh and are run from the repository root.
 uv run pytest
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 uvx pip-audit
-uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 ```
 
 If the frontend app is present in your checkout, run its gate too:

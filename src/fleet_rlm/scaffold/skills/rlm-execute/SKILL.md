@@ -53,17 +53,12 @@ with ModalInterpreter(timeout=600) as interp:
     result = interp.execute(code)
 ```
 
-## CLI Execution
+## Runtime Context
 
-```bash
-# Basic task
-uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
-
-# With volume
-uv run fleet-rlm run-basic \
-    --question "Calculate factorial of 20" \
-    --volume-name my-data
-```
+`ModalInterpreter` is still the direct Python execution path for the default
+Modal backend. Daytona workbench execution uses a different interpreter backend
+inside the shared runtime, so load `daytona-runtime` when the task is about the
+Daytona path rather than raw Modal execution.
 
 ## Execution Patterns
 
@@ -115,4 +110,4 @@ SUBMIT(log=items)
 
 ## Troubleshooting
 
-See `rlm-debug` skill for comprehensive diagnostics.
+See `rlm-debug` for runtime failures. Use `fleet-rlm daytona-smoke` before assuming a Daytona execution problem is in the higher-level orchestration.

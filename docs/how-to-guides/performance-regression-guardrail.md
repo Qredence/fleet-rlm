@@ -47,6 +47,6 @@ uv run pytest -q tests/integration/test_rlm_benchmarks.py
 ```bash
 # quality checks
 uv run ruff check src tests
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 uv run pytest -q
 ```

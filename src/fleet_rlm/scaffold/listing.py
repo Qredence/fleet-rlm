@@ -28,7 +28,11 @@ def list_skills() -> list[dict[str, Any]]:
             continue
 
         frontmatter = parse_frontmatter(skill_md)
-        file_count = sum(1 for file_path in skill_dir.rglob("*") if file_path.is_file())
+        file_count = sum(
+            1
+            for file_path in skill_dir.rglob("*")
+            if file_path.is_file() and not is_ignored(file_path.relative_to(skill_dir))
+        )
 
         skills.append(
             {
@@ -106,6 +110,8 @@ def list_hooks() -> list[dict[str, Any]]:
 
     hooks: list[dict[str, Any]] = []
     for hook_file in iter_markdown_files(hooks_dir):
+        if hook_file.name.lower() == "readme.md":
+            continue
         frontmatter = parse_frontmatter(hook_file)
         rel = hook_file.relative_to(hooks_dir)
         hooks.append(

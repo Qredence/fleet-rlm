@@ -26,7 +26,11 @@ def install_skills(target: Path, *, force: bool = False) -> list[str]:
             continue
         if target_skill.exists():
             shutil.rmtree(target_skill)
-        shutil.copytree(skill_dir, target_skill)
+        shutil.copytree(
+            skill_dir,
+            target_skill,
+            ignore=shutil.ignore_patterns(".DS_Store", "__pycache__"),
+        )
         installed.append(skill_dir.name)
 
     return installed
@@ -72,7 +76,9 @@ def install_teams(target: Path, *, force: bool = False) -> list[str]:
         if target_team.exists():
             shutil.rmtree(target_team)
         shutil.copytree(
-            team_dir, target_team, ignore=shutil.ignore_patterns(".DS_Store")
+            team_dir,
+            target_team,
+            ignore=shutil.ignore_patterns(".DS_Store", "__pycache__"),
         )
         installed.append(team_dir.name)
 
