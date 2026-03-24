@@ -25,6 +25,7 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import {
   useWorkspaceShellActions,
   useWorkspaceShellHistory,
@@ -60,13 +61,10 @@ export function AppSidebar() {
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
 
-  const handleOpenSettings = () => {
-    const openSettingsEvent = new CustomEvent("open-settings", {
-      detail: { section: "general" },
-      cancelable: true,
+  const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      returnFocusTarget: event.currentTarget,
     });
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigateTo("settings");
     }
@@ -118,6 +116,12 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
+                <SidebarMenuButton disabled tooltip="Search sessions">
+                  <Search />
+                  <span>Search sessions</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={isWorkspace}
                   onClick={() => navigateTo("workspace")}
@@ -125,12 +129,6 @@ export function AppSidebar() {
                 >
                   <MessageSquare />
                   <span>RLM Workspace</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton disabled tooltip="Search sessions">
-                  <Search />
-                  <span>Search sessions</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -165,7 +163,6 @@ export function AppSidebar() {
                       tooltip={session.title}
                       className="h-auto items-start gap-2 py-2"
                     >
-                      <MessageSquare />
                       <span className="flex min-w-0 flex-1 flex-col items-start">
                         <span className="truncate text-sm text-sidebar-foreground">
                           {session.title}

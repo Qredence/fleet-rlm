@@ -16,6 +16,7 @@ import {
 import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import type { NavItem } from "@/stores/navigation-types";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import { useWorkspaceShellActions } from "@/screens/workspace/workspace-shell-contract";
 import { useThemeStore } from "@/stores/themeStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
@@ -75,16 +76,28 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setSearch("");
   }, [onOpenChange]);
 
+  const openSettings = useCallback(() => {
+    const wasHandledByDialog = requestSettingsDialogOpen();
+    if (!wasHandledByDialog) {
+      navigateTo("settings");
+    }
+    close();
+  }, [close, navigateTo]);
+
   const navigateToPage = useCallback(
     (nav: NavItem) => {
       telemetry.capture("command_palette_action_selected", {
         action_type: "page",
         action_value: nav,
       });
+      if (nav === "settings") {
+        openSettings();
+        return;
+      }
       navigateTo(nav);
       close();
     },
-    [navigateTo, close, telemetry],
+    [navigateTo, close, openSettings, telemetry],
   );
 
   if (!open) return null;
@@ -236,8 +249,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       action_type: "action",
                       action_value: "open_settings",
                     });
-                    navigateTo("settings");
-                    close();
+                    openSettings();
                   }}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors min-h-10",

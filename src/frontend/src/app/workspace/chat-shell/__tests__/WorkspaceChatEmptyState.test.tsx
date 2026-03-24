@@ -40,12 +40,12 @@ describe("WorkspaceChatEmptyState", () => {
         hasHistory={true}
       />,
     );
-
     expect(html).toContain("Agentic Fleet Session");
     expect(html).toContain("Architecture pass");
     expect(html).toContain("Document brief");
     expect(html).toContain("Python runner");
     expect(html).toContain("Critique my work");
+    expect(html).not.toContain("Operator workspace");
     expect(html).toContain("View recent conversations");
   });
 

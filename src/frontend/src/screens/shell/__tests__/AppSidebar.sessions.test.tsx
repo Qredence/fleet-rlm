@@ -158,6 +158,7 @@ describe("AppSidebar session actions", () => {
 
     const button = findButtonByText(container, "Saved conversation");
     expect(button).toBeTruthy();
+    expect(button?.querySelector("svg")).toBeNull();
 
     act(() => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

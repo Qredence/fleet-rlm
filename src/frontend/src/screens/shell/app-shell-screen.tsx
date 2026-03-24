@@ -4,6 +4,7 @@ import type { GroupImperativeHandle } from "react-resizable-panels";
 import { AppProviders } from "@/app/providers";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { LoginDialog } from "@/app/shell/login-dialog";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { MobileTabBar } from "@/app/shell/mobile-tab-bar";
 import { RouteSync } from "@/app/shell/route-sync";
 import { ShellRouteOutlet } from "@/app/shell/shell-route-outlet";
@@ -23,6 +24,11 @@ import {
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils";
+import {
+  OPEN_SETTINGS_EVENT,
+  type OpenSettingsEventDetail,
+} from "@/screens/settings/settings-events";
+import type { SettingsSection } from "@/screens/settings/settings-screen";
 import { AppSidebar } from "@/screens/shell/app-sidebar";
 import { ShellHeader } from "@/screens/shell/shell-header";
 import { ShellSidepanel } from "@/screens/shell/shell-sidepanel";
@@ -40,7 +46,12 @@ function ShellLayout() {
   const isMobile = useIsMobile();
   const [cmdOpen, setCmdOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<
+    SettingsSection | undefined
+  >(undefined);
   const loginReturnFocusRef = useRef<HTMLElement | null>(null);
+  const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
   const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
@@ -58,6 +69,22 @@ function ShellLayout() {
     document.addEventListener("open-login", handleOpenLogin);
     return () => {
       document.removeEventListener("open-login", handleOpenLogin);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleOpenSettings = (event: Event) => {
+      const customEvent = event as CustomEvent<OpenSettingsEventDetail>;
+      settingsReturnFocusRef.current =
+        customEvent.detail?.returnFocusTarget ?? null;
+      setSettingsSection(customEvent.detail?.section);
+      setSettingsOpen(true);
+      customEvent.preventDefault();
+    };
+
+    document.addEventListener(OPEN_SETTINGS_EVENT, handleOpenSettings);
+    return () => {
+      document.removeEventListener(OPEN_SETTINGS_EVENT, handleOpenSettings);
     };
   }, []);
 
@@ -215,6 +242,13 @@ function ShellLayout() {
         open={loginOpen}
         onOpenChange={setLoginOpen}
         returnFocusRef={loginReturnFocusRef}
+      />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        section={settingsSection}
+        onSectionChange={setSettingsSection}
+        returnFocusRef={settingsReturnFocusRef}
       />
       <Toaster position={isMobile ? "top-center" : "bottom-right"} />
     </>

@@ -30,6 +30,7 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.
@@ -255,16 +256,9 @@ export function WorkspaceScreen() {
   }, []);
 
   const handleOpenRuntimeSettings = useCallback(() => {
-    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>(
-      "open-settings",
-      {
-        detail: { section: "runtime" },
-        cancelable: true,
-      },
-    );
-
-    const wasHandledByDialog =
-      document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      section: "runtime",
+    });
     if (!wasHandledByDialog) {
       navigate({ to: "/settings", search: { section: "runtime" } });
     }
