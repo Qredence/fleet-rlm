@@ -1,0 +1,46 @@
+env:
+  LITELLM_API_KEY: "${LITELLM_API_KEY}"
+  DAYTONA_API_KEY: "${DAYTONA_API_KEY}"
+  DAYTONA_API_URL: "${DAYTONA_API_URL}"
+  DSPY_LM_API_BASE: "${DSPY_LM_API_BASE}"
+  DSPY_LM_MODEL: "${DSPY_LM_MODEL}"
+before-command: |
+  #!/bin/bash
+  set -e
+
+  # Install uv (Python package manager)
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+  # Install Python dependencies (all extras needed for web/server)
+  uv sync --all-extras --dev
+
+  # Install pnpm via standalone installer (no root needed)
+  curl -fsSL https://get.pnpm.io/install.sh | PNPM_VERSION=10.32.1 sh -
+  export PATH="$HOME/.local/share/pnpm:$PATH"
+
+  # Install frontend dependencies
+  cd src/frontend
+  pnpm install --frozen-lockfile
+
+  # Build the frontend (needed so FastAPI can serve the SPA)
+  pnpm run build
+
+  cd ../..
+preview-commands:
+  - id: backend
+    title: Start Backend API Server
+    description: Starts the fleet-rlm FastAPI server which also serves the built frontend
+      SPA on port 8000
+    command: |
+      #!/bin/bash
+      set -e
+
+      export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+
+      export APP_ENV=local
+      export AUTH_MODE=dev
+      export AUTH_REQUIRED=false
+
+      uv run fleet web
+preview-port: 8000
