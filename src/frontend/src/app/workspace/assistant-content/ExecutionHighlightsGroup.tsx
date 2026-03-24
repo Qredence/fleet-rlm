@@ -17,7 +17,7 @@ export function ExecutionHighlightsGroup({
   if (!execution.hasChatHighlights) return null;
 
   return (
-    <section className="space-y-2.5" data-slot="assistant-execution-highlights">
+    <section className="flex flex-col gap-2.5" data-slot="assistant-execution-highlights">
       <div className={inspectorStyles.heading.section}>Execution</div>
       <div className={inspectorStyles.stack.compact}>
         {execution.highlights.map((highlight) => {
@@ -30,7 +30,7 @@ export function ExecutionHighlightsGroup({
               onClick={() => onOpenTab?.("execution")}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   <div className="text-sm font-medium leading-5 text-foreground">
                     {highlight.label}
                   </div>

@@ -22,6 +22,7 @@ Backend source-of-truth files:
 - Treat websocket event shape and session lifecycle as shared product surface, not backend-only implementation detail.
 - Keep CLI docs and examples aligned with the actual Typer commands.
 - Update AGENTS/docs when you discover a stable backend workflow or change runtime behavior.
+- Treat `src/fleet_rlm/scaffold/` as curated external guidance for Claude Code users. Do not auto-sync it from the repo-local `.claude/` overlays; update the packaged markdown, skills, hooks, and teams directly.
 - Prefer the smallest validation lane that covers the change, then escalate to `make quality-gate` for shared-contract work.
 
 ## Package Map
@@ -32,7 +33,7 @@ Active top-level areas under `src/fleet_rlm/`:
 - `cli/`: Typer CLI entrypoints, commands, and runtime builder constructors
 - `runtime/`: chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, MCP server, observability, Daytona provider, and Modal provider integrations
-- `scaffold/`: bundled skills, agents, teams, and hooks exposed by `fleet-rlm init`
+- `scaffold/`: curated Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers including regex and Modal utilities
 

@@ -57,7 +57,7 @@ export function WorkspaceChatEmptyState({
       )}
     >
       <div className="mb-4 flex w-full flex-col justify-center gap-2 pb-1.25">
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <h2 className="w-full text-foreground" style={DISPLAY_TITLE_STYLE}>
             Agentic Fleet Session
           </h2>

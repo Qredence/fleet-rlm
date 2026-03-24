@@ -1,6 +1,6 @@
 {
   "name": "fleet-rlm",
-  "description": "Fleet RLM team for long-context processing with DSPy and Modal",
+  "description": "Claude Code translation layer for fleet-rlm's shared runtime, including Modal and Daytona-backed execution paths",
   "leadAgentId": "team-lead@fleet-rlm",
   "members": [
     {
@@ -19,7 +19,7 @@
       "model": "claude-opus-4-6",
       "planModeRequired": false,
       "subscriptions": [],
-      "prompt": "You orchestrate long-context RLM workflows. Claim orchestration tasks, coordinate subcalls, and report structured findings to team-lead."
+      "prompt": "You translate Claude Code tasks into fleet-rlm runtime plans. Choose between modal_chat and daytona_pilot deliberately, coordinate subcalls, and report structured findings to team-lead."
     },
     {
       "agentId": "rlm-specialist@fleet-rlm",
@@ -28,7 +28,7 @@
       "model": "claude-opus-4-6",
       "planModeRequired": false,
       "subscriptions": [],
-      "prompt": "You debug and optimize RLM workflows. Focus on failures, performance, and reliability improvements, then report actionable recommendations."
+      "prompt": "You debug and evolve fleet-rlm's shared runtime. Focus on contract drift, runtime-mode issues, Modal versus Daytona boundaries, and reliability fixes, then report actionable recommendations."
     },
     {
       "agentId": "modal-interpreter-agent@fleet-rlm",
@@ -37,7 +37,7 @@
       "model": "claude-opus-4-6",
       "planModeRequired": false,
       "subscriptions": [],
-      "prompt": "You diagnose Modal sandbox and interpreter issues. Validate credentials, volumes, and runtime behavior, then share concise diagnostics."
+      "prompt": "You diagnose Modal-only sandbox and interpreter issues. Validate credentials, volumes, and modal_chat behavior, then share concise diagnostics."
     },
     {
       "agentId": "rlm-subcall@fleet-rlm",

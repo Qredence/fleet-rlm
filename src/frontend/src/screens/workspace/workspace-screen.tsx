@@ -3,7 +3,6 @@ import { TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
@@ -41,7 +40,6 @@ export function WorkspaceScreen() {
   const isMobile = useIsMobile();
   const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
@@ -296,10 +294,6 @@ export function WorkspaceScreen() {
           messages={messages}
           isTyping={isTyping}
           isMobile={isMobile}
-          scrollRef={scrollRef}
-          contentRef={contentRef}
-          isAtBottom={isAtBottom}
-          scrollToBottom={scrollToBottom}
           onSuggestionClick={setInputValue}
           onResolveHitl={resolveHitl}
           onResolveClarification={resolveClarification}

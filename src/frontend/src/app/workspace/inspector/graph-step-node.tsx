@@ -279,7 +279,7 @@ const GraphStepNode = memo(function GraphStepNode({
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Thought → Action → Observation
               </p>
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 {trajectory.thought && (
                   <div>
                     <p className="text-[10px] font-semibold text-foreground/80">Thought</p>

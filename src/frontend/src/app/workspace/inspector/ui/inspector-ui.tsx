@@ -166,7 +166,7 @@ export function DetailBlock({
 }) {
   if (!value) return null;
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-col gap-1.5">
       <div className={inspectorStyles.heading.detail}>{label}</div>
       <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
         <Streamdown content={value} streaming={false} />
@@ -195,7 +195,7 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
           <Card key={item.key} className={inspectorStyles.card.root}>
             <CardHeader className={inspectorStyles.card.header}>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   <CardTitle className="text-sm font-medium text-foreground">
                     {item.part.kind === "status_note"
                       ? `Status: ${item.part.text}`

@@ -1,4 +1,4 @@
-import * as React from "react";
+import type * as React from "react";
 import { Accordion as BaseAccordion } from "@base-ui/react";
 import { ChevronDownIcon } from "lucide-react";
 

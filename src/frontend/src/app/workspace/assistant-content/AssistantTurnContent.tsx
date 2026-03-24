@@ -64,7 +64,7 @@ export function AssistantTurnContent({
 
   return (
     <Message from="assistant" className="mb-2.5" key={model.item.key}>
-      <MessageContent className="w-full space-y-2.5">
+      <MessageContent className="w-full flex flex-col gap-2.5">
         <div
           className={cn(
             "max-w-content rounded-bubble px-4 py-3.5 shadow-sm md:px-5 md:py-4",

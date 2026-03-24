@@ -68,7 +68,7 @@ function SignupScreen() {
               </p>
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="signup-name" className="typo-label">
               Full name
             </Label>
@@ -82,7 +82,7 @@ function SignupScreen() {
               autoComplete="name"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="signup-email" className="typo-label">
               Email
             </Label>
@@ -96,7 +96,7 @@ function SignupScreen() {
               autoComplete="email"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="signup-password" className="typo-label">
               Password
             </Label>
@@ -110,7 +110,7 @@ function SignupScreen() {
               autoComplete="new-password"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="signup-confirm" className="typo-label">
               Confirm password
             </Label>

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent

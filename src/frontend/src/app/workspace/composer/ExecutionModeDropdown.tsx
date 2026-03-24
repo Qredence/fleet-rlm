@@ -29,27 +29,30 @@ interface ExecutionModeDropdownProps {
   onChange: (mode: WsExecutionMode) => void;
 }
 
-function ExecutionModeDropdown({ value, onChange }: ExecutionModeDropdownProps) {
+function ExecutionModeDropdown({
+  value,
+  onChange,
+}: ExecutionModeDropdownProps) {
   const currentMode =
-    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ?? EXECUTION_MODE_OPTIONS[0]!;
-  const CurrentModeIcon = currentMode.icon;
+    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ??
+    EXECUTION_MODE_OPTIONS[0]!;
 
   return (
-    <Select value={value} onValueChange={(nextValue) => onChange(nextValue as WsExecutionMode)}>
+    <Select
+      value={value}
+      onValueChange={(nextValue) => onChange(nextValue as WsExecutionMode)}
+    >
       <SelectTrigger
         size="sm"
         className={cn(
           PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-          "w-auto min-w-0 justify-center gap-2 border-transparent bg-transparent px-3 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground",
+          "w-auto min-w-0 justify-center border-transparent shadow-none",
         )}
         aria-label={`Execution mode: ${currentMode.name}`}
       >
-        <div className="flex items-center gap-2">
-          <CurrentModeIcon className="size-4 shrink-0" />
-          <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
-            {currentMode.name}
-          </span>
-        </div>
+        <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
+          {currentMode.name}
+        </span>
       </SelectTrigger>
       <SelectContent align="end" className="w-44">
         <SelectGroup>

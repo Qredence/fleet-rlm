@@ -312,7 +312,7 @@ Include the following information:
 # Python backend - from repo root
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 uv run pytest -q
 uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata

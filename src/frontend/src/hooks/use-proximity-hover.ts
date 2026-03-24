@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
 
 export interface ItemRect {

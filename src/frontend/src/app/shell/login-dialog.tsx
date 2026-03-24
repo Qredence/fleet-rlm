@@ -44,7 +44,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       {/* Logo + Title */}
       <div className="flex flex-col items-center gap-3 pb-2">
         <BrandMark className="w-8 h-3.75 text-foreground" />

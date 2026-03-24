@@ -1,5 +1,12 @@
 import { type MouseEvent } from "react";
-import { Database, LogIn, MessageSquare, Plus, Search, Settings } from "lucide-react";
+import {
+  Database,
+  LogIn,
+  MessageCircle,
+  Plus,
+  Search,
+  Settings,
+} from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useNavigationStore } from "@/stores/navigationStore";
 
@@ -24,27 +31,6 @@ import {
   useWorkspaceShellActions,
   useWorkspaceShellHistory,
 } from "@/screens/workspace/workspace-shell-contract";
-
-function formatSessionTimestamp(isoDate: string): string {
-  const now = Date.now();
-  const then = new Date(isoDate).getTime();
-  const diffMinutes = Math.floor((now - then) / 60_000);
-
-  if (diffMinutes < 1) return "Just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-
-  return new Date(isoDate).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
@@ -100,7 +86,10 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
+                <SidebarMenuButton
+                  onClick={handleNewSession}
+                  tooltip="New session"
+                >
                   <Plus />
                   <span>New Session</span>
                 </SidebarMenuButton>
@@ -117,7 +106,7 @@ export function AppSidebar() {
                   onClick={() => navigateTo("workspace")}
                   tooltip="RLM Workspace"
                 >
-                  <MessageSquare />
+                  <MessageCircle />
                   <span>RLM Workspace</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -151,15 +140,10 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       onClick={() => handleOpenConversation(session.id)}
                       tooltip={session.title}
-                      className="h-auto items-start gap-2 py-2"
+                      className="h-auto py-2"
                     >
-                      <span className="flex min-w-0 flex-1 flex-col items-start">
-                        <span className="truncate text-sm text-sidebar-foreground">
-                          {session.title}
-                        </span>
-                        <span className="truncate text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
-                          {formatSessionTimestamp(session.updatedAt)}
-                        </span>
+                      <span className="truncate text-sm text-sidebar-foreground">
+                        {session.title}
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -53,15 +53,6 @@ vi.mock("@/screens/workspace/use-workspace", async () => {
   } as unknown as typeof actual;
 });
 
-vi.mock("@/hooks/useStickToBottom", () => ({
-  useStickToBottom: () => ({
-    scrollRef: { current: null },
-    contentRef: { current: null },
-    isAtBottom: true,
-    scrollToBottom: vi.fn(),
-  }),
-}));
-
 vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigate: vi.fn(), navigateTo: vi.fn() }),
 }));

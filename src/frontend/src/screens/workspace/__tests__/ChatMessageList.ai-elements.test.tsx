@@ -1,4 +1,4 @@
-import { act, createRef } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -13,10 +13,6 @@ function renderChatMessageList(messages: ChatMessage[]) {
       messages={messages}
       isTyping={false}
       isMobile={false}
-      scrollRef={createRef<HTMLDivElement>()}
-      contentRef={createRef<HTMLDivElement>()}
-      isAtBottom={true}
-      scrollToBottom={() => {}}
       onSuggestionClick={() => {}}
       onResolveHitl={() => {}}
       onResolveClarification={() => {}}
@@ -38,10 +34,6 @@ function mountChatMessageList(messages: ChatMessage[]) {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -794,10 +786,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -870,10 +858,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -971,10 +955,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -1043,10 +1023,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -1146,10 +1122,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={[]}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -1195,10 +1167,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -1241,10 +1209,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
@@ -1278,10 +1242,6 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}

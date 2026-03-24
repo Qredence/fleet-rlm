@@ -1,58 +1,30 @@
 ---
 name: rlm-run
-description: Run RLM tasks with proper configuration. Use when executing tasks with dspy.RLM, configuring ModalInterpreter options, managing timeouts and iterations, or running predefined fleet-rlm CLI commands.
+description: Run fleet-rlm through its current public entrypoints. Use when you need the right command for the Web UI, API server, MCP server, terminal chat, or Daytona smoke validation from a Claude Code workflow.
 ---
 
 # RLM Runner
 
-Execute dspy.RLM tasks with ModalInterpreter.
+Use this skill for current entrypoint selection, not legacy `run-*` demos.
 
-## CLI Commands
-
-All commands use `uv run fleet-rlm`:
+## Public Entry Points
 
 ```bash
-# Basic task
-uv run fleet-rlm run-basic --question "What are the first 12 Fibonacci numbers?"
-
-# With volume persistence
-uv run fleet-rlm run-basic \
-    --question "Calculate factorial of 20" \
-    --volume-name rlm-volume-dspy
-
-# Architecture extraction from docs
-uv run fleet-rlm run-architecture \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "Extract all modules and optimizers"
-
-# API endpoint extraction
-uv run fleet-rlm run-api-endpoints --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
-
-# Error pattern analysis
-uv run fleet-rlm run-error-patterns --docs-path rlm_content/dspy-knowledge/dspy-doc.txt
-
-# Long-context analysis
-uv run fleet-rlm run-long-context \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "What are the main design decisions?" \
-    --mode analyze
-
-# Long-context summarization
-uv run fleet-rlm run-long-context \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --query "DSPy optimizers" \
-    --mode summarize
-
-# Trajectory inspection
-uv run fleet-rlm run-trajectory \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --chars 5000
-
-# Custom tool demo
-uv run fleet-rlm run-custom-tool \
-    --docs-path rlm_content/dspy-knowledge/dspy-doc.txt \
-    --chars 5000
+# from repo root
+uv run fleet web
+uv run fleet-rlm serve-api --port 8000
+uv run fleet-rlm serve-mcp --transport stdio
+uv run fleet-rlm chat
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
+
+## How To Choose
+
+- `fleet web` when the task is workspace-first and UI driven
+- `serve-api` when the backend surface itself is what you need
+- `serve-mcp` when an MCP client should talk to fleet-rlm tools
+- `chat` for in-process terminal interaction
+- `daytona-smoke` before any `daytona_pilot` workflow
 
 ## Programmatic Usage
 
@@ -87,9 +59,11 @@ print(result.confidence)   # NOT result["confidence"]
 | `verbose`        | Show full trajectory      | False              |
 | `volume_name`    | Volume for persistence    | None               |
 
-## Built-in Signatures
+## Runtime Reminder
 
-See `dspy-signature` skill and `src/fleet_rlm/runtime/agent/signatures.py` for full details.
+- `modal_chat` is the default runtime path
+- `daytona_pilot` is the Daytona-backed variant of the same shared runtime
+- If the task is Daytona-specific, also load `daytona-runtime`
 
 ## Execution Patterns
 
@@ -133,4 +107,4 @@ for i, step in enumerate(trajectory):
 
 ## Troubleshooting
 
-See `rlm-debug` skill for comprehensive diagnostics.
+See `rlm-debug` for runtime failures and `daytona-runtime` for Daytona-specific execution rules.

@@ -36,11 +36,30 @@ from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 from fleet_rlm.runtime.tools.modal_volumes import VolumeOpsMixin
 
 from . import driver_factories
-from .interpreter_events import emit_execution_event as _emit_execution_event_impl
+from .interpreter_common import (
+    async_enter as _async_enter_impl,
+)
+from .interpreter_common import (
+    async_exit as _async_exit_impl,
+)
+from .interpreter_common import (
+    execution_profile_context,
+    get_registered_tools,
+    initialize_llm_query_state,
+    initialize_tool_runtime_state,
+    set_registered_tools,
+)
+from .interpreter_common import (
+    sync_enter as _sync_enter_impl,
+)
+from .interpreter_common import (
+    sync_exit as _sync_exit_impl,
+)
 from .interpreter_events import (
     complete_event_data,
     start_event_data,
 )
+from .interpreter_events import emit_execution_event as _emit_execution_event_impl
 from .interpreter_events import summarize_code as _summarize_code_impl
 from .output_utils import _redact_sensitive_text, _summarize_stdout
 
@@ -317,12 +336,8 @@ def _is_recoverable_start_error_impl(exc: Exception) -> bool:
 
 @contextmanager
 def _execution_profile_impl(interpreter: ModalInterpreter, profile: ExecutionProfile):
-    previous = interpreter.default_execution_profile
-    interpreter.default_execution_profile = profile
-    try:
-        yield interpreter
-    finally:
-        interpreter.default_execution_profile = previous
+    with execution_profile_context(interpreter, profile) as current:
+        yield current
 
 
 def _execute_impl(
@@ -654,13 +669,12 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         async_execute: bool = True,
     ) -> None:
         # LLMQueryMixin attributes
-        self.sub_lm = sub_lm
-        self.max_llm_calls = max_llm_calls
-        self.llm_call_timeout = llm_call_timeout
-        self._llm_call_count = 0
-        self._llm_call_lock = threading.Lock()
-        self._sub_lm_executor = None
-        self._sub_lm_executor_lock = threading.Lock()
+        initialize_llm_query_state(
+            self,
+            sub_lm=sub_lm,
+            max_llm_calls=max_llm_calls,
+            llm_call_timeout=llm_call_timeout,
+        )
 
         # VolumeOpsMixin attributes
         self.volume_name = volume_name
@@ -685,9 +699,11 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         self.stdout_summary_threshold = stdout_summary_threshold
         self.stdout_summary_prefix_len = stdout_summary_prefix_len
 
-        self.output_fields: list[dict] | None = None
+        self.output_fields: list[dict[str, Any]] | None
+        self._tools: dict[str, Callable[..., Any]]
+        self.execution_event_callback: Callable[[dict[str, Any]], None] | None
+        initialize_tool_runtime_state(self)
         self._tools_registered = False
-
         self._sandbox: modal.Sandbox | None = None
         self._proc = None
         self._stdin = None
@@ -695,8 +711,6 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
         self._stdout_queue: queue.Queue[str | None] | None = None
         self._stdout_reader_thread: threading.Thread | None = None
         self._stderr_iter: Iterator[str] | None = None
-        self._tools: dict[str, Callable[..., Any]] = {}
-        self.execution_event_callback: Callable[[dict[str, Any]], None] | None = None
 
     @staticmethod
     def _summarize_code(code: str) -> tuple[str, str]:
@@ -731,11 +745,11 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
         """Dictionary of registered tools available to sandboxed code."""
-        return self._tools
+        return get_registered_tools(self)
 
     @tools.setter
     def tools(self, value: dict[str, Callable[..., Any]]) -> None:
-        self._tools = value
+        set_registered_tools(self, value)
 
     def _resolve_app(self) -> modal.App:
         """Return a fresh App handle."""
@@ -874,26 +888,16 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
 
     def __enter__(self) -> ModalInterpreter:
         """Start the interpreter and return it for use as a context manager."""
-        self.start()
-        return self
+        return _sync_enter_impl(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Shutdown the interpreter on context manager exit."""
-        self.shutdown()
-        return False
+        return _sync_exit_impl(self)
 
     async def __aenter__(self) -> ModalInterpreter:
         """Async context manager entrypoint."""
-        if self.async_execute:
-            await self.astart()
-        else:
-            self.start()
-        return self
+        return await _async_enter_impl(self)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Async context manager exitpoint."""
-        if self.async_execute:
-            await self.ashutdown()
-        else:
-            self.shutdown()
-        return False
+        return await _async_exit_impl(self)

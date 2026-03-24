@@ -9,7 +9,10 @@ from typing import Any
 
 def is_ignored(path: Path) -> bool:
     """Return True if a path component should be ignored."""
-    return any(part.startswith(".") or part == ".DS_Store" for part in path.parts)
+    return any(
+        part.startswith(".") or part in {".DS_Store", "__pycache__"}
+        for part in path.parts
+    )
 
 
 def has_visible_entries(path: Path, *, directories_only: bool = False) -> bool:

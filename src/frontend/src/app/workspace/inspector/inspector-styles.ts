@@ -19,19 +19,19 @@ import { cn } from "@/lib/utils";
 export const inspectorStyles = {
   /** Top-level TabsContent inner wrapper. */
   tab: {
-    content: "space-y-4 px-4 pb-4",
+    content: "flex flex-col gap-4 px-4 pb-4",
   },
 
   /** Vertical stacking scales. */
   stack: {
     /** Section-level: heading + children. */
-    section: "space-y-2",
+    section: "flex flex-col gap-2",
     /** Repeated card list. */
-    cards: "space-y-3",
+    cards: "flex flex-col gap-3",
     /** Inner card content stacking. */
-    content: "space-y-3",
+    content: "flex flex-col gap-3",
     /** Dense detail stacking. */
-    compact: "space-y-2",
+    compact: "flex flex-col gap-2",
   },
 
   /** Text headings. */
@@ -51,7 +51,7 @@ export const inspectorStyles = {
     /** Card content padding (no internal stack). */
     content: "px-4 pb-4",
     /** Card content padding with stacking. */
-    contentStack: "space-y-3 px-4 pb-4",
+    contentStack: "flex flex-col gap-3 px-4 pb-4",
   },
 
   /** Inset detail blocks (rounded-xl). Combine with a tone helper. */
