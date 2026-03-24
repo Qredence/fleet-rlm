@@ -17,13 +17,9 @@ describe("entraAuthConfig", () => {
 
     const { entraAuthConfig, isEntraAuthConfigured } = await loadEntraModule();
 
-    expect(entraAuthConfig.authority).toBe(
-      "https://login.microsoftonline.com/organizations",
-    );
+    expect(entraAuthConfig.authority).toBe("https://login.microsoftonline.com/organizations");
     expect(entraAuthConfig.redirectPath).toBe("/login");
-    expect(entraAuthConfig.scopes).toEqual([
-      "api://backend-client-id/access_as_user",
-    ]);
+    expect(entraAuthConfig.scopes).toEqual(["api://backend-client-id/access_as_user"]);
     expect(isEntraAuthConfigured()).toBe(true);
   });
 

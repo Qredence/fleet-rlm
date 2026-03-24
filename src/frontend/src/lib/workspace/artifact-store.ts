@@ -20,15 +20,10 @@ function dedupeSteps(steps: ExecutionStep[]): ExecutionStep[] {
   return Array.from(byId.values()).sort((first, second) => {
     const firstSequence = first.sequence;
     const secondSequence = second.sequence;
-    if (
-      firstSequence != null &&
-      secondSequence != null &&
-      firstSequence !== secondSequence
-    ) {
+    if (firstSequence != null && secondSequence != null && firstSequence !== secondSequence) {
       return firstSequence - secondSequence;
     }
-    if (first.timestamp !== second.timestamp)
-      return first.timestamp - second.timestamp;
+    if (first.timestamp !== second.timestamp) return first.timestamp - second.timestamp;
     return first.id.localeCompare(second.id);
   });
 }
@@ -71,8 +66,7 @@ export const useArtifactStore = create<ArtifactState>((set) => ({
       const existingSequence = index >= 0 ? next[index]?.sequence : undefined;
       const normalizedStep: ExecutionStep = {
         ...step,
-        sequence:
-          step.sequence ?? existingSequence ?? nextSequence(state.steps),
+        sequence: step.sequence ?? existingSequence ?? nextSequence(state.steps),
       };
 
       if (index >= 0) {

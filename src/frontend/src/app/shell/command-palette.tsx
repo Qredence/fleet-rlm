@@ -4,15 +4,7 @@
  * Mirrors the current product shell: RLM Workspace, Volumes, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  Search,
-  Zap,
-  HardDrive,
-  Plus,
-  Moon,
-  Sun,
-  Settings,
-} from "lucide-react";
+import { Search, Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
 import { Command } from "cmdk";
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import type { NavItem } from "@/stores/navigation-types";
@@ -104,11 +96,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <div className="fixed inset-0 z-100">
-      <div
-        className="surface-glass-overlay absolute inset-0"
-        onClick={close}
-        aria-hidden="true"
-      />
+      <div className="surface-glass-overlay absolute inset-0" onClick={close} aria-hidden="true" />
 
       <div
         className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4"
@@ -126,10 +114,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             }}
           >
             <div className="flex items-center gap-2 px-4 border-b border-border-subtle focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/50">
-              <Search
-                className="size-4 text-muted-foreground shrink-0"
-                aria-hidden="true"
-              />
+              <Search className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
               <Command.Input
                 value={search}
                 onValueChange={setSearch}
@@ -148,11 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </Command.Empty>
 
               <Command.Group
-                heading={
-                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
-                    Pages
-                  </span>
-                }
+                heading={<span className="text-muted-foreground px-2 pb-1 typo-micro">Pages</span>}
               >
                 {pages.map((page) => {
                   const Icon = page.icon;
@@ -179,9 +160,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
               <Command.Group
                 heading={
-                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
-                    Actions
-                  </span>
+                  <span className="text-muted-foreground px-2 pb-1 typo-micro">Actions</span>
                 }
               >
                 <Command.Item
@@ -237,9 +216,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       strokeWidth={1.5}
                     />
                   )}
-                  <span className="typo-label">
-                    Switch to {isDark ? "Light" : "Dark"} Mode
-                  </span>
+                  <span className="typo-label">Switch to {isDark ? "Light" : "Dark"} Mode</span>
                 </Command.Item>
 
                 <Command.Item
@@ -267,9 +244,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             </Command.List>
 
             <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle">
-              <span className="text-muted-foreground typo-micro">
-                Navigate with
-              </span>
+              <span className="text-muted-foreground typo-micro">Navigate with</span>
               <div className="flex items-center gap-1">
                 <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                   &uarr;
@@ -278,9 +253,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   &darr;
                 </kbd>
               </div>
-              <span className="text-muted-foreground typo-micro">
-                to select
-              </span>
+              <span className="text-muted-foreground typo-micro">to select</span>
               <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                 &crarr;
               </kbd>

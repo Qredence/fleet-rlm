@@ -10,9 +10,7 @@ export type PromptInputError = {
 
 type PromptInputErrorHandler = (error: PromptInputError) => void;
 
-export const convertBlobUrlToDataUrl = async (
-  url: string,
-): Promise<string | null> => {
+export const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -65,9 +63,7 @@ export const filterFilesBySize = (
   maxFileSize: number | undefined,
   onError?: PromptInputErrorHandler,
 ): File[] => {
-  const sized = maxFileSize
-    ? files.filter((file) => file.size <= maxFileSize)
-    : files;
+  const sized = maxFileSize ? files.filter((file) => file.size <= maxFileSize) : files;
   if (files.length > 0 && sized.length === 0) {
     onError?.({
       code: "max_file_size",
@@ -98,9 +94,7 @@ export const capFilesToCapacity = (
   return capped;
 };
 
-export const mapFilesToUiParts = (
-  files: File[],
-): (FileUIPart & { id: string })[] =>
+export const mapFilesToUiParts = (files: File[]): (FileUIPart & { id: string })[] =>
   files.map((file) => ({
     filename: file.name,
     id: nanoid(),

@@ -4,14 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RuntimeContext } from "@/screens/workspace/use-workspace";
-import type {
-  ExecutionSection,
-  ToolSessionItem,
-} from "@/app/workspace/assistant-content/model";
-import {
-  inspectorStyles,
-  inspectorInsetClass,
-} from "@/app/workspace/inspector/inspector-styles";
+import type { ExecutionSection, ToolSessionItem } from "@/app/workspace/assistant-content/model";
+import { inspectorStyles, inspectorInsetClass } from "@/app/workspace/inspector/inspector-styles";
 import { statusTone } from "../utils/inspector-utils";
 
 export { statusTone };
@@ -49,8 +43,7 @@ export function toolSessionItemState(
 ): "pending" | "running" | "completed" | "failed" {
   if (item.part.kind === "tool" || item.part.kind === "sandbox") {
     if (item.part.errorText) return "failed";
-    return item.part.state === "running" ||
-      item.part.state === "input-streaming"
+    return item.part.state === "running" || item.part.state === "input-streaming"
       ? "running"
       : "completed";
   }
@@ -78,9 +71,7 @@ export function executionSectionState(
   }
 
   if (section.kind === "queue") {
-    return section.part.items.every((item) => item.completed)
-      ? "completed"
-      : "running";
+    return section.part.items.every((item) => item.completed) ? "completed" : "running";
   }
 
   if (section.kind === "status_note") {
@@ -93,8 +84,7 @@ export function executionSectionState(
   }
   if (
     "state" in section.part &&
-    (section.part.state === "running" ||
-      section.part.state === "input-streaming")
+    (section.part.state === "running" || section.part.state === "input-streaming")
   ) {
     return "running";
   }
@@ -122,9 +112,7 @@ export function sectionGroups(sections: ExecutionSection[]) {
     {
       key: "environment",
       label: "Environment",
-      sections: sections.filter(
-        (section) => section.kind === "environment_variables",
-      ),
+      sections: sections.filter((section) => section.kind === "environment_variables"),
     },
     {
       key: "errors",
@@ -142,11 +130,7 @@ export function renderBadges(
   return (
     <div className={inspectorStyles.badge.row}>
       {values.map((value) => (
-        <Badge
-          key={value}
-          variant={variant}
-          className={inspectorStyles.badge.meta}
-        >
+        <Badge key={value} variant={variant} className={inspectorStyles.badge.meta}>
           {value}
         </Badge>
       ))}
@@ -154,13 +138,7 @@ export function renderBadges(
   );
 }
 
-export function ExternalAnchor({
-  href,
-  children,
-}: {
-  href?: string;
-  children: ReactNode;
-}) {
+export function ExternalAnchor({ href, children }: { href?: string; children: ReactNode }) {
   if (!href) {
     return <span className="text-foreground">{children}</span>;
   }
@@ -190,20 +168,14 @@ export function DetailBlock({
   return (
     <div className="space-y-1.5">
       <div className={inspectorStyles.heading.detail}>{label}</div>
-      <div
-        className={inspectorInsetClass(tone === "error" ? "error" : "strong")}
-      >
+      <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
         <Streamdown content={value} streaming={false} />
       </div>
     </div>
   );
 }
 
-export function ToolSessionDetails({
-  sessionItems,
-}: {
-  sessionItems: ToolSessionItem[];
-}) {
+export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSessionItem[] }) {
   return (
     <div className={inspectorStyles.stack.cards}>
       {sessionItems.map((item) => {
@@ -216,8 +188,7 @@ export function ToolSessionDetails({
             : item.part.kind === "sandbox"
               ? item.part.output
               : "";
-        const inputValue =
-          item.part.kind === "tool" ? stringifyValue(item.part.input) : "";
+        const inputValue = item.part.kind === "tool" ? stringifyValue(item.part.input) : "";
         const codeValue = item.part.kind === "sandbox" ? item.part.code : "";
 
         return (
@@ -231,10 +202,7 @@ export function ToolSessionDetails({
                       : `${item.eventKind.replace("_", " ")}: ${item.toolName ?? "tool"}`}
                   </CardTitle>
                 </div>
-                <Badge
-                  variant={tone.variant}
-                  className={inspectorStyles.badge.status}
-                >
+                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                   {tone.label}
                 </Badge>
               </div>
@@ -280,13 +248,9 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
         <div className={inspectorStyles.stack.compact}>
           {section.part.items.map((item) => (
             <div key={item.id} className={inspectorInsetClass("strong")}>
-              <div className="text-sm font-medium text-foreground">
-                {item.label}
-              </div>
+              <div className="text-sm font-medium text-foreground">{item.label}</div>
               {item.description ? (
-                <div className="mt-1 text-sm text-muted-foreground">
-                  {item.description}
-                </div>
+                <div className="mt-1 text-sm text-muted-foreground">{item.description}</div>
               ) : null}
             </div>
           ))}
@@ -305,20 +269,13 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
     case "tool":
       return (
         <div className={inspectorStyles.stack.cards}>
-          <DetailBlock
-            label="Input"
-            value={stringifyValue(section.part.input)}
-          />
+          <DetailBlock label="Input" value={stringifyValue(section.part.input)} />
           <DetailBlock
             label="Output"
             value={stringifyValue(section.part.output)}
             tone={section.part.errorText ? "error" : "default"}
           />
-          <DetailBlock
-            label="Error"
-            value={section.part.errorText}
-            tone="error"
-          />
+          <DetailBlock label="Error" value={section.part.errorText} tone="error" />
           {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
@@ -331,11 +288,7 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
             value={section.part.output}
             tone={section.part.errorText ? "error" : "default"}
           />
-          <DetailBlock
-            label="Error"
-            value={section.part.errorText}
-            tone="error"
-          />
+          <DetailBlock label="Error" value={section.part.errorText} tone="error" />
           {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
@@ -345,21 +298,14 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
           {section.part.variables.map((variable) => (
             <div key={variable.name} className={inspectorInsetClass("strong")}>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">
-                  {variable.name}
-                </span>
+                <span className="text-sm font-medium text-foreground">{variable.name}</span>
                 {variable.required ? (
-                  <Badge
-                    variant="secondary"
-                    className={inspectorStyles.badge.meta}
-                  >
+                  <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                     required
                   </Badge>
                 ) : null}
               </div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {variable.value}
-              </div>
+              <div className="mt-1 text-sm text-muted-foreground">{variable.value}</div>
             </div>
           ))}
         </div>

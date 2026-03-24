@@ -1,5 +1,4 @@
-const PATH_CANDIDATE_RE =
-  /(?:^|[\s("'`])((?:~\/|\/|\.\.\/|\.\/)[^\s"'`<>()[\]{}]+)/g;
+const PATH_CANDIDATE_RE = /(?:^|[\s("'`])((?:~\/|\/|\.\.\/|\.\/)[^\s"'`<>()[\]{}]+)/g;
 
 function stripTrailingPathPunctuation(value: string): string {
   return value.replace(/[.,!?;:]+$/g, "").replace(/["'`)\]}]+$/g, "");

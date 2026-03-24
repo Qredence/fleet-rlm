@@ -19,9 +19,8 @@ async function loadRuntimeModule(configOverride?: Partial<RlmApiConfig>) {
   vi.doUnmock("@/lib/rlm-api/config");
   if (configOverride) {
     vi.doMock("@/lib/rlm-api/config", async () => {
-      const actual = await vi.importActual<
-        typeof import("@/lib/rlm-api/config")
-      >("@/lib/rlm-api/config");
+      const actual =
+        await vi.importActual<typeof import("@/lib/rlm-api/config")>("@/lib/rlm-api/config");
 
       return {
         ...actual,
@@ -58,9 +57,7 @@ describe("runtimeEndpoints", () => {
     await runtimeEndpoints.settings();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/settings",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
@@ -80,9 +77,7 @@ describe("runtimeEndpoints", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/settings",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("PATCH");
     expect(String(init.body)).toContain("DSPY_LM_MODEL");
@@ -107,16 +102,12 @@ describe("runtimeEndpoints", () => {
     await runtimeEndpoints.status();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/runtime/status",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/status");
   });
 
   it("uses fallback data in explicit mock mode when runtime endpoints are unavailable", async () => {
     vi.stubEnv("VITE_MOCK_MODE", "true");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
@@ -133,9 +124,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "");
     vi.stubEnv("VITE_MOCK_MODE", "");
     vi.stubEnv("VITE_E2E", "");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
@@ -152,9 +141,7 @@ describe("runtimeEndpoints", () => {
 
   it("uses fallback data when a local loopback backend returns 502", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
@@ -166,9 +153,7 @@ describe("runtimeEndpoints", () => {
 
   it("does not use write fallback for loopback backend failures", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
@@ -189,9 +174,7 @@ describe("runtimeEndpoints", () => {
 
   it("uses write fallback in explicit mock mode", async () => {
     vi.stubEnv("VITE_MOCK_MODE", "true");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();

@@ -18,12 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar, SidebarProvider } from "@/components/ui/sidebar";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -95,9 +90,9 @@ export function SettingsDialog({
   const isMobile = useIsMobile();
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
-  const [activeSection, setActiveSection] = React.useState<
-    SettingsSection | undefined
-  >(resolveSettingsSection(section) ?? "appearance");
+  const [activeSection, setActiveSection] = React.useState<SettingsSection | undefined>(
+    resolveSettingsSection(section) ?? "appearance",
+  );
   const resolvedOpen = open ?? uncontrolledOpen;
   const wasOpenRef = React.useRef(resolvedOpen);
 
@@ -144,17 +139,12 @@ export function SettingsDialog({
           className="inset-x-0 bottom-0 top-auto h-[min(90dvh,52rem)] gap-0 rounded-t-[calc(var(--radius-xl)+0.25rem)] border-x-0 border-b-0 px-0 pt-0 pb-0 sm:max-w-none"
         >
           <div className="flex items-center justify-center py-2 shrink-0">
-            <div
-              className="surface-glass-handle h-1.25 w-9 rounded-full"
-              aria-hidden="true"
-            />
+            <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />
           </div>
 
           <div className="flex items-center justify-between gap-3 px-4 pb-2 shrink-0">
             <div className="min-w-0">
-              <SheetTitle className="text-foreground typo-h3">
-                Settings
-              </SheetTitle>
+              <SheetTitle className="text-foreground typo-h3">Settings</SheetTitle>
               <SheetDescription className="mt-1 text-sm text-muted-foreground">
                 {sectionDescription}
               </SheetDescription>
@@ -172,19 +162,14 @@ export function SettingsDialog({
           </div>
 
           <div className="px-4 pb-4">
-            <MobileSectionPicker
-              section={activeSection}
-              onSectionChange={handleSectionChange}
-            />
+            <MobileSectionPicker section={activeSection} onSectionChange={handleSectionChange} />
           </div>
 
           <ScrollArea className="min-h-0 flex-1 border-t border-border-subtle">
             <div className="flex flex-col gap-4 px-4 py-4">
               <div>
                 <h2 className="text-foreground typo-h4">{sectionTitle}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {sectionDescription}
-                </p>
+                <p className="mt-1 text-sm text-muted-foreground">{sectionDescription}</p>
               </div>
               <SettingsSectionContent
                 isDark={isDark}
@@ -207,18 +192,10 @@ export function SettingsDialog({
       ) : null}
       <DialogContent className="overflow-hidden p-0 md:max-h-[500px] md:max-w-[700px] lg:max-w-[800px]">
         <DialogTitle className="sr-only">Settings</DialogTitle>
-        <DialogDescription className="sr-only">
-          Customize your settings here.
-        </DialogDescription>
+        <DialogDescription className="sr-only">Customize your settings here.</DialogDescription>
         <SidebarProvider className="items-start" defaultOpen>
-          <Sidebar
-            collapsible="none"
-            className="hidden border-r border-sidebar-border/70 md:flex"
-          >
-            <SettingsSidebarNav
-              section={activeSection}
-              onSectionChange={handleSectionChange}
-            />
+          <Sidebar collapsible="none" className="hidden border-r border-sidebar-border/70 md:flex">
+            <SettingsSidebarNav section={activeSection} onSectionChange={handleSectionChange} />
           </Sidebar>
           <main className="flex h-[480px] flex-1 flex-col overflow-hidden">
             <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border-subtle transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
@@ -239,9 +216,7 @@ export function SettingsDialog({
             <ScrollArea className="flex-1">
               <div className="flex flex-col gap-4 p-4 pt-4 md:pt-0">
                 <div className="border-b border-border-subtle pb-4 pt-4">
-                  <p className="text-sm text-muted-foreground">
-                    {sectionDescription}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{sectionDescription}</p>
                 </div>
                 <SettingsSectionContent
                   isDark={isDark}

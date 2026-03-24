@@ -27,16 +27,10 @@ vi.mock("@/components/ui/select", () => ({
       {children}
     </button>
   ),
-  SelectContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
+  SelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
-    <button
-      type="button"
-      role="menuitemradio"
-      onClick={() => onValueChangeRef?.(value)}
-    >
+    <button type="button" role="menuitemradio" onClick={() => onValueChangeRef?.(value)}>
       {children}
     </button>
   ),
@@ -60,9 +54,7 @@ describe("ExecutionModeDropdown", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(
-        <ExecutionModeDropdown value="tools_only" onChange={() => {}} />,
-      );
+      root.render(<ExecutionModeDropdown value="tools_only" onChange={() => {}} />);
     });
 
     expect(container.textContent).toContain("Tools only");
@@ -86,17 +78,15 @@ describe("ExecutionModeDropdown", () => {
       root.render(<ExecutionModeDropdown value="auto" onChange={onChange} />);
     });
 
-    const trigger = container.querySelector(
-      'button[aria-label="Execution mode: Auto"]',
-    );
+    const trigger = container.querySelector('button[aria-label="Execution mode: Auto"]');
 
     act(() => {
       trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const rlmOnlyOption = Array.from(
-      document.querySelectorAll('[role="menuitemradio"]'),
-    ).find((item) => item.textContent?.includes("RLM only") ?? false);
+    const rlmOnlyOption = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
+      (item) => item.textContent?.includes("RLM only") ?? false,
+    );
 
     act(() => {
       rlmOnlyOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

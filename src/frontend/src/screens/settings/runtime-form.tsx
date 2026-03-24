@@ -33,10 +33,7 @@ import {
   type RuntimeEditableKey,
   type RuntimeSecretEditableKey,
 } from "@/screens/settings/use-runtime-settings";
-import type {
-  RuntimeConnectivityTestResponse,
-  RuntimeStatusResponse,
-} from "@/lib/rlm-api";
+import type { RuntimeConnectivityTestResponse, RuntimeStatusResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {
   key: RuntimeEditableKey;
@@ -50,14 +47,12 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DSPY_LM_MODEL",
     label: "LM Model",
-    description:
-      "Planner model identifier (for example: openai/gemini-3.1-pro).",
+    description: "Planner model identifier (for example: openai/gemini-3.1-pro).",
   },
   {
     key: "DSPY_LLM_API_KEY",
     label: "LM API Key",
-    description:
-      "Primary provider key for LM calls. Leave unchanged to keep current value.",
+    description: "Primary provider key for LM calls. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -90,15 +85,13 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "MODAL_TOKEN_ID",
     label: "Modal Token ID",
-    description:
-      "Optional Modal token ID override. Leave unchanged to keep current value.",
+    description: "Optional Modal token ID override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
     key: "MODAL_TOKEN_SECRET",
     label: "Modal Token Secret",
-    description:
-      "Optional Modal token secret override. Leave unchanged to keep current value.",
+    description: "Optional Modal token secret override. Leave unchanged to keep current value.",
     isSecret: true,
   },
   {
@@ -127,13 +120,9 @@ const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = [
   "MODAL_TOKEN_SECRET",
 ];
 
-const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(
-  RUNTIME_SECRET_KEYS,
-);
+const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(RUNTIME_SECRET_KEYS);
 
-function isRuntimeSecretKey(
-  key: RuntimeEditableKey,
-): key is RuntimeSecretEditableKey {
+function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
@@ -166,8 +155,7 @@ function formatCheckedAt(checkedAt: string | null | undefined) {
   return new Date(checkedAt).toLocaleString();
 }
 
-const SETTINGS_FIELD_CLASSNAME =
-  "border-b border-border-subtle py-4 last:border-b-0";
+const SETTINGS_FIELD_CLASSNAME = "border-b border-border-subtle py-4 last:border-b-0";
 
 export function RuntimeForm() {
   const {
@@ -182,10 +170,8 @@ export function RuntimeForm() {
 
   const initialValues = settingsQuery.data?.values ?? {};
   const maskedValues = settingsQuery.data?.masked_values ?? initialValues;
-  const [baselineValues, setBaselineValues] =
-    useState<Record<string, string>>(initialValues);
-  const [formValues, setFormValues] =
-    useState<Record<string, string>>(initialValues);
+  const [baselineValues, setBaselineValues] = useState<Record<string, string>>(initialValues);
+  const [formValues, setFormValues] = useState<Record<string, string>>(initialValues);
   const [clearSecretFlags, setClearSecretFlags] = useState<
     Partial<Record<RuntimeSecretEditableKey, boolean>>
   >({});
@@ -197,9 +183,9 @@ export function RuntimeForm() {
 
   const secretInputs = useMemo(
     () =>
-      Object.fromEntries(
-        RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""]),
-      ) as Partial<Record<RuntimeSecretEditableKey, string>>,
+      Object.fromEntries(RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""])) as Partial<
+        Record<RuntimeSecretEditableKey, string>
+      >,
     [formValues],
   );
 
@@ -257,8 +243,7 @@ export function RuntimeForm() {
   }, [statusQuery.data?.modal]);
 
   const daytonaChecks = useMemo(() => {
-    const source: RuntimeStatusResponse["daytona"] =
-      statusQuery.data?.daytona ?? {};
+    const source: RuntimeStatusResponse["daytona"] = statusQuery.data?.daytona ?? {};
     return Object.entries(source).filter(
       (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
     );
@@ -287,10 +272,7 @@ export function RuntimeForm() {
         });
         setClearSecretFlags({});
         toast.success("Runtime settings saved", {
-          description:
-            updated.length > 0
-              ? `Updated: ${updated.join(", ")}`
-              : "No keys changed.",
+          description: updated.length > 0 ? `Updated: ${updated.join(", ")}` : "No keys changed.",
         });
       },
       onError: (error) => {
@@ -386,9 +368,7 @@ export function RuntimeForm() {
   };
 
   const saveDisabled =
-    !hasUnsavedRuntimeChanges ||
-    saveSettings.isPending ||
-    status?.write_enabled === false;
+    !hasUnsavedRuntimeChanges || saveSettings.isPending || status?.write_enabled === false;
   const runtimeGuidance = status?.guidance ?? ["No guidance available."];
 
   const updateFieldValue = (key: RuntimeEditableKey, value: string) => {
@@ -435,16 +415,13 @@ export function RuntimeForm() {
           <FieldContent>
             <FieldTitle>Active Models</FieldTitle>
             <FieldDescription>
-              Resolved runtime model identifiers currently used for
-              planner/delegate execution.
+              Resolved runtime model identifiers currently used for planner/delegate execution.
             </FieldDescription>
           </FieldContent>
           <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
             <div>Planner: {activeModels?.planner || "not set"}</div>
             <div>Delegate: {activeModels?.delegate || "not set"}</div>
-            <div>
-              Delegate small: {activeModels?.delegate_small || "not set"}
-            </div>
+            <div>Delegate small: {activeModels?.delegate_small || "not set"}</div>
           </div>
         </Field>
 
@@ -453,8 +430,7 @@ export function RuntimeForm() {
             <FieldContent>
               <FieldTitle>Write Protection</FieldTitle>
               <FieldDescription>
-                Runtime settings updates are disabled because APP_ENV is not
-                local.
+                Runtime settings updates are disabled because APP_ENV is not local.
               </FieldDescription>
             </FieldContent>
             <Badge variant="destructive">Read-only</Badge>
@@ -464,20 +440,16 @@ export function RuntimeForm() {
 
       <Card className="gap-0 rounded-xl border-border-subtle/70 shadow-none">
         <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">
-            Runtime Configuration
-          </CardTitle>
+          <CardTitle className="text-sm font-medium">Runtime Configuration</CardTitle>
           <CardDescription className="text-sm">
-            Update runtime credentials, model selection, and Modal resource
-            names used by the local environment.
+            Update runtime credentials, model selection, and Modal resource names used by the local
+            environment.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
           <FieldGroup className="gap-5">
             {RUNTIME_FIELDS.map((field) => {
-              const secretKey = isRuntimeSecretKey(field.key)
-                ? field.key
-                : null;
+              const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
               const inputId = `runtime-${field.key.toLowerCase()}`;
               const inputValue = formValues[field.key] ?? "";
               return (
@@ -492,26 +464,18 @@ export function RuntimeForm() {
                         placeholder={field.placeholder}
                         autoComplete="off"
                         aria-label={field.label}
-                        onChange={(event) =>
-                          updateFieldValue(field.key, event.currentTarget.value)
-                        }
+                        onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
                       />
                       <InputGroupAddon align="inline-end">
                         <InputGroupButton
                           type="button"
                           size="sm"
-                          variant={
-                            clearSecretFlags[secretKey]
-                              ? "secondary"
-                              : "outline"
-                          }
+                          variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
                           className="h-full rounded-none border-y-0 border-r-0 border-l border-border-subtle/70 px-4 shadow-none"
                           aria-pressed={clearSecretFlags[secretKey] ?? false}
                           onClick={() => toggleClearSecret(secretKey)}
                         >
-                          {clearSecretFlags[secretKey]
-                            ? "Will clear on save"
-                            : "Clear saved value"}
+                          {clearSecretFlags[secretKey] ? "Will clear on save" : "Clear saved value"}
                         </InputGroupButton>
                       </InputGroupAddon>
                     </InputGroup>
@@ -523,9 +487,7 @@ export function RuntimeForm() {
                       placeholder={field.placeholder}
                       autoComplete="off"
                       aria-label={field.label}
-                      onChange={(event) =>
-                        updateFieldValue(field.key, event.currentTarget.value)
-                      }
+                      onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
                       className="max-w-xl"
                     />
                   )}
@@ -533,10 +495,7 @@ export function RuntimeForm() {
                   {field.isSecret && secretKey ? (
                     <FieldDescription>
                       Write-only input. Configured value:{" "}
-                      {maskedValues[secretKey]
-                        ? maskedValues[secretKey]
-                        : "not set"}
-                      .
+                      {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
                     </FieldDescription>
                   ) : null}
                 </Field>
@@ -546,8 +505,8 @@ export function RuntimeForm() {
         </CardContent>
         <CardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
-            Writes to <code>.env</code> (local only), updates process env, and
-            refreshes the active runtime configuration.
+            Writes to <code>.env</code> (local only), updates process env, and refreshes the active
+            runtime configuration.
           </p>
           <Button
             variant="secondary"
@@ -562,12 +521,9 @@ export function RuntimeForm() {
 
       <Card className="mt-4 gap-0 rounded-xl border-border-subtle/70 shadow-none">
         <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">
-            Test Credentials + Connection
-          </CardTitle>
+          <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
           <CardDescription className="max-w-xl text-sm">
-            Runs preflight credential checks plus live Modal and LM connectivity
-            smoke tests.
+            Runs preflight credential checks plus live Modal and LM connectivity smoke tests.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
@@ -580,9 +536,7 @@ export function RuntimeForm() {
                 onClick={handleTestModal}
                 disabled={testModalConnection.isPending}
               >
-                {testModalConnection.isPending
-                  ? "Testing Modal…"
-                  : "Test Modal"}
+                {testModalConnection.isPending ? "Testing Modal…" : "Test Modal"}
               </Button>
               <Button
                 variant="outline"
@@ -600,9 +554,7 @@ export function RuntimeForm() {
                 onClick={handleTestDaytona}
                 disabled={testDaytonaConnection.isPending}
               >
-                {testDaytonaConnection.isPending
-                  ? "Testing Daytona…"
-                  : "Test Daytona"}
+                {testDaytonaConnection.isPending ? "Testing Daytona…" : "Test Daytona"}
               </Button>
               <Button
                 variant="secondary"
@@ -620,8 +572,8 @@ export function RuntimeForm() {
             </div>
             {hasUnsavedRuntimeChanges ? (
               <p className="text-xs leading-5 text-muted-foreground">
-                Save runtime settings first so tests run against your latest
-                credentials and provider configuration.
+                Save runtime settings first so tests run against your latest credentials and
+                provider configuration.
               </p>
             ) : null}
           </div>
@@ -710,20 +662,14 @@ export function RuntimeForm() {
         <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
           <FieldContent>
             <FieldTitle>Preflight Checks</FieldTitle>
-            <FieldDescription>
-              Credential and provider availability.
-            </FieldDescription>
+            <FieldDescription>Credential and provider availability.</FieldDescription>
           </FieldContent>
           <div className="flex max-w-xl flex-wrap justify-end gap-2">
             {llmChecks.map(([key, ok]) => (
               <Badge
                 key={`llm-${key}`}
                 variant={ok ? "outline" : "destructive"}
-                className={
-                  ok
-                    ? "border-chart-3/30 bg-chart-3/10 text-chart-3"
-                    : undefined
-                }
+                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
                 LM {formatCheckLabel(key)}
@@ -733,11 +679,7 @@ export function RuntimeForm() {
               <Badge
                 key={`modal-${key}`}
                 variant={ok ? "outline" : "destructive"}
-                className={
-                  ok
-                    ? "border-chart-3/30 bg-chart-3/10 text-chart-3"
-                    : undefined
-                }
+                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
                 Modal {formatCheckLabel(key)}
@@ -747,11 +689,7 @@ export function RuntimeForm() {
               <Badge
                 key={`daytona-${key}`}
                 variant={ok ? "outline" : "destructive"}
-                className={
-                  ok
-                    ? "border-chart-3/30 bg-chart-3/10 text-chart-3"
-                    : undefined
-                }
+                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
                 Daytona {formatCheckLabel(key)}
@@ -763,9 +701,7 @@ export function RuntimeForm() {
         <Field orientation="responsive" className="py-4">
           <FieldContent>
             <FieldTitle>Guidance</FieldTitle>
-            <FieldDescription>
-              Actionable runtime recommendations.
-            </FieldDescription>
+            <FieldDescription>Actionable runtime recommendations.</FieldDescription>
           </FieldContent>
           <ul className="flex list-disc flex-col gap-1 pl-5 text-right text-xs text-muted-foreground">
             {runtimeGuidance.map((item) => (

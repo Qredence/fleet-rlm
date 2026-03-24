@@ -1,12 +1,5 @@
 import { type MouseEvent } from "react";
-import {
-  Database,
-  LogIn,
-  MessageSquare,
-  Plus,
-  Search,
-  Settings,
-} from "lucide-react";
+import { Database, LogIn, MessageSquare, Plus, Search, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { QredenceLogo } from "@/components/brand-mark";
@@ -96,9 +89,7 @@ export function AppSidebar() {
       <SidebarHeader className="gap-3 px-3 py-3">
         <div className="flex items-center gap-2 overflow-hidden px-2">
           <QredenceLogo className="h-5 w-auto shrink-0" />
-          <span className="truncate text-sm font-medium text-sidebar-foreground">
-            Qredence
-          </span>
+          <span className="truncate text-sm font-medium text-sidebar-foreground">Qredence</span>
         </div>
       </SidebarHeader>
 
@@ -107,10 +98,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={handleNewSession}
-                  tooltip="New session"
-                >
+                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
                   <Plus />
                   <span>New Session</span>
                 </SidebarMenuButton>

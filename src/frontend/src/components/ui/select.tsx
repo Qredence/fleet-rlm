@@ -8,9 +8,7 @@ import { cn } from "@/lib/utils";
 const Select = BaseSelect.Root;
 const SelectGroup = BaseSelect.Group;
 const SelectValue = BaseSelect.Value;
-type SelectPositionerProps = React.ComponentPropsWithoutRef<
-  typeof BaseSelect.Positioner
->;
+type SelectPositionerProps = React.ComponentPropsWithoutRef<typeof BaseSelect.Positioner>;
 
 function SelectTrigger({
   className,

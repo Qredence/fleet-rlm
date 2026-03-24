@@ -7,16 +7,11 @@ export type OpenSettingsEventDetail = {
   returnFocusTarget?: HTMLElement | null;
 };
 
-export function requestSettingsDialogOpen(
-  detail: OpenSettingsEventDetail = {},
-): boolean {
-  const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>(
-    OPEN_SETTINGS_EVENT,
-    {
-      detail,
-      cancelable: true,
-    },
-  );
+export function requestSettingsDialogOpen(detail: OpenSettingsEventDetail = {}): boolean {
+  const openSettingsEvent = new CustomEvent<OpenSettingsEventDetail>(OPEN_SETTINGS_EVENT, {
+    detail,
+    cancelable: true,
+  });
 
   return document.dispatchEvent(openSettingsEvent) === false;
 }

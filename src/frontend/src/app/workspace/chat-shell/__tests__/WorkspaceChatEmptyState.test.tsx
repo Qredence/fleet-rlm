@@ -4,9 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { WorkspaceChatEmptyState } from "@/app/workspace/chat-shell/WorkspaceChatEmptyState";
 
-function mountEmptyState(
-  props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>,
-) {
+function mountEmptyState(props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -58,20 +56,18 @@ describe("WorkspaceChatEmptyState", () => {
       hasHistory: true,
     });
 
-    const architectureButton = Array.from(
-      container.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Architecture pass"));
-    const historyButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("View recent conversations"),
+    const architectureButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Architecture pass"),
+    );
+    const historyButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("View recent conversations"),
     );
 
     expect(architectureButton).not.toBeUndefined();
     expect(historyButton).not.toBeUndefined();
 
     act(() => {
-      architectureButton?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
+      architectureButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       historyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 

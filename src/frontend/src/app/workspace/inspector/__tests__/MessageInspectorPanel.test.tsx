@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { MessageInspectorPanel } from "@/app/workspace/inspector/MessageInspectorPanel";
 import type { ChatMessage } from "@/screens/workspace/use-workspace";
@@ -171,15 +164,13 @@ describe("MessageInspectorPanel", () => {
     });
 
     const { container, root } = mountInspector();
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
-      (tab) => tab.textContent?.trim(),
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
     );
 
     expect(tabs).toEqual(["Trajectory"]);
     expect(container.textContent).not.toContain("Graph");
-    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe(
-      "trajectory",
-    );
+    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("trajectory");
 
     act(() => {
       root.unmount();
@@ -297,20 +288,19 @@ describe("MessageInspectorPanel", () => {
     });
 
     const { container, root } = mountInspector();
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
-      (tab) => tab.textContent?.trim(),
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
     );
     const tabList = container.querySelector('[role="tablist"]');
-    const tabsRoot = tabList?.parentElement
-      ?.parentElement as HTMLElement | null;
+    const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
     expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
     expect(tabsRoot?.classList.contains("flex")).toBe(true);
     expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");
-    expect(
-      container.querySelector('[data-testid="artifact-graph"]')?.textContent,
-    ).toContain("3 steps");
+    expect(container.querySelector('[data-testid="artifact-graph"]')?.textContent).toContain(
+      "3 steps",
+    );
 
     act(() => {
       root.unmount();

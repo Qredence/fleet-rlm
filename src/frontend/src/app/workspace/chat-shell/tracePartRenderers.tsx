@@ -43,11 +43,7 @@ import {
   InlineCitationText,
 } from "@/app/workspace/inline-citation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ui/reasoning";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ui/reasoning";
 import {
   Sandbox,
   SandboxContent,
@@ -58,12 +54,7 @@ import {
   SandboxTabsList,
   SandboxTabsTrigger,
 } from "@/app/workspace/sandbox";
-import {
-  Source,
-  Sources,
-  SourcesContent,
-  SourcesTrigger,
-} from "@/components/ai-elements/sources";
+import { Source, Sources, SourcesContent, SourcesTrigger } from "@/components/ai-elements/sources";
 import {
   Task,
   TaskContent,
@@ -100,25 +91,15 @@ import type {
   RuntimeContext,
 } from "@/screens/workspace/use-workspace";
 import { cn } from "@/lib/utils";
-import {
-  mapConfirmationState,
-  mapTaskStatus,
-  mapToolState,
-} from "@/lib/utils/prompt-kit-state";
+import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/app/workspace/assistant-content/model";
-import type {
-  ToolSessionItem,
-  TraceDisplayItem,
-} from "@/lib/workspace/chat-display-items";
+import type { ToolSessionItem, TraceDisplayItem } from "@/lib/workspace/chat-display-items";
 import {
   MONO_BASE_MEDIUM_STYLE,
   MONO_BASE_STYLE,
 } from "@/app/workspace/chat-shell/chatMessageStyles";
 
-type ToolSessionDisplayItem = Extract<
-  TraceDisplayItem,
-  { kind: "tool_session" }
->;
+type ToolSessionDisplayItem = Extract<TraceDisplayItem, { kind: "tool_session" }>;
 
 function stringifyValue(value: unknown): string {
   if (value == null) return "";
@@ -133,19 +114,11 @@ function stringifyValue(value: unknown): string {
   }
 }
 
-function shouldOpenToolRow(
-  state: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>["state"],
-) {
-  return (
-    state === "running" ||
-    state === "input-streaming" ||
-    state === "output-error"
-  );
+function shouldOpenToolRow(state: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>["state"]) {
+  return state === "running" || state === "input-streaming" || state === "output-error";
 }
 
-function shouldOpenTaskRow(
-  status: Extract<ChatRenderPart, { kind: "task" }>["status"],
-) {
+function shouldOpenTaskRow(status: Extract<ChatRenderPart, { kind: "task" }>["status"]) {
   return status === "in_progress" || status === "error";
 }
 
@@ -172,9 +145,7 @@ function toolSessionStateForItem(item: ToolSessionItem): ChatRenderToolState {
 function toolSessionHeaderLabel(items: ToolSessionItem[]) {
   const first = items[0];
   const toolName = first?.toolName ?? "Tool";
-  return first?.eventKind === "tool_call"
-    ? `Calling tool: ${toolName}`
-    : `Tool: ${toolName}`;
+  return first?.eventKind === "tool_call" ? `Calling tool: ${toolName}` : `Tool: ${toolName}`;
 }
 
 function toolSessionLine(item: ToolSessionItem) {
@@ -185,9 +156,7 @@ function toolSessionLine(item: ToolSessionItem) {
   return `${item.eventKind}: ${toolName}`;
 }
 
-function renderInlineCitations(
-  part: Extract<ChatRenderPart, { kind: "inline_citation_group" }>,
-) {
+function renderInlineCitations(part: Extract<ChatRenderPart, { kind: "inline_citation_group" }>) {
   return (
     <div className="mt-2">
       <InlineCitation>
@@ -195,9 +164,7 @@ function renderInlineCitations(
           <span className="text-xs text-muted-foreground">Sources</span>
         </InlineCitationText>
         <InlineCitationCard>
-          <InlineCitationCardTrigger
-            sources={part.citations.map((citation) => citation.url)}
-          />
+          <InlineCitationCardTrigger sources={part.citations.map((citation) => citation.url)} />
           <InlineCitationCardBody>
             <div className="space-y-3">
               {part.citations.map((citation, index) => (
@@ -223,9 +190,7 @@ function renderInlineCitations(
   );
 }
 
-function renderSources(
-  part: Extract<ChatRenderPart, { kind: "sources" }>,
-): ReactNode {
+function renderSources(part: Extract<ChatRenderPart, { kind: "sources" }>): ReactNode {
   if (part.sources.length === 0) return null;
   return (
     <Sources defaultOpen={false}>
@@ -247,9 +212,7 @@ function renderSources(
   );
 }
 
-function renderAttachments(
-  part: Extract<ChatRenderPart, { kind: "attachments" }>,
-): ReactNode {
+function renderAttachments(part: Extract<ChatRenderPart, { kind: "attachments" }>): ReactNode {
   if (part.attachments.length === 0) return null;
   return (
     <Attachments variant={part.variant ?? "grid"}>
@@ -261,10 +224,7 @@ function renderAttachments(
             type: "file",
             filename: attachment.name ?? "unknown",
             url: attachment.url ?? "",
-            mediaType:
-              attachment.mimeType ??
-              attachment.mediaType ??
-              "application/octet-stream",
+            mediaType: attachment.mimeType ?? attachment.mediaType ?? "application/octet-stream",
           }}
         >
           <AttachmentPreview />
@@ -320,10 +280,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
               {item.part.errorText ? (
                 item.part.errorText
               ) : (
-                <Streamdown
-                  content={item.part.output ?? ""}
-                  streaming={false}
-                />
+                <Streamdown content={item.part.output ?? ""} streaming={false} />
               )}
             </div>
           </div>
@@ -398,8 +355,7 @@ function renderReasoningPart(
         duration={part.duration}
         className={cn(
           "w-full",
-          embedded &&
-            "rounded-none border-0 bg-transparent px-0 py-0 shadow-none",
+          embedded && "rounded-none border-0 bg-transparent px-0 py-0 shadow-none",
         )}
       >
         <ReasoningTrigger />
@@ -425,8 +381,7 @@ function compactStatusClasses(
     tone === "accent" && "border-accent/25 bg-accent/5 text-foreground",
     tone === "primary" && "border-primary/25 bg-primary/5 text-foreground",
     tone === "success" && "border-primary/25 bg-primary/5 text-foreground",
-    (!tone || tone === "neutral") &&
-      "border-border-subtle/80 bg-muted/20 text-muted-foreground",
+    (!tone || tone === "neutral") && "border-border-subtle/80 bg-muted/20 text-muted-foreground",
   );
 }
 
@@ -477,9 +432,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
     case "chain_of_thought":
       return (
         <ChainOfThought defaultOpen={false}>
-          <ChainOfThoughtHeader>
-            {part.title ?? "Execution trace"}
-          </ChainOfThoughtHeader>
+          <ChainOfThoughtHeader>{part.title ?? "Execution trace"}</ChainOfThoughtHeader>
           <ChainOfThoughtContent>
             <div className="divide-y divide-border-subtle">
               {part.steps.map((step) => (
@@ -487,11 +440,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                   key={step.id}
                   label={step.label}
                   status={mapTaskStatus(
-                    step.status as
-                      | "pending"
-                      | "in_progress"
-                      | "completed"
-                      | "error",
+                    step.status as "pending" | "in_progress" | "completed" | "error",
                   )}
                 >
                   {step.details?.map((detail, index) => (
@@ -515,9 +464,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                 {part.items.map((item) => (
                   <QueueItem key={item.id}>
                     <QueueItemIndicator completed={item.completed} />
-                    <QueueItemContent completed={item.completed}>
-                      {item.label}
-                    </QueueItemContent>
+                    <QueueItemContent completed={item.completed}>{item.label}</QueueItemContent>
                     {item.description ? (
                       <QueueItemDescription completed={item.completed}>
                         {item.description}
@@ -541,9 +488,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                   <TaskItem key={item.id}>
                     <span>{item.text}</span>
                     {item.file ? (
-                      <TaskItemFile className="ml-2">
-                        {item.file.name}
-                      </TaskItemFile>
+                      <TaskItemFile className="ml-2">{item.file.name}</TaskItemFile>
                     ) : null}
                   </TaskItem>
                 ))}
@@ -607,9 +552,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                 ) : output ? (
                   <Streamdown content={output} streaming={false} />
                 ) : (
-                  <div className="text-muted-foreground typo-label-regular">
-                    No output yet
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No output yet</div>
                 )}
               </SandboxTabContent>
               <SandboxTabContent value="code">
@@ -618,9 +561,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                     <CodeBlockCode code={code} language="python" />
                   </CodeBlock>
                 ) : (
-                  <div className="text-muted-foreground typo-label-regular">
-                    No code captured
-                  </div>
+                  <div className="text-muted-foreground typo-label-regular">No code captured</div>
                 )}
               </SandboxTabContent>
             </SandboxTabs>
@@ -648,15 +589,11 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <EnvironmentVariableName />
-                      {variable.required ? (
-                        <EnvironmentVariableRequired />
-                      ) : null}
+                      {variable.required ? <EnvironmentVariableRequired /> : null}
                     </div>
                     <EnvironmentVariableValue />
                   </div>
-                  <EnvironmentVariableCopyButton
-                    aria-label={`Copy ${variable.name}`}
-                  />
+                  <EnvironmentVariableCopyButton aria-label={`Copy ${variable.name}`} />
                 </EnvironmentVariableGroup>
               </EnvironmentVariable>
             ))}
@@ -670,11 +607,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
     case "attachments":
       return <div>{renderAttachments(part)}</div>;
     case "status_note":
-      return (
-        <div>
-          {renderCompactStatusAlert(part.text, part.tone, part.runtimeContext)}
-        </div>
-      );
+      return <div>{renderCompactStatusAlert(part.text, part.tone, part.runtimeContext)}</div>;
     case "confirmation":
       return (
         <Confirmation
@@ -682,11 +615,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
           approval={{
             id: partKey,
             approved:
-              part.state === "approved"
-                ? true
-                : part.state === "rejected"
-                  ? false
-                  : undefined,
+              part.state === "approved" ? true : part.state === "rejected" ? false : undefined,
           }}
         >
           <ConfirmationTitle>{part.question}</ConfirmationTitle>
@@ -722,14 +651,10 @@ interface WorkspaceToolSessionMessageProps {
   item: ToolSessionDisplayItem;
 }
 
-export function WorkspaceToolSessionMessage({
-  item,
-}: WorkspaceToolSessionMessageProps) {
+export function WorkspaceToolSessionMessage({ item }: WorkspaceToolSessionMessageProps) {
   const fallbackState: ChatRenderToolState = "running";
   const latestItem = item.items[item.items.length - 1];
-  const latestState = latestItem
-    ? toolSessionStateForItem(latestItem)
-    : fallbackState;
+  const latestState = latestItem ? toolSessionStateForItem(latestItem) : fallbackState;
 
   return (
     <Message from="assistant" className="mb-4">
@@ -767,9 +692,6 @@ interface WorkspaceLegacyStatusCardProps {
   tone: "accent" | "primary" | "success";
 }
 
-export function WorkspaceLegacyStatusCard({
-  content,
-  tone,
-}: WorkspaceLegacyStatusCardProps) {
+export function WorkspaceLegacyStatusCard({ content, tone }: WorkspaceLegacyStatusCardProps) {
   return renderCompactStatusAlert(content, tone);
 }

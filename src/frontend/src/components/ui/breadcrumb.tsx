@@ -8,10 +8,7 @@ function Breadcrumb({ ...props }: React.HTMLAttributes<HTMLElement>) {
   return <nav aria-label="Breadcrumb" data-slot="breadcrumb" {...props} />;
 }
 
-function BreadcrumbList({
-  className,
-  ...props
-}: React.OlHTMLAttributes<HTMLOListElement>) {
+function BreadcrumbList({ className, ...props }: React.OlHTMLAttributes<HTMLOListElement>) {
   return (
     <ol
       data-slot="breadcrumb-list"
@@ -24,10 +21,7 @@ function BreadcrumbList({
   );
 }
 
-function BreadcrumbItem({
-  className,
-  ...props
-}: React.LiHTMLAttributes<HTMLLIElement>) {
+function BreadcrumbItem({ className, ...props }: React.LiHTMLAttributes<HTMLLIElement>) {
   return (
     <li
       data-slot="breadcrumb-item"
@@ -55,10 +49,7 @@ function BreadcrumbLink({
   );
 }
 
-function BreadcrumbPage({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLSpanElement>) {
+function BreadcrumbPage({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
       aria-current="page"
@@ -86,10 +77,7 @@ function BreadcrumbSeparator({
   );
 }
 
-function BreadcrumbEllipsis({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLSpanElement>) {
+function BreadcrumbEllipsis({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
       aria-hidden="true"

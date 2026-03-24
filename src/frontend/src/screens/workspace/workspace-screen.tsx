@@ -6,16 +6,10 @@ import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import {
-  useRuntimeStatus,
-  runtimeStatusQueryKey,
-} from "@/hooks/useRuntimeStatus";
+import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  WorkspaceComposer,
-  type AttachedFile,
-} from "@/app/workspace/workspace-composer";
+import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
 import { WorkspaceSidebar } from "@/app/workspace/workspace-sidebar";
 import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import {
@@ -47,8 +41,7 @@ export function WorkspaceScreen() {
   const isMobile = useIsMobile();
   const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
-    useStickToBottom();
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
@@ -78,8 +71,7 @@ export function WorkspaceScreen() {
     const provider = runtimeStatus.data?.sandbox_provider;
     if (!provider) return;
     didInitRuntimeMode.current = true;
-    const mapped: WsRuntimeMode =
-      provider === "daytona" ? "daytona_pilot" : "modal_chat";
+    const mapped: WsRuntimeMode = provider === "daytona" ? "daytona_pilot" : "modal_chat";
     setRuntimeMode(mapped);
   }, [runtimeStatus.data?.sandbox_provider, setRuntimeMode]);
 
@@ -90,9 +82,7 @@ export function WorkspaceScreen() {
       const sandboxProvider = mode === "daytona_pilot" ? "daytona" : "modal";
       runtimeEndpoints
         .patchSettings({ updates: { SANDBOX_PROVIDER: sandboxProvider } })
-        .then(() =>
-          queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }),
-        )
+        .then(() => queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }))
         .catch(() => {
           // silent — settings PATCH failures don't block the chat
         });
@@ -116,14 +106,10 @@ export function WorkspaceScreen() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl:
-          runtimeMode === "daytona_pilot"
-            ? inferredRepoContext?.repoUrl
-            : undefined,
+        repoUrl: runtimeMode === "daytona_pilot" ? inferredRepoContext?.repoUrl : undefined,
         repoRef:
           runtimeMode === "daytona_pilot"
-            ? (inferredRepoContext?.repoRefCandidate ??
-              inferredRepoContext?.repoRef)
+            ? (inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef)
             : undefined,
         contextPaths:
           runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
@@ -216,16 +202,8 @@ export function WorkspaceScreen() {
       return;
     }
 
-    if (
-      messagesRef.current.length > 0 &&
-      messagesRef.current !== conversation.messages
-    ) {
-      saveConversation(
-        messagesRef.current,
-        phaseRef.current,
-        undefined,
-        turnArtifactsRef.current,
-      );
+    if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
+      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
     }
 
     loadConversation(conversation);
@@ -271,11 +249,8 @@ export function WorkspaceScreen() {
         guidance?: string[];
       }
     | undefined;
-  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
-    ? daytonaStatus.guidance
-    : [];
-  const warningGuidance =
-    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
+  const warningGuidance = runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
@@ -283,9 +258,7 @@ export function WorkspaceScreen() {
       ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
       : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
   const runtimeWarningTitle =
-    runtimeMode === "daytona_pilot"
-      ? "Daytona setup required"
-      : "Runtime warning";
+    runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;

@@ -14,9 +14,7 @@ import {
 import { InputGroupTextarea } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 
-export type PromptInputTextareaProps = ComponentProps<
-  typeof InputGroupTextarea
->;
+export type PromptInputTextareaProps = ComponentProps<typeof InputGroupTextarea>;
 
 export const PromptInputTextarea = ({
   onChange,

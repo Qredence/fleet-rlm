@@ -15,11 +15,7 @@ import { springs } from "@/lib/utils/motion";
 import type { Conversation } from "@/screens/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -86,9 +82,7 @@ function groupConversations(
     map.get(group)!.push(conv);
   }
 
-  return order
-    .filter((g) => map.has(g))
-    .map((g) => ({ group: g, items: map.get(g)! }));
+  return order.filter((g) => map.has(g)).map((g) => ({ group: g, items: map.get(g)! }));
 }
 
 // ── Phase badge helper ───────────────────────────────────────────────
@@ -151,10 +145,7 @@ export function WorkspaceSidebar({
               variant="ghost"
               size="sm"
               onClick={handleClear}
-              className={cn(
-                "transition-colors",
-                confirmClear && "text-destructive",
-              )}
+              className={cn("transition-colors", confirmClear && "text-destructive")}
             >
               {confirmClear ? "Confirm Clear" : "Clear All"}
             </Button>
@@ -169,10 +160,7 @@ export function WorkspaceSidebar({
                   onClick={onClose}
                   aria-label="Close history"
                 >
-                  <X
-                    className="size-4 text-muted-foreground"
-                    aria-hidden="true"
-                  />
+                  <X className="size-4 text-muted-foreground" aria-hidden="true" />
                 </Button>
               </span>
             </TooltipTrigger>
@@ -185,14 +173,9 @@ export function WorkspaceSidebar({
       {conversations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12">
           <div className="size-10 rounded-lg bg-muted flex items-center justify-center mb-3">
-            <MessageSquare
-              className="size-5 text-muted-foreground"
-              aria-hidden="true"
-            />
+            <MessageSquare className="size-5 text-muted-foreground" aria-hidden="true" />
           </div>
-          <p className="text-muted-foreground typo-label">
-            No conversations yet
-          </p>
+          <p className="text-muted-foreground typo-label">No conversations yet</p>
           <p className="text-muted-foreground mt-1 typo-caption">
             Start a chat to see your history here
           </p>
@@ -222,9 +205,7 @@ export function WorkspaceSidebar({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                        transition={
-                          prefersReduced ? springs.instant : springs.snappy
-                        }
+                        transition={prefersReduced ? springs.instant : springs.snappy}
                         className="group flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-secondary/60 transition-colors border border-transparent hover:border-border-subtle"
                       >
                         <button
@@ -265,9 +246,7 @@ export function WorkspaceSidebar({
                               <span className="text-muted-foreground typo-helper">
                                 {msgCount} messages
                               </span>
-                              <span className="text-muted-foreground typo-helper">
-                                &middot;
-                              </span>
+                              <span className="text-muted-foreground typo-helper">&middot;</span>
                               <span className="text-muted-foreground typo-helper">
                                 {relativeTime(conv.updatedAt)}
                               </span>
@@ -287,10 +266,7 @@ export function WorkspaceSidebar({
                                 className="text-muted-foreground hover:text-destructive"
                                 onClick={() => onDelete(conv.id)}
                               >
-                                <Trash2
-                                  className="size-3.5"
-                                  aria-hidden="true"
-                                />
+                                <Trash2 className="size-3.5" aria-hidden="true" />
                               </Button>
                             </span>
                           </TooltipTrigger>

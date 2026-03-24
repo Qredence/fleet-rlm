@@ -24,11 +24,10 @@ interface EnvironmentVariablesContextType {
 // oxlint-disable-next-line eslint(no-empty-function)
 const noop = () => {};
 
-const EnvironmentVariablesContext =
-  createContext<EnvironmentVariablesContextType>({
-    setShowValues: noop,
-    showValues: false,
-  });
+const EnvironmentVariablesContext = createContext<EnvironmentVariablesContextType>({
+  setShowValues: noop,
+  showValues: false,
+});
 
 export type EnvironmentVariablesProps = HTMLAttributes<HTMLDivElement> & {
   showValues?: boolean;
@@ -44,8 +43,7 @@ export const EnvironmentVariables = ({
   children,
   ...props
 }: EnvironmentVariablesProps) => {
-  const [internalShowValues, setInternalShowValues] =
-    useState(defaultShowValues);
+  const [internalShowValues, setInternalShowValues] = useState(defaultShowValues);
   const showValues = controlledShowValues ?? internalShowValues;
 
   const setShowValues = useCallback(
@@ -56,17 +54,11 @@ export const EnvironmentVariables = ({
     [onShowValuesChange],
   );
 
-  const contextValue = useMemo(
-    () => ({ setShowValues, showValues }),
-    [setShowValues, showValues],
-  );
+  const contextValue = useMemo(() => ({ setShowValues, showValues }), [setShowValues, showValues]);
 
   return (
     <EnvironmentVariablesContext.Provider value={contextValue}>
-      <div
-        className={cn("rounded-lg border bg-background", className)}
-        {...props}
-      >
+      <div className={cn("rounded-lg border bg-background", className)} {...props}>
         {children}
       </div>
     </EnvironmentVariablesContext.Provider>
@@ -80,13 +72,7 @@ export const EnvironmentVariablesHeader = ({
   children,
   ...props
 }: EnvironmentVariablesHeaderProps) => (
-  <div
-    className={cn(
-      "flex items-center justify-between border-b px-4 py-3",
-      className,
-    )}
-    {...props}
-  >
+  <div className={cn("flex items-center justify-between border-b px-4 py-3", className)} {...props}>
     {children}
   </div>
 );
@@ -143,11 +129,10 @@ interface EnvironmentVariableContextType {
   value: string;
 }
 
-const EnvironmentVariableContext =
-  createContext<EnvironmentVariableContextType>({
-    name: "",
-    value: "",
-  });
+const EnvironmentVariableContext = createContext<EnvironmentVariableContextType>({
+  name: "",
+  value: "",
+});
 
 export type EnvironmentVariableProps = HTMLAttributes<HTMLDivElement> & {
   name: string;
@@ -166,10 +151,7 @@ export const EnvironmentVariable = ({
   return (
     <EnvironmentVariableContext.Provider value={envVarContextValue}>
       <div
-        className={cn(
-          "flex items-center justify-between gap-4 px-4 py-3",
-          className,
-        )}
+        className={cn("flex items-center justify-between gap-4 px-4 py-3", className)}
         {...props}
       >
         {children ?? (
@@ -223,9 +205,7 @@ export const EnvironmentVariableValue = ({
   const { value } = useContext(EnvironmentVariableContext);
   const { showValues } = useContext(EnvironmentVariablesContext);
 
-  const displayValue = showValues
-    ? value
-    : "•".repeat(Math.min(value.length, 20));
+  const displayValue = showValues ? value : "•".repeat(Math.min(value.length, 20));
 
   return (
     <span
@@ -241,9 +221,7 @@ export const EnvironmentVariableValue = ({
   );
 };
 
-export type EnvironmentVariableCopyButtonProps = ComponentProps<
-  typeof Button
-> & {
+export type EnvironmentVariableCopyButtonProps = ComponentProps<typeof Button> & {
   onCopy?: () => void;
   onError?: (error: Error) => void;
   timeout?: number;

@@ -215,11 +215,7 @@
 
 @utility prompt-composer-submit-button {
   color: var(--color-text);
-  background-color: color-mix(
-    in srgb,
-    var(--color-text) 8%,
-    var(--color-surface-elevated)
-  );
+  background-color: color-mix(in srgb, var(--color-text) 8%, var(--color-surface-elevated));
   border: 0;
   box-shadow: var(--shadow-100);
   transition:
@@ -227,11 +223,7 @@
     color 160ms ease,
     opacity 160ms ease;
   &:hover {
-    background-color: color-mix(
-      in srgb,
-      var(--color-text) 12%,
-      var(--color-surface-elevated)
-    );
+    background-color: color-mix(in srgb, var(--color-text) 12%, var(--color-surface-elevated));
   }
   &:disabled {
     color: var(--color-text-disabled);
@@ -240,11 +232,7 @@
 }
 
 @utility prompt-composer-menu {
-  background-color: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 96%,
-    transparent
-  );
+  background-color: color-mix(in srgb, var(--color-surface-elevated) 96%, transparent);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-400);
@@ -375,10 +363,7 @@
   padding-top: var(--space-1);
   padding-left: var(--glass-tab-bar-inset);
   padding-right: var(--glass-tab-bar-inset);
-  padding-bottom: max(
-    var(--glass-tab-bar-inset),
-    env(safe-area-inset-bottom, 8px)
-  );
+  padding-bottom: max(var(--glass-tab-bar-inset), env(safe-area-inset-bottom, 8px));
 }
 
 /* Utility: floating glass tab bar shell */
@@ -506,11 +491,7 @@
 
   --color-background-danger-soft: #ffd9d9;
   --color-background-danger-soft-hover: #ffc6c5;
-  --color-background-danger-surface: color-mix(
-    in oklab,
-    #fa423e 8%,
-    transparent
-  );
+  --color-background-danger-surface: color-mix(in oklab, #fa423e 8%, transparent);
   --color-border-danger-surface: color-mix(in oklab, #fa423e 8%, transparent);
   --color-background-danger-solid: var(--destructive);
   --color-background-danger-solid-hover: #ba2623;
@@ -528,12 +509,11 @@
 
   /* ── OpenAI Apps SDK canonical tokens: typography ────────────────── */
   --font-sans:
-    ui-sans-serif, -apple-system, system-ui, "Segoe UI", "Noto Sans",
-    "Helvetica", "Arial", "Apple Color Emoji", "Segoe UI Emoji",
-    "Segoe UI Symbol", sans-serif;
+    ui-sans-serif, -apple-system, system-ui, "Segoe UI", "Noto Sans", "Helvetica", "Arial",
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
   --font-mono:
-    ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas",
-    "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
+    ui-monospace, "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas", "Liberation Mono",
+    "DejaVu Sans Mono", "Courier New", monospace;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -686,16 +666,8 @@
   --trace-tool: var(--color-background-discovery-solid);
   --trace-memory: var(--color-background-success-solid);
   --trace-output: var(--color-background-info-solid);
-  --trace-edge: color-mix(
-    in oklab,
-    var(--color-background-info-solid) 56%,
-    transparent
-  );
-  --trace-edge-secondary: color-mix(
-    in oklab,
-    var(--color-text-secondary) 48%,
-    transparent
-  );
+  --trace-edge: color-mix(in oklab, var(--color-background-info-solid) 56%, transparent);
+  --trace-edge-secondary: color-mix(in oklab, var(--color-text-secondary) 48%, transparent);
   --toggle-track-shimmer: rgba(255, 255, 255, 0.2);
   --toggle-track-shadow: rgba(0, 0, 0, 0.06);
   --toggle-track-highlight-on: rgba(255, 255, 255, 0.2);
@@ -716,17 +688,9 @@
 
   /* ── iOS 26 Liquid Glass Material System ──────────────────────── */
   --glass-tab-bg: color-mix(in oklab, var(--color-surface) 72%, transparent);
-  --glass-tab-border: color-mix(
-    in oklab,
-    var(--color-surface) 50%,
-    transparent
-  );
+  --glass-tab-border: color-mix(in oklab, var(--color-surface) 50%, transparent);
   --glass-tab-shadow: var(--shadow-300);
-  --glass-tab-highlight: color-mix(
-    in oklab,
-    var(--color-surface) 90%,
-    transparent
-  );
+  --glass-tab-highlight: color-mix(in oklab, var(--color-surface) 90%, transparent);
   --glass-tab-blur: 24px;
   --glass-tab-bar-height: 56px;
   --glass-tab-bar-radius: 28px;
@@ -735,11 +699,7 @@
   --glass-nav-border: var(--color-border-disabled);
   --glass-nav-blur: 20px;
   --glass-sheet-bg: color-mix(in oklab, var(--color-surface) 88%, transparent);
-  --glass-sheet-border: color-mix(
-    in oklab,
-    var(--color-surface) 60%,
-    transparent
-  );
+  --glass-sheet-border: color-mix(in oklab, var(--color-surface) 60%, transparent);
   --glass-sheet-blur: 40px;
   --glass-sheet-handle: color-mix(in oklab, var(--color-text) 18%, transparent);
   --glass-overlay: rgba(0, 0, 0, 0.25);
@@ -829,11 +789,7 @@
 
   --color-background-info-solid: #0285ff;
   --color-background-info-solid-hover: #0169cc;
-  --color-background-info-surface: color-mix(
-    in oklab,
-    #0285ff 13%,
-    transparent
-  );
+  --color-background-info-surface: color-mix(in oklab, #0285ff 13%, transparent);
   --color-border-info-surface: color-mix(in oklab, #0285ff 13%, transparent);
   --color-text-info-solid: #fff;
 
@@ -878,19 +834,11 @@
   --toggle-knob-shadow: var(--shadow-300);
 
   /* iOS 26 Liquid Glass — dark mode */
-  --glass-tab-bg: color-mix(
-    in oklab,
-    var(--color-surface-secondary) 72%,
-    transparent
-  );
+  --glass-tab-bg: color-mix(in oklab, var(--color-surface-secondary) 72%, transparent);
   --glass-tab-border: var(--color-border-disabled);
   --glass-tab-shadow: var(--shadow-300);
   --glass-tab-highlight: color-mix(in oklab, var(--color-text) 6%, transparent);
-  --glass-nav-bg: color-mix(
-    in oklab,
-    var(--color-surface-secondary) 80%,
-    transparent
-  );
+  --glass-nav-bg: color-mix(in oklab, var(--color-surface-secondary) 80%, transparent);
   --glass-nav-border: var(--color-border-disabled);
   --glass-sheet-bg: color-mix(in oklab, var(--color-surface) 88%, transparent);
   --glass-sheet-border: var(--color-border);
@@ -1412,8 +1360,7 @@ li {
   line-height: 1.4;
 }
 
-[data-slot="radio-option-card"][aria-checked="true"]
-  [data-slot="radio-option-card-label"] {
+[data-slot="radio-option-card"][aria-checked="true"] [data-slot="radio-option-card-label"] {
   font-weight: var(--font-weight-medium);
 }
 
@@ -1598,11 +1545,7 @@ li {
 /* ── React Flow Minimal Skin ─────────────────────────────────────── */
 .artifact-graph-flow .react-flow__controls {
   border: 1px solid var(--border-subtle);
-  background: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 92%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, transparent);
   border-radius: 8px;
   box-shadow: none;
 }
@@ -1614,20 +1557,12 @@ li {
 }
 
 .artifact-graph-flow .react-flow__controls-button:hover {
-  background: color-mix(
-    in srgb,
-    var(--color-background-primary-soft) 42%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-background-primary-soft) 42%, transparent);
   color: var(--color-text);
 }
 
 .artifact-graph-flow .react-flow__minimap {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: color-mix(
-    in srgb,
-    var(--color-surface-elevated) 90%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-surface-elevated) 90%, transparent);
 }

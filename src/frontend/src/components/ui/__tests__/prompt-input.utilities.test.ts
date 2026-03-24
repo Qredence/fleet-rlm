@@ -12,10 +12,7 @@ const createFile = (name: string, type: string, size = 4) =>
 describe("prompt-input utilities", () => {
   it("filters files by accepted mime patterns", () => {
     const onError = vi.fn();
-    const files = [
-      createFile("photo.png", "image/png"),
-      createFile("notes.txt", "text/plain"),
-    ];
+    const files = [createFile("photo.png", "image/png"), createFile("notes.txt", "text/plain")];
 
     const accepted = filterAcceptedFiles(files, "image/*", onError);
 

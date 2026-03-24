@@ -52,14 +52,7 @@ function findCode(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return;
 
-  const candidateKeys = [
-    "code",
-    "source",
-    "python",
-    "script",
-    "content",
-    "text",
-  ];
+  const candidateKeys = ["code", "source", "python", "script", "content", "text"];
   for (const key of candidateKeys) {
     const found = asString(record[key]);
     if (found && looksLikeCode(found)) return found;
@@ -108,10 +101,7 @@ export function extractErrorDetails(payload: {
   input?: unknown;
   output?: unknown;
 }): ErrorDetails | undefined {
-  if (
-    payload.status !== "error" &&
-    !/error|failed|exception/i.test(payload.label || "")
-  ) {
+  if (payload.status !== "error" && !/error|failed|exception/i.test(payload.label || "")) {
     return;
   }
 
@@ -125,10 +115,7 @@ export function extractErrorDetails(payload: {
       asString(source.detail) ??
       "Execution failed";
     const code = asString(source.code) ?? asString(source.type);
-    const trace =
-      asString(source.traceback) ??
-      asString(source.stack) ??
-      asString(source.trace);
+    const trace = asString(source.traceback) ?? asString(source.stack) ?? asString(source.trace);
     return { message, code, trace };
   }
 
@@ -141,9 +128,7 @@ export function extractErrorDetails(payload: {
   };
 }
 
-function normalizeTrajectorySource(
-  value: unknown,
-): Record<string, unknown> | undefined {
+function normalizeTrajectorySource(value: unknown): Record<string, unknown> | undefined {
   const record = asRecord(value);
   if (!record) return;
   const nested = asRecord(record.trajectory_step) ?? asRecord(record.step_data);
@@ -157,17 +142,13 @@ function summarizeAction(record: Record<string, unknown>): string | undefined {
     asString(record.tool) ??
     asString(record.label);
   const args =
-    asString(record.args) ??
-    asString(record.tool_input) ??
-    stringify(record.input).trim();
+    asString(record.args) ?? asString(record.tool_input) ?? stringify(record.input).trim();
   if (!action) return;
   if (!args || args === "{}") return action;
   return `${action}: ${args}`;
 }
 
-function summarizeObservation(
-  record: Record<string, unknown>,
-): string | undefined {
+function summarizeObservation(record: Record<string, unknown>): string | undefined {
   const raw =
     asString(record.observation) ??
     asString(record.result) ??
@@ -183,8 +164,7 @@ export function extractTrajectoryChain(payload: {
   output?: unknown;
 }): TrajectoryChain | undefined {
   const source =
-    normalizeTrajectorySource(payload.output) ??
-    normalizeTrajectorySource(payload.input);
+    normalizeTrajectorySource(payload.output) ?? normalizeTrajectorySource(payload.input);
   if (!source) return;
 
   const thought = asString(source.thought) ?? asString(source.reasoning);
