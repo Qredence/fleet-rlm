@@ -103,8 +103,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
+        onClick={close}
       >
-        <div className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)">
+        <div
+          className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Command
             loop
             shouldFilter
