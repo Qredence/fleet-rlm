@@ -29,19 +29,12 @@ interface ExecutionModeDropdownProps {
   onChange: (mode: WsExecutionMode) => void;
 }
 
-function ExecutionModeDropdown({
-  value,
-  onChange,
-}: ExecutionModeDropdownProps) {
+function ExecutionModeDropdown({ value, onChange }: ExecutionModeDropdownProps) {
   const currentMode =
-    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ??
-    EXECUTION_MODE_OPTIONS[0]!;
+    EXECUTION_MODE_OPTIONS.find((option) => option.id === value) ?? EXECUTION_MODE_OPTIONS[0]!;
 
   return (
-    <Select
-      value={value}
-      onValueChange={(nextValue) => onChange(nextValue as WsExecutionMode)}
-    >
+    <Select value={value} onValueChange={(nextValue) => onChange(nextValue as WsExecutionMode)}>
       <SelectTrigger
         size="sm"
         className={cn(

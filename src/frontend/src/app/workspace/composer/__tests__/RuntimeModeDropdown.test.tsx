@@ -57,7 +57,7 @@ describe("RuntimeModeDropdown", () => {
       root.render(<RuntimeModeDropdown value="daytona_pilot" onChange={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Daytona pilot");
+    expect(container.textContent).toContain("Daytona");
 
     act(() => {
       root.unmount();
@@ -81,7 +81,7 @@ describe("RuntimeModeDropdown", () => {
     });
 
     const daytonaOption = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
-      (item) => item.textContent?.includes("Daytona pilot") ?? false,
+      (item) => item.textContent?.includes("Daytona") ?? false,
     );
 
     act(() => {

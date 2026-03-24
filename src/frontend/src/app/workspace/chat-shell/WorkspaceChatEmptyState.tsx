@@ -141,10 +141,7 @@ export function WorkspaceChatEmptyState({
 
       {/* Suggestion cards */}
       <div
-        className={cn(
-          "mt-6 grid w-full gap-2.5",
-          isMobile ? "grid-cols-1" : "grid-cols-2",
-        )}
+        className={cn("mt-6 grid w-full gap-2.5", isMobile ? "grid-cols-1" : "grid-cols-2")}
         aria-live="polite"
         aria-label="Suggestion actions"
       >
@@ -199,7 +196,9 @@ function SuggestionCard({ suggestion, index, prefersReduced, onClick }: Suggesti
       key={suggestion.text}
       initial={{ opacity: 0, y: prefersReduced ? 0 : 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={prefersReduced ? { duration: 0.01 } : { delay: 0.2 + index * 0.06, duration: 0.3 }}
+      transition={
+        prefersReduced ? { duration: 0.01 } : { delay: 0.2 + index * 0.06, duration: 0.3 }
+      }
       onClick={handleClick}
       className={cn(
         "group flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-left",
@@ -220,9 +219,7 @@ function SuggestionCard({ suggestion, index, prefersReduced, onClick }: Suggesti
         <span className="text-sm font-medium text-foreground leading-tight">
           {suggestion.title}
         </span>
-        <span className="text-xs text-muted-foreground leading-snug">
-          {suggestion.description}
-        </span>
+        <span className="text-xs text-muted-foreground leading-snug">{suggestion.description}</span>
       </div>
     </motion.button>
   );

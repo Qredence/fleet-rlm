@@ -1,12 +1,5 @@
 import { type MouseEvent } from "react";
-import {
-  Database,
-  LogIn,
-  MessageCircle,
-  Plus,
-  Search,
-  Settings,
-} from "lucide-react";
+import { Database, LogIn, MessageCircle, Plus, Search, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useNavigationStore } from "@/stores/navigationStore";
 
@@ -86,10 +79,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={handleNewSession}
-                  tooltip="New session"
-                >
+                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
                   <Plus />
                   <span>New Session</span>
                 </SidebarMenuButton>

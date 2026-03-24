@@ -22,11 +22,7 @@ export function AssistantAnswerBlock({
 
   return (
     <div data-slot="assistant-answer">
-      {text ? (
-        <MessageResponse>{text}</MessageResponse>
-      ) : (
-        <LoadingState />
-      )}
+      {text ? <MessageResponse>{text}</MessageResponse> : <LoadingState />}
     </div>
   );
 }

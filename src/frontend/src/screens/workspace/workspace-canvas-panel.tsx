@@ -77,8 +77,8 @@ export function WorkspaceCanvasUnavailablePanel() {
       <EmptyContent>
         <EmptyTitle>Workbench unavailable</EmptyTitle>
         <EmptyDescription>
-          The Workbench requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to
-          the backend.
+          The Workbench requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to the
+          backend.
         </EmptyDescription>
       </EmptyContent>
     </Empty>

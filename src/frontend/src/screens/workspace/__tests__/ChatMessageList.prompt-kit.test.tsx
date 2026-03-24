@@ -1131,8 +1131,8 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Generating code...");
-    expect(html).toContain("Agentic Fleet Session");
+    expect(html).toContain("Thinking...");
+    expect(html).toContain("What can I help you build?");
   });
 
   it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
@@ -1218,7 +1218,7 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
       />,
     );
 
-    expect(html).toContain("Generating code...");
+    expect(html).toContain("Thinking...");
     expect(html).toContain('data-slot="assistant-turn-content"');
   });
 

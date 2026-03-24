@@ -496,9 +496,7 @@ export function RunWorkbench() {
           <Tabs
             className="flex h-full min-h-0 flex-col"
             value={selectedTab}
-            onValueChange={(value) =>
-              selectTab(value as "iterations" | "evidence" | "final")
-            }
+            onValueChange={(value) => selectTab(value as "iterations" | "evidence" | "final")}
           >
             <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-3 no-scrollbar">
               <TabsList className="inline-flex h-10 gap-0 rounded-none border-0 bg-transparent p-0">

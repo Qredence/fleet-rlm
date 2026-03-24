@@ -3,26 +3,11 @@ import { Tabs as BaseTabs } from "@base-ui/react";
 
 import { cn } from "@/lib/utils";
 
-function Tabs({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof BaseTabs.Root>) {
-  return (
-    <BaseTabs.Root
-      ref={ref}
-      data-slot="tabs"
-      className={className}
-      {...props}
-    />
-  );
+function Tabs({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Root>) {
+  return <BaseTabs.Root ref={ref} data-slot="tabs" className={className} {...props} />;
 }
 
-function TabsList({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof BaseTabs.List>) {
+function TabsList({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.List>) {
   return (
     <BaseTabs.List
       ref={ref}
@@ -36,11 +21,7 @@ function TabsList({
   );
 }
 
-function TabsTrigger({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof BaseTabs.Tab>) {
+function TabsTrigger({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Tab>) {
   return (
     <BaseTabs.Tab
       ref={ref}
@@ -54,11 +35,7 @@ function TabsTrigger({
   );
 }
 
-function TabsContent({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof BaseTabs.Panel>) {
+function TabsContent({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Panel>) {
   return (
     <BaseTabs.Panel
       ref={ref}
