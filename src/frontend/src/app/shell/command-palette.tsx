@@ -1,7 +1,7 @@
 /**
  * Command Palette — global keyboard-driven quick actions.
  *
- * Mirrors the current product shell: RLM Workspace, Volumes, and Settings.
+ * Mirrors the current product shell: Workbench, Volumes, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Search, Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
@@ -21,7 +21,7 @@ interface PageItem {
 }
 
 const pages: PageItem[] = [
-  { key: "workspace", label: "RLM Workspace", icon: Zap },
+  { key: "workspace", label: "Workbench", icon: Zap },
   { key: "volumes", label: "Volumes", icon: HardDrive },
   { key: "settings", label: "Settings", icon: Settings },
 ];
@@ -103,8 +103,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
+        onClick={close}
       >
-        <div className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)">
+        <div
+          className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Command
             loop
             shouldFilter

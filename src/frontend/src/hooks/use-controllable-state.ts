@@ -30,7 +30,8 @@ export function useControllableState<T>({
 
   const setValue = useCallback(
     (next: T | ((prev: T) => T)) => {
-      const resolve = (prev: T): T => (typeof next === "function" ? (next as (prev: T) => T)(prev) : next);
+      const resolve = (prev: T): T =>
+        typeof next === "function" ? (next as (prev: T) => T)(prev) : next;
 
       if (!isControlled) {
         setUncontrolledValue((prev) => {

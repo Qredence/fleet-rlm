@@ -12,7 +12,7 @@ export function ShellHeader() {
   const isMobile = useIsMobile();
 
   const titleMap: Record<string, string> = {
-    workspace: "RLM Workspace",
+    workspace: "Workbench",
     volumes: "Volumes",
     settings: "Settings",
   };

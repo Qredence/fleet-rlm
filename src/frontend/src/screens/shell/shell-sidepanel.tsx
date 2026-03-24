@@ -59,7 +59,7 @@ function navLabel(nav: string): string {
     case "settings":
       return "Settings";
     default:
-      return "RLM Workspace";
+      return "Workbench";
   }
 }
 

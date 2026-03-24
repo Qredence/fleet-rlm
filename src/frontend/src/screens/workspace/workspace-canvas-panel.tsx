@@ -75,10 +75,10 @@ export function WorkspaceCanvasUnavailablePanel() {
         <PanelRight />
       </EmptyMedia>
       <EmptyContent>
-        <EmptyTitle>RLM Workspace unavailable</EmptyTitle>
+        <EmptyTitle>Workbench unavailable</EmptyTitle>
         <EmptyDescription>
-          The RLM Workspace requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to
-          the backend.
+          The Workbench requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to the
+          backend.
         </EmptyDescription>
       </EmptyContent>
     </Empty>

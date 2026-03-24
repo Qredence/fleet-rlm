@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppSidebar } from "@/screens/shell/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -45,11 +38,7 @@ vi.mock("lucide-react", () => {
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    className,
-    ...props
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>
       {children}
     </button>
@@ -116,7 +105,7 @@ describe("AppSidebar session actions", () => {
   it("starts a new workspace session from the sidebar", () => {
     const { container, root } = mountSidebar();
 
-    expect(findButtonByText(container, "RLM Workspace")).toBeTruthy();
+    expect(findButtonByText(container, "Workbench")).toBeTruthy();
 
     const button = findButtonByText(container, "New Session");
     expect(button).toBeTruthy();
@@ -164,9 +153,7 @@ describe("AppSidebar session actions", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith(
-      "conv-1",
-    );
+    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith("conv-1");
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
 
     act(() => {

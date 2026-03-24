@@ -122,12 +122,11 @@ describe("RunWorkbench", () => {
     expect(html).toContain("Workspace execution");
     expect(html).toContain("Iterations");
     expect(html).toContain("Evidence");
-    expect(html).toContain("Callbacks");
-    expect(html).toContain("Prompts");
-    expect(html).toContain("Final");
+    expect(html).toContain("Final Output");
     expect(html).toContain("Inspect tracing architecture");
     expect(html).toContain("1 iterations");
     expect(html).toContain("1 callbacks");
+    expect(html).toContain("1 prompt objects");
     expect(html).not.toContain("Timeline");
     expect(html).not.toContain("Node");
     expect(html).not.toContain("Run tree");

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 
 import { createLocalId } from "@/lib/id";
+import { parseStoredJson } from "@/lib/utils/env";
 import type {
   ChatMessage,
   Conversation,
@@ -62,14 +63,6 @@ function normalizeConversations(conversations: Conversation[]): Conversation[] {
   }
 
   return [...dedupedBySession.values(), ...withoutSessionKey].slice(0, MAX_CONVERSATIONS);
-}
-
-function parseStoredJson(raw: string | null): unknown {
-  try {
-    return raw ? (JSON.parse(raw) as unknown) : null;
-  } catch {
-    return null;
-  }
 }
 
 function toConversationArray(value: unknown): Conversation[] | null {

@@ -18,6 +18,8 @@ function Spinner({ className, size = "md", ref, ...props }: SpinnerProps) {
       ref={ref}
       role="status"
       aria-label="Loading"
+      data-slot="spinner"
+      data-size={size}
       className={cn(
         "animate-spin rounded-full border-2 border-muted border-t-primary",
         sizeClasses[size],

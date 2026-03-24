@@ -238,7 +238,7 @@ Important scope notes:
 
 ### 4b. Experimental Daytona Workbench
 
-The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a workbench inspector in `RLM Workspace`.
+The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a workbench inspector inside `Workbench`.
 
 | Module                                                              | Purpose                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -268,7 +268,7 @@ Important scope notes:
 
 ```mermaid
 flowchart LR
-    User["User prompt"] --> Workspace["RLM Workspace chat + workbench"]
+    User["User prompt"] --> Workspace["Workbench chat + workbench"]
     Workspace --> WS["/api/v1/ws/chat"]
     WS --> Agent["DaytonaWorkbenchChatAgent"]
     Agent --> Shared["RLMReActChatAgent / dspy.RLM"]

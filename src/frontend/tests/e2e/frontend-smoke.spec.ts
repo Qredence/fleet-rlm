@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("loads the supported shell surfaces without route crashes", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "RLM Workspace", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workbench", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Volumes", exact: true })).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Skills", exact: true })).toHaveCount(0);
