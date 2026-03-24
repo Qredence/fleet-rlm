@@ -84,7 +84,7 @@ import {
   QueueSectionTrigger,
 } from "@/components/ui/queue";
 import { Streamdown } from "@/components/ui/streamdown";
-import { TextShimmer } from "@/components/ui/text-shimmer";
+import { TextShimmer } from "@/components/effects/text-shimmer";
 import type {
   ChatRenderPart,
   ChatRenderToolState,
@@ -94,10 +94,6 @@ import { cn } from "@/lib/utils";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/app/workspace/assistant-content/model";
 import type { ToolSessionItem, TraceDisplayItem } from "@/lib/workspace/chat-display-items";
-import {
-  MONO_BASE_MEDIUM_STYLE,
-  MONO_BASE_STYLE,
-} from "@/app/workspace/chat-shell/chatMessageStyles";
 
 type ToolSessionDisplayItem = Extract<TraceDisplayItem, { kind: "tool_session" }>;
 
@@ -311,7 +307,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
             )}
           >
             <div className="flex items-center gap-2">
-              <span className="text-foreground" style={MONO_BASE_MEDIUM_STYLE}>
+              <span className="font-mono text-xs font-medium leading-5 text-foreground">
                 {variable.name}
               </span>
               {variable.required ? (
@@ -320,7 +316,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 </span>
               ) : null}
             </div>
-            <span className="text-muted-foreground" style={MONO_BASE_STYLE}>
+            <span className="font-mono text-xs leading-5 text-muted-foreground">
               {variable.value}
             </span>
           </div>
@@ -343,10 +339,7 @@ function renderReasoningPart(
   return (
     <div className="flex flex-col gap-1">
       {showSectionLabel ? (
-        <div
-          className="text-[11px] lowercase tracking-[0.08em] text-muted-foreground"
-          style={MONO_BASE_MEDIUM_STYLE}
-        >
+        <div className="font-mono text-[11px] font-medium lowercase tracking-[0.08em] text-muted-foreground">
           {sectionLabel}
         </div>
       ) : null}

@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { telemetryClient } from "@/lib/telemetry/client";
+import { parseStoredJson } from "@/lib/utils/env";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -22,14 +23,6 @@ function applyThemeToDocument(isDark: boolean) {
   root.dataset.theme = isDark ? "dark" : "light";
   root.classList.toggle("dark", isDark);
   root.style.colorScheme = isDark ? "dark" : "light";
-}
-
-function parseStoredJson(raw: string | null): unknown {
-  try {
-    return raw ? (JSON.parse(raw) as unknown) : null;
-  } catch {
-    return null;
-  }
 }
 
 function toPersistedTheme(value: unknown): StorageValue<ThemePersistedState> | null {

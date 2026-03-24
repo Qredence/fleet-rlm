@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { isEntraAuthConfigured } from "@/lib/auth/entra";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";

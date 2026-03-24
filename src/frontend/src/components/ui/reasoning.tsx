@@ -20,7 +20,7 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 
-import { Shimmer } from "./text-shimmer";
+import { Shimmer } from "@/components/effects/text-shimmer";
 
 interface ReasoningContextValue {
   isStreaming: boolean;

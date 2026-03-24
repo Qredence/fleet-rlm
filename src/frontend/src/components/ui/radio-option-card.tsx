@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { springs } from "@/lib/utils/motion";
 import { cn } from "@/lib/utils";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -51,8 +49,6 @@ function RadioOptionCard({
   icon,
   className,
 }: RadioOptionCardProps) {
-  const prefersReduced = useReducedMotion();
-
   return (
     <button
       type="button"
@@ -75,17 +71,12 @@ function RadioOptionCard({
         )}
         aria-hidden="true"
       >
-        <AnimatePresence>
-          {selected && (
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={prefersReduced ? springs.instant : springs.snappy}
-              className="w-2.5 h-2.5 rounded-full bg-foreground"
-            />
+        <div
+          className={cn(
+            "w-2.5 h-2.5 rounded-full bg-foreground transition-transform duration-150",
+            selected ? "scale-100" : "scale-0",
           )}
-        </AnimatePresence>
+        />
       </div>
 
       {/* ── Label + description ────────────────────────────────── */}
