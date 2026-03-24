@@ -226,8 +226,9 @@
     background-color: color-mix(in srgb, var(--color-text) 12%, var(--color-surface-elevated));
   }
   &:disabled {
-    color: var(--color-text-disabled);
-    background-color: var(--alpha-05);
+    color: var(--color-text-secondary);
+    background-color: color-mix(in srgb, var(--color-text) 5%, var(--color-surface-elevated));
+    opacity: 0.6;
   }
 }
 
@@ -1370,14 +1371,7 @@ li {
   line-height: 1.3;
 }
 
-/* ── Section Header ────────────────────────────────────────────── */
-[data-slot="section-header"] {
-}
-
 /* ── Resolved Chip ─────────────────────────────────────────────── */
-[data-slot="resolved-chip"] {
-}
-
 [data-slot="resolved-chip-label"] {
   font-size: var(--font-text-sm-size);
   font-weight: var(--font-weight-medium);
@@ -1468,10 +1462,6 @@ li {
   line-height: 1.625;
 }
 
-/* ── Suggestion Chip ────────────────────────────────────────────────── */
-[data-slot="suggestion-chip"] {
-}
-
 /* ── Progress ────────────────────────────────────────────────────────── */
 [data-slot="progress"]::-webkit-progress-bar {
   background: transparent;
@@ -1487,22 +1477,6 @@ li {
   background: var(--color-background-primary-solid);
   border-radius: inherit;
   transition: width 150ms ease;
-}
-
-[data-slot="suggestion-chip-label"] {
-  font-size: var(--font-text-sm-size);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.4;
-}
-
-/* ── Panel Header Chip ──────────────────────────────────────────────── */
-[data-slot="panel-header-chip"] {
-}
-
-[data-slot="panel-header-chip-label"] {
-  font-size: var(--font-text-sm-size);
-  font-weight: var(--font-weight-medium);
-  line-height: 1.4;
 }
 
 /* ── Streamdown cursor blink ────────────────────────────────────── */

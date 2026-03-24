@@ -31,7 +31,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                 <Card key={`${citation.url}-${index}`} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="space-y-1">
+                      <div className="flex flex-col gap-1">
                         <CardTitle className="text-sm font-medium text-foreground">
                           <ExternalAnchor href={citation.url}>{citation.title}</ExternalAnchor>
                         </CardTitle>
@@ -69,7 +69,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
               {evidence.sources.map((source) => (
                 <Card key={source.sourceId} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
-                    <div className="space-y-2">
+                    <div className="flex flex-col gap-2">
                       <CardTitle className="text-sm font-medium text-foreground">
                         <ExternalAnchor href={source.url ?? source.canonicalUrl}>
                           {source.title}
@@ -125,7 +125,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                 <Card key={attachment.attachmentId} className={inspectorStyles.card.root}>
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="space-y-1">
+                      <div className="flex flex-col gap-1">
                         <CardTitle className="text-sm font-medium text-foreground">
                           <ExternalAnchor href={attachment.url ?? attachment.previewUrl}>
                             {attachment.name}

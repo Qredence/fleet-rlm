@@ -37,10 +37,6 @@ vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/hooks/useStickToBottom", () => ({
-  useStickToBottom: () => ({ scrollRef: null, contentRef: null }),
-}));
-
 vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({
     navigate: vi.fn(),

@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { useControllableState } from "@radix-ui/react-use-controllable-state";
+import { useControllableState } from "@/hooks/use-controllable-state";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -48,7 +48,7 @@ export const ChainOfThought = memo(
 
     return (
       <ChainOfThoughtContext.Provider value={chainOfThoughtContext}>
-        <div className={cn("not-prose w-full space-y-4", className)} {...props}>
+        <div className={cn("not-prose w-full flex flex-col gap-4", className)} {...props}>
           {children}
         </div>
       </ChainOfThoughtContext.Provider>
@@ -118,7 +118,7 @@ export const ChainOfThoughtStep = memo(
         <Icon className="size-4" />
         <div className="absolute top-7 bottom-0 left-1/2 -mx-px w-px bg-border" />
       </div>
-      <div className="flex-1 space-y-2 overflow-hidden">
+      <div className="flex-1 flex flex-col gap-2 overflow-hidden">
         <div>{label}</div>
         {description && <div className="text-muted-foreground text-xs">{description}</div>}
         {children}
@@ -159,7 +159,7 @@ export const ChainOfThoughtContent = memo(
       <Collapsible open={isOpen}>
         <CollapsibleContent
           className={cn(
-            "mt-2 space-y-3",
+            "mt-2 flex flex-col gap-3",
             "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
             className,
           )}
@@ -178,7 +178,7 @@ export type ChainOfThoughtImageProps = ComponentProps<"div"> & {
 
 export const ChainOfThoughtImage = memo(
   ({ className, children, caption, ...props }: ChainOfThoughtImageProps) => (
-    <div className={cn("mt-2 space-y-2", className)} {...props}>
+    <div className={cn("mt-2 flex flex-col gap-2", className)} {...props}>
       <div className="relative flex max-h-88 items-center justify-center overflow-hidden rounded-lg bg-muted p-3">
         {children}
       </div>

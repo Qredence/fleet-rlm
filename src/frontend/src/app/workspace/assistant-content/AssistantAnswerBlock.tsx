@@ -21,7 +21,7 @@ export function AssistantAnswerBlock({
   if (!text && !showStreamingShell) return null;
 
   return (
-    <div className="space-y-1.5" data-slot="assistant-answer">
+    <div className="flex flex-col gap-1.5" data-slot="assistant-answer">
       {text ? <MessageResponse>{text}</MessageResponse> : <LoadingState />}
     </div>
   );

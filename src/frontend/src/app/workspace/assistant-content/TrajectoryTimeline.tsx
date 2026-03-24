@@ -25,7 +25,7 @@ function CompactTrajectory({
   const hasBadges = runtimeBadges.length > 0;
 
   return (
-    <div className="space-y-2" data-slot="trajectory-compact">
+    <div className="flex flex-col gap-2" data-slot="trajectory-compact">
       <Reasoning isStreaming={false} autoClose={false} defaultOpen className="w-full">
         <ReasoningTrigger
           getThinkingMessage={() => <span className="font-medium text-foreground">Planning</span>}
@@ -53,7 +53,7 @@ export function TrajectoryTimeline({
   ];
 
   return (
-    <section className="space-y-3" data-slot="assistant-trajectory">
+    <section className="flex flex-col gap-3" data-slot="assistant-trajectory">
       <div className={inspectorStyles.heading.section}>Reasoning</div>
 
       {trajectory.displayMode === "compact" ? (
@@ -63,7 +63,7 @@ export function TrajectoryTimeline({
           runtimeBadges={compactBadges}
         />
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {trajectory.overview ? (
             <div data-slot="trajectory-overview">
               <Reasoning
@@ -108,12 +108,12 @@ export function TrajectoryTimeline({
                           : item.status,
                     )}
                   >
-                    <div className="space-y-1">
+                    <div className="flex flex-col gap-1">
                       {item.body ? (
                         <Streamdown content={item.body} streaming={item.status === "running"} />
                       ) : null}
                       {item.details?.length ? (
-                        <div className="space-y-1 text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                           {item.details.map((detail, idx) => (
                             <div key={`${item.id}-detail-${idx}`}>{detail}</div>
                           ))}

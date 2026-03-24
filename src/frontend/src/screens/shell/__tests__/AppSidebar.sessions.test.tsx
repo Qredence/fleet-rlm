@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { AppSidebar } from "@/screens/shell/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -33,12 +40,16 @@ vi.mock("lucide-react", () => {
     PanelLeftOpen: Icon,
     Database: Icon,
     LogIn: Icon,
-    MessageSquare: Icon,
+    MessageCircle: Icon,
   };
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({
+    children,
+    className,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>
       {children}
     </button>
@@ -153,7 +164,9 @@ describe("AppSidebar session actions", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith("conv-1");
+    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith(
+      "conv-1",
+    );
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
 
     act(() => {

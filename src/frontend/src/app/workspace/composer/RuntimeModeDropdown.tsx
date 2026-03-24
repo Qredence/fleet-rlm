@@ -39,7 +39,7 @@ function RuntimeModeDropdown({ value, onChange }: RuntimeModeDropdownProps) {
         size="sm"
         className={cn(
           PROMPT_INPUT_ACTION_BUTTON_CLASSNAME,
-          "w-auto min-w-0 justify-center gap-2 border-transparent bg-transparent px-3 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground",
+          "w-auto min-w-0 justify-center gap-2 border-transparent shadow-none",
         )}
         aria-label={`Runtime mode: ${currentMode.name}`}
       >

@@ -91,7 +91,7 @@ export const InlineCitationCarouselItem = ({
   className,
   ...props
 }: InlineCitationCarouselItemProps) => (
-  <CarouselItem className={cn("w-full space-y-2 p-4 pl-8", className)} {...props} />
+  <CarouselItem className={cn("w-full flex flex-col gap-2 p-4 pl-8", className)} {...props} />
 );
 
 export type InlineCitationCarouselHeaderProps = ComponentProps<"div">;
@@ -220,7 +220,7 @@ export const InlineCitationSource = ({
   children,
   ...props
 }: InlineCitationSourceProps) => (
-  <div className={cn("space-y-1", className)} {...props}>
+  <div className={cn("flex flex-col gap-1", className)} {...props}>
     {title && <h4 className="truncate font-medium text-sm leading-tight">{title}</h4>}
     {url && <p className="truncate break-all text-muted-foreground text-xs">{url}</p>}
     {description && (

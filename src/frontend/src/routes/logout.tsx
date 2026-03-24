@@ -67,7 +67,7 @@ function LogoutScreen() {
             >
               <CardHeader className="items-center text-center">
                 <BrandMark className="h-3.75 w-8 text-foreground" />
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   <CardTitle className="text-foreground typo-h3">Signing you out</CardTitle>
                   <CardDescription className="typo-caption">
                     Clearing your local session and closing the current workspace.
@@ -104,7 +104,7 @@ function LogoutScreen() {
                 <div className="rounded-token flex h-12 w-12 items-center justify-center bg-muted">
                   <LogOut className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   <CardTitle className="text-foreground typo-h3">
                     You&rsquo;ve been signed out
                   </CardTitle>

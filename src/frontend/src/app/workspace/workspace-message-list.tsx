@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Conversation,
@@ -29,10 +29,6 @@ interface WorkspaceMessageListProps {
   messages: ChatMessage[];
   isTyping: boolean;
   isMobile: boolean;
-  scrollRef: RefObject<HTMLDivElement | null>;
-  contentRef: RefObject<HTMLDivElement | null>;
-  isAtBottom?: boolean;
-  scrollToBottom?: () => void;
   onSuggestionClick: (text: string) => void;
   onResolveHitl: (msgId: string, label: string) => void;
   onResolveClarification: (msgId: string, answer: string) => void;
@@ -62,10 +58,6 @@ export function WorkspaceMessageList({
   messages,
   isTyping,
   isMobile,
-  scrollRef: _scrollRef,
-  contentRef: _contentRef,
-  isAtBottom: _isAtBottom,
-  scrollToBottom: _scrollToBottom,
   onSuggestionClick,
   onResolveHitl,
   onResolveClarification,

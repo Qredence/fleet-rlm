@@ -26,7 +26,7 @@ function EvidencePreviewButton({
   return (
     <button type="button" className={inspectorPreviewButtonClass()} onClick={onClick}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <div className="text-sm font-medium leading-5 text-foreground">{label}</div>
           {description ? (
             <div className="text-sm leading-5 text-muted-foreground">{description}</div>

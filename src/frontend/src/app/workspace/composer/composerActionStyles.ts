@@ -12,7 +12,7 @@ type ButtonVariantProps = VariantProps<typeof buttonVariants>;
 export const PROMPT_INPUT_ACTION_BUTTON_SIZE: NonNullable<ButtonVariantProps["size"]> = "sm";
 
 export const PROMPT_INPUT_ACTION_BUTTON_CLASSNAME =
-  "prompt-composer-chip-button h-[26px] rounded-[50px] border-transparent bg-transparent px-3 text-[14px] font-normal leading-4.5 tracking-[-0.3px] shadow-none data-[state=open]:bg-[var(--color-background-primary-ghost-hover)] data-[state=open]:text-foreground";
+  "prompt-composer-chip-button h-[26px] rounded-[50px] border-transparent bg-transparent px-3 text-[14px] font-normal leading-4.5 tracking-[-0.3px] shadow-none hover:bg-muted/60 hover:text-foreground active:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50";
 
 export const PROMPT_INPUT_ICON_BUTTON_VARIANT: NonNullable<ButtonVariantProps["variant"]> = "ghost";
 

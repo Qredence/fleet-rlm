@@ -66,7 +66,7 @@ export function WorkspaceChatMessageItem({
 
       {message.type === "assistant" || message.type === "trace" || message.type === "reasoning" ? (
         <Message from="assistant" className="mb-2.5">
-          <MessageContent className="w-full space-y-2.5">
+          <MessageContent className="w-full flex flex-col gap-2.5">
             {message.renderParts?.map((part, index) => (
               <WorkspaceTracePart
                 key={`${message.id}-${part.kind}-${index}`}

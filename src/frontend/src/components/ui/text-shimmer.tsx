@@ -1,5 +1,3 @@
-"use client";
-
 import type { MotionProps } from "motion/react";
 import type { CSSProperties, ComponentType, JSX } from "react";
 
@@ -70,3 +68,8 @@ function TextShimmerComponent({
 }
 
 export const TextShimmer = memo(TextShimmerComponent);
+
+/** Backward-compatible alias used by reasoning.tsx and other consumers. */
+export const Shimmer = TextShimmer;
+
+export type { TextShimmerProps };

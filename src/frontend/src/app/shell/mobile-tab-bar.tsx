@@ -1,12 +1,12 @@
-import { MessageSquare, HardDrive } from "lucide-react";
+import { MessageCircle, HardDrive } from "lucide-react";
 import type { NavItem } from "@/stores/navigation-types";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { isSectionSupported } from "@/lib/rlm-api";
 import { cn } from "@/lib/utils";
 
-const tabs: { key: NavItem; label: string; icon: typeof MessageSquare }[] = [
-  { key: "workspace", label: "Workspace", icon: MessageSquare },
+const tabs: { key: NavItem; label: string; icon: typeof MessageCircle }[] = [
+  { key: "workspace", label: "Workspace", icon: MessageCircle },
   { key: "volumes", label: "Volumes", icon: HardDrive },
 ];
 

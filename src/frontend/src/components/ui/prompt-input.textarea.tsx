@@ -137,7 +137,7 @@ export const PromptInputTextarea = ({
     <InputGroupTextarea
       {...props}
       className={cn(
-        "field-sizing-content min-h-12 w-full max-h-48 border-0 bg-transparent px-2 pb-2.5 pt-3.5",
+        "field-sizing-content min-h-12 w-full max-h-48 border-0 bg-transparent px-2 pb-2.5 pt-2",
         "prompt-composer-textarea outline-none ring-0 focus-visible:ring-0 focus-visible:outline-none",
         className,
       )}

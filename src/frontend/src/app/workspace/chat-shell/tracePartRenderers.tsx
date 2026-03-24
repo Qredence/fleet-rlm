@@ -166,11 +166,11 @@ function renderInlineCitations(part: Extract<ChatRenderPart, { kind: "inline_cit
         <InlineCitationCard>
           <InlineCitationCardTrigger sources={part.citations.map((citation) => citation.url)} />
           <InlineCitationCardBody>
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {part.citations.map((citation, index) => (
                 <div
                   key={`${citation.url}-${index}`}
-                  className="space-y-2 rounded-md border-subtle p-2"
+                  className="flex flex-col gap-2 rounded-md border-subtle p-2"
                 >
                   <InlineCitationSource
                     title={citation.title}
@@ -196,7 +196,7 @@ function renderSources(part: Extract<ChatRenderPart, { kind: "sources" }>): Reac
     <Sources defaultOpen={false}>
       <SourcesTrigger count={part.sources.length} />
       <SourcesContent>
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {part.sources.map((source) => (
             <Source
               key={`${source.sourceId}-${source.url ?? source.canonicalUrl ?? source.title}`}
@@ -241,7 +241,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
     const hasOutput = Boolean(item.part.errorText || outputText);
 
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.input != null ? <ToolInput input={item.part.input} /> : null}
         {hasOutput ? (
@@ -262,10 +262,10 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
 
   if (item.part.kind === "sandbox") {
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.errorText || item.part.output ? (
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Output
             </div>
@@ -286,7 +286,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
           </div>
         ) : null}
         {item.part.code ? (
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Code
             </div>
@@ -341,7 +341,7 @@ function renderReasoningPart(
   const sectionLabel = part.label?.trim() || "reasoning";
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       {showSectionLabel ? (
         <div
           className="text-[11px] lowercase tracking-[0.08em] text-muted-foreground"
@@ -401,7 +401,7 @@ function renderCompactStatusAlert(
       className={compactStatusClasses(tone)}
     >
       <AlertDescription>
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <div className="typo-label-regular">{content}</div>
           <RuntimeContextBadge ctx={runtimeContext} />
         </div>
@@ -483,7 +483,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
           <TaskTrigger title={part.title} />
           <TaskContent>
             {part.items?.length ? (
-              <div className="space-y-1">
+              <div className="flex flex-col gap-1">
                 {part.items.map((item) => (
                   <TaskItem key={item.id}>
                     <span>{item.text}</span>
@@ -586,7 +586,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
                 value={variable.value}
               >
                 <EnvironmentVariableGroup>
-                  <div className="space-y-1">
+                  <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">
                       <EnvironmentVariableName />
                       {variable.required ? <EnvironmentVariableRequired /> : null}
@@ -665,14 +665,14 @@ export function WorkspaceToolSessionMessage({ item }: WorkspaceToolSessionMessag
             state={mapToolState(latestState)}
             title={toolSessionHeaderLabel(item.items)}
           />
-          <ToolContent className="space-y-3">
+          <ToolContent className="flex flex-col gap-3">
             {item.items.map((sessionItem) => (
               <div
                 key={sessionItem.key}
                 className="border-l border-border-subtle/70 pl-3"
                 data-slot="tool-session-item"
               >
-                <div className="space-y-2 py-0.5">
+                <div className="flex flex-col gap-2 py-0.5">
                   <div className="text-foreground typo-label-regular">
                     {toolSessionLine(sessionItem)}
                   </div>
