@@ -57,6 +57,7 @@ export function WorkspaceScreen() {
     resolveClarification,
     loadConversation,
   } = chatRuntime;
+  const stopStreaming = useChatStore((state) => state.stopStreaming);
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
@@ -266,6 +267,7 @@ export function WorkspaceScreen() {
       value={inputValue}
       onChange={setInputValue}
       onSend={handleSubmit}
+      onStop={stopStreaming}
       attachmentsEnabled={false}
       placeholder={
         !backendEnabled
@@ -327,7 +329,9 @@ export function WorkspaceScreen() {
                 <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
-                    <p>{warningGuidance[0]}</p>
+                    {warningGuidance.map((msg) => (
+                      <p key={msg}>{msg}</p>
+                    ))}
                     <Button
                       variant="outline"
                       size="sm"

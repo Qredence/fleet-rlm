@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowUp, FileText, X } from "lucide-react";
+import { ArrowUp, FileText, Square, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
@@ -29,6 +29,7 @@ interface WorkspaceComposerProps {
   value: string;
   onChange: (value: string) => void;
   onSend: (attachments: AttachedFile[]) => void;
+  onStop?: () => void;
   isLoading?: boolean;
   isReceiving?: boolean;
   attachmentsEnabled?: boolean;
@@ -58,6 +59,7 @@ function WorkspaceComposer({
   value,
   onChange,
   onSend,
+  onStop,
   isLoading = false,
   isReceiving = false,
   attachmentsEnabled = true,
@@ -72,6 +74,7 @@ function WorkspaceComposer({
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const hasContent = value.trim().length > 0;
   const canSubmitMessage = hasContent && canSubmit;
+  const isStreamingActive = isLoading && isReceiving;
 
   useEffect(
     () => () => {
@@ -182,19 +185,34 @@ function WorkspaceComposer({
             <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
           </PromptInputTools>
 
-          <PromptInputSubmit
-            aria-label={isLoading ? "Sending message" : "Submit"}
-            aria-busy={isReceiving}
-            className={cn(
-              "prompt-composer-submit-button aspect-square size-6.5 min-h-6.5 min-w-6.5 rounded-full first:rounded-full last:rounded-full",
-              "transition-[background-color,color,box-shadow,opacity]",
-            )}
-            disabled={isLoading || !canSubmitMessage}
-            size="icon-sm"
-            variant="ghost"
-          >
-            {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
-          </PromptInputSubmit>
+          {isStreamingActive && onStop ? (
+            <button
+              type="button"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className={cn(
+                "prompt-composer-submit-button flex aspect-square size-6.5 min-h-6.5 min-w-6.5 items-center justify-center rounded-full",
+                "transition-[background-color,color,box-shadow,opacity]",
+                "bg-foreground text-background hover:bg-foreground/80",
+              )}
+            >
+              <Square className="size-3 fill-current" />
+            </button>
+          ) : (
+            <PromptInputSubmit
+              aria-label={isLoading ? "Sending message" : "Submit"}
+              aria-busy={isReceiving}
+              className={cn(
+                "prompt-composer-submit-button aspect-square size-6.5 min-h-6.5 min-w-6.5 rounded-full first:rounded-full last:rounded-full",
+                "transition-[background-color,color,box-shadow,opacity]",
+              )}
+              disabled={isLoading || !canSubmitMessage}
+              size="icon-sm"
+              variant="ghost"
+            >
+              {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
+            </PromptInputSubmit>
+          )}
         </PromptInputFooter>
       </PromptInput>
     </div>
