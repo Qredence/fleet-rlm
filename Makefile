@@ -26,7 +26,7 @@ help:
 	@echo "  make check             - Alias for quality-gate"
 	@echo "  make sync-ui           - Copy src/frontend/dist/ into src/fleet_rlm/ui/dist/"
 	@echo "  make build-ui          - Build the frontend and sync packaged UI assets"
-	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5000"
+	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5001"
 	@echo "  make clean             - Remove caches and local generated artifacts"
 	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
 	@echo "  make release-check     - Run clean + quality-gate + security-check + build + twine checks"

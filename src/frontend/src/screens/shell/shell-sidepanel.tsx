@@ -9,8 +9,8 @@ import {
 
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { cn } from "@/lib/utils/cn";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { cn } from "@/lib/utils";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,

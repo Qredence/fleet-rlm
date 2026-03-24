@@ -1,34 +1,35 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TriangleAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useChatHistoryStore } from "@/screens/workspace/model/chat-history-store";
-import { useChatStore } from "@/screens/workspace/model/chat-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
+import { WorkspaceSidebar } from "@/app/workspace/workspace-sidebar";
+import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import {
-  WorkspaceComposer,
-  type AttachedFile,
-} from "@/screens/workspace/components/workspace-composer";
-import { WorkspaceSidebar } from "@/screens/workspace/components/workspace-sidebar";
-import { WorkspaceMessageList } from "@/screens/workspace/components/workspace-message-list";
-import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-runtime";
+  useChatHistoryStore,
+  useChatStore,
+  useWorkspace,
+  useWorkspaceUiStore,
+} from "@/screens/workspace/use-workspace";
 import { detectRepoContext } from "@/lib/utils/repoContext";
 import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useQueryClient } from "@tanstack/react-query";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.
  *
- * Chat logic (messages, phases, backend events) lives in `useWorkspaceRuntime`.
+ * Chat logic (messages, phases, backend events) lives in `useWorkspace`.
  * Workspace-only shell state flows through the workspace screen slice so it
  * persists across shell navigation without leaking back into root stores.
  *
@@ -44,7 +45,7 @@ export function WorkspaceScreen() {
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
-  const chatRuntime = useWorkspaceRuntime();
+  const chatRuntime = useWorkspace();
 
   const {
     messages,
@@ -233,12 +234,9 @@ export function WorkspaceScreen() {
   }, []);
 
   const handleOpenRuntimeSettings = useCallback(() => {
-    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>("open-settings", {
-      detail: { section: "runtime" },
-      cancelable: true,
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      section: "runtime",
     });
-
-    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigate({ to: "/settings", search: { section: "runtime" } });
     }

@@ -2,10 +2,10 @@ import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { WorkspaceMessageList } from "@/screens/workspace/components/workspace-message-list";
-import type { ChatMessage } from "@/screens/workspace/model/workspace-types";
+import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
+import type { ChatMessage } from "@/screens/workspace/use-workspace";
 import { useNavigationStore } from "@/stores/navigationStore";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
+import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 
 function renderChatMessageList(messages: ChatMessage[]) {
   return renderToStaticMarkup(

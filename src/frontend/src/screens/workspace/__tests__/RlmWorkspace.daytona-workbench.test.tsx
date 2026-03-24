@@ -24,9 +24,33 @@ const backendRuntimeState = {
 
 let capturedOnSend: ((attachments: never[]) => void) | null = null;
 
-vi.mock("@/screens/workspace/hooks/use-workspace-runtime", () => ({
-  useWorkspaceRuntime: () => backendRuntimeState,
-}));
+vi.mock("@/screens/workspace/use-workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
+    "@/screens/workspace/use-workspace",
+  );
+
+  return {
+    ...actual,
+    useWorkspace: () => backendRuntimeState,
+    useChatHistoryStore: () => ({
+      conversations: [],
+      saveConversation: vi.fn(),
+      loadConversation: vi.fn(),
+      deleteConversation: vi.fn(),
+      clearHistory: vi.fn(),
+    }),
+    useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
+    useRunWorkbenchStore: (
+      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+    ) =>
+      selector({
+        status: "idle",
+        activity: [],
+        iterations: [],
+        callbacks: [],
+      }),
+  } as unknown as typeof actual;
+});
 
 vi.mock("@/hooks/useStickToBottom", () => ({
   useStickToBottom: () => ({
@@ -45,16 +69,6 @@ vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/screens/workspace/model/chat-history-store", () => ({
-  useChatHistoryStore: () => ({
-    conversations: [],
-    saveConversation: vi.fn(),
-    loadConversation: vi.fn(),
-    deleteConversation: vi.fn(),
-    clearHistory: vi.fn(),
-  }),
-}));
-
 vi.mock("@/lib/telemetry/useTelemetry", () => ({
   useTelemetry: () => ({ capture: vi.fn() }),
 }));
@@ -68,27 +82,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/screens/workspace/model/chat-store", () => ({
-  useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
-}));
-
-vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
-  useRunWorkbenchStore: (
-    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
-  ) =>
-    selector({
-      status: "idle",
-      activity: [],
-      iterations: [],
-      callbacks: [],
-    }),
-}));
-
-vi.mock("@/screens/workspace/components/workspace-message-list", () => ({
+vi.mock("@/app/workspace/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div data-testid="chat-message-list">WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/screens/workspace/components/workspace-composer", () => ({
+vi.mock("@/app/workspace/workspace-composer", () => ({
   WorkspaceComposer: ({
     value,
     canSubmit,

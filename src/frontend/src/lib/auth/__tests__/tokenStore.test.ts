@@ -26,8 +26,14 @@ async function loadTokenStore(): Promise<TokenStoreModule> {
 }
 
 beforeEach(() => {
-  Object.defineProperty(window, "localStorage", { value: createStorageMock(), writable: true });
-  Object.defineProperty(window, "sessionStorage", { value: createStorageMock(), writable: true });
+  Object.defineProperty(window, "localStorage", {
+    value: createStorageMock(),
+    writable: true,
+  });
+  Object.defineProperty(window, "sessionStorage", {
+    value: createStorageMock(),
+    writable: true,
+  });
 });
 
 afterEach(() => {

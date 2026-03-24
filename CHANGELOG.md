@@ -4,7 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- The draft `0.4.99` notes below currently reflect the full uncommitted worktree.
+- The notes below summarize the current uncommitted worktree on top of `0.4.99`.
+
+### Highlights (User Impact)
+
+- Reworked settings into a reusable in-shell dialog/sheet that can open directly from the command palette, sidebar, and runtime warning CTAs without forcing a full route transition away from the active workspace.
+- Split the oversized settings screen into shared settings-content and event modules, so the routed `/settings` entrypoint and the shell overlay now share one implementation path.
+- Tightened shell presentation by simplifying the workspace empty state, reordering sidebar actions, removing redundant session-row chrome, and aligning switch/sidebar typography with the current UI token set.
+
+### Added
+
+- **Change:** Added reusable frontend modules for `SettingsDialog`, settings-section helpers/content, `open-settings` event dispatch, and a breadcrumb primitive for dialog navigation chrome.
+  **Outcome:** Settings can now render as a desktop dialog or mobile bottom sheet from anywhere in the shell while keeping one shared implementation for section state and copy.
+- **Change:** Added focused frontend tests covering settings-event dispatch semantics and the simplified sidebar/empty-state expectations.
+  **Outcome:** The new in-shell settings flow has regression coverage around dialog handoff, focus-return plumbing, and the lighter shell presentation.
+
+### Changed
+
+- **Change:** Updated command palette actions, workspace runtime settings entrypoints, and the sidebar settings button to request the shared settings dialog before falling back to route navigation.
+  **Outcome:** Operators can open settings in context, jump straight to runtime controls when prompted, and return focus to the initiating control after closing the overlay.
+- **Change:** Converted the routed settings screen into a thin wrapper around the shared dialog content and moved section metadata/rendering into `settings-content`.
+  **Outcome:** The `/settings` route and shell overlay stay visually and functionally aligned without duplicating large amounts of settings UI logic.
+- **Change:** Refreshed base shell/UI primitives, including the Base UI switch wrapper, sidebar group-label typography, and desktop settings header chrome.
+  **Outcome:** Settings and shell surfaces read more consistently with the current design system and tokenized typography.
+
+### Removed
+
+- **Change:** Removed the dedicated routed settings-page chrome, the workspace empty-state "Operator workspace" badge, and the redundant conversation icon in saved-session rows.
+  **Outcome:** The workspace shell is lighter, and settings no longer feel like a separate full-page surface.
 
 ## [0.4.99] - 2026-03-22
 

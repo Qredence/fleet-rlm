@@ -488,6 +488,10 @@ components:
           additionalProperties: true
           type: object
           title: Llm
+        mlflow:
+          additionalProperties: true
+          type: object
+          title: Mlflow
         modal:
           additionalProperties: true
           type: object

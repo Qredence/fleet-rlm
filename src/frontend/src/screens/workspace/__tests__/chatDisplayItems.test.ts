@@ -2,8 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildChatDisplayItems,
   buildPendingAssistantTurnId,
-} from "@/screens/workspace/model/chat-display-items";
-import type { ChatMessage } from "@/screens/workspace/model/workspace-types";
+} from "@/lib/workspace/chat-display-items";
+import type { ChatMessage } from "@/screens/workspace/use-workspace";
 
 describe("buildChatDisplayItems", () => {
   it("attaches contiguous reasoning directly to the following assistant turn", () => {

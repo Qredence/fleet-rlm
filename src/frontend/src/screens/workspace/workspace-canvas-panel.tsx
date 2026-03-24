@@ -9,10 +9,9 @@ import {
 } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { RunWorkbench } from "@/screens/workspace/components/workbench/RunWorkbench";
-import { MessageInspectorPanel } from "@/screens/workspace/components/inspector/MessageInspectorPanel";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
-import { useRunWorkbenchStore } from "@/screens/workspace/model/run-workbench-store";
+import { RunWorkbench } from "@/app/workspace/workbench/RunWorkbench";
+import { MessageInspectorPanel } from "@/app/workspace/inspector/MessageInspectorPanel";
+import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 
 export function useWorkspaceCanvasTitle() {
   return "Canvas";

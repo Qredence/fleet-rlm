@@ -119,7 +119,7 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/components/ui/**/*.{ts,tsx}", "src/components/prompt-kit/**/*.{ts,tsx}"],
+        files: ["src/components/ui/**/*.{ts,tsx}", "src/components/ai-elements/**/*.{ts,tsx}"],
         rules: {
           "no-restricted-imports": [
             "error",
@@ -135,15 +135,23 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/screens/**/model/**/*.{ts,tsx}"],
+        files: [
+          "src/screens/workspace/{use-workspace.ts,workspace-adapter.ts,workspace-shell-contract.ts}",
+          "src/lib/workspace/**/*.{ts,tsx}",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",
             {
               patterns: [
                 {
-                  group: ["@/screens/*/components/*"],
-                  message: "Screen model modules must not depend on screen component modules.",
+                  group: [
+                    "@/app/workspace/**",
+                    "@/screens/workspace/workspace-canvas-panel",
+                    "@/screens/workspace/workspace-screen",
+                  ],
+                  message:
+                    "Workspace runtime/state modules must not depend on workspace UI modules.",
                 },
               ],
             },
@@ -159,12 +167,12 @@ export default defineConfig({
               patterns: [
                 {
                   group: [
-                    "@/screens/workspace/components/*",
-                    "@/screens/workspace/model/*",
-                    "@/screens/workspace/hooks/*",
-                    "@/screens/volumes/components/*",
-                    "@/screens/volumes/model/*",
-                    "@/screens/volumes/hooks/*",
+                    "@/screens/workspace/**",
+                    "@/screens/volumes/**",
+                    "!@/screens/workspace/workspace-canvas-panel",
+                    "!@/screens/workspace/workspace-shell-contract",
+                    "!@/screens/volumes/volumes-canvas-panel",
+                    "!@/screens/volumes/volumes-shell-contract",
                   ],
                   message:
                     "Shell modules must import screen-owned panels through top-level screen contracts only.",
@@ -211,11 +219,12 @@ export default defineConfig({
         "src/app/App.tsx",
         "src/screens/shell/app-shell-screen.tsx",
         "src/screens/workspace/workspace-screen.tsx",
-        "src/screens/workspace/components/workspace-message-list.tsx",
-        "src/screens/workspace/components/workspace-composer.tsx",
+        "src/app/workspace/workspace-message-list.tsx",
+        "src/app/workspace/workspace-composer.tsx",
         "src/screens/settings/settings-screen.tsx",
-        "src/screens/settings/grouped-settings-pane.tsx",
-        "src/screens/settings/runtime-pane.tsx",
+        "src/screens/settings/runtime-form.tsx",
+        "src/screens/volumes/volumes-screen.tsx",
+        "src/screens/volumes/volumes-canvas-panel.tsx",
       ],
     },
   },

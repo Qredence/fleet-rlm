@@ -1,28 +1,28 @@
 import { type MouseEvent } from "react";
+import { Database, LogIn, MessageSquare, Plus, Search, Settings } from "lucide-react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
+
+import { QredenceLogo } from "@/components/brand-mark";
 import {
-  Plus,
-  Search,
-  Settings,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Database,
-  LogIn,
-  MessageSquare,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { QredenceLogo } from "@/components/shared/QredenceLogo";
-import { useNavigate, useLocation } from "@tanstack/react-router";
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
+} from "@/components/ui/sidebar";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import {
   useWorkspaceShellActions,
   useWorkspaceShellHistory,
 } from "@/screens/workspace/workspace-shell-contract";
-import { cn } from "@/lib/utils/cn";
-
-interface AppSidebarProps {
-  isCollapsed: boolean;
-  onToggleCollapse: () => void;
-}
 
 function formatSessionTimestamp(isoDate: string): string {
   const now = Date.now();
@@ -45,7 +45,7 @@ function formatSessionTimestamp(isoDate: string): string {
   });
 }
 
-export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
+export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
   const { newSession, requestConversationLoad } = useWorkspaceShellActions();
   const navigate = useNavigate();
@@ -54,12 +54,10 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
 
-  const handleOpenSettings = () => {
-    const openSettingsEvent = new CustomEvent("open-settings", {
-      detail: { section: "general" },
-      cancelable: true,
+  const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      returnFocusTarget: event.currentTarget,
     });
-    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigateTo("settings");
     }
@@ -67,10 +65,6 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
 
   const handleNewSession = () => {
     newSession();
-    navigateTo("workspace");
-  };
-
-  const handleOpenWorkspace = () => {
     navigateTo("workspace");
   };
 
@@ -90,176 +84,108 @@ export function AppSidebar({ isCollapsed, onToggleCollapse }: AppSidebarProps) {
     }
   };
 
-  if (isCollapsed) {
-    return (
-      <div className="flex h-full w-15 flex-col items-center border-r border-border-subtle bg-surface py-4">
-        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="mb-4 rounded-md!">
-          <PanelLeftOpen className="size-5 text-muted-foreground" strokeWidth={1.5} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleOpenWorkspace}
-          className="mb-2 rounded-md!"
-          aria-label="RLM Workspace"
-        >
-          <MessageSquare className="size-5 text-muted-foreground" strokeWidth={1.5} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleNewSession}
-          className="mb-4 rounded-md!"
-          aria-label="New session"
-        >
-          <Plus className="size-5" strokeWidth={1.5} />
-        </Button>
-        <div className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleOpenSettings}
-          className="mb-4 rounded-md!"
-          aria-label="Open settings"
-        >
-          <Settings className="size-5 text-muted-foreground" strokeWidth={1.5} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleOpenLogin}
-          className="mb-4 rounded-md!"
-          aria-label="Sign In"
-        >
-          <LogIn className="size-5 text-muted-foreground" strokeWidth={1.5} />
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex h-full w-65 flex-col overflow-hidden border-r border-border-subtle bg-surface">
-      {/* Header */}
-      <div className="flex h-12 items-center justify-between px-2">
-        <div className="flex items-center gap-2 pl-1.5 text-foreground">
-          <QredenceLogo className="h-5 w-auto" />
-          <span className="typo-base font-medium">Qredence</span>
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border/80">
+      <SidebarHeader className="gap-3 px-3 py-3">
+        <div className="flex items-center gap-2 overflow-hidden px-2">
+          <QredenceLogo className="h-5 w-auto shrink-0" />
+          <span className="truncate text-sm font-medium text-sidebar-foreground">Qredence</span>
         </div>
-        <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="rounded-md!">
-          <PanelLeftClose className="size-5 text-muted-foreground" strokeWidth={1.5} />
-        </Button>
-      </div>
+      </SidebarHeader>
 
-      {/* Primary Actions */}
-      <div className="mb-4 flex flex-col gap-px px-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={handleNewSession}
-          className={cn(
-            "group w-full justify-start rounded-md! pl-1.5 text-left transition-colors duration-0",
-            "text-muted-foreground",
-          )}
-        >
-          <Plus className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            New Session
-          </span>
-        </Button>
-        <Button
-          size="sm"
-          variant={isWorkspace ? "secondary" : "ghost"}
-          onClick={handleOpenWorkspace}
-          className={cn(
-            "group w-full justify-start rounded-md! pl-1.5 text-left transition-colors duration-0",
-            !isWorkspace && "text-muted-foreground",
-          )}
-        >
-          <MessageSquare className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            RLM Workspace
-          </span>
-        </Button>
+      <SidebarContent>
+        <SidebarGroup className="pt-0">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
+                  <Plus />
+                  <span>New Session</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton disabled tooltip="Search sessions">
+                  <Search />
+                  <span>Search sessions</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={isWorkspace}
+                  onClick={() => navigateTo("workspace")}
+                  tooltip="RLM Workspace"
+                >
+                  <MessageSquare />
+                  <span>RLM Workspace</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={isVolumes}
+                  onClick={() => navigateTo("volumes")}
+                  tooltip="Volumes"
+                >
+                  <Database />
+                  <span>Volumes</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
-        <Button
-          size="sm"
-          variant="ghost"
-          className="group w-full justify-start rounded-md! pl-1.5 text-left text-muted-foreground transition-colors duration-0"
-        >
-          <Search className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">
-            Search sessions
-          </span>
-        </Button>
-        <Button
-          size="sm"
-          variant={isVolumes ? "secondary" : "ghost"}
-          onClick={() => navigateTo("volumes")}
-          className={cn(
-            "group w-full justify-start rounded-md! pl-1.5 text-left transition-colors duration-0",
-            !isVolumes && "text-muted-foreground",
-          )}
-        >
-          <Database className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Volumes</span>
-        </Button>
-      </div>
+        <SidebarSeparator />
 
-      {/* Session List */}
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        <div className="mb-1 ml-2 pl-1.5 py-1 text-xs font-medium text-muted-foreground">
-          Sessions
-        </div>
-        <div className="flex flex-col gap-px px-2">
-          {conversations.length === 0 ? (
-            <div className="mx-2 rounded-lg border border-dashed border-border-subtle/80 px-3 py-3 text-xs text-muted-foreground">
-              Start a new session to build your recent history.
-            </div>
-          ) : (
-            conversations.map((session) => (
-              <Button
-                key={session.id}
-                variant="ghost"
-                size="sm"
-                onClick={() => handleOpenConversation(session.id)}
-                className={cn(
-                  "group h-auto min-h-8 w-full justify-start rounded-md! pl-1.5 pr-1 py-1.5 text-left transition-colors duration-0",
-                  "hover:bg-muted/70",
-                )}
-              >
-                <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-[450] text-foreground">{session.title}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {formatSessionTimestamp(session.updatedAt)}
-                  </div>
+        <SidebarGroup className="min-h-0 flex-1">
+          <SidebarGroupLabel>Sessions</SidebarGroupLabel>
+          <SidebarGroupContent className="min-h-0">
+            <SidebarMenu className="gap-1">
+              {conversations.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-sidebar-border/80 px-3 py-3 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+                  Start a new session to build your recent history.
                 </div>
-              </Button>
-            ))
-          )}
-        </div>
-      </div>
+              ) : (
+                conversations.map((session) => (
+                  <SidebarMenuItem key={session.id}>
+                    <SidebarMenuButton
+                      onClick={() => handleOpenConversation(session.id)}
+                      tooltip={session.title}
+                      className="h-auto items-start gap-2 py-2"
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col items-start">
+                        <span className="truncate text-sm text-sidebar-foreground">
+                          {session.title}
+                        </span>
+                        <span className="truncate text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+                          {formatSessionTimestamp(session.updatedAt)}
+                        </span>
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
 
-      {/* Footer */}
-      <div className="space-y-1 border-t border-border-subtle/50 px-2 py-3">
-        <Button
-          onClick={handleOpenSettings}
-          size="sm"
-          variant="ghost"
-          className="group w-full justify-start rounded-md! pl-1.5 text-left text-muted-foreground transition-colors duration-0"
-        >
-          <Settings className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Settings</span>
-        </Button>
-        <Button
-          onClick={handleOpenLogin}
-          size="sm"
-          variant="ghost"
-          className="group w-full justify-start rounded-md! pl-1.5 text-left text-muted-foreground transition-colors duration-0"
-        >
-          <LogIn className="min-w-5 size-5" strokeWidth={1.5} />
-          <span className="typo-base overflow-hidden whitespace-nowrap font-medium">Sign In</span>
-        </Button>
-      </div>
-    </div>
+      <SidebarFooter className="px-3 py-3">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={handleOpenSettings} tooltip="Settings">
+              <Settings />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={handleOpenLogin} tooltip="Sign In">
+              <LogIn />
+              <span>Sign In</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
   );
 }

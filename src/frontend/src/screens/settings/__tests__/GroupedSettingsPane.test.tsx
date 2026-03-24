@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { GroupedSettingsPane } from "@/screens/settings/grouped-settings-pane";
+import { GroupedSettingsPane } from "@/screens/settings/settings-screen";
 
-vi.mock("@/screens/settings/hooks/use-runtime-settings", () => ({
+vi.mock("@/screens/settings/use-runtime-settings", () => ({
   computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of [

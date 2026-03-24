@@ -30,7 +30,7 @@
 import type { ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 // ── Queue (root) ────────────────────────────────────────────────────
 

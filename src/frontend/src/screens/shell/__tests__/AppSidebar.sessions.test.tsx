@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppSidebar } from "@/screens/shell/app-sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import type { Conversation } from "@/screens/workspace/workspace-shell-contract";
 
 (
@@ -44,7 +45,7 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-vi.mock("@/components/shared/QredenceLogo", () => ({
+vi.mock("@/components/brand-mark", () => ({
   QredenceLogo: () => <div>QredenceLogo</div>,
 }));
 
@@ -71,7 +72,11 @@ function mountSidebar() {
   const root = createRoot(container);
 
   act(() => {
-    root.render(<AppSidebar isCollapsed={false} onToggleCollapse={vi.fn()} />);
+    root.render(
+      <SidebarProvider defaultOpen>
+        <AppSidebar />
+      </SidebarProvider>,
+    );
   });
 
   return { container, root };
@@ -142,6 +147,7 @@ describe("AppSidebar session actions", () => {
 
     const button = findButtonByText(container, "Saved conversation");
     expect(button).toBeTruthy();
+    expect(button?.querySelector("svg")).toBeNull();
 
     act(() => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

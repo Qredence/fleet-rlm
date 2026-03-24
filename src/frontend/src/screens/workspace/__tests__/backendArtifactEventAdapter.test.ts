@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { applyWsFrameToArtifacts } from "@/screens/workspace/model/backend-artifact-event-adapter";
-import { useArtifactStore } from "@/screens/workspace/model/artifact-store";
+import { applyWsFrameToArtifacts } from "@/lib/workspace/backend-artifact-event-adapter";
+import { useArtifactStore } from "@/screens/workspace/use-workspace";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 function makeExecutionStepFrame(

@@ -14,12 +14,8 @@ vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/components/shared/ErrorBoundary", () => ({
+vi.mock("@/components/error-boundary", () => ({
   ErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children }: { children: ReactNode }) => <button type="button">{children}</button>,
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({

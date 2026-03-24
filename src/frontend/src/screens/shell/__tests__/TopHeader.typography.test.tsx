@@ -2,6 +2,8 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { ShellHeader } from "@/screens/shell/shell-header";
 
 (
@@ -26,12 +28,21 @@ vi.mock("@/hooks/useIsMobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/components/ui/icon-button", () => ({
-  IconButton: ({ children, className }: { children: ReactNode; className?: string }) => (
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, className }: { children: ReactNode; className?: string }) => (
     <button type="button" className={className}>
       {children}
     </button>
   ),
+}));
+
+vi.mock("@/components/ui/sidebar", () => ({
+  SidebarTrigger: ({ className }: { className?: string }) => (
+    <button type="button" className={className}>
+      Toggle
+    </button>
+  ),
+  SidebarProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -46,7 +57,11 @@ function mountHeader() {
   const root = createRoot(container);
 
   act(() => {
-    root.render(<ShellHeader />);
+    root.render(
+      <SidebarProvider>
+        <ShellHeader />
+      </SidebarProvider>,
+    );
   });
 
   return { container, root };

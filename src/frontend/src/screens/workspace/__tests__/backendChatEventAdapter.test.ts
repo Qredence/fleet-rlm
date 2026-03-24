@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient } from "@tanstack/react-query";
-import { applyWsFrameToMessages } from "@/screens/workspace/model/backend-chat-event-adapter";
-import type { ChatMessage, ChatRenderPart } from "@/screens/workspace/model/workspace-types";
+import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
+import type { ChatMessage, ChatRenderPart } from "@/screens/workspace/use-workspace";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 function makeEvent(kind: string, text: string, payload?: Record<string, unknown>): WsServerMessage {

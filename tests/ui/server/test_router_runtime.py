@@ -386,6 +386,56 @@ def test_runtime_status_uses_cached_results(
     assert payload["daytona"]["configured"] is True
 
 
+def test_runtime_status_includes_mlflow_startup_state(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "degraded"
+    state.optional_service_errors["mlflow"] = (
+        "MLflow runtime initialization unavailable"
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setenv("MLFLOW_AUTO_START", "yes")
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"] == {
+        "enabled": True,
+        "auto_start_enabled": True,
+        "startup_status": "degraded",
+        "startup_error": "MLflow runtime initialization unavailable",
+    }
+    assert (
+        "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, or set MLFLOW_ENABLED=false for this environment."
+        in payload["guidance"]
+    )
+
+
+def test_runtime_status_marks_mlflow_disabled_when_env_disabled(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "disabled"
+    state.optional_service_errors.pop("mlflow", None)
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+    monkeypatch.delenv("MLFLOW_AUTO_START", raising=False)
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"] == {
+        "enabled": False,
+        "auto_start_enabled": False,
+        "startup_status": "disabled",
+        "startup_error": None,
+    }
+
+
 def test_runtime_status_stays_degraded_until_modal_and_lm_smoke_pass(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

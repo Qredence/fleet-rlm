@@ -3,7 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { Dialog as BaseDialog } from "@base-ui/react";
 import { XIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 const Dialog = BaseDialog.Root;
 
