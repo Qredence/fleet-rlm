@@ -3,7 +3,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer";
 
 function LoadingState() {
   return (
-    <div data-slot="assistant-loading">
+    <div data-slot="assistant-loading" className="flex items-center gap-2 py-1">
       <TextShimmer as="span" className="text-sm text-muted-foreground">
         Thinking...
       </TextShimmer>
@@ -21,8 +21,12 @@ export function AssistantAnswerBlock({
   if (!text && !showStreamingShell) return null;
 
   return (
-    <div className="space-y-1.5" data-slot="assistant-answer">
-      {text ? <MessageResponse>{text}</MessageResponse> : <LoadingState />}
+    <div data-slot="assistant-answer">
+      {text ? (
+        <MessageResponse>{text}</MessageResponse>
+      ) : (
+        <LoadingState />
+      )}
     </div>
   );
 }
