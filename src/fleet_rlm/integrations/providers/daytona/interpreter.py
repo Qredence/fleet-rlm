@@ -4,15 +4,32 @@ from __future__ import annotations
 
 import json
 import math
-import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import dspy
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
+from fleet_rlm.runtime.execution.interpreter_common import (
+    async_enter as _async_enter_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_common import (
+    async_exit as _async_exit_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_common import (
+    execution_profile_context,
+    get_registered_tools,
+    initialize_llm_query_state,
+    initialize_tool_runtime_state,
+    set_registered_tools,
+)
+from fleet_rlm.runtime.execution.interpreter_common import (
+    sync_enter as _sync_enter_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_common import (
+    sync_exit as _sync_exit_impl,
+)
 from fleet_rlm.runtime.execution.interpreter_events import (
     complete_event_data,
     emit_execution_event,
@@ -356,17 +373,16 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.default_execution_profile = default_execution_profile
         self.async_execute = async_execute
 
-        self.sub_lm = sub_lm
-        self.max_llm_calls = max_llm_calls
-        self.llm_call_timeout = llm_call_timeout
-        self._llm_call_count = 0
-        self._llm_call_lock = threading.Lock()
-        self._sub_lm_executor = None
-        self._sub_lm_executor_lock = threading.Lock()
-
-        self.output_fields: list[dict[str, Any]] | None = None
-        self._tools: dict[str, Callable[..., Any]] = {}
-        self.execution_event_callback: Callable[[dict[str, Any]], None] | None = None
+        initialize_llm_query_state(
+            self,
+            sub_lm=sub_lm,
+            max_llm_calls=max_llm_calls,
+            llm_call_timeout=llm_call_timeout,
+        )
+        self.output_fields: list[dict[str, Any]] | None
+        self._tools: dict[str, Callable[..., Any]]
+        self.execution_event_callback: Callable[[dict[str, Any]], None] | None
+        initialize_tool_runtime_state(self)
         self._volume = None
 
         self._started = False
@@ -385,39 +401,29 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._submit_signature_key: tuple[tuple[str, str], ...] | None = None
 
     def __enter__(self) -> DaytonaInterpreter:
-        self.start()
-        return self
+        return _sync_enter_impl(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         _ = (exc_type, exc_val, exc_tb)
-        self.shutdown()
-        return False
+        return _sync_exit_impl(self)
 
     async def __aenter__(self) -> DaytonaInterpreter:
-        await self.astart()
-        return self
+        return await _async_enter_impl(self)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         _ = (exc_type, exc_val, exc_tb)
-        await self.ashutdown()
-        return False
+        return await _async_exit_impl(self)
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
-        return self._tools
+        return get_registered_tools(self)
 
     @tools.setter
     def tools(self, value: dict[str, Callable[..., Any]]) -> None:
-        self._tools = value
+        set_registered_tools(self, value)
 
-    @contextmanager
     def execution_profile(self, profile: ExecutionProfile):
-        previous = self.default_execution_profile
-        self.default_execution_profile = profile
-        try:
-            yield self
-        finally:
-            self.default_execution_profile = previous
+        return execution_profile_context(self, profile)
 
     def configure_workspace(
         self,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from dspy.primitives import FinalOutput
 
@@ -18,6 +18,9 @@ class RLMInterpreterProtocol(Protocol):
     volume_mount_path: str
     max_llm_calls: int
     _llm_call_count: int
+    output_fields: list[dict[str, Any]] | None
+    tools: dict[str, Callable[..., Any]]
+    default_execution_profile: ExecutionProfile
     execution_event_callback: Any
 
     def start(self) -> None:
