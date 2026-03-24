@@ -3,7 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { Menu as BaseMenu } from "@base-ui/react";
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 const DropdownMenu = BaseMenu.Root;
 const DropdownMenuPortal = BaseMenu.Portal;
@@ -196,9 +196,15 @@ function DropdownMenuSeparator({
   );
 }
 
-function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
+function DropdownMenuShortcut({
+  className,
+  ...props
+}: React.ComponentProps<"span">) {
   return (
-    <span className={cn("text-muted-foreground ml-auto tracking-widest", className)} {...props} />
+    <span
+      className={cn("text-muted-foreground ml-auto tracking-widest", className)}
+      {...props}
+    />
   );
 }
 

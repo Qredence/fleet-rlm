@@ -217,6 +217,10 @@ export interface components {
       llm?: {
         [key: string]: unknown;
       };
+      /** Mlflow */
+      mlflow?: {
+        [key: string]: unknown;
+      };
       /** Modal */
       modal?: {
         [key: string]: unknown;

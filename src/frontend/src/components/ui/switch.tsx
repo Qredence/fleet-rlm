@@ -1,9 +1,12 @@
 import * as React from "react";
 import { Switch as BaseSwitch } from "@base-ui/react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
-function Switch({ className, ...props }: React.ComponentProps<typeof BaseSwitch.Root>) {
+function Switch({
+  className,
+  ...props
+}: React.ComponentProps<typeof BaseSwitch.Root>) {
   return (
     <BaseSwitch.Root
       className={cn(

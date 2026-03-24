@@ -1,7 +1,7 @@
 import type * as React from "react";
 import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 function ScrollArea({
   className,
@@ -31,8 +31,12 @@ function ScrollBar({
   orientation = "vertical",
   ref,
   ...props
-}: React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar> & {
-  ref?: React.Ref<React.ElementRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>>;
+}: React.ComponentPropsWithoutRef<
+  typeof ScrollAreaPrimitive.ScrollAreaScrollbar
+> & {
+  ref?: React.Ref<
+    React.ElementRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>
+  >;
 }) {
   return (
     <ScrollAreaPrimitive.ScrollAreaScrollbar
@@ -40,8 +44,10 @@ function ScrollBar({
       orientation={orientation}
       className={cn(
         "flex touch-none select-none transition-colors",
-        orientation === "vertical" && "h-full w-2.5 border-l border-l-transparent p-px",
-        orientation === "horizontal" && "h-2.5 flex-col border-t border-t-transparent p-px",
+        orientation === "vertical" &&
+          "h-full w-2.5 border-l border-l-transparent p-px",
+        orientation === "horizontal" &&
+          "h-2.5 flex-col border-t border-t-transparent p-px",
         className,
       )}
       {...props}

@@ -3,12 +3,14 @@ import { Select as BaseSelect } from "@base-ui/react";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Slot } from "@radix-ui/react-slot";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 const Select = BaseSelect.Root;
 const SelectGroup = BaseSelect.Group;
 const SelectValue = BaseSelect.Value;
-type SelectPositionerProps = React.ComponentPropsWithoutRef<typeof BaseSelect.Positioner>;
+type SelectPositionerProps = React.ComponentPropsWithoutRef<
+  typeof BaseSelect.Positioner
+>;
 
 function SelectTrigger({
   className,

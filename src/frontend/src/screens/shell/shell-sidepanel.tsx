@@ -9,18 +9,28 @@ import {
 
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { cn } from "@/lib/utils/cn";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { cn } from "@/lib/utils";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
-import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
+import {
+  isRlmCoreEnabled,
+  isSectionSupported,
+  UNSUPPORTED_SECTION_REASON,
+} from "@/lib/rlm-api";
 
 type CanvasMode = "workspace" | "volumes" | "empty";
 
-function EmptyPanel({ title, description }: { title: string; description: string }) {
+function EmptyPanel({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <Empty className="h-full rounded-none border-0 bg-transparent">
       <EmptyMedia variant="icon">
@@ -34,11 +44,19 @@ function EmptyPanel({ title, description }: { title: string; description: string
   );
 }
 
-function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
+function UnsupportedPanel({
+  sectionLabel,
+  reason,
+}: {
+  sectionLabel: string;
+  reason?: string;
+}) {
   return (
     <EmptyPanel
       title={`${sectionLabel} unavailable`}
-      description={reason || "This functionality is currently disabled or unsupported."}
+      description={
+        reason || "This functionality is currently disabled or unsupported."
+      }
     />
   );
 }
@@ -81,7 +99,11 @@ export function ShellSidepanel() {
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
   const canvasMode: CanvasMode =
-    activeNav === "workspace" ? "workspace" : activeNav === "volumes" ? "volumes" : "empty";
+    activeNav === "workspace"
+      ? "workspace"
+      : activeNav === "volumes"
+        ? "volumes"
+        : "empty";
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">

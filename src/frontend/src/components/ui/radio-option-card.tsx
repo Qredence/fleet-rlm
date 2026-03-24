@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { springs } from "@/lib/utils/motion";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -63,7 +63,9 @@ function RadioOptionCard({
       className={cn(
         "flex items-start gap-3 w-full text-left px-3.5 py-3.5 rounded-lg border transition-colors touch-target",
         "focus-visible:outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50",
-        selected ? "border-border-strong bg-muted" : "border-border-subtle bg-card hover:bg-muted",
+        selected
+          ? "border-border-strong bg-muted"
+          : "border-border-subtle bg-card hover:bg-muted",
         className,
       )}
     >
@@ -104,7 +106,10 @@ function RadioOptionCard({
           </span>
         </div>
         {description && (
-          <p data-slot="radio-option-card-description" className="text-muted-foreground mt-0.5">
+          <p
+            data-slot="radio-option-card-description"
+            className="text-muted-foreground mt-0.5"
+          >
             {description}
           </p>
         )}

@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef } from "react";
 import { Streamdown as StreamdownRenderer } from "streamdown";
 import "streamdown/styles.css";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 interface StreamdownProps {
   content: string;

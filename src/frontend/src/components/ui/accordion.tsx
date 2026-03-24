@@ -2,7 +2,7 @@ import * as React from "react";
 import { Accordion as BaseAccordion } from "@base-ui/react";
 import { ChevronDownIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 type AccordionRootProps = React.ComponentProps<typeof BaseAccordion.Root>;
 type AccordionProps = Omit<
@@ -22,7 +22,10 @@ function Accordion({ type, collapsible, ...props }: AccordionProps) {
   return <BaseAccordion.Root {...accordionProps} />;
 }
 
-function AccordionItem({ className, ...props }: React.ComponentProps<typeof BaseAccordion.Item>) {
+function AccordionItem({
+  className,
+  ...props
+}: React.ComponentProps<typeof BaseAccordion.Item>) {
   return (
     <BaseAccordion.Item
       className={cn("border-b border-border-subtle last:border-b-0", className)}

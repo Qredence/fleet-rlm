@@ -1,9 +1,22 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-runtime";
+import {
+  useArtifactStore,
+  useChatStore,
+  useRunWorkbenchStore,
+  useWorkspace,
+  useWorkspaceUiStore,
+} from "@/screens/workspace/use-workspace";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -11,6 +24,9 @@ import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-run
 
 const mocked = vi.hoisted(() => ({
   toastError: vi.fn(),
+  streamMessage: vi.fn(),
+  stopStreaming: vi.fn(),
+  resetSession: vi.fn(),
   clearArtifactSteps: vi.fn(),
   applyArtifactsFrame: vi.fn(),
   setCreationPhase: vi.fn(),
@@ -22,105 +38,65 @@ const mocked = vi.hoisted(() => ({
   },
 }));
 
-const mockChatStoreState = {
-  messages: [] as Array<{
-    id: string;
-    type: string;
-    content: string;
-    phase?: number;
-  }>,
-  turnArtifactsByMessageId: {},
-  isStreaming: false,
-  sessionId: "session-123",
-  runtimeMode: "daytona_pilot" as const,
-  streamMessage: vi.fn(),
-  stopStreaming: vi.fn(),
-  resetSession: vi.fn(),
-  setMessages: vi.fn(),
-  setTurnArtifactsByMessageId: vi.fn(),
-  snapshotTurnArtifacts: vi.fn(),
-  clearTurnArtifacts: vi.fn(),
-  addMessage: vi.fn((message) => {
-    mockChatStoreState.messages = [...mockChatStoreState.messages, message];
-  }),
-};
-
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { error: mocked.toastError }),
 }));
 
-vi.mock("@/screens/workspace/model/workspace-ui-store", () => ({
-  useWorkspaceUiStore: (
-    selector?: (state: {
-      setCreationPhase: typeof mocked.setCreationPhase;
-      sessionRevision: string;
-    }) => unknown,
-  ) => {
-    const state = {
-      setCreationPhase: mocked.setCreationPhase,
-      sessionRevision: "nav-session-1",
-    };
-    return selector ? selector(state) : state;
-  },
-}));
-
-vi.mock("@/screens/workspace/model/artifact-store", () => ({
-  useArtifactStore: (
-    selector: (state: { clear: typeof mocked.clearArtifactSteps; steps: [] }) => unknown,
-  ) => selector({ clear: mocked.clearArtifactSteps, steps: [] }),
-}));
-
-vi.mock("@/screens/workspace/model/chat-store", () => ({
-  useChatStore: Object.assign(
-    (selector?: (state: typeof mockChatStoreState) => unknown) =>
-      selector ? selector(mockChatStoreState) : mockChatStoreState,
-    {
-      getState: () => mockChatStoreState,
-    },
-  ),
-}));
-
-vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
-  useRunWorkbenchStore: Object.assign(
-    (selector: (state: typeof mocked.daytonaStoreState) => unknown) =>
-      selector(mocked.daytonaStoreState),
-    {
-      getState: () => mocked.daytonaStoreState,
-    },
-  ),
-}));
-
-vi.mock("@/screens/workspace/model/backend-chat-event-adapter", () => ({
+vi.mock("@/lib/workspace/backend-chat-event-adapter", () => ({
   applyWsFrameToMessages: vi.fn((messages) => ({ messages })),
 }));
 
-vi.mock("@/screens/workspace/model/backend-artifact-event-adapter", () => ({
+vi.mock("@/lib/workspace/backend-artifact-event-adapter", () => ({
   applyWsFrameToArtifacts: mocked.applyArtifactsFrame,
 }));
 
-vi.mock("@/lib/rlm-api", () => ({
-  sendCommandOverWs: vi.fn(),
-  subscribeToExecutionStream: vi.fn(() => () => {}),
-  rlmApiConfig: {
-    workspaceId: "workspace-1",
-    userId: "user-1",
-  },
-}));
+vi.mock("@/lib/rlm-api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/rlm-api")>("@/lib/rlm-api");
+
+  return {
+    ...actual,
+    sendCommandOverWs: vi.fn(),
+    subscribeToExecutionStream: vi.fn(() => () => {}),
+    rlmApiConfig: {
+      ...actual.rlmApiConfig,
+      workspaceId: "workspace-1",
+      userId: "user-1",
+    },
+  } as unknown as typeof actual;
+});
 
 function resetState() {
-  mockChatStoreState.messages = [];
-  mockChatStoreState.turnArtifactsByMessageId = {};
-  mockChatStoreState.isStreaming = false;
-  mockChatStoreState.sessionId = "session-123";
-  mockChatStoreState.runtimeMode = "daytona_pilot";
-  mockChatStoreState.streamMessage.mockReset();
-  mockChatStoreState.stopStreaming.mockReset();
-  mockChatStoreState.resetSession.mockReset();
-  mockChatStoreState.setMessages.mockReset();
-  mockChatStoreState.setTurnArtifactsByMessageId.mockReset();
-  mockChatStoreState.snapshotTurnArtifacts.mockReset();
-  mockChatStoreState.clearTurnArtifacts.mockReset();
-  mockChatStoreState.addMessage.mockClear();
+  useChatStore.getState().clearMessages();
+  useChatStore.setState({
+    isStreaming: false,
+    sessionId: "session-123",
+    runtimeMode: "daytona_pilot",
+    streamController: null,
+    streamMessage: mocked.streamMessage,
+    stopStreaming: mocked.stopStreaming,
+    resetSession: mocked.resetSession,
+  });
+  useWorkspaceUiStore.setState({
+    sessionRevision: 0,
+    setCreationPhase: mocked.setCreationPhase,
+  });
+  useArtifactStore.setState({
+    steps: [],
+    activeStepId: undefined,
+    clear: mocked.clearArtifactSteps,
+  });
+  useRunWorkbenchStore.getState().reset();
+  useRunWorkbenchStore.setState({
+    reset: mocked.daytonaStoreState.reset,
+    beginRun: mocked.daytonaStoreState.beginRun,
+    applyFrame: mocked.daytonaStoreState.applyFrame,
+    failRun: mocked.daytonaStoreState.failRun,
+  });
+
+  mocked.streamMessage.mockReset();
+  mocked.stopStreaming.mockReset();
+  mocked.resetSession.mockReset();
   mocked.daytonaStoreState.reset.mockReset();
   mocked.daytonaStoreState.beginRun.mockReset();
   mocked.daytonaStoreState.applyFrame.mockReset();
@@ -131,13 +107,13 @@ function resetState() {
   mocked.toastError.mockReset();
 }
 
-describe("useWorkspaceRuntime Daytona transport failures", () => {
+describe("useWorkspace Daytona transport failures", () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
-  let runtime: ReturnType<typeof useWorkspaceRuntime> | null = null;
+  let runtime: ReturnType<typeof useWorkspace> | null = null;
 
   function Harness() {
-    runtime = useWorkspaceRuntime();
+    runtime = useWorkspace();
     return null;
   }
 
@@ -157,7 +133,7 @@ describe("useWorkspaceRuntime Daytona transport failures", () => {
   });
 
   it("surfaces a Daytona stream failure in the workbench instead of appending a generic chat error", async () => {
-    mockChatStoreState.streamMessage.mockRejectedValue(
+    mocked.streamMessage.mockRejectedValue(
       new Error(
         "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
       ),
@@ -185,7 +161,12 @@ describe("useWorkspaceRuntime Daytona transport failures", () => {
     expect(mocked.daytonaStoreState.failRun).toHaveBeenCalledWith(
       "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
     );
-    expect(mockChatStoreState.setMessages).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toEqual([
+      expect.objectContaining({
+        type: "user",
+        content: "Explain Daytona workspace mode.",
+      }),
+    ]);
     expect(mocked.toastError).toHaveBeenCalledWith("Backend stream failed", {
       description:
         "No response arrived from the server within 15 seconds. Try again or check the backend logs.",

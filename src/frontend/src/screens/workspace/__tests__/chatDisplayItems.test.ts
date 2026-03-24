@@ -2,8 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildChatDisplayItems,
   buildPendingAssistantTurnId,
-} from "@/screens/workspace/model/chat-display-items";
-import type { ChatMessage } from "@/screens/workspace/model/workspace-types";
+} from "@/lib/workspace/chat-display-items";
+import type { ChatMessage } from "@/screens/workspace/use-workspace";
 
 describe("buildChatDisplayItems", () => {
   it("attaches contiguous reasoning directly to the following assistant turn", () => {
@@ -36,7 +36,9 @@ describe("buildChatDisplayItems", () => {
     if (items[0]?.kind === "assistant_turn") {
       expect(items[0].message?.id).toBe("assistant-final");
       expect(items[0].reasoningItems).toHaveLength(1);
-      expect(items[0].reasoningItems[0]?.part.parts[0]?.text).toBe("Thinking through the request.");
+      expect(items[0].reasoningItems[0]?.part.parts[0]?.text).toBe(
+        "Thinking through the request.",
+      );
     }
   });
 
@@ -86,7 +88,9 @@ describe("buildChatDisplayItems", () => {
       expect(items[0].message?.content).toBe("Done.");
       expect(items[0].reasoningItems).toHaveLength(1);
       expect(items[0].attachedToolSessions).toHaveLength(1);
-      expect(items[0].attachedToolSessions[0]?.items[0]?.toolName).toBe("search_files");
+      expect(items[0].attachedToolSessions[0]?.items[0]?.toolName).toBe(
+        "search_files",
+      );
     }
   });
 

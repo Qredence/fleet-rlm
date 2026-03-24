@@ -10,6 +10,7 @@ from contextlib import suppress
 from functools import partial
 from typing import Any, Literal
 
+from fleet_rlm.integrations.observability.config import MlflowConfig
 from fleet_rlm.integrations.providers.daytona import DaytonaConfigError
 
 from ..dependencies import ServerState
@@ -429,6 +430,7 @@ def build_runtime_status_response(
     state: ServerState,
     load_modal_config: LoadModalConfig,
 ) -> RuntimeStatusResponse:
+    mlflow_cfg = MlflowConfig.from_env()
     llm_checks, llm_guidance = lm_preflight()
     modal_checks, modal_guidance = modal_preflight(
         secret_name=state.config.secret_name,
@@ -445,6 +447,8 @@ def build_runtime_status_response(
     ready = state.is_ready and bool(
         modal_test is not None and modal_test.ok and lm_test is not None and lm_test.ok
     )
+    mlflow_startup_status = state.optional_service_status.get("mlflow", "pending")
+    mlflow_startup_error = state.optional_service_errors.get("mlflow")
 
     guidance: list[str] = []
     guidance.extend(llm_guidance)
@@ -453,6 +457,10 @@ def build_runtime_status_response(
     if modal_test is None or lm_test is None:
         guidance.append(
             "Run Runtime connection tests to validate live provider connectivity."
+        )
+    if mlflow_cfg.enabled and mlflow_startup_status == "degraded":
+        guidance.append(
+            "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, or set MLFLOW_ENABLED=false for this environment."
         )
 
     return RuntimeStatusResponse(
@@ -480,6 +488,15 @@ def build_runtime_status_response(
                 "planner_lm", "pending"
             ),
             "startup_error": state.optional_service_errors.get("planner_lm"),
+        },
+        mlflow={
+            "enabled": mlflow_cfg.enabled,
+            "auto_start_enabled": (
+                (os.getenv("MLFLOW_AUTO_START") or "").strip().lower()
+                in {"1", "true", "yes"}
+            ),
+            "startup_status": mlflow_startup_status,
+            "startup_error": mlflow_startup_error,
         },
         modal={
             **modal_checks,

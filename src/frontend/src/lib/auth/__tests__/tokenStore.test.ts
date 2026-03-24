@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 const CANONICAL_KEY = "fleet-rlm:access-token";
 
@@ -26,8 +33,14 @@ async function loadTokenStore(): Promise<TokenStoreModule> {
 }
 
 beforeEach(() => {
-  Object.defineProperty(window, "localStorage", { value: createStorageMock(), writable: true });
-  Object.defineProperty(window, "sessionStorage", { value: createStorageMock(), writable: true });
+  Object.defineProperty(window, "localStorage", {
+    value: createStorageMock(),
+    writable: true,
+  });
+  Object.defineProperty(window, "sessionStorage", {
+    value: createStorageMock(),
+    writable: true,
+  });
 });
 
 afterEach(() => {
@@ -45,7 +58,8 @@ describe("tokenStore", () => {
   });
 
   it("clears canonical token", async () => {
-    const { setAccessToken, clearAccessToken, getAccessToken } = await loadTokenStore();
+    const { setAccessToken, clearAccessToken, getAccessToken } =
+      await loadTokenStore();
 
     setAccessToken("to-clear");
 

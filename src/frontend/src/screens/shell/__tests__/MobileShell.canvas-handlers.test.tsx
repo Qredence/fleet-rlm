@@ -1,28 +1,34 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
-import { MobileShell } from "@/screens/shell/mobile-shell";
+import { RootLayout } from "@/screens/shell/app-shell-screen";
 import { useNavigationStore } from "@/stores/navigationStore";
 
-vi.mock("vaul", () => ({
-  Drawer: {
-    Root: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Portal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Overlay: () => <div data-testid="drawer-overlay" />,
-    Content: ({ children }: { children: React.ReactNode }) => (
-      <div data-testid="drawer-content">{children}</div>
-    ),
-    Title: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    Description: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  },
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: () => true,
 }));
 
 vi.mock("@/screens/shell/shell-header", () => ({
   ShellHeader: () => <div>ShellHeader</div>,
 }));
 
-vi.mock("@/screens/shell/shell-route-outlet", () => ({
+vi.mock("@/screens/shell/app-sidebar", () => ({
+  AppSidebar: () => <div>AppSidebar</div>,
+}));
+
+vi.mock("@/app/shell/route-sync", () => ({
+  RouteSync: () => null,
+}));
+
+vi.mock("@/app/shell/shell-route-outlet", () => ({
   ShellRouteOutlet: () => <div>ShellRouteOutlet</div>,
 }));
 
@@ -30,8 +36,16 @@ vi.mock("@/screens/shell/shell-sidepanel", () => ({
   ShellSidepanel: () => <div>ShellSidepanel</div>,
 }));
 
-vi.mock("@/screens/shell/mobile-tab-bar", () => ({
+vi.mock("@/app/shell/mobile-tab-bar", () => ({
   MobileTabBar: () => <div>MobileTabBar</div>,
+}));
+
+vi.mock("@/app/shell/command-palette", () => ({
+  CommandPalette: () => null,
+}));
+
+vi.mock("@/app/shell/login-dialog", () => ({
+  LoginDialog: () => null,
 }));
 
 describe("MobileShell canvas handlers", () => {
@@ -58,7 +72,7 @@ describe("MobileShell canvas handlers", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(<MobileShell />);
+      root.render(<RootLayout />);
     });
 
     act(() => {

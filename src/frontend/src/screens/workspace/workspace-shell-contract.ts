@@ -1,5 +1,8 @@
-import { useConversations, type Conversation } from "@/screens/workspace/model/chat-history-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
+import {
+  type Conversation,
+  useConversations,
+} from "@/screens/workspace/chat-history-store";
+import { useWorkspaceUiStore } from "@/screens/workspace/workspace-ui-store";
 
 function useWorkspaceShellHistory(): Conversation[] {
   return useConversations();
@@ -7,7 +10,9 @@ function useWorkspaceShellHistory(): Conversation[] {
 
 function useWorkspaceShellActions() {
   const newSession = useWorkspaceUiStore((state) => state.newSession);
-  const requestConversationLoad = useWorkspaceUiStore((state) => state.requestConversationLoad);
+  const requestConversationLoad = useWorkspaceUiStore(
+    (state) => state.requestConversationLoad,
+  );
 
   return {
     newSession,

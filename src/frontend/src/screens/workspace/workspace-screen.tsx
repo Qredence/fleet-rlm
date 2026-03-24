@@ -1,34 +1,40 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TriangleAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useChatHistoryStore } from "@/screens/workspace/model/chat-history-store";
-import { useChatStore } from "@/screens/workspace/model/chat-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
-import { cn } from "@/lib/utils/cn";
+import {
+  useRuntimeStatus,
+  runtimeStatusQueryKey,
+} from "@/hooks/useRuntimeStatus";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   WorkspaceComposer,
   type AttachedFile,
-} from "@/screens/workspace/components/workspace-composer";
-import { WorkspaceSidebar } from "@/screens/workspace/components/workspace-sidebar";
-import { WorkspaceMessageList } from "@/screens/workspace/components/workspace-message-list";
-import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-runtime";
+} from "@/app/workspace/workspace-composer";
+import { WorkspaceSidebar } from "@/app/workspace/workspace-sidebar";
+import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
+import {
+  useChatHistoryStore,
+  useChatStore,
+  useWorkspace,
+  useWorkspaceUiStore,
+} from "@/screens/workspace/use-workspace";
 import { detectRepoContext } from "@/lib/utils/repoContext";
 import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useQueryClient } from "@tanstack/react-query";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.
  *
- * Chat logic (messages, phases, backend events) lives in `useWorkspaceRuntime`.
+ * Chat logic (messages, phases, backend events) lives in `useWorkspace`.
  * Workspace-only shell state flows through the workspace screen slice so it
  * persists across shell navigation without leaking back into root stores.
  *
@@ -40,11 +46,12 @@ export function WorkspaceScreen() {
   const isMobile = useIsMobile();
   const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom();
+  const { scrollRef, contentRef, isAtBottom, scrollToBottom } =
+    useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
-  const chatRuntime = useWorkspaceRuntime();
+  const chatRuntime = useWorkspace();
 
   const {
     messages,
@@ -70,7 +77,8 @@ export function WorkspaceScreen() {
     const provider = runtimeStatus.data?.sandbox_provider;
     if (!provider) return;
     didInitRuntimeMode.current = true;
-    const mapped: WsRuntimeMode = provider === "daytona" ? "daytona_pilot" : "modal_chat";
+    const mapped: WsRuntimeMode =
+      provider === "daytona" ? "daytona_pilot" : "modal_chat";
     setRuntimeMode(mapped);
   }, [runtimeStatus.data?.sandbox_provider, setRuntimeMode]);
 
@@ -81,7 +89,9 @@ export function WorkspaceScreen() {
       const sandboxProvider = mode === "daytona_pilot" ? "daytona" : "modal";
       runtimeEndpoints
         .patchSettings({ updates: { SANDBOX_PROVIDER: sandboxProvider } })
-        .then(() => queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }))
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }),
+        )
         .catch(() => {
           // silent — settings PATCH failures don't block the chat
         });
@@ -105,10 +115,14 @@ export function WorkspaceScreen() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl: runtimeMode === "daytona_pilot" ? inferredRepoContext?.repoUrl : undefined,
+        repoUrl:
+          runtimeMode === "daytona_pilot"
+            ? inferredRepoContext?.repoUrl
+            : undefined,
         repoRef:
           runtimeMode === "daytona_pilot"
-            ? (inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef)
+            ? (inferredRepoContext?.repoRefCandidate ??
+              inferredRepoContext?.repoRef)
             : undefined,
         contextPaths:
           runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
@@ -201,8 +215,16 @@ export function WorkspaceScreen() {
       return;
     }
 
-    if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
-      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
+    if (
+      messagesRef.current.length > 0 &&
+      messagesRef.current !== conversation.messages
+    ) {
+      saveConversation(
+        messagesRef.current,
+        phaseRef.current,
+        undefined,
+        turnArtifactsRef.current,
+      );
     }
 
     loadConversation(conversation);
@@ -233,12 +255,16 @@ export function WorkspaceScreen() {
   }, []);
 
   const handleOpenRuntimeSettings = useCallback(() => {
-    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>("open-settings", {
-      detail: { section: "runtime" },
-      cancelable: true,
-    });
+    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>(
+      "open-settings",
+      {
+        detail: { section: "runtime" },
+        cancelable: true,
+      },
+    );
 
-    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
+    const wasHandledByDialog =
+      document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigate({ to: "/settings", search: { section: "runtime" } });
     }
@@ -251,8 +277,11 @@ export function WorkspaceScreen() {
         guidance?: string[];
       }
     | undefined;
-  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
-  const warningGuidance = runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
+    ? daytonaStatus.guidance
+    : [];
+  const warningGuidance =
+    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
@@ -260,7 +289,9 @@ export function WorkspaceScreen() {
       ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
       : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
   const runtimeWarningTitle =
-    runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
+    runtimeMode === "daytona_pilot"
+      ? "Daytona setup required"
+      : "Runtime warning";
   const hasMessages = messages.length > 0;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;

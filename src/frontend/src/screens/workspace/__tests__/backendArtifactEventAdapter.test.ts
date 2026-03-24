@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { applyWsFrameToArtifacts } from "@/screens/workspace/model/backend-artifact-event-adapter";
-import { useArtifactStore } from "@/screens/workspace/model/artifact-store";
+import { applyWsFrameToArtifacts } from "@/lib/workspace/backend-artifact-event-adapter";
+import { useArtifactStore } from "@/screens/workspace/use-workspace";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 function makeExecutionStepFrame(
@@ -83,7 +83,9 @@ describe("applyWsFrameToArtifacts", () => {
       }),
     );
 
-    const step = useArtifactStore.getState().steps.find((candidate) => candidate.id === "step-2");
+    const step = useArtifactStore
+      .getState()
+      .steps.find((candidate) => candidate.id === "step-2");
 
     expect(step?.actor_kind).toBe("root_rlm");
     expect(step?.depth).toBe(0);
@@ -91,10 +93,20 @@ describe("applyWsFrameToArtifacts", () => {
 
   it("merges adjacent reasoning and status into a single live llm step", () => {
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "Analyze prompt", undefined, "2026-03-01T12:00:01Z"),
+      makeEvent(
+        "reasoning_step",
+        "Analyze prompt",
+        undefined,
+        "2026-03-01T12:00:01Z",
+      ),
     );
     applyWsFrameToArtifacts(
-      makeEvent("status", "Planning next step", undefined, "2026-03-01T12:00:01Z"),
+      makeEvent(
+        "status",
+        "Planning next step",
+        undefined,
+        "2026-03-01T12:00:01Z",
+      ),
     );
     applyWsFrameToArtifacts(
       makeEvent(
@@ -115,7 +127,11 @@ describe("applyWsFrameToArtifacts", () => {
 
     const state = useArtifactStore.getState();
     expect(state.steps).toHaveLength(3);
-    expect(state.steps.map((step) => step.type)).toEqual(["llm", "tool", "tool"]);
+    expect(state.steps.map((step) => step.type)).toEqual([
+      "llm",
+      "tool",
+      "tool",
+    ]);
     expect(state.steps.map((step) => step.sequence)).toEqual([1, 2, 3]);
     expect(state.steps.map((step) => step.label)).toEqual([
       "Reasoning",
@@ -171,7 +187,12 @@ describe("applyWsFrameToArtifacts", () => {
 
   it("orders artifact steps by sequence even when timestamps are out of order", () => {
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "First arrival", undefined, "2026-03-01T12:00:10Z"),
+      makeEvent(
+        "reasoning_step",
+        "First arrival",
+        undefined,
+        "2026-03-01T12:00:10Z",
+      ),
     );
     applyWsFrameToArtifacts(
       makeEvent("status", "Second arrival", undefined, "2026-03-01T12:00:00Z"),
@@ -192,7 +213,12 @@ describe("applyWsFrameToArtifacts", () => {
 
   it("starts a new llm step when later reasoning resumes after tool activity", () => {
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "First thought", undefined, "2026-03-01T12:00:01Z"),
+      makeEvent(
+        "reasoning_step",
+        "First thought",
+        undefined,
+        "2026-03-01T12:00:01Z",
+      ),
     );
     applyWsFrameToArtifacts(
       makeEvent(
@@ -203,12 +229,25 @@ describe("applyWsFrameToArtifacts", () => {
       ),
     );
     applyWsFrameToArtifacts(
-      makeEvent("reasoning_step", "Second thought", undefined, "2026-03-01T12:00:03Z"),
+      makeEvent(
+        "reasoning_step",
+        "Second thought",
+        undefined,
+        "2026-03-01T12:00:03Z",
+      ),
     );
 
     const state = useArtifactStore.getState();
-    expect(state.steps.map((step) => step.type)).toEqual(["llm", "tool", "llm"]);
-    expect(state.steps.map((step) => step.label)).toEqual(["Reasoning", "Tool: grep", "Reasoning"]);
+    expect(state.steps.map((step) => step.type)).toEqual([
+      "llm",
+      "tool",
+      "llm",
+    ]);
+    expect(state.steps.map((step) => step.label)).toEqual([
+      "Reasoning",
+      "Tool: grep",
+      "Reasoning",
+    ]);
     expect(state.steps[0]?.sequence).toBe(1);
     expect(state.steps[1]?.sequence).toBe(2);
     expect(state.steps[2]?.sequence).toBe(3);

@@ -3,7 +3,7 @@
 import type { MotionProps } from "motion/react";
 import type { CSSProperties, ComponentType, JSX } from "react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
 import { memo, useMemo } from "react";
 
@@ -18,7 +18,10 @@ interface TextShimmerProps {
 }
 
 // Cache motion components at module level to avoid creating during render
-const motionComponentCache = new Map<keyof JSX.IntrinsicElements, ComponentType<MotionHTMLProps>>();
+const motionComponentCache = new Map<
+  keyof JSX.IntrinsicElements,
+  ComponentType<MotionHTMLProps>
+>();
 
 const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
   let component = motionComponentCache.get(element);
