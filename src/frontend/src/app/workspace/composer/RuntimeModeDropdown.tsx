@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { FlaskConical, MessagesSquare } from "lucide-react";
+import { MessagesSquare } from "lucide-react";
 
 import {
   Select,
@@ -12,6 +12,17 @@ import { cn } from "@/lib/utils";
 import type { WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { PROMPT_INPUT_ACTION_BUTTON_CLASSNAME } from "./composerActionStyles";
 
+function DaytonaIcon({ className }: { className?: string }) {
+  return (
+    <img
+      src="/branding/daytona-logo.png"
+      alt=""
+      aria-hidden="true"
+      className={cn("object-contain dark:invert", className)}
+    />
+  );
+}
+
 interface RuntimeModeOption {
   id: WsRuntimeMode;
   name: string;
@@ -20,7 +31,7 @@ interface RuntimeModeOption {
 
 const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
   { id: "modal_chat", name: "Modal chat", icon: MessagesSquare },
-  { id: "daytona_pilot", name: "Daytona pilot", icon: FlaskConical },
+  { id: "daytona_pilot", name: "Daytona", icon: DaytonaIcon },
 ];
 
 interface RuntimeModeDropdownProps {

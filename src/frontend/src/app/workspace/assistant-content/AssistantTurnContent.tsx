@@ -68,9 +68,9 @@ export function AssistantTurnContent({
         <div
           className={cn(
             "max-w-content rounded-bubble px-4 py-3.5 shadow-sm md:px-5 md:py-4",
-            "border border-border-subtle/60 transition-colors",
+            "border transition-colors",
             selected && "border-accent/20 bg-accent/5",
-            !selected && "bg-transparent",
+            !selected && "border-border-subtle/60 bg-card/60",
           )}
           data-slot="assistant-turn-content"
           role={onOpenTab ? "button" : undefined}
@@ -100,7 +100,7 @@ export function AssistantTurnContent({
                 model.summary.show ? (
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {model.execution.hasChatHighlights ? (
                     <ExecutionHighlightsGroup
                       execution={model.execution}

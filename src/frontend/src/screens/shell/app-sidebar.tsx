@@ -1,6 +1,7 @@
 import { type MouseEvent } from "react";
 import { Database, LogIn, MessageSquare, Plus, Search, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 import { QredenceLogo } from "@/components/brand-mark";
 import {
@@ -50,6 +51,7 @@ export function AppSidebar() {
   const { newSession, requestConversationLoad } = useWorkspaceShellActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
+  const { openCommandPalette } = useNavigationStore();
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
@@ -88,7 +90,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border/80">
       <SidebarHeader className="gap-3 px-3 py-3">
         <div className="flex items-center gap-2 overflow-hidden px-2">
-          <QredenceLogo className="h-5 w-auto shrink-0" />
+          <QredenceLogo className="size-4 shrink-0" />
           <span className="truncate text-sm font-medium text-sidebar-foreground">Qredence</span>
         </div>
       </SidebarHeader>
@@ -104,7 +106,7 @@ export function AppSidebar() {
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton disabled tooltip="Search sessions">
+                <SidebarMenuButton onClick={() => openCommandPalette()} tooltip="Search sessions">
                   <Search />
                   <span>Search sessions</span>
                 </SidebarMenuButton>

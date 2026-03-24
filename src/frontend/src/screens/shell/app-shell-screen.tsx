@@ -41,6 +41,7 @@ type OpenLoginEventDetail = {
 function ShellLayout() {
   const isMobile = useIsMobile();
   const [cmdOpen, setCmdOpen] = useState(false);
+  const { registerCommandPaletteHandlers } = useNavigationStore();
   const [loginOpen, setLoginOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
@@ -49,6 +50,10 @@ function ShellLayout() {
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
   const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+
+  useEffect(() => {
+    registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
+  }, [registerCommandPaletteHandlers]);
 
   useEffect(() => {
     const handleOpenLogin = (event: Event) => {
