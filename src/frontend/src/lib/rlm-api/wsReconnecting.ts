@@ -19,7 +19,8 @@ interface RetryState {
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_INITIAL_BACKOFF = 1000;
 const DEFAULT_MAX_BACKOFF = 30000;
-const DEFAULT_FIRST_FRAME_TIMEOUT = 15000;
+// Daytona sandbox cold-start can take 30-60s; use 60s to avoid premature timeout
+const DEFAULT_FIRST_FRAME_TIMEOUT = 60000;
 
 function calculateBackoff(attempt: number, initialBackoff: number, maxBackoff: number): number {
   const backoff = initialBackoff * Math.pow(2, attempt);
