@@ -49,7 +49,7 @@ When operating inside `src/frontend`, use `pnpm install --frozen-lockfile` and `
 
 Supported app surfaces:
 
-- `RLM Workspace`
+- `Workbench`
 - `Volumes`
 - `Settings`
 

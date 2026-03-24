@@ -122,7 +122,7 @@ REST calls use the standard `fetch` API with the base URL from
 
 | `runtime_mode` value | Product path | Agent backend |
 |----------------------|--------------|---------------|
-| `modal_chat` (default) | Standard RLM Workspace chat | DSPy-based Modal chat agent |
+| `modal_chat` (default) | Standard Workbench chat | DSPy-based Modal chat agent |
 | `daytona_pilot` | Experimental Daytona workbench | Shared ReAct + `dspy.RLM` agent with Daytona interpreter backend |
 
 ### Frontend → Backend flow

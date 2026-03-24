@@ -76,7 +76,7 @@ describe("ShellHeader typography", () => {
     const { container, root } = mountHeader();
     const heading = container.querySelector(".text-sm");
 
-    expect(heading?.textContent).toBe("RLM Workspace");
+    expect(heading?.textContent).toBe("Workbench");
     expect(heading?.className).toContain("text-sm");
     expect(heading?.className).toContain("font-medium");
     expect(heading?.className).toContain("truncate");

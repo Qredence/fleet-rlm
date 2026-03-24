@@ -14,7 +14,7 @@ works today.
 - `fleet-rlm` exposes one shared conversational runtime built on ReAct plus `dspy.RLM`.
 - `modal_chat` is the default product path.
 - `daytona_pilot` is the Daytona-backed variant of the same runtime, not a separate chat stack.
-- The live product surfaces are `RLM Workspace`, `Volumes`, and `Settings`.
+- The live product surfaces are `Workbench`, `Volumes`, and `Settings`.
 
 If the task is about the Daytona workbench path, also load `daytona-runtime`.
 

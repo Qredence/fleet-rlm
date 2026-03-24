@@ -28,8 +28,8 @@ interface RadioOptionCardProps {
  * (`radio-option-card-label` and `radio-option-card-description`), so
  * the look can be re-themed from CSS alone.
  *
- * Uses centralized spring physics from `motion-config.ts` and respects
- * `prefers-reduced-motion`.
+ * Uses Tailwind's motion-safe utilities so the selection indicator only
+ * animates when the user has not requested reduced motion.
  *
  * @example
  * ```tsx
@@ -73,7 +73,7 @@ function RadioOptionCard({
       >
         <div
           className={cn(
-            "w-2.5 h-2.5 rounded-full bg-foreground transition-transform duration-150",
+            "w-2.5 h-2.5 rounded-full bg-foreground motion-safe:transition-transform motion-safe:duration-150",
             selected ? "scale-100" : "scale-0",
           )}
         />

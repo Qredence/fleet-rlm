@@ -18,7 +18,7 @@
 - Expose an experimental Daytona pilot without forking the frontend or transport contract.
 - Ship both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
 
-The supported app surfaces are `RLM Workspace`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes now redirect to supported pages instead of remaining first-class product surfaces.
+The supported app surfaces are `Workbench`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes now redirect to supported pages instead of remaining first-class product surfaces.
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ uv run fleet web
 
 This starts the main product surface with:
 
-- `RLM Workspace` for chat and runtime execution
+- `Workbench` for chat and runtime execution
 - `Volumes` for runtime-backed file browsing
 - `Settings` for runtime configuration and diagnostics
 

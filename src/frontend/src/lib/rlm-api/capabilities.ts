@@ -5,7 +5,7 @@ import type { NavItem } from "@/stores/navigation-types";
 export const SUPPORTED_SECTIONS = new Set<NavItem>(["workspace", "settings", "volumes"]);
 
 export const UNSUPPORTED_SECTION_REASON =
-  "This surface is not part of the current RLM Workspace product contract.";
+  "This surface is not part of the current Workbench product contract.";
 
 export function isSectionSupported(nav: NavItem): boolean {
   return SUPPORTED_SECTIONS.has(nav);

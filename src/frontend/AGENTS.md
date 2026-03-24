@@ -17,7 +17,7 @@ Frontend source-of-truth files:
 
 ## Agent Priorities
 
-- Preserve the supported app surfaces: `RLM Workspace`, `Volumes`, and `Settings`.
+- Preserve the supported app surfaces: `Workbench`, `Volumes`, and `Settings`.
 - Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.

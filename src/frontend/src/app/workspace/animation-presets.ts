@@ -1,5 +1,5 @@
 /**
- * Shared animation presets for the RLM Workspace chat UI.
+ * Shared animation presets for the Workbench chat UI.
  *
  * `fadeUp` is the standard entrance (opacity + y-translate via spring).
  * `fadeUpReduced` is the prefers-reduced-motion fallback (opacity only, instant).
