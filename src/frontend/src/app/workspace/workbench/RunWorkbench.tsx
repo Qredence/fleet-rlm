@@ -497,7 +497,7 @@ export function RunWorkbench() {
             className="flex h-full min-h-0 flex-col"
             value={selectedTab}
             onValueChange={(value) =>
-              selectTab(value as "iterations" | "evidence" | "callbacks" | "prompts" | "final")
+              selectTab(value as "iterations" | "evidence" | "final")
             }
           >
             <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-3 no-scrollbar">
