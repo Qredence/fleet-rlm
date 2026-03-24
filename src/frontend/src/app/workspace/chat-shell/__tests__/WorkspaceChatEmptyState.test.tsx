@@ -38,7 +38,7 @@ describe("WorkspaceChatEmptyState", () => {
         hasHistory={true}
       />,
     );
-    expect(html).toContain("Agentic Fleet Session");
+    expect(html).toContain("What can I help you build?");
     expect(html).toContain("Architecture pass");
     expect(html).toContain("Document brief");
     expect(html).toContain("Python runner");
