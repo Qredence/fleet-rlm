@@ -5,7 +5,7 @@ function LoadingState() {
   return (
     <div data-slot="assistant-loading">
       <TextShimmer as="span" className="text-sm text-muted-foreground">
-        Generating code...
+        Thinking...
       </TextShimmer>
     </div>
   );

@@ -425,11 +425,9 @@ export function RunWorkbench() {
     attachments,
     activity,
     selectedIterationId,
-    selectedCallbackId,
     selectedTab,
     selectTab,
     selectIteration,
-    selectCallback,
     finalArtifact,
     summary,
     errorMessage,
@@ -437,8 +435,6 @@ export function RunWorkbench() {
 
   const selectedIteration =
     iterations.find((item) => item.id === selectedIterationId) ?? iterations.at(-1) ?? null;
-  const selectedCallback =
-    callbacks.find((item) => item.id === selectedCallbackId) ?? callbacks.at(-1) ?? null;
   const warningCount = summary?.warnings?.length ?? 0;
 
   return (
@@ -496,35 +492,40 @@ export function RunWorkbench() {
       </div>
 
       <Card className="flex min-h-0 flex-1 flex-col" data-testid="detail-tabs">
-        <CardContent className="min-h-0 flex-1 pb-4">
+        <CardContent className="min-h-0 flex-1 p-0">
           <Tabs
-            className="flex h-full min-h-0 flex-col gap-3"
+            className="flex h-full min-h-0 flex-col"
             value={selectedTab}
             onValueChange={(value) =>
               selectTab(value as "iterations" | "evidence" | "callbacks" | "prompts" | "final")
             }
           >
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-lg border border-border-subtle/70 bg-muted/40 p-1 sm:grid-cols-5">
-              <TabsTrigger value="iterations" className="px-3 py-2 text-xs sm:text-sm">
-                Iterations
-              </TabsTrigger>
-              <TabsTrigger value="evidence" className="px-3 py-2 text-xs sm:text-sm">
-                Evidence
-              </TabsTrigger>
-              <TabsTrigger value="callbacks" className="px-3 py-2 text-xs sm:text-sm">
-                Callbacks
-              </TabsTrigger>
-              <TabsTrigger value="prompts" className="px-3 py-2 text-xs sm:text-sm">
-                Prompts
-              </TabsTrigger>
-              <TabsTrigger value="final" className="px-3 py-2 text-xs sm:text-sm">
-                Final
-              </TabsTrigger>
-            </TabsList>
+            <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-3 no-scrollbar">
+              <TabsList className="inline-flex h-10 gap-0 rounded-none border-0 bg-transparent p-0">
+                <TabsTrigger
+                  value="iterations"
+                  className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  Iterations
+                </TabsTrigger>
+                <TabsTrigger
+                  value="evidence"
+                  className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  Evidence
+                </TabsTrigger>
+                <TabsTrigger
+                  value="final"
+                  className="rounded-none border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                >
+                  Final Output
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-            <TabsContent value="iterations" className="min-h-0 flex-1">
-              <ScrollArea className="h-full pr-2">
-                <div className="flex flex-col gap-4">
+            <TabsContent value="iterations" className="min-h-0 flex-1 mt-0">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-3 p-3">
                   {iterations.length > 0 ? (
                     <>
                       <div className="flex flex-col gap-3">
@@ -575,9 +576,9 @@ export function RunWorkbench() {
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="evidence" className="min-h-0 flex-1">
-              <ScrollArea className="h-full pr-2">
-                <div className="flex flex-col gap-4">
+            <TabsContent value="evidence" className="min-h-0 flex-1 mt-0">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-4 p-3">
                   {contextSources.length > 0 ? (
                     <section className="flex flex-col gap-3">
                       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -667,43 +668,11 @@ export function RunWorkbench() {
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="callbacks" className="min-h-0 flex-1">
-              <ScrollArea className="h-full pr-2">
-                <div className="flex flex-col gap-4">
-                  {callbacks.length > 0 ? (
-                    <>
-                      <div className="flex flex-col gap-3">
-                        {callbacks.map((callback) => (
-                          <CallbackRow
-                            key={callback.id}
-                            callback={callback}
-                            selected={selectedCallback?.id === callback.id}
-                            onSelect={() => selectCallback(callback.id)}
-                          />
-                        ))}
-                      </div>
-                      <CallbackDetail callback={selectedCallback} />
-                    </>
-                  ) : (
-                    <EmptyPanel
-                      title="No semantic callbacks yet"
-                      description="`llm_query(...)` and `llm_query_batched(...)` activity will appear here when the run delegates semantic work."
-                      icon={MessagesSquare}
-                    />
-                  )}
+            <TabsContent value="final" className="min-h-0 flex-1 mt-0">
+              <ScrollArea className="h-full">
+                <div className="p-3">
+                  <ArtifactPanel artifact={finalArtifact} />
                 </div>
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="prompts" className="min-h-0 flex-1">
-              <ScrollArea className="h-full pr-2">
-                <PromptHandleList handles={promptHandles} />
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="final" className="min-h-0 flex-1">
-              <ScrollArea className="h-full pr-2">
-                <ArtifactPanel artifact={finalArtifact} />
               </ScrollArea>
             </TabsContent>
           </Tabs>
