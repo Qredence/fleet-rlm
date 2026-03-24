@@ -1066,7 +1066,11 @@ li {
 
 [data-slot="icon-button"][data-variant="ghost"][data-active="true"]:hover,
 [data-slot="icon-button"][data-variant="ghost"][data-active="true"]:focus-visible {
-  background-color: color-mix(in srgb, var(--icon-button-active-bg) 70%, #0285ff 30%);
+  background-color: color-mix(
+    in srgb,
+    var(--icon-button-active-bg) 70%,
+    var(--color-background-info-solid) 30%
+  );
 }
 
 /* ── Accordion ──────────────────────────────────────────────────── */
