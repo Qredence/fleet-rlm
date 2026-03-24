@@ -329,8 +329,8 @@ export function WorkspaceScreen() {
                 <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
-                    {warningGuidance.map((msg, idx) => (
-                      <p key={idx}>{msg}</p>
+                    {warningGuidance.map((msg) => (
+                      <p key={msg}>{msg}</p>
                     ))}
                     <Button
                       variant="outline"
