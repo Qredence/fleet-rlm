@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RunWorkbench } from "@/app/workspace/workbench/RunWorkbench";
-import type { DetailTab, RunWorkbenchState } from "@/screens/workspace/use-workspace";
+import type {
+  DetailTab,
+  RunWorkbenchState,
+} from "@/screens/workspace/use-workspace";
 
 type MockedRunWorkbenchStore = RunWorkbenchState & {
   selectIteration: (iterationId: string | null) => void;
@@ -123,6 +126,8 @@ describe("RunWorkbench", () => {
     expect(html).toContain("Iterations");
     expect(html).toContain("Evidence");
     expect(html).toContain("Final Output");
+    expect(html).not.toContain(">Callbacks<");
+    expect(html).not.toContain(">Prompts<");
     expect(html).toContain("Inspect tracing architecture");
     expect(html).toContain("1 iterations");
     expect(html).toContain("1 callbacks");
