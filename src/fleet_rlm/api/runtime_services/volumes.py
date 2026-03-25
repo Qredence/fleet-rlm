@@ -49,6 +49,7 @@ def resolve_daytona_volume_name(
 
 
 def resolve_modal_volume_name(*, state: ServerState) -> str:
+    """Return the configured Modal volume name or raise if none is set."""
     volume_name = state.config.volume_name
     if not volume_name:
         raise HTTPException(
@@ -63,12 +64,14 @@ def resolve_volume_provider(
     state: ServerState,
     provider: VolumeProvider | None,
 ) -> VolumeProvider:
+    """Select the effective volume backend, honoring request overrides first."""
     if provider is not None:
         return provider
     return "daytona" if state.config.sandbox_provider == "daytona" else "modal"
 
 
 def normalize_volume_file_path(path: str) -> str:
+    """Normalize a requested file path and reject traversal attempts."""
     normalized_path = path if path.startswith("/") else f"/{path}"
     if ".." in PurePosixPath(normalized_path).parts:
         raise HTTPException(status_code=400, detail="Invalid file path.")
@@ -76,6 +79,7 @@ def normalize_volume_file_path(path: str) -> str:
 
 
 def normalize_volume_tree_path(root_path: str) -> str:
+    """Normalize a requested root path and reject traversal attempts."""
     normalized_path = root_path if root_path.startswith("/") else f"/{root_path}"
     normalized_path = normalized_path.rstrip("/") or "/"
     if ".." in PurePosixPath(normalized_path).parts:
@@ -84,6 +88,7 @@ def normalize_volume_tree_path(root_path: str) -> str:
 
 
 def raise_volume_file_error(exc: Exception) -> NoReturn:
+    """Convert provider-specific file read failures into stable HTTP errors."""
     message = str(exc).lower()
     if "no such file" in message or "not found" in message:
         raise HTTPException(status_code=404, detail="File not found.") from exc
@@ -158,6 +163,7 @@ async def load_volume_tree(
     root_path: str,
     max_depth: int,
 ) -> VolumeTreeResponse:
+    """Load a normalized runtime volume tree for the selected provider."""
     normalized_root_path = normalize_volume_tree_path(root_path)
     backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
     result = await _run_volume_operation(
@@ -179,6 +185,7 @@ async def load_volume_file_content(
     path: str,
     max_bytes: int,
 ) -> VolumeFileContentResponse:
+    """Load a text preview for a normalized runtime volume file path."""
     normalized_path = normalize_volume_file_path(path)
     backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
     result = await _run_volume_operation(

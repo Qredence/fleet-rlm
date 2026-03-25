@@ -251,6 +251,30 @@ def test_create_app_serves_spa_index_from_frontend_dist(
     assert logo.text == "<svg>logo</svg>"
 
 
+def test_create_app_returns_helpful_root_response_when_ui_assets_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api import main as server_main
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.main import create_app
+
+    monkeypatch.setattr(server_main, "_resolve_ui_dist_dir", lambda: None)
+
+    app = create_app(
+        config=ServerRuntimeConfig(
+            app_env="local",
+            database_required=False,
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/")
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"]
+    assert payload["hint"]
+
+
 def _fake_trace_feedback_trace(
     *,
     trace_id: str,

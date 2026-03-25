@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check dependency-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-check clean mlflow-server
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check dependency-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-artifacts release-check clean mlflow-server
 
 help:
 	@echo "Targets:"
@@ -26,6 +26,7 @@ help:
 	@echo "  make check             - Alias for quality-gate"
 	@echo "  make sync-ui           - Copy src/frontend/dist/ into src/fleet_rlm/ui/dist/"
 	@echo "  make build-ui          - Build the frontend and sync packaged UI assets"
+	@echo "  make release-artifacts - Build + verify publishable distributions with synced UI assets"
 	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5001"
 	@echo "  make clean             - Remove caches and local generated artifacts"
 	@echo "  make sync-scaffold     - Reminder that src/fleet_rlm/scaffold is curated, not auto-synced"
@@ -118,11 +119,13 @@ build-ui:
 	cd src/frontend && pnpm install --frozen-lockfile && pnpm run build
 	$(MAKE) sync-ui
 
-release-check: clean quality-gate security-check build-ui
+release-artifacts: build-ui
 	rm -rf dist build
 	uv build
 	uv run python scripts/validate_release.py wheel
 	uvx twine check dist/*
+
+release-check: clean quality-gate security-check release-artifacts
 
 clean:
 	@echo "Cleaning caches and local generated artifacts..."

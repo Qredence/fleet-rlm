@@ -8,9 +8,10 @@ Use the GitHub Actions workflow for a fully automated release:
 
 1. Go to **Actions** → **Release to PyPI** in the GitHub repository
 2. Click **Run workflow**
-3. Enter the version number (e.g., `0.1.0` or `v0.1.0`)
-4. Approve the TestPyPI environment deployment
-5. Once smoke tests pass, approve the PyPI environment deployment
+3. Finalize the `CHANGELOG.md` section for the version you are shipping
+4. Enter the version number (for this release, `0.4.99` or `v0.4.99`)
+5. Approve the TestPyPI environment deployment
+6. Once smoke tests pass, approve the PyPI environment deployment
 
 The workflow will:
 
@@ -20,6 +21,7 @@ The workflow will:
 - Upload to TestPyPI and run smoke tests
 - Upload to PyPI after approval
 - Create a GitHub release with the git tag
+- Build the GitHub release body from the matching `CHANGELOG.md` section
 
 ### Prerequisites for Automated Release
 
@@ -51,6 +53,18 @@ All commands below assume zsh and are run from the repository root.
 
 ## 1) Preflight
 
+For the single-command local path, run:
+
+```bash
+# from repo root
+make release-check
+```
+
+That target already runs the full validation lane, rebuilds and syncs packaged UI
+assets, builds the wheel/sdist, validates the packaged frontend, and runs `twine check`.
+
+If you need to run the phases manually instead of using `make release-check`:
+
 ```bash
 # from repo root
 uv run pytest
@@ -61,16 +75,15 @@ uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 uvx pip-audit
 uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
-```
 
-If the frontend app is present in your checkout, run its gate too:
-
-```bash
-# from repo root
 if [ -f src/frontend/package.json ]; then
   cd src/frontend
-  bun install --frozen-lockfile
-  bun run check
+  pnpm install --frozen-lockfile
+  pnpm run api:check
+  pnpm run type-check
+  pnpm run lint:robustness
+  pnpm run test:unit
+  pnpm run build
   cd ..
 fi
 ```
@@ -88,19 +101,20 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json
 
 ```bash
 # from repo root
-rm -rf dist build
-uv build
-uv run python scripts/validate_release.py wheel
-uvx twine check dist/*
+make release-artifacts
 ```
 
-`uv build` now runs frontend bundling automatically when `src/frontend` exists.
-In repository checkouts, ensure `bun` is installed for release builds.
+`make release-artifacts` is the canonical manual packaging path. It rebuilds the
+frontend with `pnpm`, syncs packaged UI assets into `src/fleet_rlm/ui/dist`,
+builds the wheel/sdist, validates wheel asset integrity, and runs `twine check`.
+In source checkouts, `uv build` also triggers the frontend packaging hook from
+`setup.py`, but `make release-artifacts` remains the explicit end-to-end manual
+path because it synchronizes assets and validates the resulting artifacts.
 
 Expected outputs:
 
-- `dist/fleet_rlm-0.4.94.tar.gz`
-- `dist/fleet_rlm-0.4.94-py3-none-any.whl`
+- `dist/fleet_rlm-0.4.99.tar.gz`
+- `dist/fleet_rlm-0.4.99-py3-none-any.whl`
 
 ## 3) Upload to TestPyPI
 
@@ -127,10 +141,24 @@ uv venv .venv-release-smoke
 uv pip install --python .venv-release-smoke/bin/python \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  fleet-rlm==0.4.94
+  fleet-rlm==0.4.99
 source .venv-release-smoke/bin/activate
-fleet-rlm --help
+python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
+SERVER_PID=$!
+trap 'kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
+for i in {1..30}; do
+  if curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-release-health.json; then
+    break
+  fi
+  sleep 2
+done
+curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-release-health.json
+curl -fsS http://127.0.0.1:8765/ >/tmp/fleet-release-root.html
+grep -qi "<!doctype html" /tmp/fleet-release-root.html
 deactivate
+trap - EXIT
+kill $SERVER_PID 2>/dev/null || true
+wait $SERVER_PID 2>/dev/null || true
 rm -rf .venv-release-smoke
 ```
 
@@ -153,18 +181,15 @@ uvx twine upload dist/*
 
 ## 6) Tag and document release
 
+Finalize `CHANGELOG.md` and any docs release-notes page before tagging or
+running the automated workflow. The GitHub release body is generated directly
+from the changelog section for the version being published.
+
 ```bash
 # from repo root
-git tag v0.4.94
-git push origin v0.4.94
+git tag v0.4.99
+git push origin v0.4.99
 ```
-
-Then update changelog/release notes with:
-
-- Version number
-- Date/time of release
-- Key changes included
-- Any known caveats
 
 ## Important rules
 

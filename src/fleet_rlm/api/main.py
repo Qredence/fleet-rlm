@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from fleet_rlm import __version__
@@ -85,7 +85,39 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         if index_path.exists():
             return FileResponse(index_path)
 
-        return {"error": "UI build not found. Run 'pnpm run build' in src/frontend."}
+        return JSONResponse(_ui_unavailable_payload(), status_code=503)
+
+
+def _ui_unavailable_payload() -> dict[str, str]:
+    """Return a source-aware hint when the web UI bundle is unavailable."""
+    repo_root = Path(__file__).resolve().parents[3]
+    frontend_root = repo_root / "src" / "frontend"
+
+    if (frontend_root / "package.json").exists():
+        return {
+            "error": "UI build not found.",
+            "hint": (
+                "Build the frontend with "
+                "'cd src/frontend && pnpm install --frozen-lockfile && pnpm run build' "
+                "and sync packaged UI assets with 'make build-ui' before rebuilding."
+            ),
+        }
+
+    return {
+        "error": "Packaged UI assets are missing from this installation.",
+        "hint": (
+            "Reinstall a wheel or sdist built with synced frontend assets, or use a "
+            "newer fleet-rlm release."
+        ),
+    }
+
+
+def _mount_ui_unavailable_root(app: FastAPI) -> None:
+    """Expose a helpful root response when the UI bundle is unavailable."""
+
+    @app.get("/", include_in_schema=False)
+    async def ui_unavailable_root():
+        return JSONResponse(_ui_unavailable_payload(), status_code=503)
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
@@ -128,6 +160,8 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     ui_dir = _resolve_ui_dist_dir()
     if ui_dir is not None:
         _mount_spa(app, ui_dir)
+    else:
+        _mount_ui_unavailable_root(app)
 
     return app
 

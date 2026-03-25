@@ -205,6 +205,14 @@ The canonical API contract lives at `openapi.yaml` in the repo root. The
 frontend keeps a local copy and a generated TypeScript client in sync via
 two npm scripts defined in `src/frontend/package.json`:
 
+When backend request/response shapes or OpenAPI-facing route/schema
+descriptions change, regenerate the root spec first:
+
+```bash
+# from repo root
+uv run python scripts/openapi_tools.py generate
+```
+
 ### `pnpm run api:sync`
 
 Runs two sub-steps:
@@ -217,8 +225,10 @@ Runs two sub-steps:
 ### `pnpm run api:check`
 
 Runs `api:sync` and then asserts that neither the spec copy nor the generated
-types have uncommitted changes (`git diff --exit-code`). This is used in CI
-to catch drift between the backend contract and the frontend client.
+types changed during the sync. The current implementation snapshots file
+contents before and after `api:sync` and fails if either tracked generated
+file differs. This is used in CI to catch drift between the backend contract
+and the frontend client.
 
 ### Workflow
 

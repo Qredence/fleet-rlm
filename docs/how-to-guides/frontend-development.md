@@ -1,541 +1,154 @@
 # Frontend Development
 
-This guide covers the frontend development workflow for Fleet-RLM. The frontend is a React + TypeScript application built with Vite, located in `src/frontend/`.
-
-> For the latest subsystem conventions, treat `src/frontend/AGENTS.md` as the source of truth for frontend tooling and validation commands.
+This guide documents the current frontend workflow for `fleet-rlm`. For the
+latest subsystem conventions, treat
+[`src/frontend/AGENTS.md`](../../src/frontend/AGENTS.md) as the source of truth.
 
 ## Quick Start
 
 ```bash
-# From repository root
+# from repo root
 cd src/frontend
-
-# Install dependencies
 pnpm install --frozen-lockfile
-
-# Start development server
 pnpm run dev
 ```
 
-The development server runs at `http://localhost:5173` with hot module replacement. It proxies API requests to the backend at `http://localhost:8000`.
+The development server runs at `http://localhost:5173` and proxies
+`/api/v1` and `/health` to the backend at `http://localhost:8000`.
 
-## Development Commands
+## Repo-Aligned Commands
 
-All commands run from `src/frontend/`:
+All commands below run from `src/frontend/`:
 
-| Command                  | Description                                                |
-| ------------------------ | ---------------------------------------------------------- |
-| `pnpm run dev`           | Start development server with HMR                          |
-| `pnpm run build`         | Production build                                           |
-| `pnpm run preview`       | Preview production build locally                           |
-| `pnpm run type-check`    | TypeScript type checking                                   |
-| `pnpm run lint`          | ESLint code linting                                        |
-| `pnpm run format`        | Format code with Prettier                                  |
-| `pnpm run format:check`  | Check formatting without changes                           |
-| `pnpm run test:unit`     | Run Vitest unit tests                                      |
-| `pnpm run test:watch`    | Run Vitest in watch mode                                   |
-| `pnpm run test:coverage` | Run Vitest with coverage report                            |
-| `pnpm run test:e2e`      | Run Playwright end-to-end tests                            |
-| `pnpm run check`         | Full quality gate (type-check + lint + test + build + e2e) |
+| Command | Description |
+| --- | --- |
+| `pnpm run dev` | Start the Vite+ development server |
+| `pnpm run build` | Build the production bundle |
+| `pnpm run preview` | Preview the production bundle locally |
+| `pnpm run type-check` | Run TypeScript type checks |
+| `pnpm run lint` | Run the frontend lint rules |
+| `pnpm run lint:robustness` | Run the repo-aligned frontend lint lane |
+| `pnpm run format` | Format frontend source files with Prettier |
+| `pnpm run format:check` | Check frontend formatting without writing changes |
+| `pnpm run test:unit` | Run Vitest unit tests |
+| `pnpm run test:watch` | Run Vitest in watch mode |
+| `pnpm run test:coverage` | Run Vitest with coverage output |
+| `pnpm run test:e2e` | Run Playwright end-to-end tests |
+| `pnpm run api:sync` | Copy the root OpenAPI spec and regenerate TS types |
+| `pnpm run api:check` | Fail if `api:sync` would change tracked generated files |
+| `pnpm run check` | Run type-check, lint, unit tests, build, and e2e |
 
-### Quality Gate
+## Current Source Layout
 
-The `pnpm run check` command runs the complete validation suite:
+Frontend source lives under `src/frontend/src/`.
 
-1. TypeScript type checking
-2. ESLint linting
-3. Vitest unit tests
-4. Production build
-5. Playwright E2E tests
+| Path | Purpose |
+| --- | --- |
+| `routes/` | File-based routes, redirects, auth pages, and `/404` handling |
+| `screens/` | Top-level product surfaces for workspace, volumes, settings, and shell |
+| `app/` | Behavior-heavy shell/workspace internals that should not live in route files |
+| `components/ui/` | Shared shadcn/Base UI primitives and thin local extensions |
+| `components/ai-elements/` | Transcript and chat-specific rendering primitives |
+| `lib/rlm-api/` | REST client, websocket client, config, and generated OpenAPI types |
+| `lib/workspace/` | Workspace-specific adapters, normalizers, and helper logic |
+| `stores/` | Shared Zustand state |
+| `styles/globals.css` | Tailwind v4 baseline tokens and app-wide styles |
 
-Run this before submitting a PR to catch issues early.
+## Product Surface Rules
 
-## Project Structure
+- Supported frontend surfaces are `/app/workspace`, `/app/volumes`, and
+  `/app/settings`.
+- Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and
+  `/app/analytics` routes should fall through to `/404`.
+- Thin route wrappers under `routes/` should render screen modules instead of
+  owning page logic.
+- `workspace`, `volumes`, and `settings` behavior should stay in `screens/`,
+  `app/`, and `lib/` rather than reintroducing the older `features/` layout.
 
-```text
-src/frontend/src/
-├── app/                    # Application shell and routing
-│   ├── layout/             # Layout components (DesktopShell, MobileShell)
-│   ├── pages/              # Route-level page components
-│   ├── providers/          # React context providers
-│   └── routes.ts           # Route definitions
-├── components/             # Shared UI components
-│   ├── ai-elements/        # AI chat interface components
-│   ├── chat/               # Chat input components
-│   ├── domain/             # Domain-specific components
-│   ├── shared/             # Reusable UI primitives
-│   └── ui/                 # shadcn/ui components
-├── features/               # Feature-based modules
-│   ├── artifacts/          # Code artifact display
-│   ├── rlm-workspace/      # Main chat workspace
-│   ├── settings/           # Settings dialog and panes
-│   ├── shell/              # Shell components (CommandPalette, UserMenu)
-│   └── volumes/            # Volume browser
-├── hooks/                  # Custom React hooks
-├── lib/                    # Utilities and API clients
-│   ├── auth/               # Authentication utilities
-│   ├── config/             # Configuration
-│   ├── data/               # Data types and mock data
-│   ├── perf/               # Performance utilities
-│   ├── rlm-api/            # Backend API client
-│   ├── telemetry/          # Analytics/telemetry
-│   └── utils/              # General utilities
-├── stores/                 # Zustand state stores
-├── styles/                 # Global styles
-└── test/                   # Test setup and utilities
-```
+## Runtime and API Contract Rules
 
-## Component Organization
+- `/api/v1/ws/chat` is transcript-first.
+- `/api/v1/ws/execution` is the canonical workbench stream.
+- Frontend workbench state should hydrate from
+  `execution_completed.summary`, not from Daytona-only `/ws/chat final`
+  payloads.
+- `modal_chat` is the default runtime mode.
+- `daytona_pilot` uses the same workspace shell but sends `repo_url`,
+  `repo_ref`, `context_paths`, and `batch_concurrency`.
 
-### Features (`features/`)
+## Environment
 
-Features are self-contained modules with their own components, hooks, and sometimes state. Each feature represents a distinct product area.
+Expected frontend environment:
 
-| Feature          | Purpose                                                 |
-| ---------------- | ------------------------------------------------------- |
-| `rlm-workspace/` | Main chat interface for DSPy.RLM runtime                |
-| `settings/`      | Runtime model configuration dialogs                     |
-| `shell/`         | Application shell components (CommandPalette, UserMenu) |
-| `artifacts/`     | Code and file artifact display                          |
-| `volumes/`       | Modal volume browser                                    |
+- `VITE_FLEET_API_URL=http://localhost:8000`
+- `VITE_FLEET_WORKSPACE_ID=default`
+- `VITE_FLEET_USER_ID=fleetwebapp-user`
+- `VITE_FLEET_TRACE=true`
 
-**Guidelines:**
+Optional overrides:
 
-- New product features belong in `features/`
-- Features should be self-contained with minimal cross-feature dependencies
-- Each feature can have its own `__tests__/` subdirectory for unit tests
+- `VITE_FLEET_WS_URL`
+- `VITE_ENTRA_CLIENT_ID`
+- `VITE_ENTRA_SCOPES`
+- `VITE_PUBLIC_POSTHOG_API_KEY`
+- `VITE_PUBLIC_POSTHOG_HOST`
 
-### Shared UI Components (`components/`)
+If `VITE_FLEET_WS_URL` is unset, the frontend derives websocket URLs for
+`/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
 
-#### `components/ui/` — shadcn/ui Primitives
+## OpenAPI Sync Workflow
 
-Radix UI primitives styled with Tailwind CSS. These are the building blocks for all UI.
+The canonical HTTP contract lives at `openapi.yaml` in the repo root.
 
-Key components:
-
-- `button.tsx`, `icon-button.tsx` — Button variants
-- `dialog.tsx`, `drawer.tsx`, `sheet.tsx` — Modal surfaces
-- `sidebar.tsx` — Sidebar navigation
-- `tabs.tsx`, `animated-tabs.tsx` — Tab navigation
-- `input.tsx`, `textarea.tsx` — Form inputs
-- `select.tsx`, `command.tsx` — Select and command menus
-- `scroll-area.tsx` — Scrollable containers
-
-**Guidelines:**
-
-- Keep `components/ui/` limited to primitives and thin wrappers
-- Do not add application-specific logic to UI primitives
-- Use `buttonVariants()` and similar variant functions for consistent styling
-
-#### `components/ai-elements/` — AI Chat Components
-
-Specialized UI for chat applications from the ai-elements library:
-
-| Component          | Purpose                                 |
-| ------------------ | --------------------------------------- |
-| `prompt-input.tsx` | Rich text input with attachment support |
-| `message.tsx`      | Chat message container                  |
-| `reasoning.tsx`    | Chain-of-thought display                |
-| `tool.tsx`         | Tool call display                       |
-| `code-block.tsx`   | Syntax-highlighted code blocks          |
-
-#### `components/shared/` — Application Shared Components
-
-Application-specific shared components that aren't generic primitives:
-
-| Component              | Purpose                               |
-| ---------------------- | ------------------------------------- |
-| `ErrorBoundary.tsx`    | React error boundary with fallback UI |
-| `BrandMark.tsx`        | Logo/brand mark                       |
-| `LargeTitleHeader.tsx` | Page header component                 |
-| `SkillMarkdown.tsx`    | Markdown renderer for documentation   |
-
-### When to Use Which Directory
-
-| Component Type                               | Location                  |
-| -------------------------------------------- | ------------------------- |
-| Generic UI primitive (button, input, dialog) | `components/ui/`          |
-| AI/chat-specific primitive                   | `components/ai-elements/` |
-| Reusable across multiple features            | `components/shared/`      |
-| Single-feature use case                      | `features/<feature>/`     |
-| Domain-specific (artifacts, files)           | `components/domain/`      |
-
-## TypeScript Conventions
-
-### Configuration
-
-TypeScript is configured in `tsconfig.app.json` with strict mode enabled:
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2023",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
-}
-```
-
-### Path Aliases
-
-Use the `@/*` alias for imports:
-
-```typescript
-// ✅ Preferred
-import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
-
-// ❌ Avoid relative paths for deep imports
-import { Button } from "../../../components/ui/button";
-```
-
-### Type Safety Features
-
-- **Strict mode**: All strict type checking enabled
-- **No unused variables**: Compiler warns on unused locals and parameters
-- **Unchecked indexed access**: Array/object access returns `T | undefined`
-- **No fallthrough**: Switch statement fallthrough is an error
-
-### Component Typing
-
-Use `React.forwardRef` for components that should forward refs:
-
-```typescript
-interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>, ButtonVariantProps {
-  asChild?: boolean;
-}
-
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    // Implementation
-  },
-);
-Button.displayName = "Button";
-```
-
-Use `React.ComponentProps` for extracting props from existing components:
-
-```typescript
-type DialogProps = React.ComponentProps<typeof Dialog>;
-```
-
-## State Management
-
-### Zustand Stores
-
-Global state uses Zustand stores located in `stores/`:
-
-| Store                 | Purpose                                  |
-| --------------------- | ---------------------------------------- |
-| `chatStore.ts`        | Active conversation state and streaming  |
-| `navigationStore.ts`  | Navigation, canvas, inspector state      |
-| `chatHistoryStore.ts` | LocalStorage-backed conversation history |
-| `themeStore.ts`       | Dark mode toggle                         |
-| `artifactStore.ts`    | Execution step tracking                  |
-
-**Guidelines:**
-
-- Use Zustand for ephemeral client state (UI state, streaming state)
-- Use TanStack Query for backend-backed server state
-- Keep stores focused and composable
-
-### React Hooks
-
-Custom hooks in `hooks/` provide reusable stateful logic:
-
-| Hook                  | Purpose                          |
-| --------------------- | -------------------------------- |
-| `useAuth.ts`          | Authentication state and actions |
-| `useAppNavigate.ts`   | Type-safe navigation             |
-| `useCodeMirror.ts`    | CodeMirror editor setup          |
-| `useFilesystem.ts`    | File system operations           |
-| `useIsMobile.ts`      | Responsive mobile detection      |
-| `useStickToBottom.ts` | Auto-scroll for chat lists       |
-
-## Testing
-
-### Unit Tests (Vitest)
-
-Vitest runs in jsdom environment for browser API simulation.
-
-**Test Location:**
-
-Tests are colocated with source files in `__tests__/` subdirectories:
-
-```text
-src/
-├── features/rlm-workspace/__tests__/
-│   ├── ChatMessageList.ai-elements.test.tsx
-│   ├── backendChatEventAdapter.test.ts
-│   └── chatDisplayItems.test.ts
-├── hooks/__tests__/
-│   └── useAppNavigate.test.ts
-└── stores/__tests__/
-    └── chatHistoryStore.test.ts
-```
-
-**Running Tests:**
+If backend route, schema, or OpenAPI-facing doc metadata changes, regenerate the
+root spec first:
 
 ```bash
-# Run all unit tests
-pnpm run test:unit
-
-# Watch mode for development
-pnpm run test:watch
-
-# With coverage
-pnpm run test:coverage
+# from repo root
+uv run python scripts/openapi_tools.py generate
 ```
 
-**Test Setup:**
-
-Global setup in `src/test/setup.ts` provides:
-
-- Web Storage mock (localStorage, sessionStorage)
-- `window.matchMedia` mock
-- `ResizeObserver` mock
-- `IntersectionObserver` mock
-
-**Coverage Thresholds:**
-
-| Metric     | Threshold |
-| ---------- | --------- |
-| Lines      | 60%       |
-| Functions  | 60%       |
-| Branches   | 50%       |
-| Statements | 60%       |
-
-**Writing Tests:**
-
-```typescript
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { Button } from "@/components/ui/button";
-
-describe("Button", () => {
-  it("renders with text", () => {
-    render(<Button>Click me</Button>);
-    expect(screen.getByRole("button")).toHaveTextContent("Click me");
-  });
-});
-```
-
-### End-to-End Tests (Playwright)
-
-Playwright runs against a production build for full browser testing.
-
-**Test Location:**
-
-E2E tests are in `tests/e2e/` at the frontend root.
-
-**Running Tests:**
+Then sync or verify the frontend artifacts:
 
 ```bash
-# Run E2E tests
-pnpm run test:e2e
-```
-
-**Configuration:**
-
-Playwright configuration in `playwright.config.ts`:
-
-- Runs against `http://127.0.0.1:4173`
-- Uses Chromium browser
-- Retries twice on CI
-- Captures traces, screenshots, and videos on failure
-
-### Test Anti-Patterns
-
-- **Don't** duplicate mock setup across test files — use `setup.ts`
-- **Don't** import test utilities from other test files — keep tests isolated
-- **Don't** skip tests without documenting why
-
-## API Integration
-
-### Backend API Client
-
-The backend API client is in `lib/rlm-api/`:
-
-```typescript
-import { apiClient } from "@/lib/rlm-api/client";
-import { wsClient } from "@/lib/rlm-api/wsClient";
-
-// HTTP requests
-const settings = await apiClient.get("/api/v1/runtime/settings");
-
-// WebSocket streaming
-wsClient.connect("/api/v1/ws/chat", {
-  onMessage: (frame) => {
-    /* handle frame */
-  },
-  onError: (error) => {
-    /* handle error */
-  },
-});
-```
-
-### OpenAPI Sync
-
-Keep TypeScript types in sync with the backend OpenAPI spec:
-
-```bash
-# Sync spec snapshot from backend
-pnpm run api:sync-spec
-
-# Generate TypeScript types
-pnpm run api:types
-
-# Full sync
+# from src/frontend
 pnpm run api:sync
-
-# Check for drift (CI gate)
 pnpm run api:check
 ```
 
-Generated types are in `src/lib/rlm-api/generated/openapi.ts`. Do not edit this file manually.
+Generated files:
 
-## Styling
+- `openapi/fleet-rlm.openapi.yaml`
+- `src/lib/rlm-api/generated/openapi.ts`
 
-### Tailwind CSS
+Do not edit generated files manually.
 
-The project uses Tailwind CSS v4 with the Vite plugin. Global styles are in `styles/`.
+## React and UI Conventions
 
-### Class Name Utility
+- React 19 refs should use direct ref passing instead of introducing
+  `forwardRef` by default.
+- Prefer the shared shadcn/Base UI baseline over one-off wrapper components or
+  parallel token systems.
+- Keep global theme primitives in `src/styles/globals.css`.
+- Keep `@/lib/utils` as the canonical `cn()` import path.
 
-Use the `cn()` utility for conditional class names:
+## Validation
 
-```typescript
-import { cn } from "@/lib/utils/cn";
+For the repo-aligned frontend gate:
 
-<div className={cn(
-  "base-class",
-  condition && "conditional-class",
-  className
-)} />
+```bash
+# from src/frontend
+pnpm install --frozen-lockfile
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
 ```
 
-### Component Variants
+For the broader repo gate:
 
-Use `class-variance-authority` (CVA) for component variants:
-
-```typescript
-import { cva, type VariantProps } from "class-variance-authority";
-
-const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-md",
-  {
-    variants: {
-      variant: {
-        default: "bg-primary text-primary-foreground",
-        outline: "border border-input bg-background",
-        ghost: "hover:bg-accent",
-      },
-      size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
-  },
-);
-
-type ButtonVariantProps = VariantProps<typeof buttonVariants>;
+```bash
+# from repo root
+make quality-gate
 ```
-
-## Environment Variables
-
-Configure in `.env` (see `.env.example`):
-
-| Variable                   | Purpose                       |
-| -------------------------- | ----------------------------- |
-| `VITE_FLEET_API_URL`       | Backend API base URL          |
-| `VITE_FLEET_WS_URL`        | WebSocket URL                 |
-| `VITE_FLEET_WORKSPACE_ID`  | Workspace identifier          |
-| `VITE_FLEET_USER_ID`       | User identifier               |
-| `VITE_FLEET_TRACE`         | Enable tracing                |
-| `VITE_ENTRA_CLIENT_ID`     | Microsoft Entra client ID     |
-| `VITE_ENTRA_AUTHORITY`     | Microsoft Entra authority URL |
-| `VITE_ENTRA_SCOPES`        | OAuth scopes                  |
-| `VITE_ENTRA_REDIRECT_PATH` | OAuth redirect path           |
-
-## Common Workflows
-
-### Adding a New Component
-
-1. Determine the correct location:
-   - Generic primitive → `components/ui/`
-   - Feature-specific → `features/<feature>/`
-   - Shared across features → `components/shared/`
-
-2. Create the component with TypeScript types:
-
-   ```typescript
-   // MyComponent.tsx
-   import * as React from "react";
-   import { cn } from "@/lib/utils/cn";
-
-   interface MyComponentProps {
-     className?: string;
-   }
-
-   export function MyComponent({ className }: MyComponentProps) {
-     return <div className={cn("base", className)} />;
-   }
-   ```
-
-3. Add tests in `__tests__/MyComponent.test.tsx`
-
-4. Export from the appropriate barrel file if needed
-
-### Adding a New Store
-
-1. Create `stores/myStore.ts`:
-
-   ```typescript
-   import { create } from "zustand";
-
-   interface MyState {
-     value: string;
-     setValue: (value: string) => void;
-   }
-
-   export const useMyStore = create<MyState>((set) => ({
-     value: "",
-     setValue: (value) => set({ value }),
-   }));
-   ```
-
-2. Add tests in `stores/__tests__/myStore.test.ts`
-
-### Adding a New API Endpoint
-
-1. Add endpoint method to `lib/rlm-api/client.ts` or create a new module
-
-2. Update OpenAPI types:
-
-   ```bash
-   pnpm run api:sync
-   ```
-
-3. Use TanStack Query for data fetching in components
-
-## Related Documentation
-
-- [Developer Setup Guide](developer-setup.md) — Setting up a local development environment
-- [Testing Strategy](testing-strategy.md) — Complete testing documentation
-- [Frontend Architecture](../reference/frontend-architecture.md) — Detailed component architecture
-- [AGENTS.md](../../src/frontend/AGENTS.md) — Frontend-specific conventions and guidelines

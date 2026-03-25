@@ -84,7 +84,25 @@ def _assert_feedback_access(
         )
 
 
-@router.post("/feedback", response_model=TraceFeedbackResponse)
+@router.post(
+    "/feedback",
+    response_model=TraceFeedbackResponse,
+    responses={
+        400: {
+            "description": "The feedback request did not include a valid trace identifier."
+        },
+        401: {
+            "description": "Authentication is required or the provided token is invalid."
+        },
+        403: {
+            "description": "The authenticated user is not allowed to annotate this trace."
+        },
+        404: {"description": "No MLflow trace matched the provided identifier."},
+        503: {
+            "description": "MLflow feedback services are unavailable or misconfigured."
+        },
+    },
+)
 async def create_trace_feedback(
     request: TraceFeedbackRequest,
     identity: HTTPIdentityDep,

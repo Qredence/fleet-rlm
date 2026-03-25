@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useEffect } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import {
   Conversation,
   ConversationContent,
@@ -32,10 +32,6 @@ interface WorkspaceMessageListProps {
   onSuggestionClick: (text: string) => void;
   onResolveHitl: (msgId: string, label: string) => void;
   onResolveClarification: (msgId: string, answer: string) => void;
-  showHistory?: boolean;
-  onToggleHistory?: () => void;
-  hasHistory?: boolean;
-  historyPanel?: ReactNode;
 }
 
 function renderAssistantTurn(
@@ -61,10 +57,6 @@ export function WorkspaceMessageList({
   onSuggestionClick,
   onResolveHitl,
   onResolveClarification,
-  showHistory,
-  onToggleHistory,
-  hasHistory,
-  historyPanel,
 }: WorkspaceMessageListProps) {
   const isCanvasOpen = useIsCanvasOpen();
   const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
@@ -110,17 +102,9 @@ export function WorkspaceMessageList({
       >
         {messages.length === 0 ? (
           <motion.div {...preset}>
-            <WorkspaceChatEmptyState
-              isMobile={isMobile}
-              onSuggestionClick={onSuggestionClick}
-              showHistory={showHistory}
-              onToggleHistory={onToggleHistory}
-              hasHistory={hasHistory}
-            />
+            <WorkspaceChatEmptyState isMobile={isMobile} onSuggestionClick={onSuggestionClick} />
           </motion.div>
         ) : null}
-
-        {messages.length === 0 ? <AnimatePresence>{historyPanel}</AnimatePresence> : null}
 
         {messages.length > 0 ? (
           <div className="mt-auto flex flex-col gap-4">

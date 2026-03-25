@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -9,7 +9,6 @@ import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatu
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
-import { WorkspaceSidebar } from "@/app/workspace/workspace-sidebar";
 import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import {
   useChatHistoryStore,
@@ -34,7 +33,7 @@ import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
  *
  * Conversation history is managed by `useChatHistoryStore` (localStorage-backed).
  * Auto-saves the current conversation when the session revision changes (new session),
- * and allows loading past conversations from the welcome state.
+ * and allows loading past conversations from the shell sidebar.
  */
 export function WorkspaceScreen() {
   const isMobile = useIsMobile();
@@ -137,20 +136,10 @@ export function WorkspaceScreen() {
     sessionRevision,
     requestedConversationId,
     clearRequestedConversation,
-    requestConversationLoad,
   } = useWorkspaceUiStore();
 
   // Chat history
-  const {
-    conversations,
-    saveConversation,
-    loadConversation: loadConv,
-    deleteConversation,
-    clearHistory,
-  } = useChatHistoryStore();
-
-  // ── History panel toggle ─────────────────────────────────────────
-  const [showHistory, setShowHistory] = useState(false);
+  const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
 
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
@@ -167,8 +156,6 @@ export function WorkspaceScreen() {
   }, [messages, phase, turnArtifactsByMessageId]);
 
   useEffect(() => {
-    let historyResetTimer: ReturnType<typeof setTimeout> | null = null;
-
     if (prevSessionRevisionRef.current !== sessionRevision) {
       // Save the old conversation (if it had messages)
       if (messagesRef.current.length > 0) {
@@ -184,12 +171,7 @@ export function WorkspaceScreen() {
         });
       }
       prevSessionRevisionRef.current = sessionRevision;
-      historyResetTimer = setTimeout(() => setShowHistory(false), 0);
     }
-
-    return () => {
-      if (historyResetTimer) clearTimeout(historyResetTimer);
-    };
   }, [sessionRevision, saveConversation, telemetry]);
 
   useEffect(() => {
@@ -207,7 +189,6 @@ export function WorkspaceScreen() {
 
     loadConversation(conversation);
     clearRequestedConversation();
-    setShowHistory(false);
   }, [
     clearRequestedConversation,
     loadConv,
@@ -215,22 +196,6 @@ export function WorkspaceScreen() {
     requestedConversationId,
     saveConversation,
   ]);
-
-  const handleSelectConversation = useCallback(
-    (id: string) => {
-      requestConversationLoad(id);
-      setShowHistory(false);
-    },
-    [requestConversationLoad],
-  );
-
-  const handleToggleHistory = useCallback(() => {
-    setShowHistory((prev) => !prev);
-  }, []);
-
-  const handleCloseHistory = useCallback(() => {
-    setShowHistory(false);
-  }, []);
 
   const handleOpenRuntimeSettings = useCallback(() => {
     const wasHandledByDialog = requestSettingsDialogOpen({
@@ -297,20 +262,6 @@ export function WorkspaceScreen() {
           onSuggestionClick={setInputValue}
           onResolveHitl={resolveHitl}
           onResolveClarification={resolveClarification}
-          showHistory={showHistory}
-          onToggleHistory={handleToggleHistory}
-          hasHistory={conversations.length > 0}
-          historyPanel={
-            showHistory ? (
-              <WorkspaceSidebar
-                conversations={conversations}
-                onSelect={handleSelectConversation}
-                onDelete={deleteConversation}
-                onClearAll={clearHistory}
-                onClose={handleCloseHistory}
-              />
-            ) : null
-          }
         />
       </div>
 

@@ -38,6 +38,7 @@ Canonical commands:
 - `pnpm run build`
 - `pnpm run type-check`
 - `pnpm run lint`
+- `pnpm run lint:robustness`
 - `pnpm run test:unit`
 - `pnpm run test:watch`
 - `pnpm run test:coverage`
@@ -124,7 +125,7 @@ Expected frontend environment:
 
 Optional frontend environment:
 
-- `VITE_FLEET_WS_URL`
+- `VITE_FLEET_WS_URL` (optional explicit override; when unset, websocket URLs are derived from `VITE_FLEET_API_URL`)
 - `VITE_ENTRA_CLIENT_ID`
 - `VITE_ENTRA_SCOPES`
 - `VITE_PUBLIC_POSTHOG_API_KEY`
@@ -136,6 +137,7 @@ Backend startup for frontend work:
 
 OpenAPI sync:
 
+- If backend route/schema contract metadata changed, regenerate the root spec first with `uv run python scripts/openapi_tools.py generate`
 - `pnpm run api:sync` copies the root spec and regenerates frontend types
 - `pnpm run api:check` reruns sync and fails only if that sync changes the frontend OpenAPI snapshot or generated types
 - If `api:check` produces formatting-only diffs in `openapi/fleet-rlm.openapi.yaml` or `src/lib/rlm-api/generated/openapi.ts`, keep those sync artifacts in the same change rather than hand-editing generated output
@@ -154,7 +156,7 @@ Fast frontend confidence:
 - `pnpm install --frozen-lockfile`
 - `pnpm run api:check`
 - `pnpm run type-check`
-- `pnpm run lint`
+- `pnpm run lint:robustness`
 - `pnpm run test:unit`
 - `pnpm run build`
 

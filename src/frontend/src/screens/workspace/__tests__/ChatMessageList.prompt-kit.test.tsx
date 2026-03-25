@@ -16,9 +16,6 @@ function renderChatMessageList(messages: ChatMessage[]) {
       onSuggestionClick={() => {}}
       onResolveHitl={() => {}}
       onResolveClarification={() => {}}
-      showHistory={false}
-      hasHistory={false}
-      historyPanel={null}
     />,
   );
 }
@@ -37,9 +34,6 @@ function mountChatMessageList(messages: ChatMessage[]) {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
   });
@@ -789,9 +783,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -861,9 +852,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -958,9 +946,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1026,9 +1011,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1125,9 +1107,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1170,9 +1149,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1212,9 +1188,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1245,9 +1218,6 @@ describe("WorkspaceMessageList (prompt-kit render parts)", () => {
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 

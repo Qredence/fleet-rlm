@@ -39,17 +39,69 @@ router = APIRouter(
     dependencies=[Depends(require_http_identity)],
 )
 
+AUTH_ERROR_RESPONSES = {
+    401: {
+        "description": "Authentication is required or the provided token is invalid."
+    },
+    503: {
+        "description": "Runtime services are unavailable because server startup is incomplete."
+    },
+}
 
-@router.get("/settings", response_model=RuntimeSettingsSnapshot)
+SETTINGS_WRITE_RESPONSES = {
+    **AUTH_ERROR_RESPONSES,
+    400: {"description": "The supplied runtime setting values failed validation."},
+    403: {"description": "Runtime settings can only be updated when APP_ENV=local."},
+}
+
+VOLUME_TREE_RESPONSES = {
+    **AUTH_ERROR_RESPONSES,
+    400: {"description": "The requested root path is invalid."},
+    422: {"description": "One or more volume query parameters failed validation."},
+    502: {
+        "description": "The runtime volume provider failed to list the requested path."
+    },
+    504: {
+        "description": "Volume listing timed out before the backend returned a result."
+    },
+}
+
+VOLUME_FILE_RESPONSES = {
+    **AUTH_ERROR_RESPONSES,
+    400: {
+        "description": "The requested file path is invalid or points to a directory."
+    },
+    404: {"description": "The requested runtime volume file does not exist."},
+    422: {"description": "One or more volume query parameters failed validation."},
+    502: {
+        "description": "The runtime volume provider failed to read the requested file."
+    },
+    504: {
+        "description": "Volume file reading timed out before the backend returned a result."
+    },
+}
+
+
+@router.get(
+    "/settings",
+    response_model=RuntimeSettingsSnapshot,
+    responses=AUTH_ERROR_RESPONSES,
+)
 async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
+    """Return the effective runtime settings snapshot used by the local server."""
     return json_model_response(build_runtime_settings_snapshot(state=state))
 
 
-@router.patch("/settings", response_model=RuntimeSettingsUpdateResponse)
+@router.patch(
+    "/settings",
+    response_model=RuntimeSettingsUpdateResponse,
+    responses=SETTINGS_WRITE_RESPONSES,
+)
 async def patch_runtime_settings(
     state: ServerStateDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> JSONResponse:
+    """Persist allowed runtime setting changes and hot-apply them in-process."""
     return json_model_response(
         await apply_runtime_settings_patch(
             state=state,
@@ -60,10 +112,15 @@ async def patch_runtime_settings(
     )
 
 
-@router.post("/tests/modal", response_model=RuntimeConnectivityTestResponse)
+@router.post(
+    "/tests/modal",
+    response_model=RuntimeConnectivityTestResponse,
+    responses=AUTH_ERROR_RESPONSES,
+)
 async def test_modal_connection(
     state: ServerStateDep,
 ) -> JSONResponse:
+    """Run the Modal preflight and smoke test used by the Settings diagnostics UI."""
     return json_model_response(
         await run_modal_connection_test(
             state=state,
@@ -72,8 +129,13 @@ async def test_modal_connection(
     )
 
 
-@router.post("/tests/lm", response_model=RuntimeConnectivityTestResponse)
+@router.post(
+    "/tests/lm",
+    response_model=RuntimeConnectivityTestResponse,
+    responses=AUTH_ERROR_RESPONSES,
+)
 async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
+    """Verify that the planner and delegate language-model configuration can load."""
     return json_model_response(
         await run_lm_connection_test(
             state=state,
@@ -83,13 +145,23 @@ async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
     )
 
 
-@router.post("/tests/daytona", response_model=RuntimeConnectivityTestResponse)
+@router.post(
+    "/tests/daytona",
+    response_model=RuntimeConnectivityTestResponse,
+    responses=AUTH_ERROR_RESPONSES,
+)
 async def test_daytona_connection(state: ServerStateDep) -> JSONResponse:
+    """Run the Daytona preflight and connectivity check exposed in runtime diagnostics."""
     return json_model_response(await run_daytona_connection_test(state=state))
 
 
-@router.get("/status", response_model=RuntimeStatusResponse)
+@router.get(
+    "/status",
+    response_model=RuntimeStatusResponse,
+    responses=AUTH_ERROR_RESPONSES,
+)
 async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
+    """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
     return json_model_response(
         build_runtime_status_response(
             state=state,
@@ -98,14 +170,34 @@ async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
     )
 
 
-@router.get("/volume/tree", response_model=VolumeTreeResponse)
+@router.get(
+    "/volume/tree",
+    response_model=VolumeTreeResponse,
+    responses=VOLUME_TREE_RESPONSES,
+)
 async def get_volume_tree(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
-    root_path: Annotated[str, Query()] = "/",
-    max_depth: Annotated[int, Query(ge=1, le=10)] = 3,
-    provider: Annotated[VolumeProvider | None, Query()] = None,
+    root_path: Annotated[
+        str,
+        Query(description="Directory path to list within the selected runtime volume."),
+    ] = "/",
+    max_depth: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=10,
+            description="Maximum directory depth to traverse while building the file tree.",
+        ),
+    ] = 3,
+    provider: Annotated[
+        VolumeProvider | None,
+        Query(
+            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
+        ),
+    ] = None,
 ) -> JSONResponse:
+    """List the runtime volume tree for the active workspace and provider."""
     return json_model_response(
         await load_volume_tree(
             state=state,
@@ -117,14 +209,37 @@ async def get_volume_tree(
     )
 
 
-@router.get("/volume/file", response_model=VolumeFileContentResponse)
+@router.get(
+    "/volume/file",
+    response_model=VolumeFileContentResponse,
+    responses=VOLUME_FILE_RESPONSES,
+)
 async def get_volume_file_content(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
-    path: Annotated[str, Query(min_length=1)],
-    max_bytes: Annotated[int, Query(ge=1, le=1_000_000)] = 200_000,
-    provider: Annotated[VolumeProvider | None, Query()] = None,
+    path: Annotated[
+        str,
+        Query(
+            min_length=1,
+            description="Absolute or volume-relative file path to preview from the runtime volume.",
+        ),
+    ],
+    max_bytes: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1_000_000,
+            description="Maximum number of bytes of text content to return in the preview response.",
+        ),
+    ] = 200_000,
+    provider: Annotated[
+        VolumeProvider | None,
+        Query(
+            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
+        ),
+    ] = None,
 ) -> JSONResponse:
+    """Read a text preview for a single file from the runtime volume."""
     return json_model_response(
         await load_volume_file_content(
             state=state,

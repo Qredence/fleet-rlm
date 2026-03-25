@@ -68,7 +68,7 @@ jobs:
       - name: Security checks
         run: |
           uvx pip-audit
-          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
       - name: Lint with Ruff
         run: |
@@ -76,7 +76,7 @@ jobs:
           uv run ruff format --check src tests
 
       - name: Type-check with ty
-        run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+        run: uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 
       - name: Run tests
         env:
@@ -100,15 +100,11 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: "src/frontend/pnpm-lock.yaml"
 
-      - name: Install Vite+ CLI
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: npm install -g vite-plus@0.1.11
-
       - name: Frontend install
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          vp install
+          pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
@@ -207,7 +203,6 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     needs: [build, check-pypi-availability]
-    continue-on-error: true
     environment:
       name: testpypi
       url: https://test.pypi.org/project/fleet-rlm/
@@ -228,8 +223,6 @@ jobs:
     name: Smoke Test from TestPyPI
     runs-on: ubuntu-latest
     needs: [publish-testpypi, preflight]
-    continue-on-error: true
-    if: success() || failure()
     steps:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -262,20 +255,68 @@ jobs:
           echo "❌ Failed to install after 3 attempts"
           exit 1
 
-      - name: Test CLI availability
-        run: |
-          fleet-rlm --help
-          echo "✅ CLI installed and accessible"
-
       - name: Test Python import
         run: |
           python -c "import fleet_rlm; print(f'✅ Package version: {fleet_rlm.__version__}')"
+
+      - name: Smoke test installed API and packaged UI
+        run: |
+          SERVER_LOG=$(mktemp)
+          ROOT_HEADERS=$(mktemp)
+          ROOT_BODY=$(mktemp)
+
+          python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
+          SERVER_PID=$!
+
+          cleanup() {
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-health.json; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-health.json || {
+            cat "$SERVER_LOG"
+            exit 1
+          }
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("/tmp/fleet-health.json").read_text(encoding="utf-8"))
+          assert payload["ok"] is True
+          assert payload["version"]
+          print("✅ /health is reachable")
+          PY
+
+          curl -fsS -D "$ROOT_HEADERS" http://127.0.0.1:8765/ -o "$ROOT_BODY" || {
+            cat "$SERVER_LOG"
+            exit 1
+          }
+
+          grep -qi "^content-type: text/html" "$ROOT_HEADERS" || {
+            cat "$ROOT_HEADERS"
+            cat "$ROOT_BODY"
+            exit 1
+          }
+          grep -qi "<!doctype html" "$ROOT_BODY" || {
+            cat "$ROOT_BODY"
+            exit 1
+          }
+          echo "✅ Packaged UI is served from the installed distribution"
 
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [build, smoke-test-testpypi]
-    if: always() && needs.build.result == 'success'
+    if: ${{ needs.build.result == 'success' && needs.smoke-test-testpypi.result == 'success' }}
     environment:
       name: pypi
       url: https://pypi.org/project/fleet-rlm/
@@ -293,6 +334,7 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [publish-pypi, preflight]
+    if: ${{ needs.publish-pypi.result == 'success' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

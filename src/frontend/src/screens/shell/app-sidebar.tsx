@@ -1,5 +1,13 @@
-import { type MouseEvent } from "react";
-import { Database, LogIn, MessageCircle, Plus, Search, Settings } from "lucide-react";
+import { type MouseEvent, useMemo } from "react";
+import {
+  Clock3,
+  Database,
+  LogIn,
+  MessageCircle,
+  Plus,
+  Search,
+  Settings,
+} from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useNavigationStore } from "@/stores/navigationStore";
 
@@ -9,6 +17,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -21,9 +30,67 @@ import {
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import {
+  type Conversation,
   useWorkspaceShellActions,
   useWorkspaceShellHistory,
 } from "@/screens/workspace/workspace-shell-contract";
+
+type TimeGroup = "Today" | "Yesterday" | "This Week" | "Older";
+
+function relativeTime(isoDate: string): string {
+  const now = Date.now();
+  const then = new Date(isoDate).getTime();
+  const diff = now - then;
+
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return `${weeks}w ago`;
+
+  return new Date(isoDate).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function getTimeGroup(isoDate: string): TimeGroup {
+  const now = new Date();
+  const then = new Date(isoDate);
+  const diffDays = Math.floor((now.getTime() - then.getTime()) / 86_400_000);
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return "This Week";
+  return "Older";
+}
+
+function groupConversations(
+  conversations: Conversation[],
+): Array<{ group: TimeGroup; items: Conversation[] }> {
+  const order: TimeGroup[] = ["Today", "Yesterday", "This Week", "Older"];
+  const grouped = new Map<TimeGroup, Conversation[]>();
+
+  for (const conversation of conversations) {
+    const group = getTimeGroup(conversation.updatedAt);
+    if (!grouped.has(group)) {
+      grouped.set(group, []);
+    }
+    grouped.get(group)?.push(conversation);
+  }
+
+  return order
+    .filter((group) => grouped.has(group))
+    .map((group) => ({ group, items: grouped.get(group) ?? [] }));
+}
 
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
@@ -34,6 +101,10 @@ export function AppSidebar() {
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
+  const groupedConversations = useMemo(
+    () => groupConversations(conversations),
+    [conversations],
+  );
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
     const wasHandledByDialog = requestSettingsDialogOpen({
@@ -66,15 +137,22 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border/80">
+    <Sidebar variant="floating" collapsible="icon" className="border-0">
       <SidebarHeader className="gap-3 px-3 py-3">
         <div className="flex items-center gap-2 overflow-hidden px-2">
           <QredenceLogo className="size-4 shrink-0" />
-          <span className="truncate text-sm font-medium text-sidebar-foreground">Qredence</span>
+          <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+            <span className="block truncate text-sm font-medium text-sidebar-foreground">
+              Qredence
+            </span>
+            <span className="block truncate text-xs text-sidebar-foreground/65">
+              Agentic workbench
+            </span>
+          </div>
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="overflow-hidden">
         <SidebarGroup className="pt-0">
           <SidebarGroupContent>
             <SidebarMenu>
@@ -116,30 +194,62 @@ export function AppSidebar() {
 
         <SidebarSeparator />
 
-        <SidebarGroup className="min-h-0 flex-1">
-          <SidebarGroupLabel>Sessions</SidebarGroupLabel>
-          <SidebarGroupContent className="min-h-0">
-            <SidebarMenu className="gap-1">
-              {conversations.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-sidebar-border/80 px-3 py-3 text-xs text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
-                  Start a new session to build your recent history.
-                </div>
-              ) : (
-                conversations.map((session) => (
-                  <SidebarMenuItem key={session.id}>
-                    <SidebarMenuButton
-                      onClick={() => handleOpenConversation(session.id)}
-                      tooltip={session.title}
-                      className="h-auto py-2"
-                    >
-                      <span className="truncate text-sm text-sidebar-foreground">
-                        {session.title}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))
-              )}
-            </SidebarMenu>
+        <SidebarGroup className="min-h-0 flex-1 gap-2 overflow-hidden">
+          <SidebarGroupLabel>Recent Sessions</SidebarGroupLabel>
+          <SidebarGroupAction
+            aria-label="Start a new session"
+            title="Start a new session"
+            onClick={handleNewSession}
+          >
+            <Plus />
+          </SidebarGroupAction>
+          <SidebarGroupContent className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-4 bg-linear-to-b from-sidebar to-transparent group-data-[collapsible=icon]:hidden" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-5 bg-linear-to-t from-sidebar via-sidebar/95 to-transparent group-data-[collapsible=icon]:hidden" />
+            <div className="no-scrollbar flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain pr-1">
+              <div className="px-2 pb-2 text-xs leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+                Jump back into saved work from the same left rail you use for navigation.
+              </div>
+              <SidebarMenu className="gap-1.5 pb-2">
+                {conversations.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-sidebar-border/80 px-3 py-3 text-sm leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+                    <div className="font-medium text-sidebar-foreground">No recent sessions yet</div>
+                    <div className="mt-1">
+                      Start a new session and it will appear here for quick return.
+                    </div>
+                  </div>
+                ) : (
+                  groupedConversations.map(({ group, items }) => (
+                    <li key={group} className="list-none">
+                      <div className="px-2 pt-1 pb-1 text-[0.65rem] font-medium uppercase tracking-[0.14em] text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden">
+                        {group}
+                      </div>
+                      <SidebarMenu className="gap-1">
+                        {items.map((session) => (
+                          <SidebarMenuItem key={session.id}>
+                            <SidebarMenuButton
+                              onClick={() => handleOpenConversation(session.id)}
+                              tooltip={session.title}
+                              className="h-auto min-h-12 items-start rounded-xl px-2.5 py-2.5"
+                            >
+                              <Clock3 className="mt-0.5 size-4 shrink-0 text-sidebar-foreground/70" />
+                              <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+                                <div className="truncate text-sm font-medium text-sidebar-foreground">
+                                  {session.title}
+                                </div>
+                                <div className="mt-1 truncate text-xs text-sidebar-foreground/60">
+                                  {relativeTime(session.updatedAt)}
+                                </div>
+                              </div>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        ))}
+                      </SidebarMenu>
+                    </li>
+                  ))
+                )}
+              </SidebarMenu>
+            </div>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

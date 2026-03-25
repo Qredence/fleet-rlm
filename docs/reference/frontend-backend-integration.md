@@ -273,6 +273,7 @@ From repo root:
 
 ```bash
 uv run fleet-rlm serve-api --port 8000
+uv run python scripts/openapi_tools.py generate
 rg -n "^  /" openapi.yaml
 rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
 ```
