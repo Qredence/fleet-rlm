@@ -1,4 +1,4 @@
-import { FileQuestion, MessagesSquare, SearchSlash, TriangleAlert } from "lucide-react";
+import { FileQuestion, SearchSlash, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,10 +19,8 @@ import { cn } from "@/lib/utils";
 import { useRunWorkbenchStore } from "@/screens/workspace/use-workspace";
 import type {
   ArtifactSummary,
-  CallbackSummary,
   ContextSourceSummary,
   IterationSummary,
-  PromptHandleSummary,
 } from "@/screens/workspace/use-workspace";
 
 function stringifyValue(value: unknown): string {
@@ -80,41 +78,6 @@ function EmptyPanel({
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyContent>
     </Empty>
-  );
-}
-
-function PromptHandleList({ handles }: { handles: PromptHandleSummary[] }) {
-  if (handles.length === 0) {
-    return (
-      <EmptyPanel
-        title="No prompt objects yet"
-        description="Large task, observation, and history payloads will appear here once they are externalized."
-        icon={MessagesSquare}
-      />
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {handles.map((handle) => (
-        <Card key={handle.handleId} className="border-border-subtle/80 bg-muted/15">
-          <CardHeader className="gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <CardTitle className="text-sm">{handle.label ?? handle.handleId}</CardTitle>
-              {handle.kind ? <Badge variant="secondary">{handle.kind}</Badge> : null}
-            </div>
-            <CardDescription>{handle.path || "Sandbox prompt object"}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
-            <div className="flex flex-wrap gap-3">
-              {handle.charCount != null ? <span>{handle.charCount} chars</span> : null}
-              {handle.lineCount != null ? <span>{handle.lineCount} lines</span> : null}
-            </div>
-            {handle.preview ? <p>{handle.preview}</p> : null}
-          </CardContent>
-        </Card>
-      ))}
-    </div>
   );
 }
 
@@ -274,112 +237,6 @@ function IterationDetail({ iteration }: { iteration?: IterationSummary | null })
   );
 }
 
-function CallbackRow({
-  callback,
-  selected,
-  onSelect,
-}: {
-  callback: CallbackSummary;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "w-full rounded-xl border px-3 py-3 text-left transition-colors",
-        selected
-          ? "border-accent bg-accent/10"
-          : "border-border-subtle/80 bg-muted/15 hover:bg-muted/30",
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{callback.callbackName}</Badge>
-        <Badge variant={statusBadgeVariant(callback.status)}>{callback.status}</Badge>
-        {callback.iteration != null ? (
-          <Badge variant="secondary">iter {callback.iteration}</Badge>
-        ) : null}
-      </div>
-      <p className="mt-2 text-sm text-foreground">{callback.label ?? callback.task}</p>
-      {callback.resultPreview ? (
-        <p className="mt-2 text-xs text-muted-foreground">{callback.resultPreview}</p>
-      ) : null}
-    </button>
-  );
-}
-
-function CallbackDetail({ callback }: { callback?: CallbackSummary | null }) {
-  if (!callback) {
-    return (
-      <EmptyPanel
-        title="No callback selected"
-        description="Select a semantic subcall to inspect its task, provenance, and result preview."
-        icon={SearchSlash}
-      />
-    );
-  }
-
-  return (
-    <Card className="border-border-subtle/80 bg-card/80">
-      <CardHeader>
-        <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-sm">{callback.callbackName}</CardTitle>
-          <Badge variant={statusBadgeVariant(callback.status)}>{callback.status}</Badge>
-          {callback.iteration != null ? (
-            <Badge variant="secondary">iter {callback.iteration}</Badge>
-          ) : null}
-        </div>
-        <CardDescription>{callback.label ?? callback.task}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <section className="flex flex-col gap-2">
-          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Task
-          </div>
-          <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
-            {callback.task}
-          </div>
-        </section>
-        {callback.source ? (
-          <section className="flex flex-col gap-2">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Evidence provenance
-            </div>
-            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-muted-foreground">
-              {callback.source.path ? <div>{callback.source.path}</div> : null}
-              {callback.source.startLine != null ? (
-                <div>
-                  lines {callback.source.startLine}
-                  {callback.source.endLine != null &&
-                  callback.source.endLine !== callback.source.startLine
-                    ? `-${callback.source.endLine}`
-                    : ""}
-                </div>
-              ) : null}
-              {callback.source.header ? <div>header: {callback.source.header}</div> : null}
-              {callback.source.pattern ? <div>pattern: {callback.source.pattern}</div> : null}
-              {callback.source.preview ? (
-                <p className="mt-2 text-foreground">{callback.source.preview}</p>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
-        {callback.resultPreview ? (
-          <section className="flex flex-col gap-2">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Result preview
-            </div>
-            <div className="rounded-xl border border-border-subtle/80 bg-muted/15 p-3 text-sm text-foreground">
-              {callback.resultPreview}
-            </div>
-          </section>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 function ContextSourceCard({ source }: { source: ContextSourceSummary }) {
   return (
     <Card className="border-border-subtle/80 bg-muted/15">
@@ -435,6 +292,8 @@ export function RunWorkbench() {
 
   const selectedIteration =
     iterations.find((item) => item.id === selectedIterationId) ?? iterations.at(-1) ?? null;
+  const renderedSelectedTab =
+    selectedTab === "callbacks" || selectedTab === "prompts" ? "iterations" : selectedTab;
   const warningCount = summary?.warnings?.length ?? 0;
 
   return (
@@ -495,7 +354,7 @@ export function RunWorkbench() {
         <CardContent className="min-h-0 flex-1 p-0">
           <Tabs
             className="flex h-full min-h-0 flex-col"
-            value={selectedTab}
+            value={renderedSelectedTab}
             onValueChange={(value) => selectTab(value as "iterations" | "evidence" | "final")}
           >
             <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-3 no-scrollbar">

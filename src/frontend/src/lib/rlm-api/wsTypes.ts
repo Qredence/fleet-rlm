@@ -9,7 +9,7 @@ export interface WsConnectionOptions {
   maxRetries?: number; // default 5
   initialBackoff?: number; // default 1000ms
   maxBackoff?: number; // default 30000ms
-  firstFrameTimeoutMs?: number; // default 15000ms for request/response streams
+  firstFrameTimeoutMs?: number; // default 10000ms for request/response streams unless overridden
 }
 
 export interface WsMessageRequest {
