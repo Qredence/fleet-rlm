@@ -1,43 +1,55 @@
-# fleet-rlm: AI coding instructions
+# fleet-rlm workspace instructions
 
-## Start here (architecture map)
+Use this file as a lightweight bootstrap. The detailed source of truth lives in the repo's `AGENTS.md` hierarchy and existing docs.
 
-- Follow the runtime path: `src/fleet_rlm/cli.py` → `src/fleet_rlm/runners.py` → signatures in `src/fleet_rlm/signatures.py` → `ModalInterpreter` in `src/fleet_rlm/core/interpreter.py` → sandbox JSON driver in `src/fleet_rlm/core/driver.py`.
-- Keep orchestration boundaries: `src/fleet_rlm/react/agent.py` owns ReAct/session state, `src/fleet_rlm/react/tools*.py` owns tool behavior, and `src/fleet_rlm/react/commands.py` maps WebSocket commands to tools.
-- FastAPI (`src/fleet_rlm/server/`) and FastMCP (`src/fleet_rlm/mcp/server.py`) are thin service wrappers over the same runner/agent flows.
+## Start here
 
-## Required developer workflows
+- Read `AGENTS.md` first for repo-wide rules and validation lanes.
+- Then load the closest area guide before editing code:
+	- `src/fleet_rlm/AGENTS.md` for backend, runtime, CLI, API, and provider work
+	- `src/frontend/AGENTS.md` for React, routes, websocket UI, and generated API types
+- When docs drift from code, trust `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml`.
 
-- Use `uv` for env/dependencies (`uv sync --extra dev`, plus `--extra server` or `--extra mcp` per surface).
-- Primary quality gate in this repo: `uv run ruff check src tests && uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" && uv run pytest -q`.
-- Use `ty` for types (not mypy), `ruff` for lint/format, and `pytest` for tests.
-- Use Make shortcuts when useful: `make sync-scaffold`, `make precommit-install`, `make precommit-run`, `make release-check`.
-- Before debugging type/lint failures, clear stale caches (`.ruff_cache`, `__pycache__`, `.pytest_cache`, `.mypy_cache`) and run `pre-commit clean`.
-- Web UI is the primary interactive surface for `0.4.6` (`uv run fleet web`).
-- Terminal runtime remains supported: `fleet-rlm code-chat --opentui` expects Bun and a running backend (`serve-api`).
+## Build and test
 
-## Project-specific conventions
+- Use `uv` for Python environment management and commands.
+- Use `pnpm` for frontend work in `src/frontend/` (this repo overrides the common Bun default).
+- Main local entrypoint: `uv run fleet web`.
+- Canonical validation lanes:
+	- `make test-fast`
+	- `make quality-gate`
+	- `make release-check`
+- Frontend loop from `src/frontend/`:
+	- `pnpm install --frozen-lockfile`
+	- `pnpm run api:check`
+	- `pnpm run type-check`
+	- `pnpm run lint`
+	- `pnpm run test:unit`
+	- `pnpm run build`
+- Before debugging stale lint/type/test failures, clear caches (`.ruff_cache`, `__pycache__`, `.pytest_cache`) and run `pre-commit clean`.
 
-- Python target is 3.10+ with explicit type hints.
-- ReAct tools are closure-based functions returning `dict[str, Any]`, then wrapped as `dspy.Tool` (see `build_tool_list` in `src/fleet_rlm/react/tools.py`).
-- Sandbox completion supports both `SUBMIT(...)` and `Final = ...` (`src/fleet_rlm/core/driver.py`).
-- Respect execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`); WebSocket chat defaults to root/interlocutor and command execution temporarily uses delegate profile.
-- Keep chunk contracts stable: `chunk_by_headers` returns `header` + `content` (not `body`) in both `src/fleet_rlm/chunking/headers.py` and sandbox driver helpers.
-- Do not read PDFs/binary docs with raw `Path.read_text()`; route document ingestion through `_read_document_content` (MarkItDown first, then pypdf fallback, OCR guidance for scanned PDFs).
-- Keep helper behavior aligned between host chunking (`src/fleet_rlm/chunking/`) and sandbox helpers in `src/fleet_rlm/core/driver.py`.
+## Architecture guardrails
 
-## Stateful server/session contracts
+- Supported app surfaces are `Workbench`, `Volumes`, and `Settings`; retired routes should continue to fall through to `/404`.
+- Keep transport and route wiring in `src/fleet_rlm/api/`; keep runtime behavior in `src/fleet_rlm/runtime/`; keep provider-specific logic under `src/fleet_rlm/integrations/providers/*`.
+- `modal_chat` is the default runtime mode. `daytona_pilot` stays on the shared ReAct + `dspy.RLM` architecture rather than a separate orchestration stack.
+- Treat `openapi.yaml` as the canonical HTTP contract. If you change request/response shapes or routes, keep frontend OpenAPI artifacts in sync.
 
-- `/api/v1/ws/chat` is the primary interactive endpoint (`src/fleet_rlm/server/routers/ws.py`).
-- WS payload identity envelope should include `workspace_id`, `user_id`, `session_id` (`src/fleet_rlm/server/schemas.py`).
-- Session keys are `workspace_id:user_id`; persisted manifests live at `workspaces/<workspace_id>/users/<user_id>/memory/react-session.json` on the Modal volume.
-- Use `/sessions/state` for server-side session introspection.
-- Do **not** add `from __future__ import annotations` to `src/fleet_rlm/server/routers/ws.py` (breaks FastAPI WebSocket parameter inspection).
+## Project conventions and pitfalls
 
-## Environment and runtime expectations
+- Python target is 3.10+ with explicit type hints; use `ty`, not `mypy`.
+- Do not hand-edit generated frontend files such as `src/frontend/src/routeTree.gen.ts` or `src/frontend/src/lib/rlm-api/generated/openapi.ts`.
+- Reuse existing helpers and ownership boundaries instead of introducing parallel compatibility layers or duplicate utilities.
+- For document ingestion, do not use raw `Path.read_text()` on PDFs or other binary docs; use the existing document-reading pipeline.
+- For Daytona work, use `DAYTONA_API_URL` (not `DAYTONA_API_BASE_URL`) and validate with `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]` before deeper debugging.
 
-- Planner LM comes from `.env` via `src/fleet_rlm/core/config.py`: `DSPY_LM_MODEL` + (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`), optional `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`.
-- Modal secret naming defaults to `LITELLM`; keep this unless intentionally changing infra conventions.
-- `serve-api` defaults to persistent volume `rlm-volume-dspy` when `interpreter.volume_name` is unset.
-- Canonical API contract file is `openapi.yaml` at repo root; frontend generated types are derived from `src/frontend/openapi/fleet-rlm.openapi.yaml`.
-- For Modal sandbox work, verify volume availability and credentials (`modal setup` + volume/secret readiness) before running tests.
+## Where to look instead of duplicating guidance
+
+- Repo map and validation: `AGENTS.md`
+- Backend architecture/contracts: `src/fleet_rlm/AGENTS.md`
+- Frontend architecture/contracts: `src/frontend/AGENTS.md`
+- Product and contributor overview: `README.md`, `CONTRIBUTING.md`
+- Documentation index: `docs/index.md`
+- Setup and commands: `docs/how-to-guides/developer-setup.md`, `docs/how-to-guides/installation.md`
+- Testing guidance: `docs/how-to-guides/testing-strategy.md`
+- Architecture references: `docs/architecture.md`, `docs/reference/module-map.md`, `docs/reference/codebase-map.md`
