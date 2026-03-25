@@ -22,6 +22,7 @@ Source-of-truth files for shared workflow:
 - Read the root file before making shared workflow or cross-stack changes.
 - Defer to subsystem AGENTS files once work becomes backend- or frontend-specific.
 - Treat `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml` as source of truth when docs drift from code.
+- For any code change, always run the relevant format, lint, and typecheck commands before committing or opening a PR. Tests and wider gates are additive, not substitutes for that baseline.
 - Prefer the smallest validation lane that matches the change, but escalate to `make quality-gate` for shared-contract work.
 - Update AGENTS/docs when you discover a stable workflow or when your change alters repo conventions.
 
@@ -128,6 +129,11 @@ Useful maintenance commands:
 
 Choose the smallest lane that gives confidence for the files you touched.
 Use subsystem-specific AGENTS files for narrower backend/frontend test lists and command recommendations.
+
+Mandatory baseline for code changes before commit or PR:
+
+- Backend or shared Python edits: `make format`, `make lint`, `make typecheck`
+- Frontend edits: `cd src/frontend && pnpm run format`, `pnpm run lint:robustness`, `pnpm run type-check`
 
 Docs-only changes:
 

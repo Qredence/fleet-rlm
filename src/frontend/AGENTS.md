@@ -20,6 +20,7 @@ Frontend source-of-truth files:
 - Preserve the supported app surfaces: `Workbench`, `Volumes`, and `Settings`.
 - Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
+- Always run `pnpm run format`, `pnpm run lint:robustness`, and `pnpm run type-check` before committing or opening a PR for frontend code changes.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
 - Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical canvas/workbench stream. Frontend workbench state should hydrate from `execution_completed.summary`, not Daytona-only chat-final payloads.
 - Daytona `sandbox_output` status frames should render as sandbox/debug trace cards in the transcript, while `trajectory_step` and `reasoning_step` remain the primary live trace surfaces.
@@ -153,6 +154,7 @@ Lint and boundary enforcement:
 
 Fast frontend confidence:
 
+- `pnpm run format`
 - `pnpm install --frozen-lockfile`
 - `pnpm run api:check`
 - `pnpm run type-check`
