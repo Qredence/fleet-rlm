@@ -33,7 +33,10 @@ from .commands.serve_cmds import register_serve_commands
 # This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
 _CONFIG: AppConfig | None = None
 
-app = typer.Typer(help="Run fleet-rlm demos and experimental runtimes.")
+app = typer.Typer(
+    help="Run fleet-rlm demos and experimental runtimes.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
@@ -148,7 +151,7 @@ def main() -> None:
 
     # Help and completion output should be available without initializing runtime config.
     if any(
-        arg in {"--help", "--show-completion", "--install-completion"}
+        arg in {"--help", "-h", "--show-completion", "--install-completion"}
         for arg in typer_args
     ):
         app(typer_args)

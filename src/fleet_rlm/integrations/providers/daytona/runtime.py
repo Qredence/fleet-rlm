@@ -71,7 +71,7 @@ def _run_async_compat(
 
 async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
     if inspect.isawaitable(value):
-        return await value
+        return await cast(Awaitable[_T], value)
     return cast(_T, value)
 
 
