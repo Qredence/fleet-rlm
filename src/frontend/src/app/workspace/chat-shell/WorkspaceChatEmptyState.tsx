@@ -1,6 +1,5 @@
 import {
   BookOpen,
-  Clock,
   Code2,
   GitBranch,
   Layers,
@@ -74,17 +73,11 @@ const suggestions = [
 interface WorkspaceChatEmptyStateProps {
   isMobile: boolean;
   onSuggestionClick: (text: string) => void;
-  showHistory?: boolean;
-  onToggleHistory?: () => void;
-  hasHistory?: boolean;
 }
 
 export function WorkspaceChatEmptyState({
   isMobile,
   onSuggestionClick,
-  showHistory,
-  onToggleHistory,
-  hasHistory,
 }: WorkspaceChatEmptyStateProps) {
   const prefersReduced = useReducedMotion();
 
@@ -156,24 +149,16 @@ export function WorkspaceChatEmptyState({
         ))}
       </div>
 
-      {/* History toggle */}
-      {hasHistory && !showHistory ? (
-        <motion.div
-          className="mt-5 w-full flex justify-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={prefersReduced ? { duration: 0.01 } : { delay: 0.55 }}
-        >
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-full border border-border/60 px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-border hover:bg-secondary/60 hover:text-foreground"
-            onClick={onToggleHistory}
-          >
-            <Clock className="size-3.5" aria-hidden="true" />
-            View recent conversations
-          </button>
-        </motion.div>
-      ) : null}
+      <motion.p
+        className="mt-5 max-w-md text-balance text-sm leading-6 text-muted-foreground"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={prefersReduced ? { duration: 0.01 } : { delay: 0.55 }}
+      >
+        {isMobile
+          ? "Open the sidebar anytime to jump between recent sessions, workbench tools, and volumes."
+          : "Use the left rail to jump between recent sessions, workbench tools, and volumes."}
+      </motion.p>
     </ConversationEmptyState>
   );
 }

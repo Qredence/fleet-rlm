@@ -22,6 +22,7 @@ Source-of-truth files for shared workflow:
 - Read the root file before making shared workflow or cross-stack changes.
 - Defer to subsystem AGENTS files once work becomes backend- or frontend-specific.
 - Treat `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml` as source of truth when docs drift from code.
+- For any code change, always run the relevant format, lint, and typecheck commands before committing or opening a PR. Tests and wider gates are additive, not substitutes for that baseline.
 - Prefer the smallest validation lane that matches the change, but escalate to `make quality-gate` for shared-contract work.
 - Update AGENTS/docs when you discover a stable workflow or when your change alters repo conventions.
 
@@ -87,7 +88,7 @@ Cross-stack source-of-truth boundaries:
 
 - Keep Modal and Daytona responsibilities distinct, but keep them on the same conversational runtime architecture. `daytona_pilot` should stay on the shared ReAct + `dspy.RLM` backbone, with Daytona acting as the interpreter/sandbox backend.
 - Do not reintroduce Daytona-specific chat/runtime orchestration when the shared `RLMReActChatAgent` path can express the behavior. Daytona-specific logic belongs in the interpreter/provider layer.
-- Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes or routes, update generated frontend API artifacts and verify drift with `pnpm run api:check`.
+- Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update generated frontend API artifacts, and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
 - Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.
 - Keep docs in sync when tooling, routes, runtime contracts, or agent workflow change. If you learn a stable repo convention, record it here or in the subsystem AGENTS file instead of leaving it only in chat.
@@ -101,8 +102,12 @@ Repository setup and shared workflows:
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
 - `uv run fleet-rlm serve-mcp --transport stdio`
+- `uv run python scripts/openapi_tools.py generate`
+- `uv run python scripts/openapi_tools.py validate`
+- `make clean`
 - `make test-fast`
 - `make quality-gate`
+- `make release-artifacts`
 - `make release-check`
 
 Frontend-only agent loop:
@@ -114,14 +119,21 @@ Frontend-only agent loop:
 
 Useful maintenance commands:
 
+- `make clean`
 - `make metadata-check`
+- `uv run python scripts/openapi_tools.py generate`
+- `uv run python scripts/openapi_tools.py validate`
 - `uv run python scripts/check_agents_md_freshness.py`
-- `rm -rf .ruff_cache __pycache__ .pytest_cache`
 
 ## Validation by Change Type
 
 Choose the smallest lane that gives confidence for the files you touched.
 Use subsystem-specific AGENTS files for narrower backend/frontend test lists and command recommendations.
+
+Mandatory baseline for code changes before commit or PR:
+
+- Backend or shared Python edits: `make format`, `make lint`, `make typecheck`
+- Frontend edits: `cd src/frontend && pnpm run format`, `pnpm run lint:robustness`, `pnpm run type-check`
 
 Docs-only changes:
 
@@ -144,6 +156,7 @@ Frontend-only changes:
 
 Release-oriented confidence:
 
+- `make release-artifacts`
 - `make release-check`
 
 ## Maintenance Checklist

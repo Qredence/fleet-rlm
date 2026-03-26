@@ -1,81 +1,104 @@
 # frontend
 
-Frontend for qredence Fleet, built with React + Vite+ toolchain.
-
-Pre-requisite: Install the Vite+ CLI (`vp`) from https://viteplus.dev/guide/#install-vp
+Frontend for `fleet-rlm`, built with React 19 and the repo-standard `pnpm` + Vite+ workflow.
 
 ## Install
 
 ```bash
-vp install
+cd src/frontend
+pnpm install --frozen-lockfile
 ```
 
 ## Run
 
 ```bash
-vp dev
+cd src/frontend
+pnpm run dev
 ```
 
-## FastAPI Backend Integration (fleet-rlm)
+The development server runs on `http://localhost:5173` and proxies `/api/v1` and `/health` to the backend on `http://localhost:8000`.
 
-This frontend is FastAPI-only and targets the current backend surface:
+## Backend Contract
 
-- REST: `/health`, `/ready`, `/api/v1/sessions/state`
+This frontend targets the current FastAPI surface:
+
+- REST: `/health`, `/ready`, `GET /api/v1/auth/me`, `GET /api/v1/sessions/state`, `/api/v1/runtime/*`, `POST /api/v1/traces/feedback`
 - WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
-Unsupported sections remain visible in navigation but are intentionally disabled:
+Supported product surfaces:
 
-- `skills`
-- `taxonomy`
-- `memory`
-- `analytics`
+- `/app/workspace`
+- `/app/volumes`
+- `/app/settings`
 
-### Environment
+Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics` routes should fall through to `/404`.
+
+## Environment
 
 Create a local `.env` file from `.env.example`.
 
-Required values:
+Expected values:
 
 - `VITE_FLEET_API_URL=http://localhost:8000`
-- `VITE_FLEET_WS_URL=ws://localhost:8000/ws/chat`
 - `VITE_FLEET_WORKSPACE_ID=default`
 - `VITE_FLEET_USER_ID=fleetwebapp-user`
 - `VITE_FLEET_TRACE=true`
 
-If backend values are missing, the app shows backend-capability notices instead of using legacy/mock API surfaces.
+Optional overrides:
+
+- `VITE_FLEET_WS_URL`
+- `VITE_ENTRA_CLIENT_ID`
+- `VITE_ENTRA_SCOPES`
+- `VITE_PUBLIC_POSTHOG_API_KEY`
+- `VITE_PUBLIC_POSTHOG_HOST`
+
+If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
 
 ### Backend Startup
 
-From the fleet-rlm repo:
+From the repo root:
 
 ```bash
 uv run fleet-rlm serve-api --port 8000
 ```
 
-## OpenAPI Type Sync
+## OpenAPI Sync
 
-The frontend keeps a local snapshot of backend OpenAPI and generates TS types.
+The frontend keeps a tracked snapshot of the backend OpenAPI spec and generated TypeScript types.
+
+From the repo root, regenerate the canonical spec when backend route, schema, or OpenAPI-facing doc metadata changes:
 
 ```bash
-bun run api:sync-spec
-bun run api:types
-bun run api:sync
-bun run api:check
+uv run python scripts/openapi_tools.py generate
 ```
 
-`api:sync-spec` defaults to the canonical root spec at `../../openapi.yaml` unless `OPENAPI_SPEC_PATH` is set.
+From `src/frontend`, sync or verify the frontend artifacts:
 
-Generated file:
+```bash
+pnpm run api:sync
+pnpm run api:check
+```
 
-- `src/lib/rlm-api/generated/openapi.ts` (do not edit manually)
+Generated files:
+
+- `openapi/fleet-rlm.openapi.yaml`
+- `src/lib/rlm-api/generated/openapi.ts`
+
+Do not edit these files manually.
 
 ## Quality Checks
 
 ```bash
-bun run type-check
-bun run lint
-bun run test:unit
-bun run build
-bun run test:e2e
-bun run check
+cd src/frontend
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
+```
+
+For the full frontend suite, including Playwright:
+
+```bash
+pnpm run check
 ```

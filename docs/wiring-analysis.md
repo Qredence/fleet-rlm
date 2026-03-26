@@ -76,8 +76,8 @@ REST calls use the standard `fetch` API with the base URL from
 
 | Path | Backend handler | Purpose |
 |------|-----------------|---------|
-| `/api/v1/ws/chat` | `api.chat_streaming()` in `routers/ws/api.py` | Bidirectional chat streaming |
-| `/api/v1/ws/execution` | `api.execution_stream()` in `routers/ws/api.py` | Read-only artifact/execution event stream |
+| `/api/v1/ws/chat` | `chat_streaming()` in `routers/ws/endpoint.py` | Bidirectional chat streaming |
+| `/api/v1/ws/execution` | `execution_stream()` in `routers/ws/endpoint.py` | Read-only artifact/execution event stream |
 
 ### Backend flow (`/ws/chat`)
 
@@ -108,11 +108,11 @@ REST calls use the standard `fetch` API with the base URL from
 
 ### Message protocol
 
-- **Client → Server**: `WsMessageRequest` (chat turn), `WsCommandRequest`
-  (e.g. `resolve_hitl`), `WsCancelRequest`.
-- **Server → Client**: Typed frames (`WsServerMessage`) including `chunk`,
-  `tool_call`, `artifact`, `error`, `done`, `command_ack`, `command_reject`,
-  etc.
+- **Client → Server**: schema-validated `WSMessage` frames covering `message`,
+  `command`, and `cancel`.
+- **Server → Client**: JSON envelopes emitted by the chat and execution stream
+  helpers, including `event`, `command_result`, `error`, and execution stream
+  frames.
 
 ---
 
@@ -136,12 +136,12 @@ REST calls use the standard `fetch` API with the base URL from
 3. **WebSocket payload** — `streamMessage` (in `chatStore.ts`) builds a
    `WsMessageRequest` that includes `runtime_mode` and sends it as the first
    JSON frame over the `/ws/chat` socket.
-4. **Backend dispatch** — In `routers/ws/api.py`, the first received message's
+4. **Backend dispatch** — In `routers/ws/endpoint.py`, the first received message's
    `runtime_mode` is passed to `_build_chat_agent_context()` (in
-   `chat_runtime.py`), which branches:
+   `routers/ws/runtime.py`), which branches:
    - `"modal_chat"` → standard `ChatAgentProtocol` implementation.
    - `"daytona_pilot"` → Daytona-configured shared agent cast to `ChatAgentProtocol`.
-5. **Daytona-specific options** — `runtime_options.py` extracts `repo_url`,
+5. **Daytona-specific options** — `routers/ws/types.py` normalizes `repo_url`,
    `repo_ref`, `context_paths`, and `batch_concurrency` from the message only
    when `runtime_mode == "daytona_pilot"`.
 
@@ -205,6 +205,14 @@ The canonical API contract lives at `openapi.yaml` in the repo root. The
 frontend keeps a local copy and a generated TypeScript client in sync via
 two npm scripts defined in `src/frontend/package.json`:
 
+When backend request/response shapes or OpenAPI-facing route/schema
+descriptions change, regenerate the root spec first:
+
+```bash
+# from repo root
+uv run python scripts/openapi_tools.py generate
+```
+
 ### `pnpm run api:sync`
 
 Runs two sub-steps:
@@ -217,8 +225,10 @@ Runs two sub-steps:
 ### `pnpm run api:check`
 
 Runs `api:sync` and then asserts that neither the spec copy nor the generated
-types have uncommitted changes (`git diff --exit-code`). This is used in CI
-to catch drift between the backend contract and the frontend client.
+types changed during the sync. The current implementation snapshots file
+contents before and after `api:sync` and fails if either tracked generated
+file differs. This is used in CI to catch drift between the backend contract
+and the frontend client.
 
 ### Workflow
 

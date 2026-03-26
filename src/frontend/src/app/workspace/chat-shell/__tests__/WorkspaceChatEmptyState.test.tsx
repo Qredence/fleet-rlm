@@ -11,13 +11,7 @@ function mountEmptyState(props?: Partial<ComponentProps<typeof WorkspaceChatEmpt
 
   act(() => {
     root.render(
-      <WorkspaceChatEmptyState
-        isMobile={false}
-        onSuggestionClick={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        {...props}
-      />,
+      <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} {...props} />,
     );
   });
 
@@ -29,14 +23,9 @@ describe("WorkspaceChatEmptyState", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders feature-local suggestions and the history affordance", () => {
+  it("renders feature-local suggestions and the shell-navigation hint", () => {
     const html = renderToStaticMarkup(
-      <WorkspaceChatEmptyState
-        isMobile={false}
-        onSuggestionClick={() => {}}
-        showHistory={false}
-        hasHistory={true}
-      />,
+      <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} />,
     );
     expect(html).toContain("What can I help you build?");
     expect(html).toContain("Architecture pass");
@@ -44,37 +33,26 @@ describe("WorkspaceChatEmptyState", () => {
     expect(html).toContain("Python runner");
     expect(html).toContain("Critique my work");
     expect(html).not.toContain("Operator workspace");
-    expect(html).toContain("View recent conversations");
+    expect(html).toContain("Use the left rail to jump between recent sessions");
   });
 
-  it("routes suggestion and history interactions through feature callbacks", () => {
+  it("routes suggestion interactions through feature callbacks", () => {
     const onSuggestionClick = vi.fn();
-    const onToggleHistory = vi.fn();
-    const { container, root } = mountEmptyState({
-      onSuggestionClick,
-      onToggleHistory,
-      hasHistory: true,
-    });
+    const { container, root } = mountEmptyState({ onSuggestionClick });
 
     const architectureButton = Array.from(container.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Architecture pass"),
     );
-    const historyButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("View recent conversations"),
-    );
 
     expect(architectureButton).not.toBeUndefined();
-    expect(historyButton).not.toBeUndefined();
 
     act(() => {
       architectureButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      historyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(onSuggestionClick).toHaveBeenCalledWith(
       "Analyze a codebase and extract its architecture",
     );
-    expect(onToggleHistory).toHaveBeenCalledTimes(1);
 
     act(() => {
       root.unmount();

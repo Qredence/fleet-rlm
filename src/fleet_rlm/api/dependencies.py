@@ -50,6 +50,7 @@ class ServerState:
 
     @property
     def is_ready(self) -> bool:
+        """Return whether critical server dependencies are ready to serve requests."""
         db_ready = not self.config.database_required or self.repository is not None
         planner_ready = (
             self.planner_lm is not None
@@ -68,6 +69,7 @@ def _require_server_state(app: Any) -> ServerState:
 
 
 def get_server_state(request: Request) -> ServerState:
+    """Resolve initialized server state for HTTP request handlers."""
     try:
         return _require_server_state(request.app)
     except RuntimeError as exc:
@@ -75,10 +77,12 @@ def get_server_state(request: Request) -> ServerState:
 
 
 def get_server_state_from_websocket(websocket: WebSocket) -> ServerState:
+    """Resolve initialized server state for websocket handlers."""
     return _require_server_state(websocket.app)
 
 
 def get_config(request: Request) -> ServerRuntimeConfig:
+    """Return the request-scoped server configuration snapshot."""
     return get_server_state(request).config
 
 
@@ -88,10 +92,12 @@ def get_server_config(request: Request) -> ServerRuntimeConfig:
 
 
 def get_planner_lm(request: Request) -> Any:
+    """Return the planner model currently loaded in server state."""
     return get_server_state(request).planner_lm
 
 
 def get_delegate_lm(request: Request) -> Any:
+    """Return the delegate model currently loaded in server state."""
     return get_server_state(request).delegate_lm
 
 
@@ -103,10 +109,12 @@ DelegateLMDep = Annotated[Any, Depends(get_delegate_lm)]
 
 
 def get_db_manager(request: Request) -> DatabaseManager | None:
+    """Return the configured database manager, if persistence is enabled."""
     return get_server_state(request).db_manager
 
 
 def get_repository(request: Request) -> FleetRepository | None:
+    """Return the configured repository facade, if persistence is enabled."""
     return get_server_state(request).repository
 
 
@@ -114,12 +122,14 @@ RepositoryDep = Annotated[FleetRepository | None, Depends(get_repository)]
 
 
 def get_auth_provider(request: Request) -> AuthProvider | None:
+    """Return the configured auth provider, if auth bootstrap has completed."""
     return get_server_state(request).auth_provider
 
 
 def build_unauthenticated_identity(
     config: ServerRuntimeConfig | None = None,
 ) -> NormalizedIdentity:
+    """Create the fallback development identity used when auth is optional."""
     cfg = config or ServerRuntimeConfig()
     return NormalizedIdentity(
         tenant_claim=cfg.ws_default_workspace_id,
@@ -130,6 +140,7 @@ def build_unauthenticated_identity(
 
 
 def require_repository(request: Request) -> FleetRepository:
+    """Require that database-backed repository services are configured."""
     repository = get_repository(request)
     if repository is None:
         raise HTTPException(
@@ -140,6 +151,7 @@ def require_repository(request: Request) -> FleetRepository:
 
 
 async def require_http_identity(request: Request) -> NormalizedIdentity:
+    """Authenticate an HTTP request or fall back to the configured dev identity."""
     state = get_server_state(request)
     provider = state.auth_provider
     cfg = state.config
@@ -168,6 +180,7 @@ HTTPIdentityDep = Annotated[NormalizedIdentity, Depends(require_http_identity)]
 
 
 def get_request_identity(request: Request) -> NormalizedIdentity | None:
+    """Read the resolved identity cached on the request state, if present."""
     identity = getattr(request.state, "identity", None)
     if isinstance(identity, NormalizedIdentity):
         return identity

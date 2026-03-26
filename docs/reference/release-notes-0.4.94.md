@@ -15,7 +15,7 @@ Release date: 2026-03-03
 
 ## Changed
 
-- Refactored websocket chat internals into smaller helpers in `ws/api.py` while preserving endpoint contracts.
+- Refactored websocket chat internals into smaller helpers under `src/fleet_rlm/api/routers/ws/` while preserving endpoint contracts.
 - Refactored execution event/citation shaping helpers (`step_builder.py`, `streaming_citations.py`, `streaming.py`) for clearer event construction.
 - Aligned backend/frontend docs and contract tests with current WS-first routes and OpenAPI-generated surfaces.
 - Updated build workflow so `uv build` runs frontend bundling in source/release contexts, and local `fleet web` prefers `src/frontend/dist` when present.

@@ -21,9 +21,11 @@ Backend source-of-truth files:
 - Preserve the backend/frontend runtime contract before optimizing internals.
 - Treat websocket event shape and session lifecycle as shared product surface, not backend-only implementation detail.
 - Keep CLI docs and examples aligned with the actual Typer commands.
+- Always run `make format`, `make lint`, and `make typecheck` before committing or opening a PR for backend or shared Python code changes.
 - Update AGENTS/docs when you discover a stable backend workflow or change runtime behavior.
 - Treat `src/fleet_rlm/scaffold/` as curated external guidance for Claude Code users. Do not auto-sync it from the repo-local `.claude/` overlays; update the packaged markdown, skills, hooks, and teams directly.
 - Prefer the smallest validation lane that covers the change, then escalate to `make quality-gate` for shared-contract work.
+- When backend request/response shapes or OpenAPI-facing route/schema descriptions change, regenerate `openapi.yaml` with `uv run python scripts/openapi_tools.py generate` before running frontend sync checks.
 
 ## Package Map
 
@@ -180,6 +182,8 @@ Backend setup and runtime:
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
 - `uv run fleet-rlm serve-mcp --transport stdio`
+- `uv run python scripts/openapi_tools.py generate`
+- `uv run python scripts/openapi_tools.py validate`
 
 Daytona workflows:
 

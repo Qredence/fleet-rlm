@@ -9,12 +9,27 @@ from ..schemas.core import AuthMeResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.get("/me", response_model=AuthMeResponse)
+@router.get(
+    "/me",
+    response_model=AuthMeResponse,
+    responses={
+        401: {
+            "description": "Authentication is required or the provided token is invalid."
+        },
+        403: {
+            "description": "The authenticated tenant or user is not admitted to Fleet RLM."
+        },
+        503: {
+            "description": "Authentication or repository services are not configured yet."
+        },
+    },
+)
 async def get_me(
     identity: HTTPIdentityDep,
     state: ServerStateDep,
     repository: RepositoryDep,
 ) -> AuthMeResponse:
+    """Return the authenticated identity and any admitted control-plane IDs."""
     persisted_identity = None
     if state.config.auth_mode == "entra":
         if repository is None:

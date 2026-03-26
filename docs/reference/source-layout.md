@@ -67,7 +67,7 @@ than one large chat loop.
 | Path | Description |
 | --- | --- |
 | `config.py` | Planner/delegate LM bootstrap from environment. |
-| `interpreter.py` | Compatibility import surface for the interpreter. |
+| `__init__.py` | Lazy runtime export surface for `ModalInterpreter`, planner helpers, and `sandbox_driver`. |
 | `agent/` | Shared DSPy orchestration, chat/session state, delegation policy, memory, and command helpers. |
 | `execution/` | Interpreter implementation, streaming helpers, runtime factory, and execution profiles. |
 | `content/` | Chunking, document ingestion, and execution-log processing helpers. |

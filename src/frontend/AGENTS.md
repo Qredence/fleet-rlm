@@ -20,6 +20,7 @@ Frontend source-of-truth files:
 - Preserve the supported app surfaces: `Workbench`, `Volumes`, and `Settings`.
 - Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
+- Always run `pnpm run format`, `pnpm run lint:robustness`, and `pnpm run type-check` before committing or opening a PR for frontend code changes.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
 - Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical canvas/workbench stream. Frontend workbench state should hydrate from `execution_completed.summary`, not Daytona-only chat-final payloads.
 - Daytona `sandbox_output` status frames should render as sandbox/debug trace cards in the transcript, while `trajectory_step` and `reasoning_step` remain the primary live trace surfaces.
@@ -38,6 +39,7 @@ Canonical commands:
 - `pnpm run build`
 - `pnpm run type-check`
 - `pnpm run lint`
+- `pnpm run lint:robustness`
 - `pnpm run test:unit`
 - `pnpm run test:watch`
 - `pnpm run test:coverage`
@@ -124,7 +126,7 @@ Expected frontend environment:
 
 Optional frontend environment:
 
-- `VITE_FLEET_WS_URL`
+- `VITE_FLEET_WS_URL` (optional explicit override; when unset, websocket URLs are derived from `VITE_FLEET_API_URL`)
 - `VITE_ENTRA_CLIENT_ID`
 - `VITE_ENTRA_SCOPES`
 - `VITE_PUBLIC_POSTHOG_API_KEY`
@@ -136,6 +138,7 @@ Backend startup for frontend work:
 
 OpenAPI sync:
 
+- If backend route/schema contract metadata changed, regenerate the root spec first with `uv run python scripts/openapi_tools.py generate`
 - `pnpm run api:sync` copies the root spec and regenerates frontend types
 - `pnpm run api:check` reruns sync and fails only if that sync changes the frontend OpenAPI snapshot or generated types
 - If `api:check` produces formatting-only diffs in `openapi/fleet-rlm.openapi.yaml` or `src/lib/rlm-api/generated/openapi.ts`, keep those sync artifacts in the same change rather than hand-editing generated output
@@ -151,10 +154,11 @@ Lint and boundary enforcement:
 
 Fast frontend confidence:
 
+- `pnpm run format`
 - `pnpm install --frozen-lockfile`
 - `pnpm run api:check`
 - `pnpm run type-check`
-- `pnpm run lint`
+- `pnpm run lint:robustness`
 - `pnpm run test:unit`
 - `pnpm run build`
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `ModalInterpreter` class (`src/fleet_rlm/runtime/interpreter.py`) manages sandbox lifecycle:
+The `ModalInterpreter` implementation (`src/fleet_rlm/runtime/execution/interpreter.py`), re-exported from `fleet_rlm.runtime`, manages sandbox lifecycle:
 
 - **Sandbox Creation**: Creates isolated Modal Sandbox instances with configurable images
 - **Code Execution**: Runs Python code via a JSON protocol over stdin/stdout

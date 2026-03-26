@@ -56,7 +56,7 @@ We use **Modal Sandboxes** as the execution environment, wrapped by a custom `Mo
 
 ### Key Components
 
-#### 1. ModalInterpreter (`src/fleet_rlm/runtime/interpreter.py`)
+#### 1. ModalInterpreter (`fleet_rlm.runtime.ModalInterpreter`, implemented in `src/fleet_rlm/runtime/execution/interpreter.py`)
 
 The host-side adapter implementing DSPy's `CodeInterpreter` interface:
 

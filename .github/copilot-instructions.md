@@ -1,55 +1,53 @@
-# fleet-rlm workspace instructions
-
-Use this file as a lightweight bootstrap. The detailed source of truth lives in the repo's `AGENTS.md` hierarchy and existing docs.
+# fleet-rlm: AI coding instructions
 
 ## Start here
 
-- Read `AGENTS.md` first for repo-wide rules and validation lanes.
-- Then load the closest area guide before editing code:
-	- `src/fleet_rlm/AGENTS.md` for backend, runtime, CLI, API, and provider work
-	- `src/frontend/AGENTS.md` for React, routes, websocket UI, and generated API types
-- When docs drift from code, trust `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml`.
+- Read `AGENTS.md` at the repo root first, then `src/fleet_rlm/AGENTS.md` or `src/frontend/AGENTS.md` depending on the area you touch.
+- Treat `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml` as source-of-truth workflow files.
+- The current backend architecture lives under:
+  - `src/fleet_rlm/api/` for FastAPI transport, auth, schemas, and websocket routes
+  - `src/fleet_rlm/runtime/` for the shared ReAct + `dspy.RLM` runtime
+  - `src/fleet_rlm/integrations/` for database, observability, MCP, and provider backends
+  - `src/fleet_rlm/cli/` for `fleet` and `fleet-rlm` entrypoints
 
-## Build and test
+## Required workflows
 
-- Use `uv` for Python environment management and commands.
-- Use `pnpm` for frontend work in `src/frontend/` (this repo overrides the common Bun default).
-- Main local entrypoint: `uv run fleet web`.
-- Canonical validation lanes:
-	- `make test-fast`
-	- `make quality-gate`
-	- `make release-check`
-- Frontend loop from `src/frontend/`:
-	- `pnpm install --frozen-lockfile`
-	- `pnpm run api:check`
-	- `pnpm run type-check`
-	- `pnpm run lint`
-	- `pnpm run test:unit`
-	- `pnpm run build`
-- Before debugging stale lint/type/test failures, clear caches (`.ruff_cache`, `__pycache__`, `.pytest_cache`) and run `pre-commit clean`.
+- Use `uv` for Python setup and commands: `uv sync --all-extras --dev`.
+- Use `pnpm` in `src/frontend` with `pnpm install --frozen-lockfile`.
+- Repo-standard maintenance and validation commands:
+  - `make clean`
+  - `uv run python scripts/openapi_tools.py generate`
+  - `uv run python scripts/openapi_tools.py validate`
+  - `make quality-gate`
+  - `make release-check`
 
-## Architecture guardrails
+## Product and contract rules
 
-- Supported app surfaces are `Workbench`, `Volumes`, and `Settings`; retired routes should continue to fall through to `/404`.
-- Keep transport and route wiring in `src/fleet_rlm/api/`; keep runtime behavior in `src/fleet_rlm/runtime/`; keep provider-specific logic under `src/fleet_rlm/integrations/providers/*`.
-- `modal_chat` is the default runtime mode. `daytona_pilot` stays on the shared ReAct + `dspy.RLM` architecture rather than a separate orchestration stack.
-- Treat `openapi.yaml` as the canonical HTTP contract. If you change request/response shapes or routes, keep frontend OpenAPI artifacts in sync.
+- Supported product surfaces are `Workbench`, `Volumes`, and `Settings`.
+- Retired `taxonomy`, `skills`, `memory`, and `analytics` routes should fall through to `/404`.
+- Canonical HTTP/websocket surfaces:
+  - `/health`
+  - `/ready`
+  - `GET /api/v1/auth/me`
+  - `GET /api/v1/sessions/state`
+  - `/api/v1/runtime/*`
+  - `POST /api/v1/traces/feedback`
+  - `/api/v1/ws/chat`
+  - `/api/v1/ws/execution`
+- `/api/v1/ws/chat` is transcript-first; `/api/v1/ws/execution` is the canonical workbench stream.
+- Do not hand-edit generated frontend API artifacts in `src/frontend/openapi/` or `src/frontend/src/lib/rlm-api/generated/`.
 
-## Project conventions and pitfalls
+## OpenAPI and docs sync
 
-- Python target is 3.10+ with explicit type hints; use `ty`, not `mypy`.
-- Do not hand-edit generated frontend files such as `src/frontend/src/routeTree.gen.ts` or `src/frontend/src/lib/rlm-api/generated/openapi.ts`.
-- Reuse existing helpers and ownership boundaries instead of introducing parallel compatibility layers or duplicate utilities.
-- For document ingestion, do not use raw `Path.read_text()` on PDFs or other binary docs; use the existing document-reading pipeline.
-- For Daytona work, use `DAYTONA_API_URL` (not `DAYTONA_API_BASE_URL`) and validate with `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]` before deeper debugging.
+- `openapi.yaml` at the repo root is the canonical HTTP contract.
+- If backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions change:
+  1. Run `uv run python scripts/openapi_tools.py generate`
+  2. Run `cd src/frontend && pnpm run api:check`
+  3. Update the relevant `README.md`, `AGENTS.md`, and `docs/` pages in the same change
 
-## Where to look instead of duplicating guidance
+## Runtime notes
 
-- Repo map and validation: `AGENTS.md`
-- Backend architecture/contracts: `src/fleet_rlm/AGENTS.md`
-- Frontend architecture/contracts: `src/frontend/AGENTS.md`
-- Product and contributor overview: `README.md`, `CONTRIBUTING.md`
-- Documentation index: `docs/index.md`
-- Setup and commands: `docs/how-to-guides/developer-setup.md`, `docs/how-to-guides/installation.md`
-- Testing guidance: `docs/how-to-guides/testing-strategy.md`
-- Architecture references: `docs/architecture.md`, `docs/reference/module-map.md`, `docs/reference/codebase-map.md`
+- `fleet web` delegates to `fleet-rlm serve-api --host 0.0.0.0 --port 8000`.
+- `modal_chat` is the default runtime mode.
+- `daytona_pilot` stays on the shared ReAct + `dspy.RLM` backbone; Daytona-specific logic belongs in `src/fleet_rlm/integrations/providers/daytona/`.
+- For Modal sandbox work, verify credentials and volume/secret readiness before running live tests.

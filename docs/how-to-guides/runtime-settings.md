@@ -1,6 +1,6 @@
 # Runtime Settings API
 
-The Runtime Settings API provides programmatic access to configure language models and Modal credentials for the Fleet-RLM runtime. Use these endpoints to inspect current settings, apply updates, and check runtime health.
+The Runtime Settings API provides programmatic access to configure language models, sandbox provider selection, and Modal/Daytona credentials for the Fleet-RLM runtime. Use these endpoints to inspect current settings, apply updates, and check runtime health.
 
 ## Overview
 
@@ -8,7 +8,7 @@ Runtime settings are stored in a project-local `.env` file and loaded at startup
 
 - **Read access** to all runtime settings (secrets masked)
 - **Write access** restricted to local development environments
-- **Health checks** for Modal and LM connectivity
+- **Health checks** for Modal, Daytona, and LM connectivity
 
 ## Endpoints
 
@@ -37,10 +37,14 @@ Retrieve a snapshot of current runtime settings with secret values masked.
     "DSPY_LLM_API_KEY",
     "DSPY_LM_API_BASE",
     "DSPY_LM_MAX_TOKENS",
+    "DAYTONA_API_KEY",
+    "DAYTONA_API_URL",
+    "DAYTONA_TARGET",
     "MODAL_TOKEN_ID",
     "MODAL_TOKEN_SECRET",
     "SECRET_NAME",
-    "VOLUME_NAME"
+    "VOLUME_NAME",
+    "SANDBOX_PROVIDER"
   ],
   "values": {
     "DSPY_LM_MODEL": "openai/gpt-4o",
@@ -49,10 +53,14 @@ Retrieve a snapshot of current runtime settings with secret values masked.
     "DSPY_LLM_API_KEY": "sk-...yz",
     "DSPY_LM_API_BASE": "",
     "DSPY_LM_MAX_TOKENS": "",
+    "DAYTONA_API_KEY": "",
+    "DAYTONA_API_URL": "https://app.daytona.io/api",
+    "DAYTONA_TARGET": "default",
     "MODAL_TOKEN_ID": "",
     "MODAL_TOKEN_SECRET": "***",
     "SECRET_NAME": "LITELLM",
-    "VOLUME_NAME": "fleet-rlm-memory"
+    "VOLUME_NAME": "fleet-rlm-memory",
+    "SANDBOX_PROVIDER": "modal"
   },
   "masked_values": {
     "DSPY_LM_MODEL": "openai/gpt-4o",
@@ -61,10 +69,14 @@ Retrieve a snapshot of current runtime settings with secret values masked.
     "DSPY_LLM_API_KEY": "sk-...yz",
     "DSPY_LM_API_BASE": "",
     "DSPY_LM_MAX_TOKENS": "",
+    "DAYTONA_API_KEY": "",
+    "DAYTONA_API_URL": "https://app.daytona.io/api",
+    "DAYTONA_TARGET": "default",
     "MODAL_TOKEN_ID": "",
     "MODAL_TOKEN_SECRET": "***",
     "SECRET_NAME": "LITELLM",
-    "VOLUME_NAME": "fleet-rlm-memory"
+    "VOLUME_NAME": "fleet-rlm-memory",
+    "SANDBOX_PROVIDER": "modal"
   }
 }
 ```
@@ -102,10 +114,14 @@ Update runtime settings in the `.env` file and apply changes to the running proc
 | `DSPY_LLM_API_KEY` | API key for the LM provider |
 | `DSPY_LM_API_BASE` | Custom API base URL (optional) |
 | `DSPY_LM_MAX_TOKENS` | Maximum tokens for responses (optional) |
+| `DAYTONA_API_KEY` | Daytona API key used for sandbox and volume operations |
+| `DAYTONA_API_URL` | Daytona API base URL override |
+| `DAYTONA_TARGET` | Daytona control-plane target/profile |
 | `MODAL_TOKEN_ID` | Modal authentication token ID |
 | `MODAL_TOKEN_SECRET` | Modal authentication token secret |
 | `SECRET_NAME` | Modal secret name for runtime credentials |
 | `VOLUME_NAME` | Modal volume name for persistence |
+| `SANDBOX_PROVIDER` | Active runtime sandbox backend (`modal` or `daytona`) |
 
 **Example Request:**
 
@@ -141,8 +157,11 @@ Retrieve comprehensive runtime status including active models, preflight checks,
 | `write_enabled` | boolean | Whether `PATCH /settings` is allowed |
 | `ready` | boolean | Overall runtime readiness (both Modal and LM tests passed) |
 | `active_models` | object | Currently configured models (see below) |
+| `sandbox_provider` | string | Active sandbox backend (`modal` or `daytona`) |
 | `llm` | object | LLM preflight check results |
+| `mlflow` | object | MLflow startup/preflight status |
 | `modal` | object | Modal preflight check results |
+| `daytona` | object | Daytona preflight check results |
 | `tests` | object | Cached connectivity test results |
 | `guidance` | string[] | List of remediation suggestions |
 
@@ -161,6 +180,7 @@ Retrieve comprehensive runtime status including active models, preflight checks,
   "app_env": "local",
   "write_enabled": true,
   "ready": true,
+  "sandbox_provider": "daytona",
   "active_models": {
     "planner": "openai/gpt-4o",
     "delegate": "openai/gpt-4o-mini",
@@ -178,6 +198,17 @@ Retrieve comprehensive runtime status including active models, preflight checks,
     "secret_name_set": true,
     "secret_name": "LITELLM",
     "configured_volume": "fleet-rlm-memory"
+  },
+  "daytona": {
+    "sandbox_provider_set": true,
+    "api_key_set": true,
+    "api_url_set": true,
+    "target_set": true
+  },
+  "mlflow": {
+    "enabled": false,
+    "startup_status": "pending",
+    "startup_error": null
   },
   "tests": {
     "modal": {
@@ -199,6 +230,16 @@ Retrieve comprehensive runtime status including active models, preflight checks,
       "guidance": [],
       "latency_ms": 850,
       "output_preview": "OK"
+    },
+    "daytona": {
+      "kind": "daytona",
+      "ok": true,
+      "preflight_ok": true,
+      "checked_at": "2025-01-15T10:30:08.000000+00:00",
+      "checks": { "api_key_set": true, "api_url_set": true, "target_set": true },
+      "guidance": [],
+      "latency_ms": 640,
+      "output_preview": "ok"
     }
   },
   "guidance": []
@@ -271,6 +312,12 @@ Test LM connectivity by sending a simple prompt to the configured model.
 
 **Response Schema:** Same as Modal test, with `kind: "lm"`
 
+### POST /api/v1/runtime/tests/daytona
+
+Test Daytona connectivity using the configured Daytona API credentials and target.
+
+**Response Schema:** Same as Modal test, with `kind: "daytona"`
+
 ## Local-Only Writes
 
 Runtime settings writes are intentionally restricted to local development:
@@ -278,7 +325,7 @@ Runtime settings writes are intentionally restricted to local development:
 - `PATCH /api/v1/runtime/settings` succeeds only when `APP_ENV=local`
 - Non-local environments return `403 Forbidden` for runtime writes
 - Read endpoints (`GET /settings`, `GET /status`) remain available in all environments
-- Connectivity tests (`POST /tests/modal`, `POST /tests/lm`) work in all environments
+- Connectivity tests (`POST /tests/modal`, `POST /tests/lm`, `POST /tests/daytona`) work in all environments
 
 This restriction prevents accidental credential changes in production and ensures settings changes go through proper deployment pipelines.
 
@@ -309,6 +356,15 @@ If LM tests fail:
 2. Verify `DSPY_LLM_API_KEY` contains a valid API key
 3. For custom endpoints, set `DSPY_LM_API_BASE`
 4. Check API quota and rate limits
+
+### Daytona Connection Failing
+
+If Daytona tests fail:
+
+1. Verify `SANDBOX_PROVIDER=daytona` if you intend to use Daytona-backed execution
+2. Verify `DAYTONA_API_KEY` is set with a valid credential
+3. Verify `DAYTONA_API_URL` points at the correct Daytona control plane
+4. Verify `DAYTONA_TARGET` matches the expected Daytona target/profile
 
 ### 403 on PATCH
 

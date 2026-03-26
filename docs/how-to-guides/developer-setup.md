@@ -234,6 +234,7 @@ pnpm run api:check
 pnpm run type-check
 pnpm run lint:robustness
 pnpm run test:unit
+pnpm run build
 ```
 
 ## 7. Verify Your Setup
@@ -258,12 +259,12 @@ uv run pytest -q -m "not live_llm and not benchmark"
 ### Run Quality Checks
 
 ```bash
-# Lint and format check
-uv run ruff check src tests
-uv run ruff format --check src tests
+# Repo-aligned validation gate
+make quality-gate
 
-# Type checking
-uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
+# When backend request/response or OpenAPI-facing schema metadata changes
+uv run python scripts/openapi_tools.py generate
+cd src/frontend && pnpm run api:check
 ```
 
 ### Start Development Server
@@ -366,6 +367,7 @@ require('lspconfig').pyright.setup {
 | Command                    | Description                                                       |
 | -------------------------- | ----------------------------------------------------------------- |
 | `pnpm run dev`             | Start development server                                          |
+| `pnpm run api:sync`        | Copy the root OpenAPI spec and regenerate TS types                |
 | `pnpm run api:check`       | Verify committed frontend OpenAPI artifacts are up to date        |
 | `pnpm run type-check`      | Run TypeScript type checks                                        |
 | `pnpm run lint:robustness` | Run the repo lint lane                                            |

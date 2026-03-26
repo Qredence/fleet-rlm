@@ -78,10 +78,6 @@ vi.mock("@/app/workspace/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/app/workspace/workspace-sidebar", () => ({
-  WorkspaceSidebar: () => <div>WorkspaceSidebar</div>,
-}));
-
 vi.mock("@/app/workspace/workspace-composer", () => ({
   WorkspaceComposer: () => <div>WorkspaceComposer</div>,
 }));

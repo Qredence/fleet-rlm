@@ -40,6 +40,7 @@ Runtime setup surfaces:
 - `PATCH /api/v1/runtime/settings` (local-only writes)
 - `POST /api/v1/runtime/tests/modal`
 - `POST /api/v1/runtime/tests/lm`
+- `POST /api/v1/runtime/tests/daytona`
 - `GET /api/v1/runtime/status`
 
 Runtime settings behavior:
@@ -272,8 +273,9 @@ From repo root:
 
 ```bash
 uv run fleet-rlm serve-api --port 8000
+uv run python scripts/openapi_tools.py generate
 rg -n "^  /" openapi.yaml
-rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/api.py
+rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
 ```
 
 From `src/frontend` (optional frontend validation):
