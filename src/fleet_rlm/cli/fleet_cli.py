@@ -146,6 +146,14 @@ def main() -> None:
 
     hydra_overrides, typer_args = split_hydra_overrides(sys.argv[1:])
 
+    # Help and completion output should be available without initializing runtime config.
+    if any(
+        arg in {"--help", "--show-completion", "--install-completion"}
+        for arg in typer_args
+    ):
+        app(typer_args)
+        return
+
     # Initialize config (with optional overrides)
     try:
         _CONFIG = initialize_app_config(hydra_overrides)

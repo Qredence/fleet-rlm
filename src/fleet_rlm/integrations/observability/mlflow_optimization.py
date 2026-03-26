@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, cast
 
 import dspy
+from dspy.teleprompt import MIPROv2
 
 from .config import MlflowConfig
 from .mlflow_evaluation import load_trace_rows, rows_with_expected_responses
@@ -140,7 +141,7 @@ def optimize_program_with_mipro(
     metric = build_exact_match_metric(output_key)
     program = build_program(program_spec)
 
-    optimizer = dspy.teleprompt.MIPROv2(metric=metric, auto=auto)
+    optimizer = MIPROv2(metric=metric, auto=auto)
     resolved_run_name = run_name or f"MIPROv2::{program_spec}"
     start_run = getattr(mlflow, "start_run", None)
     log_metric = getattr(mlflow, "log_metric", None)

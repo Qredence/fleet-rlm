@@ -28,9 +28,14 @@ class MlflowTraceRequestContext:
 
 
 _CURRENT_REQUEST_CONTEXT: contextvars.ContextVar[MlflowTraceRequestContext | None] = (
-    contextvars.ContextVar("fleet_rlm_mlflow_request_context", default=None)
+    contextvars.ContextVar[MlflowTraceRequestContext | None](
+        "fleet_rlm_mlflow_request_context",
+        default=None,
+    )
 )
-_CURRENT_TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+_CURRENT_TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[
+    str | None
+](
     "fleet_rlm_mlflow_trace_id",
     default=None,
 )
