@@ -177,7 +177,16 @@ async def execute_command(
 
     # Resolve the callable: look up by __name__ in the react_tools list,
     # falling back to agent method for commands like "reset".
-    tool_fn = _resolve_tool(agent, tool_name)
+    try:
+        tool_fn = _resolve_tool(agent, tool_name)
+    except AttributeError as exc:
+        message = f"Command {command} is not available in the current runtime."
+        if command == "parallel_semantic_map":
+            message += (
+                " Use analyze_document, summarize_document, extract_logs, "
+                "grounded_answer, rlm_query, or rlm_query_batched instead."
+            )
+        raise ValueError(message) from exc
 
     if command in _BLOCKING_COMMANDS:
         if inspect.iscoroutinefunction(tool_fn):

@@ -95,6 +95,7 @@ Auth, persistence, and analytics constraints:
 - `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
 - PostHog and MLflow are both active runtime codepaths and should not be documented as optional no-ops when configured
 - `/ready` now reports critical server readiness only. Planner/delegate LM warmup, PostHog startup, and MLflow startup are optional background tasks; inspect runtime status/diagnostics for those service states instead of treating them as boot blockers.
+- In `APP_ENV=local`, MLflow defaults to auto-starting when `MLFLOW_ENABLED=true` and `MLFLOW_TRACKING_URI` points at localhost, unless `MLFLOW_AUTO_START=false` explicitly disables that convenience path.
 
 ## Agent Operating Rules
 
@@ -149,13 +150,15 @@ Auth, persistence, and analytics constraints:
 - For repo-specific Daytona architecture decisions and intentional deviations, see
   [docs/reference/daytona-runtime-architecture.md](../../docs/reference/daytona-runtime-architecture.md).
 - Daytona is now aligned to the shared ReAct + `dspy.RLM` runtime architecture. Keep Daytona-specific behavior in `integrations/providers/daytona/*`, not in a parallel chat/runtime orchestrator.
-- `spawn_delegate_sub_agent_async` remains the one true recursive child-RLM path for both Modal and Daytona. `llm_query` stays semantic-only; `rlm_query` and `rlm_query_batched` remain the true child-RLM entrypoints.
+- `spawn_delegate_sub_agent_async` remains the one true recursive child-RLM path for both Modal and Daytona. `llm_query` stays semantic-only. `rlm_query` is the shared agent-level recursive entrypoint, and `rlm_query_batched` is Daytona-only for now.
+- The Daytona public heavy-work surface is intentionally small: named `dspy.RLM` capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` remains outside the Daytona tool surface.
+- For new Daytona heavy capabilities, treat `llm_query` / `llm_query_batched` as last-resort semantic helpers inside the sandbox, not as the default implementation shape.
 - `DAYTONA_TARGET` is Daytona SDK routing/config only. Do not treat it as a workspace id, sandbox id, or volume name.
 - The workspace Daytona persistent volume is derived from the authenticated workspace/tenant claim, created/read through `client.volume.get(..., create=True)`, and mounted into Daytona sandboxes through `VolumeMount`.
 - Keep Daytona aligned to the official SDK surface with direct `from daytona import ...` imports in the owning modules. Do not reintroduce a local Daytona SDK façade.
 - Keep async websocket/session-switch paths on the async helpers (`agent.areset()`, `agent.aimport_session_state()`, `interpreter.aconfigure_workspace()`, and `interpreter.aexecute()`). The Daytona provider is now async-first internally on `AsyncDaytona`; sync methods remain compatibility shims over that async implementation.
 - Root and recursive Daytona child runs should share the same workspace-scoped persistent volume when one is configured, while still using distinct Daytona sandbox sessions per child run.
-- Daytona interpreter execution is now implemented on top of `sandbox.code_interpreter.run_code()`. The repo keeps only a minimal bridge for host callbacks (`llm_query`, `llm_query_batched`, custom tools) and `SUBMIT(...)` final-artifact capture.
+- Daytona interpreter execution is now implemented on top of `sandbox.code_interpreter.run_code()`. The repo keeps only a minimal bridge for host callbacks (`llm_query`, `llm_query_batched`, custom tools) and `SUBMIT(...)` final-artifact capture. Recursive `rlm_query*` tools are agent-level only and should fail loudly if referenced from sandbox-authored code.
 - Keep canonical Daytona internals under `integrations/providers/daytona/` with the provider root modules as the real implementation surface:
   - `runtime.py`
   - `interpreter.py`

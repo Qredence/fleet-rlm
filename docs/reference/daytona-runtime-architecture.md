@@ -42,8 +42,9 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `RLMReActChatAgent` remains the top-level conversational runtime
   - long-context and recursive execution flow through `dspy.RLM`
   - `spawn_delegate_sub_agent_async` is the single recursive child-run path
-  - `llm_query` is semantic-only and does not create child sandboxes
-  - `rlm_query` and `rlm_query_batched` create true recursive Daytona child runs
+  - `llm_query` and `llm_query_batched` are semantic-only sandbox callbacks
+  - `rlm_query` is the shared agent-level recursive entrypoint
+  - `rlm_query_batched` is a Daytona-only agent-level recursive entrypoint for now
   - each child run uses its own Daytona sandbox session and returns synthesized results to the parent
 
 ## Current Runtime Shape
@@ -64,6 +65,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, and `types_serialization.py` own provider-local result, context, and recursion contracts
   - `volumes.py` owns provider-specific volume browsing helpers
 - `agent.py` and `state.py` remain the Daytona-specific agent/session adapters over the shared runtime.
+- Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The provider is now async-first internally:
   - `AsyncDaytona` drives sandbox/session lifecycle
   - host-side volume browsing uses async Daytona helpers directly
@@ -74,6 +76,8 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `RLMReActChatAgent` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
   - cached runtime-module execution for non-recursive helper reuse
+- Daytona's public heavy-work surface is intentionally limited to the named cached runtime-module capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona tool surface.
+- `llm_query` / `llm_query_batched` remain available inside the Daytona interpreter, but they are internal semantic sub-primitives rather than peer public heavy-work tools. New Daytona heavy capabilities should use them only as a documented last resort.
 
 ## Project-Specific Extensions
 

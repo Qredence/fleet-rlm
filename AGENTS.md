@@ -87,6 +87,7 @@ Cross-stack source-of-truth boundaries:
 ## Agent Operating Rules
 
 - Keep Modal and Daytona responsibilities distinct, but keep them on the same conversational runtime architecture. `daytona_pilot` should stay on the shared ReAct + `dspy.RLM` backbone, with Daytona acting as the interpreter/sandbox backend.
+- For Daytona, keep the public heavy-work surface limited to named `dspy.RLM` capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona surface; `llm_query*` stay internal sandbox callbacks.
 - Do not reintroduce Daytona-specific chat/runtime orchestration when the shared `RLMReActChatAgent` path can express the behavior. Daytona-specific logic belongs in the interpreter/provider layer.
 - Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update generated frontend API artifacts, and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.

@@ -273,3 +273,15 @@ def test_resolve_tool_falls_back_to_agent_method():
     agent.reset = reset
     resolved = _resolve_tool(agent, "reset")
     assert resolved is reset
+
+
+@pytest.mark.asyncio
+async def test_execute_command_rejects_unavailable_parallel_semantic_map():
+    agent = _FakeAgent()
+
+    with pytest.raises(ValueError, match="not available in the current runtime"):
+        await execute_command(
+            agent,
+            "parallel_semantic_map",
+            {"query": "summarize"},
+        )
