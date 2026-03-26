@@ -7,6 +7,7 @@ import {
   Plus,
   Search,
   Settings,
+  Trash2,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -22,6 +23,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -94,7 +96,12 @@ function groupConversations(
 
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
-  const { newSession, requestConversationLoad } = useWorkspaceShellActions();
+  const {
+    newSession,
+    requestConversationLoad,
+    deleteConversation,
+    clearHistory,
+  } = useWorkspaceShellActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
   const { openCommandPalette } = useNavigationStore();
@@ -123,6 +130,21 @@ export function AppSidebar() {
   const handleOpenConversation = (conversationId: string) => {
     requestConversationLoad(conversationId);
     navigateTo("workspace");
+  };
+
+  const handleDeleteConversation = (
+    event: MouseEvent<HTMLButtonElement>,
+    conversationId: string,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteConversation(conversationId);
+  };
+
+  const handleClearHistory = () => {
+    if (conversations.length === 0) return;
+    if (!window.confirm("Delete all saved sessions?")) return;
+    clearHistory();
   };
 
   const handleOpenLogin = (event: MouseEvent<HTMLButtonElement>) => {
@@ -157,13 +179,19 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
+                <SidebarMenuButton
+                  onClick={handleNewSession}
+                  tooltip="New session"
+                >
                   <Plus />
                   <span>New Session</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => openCommandPalette()} tooltip="Search sessions">
+                <SidebarMenuButton
+                  onClick={() => openCommandPalette()}
+                  tooltip="Search sessions"
+                >
                   <Search />
                   <span>Search sessions</span>
                 </SidebarMenuButton>
@@ -207,15 +235,30 @@ export function AppSidebar() {
             <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-4 bg-linear-to-b from-sidebar to-transparent group-data-[collapsible=icon]:hidden" />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-5 bg-linear-to-t from-sidebar via-sidebar/95 to-transparent group-data-[collapsible=icon]:hidden" />
             <div className="no-scrollbar flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain pr-1">
-              <div className="px-2 pb-2 text-xs leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
-                Jump back into saved work from the same left rail you use for navigation.
+              <div className="flex items-start justify-between gap-3 px-2 pb-2 group-data-[collapsible=icon]:hidden">
+                <div className="text-xs leading-5 text-sidebar-foreground/70">
+                  Jump back into saved work from the same left rail you use for
+                  navigation.
+                </div>
+                {conversations.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="shrink-0 rounded-md px-2 py-1 text-[0.7rem] font-medium text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  >
+                    Clear all
+                  </button>
+                ) : null}
               </div>
               <SidebarMenu className="gap-1.5 pb-2">
                 {conversations.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-sidebar-border/80 px-3 py-3 text-sm leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
-                    <div className="font-medium text-sidebar-foreground">No recent sessions yet</div>
+                    <div className="font-medium text-sidebar-foreground">
+                      No recent sessions yet
+                    </div>
                     <div className="mt-1">
-                      Start a new session and it will appear here for quick return.
+                      Start a new session and it will appear here for quick
+                      return.
                     </div>
                   </div>
                 ) : (
@@ -230,7 +273,7 @@ export function AppSidebar() {
                             <SidebarMenuButton
                               onClick={() => handleOpenConversation(session.id)}
                               tooltip={session.title}
-                              className="h-auto min-h-12 items-start rounded-xl px-2.5 py-2.5"
+                              className="peer/menu-button h-auto min-h-12 items-start rounded-xl px-2.5 py-2.5 pr-10"
                             >
                               <Clock3 className="mt-0.5 size-4 shrink-0 text-sidebar-foreground/70" />
                               <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
@@ -242,6 +285,17 @@ export function AppSidebar() {
                                 </div>
                               </div>
                             </SidebarMenuButton>
+                            <SidebarMenuAction
+                              aria-label={`Delete conversation: ${session.title}`}
+                              title={`Delete conversation: ${session.title}`}
+                              showOnHover
+                              className="text-sidebar-foreground/60 hover:text-destructive"
+                              onClick={(event) =>
+                                handleDeleteConversation(event, session.id)
+                              }
+                            >
+                              <Trash2 />
+                            </SidebarMenuAction>
                           </SidebarMenuItem>
                         ))}
                       </SidebarMenu>

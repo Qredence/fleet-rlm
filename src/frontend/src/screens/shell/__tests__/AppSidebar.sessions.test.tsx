@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { AppSidebar } from "@/screens/shell/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -22,6 +29,8 @@ const workspaceShellState = {
   conversations: [] as Conversation[],
   newSession: vi.fn(),
   requestConversationLoad: vi.fn(),
+  deleteConversation: vi.fn(),
+  clearHistory: vi.fn(),
 };
 
 vi.mock("lucide-react", () => {
@@ -31,6 +40,7 @@ vi.mock("lucide-react", () => {
     Search: Icon,
     Settings: Icon,
     Clock3: Icon,
+    Trash2: Icon,
     PanelLeftIcon: Icon,
     XIcon: Icon,
     Database: Icon,
@@ -40,7 +50,11 @@ vi.mock("lucide-react", () => {
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({
+    children,
+    className,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>
       {children}
     </button>
@@ -69,6 +83,8 @@ vi.mock("@/screens/workspace/workspace-shell-contract", () => ({
   useWorkspaceShellActions: () => ({
     newSession: workspaceShellState.newSession,
     requestConversationLoad: workspaceShellState.requestConversationLoad,
+    deleteConversation: workspaceShellState.deleteConversation,
+    clearHistory: workspaceShellState.clearHistory,
   }),
 }));
 
@@ -103,6 +119,9 @@ describe("AppSidebar session actions", () => {
     workspaceShellState.conversations = [];
     workspaceShellState.newSession.mockReset();
     workspaceShellState.requestConversationLoad.mockReset();
+    workspaceShellState.deleteConversation.mockReset();
+    workspaceShellState.clearHistory.mockReset();
+    vi.restoreAllMocks();
   });
 
   afterEach(() => {
@@ -174,8 +193,77 @@ describe("AppSidebar session actions", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith("conv-1");
+    expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith(
+      "conv-1",
+    );
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("deletes a saved session from the consolidated sidebar", () => {
+    const conversation: Conversation = {
+      id: "conv-delete",
+      title: "Sensitive conversation",
+      messages: [],
+      phase: "complete",
+      createdAt: "2026-03-16T10:00:00.000Z",
+      updatedAt: "2026-03-16T12:00:00.000Z",
+    };
+
+    workspaceShellState.conversations = [conversation];
+
+    const { container, root } = mountSidebar();
+
+    const deleteButton = Array.from(container.querySelectorAll("button")).find(
+      (button) =>
+        button
+          .getAttribute("aria-label")
+          ?.includes("Delete conversation: Sensitive conversation"),
+    );
+
+    expect(deleteButton).toBeTruthy();
+
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(workspaceShellState.deleteConversation).toHaveBeenCalledWith(
+      "conv-delete",
+    );
+    expect(workspaceShellState.requestConversationLoad).not.toHaveBeenCalled();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("clears saved sessions from the consolidated sidebar", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    workspaceShellState.conversations = [
+      {
+        id: "conv-clear",
+        title: "Clearable conversation",
+        messages: [],
+        phase: "complete",
+        createdAt: "2026-03-16T10:00:00.000Z",
+        updatedAt: "2026-03-16T12:00:00.000Z",
+      },
+    ];
+
+    const { container, root } = mountSidebar();
+    const clearButton = findButtonByText(container, "Clear all");
+
+    expect(clearButton).toBeTruthy();
+
+    act(() => {
+      clearButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(window.confirm).toHaveBeenCalledWith("Delete all saved sessions?");
+    expect(workspaceShellState.clearHistory).toHaveBeenCalledOnce();
 
     act(() => {
       root.unmount();
