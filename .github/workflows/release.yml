@@ -94,7 +94,7 @@ jobs:
 
       - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@e0e7c6c27c0190b15e4a6ad5c088e1f52bd8d7d9 # v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "24"
           cache: "pnpm"
@@ -144,7 +144,7 @@ jobs:
 
       - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832eb9e # v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "24"
           cache: "pnpm"
