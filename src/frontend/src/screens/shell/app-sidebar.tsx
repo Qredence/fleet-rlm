@@ -252,15 +252,17 @@ export function AppSidebar() {
               </div>
               <SidebarMenu className="gap-1.5 pb-2">
                 {conversations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-sidebar-border/80 px-3 py-3 text-sm leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
-                    <div className="font-medium text-sidebar-foreground">
-                      No recent sessions yet
+                  <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
+                    <div className="rounded-xl border border-dashed border-sidebar-border/80 px-3 py-3 text-sm leading-5 text-sidebar-foreground/70">
+                      <div className="font-medium text-sidebar-foreground">
+                        No recent sessions yet
+                      </div>
+                      <div className="mt-1">
+                        Start a new session and it will appear here for quick
+                        return.
+                      </div>
                     </div>
-                    <div className="mt-1">
-                      Start a new session and it will appear here for quick
-                      return.
-                    </div>
-                  </div>
+                  </SidebarMenuItem>
                 ) : (
                   groupedConversations.map(({ group, items }) => (
                     <li key={group} className="list-none">

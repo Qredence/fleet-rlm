@@ -57,7 +57,6 @@ SETTINGS_WRITE_RESPONSES = {
 VOLUME_TREE_RESPONSES = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The requested root path is invalid."},
-    422: {"description": "One or more volume query parameters failed validation."},
     502: {
         "description": "The runtime volume provider failed to list the requested path."
     },
@@ -72,7 +71,6 @@ VOLUME_FILE_RESPONSES = {
         "description": "The requested file path is invalid or points to a directory."
     },
     404: {"description": "The requested runtime volume file does not exist."},
-    422: {"description": "One or more volume query parameters failed validation."},
     502: {
         "description": "The runtime volume provider failed to read the requested file."
     },

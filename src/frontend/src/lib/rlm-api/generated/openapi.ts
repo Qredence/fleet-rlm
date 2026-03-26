@@ -969,9 +969,11 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description One or more volume query parameters failed validation. */
+      /** @description Validation Error */
       422: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
       /** @description The runtime volume provider failed to list the requested path. */
       502: {
@@ -1021,9 +1023,11 @@ export interface operations {
       404: {
         content: never;
       };
-      /** @description One or more volume query parameters failed validation. */
+      /** @description Validation Error */
       422: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
       /** @description The runtime volume provider failed to read the requested file. */
       502: {

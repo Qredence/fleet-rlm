@@ -267,12 +267,16 @@ paths:
             incomplete.
         '400':
           description: The requested root path is invalid.
-        '422':
-          description: One or more volume query parameters failed validation.
         '502':
           description: The runtime volume provider failed to list the requested path.
         '504':
           description: Volume listing timed out before the backend returned a result.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/runtime/volume/file:
     get:
       tags:
@@ -336,13 +340,17 @@ paths:
           description: The requested file path is invalid or points to a directory.
         '404':
           description: The requested runtime volume file does not exist.
-        '422':
-          description: One or more volume query parameters failed validation.
         '502':
           description: The runtime volume provider failed to read the requested file.
         '504':
           description: Volume file reading timed out before the backend returned a
             result.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/traces/feedback:
     post:
       tags:

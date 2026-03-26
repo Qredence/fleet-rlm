@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -143,9 +143,8 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     _register_api_routes(app)
 
     try:
-        get_scalar_api_reference: Any = import_module(
-            "scalar_fastapi"
-        ).get_scalar_api_reference
+        scalar_fastapi = cast(Any, import_module("scalar_fastapi"))
+        get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
 
         @app.get("/scalar", include_in_schema=False)
         async def scalar_docs():
