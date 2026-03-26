@@ -15,6 +15,7 @@ from .sandbox_common import (
     _aexecute_submit_ctx,
     _buffer_volume_default_path,
     _commit_volume_best_effort,
+    _document_load_result,
     _daytona_file_error,
     _persistent_roots,
     _reload_volume_best_effort,
@@ -160,15 +161,12 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
                 text = await _adaytona_read_text(daytona_session, resolved_path)
             except Exception as exc:
                 return _daytona_file_error(path=resolved_path, exc=exc)
-            ctx.agent._set_document(alias, text)
-            ctx.agent.active_alias = alias
-            return {
-                "status": "ok",
-                "alias": alias,
-                "path": resolved_path,
-                "chars": len(text),
-                "lines": len(text.splitlines()),
-            }
+            return _document_load_result(
+                ctx,
+                alias=alias,
+                path=resolved_path,
+                text=text,
+            )
 
         _reload_volume_best_effort(ctx)
 
@@ -180,15 +178,12 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
         text = str(result.get("text", ""))
         if text.startswith("[error:"):
             return {"status": "error", "error": text, "path": resolved_path}
-        ctx.agent._set_document(alias, text)
-        ctx.agent.active_alias = alias
-        return {
-            "status": "ok",
-            "alias": alias,
-            "path": resolved_path,
-            "chars": len(text),
-            "lines": len(text.splitlines()),
-        }
+        return _document_load_result(
+            ctx,
+            alias=alias,
+            path=resolved_path,
+            text=text,
+        )
 
     async def process_document(path: str, alias: str = "active") -> dict[str, Any]:
         """Load a document from volume and register it for downstream analysis."""
@@ -202,7 +197,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             "path": loaded.get("path", path),
             "chars": len(text),
             "lines": len(text.splitlines()),
-            "hint": "Use analyze_long_document or summarize_long_document for semantic processing.",
+            "hint": "Preferred over workspace_read for workspace-backed document analysis. Use analyze_long_document or summarize_long_document for semantic processing.",
         }
 
     async def memory_read(path: str) -> dict[str, Any]:
@@ -497,7 +492,7 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(workspace_read),
                 name="workspace_read",
-                desc="Read content from a file in the workspace directory",
+                desc="Read raw content from a file in the workspace directory. Low-level helper; use load_document or process_document to ingest documents for analysis.",
             ),
             Tool(
                 _sync_compatible_tool_callable(extract_python_ast),
@@ -547,7 +542,7 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(process_document),
                 name="process_document",
-                desc="Load a document from persistent storage and register it for analysis",
+                desc="Load a workspace-backed document into agent memory and register it for downstream analysis",
             ),
         ]
     )

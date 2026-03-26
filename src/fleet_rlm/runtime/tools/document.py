@@ -22,6 +22,11 @@ from fleet_rlm.runtime.execution.document_sources import (
 from fleet_rlm.runtime.content.document_ingestion.main import (
     read_document_content as _read_document_content,
 )
+from fleet_rlm.runtime.tools.sandbox_common import (
+    _SandboxToolContext,
+    _document_load_result,
+    _load_daytona_workspace_text_sync,
+)
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
@@ -48,24 +53,30 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
 
     def _load_document_impl(path: str, alias: str = "active") -> dict[str, Any]:
         """Shared implementation for loading local or URL-backed documents."""
+        ctx = _SandboxToolContext(agent=agent)
         if is_http_url(path):
             content, metadata = fetch_url_document_content(
                 path, read_document_content=_read_document_content
             )
-            agent._set_document(alias, content)
-            agent.active_alias = alias
-            response = {
-                "status": "ok",
-                "alias": alias,
-                "path": path,
-                "chars": len(content),
-                "lines": len(content.splitlines()),
-            }
-            response.update(metadata)
-            return response
+            return _document_load_result(
+                ctx,
+                alias=alias,
+                path=path,
+                text=content,
+                metadata=metadata,
+            )
 
         docs_path = Path(path)
         if not docs_path.exists():
+            loaded = _load_daytona_workspace_text_sync(ctx, path=path)
+            if loaded is not None:
+                resolved_path, content = loaded
+                return _document_load_result(
+                    ctx,
+                    alias=alias,
+                    path=resolved_path,
+                    text=content,
+                )
             raise FileNotFoundError(f"Document not found: {docs_path}")
 
         # Handle directory: return file listing
@@ -87,18 +98,13 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
 
         # Handle file: load content
         content, metadata = _read_document_content(docs_path)
-        agent._set_document(alias, content)
-        agent.active_alias = alias
-        response = {
-            "status": "ok",
-            "alias": alias,
-            "path": str(docs_path),
-            "chars": len(content),
-            "lines": len(content.splitlines()),
-        }
-        if metadata.get("source_type") != "text":
-            response.update(metadata)
-        return response
+        return _document_load_result(
+            ctx,
+            alias=alias,
+            path=str(docs_path),
+            text=content,
+            metadata=metadata,
+        )
 
     def load_document(path: str, alias: str = "active") -> dict[str, Any]:
         """Load a text document from host filesystem or public URL into agent memory.
@@ -173,7 +179,7 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
         Tool(
             load_document,
             name="load_document",
-            desc="Load a text document from host filesystem or public HTTP(S) URL into agent document memory",
+            desc="Load a text document from the host filesystem, a public HTTP(S) URL, or a Daytona workspace-backed file into agent document memory",
         ),
         Tool(
             fetch_web_document,

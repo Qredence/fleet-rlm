@@ -100,6 +100,14 @@ async def _aget_daytona_session(ctx: _SandboxToolContext) -> Any | None:
     return await interpreter._aensure_session()
 
 
+def _get_daytona_session_sync(ctx: _SandboxToolContext) -> Any | None:
+    interpreter = getattr(ctx.agent, "interpreter", None)
+    ensure_session = getattr(interpreter, "_ensure_session_sync", None)
+    if not callable(ensure_session):
+        return None
+    return ensure_session()
+
+
 def _daytona_file_error(*, path: str, exc: Exception) -> dict[str, Any]:
     return {
         "status": "error",
@@ -164,6 +172,81 @@ async def _adaytona_list_items(daytona_session: Any, path: str) -> list[dict[str
             }
         )
     return items
+
+
+def _document_load_result(
+    ctx: _SandboxToolContext,
+    *,
+    alias: str,
+    path: str,
+    text: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ctx.agent._set_document(alias, text)
+    ctx.agent.active_alias = alias
+    response = {
+        "status": "ok",
+        "alias": alias,
+        "path": path,
+        "chars": len(text),
+        "lines": len(text.splitlines()),
+    }
+    if metadata and metadata.get("source_type") != "text":
+        response.update(metadata)
+    return response
+
+
+def _load_daytona_workspace_text_sync(
+    ctx: _SandboxToolContext,
+    *,
+    path: str,
+) -> tuple[str, str] | None:
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        return None
+
+    candidate = PurePosixPath(raw_path)
+    if candidate.is_absolute():
+        return None
+
+    session = _get_daytona_session_sync(ctx)
+    if session is None:
+        return None
+
+    workspace_path = str(getattr(session, "workspace_path", "") or "").strip()
+    if not workspace_path:
+        return None
+
+    resolved_path = str(PurePosixPath(workspace_path) / candidate)
+    parent_path = str(PurePosixPath(resolved_path).parent)
+    file_name = PurePosixPath(resolved_path).name
+
+    try:
+        entries = session.list_files(parent_path)
+    except Exception as exc:
+        if _is_daytona_missing_file_error(exc):
+            return None
+        raise
+
+    has_file = False
+    for entry in entries:
+        if str(getattr(entry, "name", "") or "") != file_name:
+            continue
+        if bool(getattr(entry, "is_dir", False)):
+            return None
+        has_file = True
+        break
+
+    if not has_file:
+        return None
+
+    try:
+        text = str(session.read_file(resolved_path))
+    except Exception as exc:
+        if _is_daytona_missing_file_error(exc):
+            return None
+        raise
+    return resolved_path, text
 
 
 def _buffer_volume_default_path(workspace_root: str) -> str:
