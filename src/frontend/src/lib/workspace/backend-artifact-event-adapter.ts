@@ -12,13 +12,15 @@ function nextId(prefix: string): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   return value as Record<string, unknown>;
 }
 
 function asText(value: unknown): string {
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   if (value == null) return "";
   try {
     return JSON.stringify(value);
@@ -51,9 +53,12 @@ function normalizeStepType(value: unknown): ArtifactStepType {
 
 function normalizeActorKind(value: unknown): ArtifactActorKind | undefined {
   const raw = asText(value).trim().toLowerCase();
-  if (raw === "root_rlm" || raw === "root-rlm" || raw === "root") return "root_rlm";
-  if (raw === "sub_agent" || raw === "sub-agent" || raw === "subagent") return "sub_agent";
-  if (raw === "delegate" || raw === "rlm_delegate" || raw === "rlm-delegate") return "delegate";
+  if (raw === "root_rlm" || raw === "root-rlm" || raw === "root")
+    return "root_rlm";
+  if (raw === "sub_agent" || raw === "sub-agent" || raw === "subagent")
+    return "sub_agent";
+  if (raw === "delegate" || raw === "rlm_delegate" || raw === "rlm-delegate")
+    return "delegate";
   if (raw === "unknown") return "unknown";
   return undefined;
 }
@@ -69,7 +74,10 @@ function normalizeDepth(value: unknown): number | undefined {
   return undefined;
 }
 
-function findStepById(steps: ExecutionStep[], id?: string): ExecutionStep | undefined {
+function findStepById(
+  steps: ExecutionStep[],
+  id?: string,
+): ExecutionStep | undefined {
   if (!id) return undefined;
   return steps.find((step) => step.id === id);
 }
@@ -199,7 +207,9 @@ function appendIntoLlmStep(entry: {
   const nextReasoning = Array.isArray(previousOutput.reasoning)
     ? [...previousOutput.reasoning]
     : [];
-  const nextStatus = Array.isArray(previousOutput.status) ? [...previousOutput.status] : [];
+  const nextStatus = Array.isArray(previousOutput.status)
+    ? [...previousOutput.status]
+    : [];
 
   if (entry.bucket === "reasoning") nextReasoning.push(entry.text);
   if (entry.bucket === "status") nextStatus.push(entry.text);
@@ -227,15 +237,25 @@ function addToolStep(
   const { steps, activeStepId } = useArtifactStore.getState();
   const llm = getCurrentLlmStep(steps, activeStepId);
   const toolName = asText(payload?.tool_name).trim();
-  const label = toolName ? `Tool: ${toolName}` : kind === "tool_call" ? "Tool call" : "Tool result";
+  const label = toolName
+    ? `Tool: ${toolName}`
+    : kind === "tool_call"
+      ? "Tool call"
+      : "Tool result";
 
   add({
     id: nextId("tool"),
     type: "tool",
     label,
     parent_id: llm?.id,
-    input: kind === "tool_call" ? (payload?.tool_input ?? text) : payload?.tool_input,
-    output: kind === "tool_result" ? (payload?.tool_output ?? text) : payload?.tool_output,
+    input:
+      kind === "tool_call"
+        ? (payload?.tool_input ?? text)
+        : payload?.tool_input,
+    output:
+      kind === "tool_result"
+        ? (payload?.tool_output ?? text)
+        : payload?.tool_output,
     timestamp,
   });
 }
@@ -246,7 +266,8 @@ function addTrajectoryStep(
   timestamp: number,
 ): void {
   const stepData = asRecord(payload?.step_data);
-  const stepIndex = typeof payload?.step_index === "number" ? payload.step_index : undefined;
+  const stepIndex =
+    typeof payload?.step_index === "number" ? payload.step_index : undefined;
 
   const inferredType: ArtifactStepType = stepData?.tool_name
     ? "tool"
@@ -330,7 +351,13 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
   if (frame.type === "error") {
     const timestamp = Date.now();
     const parentId = finalizeCurrentLlm(frame.message, undefined, timestamp);
-    addOutputStep("Execution error", frame.message, undefined, timestamp, parentId);
+    addOutputStep(
+      "Execution error",
+      frame.message,
+      undefined,
+      timestamp,
+      parentId,
+    );
     liveTraceSeenForTurn = false;
     return;
   }
@@ -376,13 +403,25 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
     }
     case "cancelled": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
-      addOutputStep("Execution cancelled", text || "Request cancelled", payload, epoch, parentId);
+      addOutputStep(
+        "Execution cancelled",
+        text || "Request cancelled",
+        payload,
+        epoch,
+        parentId,
+      );
       liveTraceSeenForTurn = false;
       return;
     }
     case "error": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
-      addOutputStep("Execution error", text || "Server error", payload, epoch, parentId);
+      addOutputStep(
+        "Execution error",
+        text || "Server error",
+        payload,
+        epoch,
+        parentId,
+      );
       liveTraceSeenForTurn = false;
       return;
     }

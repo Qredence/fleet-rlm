@@ -75,8 +75,8 @@ describe("WorkspaceChatMessageItem", () => {
     };
 
     const { container, root } = mountMessage(message, { onResolveHitl });
-    const approveButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Approve"),
+    const approveButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Approve"),
     );
 
     expect(container.textContent).toContain("Approve the change?");
@@ -113,12 +113,16 @@ describe("WorkspaceChatMessageItem", () => {
     const { container, root } = mountMessage(message, {
       onResolveClarification,
     });
-    const radioButton = container.querySelector('[data-slot="radio-option-card"]');
-    const confirmButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Confirm"),
+    const radioButton = container.querySelector(
+      '[data-slot="radio-option-card"]',
+    );
+    const confirmButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Confirm"),
     );
 
-    expect(container.textContent).toContain("Which file should I inspect first?");
+    expect(container.textContent).toContain(
+      "Which file should I inspect first?",
+    );
     expect(confirmButton?.hasAttribute("disabled")).toBe(true);
 
     act(() => {

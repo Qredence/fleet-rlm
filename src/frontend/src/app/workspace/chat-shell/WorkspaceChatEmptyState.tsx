@@ -95,11 +95,17 @@ export function WorkspaceChatEmptyState({
       <motion.div
         initial={{ opacity: 0, scale: prefersReduced ? 1 : 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={prefersReduced ? { duration: 0.01 } : { duration: 0.4, ease: "easeOut" }}
+        transition={
+          prefersReduced
+            ? { duration: 0.01 }
+            : { duration: 0.4, ease: "easeOut" }
+        }
         className="mb-6 flex items-center justify-center"
       >
         <div className="relative flex size-14 items-center justify-center rounded-2xl border border-border/60 bg-background shadow-sm ring-1 ring-border/30">
-          <QredenceLogo className={cn("size-7 text-foreground", isMobile && "size-6")} />
+          <QredenceLogo
+            className={cn("size-7 text-foreground", isMobile && "size-6")}
+          />
           <span className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary shadow-sm">
             <Zap className="size-2.5 text-primary-foreground" />
           </span>
@@ -110,7 +116,9 @@ export function WorkspaceChatEmptyState({
       <motion.div
         initial={{ opacity: 0, y: prefersReduced ? 0 : 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={prefersReduced ? { duration: 0.01 } : { delay: 0.1, duration: 0.35 }}
+        transition={
+          prefersReduced ? { duration: 0.01 } : { delay: 0.1, duration: 0.35 }
+        }
         className="mb-2 flex flex-col items-center gap-1.5"
       >
         <h2
@@ -128,13 +136,17 @@ export function WorkspaceChatEmptyState({
           className="max-w-sm text-muted-foreground"
           style={{ fontSize: "0.9rem", lineHeight: 1.5, opacity: 0.75 }}
         >
-          Agentic Fleet is ready — pick a starting point or describe your task below.
+          Agentic Fleet is ready — pick a starting point or describe your task
+          below.
         </p>
       </motion.div>
 
       {/* Suggestion cards */}
       <div
-        className={cn("mt-6 grid w-full gap-2.5", isMobile ? "grid-cols-1" : "grid-cols-2")}
+        className={cn(
+          "mt-6 grid w-full gap-2.5",
+          isMobile ? "grid-cols-1" : "grid-cols-2",
+        )}
         aria-live="polite"
         aria-label="Suggestion actions"
       >
@@ -170,7 +182,12 @@ interface SuggestionCardProps {
   onClick: (text: string) => void;
 }
 
-function SuggestionCard({ suggestion, index, prefersReduced, onClick }: SuggestionCardProps) {
+function SuggestionCard({
+  suggestion,
+  index,
+  prefersReduced,
+  onClick,
+}: SuggestionCardProps) {
   const handleClick = useCallback(() => {
     onClick(suggestion.text);
   }, [onClick, suggestion.text]);
@@ -182,7 +199,9 @@ function SuggestionCard({ suggestion, index, prefersReduced, onClick }: Suggesti
       initial={{ opacity: 0, y: prefersReduced ? 0 : 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={
-        prefersReduced ? { duration: 0.01 } : { delay: 0.2 + index * 0.06, duration: 0.3 }
+        prefersReduced
+          ? { duration: 0.01 }
+          : { delay: 0.2 + index * 0.06, duration: 0.3 }
       }
       onClick={handleClick}
       className={cn(
@@ -204,7 +223,9 @@ function SuggestionCard({ suggestion, index, prefersReduced, onClick }: Suggesti
         <span className="text-sm font-medium text-foreground leading-tight">
           {suggestion.title}
         </span>
-        <span className="text-xs text-muted-foreground leading-snug">{suggestion.description}</span>
+        <span className="text-xs text-muted-foreground leading-snug">
+          {suggestion.description}
+        </span>
       </div>
     </motion.button>
   );

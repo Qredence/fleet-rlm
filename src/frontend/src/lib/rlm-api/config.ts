@@ -59,7 +59,8 @@ export const rlmApiConfig = {
   e2eMode: parseBool(import.meta.env.VITE_E2E, false),
   mockMode,
   timeoutMs: 30_000,
-  workspaceId: trimOrEmpty(import.meta.env.VITE_FLEET_WORKSPACE_ID) || "default",
+  workspaceId:
+    trimOrEmpty(import.meta.env.VITE_FLEET_WORKSPACE_ID) || "default",
   userId: trimOrEmpty(import.meta.env.VITE_FLEET_USER_ID) || "fleetwebapp-user",
   trace: parseBool(import.meta.env.VITE_FLEET_TRACE, true),
 } as const;

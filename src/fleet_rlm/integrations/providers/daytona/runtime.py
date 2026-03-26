@@ -15,6 +15,7 @@ from .runtime_helpers import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     _abuild_workspace_path,
     _aclone_repo,
+    _aensure_daytona_volume_layout,
     _aensure_workspace_root,
     _aresolve_clone_ref,
     _astage_context_paths,
@@ -254,6 +255,11 @@ class DaytonaSandboxRuntime:
             timings["sandbox_create"] = int(
                 (time.perf_counter() - create_started) * 1000
             )
+            if volume_name:
+                await _aensure_daytona_volume_layout(
+                    sandbox=sandbox,
+                    mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                )
 
             workspace_path = await _abuild_workspace_path(sandbox, repo_url)
             resolved_ref = await _aresolve_clone_ref(repo_url, ref) if repo_url else ref

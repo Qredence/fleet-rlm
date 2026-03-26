@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import type { ChatMessage } from "@/screens/workspace/use-workspace";
-import { useNavigationStore } from "@/stores/navigationStore";
 import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 function renderChatMessageList(messages: ChatMessage[]) {
   return renderToStaticMarkup(
@@ -41,7 +41,10 @@ function mountChatMessageList(messages: ChatMessage[]) {
   return { container, root };
 }
 
-describe("WorkspaceMessageList (AI Elements render parts)", () => {
+describe.each([
+  { label: "AI Elements render parts" },
+  { label: "prompt-kit render parts" },
+])("WorkspaceMessageList ($label)", () => {
   beforeEach(() => {
     useNavigationStore.setState({
       isCanvasOpen: false,
@@ -339,7 +342,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
           {
             kind: "reasoning",
             label: "final_reasoning",
-            parts: [{ type: "text", text: "This is the concise final rationale." }],
+            parts: [
+              { type: "text", text: "This is the concise final rationale." },
+            ],
             isStreaming: false,
           },
         ],
@@ -416,10 +421,14 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
     const html = renderChatMessageList(messages);
 
     const answerIndex = html.indexOf("Architecture extracted.");
-    const trajectoryPreviewIndex = html.indexOf('data-slot="assistant-trajectory"');
+    const trajectoryPreviewIndex = html.indexOf(
+      'data-slot="assistant-trajectory"',
+    );
     const thought0Index = html.indexOf("List the repository first.");
     const thought1Index = html.indexOf("Read deeper implementation docs.");
-    const synthesisIndex = html.indexOf("This supports the final architecture summary.");
+    const synthesisIndex = html.indexOf(
+      "This supports the final architecture summary.",
+    );
 
     expect(answerIndex).toBeGreaterThanOrEqual(0);
     expect(trajectoryPreviewIndex).toBeGreaterThan(answerIndex);
@@ -521,7 +530,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
 
     const answerIndex = html.indexOf('data-slot="assistant-answer"');
     const trajectoryIndex = html.indexOf('data-slot="assistant-trajectory"');
-    const executionIndex = html.indexOf('data-slot="assistant-execution-highlights"');
+    const executionIndex = html.indexOf(
+      'data-slot="assistant-execution-highlights"',
+    );
 
     expect(answerIndex).toBeGreaterThanOrEqual(0);
     expect(executionIndex).toBeGreaterThan(answerIndex);
@@ -541,7 +552,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Thinking without a final answer yet." }],
+            parts: [
+              { type: "text", text: "Thinking without a final answer yet." },
+            ],
             isStreaming: false,
           },
         ],
@@ -625,39 +638,57 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
 
     const { container, root } = mountChatMessageList(messages);
 
-    const trajectorySection = container.querySelector('[data-slot="assistant-trajectory"]');
+    const trajectorySection = container.querySelector(
+      '[data-slot="assistant-trajectory"]',
+    );
     const executionPreview = container.querySelector(
       '[data-slot="assistant-execution-highlights"] button',
     );
     const evidencePreview = container.querySelector(
       '[data-slot="assistant-evidence-preview"] button',
     );
-    const turnCard = container.querySelector('[data-slot="assistant-turn-content"]');
+    const turnCard = container.querySelector(
+      '[data-slot="assistant-turn-content"]',
+    );
 
-    expect(container.querySelector('[data-slot="assistant-summary-bar"]')).toBeNull();
+    expect(
+      container.querySelector('[data-slot="assistant-summary-bar"]'),
+    ).toBeNull();
     expect(trajectorySection).not.toBeNull();
     expect(executionPreview).not.toBeNull();
     expect(evidencePreview).not.toBeNull();
     expect(turnCard).not.toBeNull();
 
     act(() => {
-      executionPreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      executionPreview?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
-    expect(useWorkspaceUiStore.getState().selectedAssistantTurnId).toBe("assistant-1");
+    expect(useWorkspaceUiStore.getState().selectedAssistantTurnId).toBe(
+      "assistant-1",
+    );
     expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("execution");
     expect(useNavigationStore.getState().isCanvasOpen).toBe(true);
 
     act(() => {
-      evidencePreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      evidencePreview?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
     expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("evidence");
 
-    const refreshedTurnCard = container.querySelector('[data-slot="assistant-turn-content"]');
+    const refreshedTurnCard = container.querySelector(
+      '[data-slot="assistant-turn-content"]',
+    );
 
     act(() => {
-      refreshedTurnCard?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      refreshedTurnCard?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
-    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("trajectory");
+    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe(
+      "trajectory",
+    );
     expect(refreshedTurnCard?.className).toContain("border-accent/20");
 
     act(() => {
@@ -675,7 +706,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         renderParts: [
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "Inspecting host-loop Daytona output." }],
+            parts: [
+              { type: "text", text: "Inspecting host-loop Daytona output." },
+            ],
             isStreaming: false,
             runtimeContext: {
               depth: 1,
@@ -1085,7 +1118,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
     expect(html).toContain("Saved memory");
 
     // Verify the order: trajectory preview -> tool call -> tool result -> task in_progress -> task completed
-    const reasoningTriggerIndex = html.indexOf('data-slot="assistant-trajectory"');
+    const reasoningTriggerIndex = html.indexOf(
+      'data-slot="assistant-trajectory"',
+    );
     const loadDocumentIndex = html.indexOf("load_document");
     const buildIndex = html.indexOf("build_index");
     const executingPlannerIndex = html.indexOf("Executing planner");

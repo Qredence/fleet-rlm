@@ -14,7 +14,13 @@ import type {
 type DirectExecutionPart = Extract<
   ChatRenderPart,
   {
-    kind: "task" | "queue" | "tool" | "sandbox" | "environment_variables" | "status_note";
+    kind:
+      | "task"
+      | "queue"
+      | "tool"
+      | "sandbox"
+      | "environment_variables"
+      | "status_note";
   }
 >;
 
@@ -108,8 +114,13 @@ export interface AssistantContentModel {
     runtimeBadges: string[];
   };
   complexity: "simple" | "medium" | "complex";
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[];
-  attachedToolSessions: Array<Extract<TraceDisplayItem, { kind: "tool_session" }>>;
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[];
+  attachedToolSessions: Array<
+    Extract<TraceDisplayItem, { kind: "tool_session" }>
+  >;
   attachedTraceParts: AssistantTurnTracePartItem[];
   directExecutionParts: DirectExecutionPart[];
 }

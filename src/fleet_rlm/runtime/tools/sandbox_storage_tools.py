@@ -13,7 +13,6 @@ from .sandbox_common import (
     _adaytona_read_text,
     _adaytona_write_text,
     _aexecute_submit_ctx,
-    _buffer_volume_default_path,
     _commit_volume_best_effort,
     _document_load_result,
     _daytona_file_error,
@@ -98,11 +97,11 @@ else:
 
     async def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
         """Persist a sandbox buffer to persistent storage as JSON."""
-        allowed_root, _memory_root, workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root=_buffer_volume_default_path(workspace_root),
-            allowed_root=allowed_root,
+            default_root=roots.buffers_root,
+            allowed_root=roots.allowed_root,
         )
         if error is not None:
             return error
@@ -145,11 +144,11 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
 
     async def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
         """Load text from persistent storage into host-side document memory."""
-        allowed_root, _memory_root, workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root=workspace_root,
-            allowed_root=allowed_root,
+            default_root=roots.artifacts_root,
+            allowed_root=roots.allowed_root,
         )
         if error is not None:
             return error
@@ -186,7 +185,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
         )
 
     async def process_document(path: str, alias: str = "active") -> dict[str, Any]:
-        """Load a document from volume and register it for downstream analysis."""
+        """Load a durable volume-backed document and register it for analysis."""
         loaded = await load_text_from_volume(path, alias=alias)
         if loaded.get("status") != "ok":
             return loaded
@@ -197,16 +196,16 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             "path": loaded.get("path", path),
             "chars": len(text),
             "lines": len(text.splitlines()),
-            "hint": "Preferred over workspace_read for workspace-backed document analysis. Use analyze_long_document or summarize_long_document for semantic processing.",
+            "hint": "Preferred over workspace_read for durable document analysis. Use load_document for host, URL, or transient Daytona workspace files.",
         }
 
     async def memory_read(path: str) -> dict[str, Any]:
         """Read a file from persistent storage."""
-        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root=memory_root,
-            allowed_root=allowed_root,
+            default_root=roots.memory_root,
+            allowed_root=roots.allowed_root,
         )
         if error is not None:
             return error
@@ -241,11 +240,11 @@ except Exception as e:
 
     async def memory_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in persistent storage."""
-        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root=memory_root,
-            allowed_root=allowed_root,
+            default_root=roots.memory_root,
+            allowed_root=roots.allowed_root,
         )
         if error is not None:
             return error
@@ -276,7 +275,7 @@ try:
         pass
     sync_rc = 0
     try:
-        proc = subprocess.run(["sync", "/data"], check=False, capture_output=True)
+        proc = subprocess.run(["sync", allowed_root], check=False, capture_output=True)
         sync_rc = int(proc.returncode)
     except Exception:
         sync_rc = -1
@@ -287,7 +286,11 @@ except Exception as e:
         result = await _aexecute_submit_ctx(
             ctx,
             code,
-            variables={"path": resolved_path, "content": content},
+            variables={
+                "path": resolved_path,
+                "content": content,
+                "allowed_root": roots.allowed_root,
+            },
         )
         if result.get("status") == "ok":
             _commit_volume_best_effort(ctx)
@@ -300,11 +303,11 @@ except Exception as e:
         if not append:
             return await memory_write(path=path, content=content)
 
-        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         resolved_path, error = _resolve_path_or_error(
             path=path,
-            default_root=memory_root,
-            allowed_root=allowed_root,
+            default_root=roots.memory_root,
+            allowed_root=roots.allowed_root,
         )
         if error is not None:
             return error
@@ -341,7 +344,7 @@ try:
         pass
     sync_rc = 0
     try:
-        proc = subprocess.run(["sync", "/data"], check=False, capture_output=True)
+        proc = subprocess.run(["sync", allowed_root], check=False, capture_output=True)
         sync_rc = int(proc.returncode)
     except Exception:
         sync_rc = -1
@@ -352,7 +355,11 @@ except Exception as e:
         result = await _aexecute_submit_ctx(
             ctx,
             code,
-            variables={"path": resolved_path, "content": content},
+            variables={
+                "path": resolved_path,
+                "content": content,
+                "allowed_root": roots.allowed_root,
+            },
         )
         if result.get("status") == "ok":
             _commit_volume_best_effort(ctx)
@@ -389,20 +396,20 @@ except Exception as e:
 
     async def memory_list(path: str = ".") -> dict[str, Any]:
         """List files and directories in persistent storage."""
-        allowed_root, memory_root, _workspace_root = _persistent_roots(ctx)
+        roots = _persistent_roots(ctx)
         try:
             if path.strip() in {"", ".", "./"}:
-                resolved_path = memory_root
+                resolved_path = roots.memory_root
             else:
                 resolved_path, error = _resolve_path_or_error(
                     path=path,
-                    default_root=memory_root,
-                    allowed_root=allowed_root,
+                    default_root=roots.memory_root,
+                    allowed_root=roots.allowed_root,
                 )
                 if error is not None:
                     return error
         except AttributeError:
-            resolved_path = memory_root
+            resolved_path = roots.memory_root
         assert resolved_path is not None
 
         daytona_session = await _aget_daytona_session_via_sandbox(ctx)
@@ -492,7 +499,7 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(workspace_read),
                 name="workspace_read",
-                desc="Read raw content from a file in the workspace directory. Low-level helper; use load_document or process_document to ingest documents for analysis.",
+                desc="Read raw content from a transient file in the live workspace. Low-level helper; use load_document or process_document to ingest documents for analysis.",
             ),
             Tool(
                 _sync_compatible_tool_callable(extract_python_ast),
@@ -532,17 +539,17 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(save_buffer_to_volume),
                 name="save_buffer_to_volume",
-                desc="Persist a sandbox buffer to persistent storage as JSON",
+                desc="Persist a sandbox buffer to durable mounted-volume storage as JSON",
             ),
             Tool(
                 _sync_compatible_tool_callable(load_text_from_volume),
                 name="load_text_from_volume",
-                desc="Load text from persistent storage into host-side document memory",
+                desc="Load text from the durable mounted volume (artifacts by default) into host-side document memory",
             ),
             Tool(
                 _sync_compatible_tool_callable(process_document),
                 name="process_document",
-                desc="Load a workspace-backed document into agent memory and register it for downstream analysis",
+                desc="Load a durable volume-backed document into agent memory and register it for downstream analysis",
             ),
         ]
     )
@@ -552,17 +559,17 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(memory_read),
                 name="memory_read",
-                desc="Read a file from persistent storage",
+                desc="Read a file from durable volume memory",
             ),
             Tool(
                 _sync_compatible_tool_callable(memory_write),
                 name="memory_write",
-                desc="Write content to a file in persistent storage",
+                desc="Write content to a file in durable volume memory",
             ),
             Tool(
                 _sync_compatible_tool_callable(write_to_file),
                 name="write_to_file",
-                desc="Write or append text to a file in persistent storage",
+                desc="Write or append text to a file in durable volume memory",
             ),
             Tool(
                 edit_core_memory,
@@ -572,7 +579,7 @@ except Exception as e:
             Tool(
                 _sync_compatible_tool_callable(memory_list),
                 name="memory_list",
-                desc="List files and directories in persistent storage",
+                desc="List files and directories in durable volume memory",
             ),
         ]
     )

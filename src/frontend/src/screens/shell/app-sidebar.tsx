@@ -96,15 +96,22 @@ function groupConversations(
 
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
-  const { newSession, requestConversationLoad, deleteConversation, clearHistory } =
-    useWorkspaceShellActions();
+  const {
+    newSession,
+    requestConversationLoad,
+    deleteConversation,
+    clearHistory,
+  } = useWorkspaceShellActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
   const { openCommandPalette } = useNavigationStore();
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
-  const groupedConversations = useMemo(() => groupConversations(conversations), [conversations]);
+  const groupedConversations = useMemo(
+    () => groupConversations(conversations),
+    [conversations],
+  );
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
     const wasHandledByDialog = requestSettingsDialogOpen({
@@ -172,13 +179,19 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={handleNewSession} tooltip="New session">
+                <SidebarMenuButton
+                  onClick={handleNewSession}
+                  tooltip="New session"
+                >
                   <Plus />
                   <span>New Session</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => openCommandPalette()} tooltip="Search sessions">
+                <SidebarMenuButton
+                  onClick={() => openCommandPalette()}
+                  tooltip="Search sessions"
+                >
                   <Search />
                   <span>Search sessions</span>
                 </SidebarMenuButton>
@@ -224,7 +237,8 @@ export function AppSidebar() {
             <div className="no-scrollbar flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain pr-1">
               <div className="flex items-start justify-between gap-3 px-2 pb-2 group-data-[collapsible=icon]:hidden">
                 <div className="text-xs leading-5 text-sidebar-foreground/70">
-                  Jump back into saved work from the same left rail you use for navigation.
+                  Jump back into saved work from the same left rail you use for
+                  navigation.
                 </div>
                 {conversations.length > 0 ? (
                   <button
@@ -244,7 +258,8 @@ export function AppSidebar() {
                         No recent sessions yet
                       </div>
                       <div className="mt-1">
-                        Start a new session and it will appear here for quick return.
+                        Start a new session and it will appear here for quick
+                        return.
                       </div>
                     </div>
                   </SidebarMenuItem>
@@ -277,7 +292,9 @@ export function AppSidebar() {
                               title={`Delete conversation: ${session.title}`}
                               showOnHover
                               className="text-sidebar-foreground/60 hover:text-destructive"
-                              onClick={(event) => handleDeleteConversation(event, session.id)}
+                              onClick={(event) =>
+                                handleDeleteConversation(event, session.id)
+                              }
                             >
                               <Trash2 />
                             </SidebarMenuAction>

@@ -39,7 +39,9 @@ import {
 } from "@/screens/volumes/use-volumes";
 
 export function VolumesCanvasPanel() {
-  const selectedFileNode = useVolumesSelectionStore((state) => state.selectedFileNode);
+  const selectedFileNode = useVolumesSelectionStore(
+    (state) => state.selectedFileNode,
+  );
 
   if (!selectedFileNode) {
     return (
@@ -49,7 +51,9 @@ export function VolumesCanvasPanel() {
         </EmptyMedia>
         <EmptyContent>
           <EmptyTitle>No file selected</EmptyTitle>
-          <EmptyDescription>Open a file in Volumes to preview its contents here.</EmptyDescription>
+          <EmptyDescription>
+            Open a file in Volumes to preview its contents here.
+          </EmptyDescription>
         </EmptyContent>
       </Empty>
     );
@@ -59,8 +63,10 @@ export function VolumesCanvasPanel() {
 }
 
 function getFileIcon(name: string) {
-  if (name.endsWith(".md")) return <FileText className="h-5 w-5 text-chart-2" />;
-  if (name.endsWith(".py")) return <FileCode className="h-5 w-5 text-chart-1" />;
+  if (name.endsWith(".md"))
+    return <FileText className="h-5 w-5 text-chart-2" />;
+  if (name.endsWith(".py"))
+    return <FileCode className="h-5 w-5 text-chart-1" />;
   if (name.endsWith(".yaml") || name.endsWith(".yml"))
     return <FileCog className="h-5 w-5 text-chart-4" />;
   if (name.endsWith(".json") || name.endsWith(".jsonl"))
@@ -109,11 +115,18 @@ function isTextFile(name: string, mime?: string): boolean {
     ".html",
     ".css",
   ];
-  return textExts.some((ext) => name.endsWith(ext)) || (mime?.startsWith("text/") ?? false);
+  return (
+    textExts.some((ext) => name.endsWith(ext)) ||
+    (mime?.startsWith("text/") ?? false)
+  );
 }
 
 function isMarkdownFile(name: string, mime?: string): boolean {
-  return name.endsWith(".md") || name.endsWith(".markdown") || mime === "text/markdown";
+  return (
+    name.endsWith(".md") ||
+    name.endsWith(".markdown") ||
+    mime === "text/markdown"
+  );
 }
 
 function getMimeLabel(name: string, mime?: string): string {
@@ -129,90 +142,53 @@ function getMimeLabel(name: string, mime?: string): string {
   return "File";
 }
 
-const MOCK_FILE_CONTENT: Record<string, string> = {
-  "/sandbox/config/fleet.yaml": `# Fleet RLM Configuration
-# ─────────────────────────────────
-fleet:
-  name: "hax-fleet"
-  version: "0.4.2"
-  environment: "development"
+const DURABLE_ROOTS = ["/data", "/home/daytona/memory"] as const;
 
-api:
-  host: "0.0.0.0"
-  port: 8000
-  prefix: "/api/v1"
-  cors_origins:
-    - "http://localhost:5173"
-    - "https://fleet.qredence.ai"
+function buildMockFileContentMap(): Record<string, string> {
+  const entries = DURABLE_ROOTS.flatMap((root) => [
+    [
+      `${root}/memory/summaries/release-notes.md`,
+      `# Durable Memory Summary
 
-taxonomy:
-  max_depth: 4
-  root_domains:
-    - analytics
-    - development
-    - nlp
-    - devops
+- Captures reusable notes derived from prior runs
+- Shared across Daytona child sandboxes through the mounted durable volume
+`,
+    ],
+    [
+      `${root}/artifacts/reports/execution-summary.md`,
+      `# Execution Summary
 
-skills:
-  storage_backend: "filesystem"
-  base_path: "/sandbox/skills"
-  validation:
-    require_skill_md: true
-    require_manifest: true
-    min_quality_score: 70
-
-memory:
-  backend: "sqlite"
-  path: "/sandbox/data/cache/lru-cache.db"
-  max_entries: 10000
-  ttl_days: 90
+This report lives in the mounted durable volume so it remains available after sandbox teardown.
 `,
-  "/sandbox/config/auth.yaml": `# Authentication Configuration
-auth:
-  provider: "local"
-  session_ttl: 86400  # 24 hours
-  jwt_algorithm: "HS256"
-  require_email_verification: false
+    ],
+    [
+      `${root}/buffers/active-buffer.txt`,
+      `workspace = transient
+volume = durable
+context = staged per run
 `,
-  "/sandbox/config/policies/review-policy.yaml": `# Review Policy
-review:
-  auto_approve_threshold: 90
-  require_human_review_below: 80
-  max_review_time_hours: 48
-  reviewers:
-    - role: "admin"
-    - role: "lead"
-`,
-  "/sandbox/config/policies/publish-policy.yaml": `# Publish Policy
-publish:
-  require_validation: true
-  require_review: true
-  min_quality_score: 85
-  require_documentation: true
-  require_tests: false
-`,
-  "/sandbox/config/taxonomy.json": `{
-  "version": "1.0.0",
-  "domains": [
-    {
-      "name": "analytics",
-      "categories": ["data-processing", "preprocessing", "visualization"]
-    },
-    {
-      "name": "development",
-      "categories": ["quality-assurance", "testing", "integration"]
-    },
-    {
-      "name": "nlp",
-      "categories": ["text-processing", "analysis", "knowledge-management"]
-    },
-    {
-      "name": "devops",
-      "categories": ["automation", "observability"]
-    }
-  ]
+    ],
+    [
+      `${root}/meta/workspaces/default/react-session-default.json`,
+      `{
+  "session_id": "default",
+  "storage_mode": "durable_volume",
+  "manifest_root": "meta/workspaces/default"
 }`,
-};
+    ],
+    [
+      `${root}/meta/workspaces/default/provenance.json`,
+      `{
+  "builder_mode": "sdk_owned_runtime",
+  "volume_layout": ["memory", "artifacts", "buffers", "meta"]
+}`,
+    ],
+  ]);
+
+  return Object.fromEntries(entries);
+}
+
+const MOCK_FILE_CONTENT = buildMockFileContentMap();
 
 const METADATA_LABEL_STYLE = {
   fontFamily: "var(--font-sans)",
@@ -247,7 +223,10 @@ function MetadataRow({
   return (
     <div className="flex items-center gap-3 py-2">
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="shrink-0 text-muted-foreground" style={METADATA_LABEL_STYLE}>
+      <span
+        className="shrink-0 text-muted-foreground"
+        style={METADATA_LABEL_STYLE}
+      >
         {label}
       </span>
       <span className="truncate text-foreground typo-caption">{value}</span>
@@ -270,7 +249,10 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
     content: apiContent,
     isLoading: isContentLoading,
     error: contentError,
-  } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "modal");
+  } = useFileContent(
+    isText && !mock ? file.path : null,
+    file.provider ?? "modal",
+  );
   const resolvedContent = mockContent ?? (apiContent || null);
 
   const handleCopyPath = () => {
@@ -296,7 +278,9 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
             <h3 className="truncate text-foreground typo-h4">{file.name}</h3>
             <div className="mt-1 flex items-center gap-2">
               <Badge variant="secondary" className="rounded-full">
-                <span className="typo-micro">{getMimeLabel(file.name, file.mime)}</span>
+                <span className="typo-micro">
+                  {getMimeLabel(file.name, file.mime)}
+                </span>
               </Badge>
               {file.skillId ? (
                 <Badge variant="secondary" className="rounded-full">
@@ -309,7 +293,9 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
 
         <div className="mb-4 flex items-center gap-2 rounded-lg border-subtle bg-muted/50 p-2.5">
           <HardDrive className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <code className="min-w-0 flex-1 truncate text-foreground typo-mono">{file.path}</code>
+          <code className="min-w-0 flex-1 truncate text-foreground typo-mono">
+            {file.path}
+          </code>
           <Button
             variant="ghost"
             className={cn("h-7 w-7 shrink-0 p-0", isMobile && "touch-target")}
@@ -322,18 +308,32 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
 
         <Card className="mb-4 border-border-subtle">
           <CardContent className="px-4 py-1">
-            <MetadataRow icon={Weight} label="Size" value={formatDetailFileSize(file.size)} />
+            <MetadataRow
+              icon={Weight}
+              label="Size"
+              value={formatDetailFileSize(file.size)}
+            />
             <Separator className="border-border-subtle" />
-            <MetadataRow icon={Clock} label="Modified" value={formatDetailDate(file.modifiedAt)} />
+            <MetadataRow
+              icon={Clock}
+              label="Modified"
+              value={formatDetailDate(file.modifiedAt)}
+            />
             <Separator className="border-border-subtle" />
-            <MetadataRow icon={FileText} label="Type" value={getMimeLabel(file.name, file.mime)} />
+            <MetadataRow
+              icon={FileText}
+              label="Type"
+              value={getMimeLabel(file.name, file.mime)}
+            />
           </CardContent>
         </Card>
 
         {isText ? (
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-muted-foreground typo-label">Content Preview</span>
+              <span className="text-muted-foreground typo-label">
+                Content Preview
+              </span>
               {resolvedContent ? (
                 <Button
                   variant="ghost"
@@ -341,7 +341,9 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
                   onClick={handleCopyContent}
                 >
                   <Copy className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-muted-foreground typo-helper">Copy</span>
+                  <span className="text-muted-foreground typo-helper">
+                    Copy
+                  </span>
                 </Button>
               ) : null}
             </div>
@@ -352,15 +354,21 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
               {!mock && isContentLoading ? (
                 <div className="flex flex-col items-center gap-2 p-6 text-center">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground motion-reduce:animate-none" />
-                  <p className="text-muted-foreground typo-caption">Loading file content...</p>
+                  <p className="text-muted-foreground typo-caption">
+                    Loading file content...
+                  </p>
                 </div>
               ) : null}
 
               {!mock && contentError && !isContentLoading ? (
                 <div className="flex flex-col items-center gap-2 p-4 text-center">
                   <ExternalLink className="h-5 w-5 text-destructive" />
-                  <p className="text-muted-foreground typo-caption">Failed to load file content.</p>
-                  <p className="text-muted-foreground typo-helper">{contentError.message}</p>
+                  <p className="text-muted-foreground typo-caption">
+                    Failed to load file content.
+                  </p>
+                  <p className="text-muted-foreground typo-helper">
+                    {contentError.message}
+                  </p>
                 </div>
               ) : null}
 
@@ -398,12 +406,15 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
               </div>
               <p className="text-foreground typo-label">Binary file</p>
               <p className="max-w-75 text-muted-foreground typo-caption">
-                This file cannot be previewed in the browser. Download it or open it with an
-                external tool.
+                This file cannot be previewed in the browser. Download it or
+                open it with an external tool.
               </p>
               <Button
                 variant="secondary"
-                className={cn("mt-2 gap-2 rounded-button", isMobile && "touch-target")}
+                className={cn(
+                  "mt-2 gap-2 rounded-button",
+                  isMobile && "touch-target",
+                )}
               >
                 <ExternalLink className="h-4 w-4" />
                 <span className="typo-label">Open externally</span>
@@ -471,13 +482,21 @@ function parseInline(text: string): ReactNode[] {
       );
     } else if (match[2]) {
       result.push(
-        <strong key={match.index} className="text-foreground" style={BOLD_STYLE}>
+        <strong
+          key={match.index}
+          className="text-foreground"
+          style={BOLD_STYLE}
+        >
           {match[2].slice(2, -2)}
         </strong>,
       );
     } else if (match[3]) {
       result.push(
-        <strong key={match.index} className="text-foreground" style={BOLD_STYLE}>
+        <strong
+          key={match.index}
+          className="text-foreground"
+          style={BOLD_STYLE}
+        >
           {match[3].slice(2, -2)}
         </strong>,
       );
@@ -636,7 +655,9 @@ function parseBlocks(md: string): Block[] {
 function renderBlock(block: Block, index: number): ReactNode {
   switch (block.type) {
     case "heading": {
-      const cfg = MARKDOWN_HEADING_STYLES[block.level ?? 1] ?? MARKDOWN_HEADING_STYLES[3]!;
+      const cfg =
+        MARKDOWN_HEADING_STYLES[block.level ?? 1] ??
+        MARKDOWN_HEADING_STYLES[3]!;
       const Tag = `h${block.level ?? 1}` as "h1" | "h2" | "h3";
       return (
         <Tag key={index} className={cfg.className}>
@@ -646,7 +667,10 @@ function renderBlock(block: Block, index: number): ReactNode {
     }
     case "paragraph":
       return (
-        <p key={index} className="mb-3 text-muted-foreground typo-label-regular">
+        <p
+          key={index}
+          className="mb-3 text-muted-foreground typo-label-regular"
+        >
           {parseInline(block.content)}
         </p>
       );

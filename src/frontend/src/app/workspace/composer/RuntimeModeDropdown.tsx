@@ -41,11 +41,15 @@ interface RuntimeModeDropdownProps {
 
 function RuntimeModeDropdown({ value, onChange }: RuntimeModeDropdownProps) {
   const currentMode =
-    RUNTIME_MODE_OPTIONS.find((option) => option.id === value) ?? RUNTIME_MODE_OPTIONS[0]!;
+    RUNTIME_MODE_OPTIONS.find((option) => option.id === value) ??
+    RUNTIME_MODE_OPTIONS[0]!;
   const CurrentModeIcon = currentMode.icon;
 
   return (
-    <Select value={value} onValueChange={(nextValue) => onChange(nextValue as WsRuntimeMode)}>
+    <Select
+      value={value}
+      onValueChange={(nextValue) => onChange(nextValue as WsRuntimeMode)}
+    >
       <SelectTrigger
         size="sm"
         className={cn(

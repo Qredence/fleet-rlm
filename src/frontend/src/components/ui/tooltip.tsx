@@ -6,7 +6,12 @@ import { cn } from "@/lib/utils";
 
 // Base UI doesn't strictly need a Provider in the same way Radix does,
 // but we keep the export for API compatibility if it was used globally.
-function TooltipProvider({ children }: { children: React.ReactNode; [key: string]: unknown }) {
+function TooltipProvider({
+  children,
+}: {
+  children: React.ReactNode;
+  [key: string]: unknown;
+}) {
   return <>{children}</>;
 }
 

@@ -16,7 +16,10 @@ interface TextShimmerProps {
 }
 
 // Cache motion components at module level to avoid creating during render
-const motionComponentCache = new Map<keyof JSX.IntrinsicElements, ComponentType<MotionHTMLProps>>();
+const motionComponentCache = new Map<
+  keyof JSX.IntrinsicElements,
+  ComponentType<MotionHTMLProps>
+>();
 
 const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
   let component = motionComponentCache.get(element);

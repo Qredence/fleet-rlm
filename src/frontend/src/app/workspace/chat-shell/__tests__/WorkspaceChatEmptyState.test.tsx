@@ -4,14 +4,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { WorkspaceChatEmptyState } from "@/app/workspace/chat-shell/WorkspaceChatEmptyState";
 
-function mountEmptyState(props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>) {
+function mountEmptyState(
+  props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>,
+) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
 
   act(() => {
     root.render(
-      <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} {...props} />,
+      <WorkspaceChatEmptyState
+        isMobile={false}
+        onSuggestionClick={() => {}}
+        {...props}
+      />,
     );
   });
 
@@ -40,14 +46,16 @@ describe("WorkspaceChatEmptyState", () => {
     const onSuggestionClick = vi.fn();
     const { container, root } = mountEmptyState({ onSuggestionClick });
 
-    const architectureButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Architecture pass"),
-    );
+    const architectureButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Architecture pass"));
 
     expect(architectureButton).not.toBeUndefined();
 
     act(() => {
-      architectureButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      architectureButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
 
     expect(onSuggestionClick).toHaveBeenCalledWith(

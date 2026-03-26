@@ -1,5 +1,5 @@
 /**
- * React Query hooks for runtime volume filesystem data.
+ * React Query hooks for durable runtime volume filesystem data.
  *
  * Fetches the real volume tree from the backend endpoint
  * GET /api/v1/runtime/volume/tree. Falls back to local mock data
@@ -75,20 +75,242 @@ function toFsNode(node: VolumeTreeNode, provider: VolumeProvider): FsNode {
   };
 }
 
-function mockNodesForProvider(provider: VolumeProvider): FsNode[] {
-  const clone = (node: FsNode): FsNode => ({
+function createMockFile(
+  id: string,
+  name: string,
+  path: string,
+  options?: {
+    size?: number;
+    mime?: string;
+    modifiedAt?: string;
+  },
+): FsNode {
+  return {
+    id,
+    name,
+    path,
+    type: "file",
+    children: [],
+    size: options?.size,
+    mime: options?.mime,
+    modifiedAt: options?.modifiedAt,
+  };
+}
+
+function createMockDirectory(
+  id: string,
+  name: string,
+  path: string,
+  children: FsNode[],
+  modifiedAt?: string,
+): FsNode {
+  return {
+    id,
+    name,
+    path,
+    type: "directory",
+    children,
+    modifiedAt,
+  };
+}
+
+function createMockVolume(
+  id: string,
+  name: string,
+  mountedRoot: string,
+  children: FsNode[],
+  modifiedAt?: string,
+): FsNode {
+  return {
+    id,
+    name,
+    path: `${mountedRoot}/${name}`,
+    type: "volume",
+    children,
+    modifiedAt,
+  };
+}
+
+export function getMockFilesystem(provider: VolumeProvider): FsNode[] {
+  const mountedRoot = provider === "daytona" ? "/home/daytona/memory" : "/data";
+  const modifiedAt = "2026-03-26T08:00:00Z";
+
+  const withProvider = (node: FsNode): FsNode => ({
     ...node,
     provider,
-    children: node.children?.map(clone),
+    children: node.children?.map(withProvider),
   });
-  return mockFilesystem.map(clone);
+
+  return [
+    createMockVolume(
+      "vol-memory",
+      "memory",
+      mountedRoot,
+      [
+        createMockFile(
+          "f-memory-facts",
+          "facts.json",
+          `${mountedRoot}/memory/facts.json`,
+          {
+            size: 2840,
+            mime: "application/json",
+            modifiedAt,
+          },
+        ),
+        createMockDirectory(
+          "dir-memory-summaries",
+          "summaries",
+          `${mountedRoot}/memory/summaries`,
+          [
+            createMockFile(
+              "f-memory-summary-md",
+              "release-notes.md",
+              `${mountedRoot}/memory/summaries/release-notes.md`,
+              {
+                size: 1820,
+                mime: "text/markdown",
+                modifiedAt,
+              },
+            ),
+          ],
+          modifiedAt,
+        ),
+      ],
+      modifiedAt,
+    ),
+    createMockVolume(
+      "vol-artifacts",
+      "artifacts",
+      mountedRoot,
+      [
+        createMockDirectory(
+          "dir-artifacts-reports",
+          "reports",
+          `${mountedRoot}/artifacts/reports`,
+          [
+            createMockFile(
+              "f-artifacts-summary",
+              "execution-summary.md",
+              `${mountedRoot}/artifacts/reports/execution-summary.md`,
+              {
+                size: 2140,
+                mime: "text/markdown",
+                modifiedAt,
+              },
+            ),
+          ],
+          modifiedAt,
+        ),
+        createMockDirectory(
+          "dir-artifacts-generated",
+          "generated",
+          `${mountedRoot}/artifacts/generated`,
+          [
+            createMockFile(
+              "f-artifacts-review",
+              "code-review-v2.0.1.tar.gz",
+              `${mountedRoot}/artifacts/generated/code-review-v2.0.1.tar.gz`,
+              {
+                size: 18200,
+                mime: "application/gzip",
+                modifiedAt,
+              },
+            ),
+          ],
+          modifiedAt,
+        ),
+      ],
+      modifiedAt,
+    ),
+    createMockVolume(
+      "vol-buffers",
+      "buffers",
+      mountedRoot,
+      [
+        createMockFile(
+          "f-buffers-active",
+          "active-buffer.txt",
+          `${mountedRoot}/buffers/active-buffer.txt`,
+          {
+            size: 640,
+            mime: "text/plain",
+            modifiedAt,
+          },
+        ),
+        createMockDirectory(
+          "dir-buffers-diffs",
+          "diffs",
+          `${mountedRoot}/buffers/diffs`,
+          [
+            createMockFile(
+              "f-buffers-patch",
+              "current.patch",
+              `${mountedRoot}/buffers/diffs/current.patch`,
+              {
+                size: 980,
+                mime: "text/plain",
+                modifiedAt,
+              },
+            ),
+          ],
+          modifiedAt,
+        ),
+      ],
+      modifiedAt,
+    ),
+    createMockVolume(
+      "vol-meta",
+      "meta",
+      mountedRoot,
+      [
+        createMockDirectory(
+          "dir-meta-workspaces",
+          "workspaces",
+          `${mountedRoot}/meta/workspaces`,
+          [
+            createMockDirectory(
+              "dir-meta-workspace-default",
+              "default",
+              `${mountedRoot}/meta/workspaces/default`,
+              [
+                createMockFile(
+                  "f-meta-manifest",
+                  "react-session-default.json",
+                  `${mountedRoot}/meta/workspaces/default/react-session-default.json`,
+                  {
+                    size: 1540,
+                    mime: "application/json",
+                    modifiedAt,
+                  },
+                ),
+                createMockFile(
+                  "f-meta-provenance",
+                  "provenance.json",
+                  `${mountedRoot}/meta/workspaces/default/provenance.json`,
+                  {
+                    size: 920,
+                    mime: "application/json",
+                    modifiedAt,
+                  },
+                ),
+              ],
+              modifiedAt,
+            ),
+          ],
+          modifiedAt,
+        ),
+      ],
+      modifiedAt,
+    ),
+  ].map(withProvider);
 }
 
 // ── Query Keys ──────────────────────────────────────────────────────
 
 export const filesystemKeys = {
   all: ["filesystem"] as const,
-  tree: (provider: VolumeProvider) => [...filesystemKeys.all, "tree", provider] as const,
+  tree: (provider: VolumeProvider) =>
+    [...filesystemKeys.all, "tree", provider] as const,
   fileContent: (provider: VolumeProvider, path: string) =>
     [...filesystemKeys.all, "file", provider, path] as const,
 };
@@ -96,7 +318,7 @@ export const filesystemKeys = {
 // ── useFilesystem (tree) ────────────────────────────────────────────
 
 interface UseFilesystemReturn {
-  /** Sandbox volumes — always defined (empty array if loading/error) */
+  /** Durable volume roots — always defined (empty array if loading/error) */
   volumes: FsNode[];
   /** Data source used to populate filesystem data. */
   dataSource: DataSource;
@@ -126,17 +348,23 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
     queryFn: async ({ signal }): Promise<FilesystemPayload> => {
       if (mock) {
         return {
-          volumes: mockNodesForProvider(provider),
+          volumes: getMockFilesystem(provider),
           dataSource: "mock",
           degradedReason: undefined,
         };
       }
 
       try {
-        const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
+        const url = new URL(
+          "/api/v1/runtime/volume/tree",
+          window.location.origin,
+        );
         url.searchParams.set("max_depth", "4");
         url.searchParams.set("provider", provider);
-        const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
+        const resp = await rlmApiClient.get<VolumeTreeResponse>(
+          url.pathname + url.search,
+          signal,
+        );
         return {
           volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
           dataSource: "api",
@@ -184,7 +412,7 @@ interface UseFileContentReturn {
 }
 
 /**
- * Fetches the content of a single file from the sandbox.
+ * Fetches the content of a single file from the durable volume browser.
  * Only enabled when `path` is non-null.
  *
  * In mock mode, returns a placeholder message — file content is not
@@ -283,316 +511,3 @@ export function filterFs(nodes: FsNode[], query: string): FsNode[] {
     })
     .filter(Boolean) as FsNode[];
 }
-
-export const mockFilesystem: FsNode[] = [
-  {
-    id: "vol-skills",
-    name: "skills",
-    path: "/sandbox/skills",
-    type: "volume",
-    modifiedAt: "2026-02-16T08:00:00Z",
-    children: [
-      {
-        id: "dir-sk001",
-        name: "data-analysis",
-        path: "/sandbox/skills/data-analysis",
-        type: "directory",
-        skillId: "sk-001",
-        modifiedAt: "2026-02-06T12:00:00Z",
-        children: [
-          {
-            id: "f-sk001-md",
-            name: "SKILL.md",
-            path: "/sandbox/skills/data-analysis/SKILL.md",
-            type: "file",
-            size: 4820,
-            mime: "text/markdown",
-            modifiedAt: "2026-02-06T12:00:00Z",
-            skillId: "sk-001",
-          },
-          {
-            id: "f-sk001-yaml",
-            name: "manifest.yaml",
-            path: "/sandbox/skills/data-analysis/manifest.yaml",
-            type: "file",
-            size: 1240,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-06T11:30:00Z",
-            skillId: "sk-001",
-          },
-          {
-            id: "f-sk001-py",
-            name: "handler.py",
-            path: "/sandbox/skills/data-analysis/handler.py",
-            type: "file",
-            size: 3650,
-            mime: "text/x-python",
-            modifiedAt: "2026-02-06T11:45:00Z",
-            skillId: "sk-001",
-          },
-        ],
-      },
-      {
-        id: "dir-sk002",
-        name: "code-review",
-        path: "/sandbox/skills/code-review",
-        type: "directory",
-        skillId: "sk-002",
-        modifiedAt: "2026-02-07T09:00:00Z",
-        children: [
-          {
-            id: "f-sk002-md",
-            name: "SKILL.md",
-            path: "/sandbox/skills/code-review/SKILL.md",
-            type: "file",
-            size: 5130,
-            mime: "text/markdown",
-            modifiedAt: "2026-02-07T09:00:00Z",
-            skillId: "sk-002",
-          },
-          {
-            id: "f-sk002-yaml",
-            name: "manifest.yaml",
-            path: "/sandbox/skills/code-review/manifest.yaml",
-            type: "file",
-            size: 1580,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-07T08:45:00Z",
-            skillId: "sk-002",
-          },
-          {
-            id: "f-sk002-rules",
-            name: ".reviewrc.yaml",
-            path: "/sandbox/skills/code-review/.reviewrc.yaml",
-            type: "file",
-            size: 890,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-07T08:30:00Z",
-            skillId: "sk-002",
-          },
-        ],
-      },
-      {
-        id: "dir-sk005",
-        name: "test-generation",
-        path: "/sandbox/skills/test-generation",
-        type: "directory",
-        skillId: "sk-005",
-        modifiedAt: "2026-02-07T14:00:00Z",
-        children: [
-          {
-            id: "f-sk005-md",
-            name: "SKILL.md",
-            path: "/sandbox/skills/test-generation/SKILL.md",
-            type: "file",
-            size: 6240,
-            mime: "text/markdown",
-            modifiedAt: "2026-02-07T14:00:00Z",
-            skillId: "sk-005",
-          },
-          {
-            id: "f-sk005-yaml",
-            name: "manifest.yaml",
-            path: "/sandbox/skills/test-generation/manifest.yaml",
-            type: "file",
-            size: 1820,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-07T13:45:00Z",
-            skillId: "sk-005",
-          },
-          {
-            id: "f-sk005-py",
-            name: "handler.py",
-            path: "/sandbox/skills/test-generation/handler.py",
-            type: "file",
-            size: 4210,
-            mime: "text/x-python",
-            modifiedAt: "2026-02-07T13:30:00Z",
-            skillId: "sk-005",
-          },
-          {
-            id: "f-sk005-test",
-            name: "test_handler.py",
-            path: "/sandbox/skills/test-generation/test_handler.py",
-            type: "file",
-            size: 2890,
-            mime: "text/x-python",
-            modifiedAt: "2026-02-07T13:15:00Z",
-            skillId: "sk-005",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "vol-config",
-    name: "config",
-    path: "/sandbox/config",
-    type: "volume",
-    modifiedAt: "2026-02-14T16:00:00Z",
-    children: [
-      {
-        id: "f-fleet-yaml",
-        name: "fleet.yaml",
-        path: "/sandbox/config/fleet.yaml",
-        type: "file",
-        size: 2340,
-        mime: "text/yaml",
-        modifiedAt: "2026-02-14T16:00:00Z",
-      },
-      {
-        id: "f-taxonomy-json",
-        name: "taxonomy.json",
-        path: "/sandbox/config/taxonomy.json",
-        type: "file",
-        size: 8920,
-        mime: "application/json",
-        modifiedAt: "2026-02-14T15:30:00Z",
-      },
-      {
-        id: "f-auth-yaml",
-        name: "auth.yaml",
-        path: "/sandbox/config/auth.yaml",
-        type: "file",
-        size: 640,
-        mime: "text/yaml",
-        modifiedAt: "2026-02-12T10:00:00Z",
-      },
-      {
-        id: "dir-policies",
-        name: "policies",
-        path: "/sandbox/config/policies",
-        type: "directory",
-        modifiedAt: "2026-02-13T14:00:00Z",
-        children: [
-          {
-            id: "f-review-policy",
-            name: "review-policy.yaml",
-            path: "/sandbox/config/policies/review-policy.yaml",
-            type: "file",
-            size: 420,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-13T14:00:00Z",
-          },
-          {
-            id: "f-publish-policy",
-            name: "publish-policy.yaml",
-            path: "/sandbox/config/policies/publish-policy.yaml",
-            type: "file",
-            size: 380,
-            mime: "text/yaml",
-            modifiedAt: "2026-02-13T13:30:00Z",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "vol-artifacts",
-    name: "artifacts",
-    path: "/sandbox/artifacts",
-    type: "volume",
-    modifiedAt: "2026-02-15T10:30:00Z",
-    children: [
-      {
-        id: "dir-art-sessions",
-        name: "sessions",
-        path: "/sandbox/artifacts/sessions",
-        type: "directory",
-        modifiedAt: "2026-02-15T10:30:00Z",
-        children: [
-          {
-            id: "f-session-log",
-            name: "session-default.jsonl",
-            path: "/sandbox/artifacts/sessions/session-default.jsonl",
-            type: "file",
-            size: 15600,
-            mime: "application/jsonl",
-            modifiedAt: "2026-02-15T10:30:00Z",
-          },
-          {
-            id: "f-session-2-log",
-            name: "session-2.jsonl",
-            path: "/sandbox/artifacts/sessions/session-2.jsonl",
-            type: "file",
-            size: 8400,
-            mime: "application/jsonl",
-            modifiedAt: "2026-02-10T11:20:00Z",
-          },
-        ],
-      },
-      {
-        id: "dir-art-generated",
-        name: "generated",
-        path: "/sandbox/artifacts/generated",
-        type: "directory",
-        modifiedAt: "2026-02-15T10:30:00Z",
-        children: [
-          {
-            id: "f-gen-tests",
-            name: "test-generation-v1.4.2.tar.gz",
-            path: "/sandbox/artifacts/generated/test-generation-v1.4.2.tar.gz",
-            type: "file",
-            size: 24500,
-            mime: "application/gzip",
-            modifiedAt: "2026-02-07T14:00:00Z",
-          },
-          {
-            id: "f-gen-review",
-            name: "code-review-v2.0.1.tar.gz",
-            path: "/sandbox/artifacts/generated/code-review-v2.0.1.tar.gz",
-            type: "file",
-            size: 18200,
-            mime: "application/gzip",
-            modifiedAt: "2026-02-07T09:00:00Z",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "vol-data",
-    name: "data",
-    path: "/sandbox/data",
-    type: "volume",
-    modifiedAt: "2026-02-16T08:00:00Z",
-    children: [
-      {
-        id: "f-embeddings",
-        name: "skill-embeddings.bin",
-        path: "/sandbox/data/skill-embeddings.bin",
-        type: "file",
-        size: 524288,
-        mime: "application/octet-stream",
-        modifiedAt: "2026-02-16T08:00:00Z",
-      },
-      {
-        id: "f-index",
-        name: "taxonomy-index.json",
-        path: "/sandbox/data/taxonomy-index.json",
-        type: "file",
-        size: 12400,
-        mime: "application/json",
-        modifiedAt: "2026-02-14T15:30:00Z",
-      },
-      {
-        id: "dir-cache",
-        name: "cache",
-        path: "/sandbox/data/cache",
-        type: "directory",
-        modifiedAt: "2026-02-16T07:00:00Z",
-        children: [
-          {
-            id: "f-cache-lru",
-            name: "lru-cache.db",
-            path: "/sandbox/data/cache/lru-cache.db",
-            type: "file",
-            size: 65536,
-            mime: "application/octet-stream",
-            modifiedAt: "2026-02-16T07:00:00Z",
-          },
-        ],
-      },
-    ],
-  },
-];

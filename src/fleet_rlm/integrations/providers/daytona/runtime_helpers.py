@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 
 from fleet_rlm.runtime.content.document_ingestion.main import read_document_content
+from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
 
 from .config import ResolvedDaytonaConfig
 from .diagnostics import DaytonaDiagnosticError
@@ -68,8 +69,8 @@ def _run_async_compat(
 
 async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
     if inspect.isawaitable(value):
-        return await cast(Awaitable[_T], value)
-    return cast(_T, value)
+        return await value
+    return value
 
 
 def _build_daytona_client(config: ResolvedDaytonaConfig) -> Any:
@@ -204,6 +205,29 @@ async def _aensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona workspace create failure: {exc}",
+            category="sandbox_create_clone_error",
+            phase="sandbox_create",
+        ) from exc
+
+
+async def _aensure_daytona_volume_layout(
+    *,
+    sandbox: Any,
+    mounted_root: str = str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+) -> None:
+    """Ensure the canonical durable directories exist on a mounted Daytona volume."""
+    roots = mounted_storage_roots(mounted_root)
+    try:
+        for path in (
+            roots.memory_root,
+            roots.artifacts_root,
+            roots.buffers_root,
+            roots.meta_root,
+        ):
+            await _aensure_remote_directory(sandbox.fs, PurePosixPath(path))
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"Daytona volume layout create failure: {exc}",
             category="sandbox_create_clone_error",
             phase="sandbox_create",
         ) from exc
@@ -435,6 +459,7 @@ __all__ = [
     "_aensure_remote_directory",
     "_aensure_remote_parent",
     "_aensure_workspace_root",
+    "_aensure_daytona_volume_layout",
     "_aread_document_content",
     "_aresolve_clone_ref",
     "_astage_context_paths",

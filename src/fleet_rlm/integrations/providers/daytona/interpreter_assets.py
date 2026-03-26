@@ -29,7 +29,6 @@ from contextlib import contextmanager as _contextmanager
 
 REPO_PATH = {workspace_path!r}
 MEMORY_ROOT = _pathlib.Path({volume_mount_path!r})
-WORKSPACE_VOLUME_ROOT = MEMORY_ROOT / "workspace"
 _FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
 _buffers = globals().get("_buffers", {{}})
 
@@ -38,6 +37,21 @@ def resolve_path(path: str) -> str:
     if candidate.is_absolute():
         return str(candidate)
     return str(_pathlib.Path(REPO_PATH) / candidate)
+
+def _resolve_workspace_path(path: str) -> tuple[str | None, str | None]:
+    raw = str(path or "").strip()
+    if not raw:
+        return None, "[error: workspace path cannot be empty]"
+    candidate = _pathlib.Path(raw)
+    if candidate.is_absolute():
+        return None, f"[error: invalid workspace path: {{raw}}]"
+    repo_real = _pathlib.Path(_os.path.realpath(REPO_PATH))
+    resolved = _pathlib.Path(
+        _os.path.realpath(_os.path.normpath(str(repo_real / candidate)))
+    )
+    if resolved != repo_real and not str(resolved).startswith(str(repo_real) + _os.sep):
+        return None, f"[error: invalid workspace path: {{raw}}]"
+    return str(resolved), None
 
 def run(command: str, cwd: str | None = None) -> dict[str, object]:
     completed = _subprocess.run(
@@ -212,11 +226,11 @@ def load_from_volume(path: str) -> str:
         return handle.read()
 
 def workspace_write(path: str, content: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+    full, path_error = _resolve_workspace_path(path)
     if path_error is not None or full is None:
         return path_error or "[error: invalid workspace path]"
     lock_path = full + ".lock"
-    _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
+    _os.makedirs(_os.path.dirname(full) or REPO_PATH, exist_ok=True)
     fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
     try:
         _fcntl.flock(fd, _fcntl.LOCK_EX)
@@ -228,7 +242,7 @@ def workspace_write(path: str, content: str) -> str:
     return full
 
 def workspace_read(path: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+    full, path_error = _resolve_workspace_path(path)
     if path_error is not None or full is None:
         return path_error or "[error: invalid workspace path]"
     if not _os.path.isfile(full):
@@ -237,11 +251,11 @@ def workspace_read(path: str) -> str:
         return handle.read()
 
 def workspace_append(path: str, content: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
+    full, path_error = _resolve_workspace_path(path)
     if path_error is not None or full is None:
         return path_error or "[error: invalid workspace path]"
     lock_path = full + ".lock"
-    _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
+    _os.makedirs(_os.path.dirname(full) or REPO_PATH, exist_ok=True)
     fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
     try:
         _fcntl.flock(fd, _fcntl.LOCK_EX)

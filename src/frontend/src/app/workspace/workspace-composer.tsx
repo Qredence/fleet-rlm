@@ -43,7 +43,10 @@ interface WorkspaceComposerProps {
 }
 
 function createAttachmentId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `attachment-${nanoid()}`;
@@ -88,7 +91,9 @@ function WorkspaceComposer({
       const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
         id: createAttachmentId(),
         file,
-        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
       }));
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
@@ -112,7 +117,8 @@ function WorkspaceComposer({
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
-      description: "This backend currently does not accept binary upload payloads.",
+      description:
+        "This backend currently does not accept binary upload payloads.",
     });
   }, []);
 
@@ -181,8 +187,14 @@ function WorkspaceComposer({
               onFilesSelected={handleFilesSelected}
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
-            <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
-            <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
+            <ExecutionModeDropdown
+              value={executionMode}
+              onChange={onExecutionModeChange}
+            />
+            <RuntimeModeDropdown
+              value={runtimeMode}
+              onChange={onRuntimeModeChange}
+            />
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (
@@ -210,7 +222,11 @@ function WorkspaceComposer({
               size="icon-sm"
               variant="ghost"
             >
-              {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
+              {isLoading ? (
+                <Spinner size="sm" />
+              ) : (
+                <ArrowUp className="size-4.5" />
+              )}
             </PromptInputSubmit>
           )}
         </PromptInputFooter>

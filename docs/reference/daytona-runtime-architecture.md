@@ -14,6 +14,7 @@ The current implementation treats these Daytona docs as the normative baseline:
 - Async File System: [https://www.daytona.io/docs/en/python-sdk/async/async-file-system/](https://www.daytona.io/docs/en/python-sdk/async/async-file-system/)
 - Async Volume: [https://www.daytona.io/docs/en/python-sdk/async/async-volume/](https://www.daytona.io/docs/en/python-sdk/async/async-volume/)
 - Async Code Interpreter: [https://www.daytona.io/docs/en/python-sdk/async/async-code-interpreter/](https://www.daytona.io/docs/en/python-sdk/async/async-code-interpreter/)
+- Declarative Builder: [https://www.daytona.io/docs/en/declarative-builder](https://www.daytona.io/docs/en/declarative-builder)
 - Log Streaming: [https://www.daytona.io/docs/en/log-streaming/](https://www.daytona.io/docs/en/log-streaming/)
 - Volumes: [https://www.daytona.io/docs/en/volumes/](https://www.daytona.io/docs/en/volumes/)
 - Recursive Language Models / DSPy: [https://www.daytona.io/docs/en/guides/recursive-language-models](https://www.daytona.io/docs/en/guides/recursive-language-models)
@@ -121,6 +122,9 @@ In practice the provider is intentionally hybrid:
 - Root and recursive child Daytona runs share the same workspace-scoped
   persistent volume when one is configured, while still using distinct Daytona
   sandbox sessions per child run.
+- The runtime remains SDK-owned. Repo-side `.daytona`, devcontainer, or
+  Declarative Builder config is not consulted at runtime in this iteration.
+- Declarative Builder is relevant only as a future base-image/bootstrap strategy.
 
 ## Persistent Memory Model
 
@@ -129,8 +133,18 @@ There are two distinct persistence layers in the Daytona runtime:
 - Volatile execution-context state:
   - Python globals, imports, helper functions, and in-memory objects live inside the Daytona code-interpreter context
   - this state persists across multiple `run_code(...)` calls while that context remains alive
-- Durable workspace memory:
-  - files written to the mounted Daytona volume under `/home/daytona/memory`
-  - this state is the persistence mechanism that survives context reset, sandbox restart, or session resume
+- Durable mounted-volume storage:
+  - the mounted volume root is `/home/daytona/memory`
+  - canonical durable directories under it are `memory/`, `artifacts/`, `buffers/`, and `meta/`
+  - workspace repos, staged context, package installs, caches, and scratch files are not durable by default
+  - files survive context reset, sandbox restart, or session resume only when they are explicitly promoted into those durable directories
 
-When code needs durable memory, it must write to the mounted Daytona volume rather than relying on in-process globals.
+## Workspace vs. Volume vs. Context
+
+- Workspace root: the live repo checkout plus transient execution files inside the sandbox
+- Context root: run-scoped host inputs staged into the workspace under `.fleet-rlm/context`
+- Mounted volume root: durable storage only, not a pseudo-persistent workspace
+
+Workspace-aware tools target the live sandbox workspace. Volume-aware tools target the canonical durable directories. There is no automatic workspace-to-volume sync in this iteration.
+
+When code needs durable memory or durable artifacts, it must explicitly write to the mounted Daytona volume rather than relying on in-process globals or transient workspace files.

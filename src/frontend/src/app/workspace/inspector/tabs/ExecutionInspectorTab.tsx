@@ -1,7 +1,12 @@
 import { memo } from "react";
 import { TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Accordion,
@@ -32,8 +37,13 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
           {groups.map((group) => (
             <section key={group.key} className={inspectorStyles.stack.section}>
               <div className="flex items-center justify-between gap-2">
-                <div className={inspectorStyles.heading.section}>{group.label}</div>
-                <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                <div className={inspectorStyles.heading.section}>
+                  {group.label}
+                </div>
+                <Badge
+                  variant="secondary"
+                  className={inspectorStyles.badge.meta}
+                >
                   {group.sections.length}
                 </Badge>
               </div>
@@ -42,12 +52,17 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
                 {group.sections.map((section) => {
                   const tone = statusTone(executionSectionState(section));
                   return (
-                    <Card key={section.id} className={inspectorStyles.card.root}>
+                    <Card
+                      key={section.id}
+                      className={inspectorStyles.card.root}
+                    >
                       <CardHeader className={inspectorStyles.card.header}>
                         <Accordion
                           type="single"
                           collapsible
-                          defaultValue={section.defaultOpen ? "details" : undefined}
+                          defaultValue={
+                            section.defaultOpen ? "details" : undefined
+                          }
                         >
                           <AccordionItem value="details" className="border-b-0">
                             <AccordionTrigger className="py-0 hover:no-underline">
@@ -57,7 +72,9 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
                                     <CardTitle className="text-sm font-medium text-foreground">
                                       {section.label}
                                     </CardTitle>
-                                    <CardDescription>{section.summary}</CardDescription>
+                                    <CardDescription>
+                                      {section.summary}
+                                    </CardDescription>
                                   </div>
                                   <Badge
                                     variant={tone.variant}

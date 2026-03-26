@@ -24,7 +24,10 @@ const runtimeContext: RuntimeContext = {
   sandboxId: "sb-1234567890",
 };
 
-function makeAssistantMessage(renderParts?: ChatRenderPart[], content = "Answer"): ChatMessage {
+function makeAssistantMessage(
+  renderParts?: ChatRenderPart[],
+  content = "Answer",
+): ChatMessage {
   return {
     id: "assistant-message",
     type: "assistant",
@@ -136,9 +139,18 @@ describe("buildAssistantContentModel", () => {
     const item = makeAssistantTurn({
       reasoningItems: [
         makeReasoningItem("overview", makeReasoningPart("Inspect repository")),
-        makeReasoningItem("thought-1", makeReasoningPart("Second fallback thought", "thought_1")),
-        makeReasoningItem("thought-0", makeReasoningPart("First fallback thought", "thought_0")),
-        makeReasoningItem("final", makeReasoningPart("All set", "final_reasoning")),
+        makeReasoningItem(
+          "thought-1",
+          makeReasoningPart("Second fallback thought", "thought_1"),
+        ),
+        makeReasoningItem(
+          "thought-0",
+          makeReasoningPart("First fallback thought", "thought_0"),
+        ),
+        makeReasoningItem(
+          "final",
+          makeReasoningPart("All set", "final_reasoning"),
+        ),
       ],
       trajectoryItems: [
         makeTrajectoryItem(

@@ -8,7 +8,10 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
-from fleet_rlm.runtime.execution.storage_paths import runtime_storage_roots
+from fleet_rlm.runtime.execution.storage_paths import (
+    RuntimeStorageRoots,
+    runtime_storage_roots,
+)
 
 from .shared import aexecute_submit, execute_submit
 from .volume_helpers import resolve_mounted_volume_path
@@ -64,10 +67,9 @@ def _resolve_path_or_error(
         return None, {"status": "error", "error": str(exc)}
 
 
-def _persistent_roots(ctx: _SandboxToolContext) -> tuple[str, str, str]:
-    """Return the allowed root plus memory/workspace defaults for the backend."""
-    roots = runtime_storage_roots(cast(RLMInterpreterProtocol, ctx.agent.interpreter))
-    return roots.allowed_root, roots.memory_root, roots.workspace_root
+def _persistent_roots(ctx: _SandboxToolContext) -> RuntimeStorageRoots:
+    """Return canonical durable storage roots for the active backend."""
+    return runtime_storage_roots(cast(RLMInterpreterProtocol, ctx.agent.interpreter))
 
 
 def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
@@ -247,7 +249,3 @@ def _load_daytona_workspace_text_sync(
             return None
         raise
     return resolved_path, text
-
-
-def _buffer_volume_default_path(workspace_root: str) -> str:
-    return str(PurePosixPath(workspace_root) / "buffers")

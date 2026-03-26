@@ -8,7 +8,9 @@ export const TELEMETRY_PII_DENYLIST = [
   "last_name",
 ] as const;
 
-const TELEMETRY_PII_KEYS = new Set<string>(TELEMETRY_PII_DENYLIST.map((key) => key.toLowerCase()));
+const TELEMETRY_PII_KEYS = new Set<string>(
+  TELEMETRY_PII_DENYLIST.map((key) => key.toLowerCase()),
+);
 
 type TelemetryProperties = Record<string, unknown>;
 

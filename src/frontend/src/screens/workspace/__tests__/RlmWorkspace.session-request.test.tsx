@@ -1,6 +1,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
@@ -34,15 +41,20 @@ const backendRuntimeState = {
 };
 
 vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
-    "@/screens/workspace/use-workspace",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/screens/workspace/use-workspace")
+  >("@/screens/workspace/use-workspace");
 
   return {
     ...actual,
     useWorkspace: () => backendRuntimeState,
     useRunWorkbenchStore: (
-      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+      selector: (state: {
+        status: "idle";
+        activity: [];
+        iterations: [];
+        callbacks: [];
+      }) => unknown,
     ) =>
       selector({
         status: "idle",
@@ -148,7 +160,9 @@ describe("WorkspaceScreen requested conversation loading", () => {
       );
     });
 
-    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(conversation);
+    expect(backendRuntimeState.loadConversation).toHaveBeenCalledWith(
+      conversation,
+    );
     expect(useWorkspaceUiStore.getState().requestedConversationId).toBeNull();
 
     act(() => {

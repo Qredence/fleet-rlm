@@ -11,8 +11,12 @@ function useWorkspaceShellHistory(): Conversation[] {
 
 function useWorkspaceShellActions() {
   const newSession = useWorkspaceUiStore((state) => state.newSession);
-  const requestConversationLoad = useWorkspaceUiStore((state) => state.requestConversationLoad);
-  const deleteConversation = useChatHistoryStore((state) => state.deleteConversation);
+  const requestConversationLoad = useWorkspaceUiStore(
+    (state) => state.requestConversationLoad,
+  );
+  const deleteConversation = useChatHistoryStore(
+    (state) => state.deleteConversation,
+  );
   const clearHistory = useChatHistoryStore((state) => state.clearHistory);
 
   return {

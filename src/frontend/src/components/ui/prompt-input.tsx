@@ -45,7 +45,9 @@ export const PromptInputProvider = ({
   const clearInput = useCallback(() => setTextInput(""), []);
 
   // ----- attachments state (global when wrapped)
-  const [attachmentFiles, setAttachmentFiles] = useState<(FileUIPart & { id: string })[]>([]);
+  const [attachmentFiles, setAttachmentFiles] = useState<
+    (FileUIPart & { id: string })[]
+  >([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // oxlint-disable-next-line eslint(no-empty-function)
   const openRef = useRef<() => void>(() => {});
@@ -159,7 +161,9 @@ export const PromptInputActionAddAttachments = ({
   const attachments = usePromptInputAttachments();
 
   const handleSelect = (
-    event: Parameters<NonNullable<PromptInputActionAddAttachmentsProps["onSelect"]>>[0],
+    event: Parameters<
+      NonNullable<PromptInputActionAddAttachmentsProps["onSelect"]>
+    >[0],
   ) => {
     onSelect?.(event);
     if (!event.defaultPrevented) {
@@ -179,7 +183,10 @@ export interface PromptInputMessage {
   files: FileUIPart[];
 }
 
-export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" | "onError"> & {
+export type PromptInputProps = Omit<
+  HTMLAttributes<HTMLFormElement>,
+  "onSubmit" | "onError"
+> & {
   // e.g., "image/*" or leave undefined for any
   accept?: string;
   multiple?: boolean;
@@ -252,7 +259,12 @@ export const PromptInput = ({
       }
 
       setItems((prev) => {
-        const capped = capFilesToCapacity(sized, prev.length, maxFiles, onError);
+        const capped = capFilesToCapacity(
+          sized,
+          prev.length,
+          maxFiles,
+          onError,
+        );
         return [...prev, ...mapFilesToUiParts(capped)];
       });
     },
@@ -308,7 +320,10 @@ export const PromptInput = ({
     [usingProvider, controller],
   );
 
-  const clearReferencedSources = useCallback(() => setReferencedSources([]), []);
+  const clearReferencedSources = useCallback(
+    () => setReferencedSources([]),
+    [],
+  );
 
   const add = usingProvider ? addWithProviderValidation : addLocal;
   const remove = usingProvider ? controller.attachments.remove : removeLocal;
@@ -435,7 +450,10 @@ export const PromptInput = ({
     () => ({
       add: (incoming: SourceDocumentUIPart[] | SourceDocumentUIPart) => {
         const array = Array.isArray(incoming) ? incoming : [incoming];
-        setReferencedSources((prev) => [...prev, ...array.map((s) => ({ ...s, id: nanoid() }))]);
+        setReferencedSources((prev) => [
+          ...prev,
+          ...array.map((s) => ({ ...s, id: nanoid() })),
+        ]);
       },
       clear: clearReferencedSources,
       remove: (id: string) => {
@@ -520,7 +538,12 @@ export const PromptInput = ({
         title="Upload files"
         type="file"
       />
-      <form className={cn("w-full", className)} onSubmit={handleSubmit} ref={formRef} {...props}>
+      <form
+        className={cn("w-full", className)}
+        onSubmit={handleSubmit}
+        ref={formRef}
+        {...props}
+      >
         <InputGroup className="prompt-composer-shell bg-(--color-surface-elevated)! flex-col items-stretch rounded-2xl border-0 p-1">
           {children}
         </InputGroup>
@@ -558,7 +581,10 @@ export {
   usePromptInputReferencedSources,
   useProviderAttachments,
 } from "./prompt-input.context";
-export type { PromptInputError, PromptInputErrorCode } from "./prompt-input.utilities";
+export type {
+  PromptInputError,
+  PromptInputErrorCode,
+} from "./prompt-input.utilities";
 export type {
   PromptInputActionMenuContentProps,
   PromptInputActionMenuItemProps,

@@ -25,7 +25,9 @@ describe("settings section helpers", () => {
       "Configure theme, telemetry, LM integration",
     );
     expect(getSettingsSectionTitle("runtime")).toBe("Runtime");
-    expect(getSettingsSectionDescription("runtime")).toContain("runtime credentials");
+    expect(getSettingsSectionDescription("runtime")).toContain(
+      "runtime credentials",
+    );
   });
 });
 

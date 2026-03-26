@@ -33,7 +33,8 @@ export function resolvePostHogWebConfig(
   const projectDefault = readNonEmpty(
     overrides.projectDefaultApiKey ?? PROJECT_POSTHOG_DEFAULT_API_KEY,
   );
-  const host = readNonEmpty(env.VITE_PUBLIC_POSTHOG_HOST) ?? PROJECT_POSTHOG_DEFAULT_HOST;
+  const host =
+    readNonEmpty(env.VITE_PUBLIC_POSTHOG_HOST) ?? PROJECT_POSTHOG_DEFAULT_HOST;
 
   if (canonical) {
     return { apiKey: canonical, host, keySource: "canonical_env" };

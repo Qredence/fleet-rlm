@@ -1,6 +1,9 @@
 import { create } from "zustand";
 
-import type { CreationPhase, InspectorTab } from "@/lib/workspace/workspace-types";
+import type {
+  CreationPhase,
+  InspectorTab,
+} from "@/lib/workspace/workspace-types";
 import { useNavigationStore } from "@/stores/navigationStore";
 
 export interface WorkspaceUiState {
@@ -46,7 +49,8 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   clearRequestedConversation: () => set({ requestedConversationId: null }),
   openInspector: (turnId, tab) => {
     set((state) => ({
-      selectedAssistantTurnId: turnId === undefined ? state.selectedAssistantTurnId : turnId,
+      selectedAssistantTurnId:
+        turnId === undefined ? state.selectedAssistantTurnId : turnId,
       activeInspectorTab: tab ?? state.activeInspectorTab,
     }));
     openShellCanvas();
@@ -69,4 +73,5 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
 
 export const useSelectedAssistantTurnId = () =>
   useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
-export const useActiveInspectorTab = () => useWorkspaceUiStore((state) => state.activeInspectorTab);
+export const useActiveInspectorTab = () =>
+  useWorkspaceUiStore((state) => state.activeInspectorTab);

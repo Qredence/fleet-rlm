@@ -155,6 +155,7 @@ Auth, persistence, and analytics constraints:
 - For new Daytona heavy capabilities, treat `llm_query` / `llm_query_batched` as last-resort semantic helpers inside the sandbox, not as the default implementation shape.
 - `DAYTONA_TARGET` is Daytona SDK routing/config only. Do not treat it as a workspace id, sandbox id, or volume name.
 - The workspace Daytona persistent volume is derived from the authenticated workspace/tenant claim, created/read through `client.volume.get(..., create=True)`, and mounted into Daytona sandboxes through `VolumeMount`.
+- The runtime remains SDK-owned. Do not require repo-side `.daytona`, devcontainer, or Declarative Builder config to create Daytona sandboxes in this iteration. Declarative Builder is reserved as an optional future base-image/bootstrap layer.
 - Keep Daytona aligned to the official SDK surface with direct `from daytona import ...` imports in the owning modules. Do not reintroduce a local Daytona SDK façade.
 - Keep async websocket/session-switch paths on the async helpers (`agent.areset()`, `agent.aimport_session_state()`, `interpreter.aconfigure_workspace()`, and `interpreter.aexecute()`). The Daytona provider is now async-first internally on `AsyncDaytona`; sync methods remain compatibility shims over that async implementation.
 - Root and recursive Daytona child runs should share the same workspace-scoped persistent volume when one is configured, while still using distinct Daytona sandbox sessions per child run.
@@ -171,7 +172,13 @@ Auth, persistence, and analytics constraints:
   - `volumes.py`
 - Persistent Daytona memory has two layers:
   - volatile code-interpreter context state inside the live sandbox-side Python process
-  - durable workspace state on the mounted Daytona volume at `/home/daytona/memory`
+  - durable mounted-volume storage rooted at `/home/daytona/memory`
+- Canonical durable volume directories are:
+  - `/home/daytona/memory/memory`
+  - `/home/daytona/memory/artifacts`
+  - `/home/daytona/memory/buffers`
+  - `/home/daytona/memory/meta`
+- Treat the live Daytona workspace as transient repo/execution state. `context_paths` are staged into the workspace for the current run only, and there is no automatic workspace-to-volume sync.
 - Keep Daytona chat/session normalization helpers in `integrations/providers/daytona/state.py` so `agent.py` stays a focused Daytona-specific agent/session adapter over the shared runtime.
 - Keep terminal session actions in `cli/terminal/session_actions.py` and transcript/rendering helpers in `cli/terminal/session_view.py`.
 - Keep MLflow runtime bootstrap, callback registration, and request-context helpers in `integrations/observability/mlflow_runtime.py`; keep trace lookup, feedback logging, and dataset/export helpers in `integrations/observability/mlflow_traces.py`.
