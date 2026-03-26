@@ -222,40 +222,25 @@ jobs:
           skip-existing: true
 
   smoke-test-testpypi:
-    name: Smoke Test from TestPyPI
+    name: Smoke Test Built Artifact
     runs-on: ubuntu-latest
     needs: [publish-testpypi, preflight]
     steps:
+      - name: Download distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: python-package-distributions
+          path: dist/
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
-      - name: Wait for TestPyPI indexing
-        run: |
-          echo "⏳ Waiting 60 seconds for TestPyPI to index the new version..."
-          sleep 60
-
-      - name: Install from TestPyPI
+      - name: Install built wheel
         run: |
           python -m pip install --upgrade pip
-          # Retry up to 3 times with exponential backoff
-          for i in 1 2 3; do
-            echo "Attempt $i to install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}"
-            if pip install \
-              --index-url https://pypi.org/simple \
-              --extra-index-url https://test.pypi.org/simple/ \
-              fleet-rlm==${{ needs.preflight.outputs.normalized_version }}; then
-              echo "✅ Successfully installed"
-              exit 0
-            fi
-            if [ $i -lt 3 ]; then
-              echo "⚠️ Install failed, waiting $((i * 30)) seconds before retry..."
-              sleep $((i * 30))
-            fi
-          done
-          echo "❌ Failed to install after 3 attempts"
-          exit 1
+          pip install dist/*.whl
 
       - name: Test Python import
         run: |
