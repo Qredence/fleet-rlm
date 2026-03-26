@@ -145,7 +145,7 @@ markers = [
 ]
 
 [tool.ty.src]
-exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py"]
+exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py", "setup.py"]
 
 [tool.deptry]
 # Exclude test directories and node_modules from import scanning
