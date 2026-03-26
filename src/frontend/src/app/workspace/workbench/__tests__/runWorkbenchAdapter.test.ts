@@ -707,7 +707,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = failRunWorkbenchRun(
       started,
-      "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+      "No response arrived from the server within 60 seconds. Try again or check the backend logs.",
     );
 
     expect(next.status).toBe("error");

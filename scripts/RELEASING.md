@@ -73,7 +73,9 @@ uv run ruff format --check src tests
 uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
-uvx pip-audit
+# TODO: Remove this ignore once Pygments ships a patched release for
+# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
+uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
 uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
 if [ -f src/frontend/package.json ]; then

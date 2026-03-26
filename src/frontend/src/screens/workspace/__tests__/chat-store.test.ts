@@ -300,6 +300,18 @@ describe("useChatStore — streamMessage", () => {
     expect(payload).not.toHaveProperty("max_depth");
   });
 
+  it("extends the first-frame timeout for Daytona streams", async () => {
+    vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
+
+    await useChatStore.getState().streamMessage("trace the repo");
+
+    const [, options] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
+    expect(options).toMatchObject({
+      firstFrameTimeoutMs: 60000,
+    });
+  });
+
   it("uses trace override=false to disable websocket trace mode", async () => {
     vi.mocked(streamChatOverWs).mockResolvedValue(undefined);
 

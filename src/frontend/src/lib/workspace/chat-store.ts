@@ -12,6 +12,8 @@ import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapt
 import type { ChatMessage, ExecutionStep } from "@/lib/workspace/workspace-types";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 
+const DAYTONA_FIRST_FRAME_TIMEOUT_MS = 60_000;
+
 interface StreamMessageOptions {
   traceEnabled?: boolean;
   executionMode?: WsExecutionMode;
@@ -121,6 +123,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     const traceEnabled = options?.traceEnabled ?? true;
     const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
+    const firstFrameTimeoutMs =
+      resolvedRuntimeMode === "daytona_pilot" ? DAYTONA_FIRST_FRAME_TIMEOUT_MS : undefined;
 
     const payload = {
       type: "message",
@@ -156,6 +160,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     try {
       await streamChatOverWs(request as unknown as Parameters<typeof streamChatOverWs>[0], {
         signal: controller.signal,
+        firstFrameTimeoutMs,
         onFrame: (frame) => {
           set((state) => ({
             messages: applyWsFrameToMessages(state.messages, frame, queryClient).messages,

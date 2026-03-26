@@ -81,7 +81,9 @@ docs-check:
 	uv run python scripts/check_docs_quality.py
 
 security-check:
-	uvx pip-audit
+	# TODO: Remove this ignore once Pygments ships a patched release for
+	# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
+	uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
 	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
 dependency-check:

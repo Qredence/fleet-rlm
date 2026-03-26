@@ -45,7 +45,7 @@ describe("useRunWorkbenchStore", () => {
   it("clears a stale error banner when a new Daytona run begins", () => {
     useRunWorkbenchStore
       .getState()
-      .failRun("No response arrived from the server within 15 seconds.");
+      .failRun("No response arrived from the server within 60 seconds.");
 
     useRunWorkbenchStore.getState().beginRun({
       task: "Say hello in one sentence.",

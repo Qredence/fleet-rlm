@@ -127,7 +127,7 @@ describe("useWorkspace Daytona transport failures", () => {
   it("surfaces a Daytona stream failure in the workbench instead of appending a generic chat error", async () => {
     mocked.streamMessage.mockRejectedValue(
       new Error(
-        "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+        "No response arrived from the server within 60 seconds. Try again or check the backend logs.",
       ),
     );
 
@@ -151,7 +151,7 @@ describe("useWorkspace Daytona transport failures", () => {
 
     expect(mocked.daytonaStoreState.beginRun).toHaveBeenCalledOnce();
     expect(mocked.daytonaStoreState.failRun).toHaveBeenCalledWith(
-      "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+      "No response arrived from the server within 60 seconds. Try again or check the backend logs.",
     );
     expect(useChatStore.getState().messages).toEqual([
       expect.objectContaining({
@@ -161,7 +161,7 @@ describe("useWorkspace Daytona transport failures", () => {
     ]);
     expect(mocked.toastError).toHaveBeenCalledWith("Backend stream failed", {
       description:
-        "No response arrived from the server within 15 seconds. Try again or check the backend logs.",
+        "No response arrived from the server within 60 seconds. Try again or check the backend logs.",
     });
   });
 });
