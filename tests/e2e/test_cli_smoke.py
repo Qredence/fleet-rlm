@@ -7,8 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
-from fleet_rlm.cli.commands.serve_cmds import _resolve_server_volume_name
-from fleet_rlm.infrastructure.config.env import AppConfig
+from fleet_rlm.cli.runtime_factory import resolve_server_volume_name
+from fleet_rlm.integrations.config.env import AppConfig
 
 
 runner = CliRunner()
@@ -119,11 +119,11 @@ def test_init_rejects_only_mode_with_exclusion(tmp_path: Path):
 
 def test_resolve_server_volume_name_defaults_to_persistent_volume():
     config = AppConfig()
-    assert _resolve_server_volume_name(config) == "rlm-volume-dspy"
+    assert resolve_server_volume_name(config) == "rlm-volume-dspy"
 
 
 def test_resolve_server_volume_name_preserves_configured_volume():
     config = AppConfig(
         interpreter={"volume_name": "custom-volume"},
     )
-    assert _resolve_server_volume_name(config) == "custom-volume"
+    assert resolve_server_volume_name(config) == "custom-volume"

@@ -1,7 +1,5 @@
 import type { ReactNode } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { springs } from "@/lib/utils/motion";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -30,8 +28,8 @@ interface RadioOptionCardProps {
  * (`radio-option-card-label` and `radio-option-card-description`), so
  * the look can be re-themed from CSS alone.
  *
- * Uses centralized spring physics from `motion-config.ts` and respects
- * `prefers-reduced-motion`.
+ * Uses Tailwind's motion-safe utilities so the selection indicator only
+ * animates when the user has not requested reduced motion.
  *
  * @example
  * ```tsx
@@ -51,8 +49,6 @@ function RadioOptionCard({
   icon,
   className,
 }: RadioOptionCardProps) {
-  const prefersReduced = useReducedMotion();
-
   return (
     <button
       type="button"
@@ -75,17 +71,12 @@ function RadioOptionCard({
         )}
         aria-hidden="true"
       >
-        <AnimatePresence>
-          {selected && (
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={prefersReduced ? springs.instant : springs.snappy}
-              className="w-2.5 h-2.5 rounded-full bg-foreground"
-            />
+        <div
+          className={cn(
+            "w-2.5 h-2.5 rounded-full bg-foreground motion-safe:transition-transform motion-safe:duration-150",
+            selected ? "scale-100" : "scale-0",
           )}
-        </AnimatePresence>
+        />
       </div>
 
       {/* ── Label + description ────────────────────────────────── */}

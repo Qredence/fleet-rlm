@@ -10,6 +10,8 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.ui.conftest import STAGING_TEST_JWT_SECRET
+
 
 def _server_state(local_client: TestClient) -> Any:
     return cast(Any, local_client.app).state.server_state
@@ -23,10 +25,14 @@ def _staging_bearer_headers() -> dict[str, str]:
             "email": "alice@example.com",
             "name": "Alice",
         },
-        "staging-test-secret",
+        STAGING_TEST_JWT_SECRET,
         algorithm="HS256",
     )
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_staging_test_jwt_secret_meets_hs256_guidance() -> None:
+    assert len(STAGING_TEST_JWT_SECRET) >= 32
 
 
 def test_runtime_settings_masks_secrets(
@@ -380,6 +386,114 @@ def test_runtime_status_uses_cached_results(
     assert payload["daytona"]["configured"] is True
 
 
+def test_runtime_status_includes_mlflow_startup_state(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "degraded"
+    state.optional_service_errors["mlflow"] = (
+        "MLflow runtime initialization unavailable"
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setenv("MLFLOW_AUTO_START", "yes")
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"] == {
+        "enabled": True,
+        "auto_start_enabled": True,
+        "startup_status": "degraded",
+        "startup_error": "MLflow runtime initialization unavailable",
+    }
+    assert (
+        "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, or set MLFLOW_ENABLED=false for this environment."
+        in payload["guidance"]
+    )
+
+
+def test_runtime_status_marks_mlflow_disabled_when_env_disabled(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "disabled"
+    state.optional_service_errors.pop("mlflow", None)
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+    monkeypatch.delenv("MLFLOW_AUTO_START", raising=False)
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"] == {
+        "enabled": False,
+        "auto_start_enabled": False,
+        "startup_status": "disabled",
+        "startup_error": None,
+    }
+
+
+def test_runtime_status_stays_degraded_until_modal_and_lm_smoke_pass(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.runtime_test_results = {}
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.load_modal_config",
+        lambda: {},
+    )
+
+    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
+    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert payload["llm"]["model_set"] is False
+    assert payload["modal"]["credentials_available"] is False
+    assert (
+        "Run Runtime connection tests to validate live provider connectivity."
+        in payload["guidance"]
+    )
+
+
+def test_runtime_status_keeps_daytona_guidance_nested(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.providers.daytona.config import DaytonaConfigError
+
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_API_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.resolve_daytona_config",
+        lambda: (_ for _ in ()).throw(
+            DaytonaConfigError(
+                "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
+            )
+        ),
+    )
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["daytona"]["configured"] is False
+    assert payload["daytona"]["guidance"] == [
+        "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
+    ]
+
+
 def test_runtime_daytona_volume_name_uses_workspace_claim(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -402,11 +516,31 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
     )
 
     response = local_client.get("/api/v1/runtime/volume/tree")
+
+    assert response.status_code == 502
+    assert "Volume listing failed" in response.json().get("detail", "")
+
+
+def test_runtime_daytona_volume_tree_maps_backend_errors_to_502(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/tree",
+        headers=_staging_bearer_headers(),
+    )
 
     assert response.status_code == 502
     assert "Volume listing failed" in response.json().get("detail", "")
@@ -439,7 +573,7 @@ def test_runtime_volume_tree_uses_explicit_modal_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         _fake_list_volume_tree,
     )
 
@@ -468,7 +602,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
     state.config.volume_name = "test-volume"
     captured: dict[str, object] = {}
 
-    def _fake_list_daytona_volume_tree(
+    async def _fake_list_daytona_volume_tree(
         volume_name: str,
         root_path: str,
         max_depth: int,
@@ -490,7 +624,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_daytona_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         _fake_list_daytona_volume_tree,
     )
 
@@ -519,7 +653,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
     state.config.volume_name = "test-volume"
     captured: dict[str, object] = {}
 
-    def _fake_read_daytona_volume_file_text(
+    async def _fake_read_daytona_volume_file_text(
         volume_name: str,
         path: str,
         max_bytes: int,
@@ -540,7 +674,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_daytona_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         _fake_read_daytona_volume_file_text,
     )
 
@@ -586,7 +720,7 @@ def test_runtime_volume_file_uses_explicit_modal_provider_override(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         _fake_read_volume_file_text,
     )
 
@@ -614,7 +748,7 @@ def test_runtime_volume_tree_defaults_to_active_provider(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
         lambda volume_name, root_path, max_depth: {
             "volume_name": volume_name,
             "root_path": root_path,
@@ -639,11 +773,32 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
     )
 
     response = local_client.get("/api/v1/runtime/volume/file", params={"path": "/x"})
+
+    assert response.status_code == 404
+    assert response.json().get("detail") == "File not found."
+
+
+def test_runtime_daytona_volume_file_maps_not_found_errors_to_404(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/x"},
+        headers=_staging_bearer_headers(),
+    )
 
     assert response.status_code == 404
     assert response.json().get("detail") == "File not found."
@@ -657,13 +812,34 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
     )
 
     response = local_client.get(
         "/api/v1/runtime/volume/file",
         params={"path": "/folder"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Path must point to a file."
+
+
+def test_runtime_daytona_volume_file_maps_directory_errors_to_400(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volume/file",
+        params={"path": "/folder"},
+        headers=_staging_bearer_headers(),
     )
 
     assert response.status_code == 400
@@ -678,7 +854,7 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
     state.config.sandbox_provider = "modal"
     state.config.volume_name = "test-volume"
     monkeypatch.setattr(
-        "fleet_rlm.core.tools.volume_ops.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
     )
 
@@ -694,6 +870,29 @@ def test_runtime_volume_tree_rejects_invalid_max_depth(
     response = local_client.get("/api/v1/runtime/volume/tree", params={"max_depth": 0})
 
     assert response.status_code == 422
+
+
+def test_runtime_volume_tree_rejects_path_traversal(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.config.sandbox_provider = "modal"
+    state.config.volume_name = "test-volume"
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("volume backend should not be called")
+        ),
+    )
+
+    response = local_client.get(
+        "/api/v1/runtime/volume/tree",
+        params={"root_path": "/../etc"},
+    )
+
+    assert response.status_code == 400
+    assert response.json().get("detail") == "Invalid root path."
 
 
 def test_runtime_volume_file_rejects_invalid_max_bytes(

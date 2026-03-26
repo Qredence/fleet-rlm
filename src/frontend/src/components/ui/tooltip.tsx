@@ -2,7 +2,7 @@ import type * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { Tooltip as BaseTooltip } from "@base-ui/react";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 // Base UI doesn't strictly need a Provider in the same way Radix does,
 // but we keep the export for API compatibility if it was used globally.

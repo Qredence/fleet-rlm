@@ -1,50 +1,48 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { useStickToBottom } from "@/hooks/useStickToBottom";
-import { useChatHistoryStore } from "@/screens/workspace/model/chat-history-store";
-import { useChatStore } from "@/screens/workspace/model/chat-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
 import { useAppNavigate } from "@/hooks/useAppNavigate";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
+import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import {
-  WorkspaceComposer,
-  type AttachedFile,
-} from "@/screens/workspace/components/workspace-composer";
-import { WorkspaceSidebar } from "@/screens/workspace/components/workspace-sidebar";
-import { WorkspaceMessageList } from "@/screens/workspace/components/workspace-message-list";
-import { useWorkspaceRuntime } from "@/screens/workspace/hooks/use-workspace-runtime";
+  useChatHistoryStore,
+  useChatStore,
+  useWorkspace,
+  useWorkspaceUiStore,
+} from "@/screens/workspace/use-workspace";
 import { detectRepoContext } from "@/lib/utils/repoContext";
 import { detectContextPaths } from "@/lib/utils/sourceContext";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { useQueryClient } from "@tanstack/react-query";
+import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.
  *
- * Chat logic (messages, phases, backend events) lives in `useWorkspaceRuntime`.
+ * Chat logic (messages, phases, backend events) lives in `useWorkspace`.
  * Workspace-only shell state flows through the workspace screen slice so it
  * persists across shell navigation without leaking back into root stores.
  *
  * Conversation history is managed by `useChatHistoryStore` (localStorage-backed).
  * Auto-saves the current conversation when the session revision changes (new session),
- * and allows loading past conversations from the welcome state.
+ * and allows loading past conversations from the shell sidebar.
  */
 export function WorkspaceScreen() {
   const isMobile = useIsMobile();
   const { navigate } = useAppNavigate();
   const telemetry = useTelemetry();
-  const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom();
   const backendEnabled = isRlmCoreEnabled();
   const runtimeStatus = useRuntimeStatus({ enabled: backendEnabled });
 
-  const chatRuntime = useWorkspaceRuntime();
+  const chatRuntime = useWorkspace();
 
   const {
     messages,
@@ -58,6 +56,7 @@ export function WorkspaceScreen() {
     resolveClarification,
     loadConversation,
   } = chatRuntime;
+  const stopStreaming = useChatStore((state) => state.stopStreaming);
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
@@ -133,24 +132,11 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const {
-    sessionRevision,
-    requestedConversationId,
-    clearRequestedConversation,
-    requestConversationLoad,
-  } = useWorkspaceUiStore();
+  const { sessionRevision, requestedConversationId, clearRequestedConversation } =
+    useWorkspaceUiStore();
 
   // Chat history
-  const {
-    conversations,
-    saveConversation,
-    loadConversation: loadConv,
-    deleteConversation,
-    clearHistory,
-  } = useChatHistoryStore();
-
-  // ── History panel toggle ─────────────────────────────────────────
-  const [showHistory, setShowHistory] = useState(false);
+  const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
 
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
@@ -167,8 +153,6 @@ export function WorkspaceScreen() {
   }, [messages, phase, turnArtifactsByMessageId]);
 
   useEffect(() => {
-    let historyResetTimer: ReturnType<typeof setTimeout> | null = null;
-
     if (prevSessionRevisionRef.current !== sessionRevision) {
       // Save the old conversation (if it had messages)
       if (messagesRef.current.length > 0) {
@@ -184,12 +168,7 @@ export function WorkspaceScreen() {
         });
       }
       prevSessionRevisionRef.current = sessionRevision;
-      historyResetTimer = setTimeout(() => setShowHistory(false), 0);
     }
-
-    return () => {
-      if (historyResetTimer) clearTimeout(historyResetTimer);
-    };
   }, [sessionRevision, saveConversation, telemetry]);
 
   useEffect(() => {
@@ -207,7 +186,6 @@ export function WorkspaceScreen() {
 
     loadConversation(conversation);
     clearRequestedConversation();
-    setShowHistory(false);
   }, [
     clearRequestedConversation,
     loadConv,
@@ -216,29 +194,10 @@ export function WorkspaceScreen() {
     saveConversation,
   ]);
 
-  const handleSelectConversation = useCallback(
-    (id: string) => {
-      requestConversationLoad(id);
-      setShowHistory(false);
-    },
-    [requestConversationLoad],
-  );
-
-  const handleToggleHistory = useCallback(() => {
-    setShowHistory((prev) => !prev);
-  }, []);
-
-  const handleCloseHistory = useCallback(() => {
-    setShowHistory(false);
-  }, []);
-
   const handleOpenRuntimeSettings = useCallback(() => {
-    const openSettingsEvent = new CustomEvent<{ section: "runtime" }>("open-settings", {
-      detail: { section: "runtime" },
-      cancelable: true,
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      section: "runtime",
     });
-
-    const wasHandledByDialog = document.dispatchEvent(openSettingsEvent) === false;
     if (!wasHandledByDialog) {
       navigate({ to: "/settings", search: { section: "runtime" } });
     }
@@ -270,6 +229,7 @@ export function WorkspaceScreen() {
       value={inputValue}
       onChange={setInputValue}
       onSend={handleSubmit}
+      onStop={stopStreaming}
       attachmentsEnabled={false}
       placeholder={
         !backendEnabled
@@ -296,27 +256,9 @@ export function WorkspaceScreen() {
           messages={messages}
           isTyping={isTyping}
           isMobile={isMobile}
-          scrollRef={scrollRef}
-          contentRef={contentRef}
-          isAtBottom={isAtBottom}
-          scrollToBottom={scrollToBottom}
           onSuggestionClick={setInputValue}
           onResolveHitl={resolveHitl}
           onResolveClarification={resolveClarification}
-          showHistory={showHistory}
-          onToggleHistory={handleToggleHistory}
-          hasHistory={conversations.length > 0}
-          historyPanel={
-            showHistory ? (
-              <WorkspaceSidebar
-                conversations={conversations}
-                onSelect={handleSelectConversation}
-                onDelete={deleteConversation}
-                onClearAll={clearHistory}
-                onClose={handleCloseHistory}
-              />
-            ) : null
-          }
         />
       </div>
 
@@ -335,7 +277,9 @@ export function WorkspaceScreen() {
                 <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
-                    <p>{warningGuidance[0]}</p>
+                    {warningGuidance.map((msg) => (
+                      <p key={msg}>{msg}</p>
+                    ))}
                     <Button
                       variant="outline"
                       size="sm"

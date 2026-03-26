@@ -311,6 +311,31 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
+  it("includes workspace, user, and session identity on execution subscriptions", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WORKSPACE_ID", "workspace-7");
+    vi.stubEnv("VITE_FLEET_USER_ID", "user-9");
+    const { subscribeToExecutionStream } = await loadWsClientModule();
+    installSocketFactory();
+
+    const unsubscribe = subscribeToExecutionStream("session-1", {
+      onFrame: vi.fn(),
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    await Promise.resolve();
+
+    const connectionUrl = new URL(String(MockWebSocket.mock.calls[0]?.[0]));
+    expect(connectionUrl.pathname).toBe("/api/v1/ws/execution");
+    expect(connectionUrl.searchParams.get("workspace_id")).toBe("workspace-7");
+    expect(connectionUrl.searchParams.get("user_id")).toBe("user-9");
+    expect(connectionUrl.searchParams.get("session_id")).toBe("session-1");
+
+    unsubscribe();
+  });
+
   it("keeps execution subscriptions open after execution_completed frames", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
     const { subscribeToExecutionStream } = await loadWsClientModule();

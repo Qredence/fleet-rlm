@@ -1,17 +1,18 @@
 import { PanelRight } from "lucide-react";
-import { useNavigationStore } from "@/stores/navigationStore";
+
+import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { IconButton } from "@/components/ui/icon-button";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 export function ShellHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas } = useNavigationStore();
   const isMobile = useIsMobile();
 
-  // Format the activeNav into a nice title
   const titleMap: Record<string, string> = {
-    workspace: "RLM Workspace",
+    workspace: "Workbench",
     volumes: "Volumes",
     settings: "Settings",
   };
@@ -20,35 +21,37 @@ export function ShellHeader() {
   return (
     <header
       className={cn(
-        "flex shrink-0 items-center justify-between gap-2 h-12",
-        !isMobile && "border-b border-border-subtle bg-surface px-4",
-        isMobile && "px-4 pt-2 bg-surface border-b border-border-subtle",
+        "flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
+        isMobile ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-4 py-2",
       )}
     >
-      <div className="flex-1 min-w-0 text-sm font-medium text-foreground truncate">{title}</div>
-
-      <div className="flex items-center shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <IconButton
-                onClick={toggleCanvas}
-                isActive={isCanvasOpen}
-                aria-label={isCanvasOpen ? "Close side panel" : "Open side panel"}
-                className={cn(
-                  isMobile ? "touch-target" : "h-8 w-8 rounded-lg",
-                  isCanvasOpen && "bg-muted/80",
-                )}
-              >
-                <PanelRight className={isMobile ? "size-6" : "size-5"} strokeWidth={1.5} />
-              </IconButton>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {isCanvasOpen ? "Close side panel" : "Open side panel"}
-          </TooltipContent>
-        </Tooltip>
+      <div className="flex min-w-0 items-center gap-2">
+        <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
+        <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <Button
+              type="button"
+              size={isMobile ? "icon" : "icon-sm"}
+              variant={isCanvasOpen ? "secondary" : "ghost"}
+              aria-label={isCanvasOpen ? "Close side panel" : "Open side panel"}
+              className={cn(isMobile && "rounded-xl")}
+              onClick={toggleCanvas}
+            >
+              <PanelRight />
+              <span className="sr-only">
+                {isCanvasOpen ? "Close side panel" : "Open side panel"}
+              </span>
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {isCanvasOpen ? "Close side panel" : "Open side panel"}
+        </TooltipContent>
+      </Tooltip>
     </header>
   );
 }

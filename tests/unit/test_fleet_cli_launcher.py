@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm import fleet_cli
-from fleet_rlm.infrastructure.config.env import AppConfig
+import fleet_rlm.cli.main as fleet_cli
+from fleet_rlm.integrations.config.env import AppConfig
 
 
 def test_main_uses_python_ui(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,7 +9,26 @@ Use this guide when you want `fleet-rlm` to emit MLflow traces during live DSPy 
 make mlflow-server
 ```
 
-That starts an OSS MLflow tracking server on `http://127.0.0.1:5000` using `sqlite:///mlruns.db`.
+That starts an OSS MLflow tracking server on `http://127.0.0.1:5001` using `sqlite:///mlruns.db`.
+
+### Optional: Auto-start MLflow in local development
+
+If you prefer not to keep a second terminal open for `make mlflow-server`, the API
+server can launch MLflow automatically in local development:
+
+```bash
+# from repo root
+export MLFLOW_AUTO_START=true
+uv run fleet web
+```
+
+Notes:
+
+- Auto-start only runs when `APP_ENV=local`.
+- The port comes from `MLFLOW_TRACKING_URI`, so keep that value aligned with your
+  local MLflow server.
+- Startup still succeeds if MLflow cannot be reached; the app reports MLflow as
+  degraded instead of failing boot.
 
 ## 2. Enable MLflow in fleet-rlm
 
@@ -18,7 +37,7 @@ Set the following environment variables before starting the server or running of
 ```bash
 # from repo root
 export MLFLOW_ENABLED=true
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 export MLFLOW_EXPERIMENT=fleet-rlm
 
 # optional model registry / deployment id
@@ -46,6 +65,11 @@ export MLFLOW_TRACKING_PASSWORD=replace-with-password
 ```
 
 If you do not want MLflow for a given environment, set `MLFLOW_ENABLED=false` and startup will skip MLflow initialization entirely.
+
+When MLflow is enabled, its initialization runs as an optional background startup
+task. If startup cannot reach the tracking server, check `/api/v1/runtime/status`
+for the `mlflow.startup_status` and `mlflow.startup_error` fields while you verify
+connectivity, permissions, or auth settings.
 
 When MLflow is enabled:
 
@@ -173,7 +197,7 @@ uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 If your MCP client supports per-server env vars, point it at the same tracking server:
 
 ```bash
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000 \
+MLFLOW_TRACKING_URI=http://127.0.0.1:5001 \
 uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 ```
 

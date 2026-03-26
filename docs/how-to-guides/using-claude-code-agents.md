@@ -1,15 +1,23 @@
 # Using with Claude Code
 
-This guide covers using `fleet-rlm` scaffold assets with Claude Code.
+This guide covers using the packaged Claude Code scaffold as an alternative
+interface over `fleet-rlm`.
 
 ## What Gets Installed
 
-`fleet-rlm` ships reusable assets under `src/fleet_rlm/_scaffold/`:
+`fleet-rlm` ships curated assets under `src/fleet_rlm/scaffold/`:
 
 - Skills: `skills/`
 - Agent definitions: `agents/`
 - Team templates: `teams/`
 - Hooks: `hooks/`
+
+These assets are maintained as a Claude-facing translation of the project:
+
+- `rlm` explains the shared ReAct plus `dspy.RLM` runtime
+- `daytona-runtime` explains the Daytona-backed path
+- `rlm-debug` covers runtime and contract debugging
+- the packaged agents coordinate that knowledge for Claude Code users
 
 Install to `~/.claude/`:
 
@@ -48,14 +56,13 @@ The scaffold follows a three-layer model:
 
 Typical usage examples:
 
-- "Use the `rlm` skill to analyze this large document."
-- "Use `rlm-debug` to diagnose Modal auth and timeout failures."
-- "Use `dspy-signature` to design a new extraction signature."
-- "Delegate this long-context extraction to `rlm-orchestrator`."
+- "Load `rlm` and explain whether this should run in `modal_chat` or `daytona_pilot`."
+- "Load `daytona-runtime` and explain how the Daytona workbench path persists memory."
+- "Use `rlm-debug` to diagnose websocket or runtime-mode drift."
+- "Delegate this fleet-rlm workspace task to `rlm-orchestrator`."
 
-The bundled `rlm` skill includes PDF/document ingestion guidance via
-`load_document` and `read_file_slice` (MarkItDown first, `pypdf` fallback).
-Scanned/image-only PDFs require OCR before analysis.
+The packaged scaffold is curated project guidance. It is not meant to be a raw
+mirror of the local `.claude/` directory.
 
 ## Agent Team Workflows (Experimental)
 
@@ -79,5 +86,5 @@ ls -la ~/.claude/hooks
 If needed:
 
 ```bash
-uv run python scripts/validate_env.py agents
+uv run fleet-rlm init --list
 ```

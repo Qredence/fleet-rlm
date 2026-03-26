@@ -9,6 +9,8 @@ from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
 from tests.ui.fixtures_ui import apply_ui_test_env
 
+STAGING_TEST_JWT_SECRET = "0123456789abcdef0123456789abcdef"
+
 
 @pytest.fixture(autouse=True)
 def _ui_server_state_isolation(reset_server_state):
@@ -54,7 +56,7 @@ def staging_client() -> TestClient:
             allow_debug_auth=False,
             allow_query_auth_tokens=False,
             cors_allowed_origins=["https://example.com"],
-            dev_jwt_secret="staging-test-secret",
+            dev_jwt_secret=STAGING_TEST_JWT_SECRET,
         )
     )
     with TestClient(app) as client:

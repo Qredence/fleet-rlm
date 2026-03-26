@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 const ButtonGroupContext = React.createContext<{
   orientation?: "horizontal" | "vertical";

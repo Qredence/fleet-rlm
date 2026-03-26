@@ -72,6 +72,10 @@ DSPY_LLM_API_KEY=sk-...
 
 See [Environment Variables](#environment-variables) below for the full configuration reference.
 
+If you plan to use MLflow locally, keep `MLFLOW_TRACKING_URI=http://127.0.0.1:5001`
+aligned with the `make mlflow-server` target, or set `MLFLOW_AUTO_START=true` to
+let the API server start MLflow for local development.
+
 ### 3. Frontend Setup (Optional)
 
 For frontend development, install dependencies in the `src/frontend/` directory:
@@ -150,7 +154,7 @@ The `.env.example` file contains all configurable environment variables. Key cat
 | Variable              | Description                | Default                 |
 | --------------------- | -------------------------- | ----------------------- |
 | `MLFLOW_ENABLED`      | Enable MLflow tracing      | `true`                  |
-| `MLFLOW_TRACKING_URI` | MLflow server URL          | `http://127.0.0.1:5000` |
+| `MLFLOW_TRACKING_URI` | MLflow server URL          | `http://127.0.0.1:5001` |
 | `MLFLOW_EXPERIMENT`   | Experiment name for traces | `fleet-rlm`             |
 
 ### Optional: Analytics
@@ -178,13 +182,13 @@ The `.env.example` file contains all configurable environment variables. Key cat
 
 The project includes a `Makefile` for common development tasks:
 
-| Target               | Command                                                                    |
-| -------------------- | -------------------------------------------------------------------------- |
-| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`)                    |
-| `make test-fast`     | Run tests excluding `live_llm` and `benchmark`                             |
-| `make quality-gate`  | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| Target               | Command                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`)                             |
+| `make test-fast`     | Run tests excluding `live_llm` and `benchmark`                                      |
+| `make quality-gate`  | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate       |
 | `make release-check` | Run release-oriented validation: quality gate, security checks, UI build, packaging |
-| `make mlflow-server` | Start local MLflow server on port 5000                                     |
+| `make mlflow-server` | Start local MLflow server on port 5001                                              |
 
 ## Docs-Only Validation
 

@@ -64,7 +64,7 @@ When docs conflict with implementation, treat these as authoritative:
 
 - CLI truth: `uv run fleet-rlm --help` and `uv run fleet --help`
 - API truth: `openapi.yaml`
-- WebSocket truth: `src/fleet_rlm/api/routers/ws/api.py`
+- WebSocket truth: `src/fleet_rlm/api/routers/ws/endpoint.py` and adjacent helpers in `src/fleet_rlm/api/routers/ws/`
 
 ## Archive Note
 

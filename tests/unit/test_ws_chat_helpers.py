@@ -3,44 +3,26 @@ from __future__ import annotations
 import asyncio
 import inspect
 from contextlib import suppress
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 
 import pytest
 from fastapi import WebSocketDisconnect
 
-from fleet_rlm.core.models import StreamEvent
-from fleet_rlm.api.routers.ws.streaming import (
-    _enqueue_latest_nonblocking,
+from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.api.routers.ws.stream import (
     _emit_stream_event,
-    _handle_stream_error,
-    _should_reload_docs_path,
 )
-from fleet_rlm.api.routers import ws as ws_router
 from fleet_rlm.api.routers.ws.helpers import (
     _close_websocket_safely,
     _try_send_json,
 )
+from fleet_rlm.api.routers.ws.session import (
+    switch_session_if_needed,
+)
+from fleet_rlm.api.routers import ws as ws_router
 from fleet_rlm.api.schemas import WSMessage
-from tests.ui.fixtures_ui import ts
-
-
-def test_should_reload_docs_path_dedupes_same_path() -> None:
-    assert _should_reload_docs_path(None, None) is False
-    assert _should_reload_docs_path(None, "") is False
-    assert _should_reload_docs_path(None, "docs/a.txt") is True
-    assert _should_reload_docs_path("docs/a.txt", "docs/a.txt") is False
-    assert _should_reload_docs_path("docs/a.txt", "docs/b.txt") is True
-
-
-def test_enqueue_latest_nonblocking_drops_oldest_when_full() -> None:
-    queue: asyncio.Queue[int] = asyncio.Queue(maxsize=2)
-
-    assert _enqueue_latest_nonblocking(queue, 1) is True
-    assert _enqueue_latest_nonblocking(queue, 2) is True
-    assert _enqueue_latest_nonblocking(queue, 3) is True
-
-    assert queue.get_nowait() == 2
-    assert queue.get_nowait() == 3
+from tests.ui.fixtures_ui import FakeChatAgent, ts
 
 
 class _ClosedSendWebSocket:
@@ -162,23 +144,6 @@ def test_emit_stream_event_translates_closed_send_runtime_error_to_disconnect() 
         )
 
 
-def test_handle_stream_error_ignores_closed_socket_during_error_send() -> None:
-    lifecycle = _LifecycleStub()
-
-    asyncio.run(
-        _handle_stream_error(
-            websocket=cast(Any, _ClosedSendWebSocket()),
-            lifecycle=cast(Any, lifecycle),
-            step_builder=cast(Any, _NoopStepBuilder()),
-            exc=RuntimeError("boom"),
-            request_message="hello",
-        )
-    )
-
-    assert lifecycle.run_completed is True
-    assert lifecycle.completed_with is not None
-
-
 def test_emit_stream_event_sends_terminal_error_before_run_completion() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
@@ -284,6 +249,67 @@ def test_ws_message_accepts_daytona_runtime_fields() -> None:
     assert message.repo_url == "https://github.com/qredence/fleet-rlm.git"
     assert message.repo_ref == "main"
     assert message.batch_concurrency == 6
+
+
+@pytest.mark.asyncio
+async def test_switch_session_uses_async_reset_for_new_session() -> None:
+    state = SimpleNamespace(sessions={})
+    agent = FakeChatAgent()
+
+    key, manifest_path, session_record, docs_path = await switch_session_if_needed(
+        state=cast(Any, state),
+        agent=cast(Any, agent),
+        interpreter=None,
+        workspace_id="tenant-a",
+        user_id="user-a",
+        sess_id="session-a",
+        active_key=None,
+        session_record=None,
+        last_loaded_docs_path=None,
+        local_persist=_noop_persist,
+    )
+
+    assert key == "tenant-a:user-a:session-a"
+    assert manifest_path.endswith("react-session-session-a.json")
+    assert session_record["session_id"] == "session-a"
+    assert docs_path is None
+    assert agent.areset_calls == 1
+    assert agent.reset_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_switch_session_uses_async_import_for_restored_state() -> None:
+    state = SimpleNamespace(
+        sessions={
+            "tenant-a:user-a:session-a": {
+                "session_id": "session-a",
+                "manifest": {},
+                "session": {"state": {"history": [{"user_request": "hi"}]}},
+            }
+        }
+    )
+    agent = FakeChatAgent()
+
+    key, manifest_path, session_record, docs_path = await switch_session_if_needed(
+        state=cast(Any, state),
+        agent=cast(Any, agent),
+        interpreter=None,
+        workspace_id="tenant-a",
+        user_id="user-a",
+        sess_id="session-a",
+        active_key=None,
+        session_record=None,
+        last_loaded_docs_path=None,
+        local_persist=_noop_persist,
+    )
+
+    assert key == "tenant-a:user-a:session-a"
+    assert manifest_path.endswith("react-session-session-a.json")
+    assert session_record["session_id"] == "session-a"
+    assert docs_path is None
+    assert agent.aimport_session_state_calls == 1
+    assert agent.import_session_state_calls == 0
+    assert agent.areset_calls == 0
 
 
 async def _noop_persist(*, include_volume_save: bool = True) -> None:

@@ -39,7 +39,10 @@ FORBIDDEN_TRACKED_TMP_PATTERNS = (
     re.compile(r"(^|/)tmp($|/)"),
 )
 FORBIDDEN_TRACKED_MJS_PATTERN = re.compile(r"\.mjs$")
-ALLOWED_TRACKED_MJS_EXACT = {"src/frontend/postcss.config.mjs"}
+ALLOWED_TRACKED_MJS_EXACT = {
+    "src/frontend/postcss.config.mjs",
+    "src/frontend/scripts/check-api-sync.mjs",
+}
 INIT_VERSION_PATTERN = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
 WHEEL_UI_PREFIX = "fleet_rlm/ui/dist/"
 

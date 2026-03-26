@@ -1,0 +1,66 @@
+defaults:
+  - _self_
+
+agent:
+  max_iters: 60
+  # Default to DSPY_LM_MODEL environment variable if set, otherwise fallback to a known model
+  # from config/config.yaml (e.g., gemini-3-flash-preview or deepseek-v3.2-maas).
+  # We use OC env interpolation to respect user's existing .env setup.
+  model: ${oc.env:DSPY_LM_MODEL,openai/gemini-3-flash-preview}
+  temperature: 1
+  delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
+  delegate_max_tokens: 64000
+  rlm_max_iterations: 30
+  guardrail_mode: "off"
+  min_substantive_chars: 20
+
+interpreter:
+  image: "python:3.13-slim-bookworm"
+  timeout: 900
+  secrets: ["LITELLM"]
+  volume_name: ${oc.env:VOLUME_NAME,null}
+  async_execute: true
+
+memory:
+  # Limits for core memory blocks (in characters)
+  core_memory_limits:
+    persona: 2000
+    human: 2000
+    scratchpad: 1000
+  # Path in the volume for archival memory
+  archival_path: "/data/memory"
+
+rlm_settings:
+  max_depth: 2
+  max_iters: 60
+  deep_max_iters: 60
+  enable_adaptive_iters: true
+  max_iterations: 60
+  max_llm_calls: 50
+  max_output_chars: 100000
+  delegate_max_calls_per_turn: 8
+  delegate_result_truncation_chars: 8000
+  stdout_summary_threshold: 10000
+  stdout_summary_prefix_len: 200
+  verbose: True
+
+analytics:
+  posthog:
+    enabled: ${oc.env:POSTHOG_ENABLED,true}
+    api_key: ${oc.env:POSTHOG_API_KEY,null}
+    host: ${oc.env:POSTHOG_HOST,https://eu.i.posthog.com}
+    flush_interval: ${oc.env:POSTHOG_FLUSH_INTERVAL,10.0}
+    flush_at: ${oc.env:POSTHOG_FLUSH_AT,10}
+    enable_dspy_optimization: ${oc.env:POSTHOG_ENABLE_DSPY_OPTIMIZATION,false}
+    input_truncation_chars: ${oc.env:POSTHOG_INPUT_TRUNCATION,10000}
+    output_truncation_chars: ${oc.env:POSTHOG_OUTPUT_TRUNCATION,5000}
+    redact_sensitive: ${oc.env:POSTHOG_REDACT_SENSITIVE,true}
+  mlflow:
+    enabled: ${oc.env:MLFLOW_ENABLED,true}
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,http://127.0.0.1:5001}
+    experiment: ${oc.env:MLFLOW_EXPERIMENT,fleet-rlm}
+    active_model_id: ${oc.env:MLFLOW_ACTIVE_MODEL_ID,null}
+    dspy_log_traces_from_compile: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE,false}
+    dspy_log_traces_from_eval: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_EVAL,true}
+    dspy_log_compiles: ${oc.env:MLFLOW_DSPY_LOG_COMPILES,false}
+    dspy_log_evals: ${oc.env:MLFLOW_DSPY_LOG_EVALS,false}

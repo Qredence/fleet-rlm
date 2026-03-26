@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("loads the supported shell surfaces without route crashes", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "RLM Workspace", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workbench", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Volumes", exact: true })).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Skills", exact: true })).toHaveCount(0);
@@ -14,21 +14,22 @@ test("loads the supported shell surfaces without route crashes", async ({ page }
   await expect(page.getByText("We hit a rendering issue on this route")).toHaveCount(0);
 });
 
-test("legacy product routes redirect to the supported surfaces", async ({ page }) => {
+test("retired product routes fall through to not-found", async ({ page }) => {
   await page.goto("/app/skills");
-  await expect(page).toHaveURL(/\/app\/workspace$/);
+  await expect(page).toHaveURL(/\/404$/);
+  await expect(page.getByRole("heading", { name: "Page not found", exact: true })).toBeVisible();
 
   await page.goto("/app/memory");
-  await expect(page).toHaveURL(/\/app\/workspace$/);
+  await expect(page).toHaveURL(/\/404$/);
 
   await page.goto("/app/analytics");
-  await expect(page).toHaveURL(/\/app\/workspace$/);
+  await expect(page).toHaveURL(/\/404$/);
 
   await page.goto("/app/taxonomy");
-  await expect(page).toHaveURL(/\/app\/volumes$/);
+  await expect(page).toHaveURL(/\/404$/);
 
   await page.goto("/app/taxonomy/demo-skill");
-  await expect(page).toHaveURL(/\/app\/volumes$/);
+  await expect(page).toHaveURL(/\/404$/);
 });
 
 test("sign-in dialog supports keyboard dismissal and restores focus", async ({ page }) => {

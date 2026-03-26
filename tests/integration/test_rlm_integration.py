@@ -1,4 +1,4 @@
-"""Integration tests for dspy.RLM + ModalInterpreter.
+"""Integration tests for dspy.RLM + the interpreter-backed execution runtime.
 
 These tests require Modal credentials (LITELLM secret configured).
 They validate the full variable-space -> sandbox -> recursion pipeline.
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.live_llm
 @pytest.fixture
 def interpreter(require_litellm):
     """Fixture providing a started ModalInterpreter."""
-    from fleet_rlm.core.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(timeout=120)
     interp.start()
@@ -38,7 +38,7 @@ def interpreter(require_litellm):
 @pytest.fixture
 def interpreter_with_volume(require_litellm):
     """Fixture providing a ModalInterpreter with volume support."""
-    from fleet_rlm.core.interpreter import ModalInterpreter
+    from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
     interp = ModalInterpreter(
         timeout=120,

@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
-import type { Conversation } from "@/screens/workspace/model/chat-history-store";
-import { useChatHistoryStore } from "@/screens/workspace/model/chat-history-store";
-import { useChatStore } from "@/screens/workspace/model/chat-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
+import type { Conversation } from "@/screens/workspace/use-workspace";
+import { useChatHistoryStore } from "@/screens/workspace/use-workspace";
+import { useChatStore } from "@/screens/workspace/use-workspace";
+import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 import { useNavigationStore } from "@/stores/navigationStore";
 
 (
@@ -33,18 +33,25 @@ const backendRuntimeState = {
   loadConversation: vi.fn(),
 };
 
-vi.mock("@/screens/workspace/hooks/use-workspace-runtime", () => ({
-  useWorkspaceRuntime: () => backendRuntimeState,
-}));
+vi.mock("@/screens/workspace/use-workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
+    "@/screens/workspace/use-workspace",
+  );
 
-vi.mock("@/hooks/useStickToBottom", () => ({
-  useStickToBottom: () => ({
-    scrollRef: { current: null },
-    contentRef: { current: null },
-    isAtBottom: true,
-    scrollToBottom: vi.fn(),
-  }),
-}));
+  return {
+    ...actual,
+    useWorkspace: () => backendRuntimeState,
+    useRunWorkbenchStore: (
+      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+    ) =>
+      selector({
+        status: "idle",
+        activity: [],
+        iterations: [],
+        callbacks: [],
+      }),
+  } as unknown as typeof actual;
+});
 
 vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigate: vi.fn(), navigateTo: vi.fn() }),
@@ -67,27 +74,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/screens/workspace/model/run-workbench-store", () => ({
-  useRunWorkbenchStore: (
-    selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
-  ) =>
-    selector({
-      status: "idle",
-      activity: [],
-      iterations: [],
-      callbacks: [],
-    }),
-}));
-
-vi.mock("@/screens/workspace/components/workspace-message-list", () => ({
+vi.mock("@/app/workspace/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/screens/workspace/components/workspace-sidebar", () => ({
-  WorkspaceSidebar: () => <div>WorkspaceSidebar</div>,
-}));
-
-vi.mock("@/screens/workspace/components/workspace-composer", () => ({
+vi.mock("@/app/workspace/workspace-composer", () => ({
   WorkspaceComposer: () => <div>WorkspaceComposer</div>,
 }));
 

@@ -7,7 +7,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
-from fleet_rlm.infrastructure.database import DatabaseManager
+from fleet_rlm.integrations.database import DatabaseManager
 
 pytestmark = [
     pytest.mark.db,

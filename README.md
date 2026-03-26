@@ -18,7 +18,7 @@
 - Expose an experimental Daytona pilot without forking the frontend or transport contract.
 - Ship both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
 
-The supported app surfaces are `RLM Workspace`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes now redirect to supported pages instead of remaining first-class product surfaces.
+The supported app surfaces are `Workbench`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ uv run fleet web
 
 This starts the main product surface with:
 
-- `RLM Workspace` for chat and runtime execution
+- `Workbench` for chat and runtime execution
 - `Volumes` for runtime-backed file browsing
 - `Settings` for runtime configuration and diagnostics
 
@@ -151,10 +151,33 @@ Frontend contributors should use `pnpm` inside `src/frontend`:
 cd src/frontend
 pnpm install --frozen-lockfile
 pnpm run dev
-pnpm run check
+pnpm run api:check
+pnpm run type-check
+pnpm run lint:robustness
+pnpm run test:unit
+pnpm run build
 ```
 
 This repo explicitly uses `pnpm` for frontend work even though the packaged frontend is built with Vite+ under the hood.
+
+## Maintenance
+
+Common maintenance commands from the repo root:
+
+```bash
+# Clear caches and local generated artifacts
+make clean
+
+# Regenerate the canonical FastAPI schema after backend contract or doc-metadata changes
+uv run python scripts/openapi_tools.py generate
+
+# Validate the schema quality improvements in-flight
+uv run python scripts/openapi_tools.py validate
+
+# Sync frontend OpenAPI artifacts after the root spec changes
+cd src/frontend
+pnpm run api:sync
+```
 
 ## Validation
 
@@ -163,6 +186,7 @@ Repo-level validation:
 ```bash
 make test-fast
 make quality-gate
+make release-artifacts
 make release-check
 ```
 

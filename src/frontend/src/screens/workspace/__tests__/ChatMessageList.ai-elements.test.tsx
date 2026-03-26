@@ -1,11 +1,11 @@
-import { act, createRef } from "react";
+import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { WorkspaceMessageList } from "@/screens/workspace/components/workspace-message-list";
-import type { ChatMessage } from "@/screens/workspace/model/workspace-types";
+import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
+import type { ChatMessage } from "@/screens/workspace/use-workspace";
 import { useNavigationStore } from "@/stores/navigationStore";
-import { useWorkspaceUiStore } from "@/screens/workspace/model/workspace-ui-store";
+import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 
 function renderChatMessageList(messages: ChatMessage[]) {
   return renderToStaticMarkup(
@@ -13,16 +13,9 @@ function renderChatMessageList(messages: ChatMessage[]) {
       messages={messages}
       isTyping={false}
       isMobile={false}
-      scrollRef={createRef<HTMLDivElement>()}
-      contentRef={createRef<HTMLDivElement>()}
-      isAtBottom={true}
-      scrollToBottom={() => {}}
       onSuggestionClick={() => {}}
       onResolveHitl={() => {}}
       onResolveClarification={() => {}}
-      showHistory={false}
-      hasHistory={false}
-      historyPanel={null}
     />,
   );
 }
@@ -38,16 +31,9 @@ function mountChatMessageList(messages: ChatMessage[]) {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
   });
@@ -794,16 +780,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -870,16 +849,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -971,16 +943,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1043,16 +1008,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1146,21 +1104,14 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={[]}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
-    expect(html).toContain("Generating code...");
-    expect(html).toContain("Agentic Fleet Session");
+    expect(html).toContain("Thinking...");
+    expect(html).toContain("What can I help you build?");
   });
 
   it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
@@ -1195,16 +1146,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
@@ -1241,20 +1185,13 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={true}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 
-    expect(html).toContain("Generating code...");
+    expect(html).toContain("Thinking...");
     expect(html).toContain('data-slot="assistant-turn-content"');
   });
 
@@ -1278,16 +1215,9 @@ describe("WorkspaceMessageList (AI Elements render parts)", () => {
         messages={messages}
         isTyping={false}
         isMobile={false}
-        scrollRef={createRef<HTMLDivElement>()}
-        contentRef={createRef<HTMLDivElement>()}
-        isAtBottom={true}
-        scrollToBottom={() => {}}
         onSuggestionClick={() => {}}
         onResolveHitl={() => {}}
         onResolveClarification={() => {}}
-        showHistory={false}
-        hasHistory={false}
-        historyPanel={null}
       />,
     );
 

@@ -1,16 +1,15 @@
-import * as React from "react";
+import type * as React from "react";
+import { Input as InputPrimitive } from "@base-ui/react/input";
 
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
-    <input
+    <InputPrimitive
       type={type}
       data-slot="input"
       className={cn(
-        "file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-border-subtle/70 flex h-9 w-full min-w-0 rounded-lg border px-3 py-1 bg-input-background transition-[color,box-shadow,border-color] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
-        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+        "border-border-subtle/70 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 disabled:bg-input/50 dark:bg-input/30 dark:disabled:bg-input/80 h-8 rounded-lg border bg-input-background px-2.5 py-1 text-base transition-[color,box-shadow,border-color] file:h-6 file:text-sm file:font-medium focus-visible:ring-3 aria-invalid:ring-3 md:text-sm w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent file:text-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

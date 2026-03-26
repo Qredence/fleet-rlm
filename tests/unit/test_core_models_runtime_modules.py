@@ -14,6 +14,7 @@ Verifies:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -50,13 +51,13 @@ def fake_interpreter() -> MagicMock:
 
 
 def test_registry_contains_all_expected_names():
-    from fleet_rlm.core.models.rlm_runtime_modules import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.models.rlm_runtime_modules import RUNTIME_MODULE_REGISTRY
 
     assert EXPECTED_MODULE_NAMES <= frozenset(RUNTIME_MODULE_REGISTRY)
 
 
 def test_runtime_module_names_frozenset_matches_registry():
-    from fleet_rlm.core.models.rlm_runtime_modules import (
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
         RUNTIME_MODULE_NAMES,
         RUNTIME_MODULE_REGISTRY,
     )
@@ -65,7 +66,7 @@ def test_runtime_module_names_frozenset_matches_registry():
 
 
 def test_each_registry_entry_has_signature_and_classname():
-    from fleet_rlm.core.models.rlm_runtime_modules import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.models.rlm_runtime_modules import RUNTIME_MODULE_REGISTRY
 
     for name, defn in RUNTIME_MODULE_REGISTRY.items():
         assert defn.signature is not None, f"No signature for {name}"
@@ -85,9 +86,9 @@ def test_each_registry_entry_has_signature_and_classname():
 @pytest.mark.parametrize("name", sorted(EXPECTED_MODULE_NAMES))
 def test_build_runtime_module_returns_module_instance(name: str, fake_interpreter: Any):
     """Every registered name should produce a dspy.Module instance."""
-    from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
+    from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
 
-    with patch("fleet_rlm.core.models.rlm_runtime_modules.dspy.RLM", MagicMock()):
+    with patch("fleet_rlm.runtime.models.rlm_runtime_modules.dspy.RLM", MagicMock()):
         module = build_runtime_module(
             name,
             interpreter=fake_interpreter,
@@ -100,7 +101,7 @@ def test_build_runtime_module_returns_module_instance(name: str, fake_interprete
 
 
 def test_build_runtime_module_raises_for_unknown_name(fake_interpreter: Any):
-    from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
+    from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
 
     with pytest.raises(ValueError, match="Unknown runtime module: nonexistent"):
         build_runtime_module(
@@ -114,9 +115,9 @@ def test_build_runtime_module_raises_for_unknown_name(fake_interpreter: Any):
 
 def test_build_runtime_module_each_call_is_new_instance(fake_interpreter: Any):
     """build_runtime_module always constructs a new instance (no shared state)."""
-    from fleet_rlm.core.models.rlm_runtime_modules import build_runtime_module
+    from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
 
-    with patch("fleet_rlm.core.models.rlm_runtime_modules.dspy.RLM", MagicMock()):
+    with patch("fleet_rlm.runtime.models.rlm_runtime_modules.dspy.RLM", MagicMock()):
         m1 = build_runtime_module(
             "grounded_answer",
             interpreter=fake_interpreter,
@@ -142,8 +143,10 @@ def test_build_runtime_module_each_call_is_new_instance(fake_interpreter: Any):
 
 def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: Any):
     """Verify that recursive subquery RLM uses RecursiveSubQuerySignature."""
-    from fleet_rlm.core.agent.signatures import RecursiveSubQuerySignature
-    from fleet_rlm.core.models.rlm_runtime_modules import build_recursive_subquery_rlm
+    from fleet_rlm.runtime.agent.signatures import RecursiveSubQuerySignature
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        build_recursive_subquery_rlm,
+    )
 
     captured: dict[str, Any] = {}
 
@@ -151,7 +154,7 @@ def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: A
         captured.update(kwargs)
         return MagicMock()
 
-    with patch("fleet_rlm.core.models.rlm_runtime_modules.dspy.RLM", _fake_rlm):
+    with patch("fleet_rlm.runtime.models.rlm_runtime_modules.dspy.RLM", _fake_rlm):
         build_recursive_subquery_rlm(
             interpreter=fake_interpreter,
             max_iterations=5,
@@ -163,3 +166,97 @@ def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: A
     assert captured["interpreter"] is fake_interpreter
     assert captured["max_iterations"] == 5
     assert captured["verbose"] is True
+
+
+def test_grounded_answer_synthesis_module_chunks_document_before_rlm(
+    fake_interpreter: Any,
+):
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        GroundedAnswerSynthesisModule,
+    )
+
+    captured: dict[str, Any] = {}
+
+    class _FakeGroundedAnswerRLM:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            captured.update(kwargs)
+            return dspy.Prediction(
+                answer="ok",
+                citations=[],
+                confidence=75,
+                coverage_notes="done",
+            )
+
+    with patch(
+        "fleet_rlm.runtime.models.rlm_runtime_modules.create_runtime_rlm",
+        return_value=_FakeGroundedAnswerRLM(),
+    ):
+        module = GroundedAnswerSynthesisModule(
+            interpreter=fake_interpreter,
+            max_iterations=10,
+            max_llm_calls=20,
+            verbose=False,
+        )
+
+    prediction = module.forward(
+        document="# Header\nline1\nline2",
+        query="What happened?",
+        chunk_strategy="headers",
+        max_chunks=4,
+    )
+
+    assert isinstance(prediction, dspy.Prediction)
+    assert captured["query"] == "What happened?"
+    assert captured["response_style"] == "concise"
+    assert captured["evidence_chunks"]
+
+
+def test_memory_migration_planning_module_composes_audit_then_migration(
+    fake_interpreter: Any,
+):
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        MemoryMigrationPlanningModule,
+    )
+
+    captured: dict[str, Any] = {}
+
+    class _FakeAuditModule:
+        def __call__(self, **kwargs: Any) -> SimpleNamespace:
+            captured["audit_kwargs"] = kwargs
+            return SimpleNamespace(issues=["flatten archive layout"])
+
+    class _FakeMigrationRLM:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            captured["migration_kwargs"] = kwargs
+            return dspy.Prediction(
+                operations=[],
+                rollback_steps=[],
+                verification_checks=[],
+                estimated_risk="low",
+            )
+
+    with (
+        patch(
+            "fleet_rlm.runtime.models.rlm_runtime_modules.MemoryStructureAuditPlanningModule",
+            return_value=_FakeAuditModule(),
+        ),
+        patch(
+            "fleet_rlm.runtime.models.rlm_runtime_modules.create_runtime_rlm",
+            return_value=_FakeMigrationRLM(),
+        ),
+    ):
+        module = MemoryMigrationPlanningModule(
+            interpreter=fake_interpreter,
+            max_iterations=10,
+            max_llm_calls=20,
+            verbose=False,
+        )
+
+    prediction = module.forward()
+
+    assert isinstance(prediction, dspy.Prediction)
+    assert captured["audit_kwargs"]["root_path"] == "/data/memory"
+    assert captured["migration_kwargs"] == {
+        "audit_findings": ["flatten archive layout"],
+        "approved_constraints": "No destructive operation without explicit confirmation and rollback.",
+    }

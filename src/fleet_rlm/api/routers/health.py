@@ -8,13 +8,23 @@ from ..schemas.core import HealthResponse, ReadyResponse
 router = APIRouter(tags=["health"])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    responses={503: {"description": "Health status could not be determined."}},
+)
 async def health() -> HealthResponse:
+    """Report a lightweight server health signal and package version."""
     return HealthResponse()
 
 
-@router.get("/ready", response_model=ReadyResponse)
+@router.get(
+    "/ready",
+    response_model=ReadyResponse,
+    responses={503: {"description": "Readiness evaluation could not complete."}},
+)
 async def ready(state: ServerStateDep) -> ReadyResponse:
+    """Report whether critical startup dependencies are ready for requests."""
     cfg = state.config
     planner_ready = state.planner_lm is not None
 

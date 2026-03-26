@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppSidebar } from "@/screens/shell/app-sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import type { Conversation } from "@/screens/workspace/workspace-shell-contract";
 
 (
@@ -16,10 +17,13 @@ const navigateMock = vi.fn();
 const locationState = {
   pathname: "/app/workspace",
 };
+let isMobile = false;
 const workspaceShellState = {
   conversations: [] as Conversation[],
   newSession: vi.fn(),
   requestConversationLoad: vi.fn(),
+  deleteConversation: vi.fn(),
+  clearHistory: vi.fn(),
 };
 
 vi.mock("lucide-react", () => {
@@ -28,11 +32,13 @@ vi.mock("lucide-react", () => {
     Plus: Icon,
     Search: Icon,
     Settings: Icon,
-    PanelLeftClose: Icon,
-    PanelLeftOpen: Icon,
+    Clock3: Icon,
+    Trash2: Icon,
+    PanelLeftIcon: Icon,
+    XIcon: Icon,
     Database: Icon,
     LogIn: Icon,
-    MessageSquare: Icon,
+    MessageCircle: Icon,
   };
 });
 
@@ -44,7 +50,7 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-vi.mock("@/components/shared/QredenceLogo", () => ({
+vi.mock("@/components/brand-mark", () => ({
   QredenceLogo: () => <div>QredenceLogo</div>,
 }));
 
@@ -57,11 +63,17 @@ vi.mock("@/hooks/useAppNavigate", () => ({
   useAppNavigate: () => ({ navigateTo: navigateToMock }),
 }));
 
+vi.mock("@/hooks/useIsMobile", () => ({
+  useIsMobile: () => isMobile,
+}));
+
 vi.mock("@/screens/workspace/workspace-shell-contract", () => ({
   useWorkspaceShellHistory: () => workspaceShellState.conversations,
   useWorkspaceShellActions: () => ({
     newSession: workspaceShellState.newSession,
     requestConversationLoad: workspaceShellState.requestConversationLoad,
+    deleteConversation: workspaceShellState.deleteConversation,
+    clearHistory: workspaceShellState.clearHistory,
   }),
 }));
 
@@ -71,7 +83,11 @@ function mountSidebar() {
   const root = createRoot(container);
 
   act(() => {
-    root.render(<AppSidebar isCollapsed={false} onToggleCollapse={vi.fn()} />);
+    root.render(
+      <SidebarProvider defaultOpen>
+        <AppSidebar />
+      </SidebarProvider>,
+    );
   });
 
   return { container, root };
@@ -87,10 +103,14 @@ describe("AppSidebar session actions", () => {
   beforeEach(() => {
     navigateToMock.mockReset();
     navigateMock.mockReset();
+    isMobile = false;
     locationState.pathname = "/app/workspace";
     workspaceShellState.conversations = [];
     workspaceShellState.newSession.mockReset();
     workspaceShellState.requestConversationLoad.mockReset();
+    workspaceShellState.deleteConversation.mockReset();
+    workspaceShellState.clearHistory.mockReset();
+    vi.restoreAllMocks();
   });
 
   afterEach(() => {
@@ -100,7 +120,7 @@ describe("AppSidebar session actions", () => {
   it("starts a new workspace session from the sidebar", () => {
     const { container, root } = mountSidebar();
 
-    expect(findButtonByText(container, "RLM Workspace")).toBeTruthy();
+    expect(findButtonByText(container, "Workbench")).toBeTruthy();
 
     const button = findButtonByText(container, "New Session");
     expect(button).toBeTruthy();
@@ -111,6 +131,20 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.newSession).toHaveBeenCalledOnce();
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("renders an empty-state session hint in the left rail", () => {
+    const { container, root } = mountSidebar();
+
+    expect(container.textContent).toContain("Recent Sessions");
+    expect(container.textContent).toContain("No recent sessions yet");
+    expect(container.textContent).toContain(
+      "Start a new session and it will appear here for quick return.",
+    );
 
     act(() => {
       root.unmount();
@@ -139,6 +173,7 @@ describe("AppSidebar session actions", () => {
     const { container, root } = mountSidebar();
 
     expect(container.textContent).toContain("Saved conversation");
+    expect(container.textContent).toContain("Older");
 
     const button = findButtonByText(container, "Saved conversation");
     expect(button).toBeTruthy();
@@ -149,6 +184,108 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith("conv-1");
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("deletes a saved session from the consolidated sidebar", () => {
+    const conversation: Conversation = {
+      id: "conv-delete",
+      title: "Sensitive conversation",
+      messages: [],
+      phase: "complete",
+      createdAt: "2026-03-16T10:00:00.000Z",
+      updatedAt: "2026-03-16T12:00:00.000Z",
+    };
+
+    workspaceShellState.conversations = [conversation];
+
+    const { container, root } = mountSidebar();
+
+    const deleteButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.getAttribute("aria-label")?.includes("Delete conversation: Sensitive conversation"),
+    );
+
+    expect(deleteButton).toBeTruthy();
+
+    act(() => {
+      deleteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(workspaceShellState.deleteConversation).toHaveBeenCalledWith("conv-delete");
+    expect(workspaceShellState.requestConversationLoad).not.toHaveBeenCalled();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("clears saved sessions from the consolidated sidebar", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    workspaceShellState.conversations = [
+      {
+        id: "conv-clear",
+        title: "Clearable conversation",
+        messages: [],
+        phase: "complete",
+        createdAt: "2026-03-16T10:00:00.000Z",
+        updatedAt: "2026-03-16T12:00:00.000Z",
+      },
+    ];
+
+    const { container, root } = mountSidebar();
+    const clearButton = findButtonByText(container, "Clear all");
+
+    expect(clearButton).toBeTruthy();
+
+    act(() => {
+      clearButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(window.confirm).toHaveBeenCalledWith("Delete all saved sessions?");
+    expect(workspaceShellState.clearHistory).toHaveBeenCalledOnce();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("exposes saved sessions through the mobile sidebar trigger", () => {
+    isMobile = true;
+    workspaceShellState.conversations = [
+      {
+        id: "conv-mobile",
+        title: "Mobile conversation",
+        messages: [],
+        phase: "complete",
+        createdAt: "2020-03-16T10:00:00.000Z",
+        updatedAt: "2020-03-16T12:00:00.000Z",
+      },
+    ];
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <SidebarProvider defaultOpen>
+          <SidebarTrigger />
+          <AppSidebar />
+        </SidebarProvider>,
+      );
+    });
+
+    const trigger = container.querySelector("button");
+    expect(trigger).toBeTruthy();
+
+    act(() => {
+      trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toContain("Mobile conversation");
 
     act(() => {
       root.unmount();

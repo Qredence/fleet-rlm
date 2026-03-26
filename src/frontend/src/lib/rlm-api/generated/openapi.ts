@@ -5,15 +5,24 @@
 
 export interface paths {
   "/health": {
-    /** Health */
+    /**
+     * Health
+     * @description Report a lightweight server health signal and package version.
+     */
     get: operations["health_health_get"];
   };
   "/ready": {
-    /** Ready */
+    /**
+     * Ready
+     * @description Report whether critical startup dependencies are ready for requests.
+     */
     get: operations["ready_ready_get"];
   };
   "/api/v1/auth/me": {
-    /** Get Me */
+    /**
+     * Get Me
+     * @description Return the authenticated identity and any admitted control-plane IDs.
+     */
     get: operations["get_me_api_v1_auth_me_get"];
   };
   "/api/v1/sessions/state": {
@@ -24,38 +33,56 @@ export interface paths {
     get: operations["list_session_state_api_v1_sessions_state_get"];
   };
   "/api/v1/runtime/settings": {
-    /** Get Runtime Settings */
+    /**
+     * Get Runtime Settings
+     * @description Return the effective runtime settings snapshot used by the local server.
+     */
     get: operations["get_runtime_settings_api_v1_runtime_settings_get"];
-    /** Patch Runtime Settings */
+    /**
+     * Patch Runtime Settings
+     * @description Persist allowed runtime setting changes and hot-apply them in-process.
+     */
     patch: operations["patch_runtime_settings_api_v1_runtime_settings_patch"];
   };
   "/api/v1/runtime/tests/modal": {
-    /** Test Modal Connection */
+    /**
+     * Test Modal Connection
+     * @description Run the Modal preflight and smoke test used by the Settings diagnostics UI.
+     */
     post: operations["test_modal_connection_api_v1_runtime_tests_modal_post"];
   };
-  "/api/v1/runtime/tests/daytona": {
-    /** Test Daytona Connection */
-    post: operations["test_daytona_connection_api_v1_runtime_tests_daytona_post"];
-  };
   "/api/v1/runtime/tests/lm": {
-    /** Test Lm Connection */
+    /**
+     * Test Lm Connection
+     * @description Verify that the planner and delegate language-model configuration can load.
+     */
     post: operations["test_lm_connection_api_v1_runtime_tests_lm_post"];
   };
+  "/api/v1/runtime/tests/daytona": {
+    /**
+     * Test Daytona Connection
+     * @description Run the Daytona preflight and connectivity check exposed in runtime diagnostics.
+     */
+    post: operations["test_daytona_connection_api_v1_runtime_tests_daytona_post"];
+  };
   "/api/v1/runtime/status": {
-    /** Get Runtime Status */
+    /**
+     * Get Runtime Status
+     * @description Return the combined runtime readiness, model, and provider diagnostics snapshot.
+     */
     get: operations["get_runtime_status_api_v1_runtime_status_get"];
   };
   "/api/v1/runtime/volume/tree": {
     /**
      * Get Volume Tree
-     * @description List the file tree of the configured runtime volume.
+     * @description List the runtime volume tree for the active workspace and provider.
      */
     get: operations["get_volume_tree_api_v1_runtime_volume_tree_get"];
   };
   "/api/v1/runtime/volume/file": {
     /**
      * Get Volume File Content
-     * @description Read a volume file as UTF-8 text for frontend preview.
+     * @description Read a text preview for a single file from the runtime volume.
      */
     get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
   };
@@ -72,19 +99,40 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    /** AuthMeResponse */
+    /**
+     * AuthMeResponse
+     * @description Resolved identity payload returned to authenticated clients.
+     */
     AuthMeResponse: {
-      /** Tenant Claim */
+      /**
+       * Tenant Claim
+       * @description Tenant or workspace claim resolved from auth.
+       */
       tenant_claim: string;
-      /** User Claim */
+      /**
+       * User Claim
+       * @description User claim resolved from auth.
+       */
       user_claim: string;
-      /** Email */
+      /**
+       * Email
+       * @description User email address when the auth provider returned one.
+       */
       email?: string | null;
-      /** Name */
+      /**
+       * Name
+       * @description Display name returned by the auth provider, when available.
+       */
       name?: string | null;
-      /** Tenant Id */
+      /**
+       * Tenant Id
+       * @description Persisted control-plane tenant identifier for admitted Entra users.
+       */
       tenant_id?: string | null;
-      /** User Id */
+      /**
+       * User Id
+       * @description Persisted control-plane user identifier for admitted Entra users.
+       */
       user_id?: string | null;
     };
     /** HTTPValidationError */
@@ -92,228 +140,415 @@ export interface components {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
     };
-    /** HealthResponse */
+    /**
+     * HealthResponse
+     * @description Response body for the lightweight health endpoint.
+     */
     HealthResponse: {
       /**
        * Ok
+       * @description Whether the service reports itself as healthy.
        * @default true
        */
       ok?: boolean;
       /**
        * Version
-       * @default 0.4.98
+       * @description Package version currently serving the API.
+       * @default 0.4.99
        */
       version?: string;
     };
-    /** ReadyResponse */
+    /**
+     * ReadyResponse
+     * @description Response body for the readiness endpoint.
+     */
     ReadyResponse: {
-      /** Ready */
+      /**
+       * Ready
+       * @description Whether critical startup dependencies are ready.
+       */
       ready: boolean;
-      /** Planner Configured */
+      /**
+       * Planner Configured
+       * @description Whether a planner model is currently configured and available.
+       */
       planner_configured: boolean;
       /**
        * Planner
+       * @description Planner readiness classification.
        * @enum {string}
        */
       planner: "ready" | "missing";
       /**
        * Database
+       * @description Database readiness classification for persistence-backed features.
        * @enum {string}
        */
       database: "ready" | "missing" | "disabled" | "degraded";
-      /** Database Required */
+      /**
+       * Database Required
+       * @description Whether the current server configuration requires database availability.
+       */
       database_required: boolean;
-      /** Sandbox Provider */
+      /**
+       * Sandbox Provider
+       * @description Active sandbox backend selected for runtime execution.
+       */
       sandbox_provider: string;
     };
-    /** RuntimeActiveModels */
+    /**
+     * RuntimeActiveModels
+     * @description Resolved active model identifiers currently loaded by the runtime.
+     */
     RuntimeActiveModels: {
       /**
        * Planner
+       * @description Planner model identifier currently in use.
        * @default
        */
       planner?: string;
       /**
        * Delegate
+       * @description Delegate model identifier currently in use.
        * @default
        */
       delegate?: string;
       /**
        * Delegate Small
+       * @description Small delegate model identifier currently in use, when configured.
        * @default
        */
       delegate_small?: string;
     };
-    /** RuntimeConnectivityTestResponse */
+    /**
+     * RuntimeConnectivityTestResponse
+     * @description Result payload for runtime connectivity and preflight diagnostics.
+     */
     RuntimeConnectivityTestResponse: {
       /**
        * Kind
+       * @description Runtime subsystem that was tested.
        * @enum {string}
        */
       kind: "modal" | "lm" | "daytona";
-      /** Ok */
+      /**
+       * Ok
+       * @description Whether the connectivity test completed successfully.
+       */
       ok: boolean;
-      /** Preflight Ok */
+      /**
+       * Preflight Ok
+       * @description Whether prerequisite configuration checks passed.
+       */
       preflight_ok: boolean;
-      /** Checked At */
+      /**
+       * Checked At
+       * @description UTC timestamp when the test completed.
+       */
       checked_at: string;
-      /** Checks */
+      /**
+       * Checks
+       * @description Structured boolean or value checks collected during the test run.
+       */
       checks?: {
         [key: string]: unknown;
       };
-      /** Guidance */
+      /**
+       * Guidance
+       * @description Human-readable remediation steps when the test did not pass cleanly.
+       */
       guidance?: string[];
-      /** Latency Ms */
+      /**
+       * Latency Ms
+       * @description Observed latency for the successful smoke test, when applicable.
+       */
       latency_ms?: number | null;
-      /** Output Preview */
+      /**
+       * Output Preview
+       * @description Short preview of the smoke-test output, when available.
+       */
       output_preview?: string | null;
-      /** Error */
+      /**
+       * Error
+       * @description Error summary when the test failed.
+       */
       error?: string | null;
     };
-    /** RuntimeSettingsSnapshot */
+    /**
+     * RuntimeSettingsSnapshot
+     * @description Current runtime settings snapshot returned by the Settings API.
+     */
     RuntimeSettingsSnapshot: {
-      /** Env Path */
+      /**
+       * Env Path
+       * @description Filesystem path to the environment file being edited.
+       */
       env_path: string;
-      /** Keys */
+      /**
+       * Keys
+       * @description Ordered list of runtime setting keys surfaced by the Settings API.
+       */
       keys?: string[];
-      /** Values */
+      /**
+       * Values
+       * @description Unmasked runtime setting values that are safe to return directly.
+       */
       values?: {
         [key: string]: string;
       };
-      /** Masked Values */
+      /**
+       * Masked Values
+       * @description Masked secret values returned for display-only settings fields.
+       */
       masked_values?: {
         [key: string]: string;
       };
     };
-    /** RuntimeSettingsUpdateRequest */
+    /**
+     * RuntimeSettingsUpdateRequest
+     * @description Patch body for runtime setting updates.
+     */
     RuntimeSettingsUpdateRequest: {
-      /** Updates */
+      /**
+       * Updates
+       * @description Mapping of allowlisted runtime setting keys to their new values.
+       */
       updates?: {
         [key: string]: unknown;
       };
     };
-    /** RuntimeSettingsUpdateResponse */
+    /**
+     * RuntimeSettingsUpdateResponse
+     * @description Result payload after runtime settings are persisted and hot-applied.
+     */
     RuntimeSettingsUpdateResponse: {
-      /** Updated */
+      /**
+       * Updated
+       * @description Runtime setting keys that were successfully updated.
+       */
       updated?: string[];
-      /** Env Path */
+      /**
+       * Env Path
+       * @description Filesystem path to the environment file that was updated.
+       */
       env_path: string;
     };
-    /** RuntimeStatusResponse */
+    /**
+     * RuntimeStatusResponse
+     * @description Combined readiness and diagnostics snapshot for the runtime settings UI.
+     */
     RuntimeStatusResponse: {
-      /** App Env */
+      /**
+       * App Env
+       * @description Current application environment, such as `local` or `prod`.
+       */
       app_env: string;
-      /** Write Enabled */
+      /**
+       * Write Enabled
+       * @description Whether runtime settings writes are currently allowed.
+       */
       write_enabled: boolean;
-      /** Ready */
+      /**
+       * Ready
+       * @description Whether critical runtime services are ready to serve requests.
+       */
       ready: boolean;
+      /** @description Resolved planner and delegate model identities. */
       active_models: components["schemas"]["RuntimeActiveModels"];
       /**
        * Sandbox Provider
+       * @description Active sandbox backend selected for runtime execution and volume browsing.
        * @default modal
+       * @enum {string}
        */
-      sandbox_provider?: string;
-      /** Llm */
+      sandbox_provider?: "modal" | "daytona";
+      /**
+       * Llm
+       * @description Language-model configuration and readiness diagnostics.
+       */
       llm?: {
         [key: string]: unknown;
       };
-      /** Modal */
+      /**
+       * Mlflow
+       * @description MLflow enablement and startup diagnostics.
+       */
+      mlflow?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Modal
+       * @description Modal configuration and readiness diagnostics.
+       */
       modal?: {
         [key: string]: unknown;
       };
-      /** Daytona */
+      /**
+       * Daytona
+       * @description Daytona configuration and readiness diagnostics.
+       */
       daytona?: {
         [key: string]: unknown;
       };
+      /** @description Cached runtime connectivity test results exposed in the Settings UI. */
       tests: components["schemas"]["RuntimeTestCache"];
-      /** Guidance */
+      /**
+       * Guidance
+       * @description Human-readable remediation steps for incomplete runtime setup.
+       */
       guidance?: string[];
     };
-    /** RuntimeTestCache */
+    /**
+     * RuntimeTestCache
+     * @description Cached runtime test results included in the runtime status payload.
+     */
     RuntimeTestCache: {
+      /** @description Most recent Modal connectivity test result, if one has been run. */
       modal?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
+      /** @description Most recent language-model connectivity test result, if one has been run. */
       lm?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
+      /** @description Most recent Daytona connectivity test result, if one has been run. */
       daytona?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
     };
-    /** SessionStateResponse */
+    /**
+     * SessionStateResponse
+     * @description Response body for the session-state summary endpoint.
+     */
     SessionStateResponse: {
       /**
        * Ok
+       * @description Whether the session-state query completed successfully.
        * @default true
        */
       ok?: boolean;
-      /** Sessions */
+      /**
+       * Sessions
+       * @description Active or restored session summaries currently known to the server.
+       */
       sessions?: components["schemas"]["SessionStateSummary"][];
     };
-    /** SessionStateSummary */
+    /**
+     * SessionStateSummary
+     * @description Lightweight summary of a persisted or active chat session.
+     */
     SessionStateSummary: {
-      /** Key */
+      /**
+       * Key
+       * @description Stable in-memory session key used by the server.
+       */
       key: string;
-      /** Workspace Id */
+      /**
+       * Workspace Id
+       * @description Workspace identifier owning the session.
+       */
       workspace_id: string;
-      /** User Id */
+      /**
+       * User Id
+       * @description User identifier owning the session.
+       */
       user_id: string;
-      /** Session Id */
+      /**
+       * Session Id
+       * @description Optional explicit session identifier when one has been assigned.
+       */
       session_id?: string | null;
       /**
        * History Turns
+       * @description Number of conversation turns currently stored in session history.
        * @default 0
        */
       history_turns?: number;
       /**
        * Document Count
+       * @description Number of loaded document entries attached to the session state.
        * @default 0
        */
       document_count?: number;
       /**
        * Memory Count
+       * @description Number of persisted memory items in the session manifest.
        * @default 0
        */
       memory_count?: number;
       /**
        * Log Count
+       * @description Number of execution log entries in the session manifest.
        * @default 0
        */
       log_count?: number;
       /**
        * Artifact Count
+       * @description Number of artifacts currently tracked in the session manifest.
        * @default 0
        */
       artifact_count?: number;
-      /** Updated At */
+      /**
+       * Updated At
+       * @description Last updated timestamp recorded in the session manifest, when available.
+       */
       updated_at?: string | null;
     };
-    /** TraceFeedbackRequest */
+    /**
+     * TraceFeedbackRequest
+     * @description Feedback payload for annotating an MLflow trace.
+     */
     TraceFeedbackRequest: {
-      /** Trace Id */
+      /**
+       * Trace Id
+       * @description Resolved MLflow trace identifier when the client already knows it.
+       */
       trace_id?: string | null;
-      /** Client Request Id */
+      /**
+       * Client Request Id
+       * @description Client request identifier used to resolve the trace when trace_id is absent.
+       */
       client_request_id?: string | null;
-      /** Is Correct */
+      /**
+       * Is Correct
+       * @description Whether the model output was considered correct.
+       */
       is_correct: boolean;
-      /** Comment */
+      /**
+       * Comment
+       * @description Optional free-form reviewer comment explaining the feedback.
+       */
       comment?: string | null;
-      /** Expected Response */
+      /**
+       * Expected Response
+       * @description Optional ground-truth response or correction to log alongside the feedback.
+       */
       expected_response?: string | null;
     };
-    /** TraceFeedbackResponse */
+    /**
+     * TraceFeedbackResponse
+     * @description Result payload after MLflow feedback has been recorded.
+     */
     TraceFeedbackResponse: {
       /**
        * Ok
+       * @description Whether the feedback request completed successfully.
        * @default true
        */
       ok?: boolean;
-      /** Trace Id */
+      /**
+       * Trace Id
+       * @description Resolved MLflow trace identifier that received the feedback.
+       */
       trace_id: string;
-      /** Client Request Id */
+      /**
+       * Client Request Id
+       * @description Resolved client request identifier associated with the trace, when available.
+       */
       client_request_id?: string | null;
       /**
        * Feedback Logged
+       * @description Whether binary/correctness feedback was successfully logged.
        * @default true
        */
       feedback_logged?: boolean;
       /**
        * Expectation Logged
+       * @description Whether an expected-response correction was successfully logged.
        * @default false
        */
       expectation_logged?: boolean;
@@ -332,26 +567,39 @@ export interface components {
       ctx?: Record<string, never>;
     };
     /**
-     * VolumeProvider
-     * @enum {string}
-     */
-    VolumeProvider: "modal" | "daytona";
-    /**
      * VolumeFileContentResponse
      * @description Response for runtime volume file-content preview endpoint.
      */
     VolumeFileContentResponse: {
-      provider: components["schemas"]["VolumeProvider"];
-      /** Path */
+      /**
+       * Provider
+       * @description Runtime volume backend used to satisfy the request.
+       * @enum {string}
+       */
+      provider: "modal" | "daytona";
+      /**
+       * Path
+       * @description Normalized file path used for the preview request.
+       */
       path: string;
-      /** Mime */
+      /**
+       * Mime
+       * @description Detected MIME type for the returned content.
+       */
       mime: string;
-      /** Size */
+      /**
+       * Size
+       * @description File size in bytes reported by the provider.
+       */
       size: number;
-      /** Content */
+      /**
+       * Content
+       * @description UTF-8 text preview returned for the requested file.
+       */
       content: string;
       /**
        * Truncated
+       * @description Whether the returned file content was truncated to respect max_bytes.
        * @default false
        */
       truncated?: boolean;
@@ -361,22 +609,41 @@ export interface components {
      * @description A single node in the volume file tree.
      */
     VolumeTreeNode: {
-      /** Id */
+      /**
+       * Id
+       * @description Stable node identifier used by the frontend tree view.
+       */
       id: string;
-      /** Name */
+      /**
+       * Name
+       * @description Display name for the file-system node.
+       */
       name: string;
-      /** Path */
+      /**
+       * Path
+       * @description Absolute path for the file-system node within the runtime volume.
+       */
       path: string;
       /**
        * Type
+       * @description Kind of file-system node represented by this entry.
        * @enum {string}
        */
       type: "volume" | "directory" | "file";
-      /** Children */
+      /**
+       * Children
+       * @description Child nodes for directory or volume entries.
+       */
       children?: components["schemas"]["VolumeTreeNode"][];
-      /** Size */
+      /**
+       * Size
+       * @description File size in bytes when the provider reports one.
+       */
       size?: number | null;
-      /** Modified At */
+      /**
+       * Modified At
+       * @description Last modified timestamp when the provider reports one.
+       */
       modified_at?: string | null;
     };
     /**
@@ -384,25 +651,42 @@ export interface components {
      * @description Response for the volume tree listing endpoint.
      */
     VolumeTreeResponse: {
-      provider: components["schemas"]["VolumeProvider"];
-      /** Volume Name */
+      /**
+       * Provider
+       * @description Runtime volume backend used to satisfy the request.
+       * @enum {string}
+       */
+      provider: "modal" | "daytona";
+      /**
+       * Volume Name
+       * @description Resolved volume name used for the listing request.
+       */
       volume_name: string;
-      /** Root Path */
+      /**
+       * Root Path
+       * @description Normalized root path used for the listing request.
+       */
       root_path: string;
-      /** Nodes */
+      /**
+       * Nodes
+       * @description Tree nodes rooted at the requested path.
+       */
       nodes: components["schemas"]["VolumeTreeNode"][];
       /**
        * Total Files
+       * @description Total file count returned in the current response payload.
        * @default 0
        */
       total_files?: number;
       /**
        * Total Dirs
+       * @description Total directory count returned in the current response payload.
        * @default 0
        */
       total_dirs?: number;
       /**
        * Truncated
+       * @description Whether the provider truncated the tree because of depth or payload limits.
        * @default false
        */
       truncated?: boolean;
@@ -420,7 +704,10 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
-  /** Health */
+  /**
+   * Health
+   * @description Report a lightweight server health signal and package version.
+   */
   health_health_get: {
     responses: {
       /** @description Successful Response */
@@ -429,9 +716,16 @@ export interface operations {
           "application/json": components["schemas"]["HealthResponse"];
         };
       };
+      /** @description Health status could not be determined. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Ready */
+  /**
+   * Ready
+   * @description Report whether critical startup dependencies are ready for requests.
+   */
   ready_ready_get: {
     responses: {
       /** @description Successful Response */
@@ -440,9 +734,16 @@ export interface operations {
           "application/json": components["schemas"]["ReadyResponse"];
         };
       };
+      /** @description Readiness evaluation could not complete. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Get Me */
+  /**
+   * Get Me
+   * @description Return the authenticated identity and any admitted control-plane IDs.
+   */
   get_me_api_v1_auth_me_get: {
     responses: {
       /** @description Successful Response */
@@ -450,6 +751,18 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AuthMeResponse"];
         };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The authenticated tenant or user is not admitted to Fleet RLM. */
+      403: {
+        content: never;
+      };
+      /** @description Authentication or repository services are not configured yet. */
+      503: {
+        content: never;
       };
     };
   };
@@ -465,9 +778,20 @@ export interface operations {
           "application/json": components["schemas"]["SessionStateResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Session state is unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Get Runtime Settings */
+  /**
+   * Get Runtime Settings
+   * @description Return the effective runtime settings snapshot used by the local server.
+   */
   get_runtime_settings_api_v1_runtime_settings_get: {
     responses: {
       /** @description Successful Response */
@@ -476,9 +800,20 @@ export interface operations {
           "application/json": components["schemas"]["RuntimeSettingsSnapshot"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Patch Runtime Settings */
+  /**
+   * Patch Runtime Settings
+   * @description Persist allowed runtime setting changes and hot-apply them in-process.
+   */
   patch_runtime_settings_api_v1_runtime_settings_patch: {
     requestBody: {
       content: {
@@ -492,15 +827,34 @@ export interface operations {
           "application/json": components["schemas"]["RuntimeSettingsUpdateResponse"];
         };
       };
+      /** @description The supplied runtime setting values failed validation. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime settings can only be updated when APP_ENV=local. */
+      403: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Test Modal Connection */
+  /**
+   * Test Modal Connection
+   * @description Run the Modal preflight and smoke test used by the Settings diagnostics UI.
+   */
   test_modal_connection_api_v1_runtime_tests_modal_post: {
     responses: {
       /** @description Successful Response */
@@ -509,20 +863,20 @@ export interface operations {
           "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
         };
       };
-    };
-  };
-  /** Test Daytona Connection */
-  test_daytona_connection_api_v1_runtime_tests_daytona_post: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
-        };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
-  /** Test Lm Connection */
+  /**
+   * Test Lm Connection
+   * @description Verify that the planner and delegate language-model configuration can load.
+   */
   test_lm_connection_api_v1_runtime_tests_lm_post: {
     responses: {
       /** @description Successful Response */
@@ -531,9 +885,42 @@ export interface operations {
           "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
     };
   };
-  /** Get Runtime Status */
+  /**
+   * Test Daytona Connection
+   * @description Run the Daytona preflight and connectivity check exposed in runtime diagnostics.
+   */
+  test_daytona_connection_api_v1_runtime_tests_daytona_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Runtime Status
+   * @description Return the combined runtime readiness, model, and provider diagnostics snapshot.
+   */
   get_runtime_status_api_v1_runtime_status_get: {
     responses: {
       /** @description Successful Response */
@@ -542,18 +929,29 @@ export interface operations {
           "application/json": components["schemas"]["RuntimeStatusResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
     };
   };
   /**
    * Get Volume Tree
-   * @description List the file tree of the configured runtime volume.
+   * @description List the runtime volume tree for the active workspace and provider.
    */
   get_volume_tree_api_v1_runtime_volume_tree_get: {
     parameters: {
       query?: {
+        /** @description Directory path to list within the selected runtime volume. */
         root_path?: string;
+        /** @description Maximum directory depth to traverse while building the file tree. */
         max_depth?: number;
-        provider?: components["schemas"]["VolumeProvider"] | null;
+        /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
+        provider?: ("modal" | "daytona") | null;
       };
     };
     responses: {
@@ -563,24 +961,47 @@ export interface operations {
           "application/json": components["schemas"]["VolumeTreeResponse"];
         };
       };
+      /** @description The requested root path is invalid. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description The runtime volume provider failed to list the requested path. */
+      502: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+      /** @description Volume listing timed out before the backend returned a result. */
+      504: {
+        content: never;
+      };
     };
   };
   /**
    * Get Volume File Content
-   * @description Read a volume file as UTF-8 text for frontend preview.
+   * @description Read a text preview for a single file from the runtime volume.
    */
   get_volume_file_content_api_v1_runtime_volume_file_get: {
     parameters: {
       query: {
+        /** @description Absolute or volume-relative file path to preview from the runtime volume. */
         path: string;
+        /** @description Maximum number of bytes of text content to return in the preview response. */
         max_bytes?: number;
-        provider?: components["schemas"]["VolumeProvider"] | null;
+        /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
+        provider?: ("modal" | "daytona") | null;
       };
     };
     responses: {
@@ -590,11 +1011,35 @@ export interface operations {
           "application/json": components["schemas"]["VolumeFileContentResponse"];
         };
       };
+      /** @description The requested file path is invalid or points to a directory. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested runtime volume file does not exist. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description The runtime volume provider failed to read the requested file. */
+      502: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+      /** @description Volume file reading timed out before the backend returned a result. */
+      504: {
+        content: never;
       };
     };
   };
@@ -615,11 +1060,31 @@ export interface operations {
           "application/json": components["schemas"]["TraceFeedbackResponse"];
         };
       };
+      /** @description The feedback request did not include a valid trace identifier. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The authenticated user is not allowed to annotate this trace. */
+      403: {
+        content: never;
+      };
+      /** @description No MLflow trace matched the provided identifier. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description MLflow feedback services are unavailable or misconfigured. */
+      503: {
+        content: never;
       };
     };
   };

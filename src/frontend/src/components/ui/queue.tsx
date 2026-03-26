@@ -30,7 +30,7 @@
 import type { ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 // ── Queue (root) ────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ interface QueueProps {
 
 function Queue({ children, className }: QueueProps) {
   return (
-    <div data-slot="queue" className={cn("space-y-2", className)}>
+    <div data-slot="queue" className={cn("flex flex-col gap-2", className)}>
       {children}
     </div>
   );

@@ -8,7 +8,18 @@ from fleet_rlm.api.schemas.core import SessionStateResponse, SessionStateSummary
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-@router.get("/state", response_model=SessionStateResponse)
+@router.get(
+    "/state",
+    response_model=SessionStateResponse,
+    responses={
+        401: {
+            "description": "Authentication is required or the provided token is invalid."
+        },
+        503: {
+            "description": "Session state is unavailable because server startup is incomplete."
+        },
+    },
+)
 async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []

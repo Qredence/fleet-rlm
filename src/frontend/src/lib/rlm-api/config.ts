@@ -4,12 +4,7 @@
  * Uses Vite `VITE_` env vars and derives sensible defaults for local
  * backend development when values are provided.
  */
-
-import { parseBool } from "@/lib/utils/env";
-
-function trimOrEmpty(value: string | undefined): string {
-  return value?.trim() ?? "";
-}
+import { parseBool, trimOrEmpty } from "@/lib/utils/env";
 
 function deriveWsUrl(apiUrl: string, path: string): string {
   if (!apiUrl) return "";

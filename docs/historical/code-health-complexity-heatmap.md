@@ -13,7 +13,7 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | band | loc | file                                                                        |
 | ---- | --- | --------------------------------------------------------------------------- |
 | L1   | 823 | `src/fleet_rlm/db/models.py`                                                |
-| L1   | 795 | `src/fleet_rlm/core/interpreter.py`                                         |
+| L1   | 795 | `src/fleet_rlm/runtime/interpreter.py`                                         |
 | L1   | 707 | `src/fleet_rlm/react/agent.py`                                              |
 | L2   | 591 | `src/fleet_rlm/terminal/commands.py`                                        |
 | L2   | 565 | `src/fleet_rlm/react/streaming.py`                                          |
@@ -23,7 +23,7 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | L3   | 474 | `src/fleet_rlm/react/tools/sandbox.py`                                      |
 | L3   | 446 | `src/fleet_rlm/terminal/ui.py`                                              |
 | L3   | 414 | `src/fleet_rlm/server/routers/runtime.py`                                   |
-| L3   | 408 | `src/fleet_rlm/core/config.py`                                              |
+| L3   | 408 | `src/fleet_rlm/runtime/config.py`                                              |
 | L3   | 408 | `src/fleet_rlm/utils/scaffold.py`                                           |
 | L3   | 382 | `src/fleet_rlm/react/tools/delegate.py`                                     |
 | L3   | 381 | `src/fleet_rlm/server/routers/ws/api.py`                                    |
@@ -38,7 +38,7 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | `src/fleet_rlm/server/execution/step_builder.py::ExecutionStepBuilder.from_stream_event`          | 30  | D    | H1        | 1.0                 | 1            | 0.8560   |
 | `src/fleet_rlm/server/routers/ws/commands.py::_handle_command`                                    | 28  | D    | H1        | 1.0                 | 1            | 0.8560   |
 | `src/fleet_rlm/react/tools/filesystem.py::_list_files_impl`                                       | 27  | D    | H1        | 1.0                 | 1            | 0.8560   |
-| `src/fleet_rlm/core/interpreter.py::ModalInterpreter.execute`                                     | 44  | F    | H1        | 0.7                 | 11           | 0.8260   |
+| `src/fleet_rlm/runtime/interpreter.py::ModalInterpreter.execute`                                     | 44  | F    | H1        | 0.7                 | 11           | 0.8260   |
 | `src/fleet_rlm/react/streaming.py::aiter_chat_turn_stream`                                        | 16  | C    | H2        | 1.0                 | 14           | 0.7690   |
 | `src/fleet_rlm/react/streaming_citations.py::_normalize_trajectory`                               | 20  | C    | H2        | 1.0                 | 3            | 0.7030   |
 | `src/fleet_rlm/react/delegate_sub_agent.py::spawn_delegate_sub_agent`                             | 19  | C    | H2        | 1.0                 | 3            | 0.7030   |
@@ -50,7 +50,7 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | `src/fleet_rlm/terminal/commands.py::handle_alias_command`                                        | 30  | D    | H1        | 0.4                 | 2            | 0.6820   |
 | `src/fleet_rlm/server/config.py::ServerRuntimeConfig`                                             | 24  | D    | H2        | 0.7                 | 14           | 0.6790   |
 | `src/fleet_rlm/terminal/chat.py::_TerminalChatSession._run_chat_turn`                             | 29  | D    | H1        | 0.4                 | 1            | 0.6760   |
-| `src/fleet_rlm/core/driver.py::sandbox_driver`                                                    | 16  | C    | H2        | 0.7                 | 7            | 0.6370   |
+| `src/fleet_rlm/runtime/driver.py::sandbox_driver`                                                    | 16  | C    | H2        | 0.7                 | 7            | 0.6370   |
 | `src/fleet_rlm/server/routers/sessions.py::list_session_state`                                    | 17  | C    | H2        | 0.7                 | 6            | 0.6310   |
 | `src/fleet_rlm/react/agent.py::RLMReActChatAgent._count_tool_errors`                              | 11  | C    | H3        | 1.0                 | 17           | 0.6220   |
 | `src/fleet_rlm/react/agent.py::RLMReActChatAgent.chat_turn_stream`                                | 11  | C    | H3        | 1.0                 | 17           | 0.6220   |
@@ -77,8 +77,8 @@ Wave 1 priority: ReAct + Server WS. Target complexity threshold for refactor ass
 | `src/fleet_rlm/models/streaming.py::TurnState`                                                    | 22  | D    | H2        | 0.4                 | 1            | 0.5110   |
 | `src/fleet_rlm/models/streaming.py::TurnState.apply`                                              | 21  | D    | H2        | 0.4                 | 1            | 0.5110   |
 | `src/fleet_rlm/terminal/chat.py::_TerminalChatSession._print_status`                              | 21  | D    | H2        | 0.4                 | 1            | 0.5110   |
-| `src/fleet_rlm/core/config.py::get_delegate_lm_from_env`                                          | 12  | C    | H3        | 0.7                 | 12           | 0.5020   |
-| `src/fleet_rlm/core/config.py::_load_dotenv`                                                      | 11  | C    | H3        | 0.7                 | 12           | 0.5020   |
+| `src/fleet_rlm/runtime/config.py::get_delegate_lm_from_env`                                          | 12  | C    | H3        | 0.7                 | 12           | 0.5020   |
+| `src/fleet_rlm/runtime/config.py::_load_dotenv`                                                      | 11  | C    | H3        | 0.7                 | 12           | 0.5020   |
 | `src/fleet_rlm/server/routers/runtime.py::patch_runtime_settings`                                 | 13  | C    | H3        | 0.7                 | 4            | 0.4540   |
 | `src/fleet_rlm/server/auth/dev.py::DevAuthProvider._authenticate`                                 | 14  | C    | H3        | 0.7                 | 3            | 0.4480   |
 | `src/fleet_rlm/fleet_cli.py::main`                                                                | 12  | C    | H3        | 0.4                 | 5            | 0.3700   |

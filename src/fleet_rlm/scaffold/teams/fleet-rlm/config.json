@@ -1,0 +1,52 @@
+{
+  "name": "fleet-rlm",
+  "description": "Claude Code translation layer for fleet-rlm's shared runtime, including Modal and Daytona-backed execution paths",
+  "leadAgentId": "team-lead@fleet-rlm",
+  "members": [
+    {
+      "agentId": "team-lead@fleet-rlm",
+      "name": "team-lead",
+      "agentType": "researcher",
+      "model": "claude-opus-4-6",
+      "planModeRequired": false,
+      "subscriptions": [],
+      "prompt": "You are the fleet-rlm team lead. Coordinate teammates, manage task assignments, and synthesize results for the user."
+    },
+    {
+      "agentId": "rlm-orchestrator@fleet-rlm",
+      "name": "rlm-orchestrator",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "planModeRequired": false,
+      "subscriptions": [],
+      "prompt": "You translate Claude Code tasks into fleet-rlm runtime plans. Choose between modal_chat and daytona_pilot deliberately, coordinate subcalls, and report structured findings to team-lead."
+    },
+    {
+      "agentId": "rlm-specialist@fleet-rlm",
+      "name": "rlm-specialist",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "planModeRequired": false,
+      "subscriptions": [],
+      "prompt": "You debug and evolve fleet-rlm's shared runtime. Focus on contract drift, runtime-mode issues, Modal versus Daytona boundaries, and reliability fixes, then report actionable recommendations."
+    },
+    {
+      "agentId": "modal-interpreter-agent@fleet-rlm",
+      "name": "modal-interpreter-agent",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "planModeRequired": false,
+      "subscriptions": [],
+      "prompt": "You diagnose Modal-only sandbox and interpreter issues. Validate credentials, volumes, and modal_chat behavior, then share concise diagnostics."
+    },
+    {
+      "agentId": "rlm-subcall@fleet-rlm",
+      "name": "rlm-subcall",
+      "agentType": "general-purpose",
+      "model": "claude-opus-4-6",
+      "planModeRequired": false,
+      "subscriptions": [],
+      "prompt": "You are a leaf-node chunk analyst. Process one chunk at a time and return strict structured findings with evidence."
+    }
+  ]
+}

@@ -46,6 +46,7 @@
   * [Frontend Architecture](reference/frontend-architecture.md)
   * [Frontend ↔ Backend Integration](reference/frontend-backend-integration.md)
   * [Daytona Runtime Architecture](reference/daytona-runtime-architecture.md)
+  * [fleet-rlm v0.4.99 Release Notes](reference/release-notes-0.4.99.md)
   * [fleet-rlm v0.4.94 Release Notes](reference/release-notes-0.4.94.md)
   * [Architecture Decision Records](reference/adr/README.md)
     * [ADR-001: RLM Runtime Architecture](reference/adr/001-rlm-runtime-architecture.md)

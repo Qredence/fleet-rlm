@@ -1,6 +1,6 @@
 """Unit tests for document URL source helpers.
 
-Covers fleet_rlm.core.execution.document_sources:
+Covers fleet_rlm.runtime.execution.document_sources:
 - is_http_url: URL detection
 - _assert_public_http_url: security guard
 - fetch_url_document_content: full fetch pipeline (mocked httpx)
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fleet_rlm.core.execution.document_sources import (
+from fleet_rlm.runtime.execution.document_sources import (
     _assert_public_http_url,
     _normalize_content_type,
     _rewrite_gist_page_url,
@@ -142,10 +142,12 @@ def test_fetch_url_document_content_plain_text(monkeypatch: pytest.MonkeyPatch):
     client_mock.stream = MagicMock(return_value=fake_resp)
 
     with patch(
-        "fleet_rlm.core.execution.document_sources.httpx.Client",
+        "fleet_rlm.runtime.execution.document_sources.httpx.Client",
         return_value=client_mock,
     ):
-        with patch("fleet_rlm.core.execution.document_sources._assert_public_http_url"):
+        with patch(
+            "fleet_rlm.runtime.execution.document_sources._assert_public_http_url"
+        ):
             text, meta = fetch_url_document_content(
                 "https://example.com/doc.txt",
                 read_document_content=_fake_read_document_content,
@@ -178,10 +180,12 @@ def test_fetch_url_document_content_raises_on_http_error(
     client_mock.stream = MagicMock(return_value=fake_resp)
 
     with patch(
-        "fleet_rlm.core.execution.document_sources.httpx.Client",
+        "fleet_rlm.runtime.execution.document_sources.httpx.Client",
         return_value=client_mock,
     ):
-        with patch("fleet_rlm.core.execution.document_sources._assert_public_http_url"):
+        with patch(
+            "fleet_rlm.runtime.execution.document_sources._assert_public_http_url"
+        ):
             with pytest.raises(ValueError, match="HTTP 404"):
                 fetch_url_document_content(
                     "https://example.com/missing.txt",

@@ -1,43 +1,53 @@
 # fleet-rlm: AI coding instructions
 
-## Start here (architecture map)
+## Start here
 
-- Follow the runtime path: `src/fleet_rlm/cli.py` → `src/fleet_rlm/runners.py` → signatures in `src/fleet_rlm/signatures.py` → `ModalInterpreter` in `src/fleet_rlm/core/interpreter.py` → sandbox JSON driver in `src/fleet_rlm/core/driver.py`.
-- Keep orchestration boundaries: `src/fleet_rlm/react/agent.py` owns ReAct/session state, `src/fleet_rlm/react/tools*.py` owns tool behavior, and `src/fleet_rlm/react/commands.py` maps WebSocket commands to tools.
-- FastAPI (`src/fleet_rlm/server/`) and FastMCP (`src/fleet_rlm/mcp/server.py`) are thin service wrappers over the same runner/agent flows.
+- Read `AGENTS.md` at the repo root first, then `src/fleet_rlm/AGENTS.md` or `src/frontend/AGENTS.md` depending on the area you touch.
+- Treat `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml` as source-of-truth workflow files.
+- The current backend architecture lives under:
+  - `src/fleet_rlm/api/` for FastAPI transport, auth, schemas, and websocket routes
+  - `src/fleet_rlm/runtime/` for the shared ReAct + `dspy.RLM` runtime
+  - `src/fleet_rlm/integrations/` for database, observability, MCP, and provider backends
+  - `src/fleet_rlm/cli/` for `fleet` and `fleet-rlm` entrypoints
 
-## Required developer workflows
+## Required workflows
 
-- Use `uv` for env/dependencies (`uv sync --extra dev`, plus `--extra server` or `--extra mcp` per surface).
-- Primary quality gate in this repo: `uv run ruff check src tests && uv run ty check src --exclude "src/fleet_rlm/_scaffold/**" && uv run pytest -q`.
-- Use `ty` for types (not mypy), `ruff` for lint/format, and `pytest` for tests.
-- Use Make shortcuts when useful: `make sync-scaffold`, `make precommit-install`, `make precommit-run`, `make release-check`.
-- Before debugging type/lint failures, clear stale caches (`.ruff_cache`, `__pycache__`, `.pytest_cache`, `.mypy_cache`) and run `pre-commit clean`.
-- Web UI is the primary interactive surface for `0.4.6` (`uv run fleet web`).
-- Terminal runtime remains supported: `fleet-rlm code-chat --opentui` expects Bun and a running backend (`serve-api`).
+- Use `uv` for Python setup and commands: `uv sync --all-extras --dev`.
+- Use `pnpm` in `src/frontend` with `pnpm install --frozen-lockfile`.
+- Repo-standard maintenance and validation commands:
+  - `make clean`
+  - `uv run python scripts/openapi_tools.py generate`
+  - `uv run python scripts/openapi_tools.py validate`
+  - `make quality-gate`
+  - `make release-check`
 
-## Project-specific conventions
+## Product and contract rules
 
-- Python target is 3.10+ with explicit type hints.
-- ReAct tools are closure-based functions returning `dict[str, Any]`, then wrapped as `dspy.Tool` (see `build_tool_list` in `src/fleet_rlm/react/tools.py`).
-- Sandbox completion supports both `SUBMIT(...)` and `Final = ...` (`src/fleet_rlm/core/driver.py`).
-- Respect execution profiles (`ROOT_INTERLOCUTOR`, `RLM_DELEGATE`, `MAINTENANCE`); WebSocket chat defaults to root/interlocutor and command execution temporarily uses delegate profile.
-- Keep chunk contracts stable: `chunk_by_headers` returns `header` + `content` (not `body`) in both `src/fleet_rlm/chunking/headers.py` and sandbox driver helpers.
-- Do not read PDFs/binary docs with raw `Path.read_text()`; route document ingestion through `_read_document_content` (MarkItDown first, then pypdf fallback, OCR guidance for scanned PDFs).
-- Keep helper behavior aligned between host chunking (`src/fleet_rlm/chunking/`) and sandbox helpers in `src/fleet_rlm/core/driver.py`.
+- Supported product surfaces are `Workbench`, `Volumes`, and `Settings`.
+- Retired `taxonomy`, `skills`, `memory`, and `analytics` routes should fall through to `/404`.
+- Canonical HTTP/websocket surfaces:
+  - `/health`
+  - `/ready`
+  - `GET /api/v1/auth/me`
+  - `GET /api/v1/sessions/state`
+  - `/api/v1/runtime/*`
+  - `POST /api/v1/traces/feedback`
+  - `/api/v1/ws/chat`
+  - `/api/v1/ws/execution`
+- `/api/v1/ws/chat` is transcript-first; `/api/v1/ws/execution` is the canonical workbench stream.
+- Do not hand-edit generated frontend API artifacts in `src/frontend/openapi/` or `src/frontend/src/lib/rlm-api/generated/`.
 
-## Stateful server/session contracts
+## OpenAPI and docs sync
 
-- `/api/v1/ws/chat` is the primary interactive endpoint (`src/fleet_rlm/server/routers/ws.py`).
-- WS payload identity envelope should include `workspace_id`, `user_id`, `session_id` (`src/fleet_rlm/server/schemas.py`).
-- Session keys are `workspace_id:user_id`; persisted manifests live at `workspaces/<workspace_id>/users/<user_id>/memory/react-session.json` on the Modal volume.
-- Use `/sessions/state` for server-side session introspection.
-- Do **not** add `from __future__ import annotations` to `src/fleet_rlm/server/routers/ws.py` (breaks FastAPI WebSocket parameter inspection).
+- `openapi.yaml` at the repo root is the canonical HTTP contract.
+- If backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions change:
+  1. Run `uv run python scripts/openapi_tools.py generate`
+  2. Run `cd src/frontend && pnpm run api:check`
+  3. Update the relevant `README.md`, `AGENTS.md`, and `docs/` pages in the same change
 
-## Environment and runtime expectations
+## Runtime notes
 
-- Planner LM comes from `.env` via `src/fleet_rlm/core/config.py`: `DSPY_LM_MODEL` + (`DSPY_LLM_API_KEY` or `DSPY_LM_API_KEY`), optional `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`.
-- Modal secret naming defaults to `LITELLM`; keep this unless intentionally changing infra conventions.
-- `serve-api` defaults to persistent volume `rlm-volume-dspy` when `interpreter.volume_name` is unset.
-- Canonical API contract file is `openapi.yaml` at repo root; frontend generated types are derived from `src/frontend/openapi/fleet-rlm.openapi.yaml`.
-- For Modal sandbox work, verify volume availability and credentials (`modal setup` + volume/secret readiness) before running tests.
+- `fleet web` delegates to `fleet-rlm serve-api --host 0.0.0.0 --port 8000`.
+- `modal_chat` is the default runtime mode.
+- `daytona_pilot` stays on the shared ReAct + `dspy.RLM` backbone; Daytona-specific logic belongs in `src/fleet_rlm/integrations/providers/daytona/`.
+- For Modal sandbox work, verify credentials and volume/secret readiness before running live tests.

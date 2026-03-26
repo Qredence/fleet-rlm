@@ -101,9 +101,11 @@ This command:
 
 ```bash
 uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
-This ensures code quality checks run automatically before each commit.
+This installs both fast `pre-commit` hooks for each commit and stronger `pre-push`
+checks before code leaves your machine.
 
 ## 4. Configure Environment Variables
 
@@ -125,13 +127,13 @@ DSPY_LLM_API_KEY=sk-your-api-key-here
 
 ### Environment Variable Categories
 
-| Category     | Variables                               | Required        |
-| ------------ | --------------------------------------- | --------------- |
-| **LLM**      | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`     | Yes             |
-| **Database** | `DATABASE_URL`                          | For persistence |
-| **Auth**     | `AUTH_MODE`, `AUTH_REQUIRED`            | For API server  |
-| **MLflow**   | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI` | For tracing     |
-| **PostHog**  | `POSTHOG_ENABLED`, `POSTHOG_API_KEY`, `POSTHOG_HOST` | For analytics |
+| Category     | Variables                                            | Required        |
+| ------------ | ---------------------------------------------------- | --------------- |
+| **LLM**      | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`                  | Yes             |
+| **Database** | `DATABASE_URL`                                       | For persistence |
+| **Auth**     | `AUTH_MODE`, `AUTH_REQUIRED`                         | For API server  |
+| **MLflow**   | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI`              | For tracing     |
+| **PostHog**  | `POSTHOG_ENABLED`, `POSTHOG_API_KEY`, `POSTHOG_HOST` | For analytics   |
 
 ### Key Configuration Options
 
@@ -153,14 +155,21 @@ APP_ENV=local
 
 # MLflow Tracing (enabled by default)
 MLFLOW_ENABLED=true
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 MLFLOW_EXPERIMENT=fleet-rlm
+
+# Optional: start MLflow automatically during local API startup
+# MLFLOW_AUTO_START=true
 
 # PostHog Analytics
 POSTHOG_ENABLED=false
 ```
 
 > **Security:** Never commit your `.env` file. It is already in `.gitignore`. For team setups, use Modal secrets for shared API keys.
+
+> **MLflow note:** The local MLflow default is `http://127.0.0.1:5001`, which
+> matches `make mlflow-server`. If you change the port in `.env`, keep your manual
+> MLflow server command aligned, or enable `MLFLOW_AUTO_START=true` for local dev.
 
 ## 5. Configure Modal Credentials
 
@@ -225,6 +234,7 @@ pnpm run api:check
 pnpm run type-check
 pnpm run lint:robustness
 pnpm run test:unit
+pnpm run build
 ```
 
 ## 7. Verify Your Setup
@@ -249,12 +259,12 @@ uv run pytest -q -m "not live_llm and not benchmark"
 ### Run Quality Checks
 
 ```bash
-# Lint and format check
-uv run ruff check src tests
-uv run ruff format --check src tests
+# Repo-aligned validation gate
+make quality-gate
 
-# Type checking
-uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+# When backend request/response or OpenAPI-facing schema metadata changes
+uv run python scripts/openapi_tools.py generate
+cd src/frontend && pnpm run api:check
 ```
 
 ### Start Development Server
@@ -340,23 +350,24 @@ require('lspconfig').pyright.setup {
 
 ### Makefile Targets
 
-| Command                                      | Description                                                                  |
-| -------------------------------------------- | ---------------------------------------------------------------------------- |
-| `make sync-all`                              | Install all dependencies                                                     |
-| `make test-fast`                             | Run the default fast backend test suite                                      |
-| `make quality-gate`                          | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
-| `make release-check`                         | Run release-oriented validation, including security and packaging            |
-| `make format`                                | Format code with ruff                                                        |
-| `make lint`                                  | Check linting with ruff                                                      |
-| `make typecheck`                             | Run type checker                                                             |
-| `uv run python scripts/check_docs_quality.py` | Run docs-only validation                                                     |
-| `make mlflow-server`                         | Start local MLflow server                                                    |
+| Command                                       | Description                                                                   |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `make sync-all`                               | Install all dependencies                                                      |
+| `make test-fast`                              | Run the default fast backend test suite                                       |
+| `make quality-gate`                           | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
+| `make release-check`                          | Run release-oriented validation, including security and packaging             |
+| `make format`                                 | Format code with ruff                                                         |
+| `make lint`                                   | Check linting with ruff                                                       |
+| `make typecheck`                              | Run type checker                                                              |
+| `uv run python scripts/check_docs_quality.py` | Run docs-only validation                                                      |
+| `make mlflow-server`                          | Start local MLflow server                                                     |
 
 ### Frontend Commands
 
 | Command                    | Description                                                       |
 | -------------------------- | ----------------------------------------------------------------- |
 | `pnpm run dev`             | Start development server                                          |
+| `pnpm run api:sync`        | Copy the root OpenAPI spec and regenerate TS types                |
 | `pnpm run api:check`       | Verify committed frontend OpenAPI artifacts are up to date        |
 | `pnpm run type-check`      | Run TypeScript type checks                                        |
 | `pnpm run lint:robustness` | Run the repo lint lane                                            |
@@ -424,6 +435,7 @@ pnpm install --frozen-lockfile
 
 ```bash
 uv run pre-commit run --all-files
+uv run pre-commit run --hook-stage pre-push --all-files
 ```
 
 ## Next Steps

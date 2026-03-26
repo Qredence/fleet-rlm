@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from fleet_rlm.features.chunking import (
+from fleet_rlm.runtime.content.chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
     chunk_by_size,

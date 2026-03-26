@@ -16,6 +16,10 @@ interface CanvasHandlers {
   close: () => void;
 }
 
+interface CommandPaletteHandlers {
+  open: () => void;
+}
+
 interface NavigationState {
   // Navigation
   activeNav: NavItem;
@@ -28,6 +32,10 @@ interface NavigationState {
   closeCanvas: () => void;
   toggleCanvas: () => void;
   registerCanvasHandlers: (handlers: CanvasHandlers) => void;
+
+  // Command palette
+  openCommandPalette: () => void;
+  registerCommandPaletteHandlers: (handlers: CommandPaletteHandlers) => void;
 }
 
 // ── Canvas Handlers (external registration) ──────────────────────────
@@ -39,6 +47,12 @@ let canvasHandlers: CanvasHandlers = {
   close: () => {
     useNavigationStore.setState({ isCanvasOpen: false });
   },
+};
+
+// ── Command Palette Handlers (external registration) ─────────────────
+
+let commandPaletteHandlers: CommandPaletteHandlers = {
+  open: () => {},
 };
 
 // ── Store ────────────────────────────────────────────────────────────
@@ -65,6 +79,12 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     if (get().isCanvasOpen) {
       handlers.open();
     }
+  },
+
+  // Command palette
+  openCommandPalette: () => commandPaletteHandlers.open(),
+  registerCommandPaletteHandlers: (handlers) => {
+    commandPaletteHandlers = handlers;
   },
 }));
 

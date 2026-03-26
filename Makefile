@@ -1,7 +1,7 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not benchmark
 
-.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check dependency-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-check clean mlflow-server
+.PHONY: help sync sync-dev sync-all test test-fast test-unit test-ui test-integration lint format-check format typecheck metadata-check docs-check security-check dependency-check frontend-check quality-gate check precommit-install precommit-run cli-help sync-scaffold sync-ui build-ui release-artifacts release-check clean mlflow-server
 
 help:
 	@echo "Targets:"
@@ -26,11 +26,12 @@ help:
 	@echo "  make check             - Alias for quality-gate"
 	@echo "  make sync-ui           - Copy src/frontend/dist/ into src/fleet_rlm/ui/dist/"
 	@echo "  make build-ui          - Build the frontend and sync packaged UI assets"
-	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5000"
+	@echo "  make release-artifacts - Build + verify publishable distributions with synced UI assets"
+	@echo "  make mlflow-server     - Start a local MLflow OSS tracking server on port 5001"
 	@echo "  make clean             - Remove caches and local generated artifacts"
-	@echo "  make sync-scaffold     - Sync .claude/ to src/fleet_rlm/_scaffold/"
+	@echo "  make sync-scaffold     - Reminder that src/fleet_rlm/scaffold is curated, not auto-synced"
 	@echo "  make release-check     - Run clean + quality-gate + security-check + build + twine checks"
-	@echo "  make precommit-install - Install pre-commit git hooks"
+	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run     - Run pre-commit on all files"
 	@echo "  make cli-help          - Show fleet-rlm CLI help"
 
@@ -69,7 +70,7 @@ format:
 
 typecheck:
 	uv run ty check src \
-		--exclude "src/fleet_rlm/_scaffold/**"
+		--exclude "src/fleet_rlm/scaffold/**"
 
 metadata-check:
 	uv run python scripts/validate_release.py hygiene
@@ -80,8 +81,10 @@ docs-check:
 	uv run python scripts/check_docs_quality.py
 
 security-check:
-	uvx pip-audit
-	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+	# TODO: Remove this ignore once Pygments ships a patched release for
+	# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
+	uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
+	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
 dependency-check:
 	uvx deptry .
@@ -101,16 +104,12 @@ quality-gate: lint format-check typecheck test-fast metadata-check docs-check fr
 check: quality-gate
 
 mlflow-server:
-	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5000
+	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5001
 
 sync-scaffold:
-	@echo "Syncing .claude/ to src/fleet_rlm/_scaffold/..."
-	mkdir -p src/fleet_rlm/_scaffold/teams src/fleet_rlm/_scaffold/hooks
-	rsync -a --delete .claude/skills/ src/fleet_rlm/_scaffold/skills/
-	rsync -a --delete .claude/agents/ src/fleet_rlm/_scaffold/agents/
-	[ -d .claude/hooks ] && rsync -a --delete .claude/hooks/ src/fleet_rlm/_scaffold/hooks/ || true
-	[ -d .claude/teams ] && rsync -a --delete .claude/teams/ src/fleet_rlm/_scaffold/teams/ || true
-	@echo "Scaffold sync complete"
+	@echo "src/fleet_rlm/scaffold is a curated Claude Code translation layer for fleet-rlm."
+	@echo "It is not auto-synced from .claude."
+	@echo "Update the packaged scaffold assets directly and validate with 'uv run fleet-rlm init --list'."
 
 sync-ui:
 	@echo "Syncing frontend dist to packaged UI assets..."
@@ -122,11 +121,13 @@ build-ui:
 	cd src/frontend && pnpm install --frozen-lockfile && pnpm run build
 	$(MAKE) sync-ui
 
-release-check: clean quality-gate security-check build-ui
+release-artifacts: build-ui
 	rm -rf dist build
 	uv build
 	uv run python scripts/validate_release.py wheel
 	uvx twine check dist/*
+
+release-check: clean quality-gate security-check release-artifacts
 
 clean:
 	@echo "Cleaning caches and local generated artifacts..."
@@ -137,6 +138,7 @@ clean:
 
 precommit-install:
 	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
 
 precommit-run:
 	uv run pre-commit run --all-files

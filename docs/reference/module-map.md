@@ -1,8 +1,8 @@
 # Python Backend Module Map
 
 This document maps the current module relationships within `src/fleet_rlm/`.
-It reflects the post-refactor package split across `api/`, `cli/`, `core/`,
-`features/`, and `infrastructure/`.
+It reflects the simplified backend split across `api/`, `cli/`, `runtime/`,
+`integrations/`, and `scaffold/`.
 
 ## Layered Overview
 
@@ -10,101 +10,67 @@ It reflects the post-refactor package split across `api/`, `cli/`, `core/`,
 graph TB
     CLI["cli/"]
     API["api/"]
-    MCP["infrastructure/mcp/"]
-    CORE_AGENT["core/agent/"]
-    CORE_EXEC["core/execution/"]
-    CORE_TOOLS["core/tools/"]
-    CORE_MODELS["core/models/"]
-    DB["infrastructure/database/"]
-    CFG["infrastructure/config/"]
-    DAYTONA["infrastructure/providers/daytona/"]
-    ANALYTICS["features/analytics/"]
-    CHUNKING["features/chunking/"]
-    TERMINAL["features/terminal/"]
-    DOCS["features/document_ingestion/"]
+    RUNTIME["runtime/"]
+    INTEGRATIONS["integrations/"]
+    SCAFFOLD["scaffold/"]
     UI["ui/dist"]
 
-    CLI --> TERMINAL
     CLI --> API
-    CLI --> MCP
-    CLI --> CORE_AGENT
-    CLI --> CFG
+    CLI --> RUNTIME
+    CLI --> INTEGRATIONS
+    CLI --> SCAFFOLD
 
-    API --> CORE_AGENT
-    API --> CORE_EXEC
-    API --> CORE_MODELS
-    API --> DB
-    API --> CFG
-    API --> ANALYTICS
-    API --> DAYTONA
+    API --> RUNTIME
+    API --> INTEGRATIONS
     API --> UI
 
-    MCP --> CORE_AGENT
-    MCP --> CFG
-
-    CORE_AGENT --> CORE_TOOLS
-    CORE_AGENT --> CORE_EXEC
-    CORE_AGENT --> CORE_MODELS
-    CORE_AGENT --> CHUNKING
-
-    CORE_TOOLS --> CHUNKING
-    CORE_TOOLS --> DOCS
-    CORE_EXEC --> CFG
-    CORE_EXEC --> DAYTONA
+    RUNTIME --> INTEGRATIONS
 ```
 
 ## Runtime Surfaces
 
 | Surface | Entry point | Primary dependencies |
 | --- | --- | --- |
-| `fleet` | `cli/main.py` | `features/terminal`, `cli/fleet_cli.py` for `fleet web` |
-| `fleet-rlm` | `cli/fleet_cli.py` | `cli/commands/*`, `cli/runners.py`, config bootstrap |
-| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `infrastructure/database`, `features/analytics` |
-| FastMCP server | `infrastructure/mcp/server.py:create_mcp_server` | `runners`, `core.agent`, `core.config` |
+| `fleet` | `cli/main.py` | `cli/fleet_cli.py`, `cli/terminal/*` |
+| `fleet-rlm` | `cli/fleet_cli.py` | `cli/commands/*`, `cli/runners.py`, `integrations/config/*` |
+| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `integrations/database/*`, `integrations/observability/*` |
+| FastMCP server | `integrations/mcp/server.py:create_mcp_server` | `cli/runners.py`, `runtime/agent/*`, `runtime/config.py` |
 
-## Core Runtime Map
+## Shared Runtime Map
 
 ```mermaid
 graph LR
-    CHAT["core/agent/chat_agent.py"]
-    RLM["core/agent/rlm_agent.py"]
-    SIG["core/agent/signatures.py"]
-    MEM["core/agent/memory.py"]
-    TOOLS["core/tools/__init__.py"]
-    EXEC["core/execution/interpreter.py"]
-    STREAM["core/execution/streaming.py"]
-    STREAM_CTX["core/execution/streaming_context.py"]
-    STREAM_CITE["core/execution/streaming_citations.py"]
-    RT_FACTORY["core/execution/runtime_factory.py"]
-    RT_MODELS["core/models/rlm_runtime_modules.py"]
-    EVENTS["core/models/streaming.py"]
+    CHAT["runtime/agent/chat_agent.py"]
+    RLM["runtime/agent/recursive_runtime.py"]
+    SIG["runtime/agent/signatures.py"]
+    EXEC["runtime/execution/interpreter.py"]
+    STREAM["runtime/execution/streaming.py"]
+    STREAM_CTX["runtime/execution/streaming_context.py"]
+    TOOLS["runtime/tools/"]
+    CONTENT["runtime/content/"]
+    MODELS["runtime/models/"]
+    PROVIDERS["integrations/providers/"]
 
     CHAT --> SIG
-    CHAT --> MEM
     CHAT --> TOOLS
-    CHAT --> RLM
     CHAT --> EXEC
     CHAT --> STREAM
     CHAT --> STREAM_CTX
-    CHAT --> RT_MODELS
-
-    RLM --> EXEC
-    RLM --> STREAM
-    RLM --> STREAM_CTX
-    RLM --> STREAM_CITE
-    RT_FACTORY --> RT_MODELS
-    STREAM --> EVENTS
+    CHAT --> RLM
+    TOOLS --> CONTENT
+    EXEC --> PROVIDERS
+    STREAM --> MODELS
 ```
 
 ### Key dependencies
 
 | From | To | Purpose |
 | --- | --- | --- |
-| `core/agent/chat_agent.py` | `core/tools/` | Tool list assembly and tool dispatch |
-| `core/agent/chat_agent.py` | `core/execution/interpreter.py` | Sandbox-backed execution |
-| `core/agent/rlm_agent.py` | `core/execution/*` | Recursive delegation and streamed child turns |
-| `core/tools/*` | `features/chunking/*` | Chunking, grounding, and document workflows |
-| `core/models/rlm_runtime_modules.py` | `core/agent/signatures.py` | Runtime module registry |
+| `runtime/agent/chat_agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
+| `runtime/agent/chat_agent.py` | `runtime/execution/interpreter.py` | Sandbox-backed execution |
+| `runtime/agent/recursive_runtime.py` | `runtime/execution/*` | Recursive delegation and streamed child turns |
+| `runtime/tools/*` | `runtime/content/*` | Chunking, grounding, document, and log workflows |
+| `runtime/execution/*` | `integrations/providers/*` | Modal/Daytona interpreter backend selection |
 
 ## API and WebSocket Map
 
@@ -112,68 +78,59 @@ graph LR
 graph LR
     APP["api/main.py"]
     ROUTERS["api/routers/"]
-    WS_API["api/routers/ws/api.py"]
-    WS_LOOP["api/routers/ws/message_loop.py"]
-    WS_STREAM["api/routers/ws/streaming.py"]
-    WS_RUNTIME["api/routers/ws/chat_runtime.py"]
+    WS_ENDPOINT["api/routers/ws/endpoint.py"]
+    WS_STREAM["api/routers/ws/stream.py"]
+    WS_SESSION["api/routers/ws/session.py"]
+    WS_COMMANDS["api/routers/ws/commands.py"]
+    WS_HELPERS["api/routers/ws/* helpers"]
     EXEC["api/execution/"]
     AUTH["api/auth/"]
-    SCHEMAS["api/schemas/"]
-    DB["infrastructure/database/"]
-    ANALYTICS["features/analytics/"]
-    DAYTONA["infrastructure/providers/daytona/"]
-    AGENT["core/agent/"]
+    RUNTIME["runtime/"]
+    INTEGRATIONS["integrations/"]
 
     APP --> ROUTERS
-    APP --> AUTH
-    APP --> EXEC
-    APP --> DB
-    APP --> ANALYTICS
-
-    ROUTERS --> SCHEMAS
-    ROUTERS --> WS_API
-
-    WS_API --> WS_RUNTIME
-    WS_API --> WS_LOOP
-    WS_API --> WS_STREAM
-    WS_RUNTIME --> AGENT
-    WS_STREAM --> EXEC
-    WS_STREAM --> DB
-    WS_STREAM --> ANALYTICS
-    WS_RUNTIME --> DAYTONA
+    ROUTERS --> AUTH
+    ROUTERS --> WS_ENDPOINT
+    ROUTERS --> EXEC
+    ROUTERS --> INTEGRATIONS
+    WS_ENDPOINT --> WS_SESSION
+    WS_ENDPOINT --> WS_STREAM
+    WS_ENDPOINT --> WS_HELPERS
+    WS_STREAM --> WS_COMMANDS
+    WS_STREAM --> WS_HELPERS
+    WS_STREAM --> RUNTIME
+    WS_SESSION --> RUNTIME
+    WS_SESSION --> INTEGRATIONS
 ```
 
 ### Key dependencies
 
 | From | To | Purpose |
 | --- | --- | --- |
-| `api/main.py` | `infrastructure/database/` | Database manager and repository setup |
-| `api/main.py` | `features/analytics/` | PostHog and MLflow lifecycle setup |
-| `api/routers/ws/*` | `core/agent/` | Shared runtime execution |
-| `api/routers/ws/runtime_options.py` | `infrastructure/providers/daytona/` | Daytona-specific request normalization |
-| `api/execution/*` | `core/models/streaming.py` | Trace/event shaping |
+| `api/main.py` | `api/bootstrap.py` | Runtime bootstrap lifecycle, critical startup, and optional warmup scheduling |
+| `api/bootstrap.py` | `integrations/database/*` | Database manager and repository setup |
+| `api/bootstrap.py` | `integrations/observability/*` | PostHog and MLflow lifecycle setup |
+| `api/routers/ws/*` | `runtime/agent/*` | Shared runtime execution |
+| `api/routers/ws/commands.py`, `hitl.py` | `runtime/agent/*` | Command dispatch and HITL command handling |
+| `api/routers/ws/lifecycle.py`, `turn_setup.py`, `turn_lifecycle.py` | `integrations/database/*`, `api/execution/*` | Run/turn lifecycle orchestration |
+| `api/routers/ws/persistence.py`, `manifest.py`, `artifacts.py` | `integrations/database/*` | Durable state, manifest, and artifact persistence |
+| `api/routers/ws/errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `terminal.py`, `completion.py` | `runtime/models/*`, `api/execution/*` | Failure handling, cancellation, terminal event shaping, and final summaries |
+| `api/routers/ws/types.py` | `integrations/providers/daytona/*` | Daytona-specific request normalization |
+| `api/execution/*` | `runtime/models/*` | Trace/event shaping |
+| `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
+| `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/providers/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
+| `api/runtime_services/volumes.py` | `runtime/tools/modal_volumes.py`, `integrations/providers/daytona/volumes.py` | Volume browsing |
 
-## Provider, Persistence, and Feature Packages
+## Integration Packages
 
 | Package | Role | Notable files |
 | --- | --- | --- |
-| `infrastructure/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py` |
-| `infrastructure/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
-| `infrastructure/providers/daytona/` | Experimental Daytona interpreter backend | `chat_agent.py`, `interpreter.py`, `sandbox.py`, `config.py` |
-| `features/analytics/` | Telemetry and evaluation | `client.py`, `posthog_callback.py`, `mlflow_integration.py`, `trace_context.py` |
-| `features/terminal/` | Terminal chat UX | `chat.py`, `commands.py`, `settings.py`, `ui.py` |
-| `features/scaffold/` | Packaged Codex/Claude assets | `skills/`, `agents/`, `hooks/`, `teams/` |
-
-## Compatibility Surfaces
-
-Several top-level modules remain intentionally thin so older imports keep
-working while the real implementation lives elsewhere.
-
-| Compatibility path | Canonical implementation |
-| --- | --- |
-| `fleet_rlm.runners` | `fleet_rlm.cli.runners` |
-| `fleet_rlm.scaffold` | `fleet_rlm.utils.scaffold` |
-| `fleet_rlm.analytics` | `fleet_rlm.features.analytics` |
+| `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
+| `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
+| `integrations/mcp/` | FastMCP server surface | `server.py` |
+| `integrations/observability/` | Telemetry and evaluation | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
+| `integrations/providers/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `smoke.py`, `state.py`, `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, `types_serialization.py` |
+| `integrations/providers/modal/` | Modal provider helpers | provider-specific helpers only |
 
 ## Verification
 
@@ -185,5 +142,3 @@ find src/fleet_rlm -maxdepth 2 -type d | sort
 rg --files src/fleet_rlm
 rg -n "^from fleet_rlm\\.|^import fleet_rlm\\." src/fleet_rlm
 ```
-
-Last updated: 2026-03-17

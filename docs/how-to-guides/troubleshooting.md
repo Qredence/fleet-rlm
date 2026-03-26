@@ -67,10 +67,10 @@ See [Auth Modes](../reference/auth.md).
 
 - Deprecated and planned/stub REST surfaces were removed.
 - Requests to `/api/v1/tasks*`, `/api/v1/sessions*` CRUD, and `/api/v1/{taxonomy|analytics|search|memory|sandbox}*` now return `404 Not Found`.
-- The supported product surfaces are `RLM Workspace`, `Volumes`, and
-  `Settings`. Legacy `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and
-  `/app/analytics` routes redirect to those surfaces instead of remaining
-  first-class pages.
+- The supported product surfaces are `Workbench`, `Volumes`, and
+  `Settings`. Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and
+  `/app/analytics` paths now fall through to the frontend not-found route
+  instead of remaining first-class pages or redirect shims.
 
 ## Diagnostic Commands
 
@@ -83,5 +83,5 @@ uv run fleet --help
 rg -n "^  /" openapi.yaml
 
 # WS route inventory
-rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/api.py
+rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
 ```

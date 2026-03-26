@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fleet_rlm.infrastructure.database import FleetRepository, TenantStatus
-from fleet_rlm.infrastructure.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database import FleetRepository, TenantStatus
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 from .base import AuthError
 from .types import NormalizedIdentity
@@ -21,6 +21,7 @@ async def resolve_admitted_identity(
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
+    """Resolve and validate an Entra-authenticated identity against tenant admission."""
     persisted = await repository.resolve_control_plane_identity(
         entra_tenant_id=identity.tenant_claim,
         entra_user_id=identity.user_claim,

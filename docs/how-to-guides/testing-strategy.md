@@ -147,6 +147,7 @@ Frontend tests use **Vitest** for unit tests and **Playwright** for end-to-end t
 
 | Command                   | Description                                                       |
 | ------------------------- | ----------------------------------------------------------------- |
+| `pnpm run api:sync`       | Copy the root OpenAPI spec and regenerate TS types                |
 | `pnpm run api:check`      | Verify committed frontend OpenAPI artifacts match the backend spec |
 | `pnpm run type-check`     | Run TypeScript type checks                                        |
 | `pnpm run lint:robustness`| Run the repo lint lane                                            |
@@ -175,6 +176,12 @@ pnpm run lint:robustness
 pnpm run test:unit
 pnpm run build
 
+# After backend contract or OpenAPI-facing schema changes
+cd ..
+uv run python scripts/openapi_tools.py generate
+cd src/frontend
+pnpm run api:check
+
 # Run the full frontend suite (adds Playwright e2e)
 pnpm run check
 
@@ -186,10 +193,11 @@ pnpm run test:watch
 
 ```text
 src/frontend/src/
-├── __tests__/            # Shared test utilities
-├── features/
-│   └── rlm-workspace/
-│       └── __tests__/    # Feature-specific unit tests
+├── app/                  # Shell and workspace internals
+├── routes/               # File-based routes and /404 handling
+├── screens/              # Top-level workspace, volumes, settings, and shell surfaces
+├── lib/                  # API, workspace adapters, and shared helpers
+├── stores/               # Shared Zustand state
 └── ...
 ```
 
@@ -234,12 +242,14 @@ Install pre-commit hooks for automatic checks:
 
 ```bash
 uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
 Run pre-commit manually:
 
 ```bash
 uv run pre-commit run --all-files
+uv run pre-commit run --hook-stage pre-push --all-files
 ```
 
 ## Test Anti-Patterns

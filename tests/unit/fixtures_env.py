@@ -91,11 +91,11 @@ def apply_posthog_defaults(
     host: str = "https://eu.i.posthog.com",
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.features.analytics.config.PROJECT_POSTHOG_DEFAULT_API_KEY",
+        "fleet_rlm.integrations.observability.config.PROJECT_POSTHOG_DEFAULT_API_KEY",
         api_key,
     )
     monkeypatch.setattr(
-        "fleet_rlm.features.analytics.config.PROJECT_POSTHOG_DEFAULT_HOST",
+        "fleet_rlm.integrations.observability.config.PROJECT_POSTHOG_DEFAULT_HOST",
         host,
     )
 

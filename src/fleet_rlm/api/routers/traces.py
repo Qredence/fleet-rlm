@@ -6,12 +6,30 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from fleet_rlm.features.analytics import MlflowConfig, log_trace_feedback, resolve_trace
+from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..dependencies import HTTPIdentityDep
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
 
 router = APIRouter(prefix="/traces", tags=["traces"])
+
+
+def resolve_trace(**kwargs):
+    """Compatibility shim for MLflow trace lookup used by tests and routes."""
+    from fleet_rlm.integrations.observability.mlflow_traces import (
+        resolve_trace as _impl,
+    )
+
+    return _impl(**kwargs)
+
+
+def log_trace_feedback(**kwargs):
+    """Compatibility shim for MLflow feedback logging used by tests and routes."""
+    from fleet_rlm.integrations.observability.mlflow_traces import (
+        log_trace_feedback as _impl,
+    )
+
+    return _impl(**kwargs)
 
 
 def _trace_info_payload(trace: object) -> dict[str, Any]:
@@ -66,7 +84,25 @@ def _assert_feedback_access(
         )
 
 
-@router.post("/feedback", response_model=TraceFeedbackResponse)
+@router.post(
+    "/feedback",
+    response_model=TraceFeedbackResponse,
+    responses={
+        400: {
+            "description": "The feedback request did not include a valid trace identifier."
+        },
+        401: {
+            "description": "Authentication is required or the provided token is invalid."
+        },
+        403: {
+            "description": "The authenticated user is not allowed to annotate this trace."
+        },
+        404: {"description": "No MLflow trace matched the provided identifier."},
+        503: {
+            "description": "MLflow feedback services are unavailable or misconfigured."
+        },
+    },
+)
 async def create_trace_feedback(
     request: TraceFeedbackRequest,
     identity: HTTPIdentityDep,

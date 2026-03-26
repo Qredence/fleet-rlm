@@ -7,12 +7,40 @@ appropriately (e.g. committing volume changes).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from fleet_rlm.core.agent import RLMReActChatAgent
+from fleet_rlm.runtime.tools import sandbox as sandbox_tools
+from fleet_rlm.runtime.agent import RLMReActChatAgent
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
+
+
+class _FakeDaytonaSession:
+    def __init__(self) -> None:
+        self.read_calls: list[str] = []
+        self.write_calls: list[tuple[str, str]] = []
+        self.list_calls: list[str] = []
+        self.file_contents: dict[str, str] = {}
+        self.list_entries: dict[str, list[object]] = {}
+        self.sandbox = SimpleNamespace(
+            fs=SimpleNamespace(list_files=self._list_files),
+        )
+
+    async def aread_file(self, path: str) -> str:
+        self.read_calls.append(path)
+        return self.file_contents[path]
+
+    async def awrite_file(self, path: str, content: str) -> str:
+        self.write_calls.append((path, content))
+        self.file_contents[path] = content
+        return path
+
+    async def _list_files(self, path: str) -> list[object]:
+        self.list_calls.append(path)
+        return self.list_entries.get(path, [])
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +69,40 @@ def test_memory_read_generates_read_code(monkeypatch):
     assert fake_interpreter.reload_calls == 1
 
 
+def test_memory_read_uses_daytona_session(monkeypatch):
+    """Daytona-backed memory_read should use native session file APIs."""
+    fake_interpreter = FakeInterpreter()
+    fake_interpreter.volume_mount_path = "/home/daytona/memory"
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    session = _FakeDaytonaSession()
+    session.file_contents["/home/daytona/memory/notes/native.txt"] = (
+        "hello from daytona"
+    )
+
+    async def _fake_get_daytona_session(ctx):
+        _ = ctx
+        return session
+
+    monkeypatch.setattr(
+        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+    )
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_read = tool_map["memory_read"]
+
+    result = memory_read.func(path="notes/native.txt")
+
+    assert result == {
+        "status": "ok",
+        "path": "/home/daytona/memory/notes/native.txt",
+        "content": "hello from daytona",
+        "chars": len("hello from daytona"),
+    }
+    assert session.read_calls == ["/home/daytona/memory/notes/native.txt"]
+    assert fake_interpreter.execute_calls == []
+    assert fake_interpreter.reload_calls == 0
+
+
 def test_memory_list_generates_listdir_code(monkeypatch):
     """memory_list should generate python code to list directory contents."""
     fake_interpreter = FakeInterpreter()
@@ -58,6 +120,44 @@ def test_memory_list_generates_listdir_code(monkeypatch):
     assert "os.listdir(path)" in code
     assert vars["path"] == "/data/docs"
     assert fake_interpreter.reload_calls == 1
+
+
+def test_memory_list_uses_daytona_session(monkeypatch):
+    """Daytona-backed memory_list should use native fs listings."""
+    fake_interpreter = FakeInterpreter()
+    fake_interpreter.volume_mount_path = "/home/daytona/memory"
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    session = _FakeDaytonaSession()
+    session.list_entries["/home/daytona/memory/docs"] = [
+        SimpleNamespace(name="guides", is_dir=True),
+        SimpleNamespace(name="readme.txt", is_dir=False),
+    ]
+
+    async def _fake_get_daytona_session(ctx):
+        _ = ctx
+        return session
+
+    monkeypatch.setattr(
+        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+    )
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_list = tool_map["memory_list"]
+
+    result = memory_list.func(path="docs")
+
+    assert result == {
+        "status": "ok",
+        "path": "/home/daytona/memory/docs",
+        "items": [
+            {"name": "guides", "type": "dir"},
+            {"name": "readme.txt", "type": "file"},
+        ],
+        "count": 2,
+    }
+    assert session.list_calls == ["/home/daytona/memory/docs"]
+    assert fake_interpreter.execute_calls == []
+    assert fake_interpreter.reload_calls == 0
 
 
 def test_memory_write_generates_write_code_and_commits(monkeypatch):
@@ -82,6 +182,38 @@ def test_memory_write_generates_write_code_and_commits(monkeypatch):
 
     # Check Host-Side Commit
     assert fake_interpreter.commit_calls == 1
+
+
+def test_memory_write_uses_daytona_session(monkeypatch):
+    """Daytona-backed memory_write should use native session file APIs."""
+    fake_interpreter = FakeInterpreter()
+    fake_interpreter.volume_mount_path = "/home/daytona/memory"
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    session = _FakeDaytonaSession()
+
+    async def _fake_get_daytona_session(ctx):
+        _ = ctx
+        return session
+
+    monkeypatch.setattr(
+        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+    )
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_write = tool_map["memory_write"]
+
+    result = memory_write.func(path="notes/daytona.txt", content="native write")
+
+    assert result == {
+        "status": "ok",
+        "path": "/home/daytona/memory/notes/daytona.txt",
+        "chars": len("native write"),
+    }
+    assert session.write_calls == [
+        ("/home/daytona/memory/notes/daytona.txt", "native write")
+    ]
+    assert fake_interpreter.execute_calls == []
+    assert fake_interpreter.commit_calls == 0
 
 
 def test_memory_write_skips_commit_if_no_volume(monkeypatch):
@@ -145,6 +277,77 @@ def test_write_to_file_append_mode(monkeypatch):
     code, vars = fake_interpreter.execute_calls[0]
     assert 'open(path, "a", encoding="utf-8")' in code
     assert vars["path"] == "/data/memory/logs/session.txt"
+
+
+def test_write_to_file_append_uses_daytona_session(monkeypatch):
+    """Daytona-backed write_to_file append should use native session file APIs."""
+    fake_interpreter = FakeInterpreter()
+    fake_interpreter.volume_mount_path = "/home/daytona/memory"
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    session = _FakeDaytonaSession()
+    session.file_contents["/home/daytona/memory/logs/session.txt"] = "line0\n"
+
+    async def _fake_get_daytona_session(ctx):
+        _ = ctx
+        return session
+
+    monkeypatch.setattr(
+        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+    )
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    write_to_file = tool_map["write_to_file"]
+
+    result = write_to_file.func(path="logs/session.txt", content="line1\n", append=True)
+
+    assert result == {
+        "status": "ok",
+        "path": "/home/daytona/memory/logs/session.txt",
+        "chars": len("line1\n"),
+        "mode": "append",
+    }
+    assert session.read_calls == ["/home/daytona/memory/logs/session.txt"]
+    assert session.write_calls == [
+        ("/home/daytona/memory/logs/session.txt", "line0\nline1\n")
+    ]
+    assert fake_interpreter.execute_calls == []
+    assert fake_interpreter.commit_calls == 0
+
+
+def test_load_text_from_volume_uses_daytona_session(monkeypatch):
+    """Daytona-backed load_text_from_volume should hydrate document cache natively."""
+    fake_interpreter = FakeInterpreter()
+    fake_interpreter.volume_mount_path = "/home/daytona/memory"
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+    session = _FakeDaytonaSession()
+    session.file_contents["/home/daytona/memory/workspace/docs/spec.md"] = (
+        "# Spec\nHello"
+    )
+
+    async def _fake_get_daytona_session(ctx):
+        _ = ctx
+        return session
+
+    monkeypatch.setattr(
+        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+    )
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    load_text_from_volume = tool_map["load_text_from_volume"]
+
+    result = load_text_from_volume.func(path="docs/spec.md", alias="spec")
+
+    assert result == {
+        "status": "ok",
+        "alias": "spec",
+        "path": "/home/daytona/memory/workspace/docs/spec.md",
+        "chars": len("# Spec\nHello"),
+        "lines": 2,
+    }
+    assert session.read_calls == ["/home/daytona/memory/workspace/docs/spec.md"]
+    assert agent.documents["spec"] == "# Spec\nHello"
+    assert agent.active_alias == "spec"
+    assert fake_interpreter.execute_calls == []
 
 
 def test_edit_core_memory_tool_append(monkeypatch):

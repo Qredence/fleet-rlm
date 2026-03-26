@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from fleet_rlm.infrastructure.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 
 def _resolve_server_env_path() -> Path:

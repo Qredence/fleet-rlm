@@ -16,13 +16,13 @@ describe("useAppNavigate route truth", () => {
     expect(pathToNav("/app/settings")).toBe("settings");
   });
 
-  it("treats legacy or retired routes as redirects into the supported shell", () => {
-    expect(pathToNav("/app/taxonomy")).toBe("volumes");
-    expect(pathToNav("/app/taxonomy/demo-skill")).toBe("volumes");
-    expect(pathToNav("/app/skills")).toBe("workspace");
-    expect(pathToNav("/app/skills/demo-skill")).toBe("workspace");
-    expect(pathToNav("/app/memory")).toBe("workspace");
-    expect(pathToNav("/app/analytics")).toBe("workspace");
+  it("treats retired product routes as unsupported", () => {
+    expect(pathToNav("/app/taxonomy")).toBeNull();
+    expect(pathToNav("/app/taxonomy/demo-skill")).toBeNull();
+    expect(pathToNav("/app/skills")).toBeNull();
+    expect(pathToNav("/app/skills/demo-skill")).toBeNull();
+    expect(pathToNav("/app/memory")).toBeNull();
+    expect(pathToNav("/app/analytics")).toBeNull();
   });
 
   it("ignores paths outside the app shell", () => {

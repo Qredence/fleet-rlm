@@ -67,8 +67,10 @@ jobs:
 
       - name: Security checks
         run: |
-          uvx pip-audit
-          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+          # TODO: Remove this ignore once Pygments ships a patched release for
+          # GHSA-5239-wwwm-4pmq / CVE-2026-4539.
+          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
+          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
       - name: Lint with Ruff
         run: |
@@ -76,7 +78,7 @@ jobs:
           uv run ruff format --check src tests
 
       - name: Type-check with ty
-        run: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+        run: uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
 
       - name: Run tests
         env:
@@ -88,27 +90,23 @@ jobs:
 
       - name: Install pnpm
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: pnpm/action-setup@f8f698fa4c9186c9e5d575fa0c5fe10530cd0307 # v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
         with:
           version: 10.32.1
 
       - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@e0e7c6c27c0190b15e4a6ad5c088e1f52bd8d7d9 # v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "24"
           cache: "pnpm"
           cache-dependency-path: "src/frontend/pnpm-lock.yaml"
 
-      - name: Install Vite+ CLI
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: npm install -g vite-plus@0.1.11
-
       - name: Frontend install
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          vp install
+          pnpm install --frozen-lockfile
 
       - name: Install Playwright browser
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
@@ -142,13 +140,13 @@ jobs:
 
       - name: Install pnpm
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: pnpm/action-setup@b23e8e09b55e60b3bd7baa9e8036d21c3c284b8f # v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
         with:
           version: 10.32.1
 
       - name: Set up Node.js
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832eb9e # v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "24"
           cache: "pnpm"
@@ -207,7 +205,6 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     needs: [build, check-pypi-availability]
-    continue-on-error: true
     environment:
       name: testpypi
       url: https://test.pypi.org/project/fleet-rlm/
@@ -225,57 +222,88 @@ jobs:
           skip-existing: true
 
   smoke-test-testpypi:
-    name: Smoke Test from TestPyPI
+    name: Smoke Test Built Artifact
     runs-on: ubuntu-latest
     needs: [publish-testpypi, preflight]
-    continue-on-error: true
-    if: success() || failure()
     steps:
+      - name: Download distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: python-package-distributions
+          path: dist/
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
-      - name: Wait for TestPyPI indexing
-        run: |
-          echo "⏳ Waiting 60 seconds for TestPyPI to index the new version..."
-          sleep 60
-
-      - name: Install from TestPyPI
+      - name: Install built wheel
         run: |
           python -m pip install --upgrade pip
-          # Retry up to 3 times with exponential backoff
-          for i in 1 2 3; do
-            echo "Attempt $i to install fleet-rlm==${{ needs.preflight.outputs.normalized_version }}"
-            if pip install \
-              --index-url https://pypi.org/simple \
-              --extra-index-url https://test.pypi.org/simple/ \
-              fleet-rlm==${{ needs.preflight.outputs.normalized_version }}; then
-              echo "✅ Successfully installed"
-              exit 0
-            fi
-            if [ $i -lt 3 ]; then
-              echo "⚠️ Install failed, waiting $((i * 30)) seconds before retry..."
-              sleep $((i * 30))
-            fi
-          done
-          echo "❌ Failed to install after 3 attempts"
-          exit 1
-
-      - name: Test CLI availability
-        run: |
-          fleet-rlm --help
-          echo "✅ CLI installed and accessible"
+          pip install dist/*.whl
 
       - name: Test Python import
         run: |
           python -c "import fleet_rlm; print(f'✅ Package version: {fleet_rlm.__version__}')"
 
+      - name: Smoke test installed API and packaged UI
+        run: |
+          SERVER_LOG=$(mktemp)
+          ROOT_HEADERS=$(mktemp)
+          ROOT_BODY=$(mktemp)
+
+          python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
+          SERVER_PID=$!
+
+          cleanup() {
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-health.json; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8765/health >/tmp/fleet-health.json || {
+            cat "$SERVER_LOG"
+            exit 1
+          }
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("/tmp/fleet-health.json").read_text(encoding="utf-8"))
+          assert payload["ok"] is True
+          assert payload["version"]
+          print("✅ /health is reachable")
+          PY
+
+          curl -fsS -D "$ROOT_HEADERS" http://127.0.0.1:8765/ -o "$ROOT_BODY" || {
+            cat "$SERVER_LOG"
+            exit 1
+          }
+
+          grep -qi "^content-type: text/html" "$ROOT_HEADERS" || {
+            cat "$ROOT_HEADERS"
+            cat "$ROOT_BODY"
+            exit 1
+          }
+          grep -qi "<!doctype html" "$ROOT_BODY" || {
+            cat "$ROOT_BODY"
+            exit 1
+          }
+          echo "✅ Packaged UI is served from the installed distribution"
+
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [build, smoke-test-testpypi]
-    if: always() && needs.build.result == 'success'
+    if: ${{ needs.build.result == 'success' && needs.smoke-test-testpypi.result == 'success' }}
     environment:
       name: pypi
       url: https://pypi.org/project/fleet-rlm/
@@ -293,6 +321,7 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [publish-pypi, preflight]
+    if: ${{ needs.publish-pypi.result == 'success' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

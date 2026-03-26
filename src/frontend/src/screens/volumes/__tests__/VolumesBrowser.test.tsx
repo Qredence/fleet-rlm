@@ -1,35 +1,39 @@
 import { act } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { VolumesBrowser } from "@/screens/volumes/volumes-browser";
-import type { VolumeProvider } from "@/screens/volumes/model/volumes-types";
+import { VolumesBrowser } from "@/screens/volumes/volumes-screen";
+import type { VolumeProvider } from "@/screens/volumes/use-volumes";
 
 const useFilesystemMock = vi.fn();
 const clearSelectedFile = vi.fn();
 const selectFile = vi.fn();
 const openCanvas = vi.fn();
 
-vi.mock("@/screens/volumes/hooks/use-volumes-filesystem", () => ({
-  useFilesystem: (provider: VolumeProvider) => useFilesystemMock(provider),
-}));
+vi.mock("@/screens/volumes/use-volumes", async () => {
+  const actual = await vi.importActual<typeof import("@/screens/volumes/use-volumes")>(
+    "@/screens/volumes/use-volumes",
+  );
+  return {
+    ...actual,
+    useFilesystem: (provider: VolumeProvider) => useFilesystemMock(provider),
+    useVolumesSelectionStore: (
+      selector: (state: {
+        selectFile: (node: unknown) => void;
+        clearSelectedFile: () => void;
+      }) => unknown,
+    ) =>
+      selector({
+        selectFile,
+        clearSelectedFile,
+      }),
+  };
+});
 
 vi.mock("@/stores/navigationStore", () => ({
   useNavigationStore: (selector: (state: { openCanvas: () => void }) => unknown) =>
     selector({ openCanvas }),
-}));
-
-vi.mock("@/screens/volumes/model/volumes-selection-store", () => ({
-  useVolumesSelectionStore: (
-    selector: (state: {
-      selectFile: (node: unknown) => void;
-      clearSelectedFile: () => void;
-    }) => unknown,
-  ) =>
-    selector({
-      selectFile,
-      clearSelectedFile,
-    }),
 }));
 
 vi.mock("@/hooks/useIsMobile", () => ({
@@ -45,13 +49,13 @@ vi.mock("@/hooks/useRuntimeStatus", () => ({
 }));
 
 vi.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: {
+    div: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => (
+      <div {...props}>{children}</div>
+    ),
+  },
   useReducedMotion: () => true,
-}));
-
-vi.mock("@/screens/volumes/volumes-browser-sections", () => ({
-  FsItem: ({ node }: { node: { name: string; provider?: string } }) => (
-    <div data-testid="fs-item">{`${node.name}:${node.provider ?? "unknown"}`}</div>
-  ),
 }));
 
 (
@@ -102,7 +106,7 @@ describe("VolumesBrowser", () => {
     expect(useFilesystemMock).toHaveBeenCalled();
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("modal");
     expect(container.textContent).toContain("Browse the modal runtime volume");
-    expect(container.textContent).toContain("modal-volume:modal");
+    expect(container.textContent).toContain("/sandbox/modal-volume");
 
     const daytonaToggle = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Daytona",
@@ -116,7 +120,7 @@ describe("VolumesBrowser", () => {
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
     expect(clearSelectedFile).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Browse the daytona runtime volume");
-    expect(container.textContent).toContain("daytona-volume:daytona");
+    expect(container.textContent).toContain("/sandbox/daytona-volume");
 
     act(() => {
       root.unmount();

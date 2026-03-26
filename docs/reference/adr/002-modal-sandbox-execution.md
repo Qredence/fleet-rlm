@@ -56,7 +56,7 @@ We use **Modal Sandboxes** as the execution environment, wrapped by a custom `Mo
 
 ### Key Components
 
-#### 1. ModalInterpreter (`src/fleet_rlm/core/interpreter.py`)
+#### 1. ModalInterpreter (`fleet_rlm.runtime.ModalInterpreter`, implemented in `src/fleet_rlm/runtime/execution/interpreter.py`)
 
 The host-side adapter implementing DSPy's `CodeInterpreter` interface:
 
@@ -77,7 +77,7 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
     def shutdown(self) -> None: ...
 ```
 
-#### 2. Sandbox Driver (`src/fleet_rlm/core/driver.py`)
+#### 2. Sandbox Driver (`src/fleet_rlm/runtime/driver.py`)
 
 The sandbox-side driver that handles the JSON protocol:
 
@@ -160,9 +160,9 @@ Files written to `/data` persist across sandbox restarts.
 
 ## References
 
-- `src/fleet_rlm/core/interpreter.py` — ModalInterpreter implementation
-- `src/fleet_rlm/core/driver.py` — Sandbox driver
-- `src/fleet_rlm/core/volume_ops.py` — Volume operations
-- `src/fleet_rlm/core/llm_tools.py` — Built-in LLM tools
-- `src/fleet_rlm/core/sandbox_tools.py` — Sandbox tool utilities
+- `src/fleet_rlm/runtime/execution/interpreter.py` — ModalInterpreter implementation
+- `src/fleet_rlm/runtime/execution/core_driver.py` — Sandbox driver
+- `src/fleet_rlm/runtime/tools/modal_volumes.py` — Volume operations
+- `src/fleet_rlm/runtime/tools/llm_tools.py` — Built-in LLM tools
+- `src/fleet_rlm/runtime/execution/sandbox_assets.py` — Bundled sandbox helper assets
 - Modal documentation: https://modal.com/docs

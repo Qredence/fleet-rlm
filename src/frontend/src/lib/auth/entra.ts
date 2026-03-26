@@ -7,10 +7,7 @@ import {
   type SilentRequest,
 } from "@azure/msal-browser";
 import { clearAccessToken, setAccessToken } from "@/lib/auth/tokenStore";
-
-function trimOrEmpty(value: string | undefined): string {
-  return value?.trim() ?? "";
-}
+import { trimOrEmpty } from "@/lib/utils/env";
 
 function parseCsv(value: string | undefined): string[] {
   return trimOrEmpty(value)

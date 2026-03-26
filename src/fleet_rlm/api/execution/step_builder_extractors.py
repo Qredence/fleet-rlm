@@ -8,19 +8,32 @@ ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
 ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
 
 
-def _extract_depth(payload: dict[str, Any]) -> int | None:
-    candidates: list[Any] = [
-        payload.get("depth"),
-        payload.get("delegate_depth"),
-        payload.get("sub_agent_depth"),
-    ]
+def _iter_runtime_sources(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    sources: list[dict[str, Any]] = []
+    runtime_payload = payload.get("runtime")
+    if isinstance(runtime_payload, dict):
+        sources.append(runtime_payload)
+
+    sources.append(payload)
+
     step_data = payload.get("step_data")
     if isinstance(step_data, dict):
+        step_runtime = step_data.get("runtime")
+        if isinstance(step_runtime, dict):
+            sources.append(step_runtime)
+        sources.append(step_data)
+
+    return tuple(sources)
+
+
+def _extract_depth(payload: dict[str, Any]) -> int | None:
+    candidates: list[Any] = []
+    for source in _iter_runtime_sources(payload):
         candidates.extend(
             [
-                step_data.get("depth"),
-                step_data.get("delegate_depth"),
-                step_data.get("sub_agent_depth"),
+                source.get("depth"),
+                source.get("delegate_depth"),
+                source.get("sub_agent_depth"),
             ]
         )
     for raw in candidates:
@@ -34,24 +47,16 @@ def _extract_depth(payload: dict[str, Any]) -> int | None:
 
 
 def _extract_parent_hint(payload: dict[str, Any]) -> str | None:
-    for key in ("parent_step_id", "parent_id"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    step_data = payload.get("step_data")
-    if isinstance(step_data, dict):
+    for source in _iter_runtime_sources(payload):
         for key in ("parent_step_id", "parent_id"):
-            value = step_data.get(key)
+            value = source.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
 
 
 def _iter_actor_sources(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    step_data = payload.get("step_data")
-    if isinstance(step_data, dict):
-        return (payload, step_data)
-    return (payload,)
+    return _iter_runtime_sources(payload)
 
 
 def _extract_actor_id(payload: dict[str, Any]) -> str | None:
@@ -89,8 +94,11 @@ def _extract_actor_kind_from_text(payload: dict[str, Any]) -> ExecutionActorKind
 
 
 def _is_delegate_execution_profile(payload: dict[str, Any]) -> bool:
-    execution_profile = str(payload.get("execution_profile", "")).strip().upper()
-    return execution_profile == "RLM_DELEGATE"
+    for source in _iter_runtime_sources(payload):
+        execution_profile = str(source.get("execution_profile", "")).strip().upper()
+        if execution_profile == "RLM_DELEGATE":
+            return True
+    return False
 
 
 def _has_actor_marker(source: dict[str, Any], keys: tuple[str, ...]) -> bool:

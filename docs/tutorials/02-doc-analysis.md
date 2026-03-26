@@ -10,7 +10,7 @@ Analyze a document using the `run_long_context` runner and DSPy signatures.
 
 ```bash
 uv run python - <<'PY'
-from fleet_rlm.runners import run_long_context
+from fleet_rlm.cli.runners import run_long_context
 
 result = run_long_context(
     docs_path="README.md",
@@ -26,7 +26,7 @@ PY
 
 ```bash
 uv run python - <<'PY'
-from fleet_rlm.runners import run_long_context
+from fleet_rlm.cli.runners import run_long_context
 
 result = run_long_context(
     docs_path="README.md",
@@ -39,7 +39,7 @@ PY
 
 ## What This Uses
 
-- `fleet_rlm.runners.run_long_context`
+- `fleet_rlm.cli.runners.run_long_context`
 - `AnalyzeLongDocument` / `SummarizeLongDocument`
 - Modal sandbox helper stack (`peek`, `grep`, chunking helpers, buffer tools)
 

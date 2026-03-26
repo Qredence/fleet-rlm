@@ -1,7 +1,7 @@
 """Regex-only utility helpers.
 
 This module intentionally keeps text extraction helpers separate from
-agent tool registries (`fleet_rlm.core.tools`) to reduce naming ambiguity.
+agent tool registries (`fleet_rlm.runtime.tools`) to reduce naming ambiguity.
 """
 
 from __future__ import annotations

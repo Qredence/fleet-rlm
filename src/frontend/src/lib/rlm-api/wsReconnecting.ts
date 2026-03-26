@@ -19,7 +19,8 @@ interface RetryState {
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_INITIAL_BACKOFF = 1000;
 const DEFAULT_MAX_BACKOFF = 30000;
-const DEFAULT_FIRST_FRAME_TIMEOUT = 15000;
+// Default first-frame timeout for generic WS flows; Daytona flows should override explicitly if needed
+const DEFAULT_FIRST_FRAME_TIMEOUT = 10000;
 
 function calculateBackoff(attempt: number, initialBackoff: number, maxBackoff: number): number {
   const backoff = initialBackoff * Math.pow(2, attempt);

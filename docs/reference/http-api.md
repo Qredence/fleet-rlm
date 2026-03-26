@@ -39,7 +39,7 @@ Basic liveness check.
 ```json
 {
   "ok": true,
-  "version": "0.4.98"
+  "version": "0.4.99"
 }
 ```
 
@@ -113,13 +113,23 @@ Returns current runtime settings snapshot.
 ```json
 {
   "env_path": "/path/to/.env",
-  "keys": ["DSPY_LM_MODEL", "DSPY_DELEGATE_LM_MODEL", "SECRET_NAME"],
+  "keys": [
+    "DSPY_LM_MODEL",
+    "DSPY_DELEGATE_LM_MODEL",
+    "DAYTONA_API_URL",
+    "SANDBOX_PROVIDER"
+  ],
   "values": {
-    "DSPY_LM_MODEL": "gpt-4o",
-    "DSPY_DELEGATE_LM_MODEL": "gpt-4o-mini"
+    "DSPY_LM_MODEL": "openai/gpt-4o",
+    "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4o-mini",
+    "DAYTONA_API_URL": "https://app.daytona.io/api",
+    "SANDBOX_PROVIDER": "modal"
   },
   "masked_values": {
-    "SECRET_NAME": "***"
+    "DSPY_LM_MODEL": "openai/gpt-4o",
+    "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4o-mini",
+    "DAYTONA_API_URL": "https://app.daytona.io/api",
+    "SANDBOX_PROVIDER": "modal"
   }
 }
 ```
@@ -133,8 +143,8 @@ Updates runtime settings. **Local environment only** (`APP_ENV=local`).
 ```json
 {
   "updates": {
-    "DSPY_LM_MODEL": "gpt-4o-mini",
-    "DSPY_DELEGATE_LM_MODEL": "gpt-3.5-turbo"
+    "DSPY_LM_MODEL": "openai/gpt-4o-mini",
+    "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4o-mini"
   }
 }
 ```
@@ -148,7 +158,7 @@ Updates runtime settings. **Local environment only** (`APP_ENV=local`).
 }
 ```
 
-**Allowed keys:** `DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`, `DSPY_DELEGATE_LM_SMALL_MODEL`, `SECRET_NAME`, `VOLUME_NAME`
+**Allowed keys:** `DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`, `DSPY_DELEGATE_LM_SMALL_MODEL`, `DSPY_LLM_API_KEY`, `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`, `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `SECRET_NAME`, `VOLUME_NAME`, `SANDBOX_PROVIDER`
 
 ### `GET /api/v1/runtime/status`
 
@@ -161,9 +171,10 @@ Returns runtime status with active models and connectivity test cache.
   "app_env": "local",
   "write_enabled": true,
   "ready": true,
+  "sandbox_provider": "daytona",
   "active_models": {
-    "planner": "gpt-4o",
-    "delegate": "gpt-4o-mini",
+    "planner": "openai/gpt-4o",
+    "delegate": "openai/gpt-4o-mini",
     "delegate_small": ""
   },
   "llm": {
@@ -171,15 +182,27 @@ Returns runtime status with active models and connectivity test cache.
     "api_key_set": true,
     "planner_configured": true
   },
+  "mlflow": {
+    "enabled": false,
+    "startup_status": "pending",
+    "startup_error": null
+  },
   "modal": {
     "credentials_available": true,
     "secret_name_set": true,
     "secret_name": "LITELLM",
     "configured_volume": "fleet-rlm-volume"
   },
+  "daytona": {
+    "sandbox_provider_set": true,
+    "api_key_set": true,
+    "api_url_set": true,
+    "target_set": true
+  },
   "tests": {
     "modal": { "ok": true, "latency_ms": 150 },
-    "lm": { "ok": true, "latency_ms": 850 }
+    "lm": { "ok": true, "latency_ms": 850 },
+    "daytona": { "ok": true, "latency_ms": 640 }
   },
   "guidance": []
 }
@@ -229,9 +252,32 @@ Tests LLM connectivity.
 }
 ```
 
+### `POST /api/v1/runtime/tests/daytona`
+
+Tests Daytona connectivity.
+
+**Response:**
+
+```json
+{
+  "kind": "daytona",
+  "ok": true,
+  "preflight_ok": true,
+  "checked_at": "2026-03-09T12:00:00Z",
+  "checks": {
+    "api_key_set": true,
+    "api_url_set": true,
+    "target_set": true
+  },
+  "guidance": [],
+  "latency_ms": 640,
+  "output_preview": "ok"
+}
+```
+
 ### `GET /api/v1/runtime/volume/tree`
 
-Lists the file tree of the configured Modal Volume.
+Lists the file tree of the configured runtime volume.
 
 **Query Parameters:**
 
@@ -239,11 +285,13 @@ Lists the file tree of the configured Modal Volume.
 |-----------|------|---------|-------------|
 | `root_path` | string | `/` | - |
 | `max_depth` | integer | `3` | 1-10 |
+| `provider` | `"modal"` \| `"daytona"` | active backend | - |
 
 **Response:**
 
 ```json
 {
+  "provider": "daytona",
   "volume_name": "fleet-rlm-volume",
   "root_path": "/",
   "nodes": [
@@ -279,11 +327,13 @@ Reads a volume file as UTF-8 text for frontend preview.
 |-----------|------|----------|-------------|
 | `path` | string | yes | min length 1 |
 | `max_bytes` | integer | no | 1-1,000,000, default 200,000 |
+| `provider` | `"modal"` \| `"daytona"` | no | active backend when omitted |
 
 **Response:**
 
 ```json
 {
+  "provider": "daytona",
   "path": "/README.md",
   "mime": "text/markdown",
   "size": 1234,
@@ -435,7 +485,7 @@ Send a user message to initiate or continue a conversation.
 | Mode | Behavior |
 |------|----------|
 | `modal_chat` | Default product runtime with Modal-backed execution |
-| `daytona_pilot` | Experimental Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime inside `RLM Workspace` |
+| `daytona_pilot` | Experimental Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime inside `Workbench` |
 
 When `runtime_mode="daytona_pilot"`:
 
@@ -532,7 +582,7 @@ Emitted during chat turns to stream agent progress.
 {
   "type": "event",
   "data": {
-    "kind": "thought",
+    "kind": "reasoning_step",
     "text": "Analyzing the user's request...",
     "payload": {
       "depth": 0,
@@ -549,16 +599,23 @@ Emitted during chat turns to stream agent progress.
 
 | Kind | Description |
 |------|-------------|
-| `thought` | Agent reasoning step |
+| `assistant_token` | Incremental assistant text token |
+| `status` | Low-emphasis runtime status update |
+| `warning` | Non-fatal warning |
+| `reasoning_step` | Agent reasoning step |
 | `tool_call` | Tool invocation starting |
 | `tool_result` | Tool execution result |
-| `delegation` | RLM sub-agent delegation |
-| `delegation_result` | Sub-agent result summary |
+| `trajectory_step` | Trajectory/plan step |
+| `plan_update` | Planner update surfaced as a status/tool event |
+| `rlm_executing` | Runtime execution milestone |
+| `memory_update` | Memory operation update |
+| `hitl_request` | Human-in-the-loop prompt |
+| `hitl_resolved` | HITL resolution received |
+| `command_ack` | Command accepted |
+| `command_reject` | Command rejected |
 | `final` | Final response text |
 | `cancelled` | Request was cancelled |
 | `error` | Error occurred |
-| `hitl_request` | Human-in-the-loop prompt |
-| `hitl_resolved` | HITL resolution received |
 
 **Event Data Fields:**
 
@@ -566,19 +623,10 @@ Emitted during chat turns to stream agent progress.
 |-------|------|-------------|
 | `kind` | string | Event type identifier |
 | `text` | string | Human-readable content |
-| `payload` | object \| null | Structured event data |
+| `payload` | object \| null | Event-specific structured data; runtime metadata is carried under `payload.runtime` when available |
 | `timestamp` | string | ISO 8601 timestamp |
 | `version` | integer | Schema version (currently 2) |
 | `event_id` | string | Unique event identifier |
-
-**Payload Fields by Kind:**
-
-- **`tool_call`**: `{ tool_name, tool_args, depth, runtime }`
-- **`tool_result`**: `{ tool_name, result, depth, runtime }`
-- **`delegation`**: `{ query, depth, runtime }`
-- **`delegation_result`**: `{ result_preview, depth, runtime }`
-- **`final`**: `{ trace_id, run_id, runtime }`
-- **`error`**: `{ error_type, code }`
 
 ---
 
@@ -657,15 +705,15 @@ Dedicated execution observability stream for Artifact Canvas consumers. Provides
 **Connection:**
 
 ```text
-ws://localhost:8000/api/v1/ws/execution?workspace_id=default&user_id=anonymous&session_id=session-uuid
+ws://localhost:8000/api/v1/ws/execution?session_id=session-uuid
 ```
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `workspace_id` | string | yes | Workspace to subscribe to |
-| `user_id` | string | yes | User to subscribe to |
+| `workspace_id` | string | no | Compatibility query parameter; authenticated workspace identity is canonical |
+| `user_id` | string | no | Compatibility query parameter; authenticated user identity is canonical |
 | `session_id` | string | yes | Session to subscribe to |
 
 **Authentication:** Bearer token in subprotocol header when `AUTH_REQUIRED=true`.
@@ -819,5 +867,5 @@ rg -n "^  /" openapi.yaml
 rg -n "@router\.(get|post|patch)" src/fleet_rlm/api/routers/
 
 # Check WebSocket routes
-rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/api.py
+rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
 ```

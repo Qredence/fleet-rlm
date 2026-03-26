@@ -1,5 +1,5 @@
 import type * as React from "react";
-import { cn } from "@/lib/utils/cn";
+import { cn } from "@/lib/utils";
 
 interface SpinnerProps extends React.HTMLAttributes<HTMLDivElement> {
   size?: "sm" | "md" | "lg";
@@ -18,6 +18,8 @@ function Spinner({ className, size = "md", ref, ...props }: SpinnerProps) {
       ref={ref}
       role="status"
       aria-label="Loading"
+      data-slot="spinner"
+      data-size={size}
       className={cn(
         "animate-spin rounded-full border-2 border-muted border-t-primary",
         sizeClasses[size],
