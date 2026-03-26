@@ -1,8 +1,4 @@
-import {
-  FileQuestion,
-  SearchSlash,
-  TriangleAlert,
-} from "lucide-react";
+import { FileQuestion, SearchSlash, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

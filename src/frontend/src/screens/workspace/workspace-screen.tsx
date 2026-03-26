@@ -132,11 +132,8 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const {
-    sessionRevision,
-    requestedConversationId,
-    clearRequestedConversation,
-  } = useWorkspaceUiStore();
+  const { sessionRevision, requestedConversationId, clearRequestedConversation } =
+    useWorkspaceUiStore();
 
   // Chat history
   const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
