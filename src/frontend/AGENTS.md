@@ -68,6 +68,8 @@ State management:
 - `src/screens/workspace/use-workspace.ts` is the public workspace state/runtime contract; the implementation-heavy stores, types, and runtime helpers live under `src/lib/workspace/`
 - `src/screens/workspace/workspace-canvas-panel.tsx` stays the shell-facing canvas surface; canvas internals live under `src/app/workspace/`
 - Volumes file-selection state lives in `src/screens/volumes/use-volumes.ts`
+- Assistant transcript/content modeling lives under `src/app/workspace/assistant-content/model/`; keep screen entry files thin and route model-building through that module tree instead of recreating screen-local model helpers.
+- `src/lib/workspace/` owns the backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping. Do not reintroduce a screen-layer `workspace-adapter.ts`.
 - The Volumes page has a local provider switcher for `modal` vs `daytona`; keep that selector page-scoped and do not route it through global runtime settings.
 - `src/stores/navigation-types.ts` owns the shared `NavItem` type used by shell navigation and route helpers
 
@@ -114,6 +116,7 @@ React/runtime rules:
 - `daytona_pilot` is the experimental workbench path and sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 - Runtime labels shown to users are `"Modal chat"` and `"Daytona pilot"`
 - Shared runtime status queries belong in `src/hooks/useRuntimeStatus.ts`; settings should compose that hook rather than own the query contract
+- The Volumes surface represents mounted durable storage, not the transient live workspace. Keep provider copy and mock data aligned with the canonical durable roots: `memory`, `artifacts`, `buffers`, and `meta`.
 
 ## Environment and Contract Sync
 

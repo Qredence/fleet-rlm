@@ -178,6 +178,11 @@ Auth, persistence, and analytics constraints:
   - `/home/daytona/memory/artifacts`
   - `/home/daytona/memory/buffers`
   - `/home/daytona/memory/meta`
+- Session manifests on Daytona durable storage live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`. Keep backward-compatible reads from the legacy `workspaces/...` path only as a migration fallback.
+- Keep tool semantics explicit:
+  - `load_document` handles host files, HTTP(S) URLs, and transient Daytona workspace files
+  - `process_document` / `load_text_from_volume` target durable mounted-volume content
+  - `workspace_read` is a low-level transient-workspace helper, not a durable storage API
 - Treat the live Daytona workspace as transient repo/execution state. `context_paths` are staged into the workspace for the current run only, and there is no automatic workspace-to-volume sync.
 - Keep Daytona chat/session normalization helpers in `integrations/providers/daytona/state.py` so `agent.py` stays a focused Daytona-specific agent/session adapter over the shared runtime.
 - Keep terminal session actions in `cli/terminal/session_actions.py` and transcript/rendering helpers in `cli/terminal/session_view.py`.

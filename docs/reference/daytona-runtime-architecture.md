@@ -119,6 +119,8 @@ In practice the provider is intentionally hybrid:
 - `DAYTONA_TARGET` is used only as Daytona SDK routing/config input.
 - `DAYTONA_TARGET` must not be treated as a workspace id, sandbox id, or volume name.
 - The current internal Daytona volume mount path is `/home/daytona/memory`.
+- Session manifests on durable storage live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`.
+- Manifest readers keep a best-effort fallback to the legacy `workspaces/...` path only for migration compatibility.
 - Root and recursive child Daytona runs share the same workspace-scoped
   persistent volume when one is configured, while still using distinct Daytona
   sandbox sessions per child run.
@@ -136,6 +138,7 @@ There are two distinct persistence layers in the Daytona runtime:
 - Durable mounted-volume storage:
   - the mounted volume root is `/home/daytona/memory`
   - canonical durable directories under it are `memory/`, `artifacts/`, `buffers/`, and `meta/`
+  - session manifests and workspace provenance belong under `meta/workspaces/...`
   - workspace repos, staged context, package installs, caches, and scratch files are not durable by default
   - files survive context reset, sandbox restart, or session resume only when they are explicitly promoted into those durable directories
 
