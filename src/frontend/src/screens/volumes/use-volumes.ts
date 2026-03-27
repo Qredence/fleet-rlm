@@ -88,7 +88,8 @@ function mockNodesForProvider(provider: VolumeProvider): FsNode[] {
 
 export const filesystemKeys = {
   all: ["filesystem"] as const,
-  tree: (provider: VolumeProvider) => [...filesystemKeys.all, "tree", provider] as const,
+  tree: (provider: VolumeProvider) =>
+    [...filesystemKeys.all, "tree", provider] as const,
   fileContent: (provider: VolumeProvider, path: string) =>
     [...filesystemKeys.all, "file", provider, path] as const,
 };
@@ -133,10 +134,16 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
       }
 
       try {
-        const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
+        const url = new URL(
+          "/api/v1/runtime/volume/tree",
+          window.location.origin,
+        );
         url.searchParams.set("max_depth", "4");
         url.searchParams.set("provider", provider);
-        const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
+        const resp = await rlmApiClient.get<VolumeTreeResponse>(
+          url.pathname + url.search,
+          signal,
+        );
         return {
           volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
           dataSource: "api",

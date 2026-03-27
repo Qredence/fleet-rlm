@@ -19,8 +19,12 @@ describe("backend contract lock", () => {
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
-    expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(config.rlmApiConfig.wsUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/chat",
+    );
+    expect(config.rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/execution",
+    );
   });
 
   it("maps explicit /chat ws URL to /execution for execution stream", async () => {
@@ -29,8 +33,12 @@ describe("backend contract lock", () => {
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
-    expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(config.rlmApiConfig.wsUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/chat",
+    );
+    expect(config.rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/execution",
+    );
   });
 
   it("keeps runtime endpoint paths on /api/v1/runtime/*", async () => {

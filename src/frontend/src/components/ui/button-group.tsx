@@ -15,11 +15,19 @@ export type ButtonGroupProps = React.HTMLAttributes<HTMLDivElement> & {
   orientation?: "horizontal" | "vertical";
 };
 
-export function ButtonGroup({ className, orientation = "horizontal", ...props }: ButtonGroupProps) {
+export function ButtonGroup({
+  className,
+  orientation = "horizontal",
+  ...props
+}: ButtonGroupProps) {
   return (
     <ButtonGroupContext.Provider value={{ orientation }}>
       <div
-        className={cn("flex", orientation === "horizontal" ? "flex-row" : "flex-col", className)}
+        className={cn(
+          "flex",
+          orientation === "horizontal" ? "flex-row" : "flex-col",
+          className,
+        )}
         role="group"
         {...props}
       />
@@ -31,11 +39,18 @@ export type ButtonGroupTextProps = React.HTMLAttributes<HTMLSpanElement> & {
   asChild?: boolean;
 };
 
-export function ButtonGroupText({ className, asChild = false, ...props }: ButtonGroupTextProps) {
+export function ButtonGroupText({
+  className,
+  asChild = false,
+  ...props
+}: ButtonGroupTextProps) {
   const Comp = asChild ? Slot : "span";
   return (
     <Comp
-      className={cn("flex items-center justify-center px-3 py-1 text-sm", className)}
+      className={cn(
+        "flex items-center justify-center px-3 py-1 text-sm",
+        className,
+      )}
       {...props}
     />
   );

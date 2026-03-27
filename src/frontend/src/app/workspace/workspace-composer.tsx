@@ -43,7 +43,10 @@ interface WorkspaceComposerProps {
 }
 
 function createAttachmentId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `attachment-${nanoid()}`;
@@ -68,7 +71,7 @@ function WorkspaceComposer({
   executionMode,
   onExecutionModeChange,
   canSubmit = true,
-  placeholder = "Ask anything…",
+  placeholder = "Ask, search or make anything...",
   className,
 }: WorkspaceComposerProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
@@ -88,7 +91,9 @@ function WorkspaceComposer({
       const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
         id: createAttachmentId(),
         file,
-        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
       }));
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
@@ -112,7 +117,8 @@ function WorkspaceComposer({
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
-      description: "This backend currently does not accept binary upload payloads.",
+      description:
+        "This backend currently does not accept binary upload payloads.",
     });
   }, []);
 
@@ -157,6 +163,7 @@ function WorkspaceComposer({
   return (
     <div className={className}>
       <PromptInput
+        className="w-full"
         onSubmit={async () => {
           handleSubmit();
         }}
@@ -166,7 +173,7 @@ function WorkspaceComposer({
         <PromptInputBody>
           <PromptInputTextarea
             aria-label="Message"
-            className="min-h-10 px-2 pb-2 pt-1.5"
+            className="min-h-16 px-4 pb-2 pt-4"
             disabled={isLoading}
             onChange={(event) => onChange(event.currentTarget.value)}
             placeholder={placeholder}
@@ -174,15 +181,21 @@ function WorkspaceComposer({
           />
         </PromptInputBody>
 
-        <PromptInputFooter className="px-1 pb-1 pt-0">
-          <PromptInputTools>
+        <PromptInputFooter className="px-3 pb-3 pt-0">
+          <PromptInputTools className="gap-1.5">
             <AttachmentDropdown
               uploadsEnabled={attachmentsEnabled}
               onFilesSelected={handleFilesSelected}
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
-            <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
-            <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
+            <ExecutionModeDropdown
+              value={executionMode}
+              onChange={onExecutionModeChange}
+            />
+            <RuntimeModeDropdown
+              value={runtimeMode}
+              onChange={onRuntimeModeChange}
+            />
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (
@@ -191,7 +204,7 @@ function WorkspaceComposer({
               onClick={onStop}
               aria-label="Stop generating"
               className={cn(
-                "prompt-composer-submit-button flex aspect-square size-6.5 min-h-6.5 min-w-6.5 items-center justify-center rounded-full",
+                "prompt-composer-submit-button flex aspect-square size-8 min-h-8 min-w-8 items-center justify-center rounded-full",
                 "transition-[background-color,color,box-shadow,opacity]",
                 "bg-foreground text-background hover:bg-foreground/80",
               )}
@@ -203,14 +216,18 @@ function WorkspaceComposer({
               aria-label={isLoading ? "Sending message" : "Submit"}
               aria-busy={isReceiving}
               className={cn(
-                "prompt-composer-submit-button aspect-square size-6.5 min-h-6.5 min-w-6.5 rounded-full first:rounded-full last:rounded-full",
+                "prompt-composer-submit-button aspect-square size-8 min-h-8 min-w-8 rounded-full first:rounded-full last:rounded-full",
                 "transition-[background-color,color,box-shadow,opacity]",
               )}
               disabled={isLoading || !canSubmitMessage}
               size="icon-sm"
               variant="ghost"
             >
-              {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
+              {isLoading ? (
+                <Spinner size="sm" />
+              ) : (
+                <ArrowUp className="size-4.5" />
+              )}
             </PromptInputSubmit>
           )}
         </PromptInputFooter>

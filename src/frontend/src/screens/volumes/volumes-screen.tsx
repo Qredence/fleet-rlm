@@ -45,13 +45,16 @@ export function VolumesScreen() {
 export function VolumesBrowser() {
   const openCanvas = useNavigationStore((state) => state.openCanvas);
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
-  const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
+  const clearSelectedFile = useVolumesSelectionStore(
+    (state) => state.clearSelectedFile,
+  );
   const isMobile = useIsMobile();
   const { data: runtimeStatus } = useRuntimeStatus();
   const prefersReduced = useReducedMotion();
   const defaultProvider: VolumeProvider =
     runtimeStatus?.sandbox_provider === "daytona" ? "daytona" : "modal";
-  const [selectedProvider, setSelectedProvider] = useState<VolumeProvider | null>(null);
+  const [selectedProvider, setSelectedProvider] =
+    useState<VolumeProvider | null>(null);
   const activeProvider = selectedProvider ?? defaultProvider;
   const {
     volumes: filesystem,
@@ -70,7 +73,10 @@ export function VolumesBrowser() {
   }, [defaultProvider]);
 
   useEffect(() => {
-    if (previousProviderRef.current && previousProviderRef.current !== activeProvider) {
+    if (
+      previousProviderRef.current &&
+      previousProviderRef.current !== activeProvider
+    ) {
       clearSelectedFile();
       setFsExpanded(new Set());
     }
@@ -106,7 +112,10 @@ export function VolumesBrowser() {
     }
   }, []);
 
-  const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);
+  const filteredFs = useMemo(
+    () => filterFs(filesystem, fsSearch),
+    [filesystem, fsSearch],
+  );
   const fsStats = useMemo(
     () => ({
       volumes: filesystem.length,
@@ -133,7 +142,9 @@ export function VolumesBrowser() {
             onClick={() => refetch()}
             aria-label="Refresh volume tree"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", isLoading && "animate-spin")} />
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", isLoading && "animate-spin")}
+            />
           </Button>
           <Button
             variant="link"
@@ -193,9 +204,12 @@ export function VolumesBrowser() {
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
       {!isMobile ? (
         <div className="mx-auto w-full max-w-200 shrink-0 border-b border-border-subtle px-6 pb-4 pt-4 md:pt-6">
-          <h2 className="mb-1 text-balance text-foreground typo-h3">Volume Browser</h2>
+          <h2 className="mb-1 text-balance text-foreground typo-h3">
+            Volume Browser
+          </h2>
           <p className="mb-3 text-muted-foreground typo-helper">
-            Browse the {providerLabel.toLowerCase()} runtime volume for this workspace.
+            Browse the {providerLabel.toLowerCase()} runtime volume for this
+            workspace.
           </p>
           {headerChildren}
         </div>
@@ -204,9 +218,12 @@ export function VolumesBrowser() {
       <ScrollArea className="min-h-0 flex-1">
         {isMobile ? (
           <div className="w-full px-4 pb-4 pt-2">
-            <h2 className="mb-3 text-balance text-foreground typo-h2">Volume Browser</h2>
+            <h2 className="mb-3 text-balance text-foreground typo-h2">
+              Volume Browser
+            </h2>
             <p className="mb-3 text-muted-foreground typo-helper">
-              Browse the {providerLabel.toLowerCase()} runtime volume for this workspace.
+              Browse the {providerLabel.toLowerCase()} runtime volume for this
+              workspace.
             </p>
             {headerChildren}
           </div>
@@ -216,7 +233,9 @@ export function VolumesBrowser() {
           {isDegraded ? (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />
-              <AlertTitle className="typo-label">{providerLabel} volume unavailable</AlertTitle>
+              <AlertTitle className="typo-label">
+                {providerLabel} volume unavailable
+              </AlertTitle>
               <AlertDescription className="typo-caption">
                 {filesystemDegradedReason ??
                   `The ${providerLabel.toLowerCase()} volume endpoint is unavailable right now.`}
@@ -253,8 +272,12 @@ export function VolumesBrowser() {
 
       <div className="shrink-0 border-t border-border-subtle px-4 py-3 md:px-6">
         <span className="text-muted-foreground typo-helper">
-          {providerLabel} · {fsStats.volumes} volumes · {fsStats.totalFiles} files
-          {filesystemDataSource !== "mock" && filesystemDataSource !== "fallback" ? " · Live" : ""}
+          {providerLabel} · {fsStats.volumes} volumes · {fsStats.totalFiles}{" "}
+          files
+          {filesystemDataSource !== "mock" &&
+          filesystemDataSource !== "fallback"
+            ? " · Live"
+            : ""}
         </span>
       </div>
     </div>
@@ -341,7 +364,11 @@ function FsItem({
         {isExpandable ? (
           <motion.div
             animate={{ rotate: isOpen ? 90 : 0 }}
-            transition={prefersReduced ? { duration: 0.01 } : { duration: 0.15, ease: "easeOut" }}
+            transition={
+              prefersReduced
+                ? { duration: 0.01 }
+                : { duration: 0.15, ease: "easeOut" }
+            }
           >
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </motion.div>
@@ -350,7 +377,12 @@ function FsItem({
         )}
 
         {isVolume ? (
-          <HardDrive className={cn("h-4 w-4", isOpen ? "text-accent" : "text-muted-foreground")} />
+          <HardDrive
+            className={cn(
+              "h-4 w-4",
+              isOpen ? "text-accent" : "text-muted-foreground",
+            )}
+          />
         ) : isFile ? (
           fileIcon(node.name, node.mime)
         ) : isOpen ? (
@@ -369,7 +401,10 @@ function FsItem({
         </span>
 
         {isFile && node.size ? (
-          <span className="shrink-0 text-muted-foreground" style={FILE_SIZE_STYLE}>
+          <span
+            className="shrink-0 text-muted-foreground"
+            style={FILE_SIZE_STYLE}
+          >
             {formatFileSize(node.size)}
           </span>
         ) : isVolume ? (
@@ -391,7 +426,11 @@ function FsItem({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={prefersReduced ? { duration: 0.01 } : { duration: 0.18, ease: "easeOut" }}
+            transition={
+              prefersReduced
+                ? { duration: 0.01 }
+                : { duration: 0.18, ease: "easeOut" }
+            }
             className="overflow-hidden"
           >
             {node.children.map((child) => (

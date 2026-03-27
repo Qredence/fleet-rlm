@@ -44,9 +44,9 @@ vi.mock("@/hooks/useAppNavigate", () => ({
 }));
 
 vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
-    "@/screens/workspace/use-workspace",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/screens/workspace/use-workspace")
+  >("@/screens/workspace/use-workspace");
 
   return {
     ...actual,
@@ -71,7 +71,12 @@ vi.mock("@/screens/workspace/use-workspace", async () => {
       loadConversation: vi.fn(),
     }),
     useRunWorkbenchStore: (
-      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+      selector: (state: {
+        status: "idle";
+        activity: [];
+        iterations: [];
+        callbacks: [];
+      }) => unknown,
     ) =>
       selector({
         status: "idle",
@@ -151,7 +156,9 @@ describe("WorkspaceScreen runtime warning", () => {
         guidance: [],
         daytona: {
           configured: false,
-          guidance: ["Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."],
+          guidance: [
+            "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.",
+          ],
         },
       },
     };

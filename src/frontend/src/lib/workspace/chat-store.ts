@@ -9,7 +9,10 @@ import {
 } from "@/lib/rlm-api";
 import { telemetryClient } from "@/lib/telemetry/client";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
-import type { ChatMessage, ExecutionStep } from "@/lib/workspace/workspace-types";
+import type {
+  ChatMessage,
+  ExecutionStep,
+} from "@/lib/workspace/workspace-types";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 
 const DAYTONA_FIRST_FRAME_TIMEOUT_MS = 60_000;
@@ -34,11 +37,15 @@ interface ChatStore {
   setSessionId: (id: string) => void;
   resetSession: () => void;
   setRuntimeMode: (mode: WsRuntimeMode) => void;
-  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
+  setMessages: (
+    messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
+  ) => void;
   setTurnArtifactsByMessageId: (
     turnArtifactsByMessageId:
       | Record<string, ExecutionStep[]>
-      | ((prev: Record<string, ExecutionStep[]>) => Record<string, ExecutionStep[]>),
+      | ((
+          prev: Record<string, ExecutionStep[]>,
+        ) => Record<string, ExecutionStep[]>),
   ) => void;
   snapshotTurnArtifacts: (messageId: string, steps: ExecutionStep[]) => void;
   clearTurnArtifacts: () => void;
@@ -76,13 +83,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setMessages: (updater) =>
     set((state) => ({
-      messages: typeof updater === "function" ? updater(state.messages) : updater,
+      messages:
+        typeof updater === "function" ? updater(state.messages) : updater,
     })),
 
   setTurnArtifactsByMessageId: (updater) =>
     set((state) => ({
       turnArtifactsByMessageId:
-        typeof updater === "function" ? updater(state.turnArtifactsByMessageId) : updater,
+        typeof updater === "function"
+          ? updater(state.turnArtifactsByMessageId)
+          : updater,
     })),
 
   snapshotTurnArtifacts: (messageId, steps) =>
@@ -124,7 +134,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const traceEnabled = options?.traceEnabled ?? true;
     const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
     const firstFrameTimeoutMs =
-      resolvedRuntimeMode === "daytona_pilot" ? DAYTONA_FIRST_FRAME_TIMEOUT_MS : undefined;
+      resolvedRuntimeMode === "daytona_pilot"
+        ? DAYTONA_FIRST_FRAME_TIMEOUT_MS
+        : undefined;
 
     const payload = {
       type: "message",
@@ -147,10 +159,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
       if (options?.repoRef !== undefined) {
         const repoUrl = options.repoUrl ?? null;
-        request.repo_ref = repoUrl && options.repoRef.trim() ? options.repoRef : null;
+        request.repo_ref =
+          repoUrl && options.repoRef.trim() ? options.repoRef : null;
       }
       if (options?.contextPaths !== undefined) {
-        request.context_paths = options.contextPaths.length > 0 ? options.contextPaths : null;
+        request.context_paths =
+          options.contextPaths.length > 0 ? options.contextPaths : null;
       }
       if (options?.batchConcurrency !== undefined) {
         request.batch_concurrency = options.batchConcurrency;
@@ -158,24 +172,32 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
 
     try {
-      await streamChatOverWs(request as unknown as Parameters<typeof streamChatOverWs>[0], {
-        signal: controller.signal,
-        firstFrameTimeoutMs,
-        onFrame: (frame) => {
-          set((state) => ({
-            messages: applyWsFrameToMessages(state.messages, frame, queryClient).messages,
-          }));
+      await streamChatOverWs(
+        request as unknown as Parameters<typeof streamChatOverWs>[0],
+        {
+          signal: controller.signal,
+          firstFrameTimeoutMs,
+          onFrame: (frame) => {
+            set((state) => ({
+              messages: applyWsFrameToMessages(
+                state.messages,
+                frame,
+                queryClient,
+              ).messages,
+            }));
 
-          if (onFrameCallback) {
-            onFrameCallback(frame);
-          }
+            if (onFrameCallback) {
+              onFrameCallback(frame);
+            }
+          },
         },
-      });
+      );
     } catch (error) {
       if (controller.signal.aborted) {
         return;
       }
-      const message = error instanceof Error ? error.message : "Unknown streaming error";
+      const message =
+        error instanceof Error ? error.message : "Unknown streaming error";
       set({ error: message });
       throw error;
     } finally {

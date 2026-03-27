@@ -19,7 +19,9 @@ export function useControllableState<T>({
   defaultProp?: T;
   onChange?: (value: T) => void;
 }): [T, (next: T | ((prev: T) => T)) => void] {
-  const [uncontrolledValue, setUncontrolledValue] = useState<T>(defaultProp as T);
+  const [uncontrolledValue, setUncontrolledValue] = useState<T>(
+    defaultProp as T,
+  );
   const isControlled = prop !== undefined;
   const value = isControlled ? (prop as T) : uncontrolledValue;
 

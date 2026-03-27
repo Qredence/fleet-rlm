@@ -1,7 +1,14 @@
 import { act } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { VolumesBrowser } from "@/screens/volumes/volumes-screen";
 import type { VolumeProvider } from "@/screens/volumes/use-volumes";
@@ -12,9 +19,9 @@ const selectFile = vi.fn();
 const openCanvas = vi.fn();
 
 vi.mock("@/screens/volumes/use-volumes", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/volumes/use-volumes")>(
-    "@/screens/volumes/use-volumes",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/screens/volumes/use-volumes")
+  >("@/screens/volumes/use-volumes");
   return {
     ...actual,
     useFilesystem: (provider: VolumeProvider) => useFilesystemMock(provider),
@@ -32,8 +39,9 @@ vi.mock("@/screens/volumes/use-volumes", async () => {
 });
 
 vi.mock("@/stores/navigationStore", () => ({
-  useNavigationStore: (selector: (state: { openCanvas: () => void }) => unknown) =>
-    selector({ openCanvas }),
+  useNavigationStore: (
+    selector: (state: { openCanvas: () => void }) => unknown,
+  ) => selector({ openCanvas }),
 }));
 
 vi.mock("@/hooks/useIsMobile", () => ({
@@ -119,7 +127,9 @@ describe("VolumesBrowser", () => {
 
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
     expect(clearSelectedFile).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Browse the daytona runtime volume");
+    expect(container.textContent).toContain(
+      "Browse the daytona runtime volume",
+    );
     expect(container.textContent).toContain("/sandbox/daytona-volume");
 
     act(() => {

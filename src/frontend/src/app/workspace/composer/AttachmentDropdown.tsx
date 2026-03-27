@@ -9,7 +9,11 @@ import {
   MenubarMenu,
   MenubarTrigger,
 } from "@/components/ui/menubar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   PROMPT_INPUT_ICON_BUTTON_CLASSNAME,
@@ -75,7 +79,10 @@ function AttachmentDropdown({
             </TooltipContent>
           </Tooltip>
 
-          <MenubarContent align="start" className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-60")}>
+          <MenubarContent
+            align="start"
+            className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, "w-60")}
+          >
             <MenubarItem
               className="prompt-composer-menu-item cursor-pointer gap-3 rounded-xl px-3 py-2.5"
               onSelect={() => {

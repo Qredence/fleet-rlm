@@ -104,7 +104,13 @@
     "overrides": {
       "flatted": "3.4.2",
       "undici": "6.24.0"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "core-js",
+      "esbuild",
+      "msw",
+      "protobufjs"
+    ]
   },
   "trustedDependencies": [
     "@tailwindcss/oxide",

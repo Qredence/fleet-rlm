@@ -5,16 +5,25 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { RuntimeModeDropdown } from "@/app/workspace/composer/RuntimeModeDropdown";
 
 let onValueChangeRef: ((value: string) => void) | undefined;
+let currentValueRef: string | undefined;
+
+const runtimeLabelByValue: Record<string, string> = {
+  daytona_pilot: "Daytona",
+  modal_chat: "Modal chat",
+};
 
 vi.mock("@/components/ui/select", () => ({
   Select: ({
     children,
     onValueChange,
+    value,
   }: {
     children: ReactNode;
     onValueChange?: (value: string) => void;
+    value?: string;
   }) => {
     onValueChangeRef = onValueChange;
+    currentValueRef = value;
     return <div>{children}</div>;
   },
   SelectTrigger: ({
@@ -27,10 +36,29 @@ vi.mock("@/components/ui/select", () => ({
       {children}
     </button>
   ),
-  SelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
   SelectGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectValue: ({
+    children,
+    placeholder,
+  }: {
+    children?: ReactNode;
+    placeholder?: string;
+  }) => (
+    <span>
+      {children ??
+        (currentValueRef ? runtimeLabelByValue[currentValueRef] : undefined) ??
+        placeholder}
+    </span>
+  ),
   SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
-    <button type="button" role="menuitemradio" onClick={() => onValueChangeRef?.(value)}>
+    <button
+      type="button"
+      role="menuitemradio"
+      onClick={() => onValueChangeRef?.(value)}
+    >
       {children}
     </button>
   ),
@@ -46,6 +74,7 @@ describe("RuntimeModeDropdown", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     onValueChangeRef = undefined;
+    currentValueRef = undefined;
   });
 
   it("renders the current runtime label", () => {
@@ -54,7 +83,9 @@ describe("RuntimeModeDropdown", () => {
     const root = createRoot(container);
 
     act(() => {
-      root.render(<RuntimeModeDropdown value="daytona_pilot" onChange={() => {}} />);
+      root.render(
+        <RuntimeModeDropdown value="daytona_pilot" onChange={() => {}} />,
+      );
     });
 
     expect(container.textContent).toContain("Daytona");
@@ -71,18 +102,22 @@ describe("RuntimeModeDropdown", () => {
     const onChange = vi.fn();
 
     act(() => {
-      root.render(<RuntimeModeDropdown value="modal_chat" onChange={onChange} />);
+      root.render(
+        <RuntimeModeDropdown value="modal_chat" onChange={onChange} />,
+      );
     });
 
-    const trigger = container.querySelector('button[aria-label="Runtime mode: Modal chat"]');
+    const trigger = container.querySelector(
+      'button[aria-label="Runtime mode: Modal chat"]',
+    );
 
     act(() => {
       trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const daytonaOption = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
-      (item) => item.textContent?.includes("Daytona") ?? false,
-    );
+    const daytonaOption = Array.from(
+      document.querySelectorAll('[role="menuitemradio"]'),
+    ).find((item) => item.textContent?.includes("Daytona") ?? false);
 
     act(() => {
       daytonaOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

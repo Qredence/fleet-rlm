@@ -9,7 +9,11 @@ import {
 } from "@/lib/workspace/run-workbench-adapter";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
-function makeEvent(kind: string, text: string, payload?: Record<string, unknown>): WsServerMessage {
+function makeEvent(
+  kind: string,
+  text: string,
+  payload?: Record<string, unknown>,
+): WsServerMessage {
   return {
     type: "event",
     data: {
@@ -78,7 +82,8 @@ describe("runWorkbenchAdapter", () => {
             {
               iteration: 1,
               status: "completed",
-              reasoning_summary: "Planner selected a grounded repo-and-doc sweep.",
+              reasoning_summary:
+                "Planner selected a grounded repo-and-doc sweep.",
               code: "summary = 'Done'\nSUBMIT(summary=summary)",
               stdout: "done",
               duration_ms: 123,
@@ -111,7 +116,8 @@ describe("runWorkbenchAdapter", () => {
               kind: "file",
               title: "spec.pdf",
               display_url: "/Users/zocho/Documents/spec.pdf",
-              description: "Staged at /workspace/context/spec.pdf.extracted.txt",
+              description:
+                "Staged at /workspace/context/spec.pdf.extracted.txt",
             },
           ],
           attachments: [
@@ -142,7 +148,9 @@ describe("runWorkbenchAdapter", () => {
     expect(next.status).toBe("completed");
     expect(next.runId).toBe("run-123");
     expect(next.daytonaMode).toBe("host_loop_rlm");
-    expect(next.contextSources[0]?.hostPath).toBe("/Users/zocho/Documents/spec.pdf");
+    expect(next.contextSources[0]?.hostPath).toBe(
+      "/Users/zocho/Documents/spec.pdf",
+    );
     expect(next.iterations).toEqual([]);
     expect(next.callbacks).toEqual([]);
     expect(next.promptHandles).toEqual([]);
@@ -395,7 +403,9 @@ describe("runWorkbenchAdapter", () => {
     expect(next.status).toBe("completed");
     expect(next.runId).toBe("run-daytona-1");
     expect(next.daytonaMode).toBe("host_loop_rlm");
-    expect(next.contextSources[0]?.hostPath).toBe("/workspace/docs/overview.md");
+    expect(next.contextSources[0]?.hostPath).toBe(
+      "/workspace/docs/overview.md",
+    );
     expect(next.promptHandles[0]?.handleId).toBe("prompt-daytona-1");
     expect(next.iterations[0]?.reasoningSummary).toContain("Daytona");
     expect(next.callbacks[0]?.callbackName).toBe("llm_query_batched");
@@ -509,10 +519,14 @@ describe("runWorkbenchAdapter", () => {
 
     expect(withToolResult.callbacks).toHaveLength(1);
     expect(withToolResult.callbacks[0]?.status).toBe("completed");
-    expect(withToolResult.callbacks[0]?.task).toBe("Summarize the overview section");
+    expect(withToolResult.callbacks[0]?.task).toBe(
+      "Summarize the overview section",
+    );
     expect(withToolResult.callbacks[0]?.label).toBe("Overview");
     expect(withToolResult.callbacks[0]?.source?.path).toBe("docs/overview.md");
-    expect(withToolResult.callbacks[0]?.resultPreview).toContain("system topology");
+    expect(withToolResult.callbacks[0]?.resultPreview).toContain(
+      "system topology",
+    );
   });
 
   it("keeps distinct callbacks when the task text repeats across sources", () => {
@@ -569,10 +583,9 @@ describe("runWorkbenchAdapter", () => {
     );
 
     expect(withSecondCallback.callbacks).toHaveLength(2);
-    expect(withSecondCallback.callbacks.map((item) => item.source?.path)).toEqual([
-      "docs/overview.md",
-      "docs/architecture.md",
-    ]);
+    expect(
+      withSecondCallback.callbacks.map((item) => item.source?.path),
+    ).toEqual(["docs/overview.md", "docs/architecture.md"]);
   });
 
   it("keeps distinct sources when multiple excerpts come from the same file", () => {
@@ -621,7 +634,10 @@ describe("runWorkbenchAdapter", () => {
     );
 
     expect(next.sources).toHaveLength(2);
-    expect(next.sources.map((item) => item.sourceId)).toEqual(["slice-1", "slice-2"]);
+    expect(next.sources.map((item) => item.sourceId)).toEqual([
+      "slice-1",
+      "slice-2",
+    ]);
   });
 
   it("ignores non-Daytona frames after a completed Daytona run", () => {
@@ -711,7 +727,9 @@ describe("runWorkbenchAdapter", () => {
     );
 
     expect(next.status).toBe("error");
-    expect(next.contextSources[0]?.hostPath).toBe("/Users/zocho/Documents/spec.pdf");
+    expect(next.contextSources[0]?.hostPath).toBe(
+      "/Users/zocho/Documents/spec.pdf",
+    );
     expect(next.summary?.terminationReason).toBe("failed");
     expect(next.errorMessage).toMatch(/No response arrived/);
     expect(next.activity.at(-1)?.kind).toBe("error");

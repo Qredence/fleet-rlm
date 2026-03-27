@@ -56,13 +56,16 @@ function parseRepoCandidate(
   let repoRefCandidate: string | undefined;
   if (
     segments.length >= 4 &&
-    (segments[2]?.toLowerCase() === "tree" || segments[2]?.toLowerCase() === "blob")
+    (segments[2]?.toLowerCase() === "tree" ||
+      segments[2]?.toLowerCase() === "blob")
   ) {
     const candidate = decodeURIComponent(segments[3] ?? "").trim();
     if (candidate) {
       repoRef = candidate;
     }
-    const candidateTail = decodeURIComponent(segments.slice(3).join("/")).trim();
+    const candidateTail = decodeURIComponent(
+      segments.slice(3).join("/"),
+    ).trim();
     if (candidateTail) {
       repoRefCandidate = candidateTail;
     }
@@ -76,12 +79,16 @@ function parseRepoCandidate(
 }
 
 function detectRepoRefHint(value: string): string | undefined {
-  const commitMatch = value.match(/(?:^|\s)commit\s+([0-9a-f]{7,40})(?=$|[\s.,!?;:])/i);
+  const commitMatch = value.match(
+    /(?:^|\s)commit\s+([0-9a-f]{7,40})(?=$|[\s.,!?;:])/i,
+  );
   if (commitMatch?.[1]) {
     return commitMatch[1];
   }
 
-  const refMatch = value.match(/(?:^|\s)(?:branch|ref)\s+([A-Za-z0-9._/-]+)(?=$|[\s.,!?;:])/i);
+  const refMatch = value.match(
+    /(?:^|\s)(?:branch|ref)\s+([A-Za-z0-9._/-]+)(?=$|[\s.,!?;:])/i,
+  );
   if (refMatch?.[1]) {
     const normalized = stripTrailingPunctuation(refMatch[1]);
     return normalized || undefined;

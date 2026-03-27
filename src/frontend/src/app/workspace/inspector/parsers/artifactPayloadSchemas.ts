@@ -99,10 +99,13 @@ export function parseArtifactPayload(value: unknown): ParsedArtifactPayload {
     ("trajectory_step" in record ||
       "step_data" in record ||
       "thought" in record ||
-      ("tool_name" in record && "output" in record && !("tool_output" in record)));
+      ("tool_name" in record &&
+        "output" in record &&
+        !("tool_output" in record)));
   if (looksLikeTrajectory) {
     const trajectory = TrajectoryEnvelopeSchema.safeParse(value);
-    if (trajectory.success) return { kind: "trajectory", data: trajectory.data };
+    if (trajectory.success)
+      return { kind: "trajectory", data: trajectory.data };
   }
 
   if (record) {

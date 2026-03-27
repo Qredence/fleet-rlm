@@ -35,7 +35,11 @@ function parseTrajectoryStepIndex(
   payload?: Record<string, unknown>,
   stepData?: Record<string, unknown>,
 ): number {
-  return asOptionalNumber(payload?.step_index) ?? asOptionalNumber(stepData?.index) ?? 0;
+  return (
+    asOptionalNumber(payload?.step_index) ??
+    asOptionalNumber(stepData?.index) ??
+    0
+  );
 }
 
 function normalizeTrajectoryStep(
@@ -225,16 +229,22 @@ function summarizeTrajectoryValue(value: unknown): string | undefined {
   }
 }
 
-export function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
+export function trajectoryStepDetails(
+  step: NormalizedTrajectoryStep,
+): string[] {
   const details: string[] = [];
   if (step.toolName) {
     details.push(`Tool · ${step.toolName}`);
   }
   if (step.toolInput !== undefined) {
-    details.push(`Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`);
+    details.push(
+      `Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`,
+    );
   }
   if (step.toolOutput !== undefined) {
-    details.push(`Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`);
+    details.push(
+      `Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`,
+    );
   }
   return details;
 }

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { RuntimeForm, shouldHydrateRuntimeForm } from "@/screens/settings/runtime-form";
+import {
+  RuntimeForm,
+  shouldHydrateRuntimeForm,
+} from "@/screens/settings/runtime-form";
 
 vi.mock("@/screens/settings/use-runtime-settings", () => ({
   useRuntimeSettings: () => ({
@@ -81,7 +84,10 @@ vi.mock("@/screens/settings/use-runtime-settings", () => ({
     },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
+  computeRuntimeUpdates: (
+    current: Record<string, string>,
+    baseline: Record<string, string>,
+  ) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {

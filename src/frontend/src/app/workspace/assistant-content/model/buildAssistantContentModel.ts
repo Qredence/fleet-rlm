@@ -1,5 +1,11 @@
-import type { ChatRenderPart, ChatRenderToolState } from "@/screens/workspace/use-workspace";
-import type { AssistantTurnDisplayItem, ToolSessionItem } from "@/lib/workspace/chat-display-items";
+import type {
+  ChatRenderPart,
+  ChatRenderToolState,
+} from "@/screens/workspace/use-workspace";
+import type {
+  AssistantTurnDisplayItem,
+  ToolSessionItem,
+} from "@/lib/workspace/chat-display-items";
 import { buildAssistantTrajectoryModel } from "./buildAssistantTrajectoryModel";
 import { humanizeLabel, uniqueStrings } from "./modelUtils";
 import { getRuntimeBadgeStrings } from "./runtimeBadges";
@@ -11,10 +17,16 @@ import type {
 } from "./types";
 
 function shouldOpenToolRow(state: ChatRenderToolState) {
-  return state === "running" || state === "input-streaming" || state === "output-error";
+  return (
+    state === "running" ||
+    state === "input-streaming" ||
+    state === "output-error"
+  );
 }
 
-function shouldOpenTaskRow(status: Extract<ChatRenderPart, { kind: "task" }>["status"]) {
+function shouldOpenTaskRow(
+  status: Extract<ChatRenderPart, { kind: "task" }>["status"],
+) {
   return status === "in_progress" || status === "error";
 }
 
@@ -41,10 +53,14 @@ function toolSessionStateForItem(item: ToolSessionItem): ChatRenderToolState {
 function toolSessionHeaderLabel(items: ToolSessionItem[]) {
   const first = items[0];
   const toolName = first?.toolName ?? "Tool";
-  return first?.eventKind === "tool_call" ? `Calling tool: ${toolName}` : `Tool: ${toolName}`;
+  return first?.eventKind === "tool_call"
+    ? `Calling tool: ${toolName}`
+    : `Tool: ${toolName}`;
 }
 
-function summarizeToolSession(session: AssistantContentModel["attachedToolSessions"][number]) {
+function summarizeToolSession(
+  session: AssistantContentModel["attachedToolSessions"][number],
+) {
   const latestItem = session.items[session.items.length - 1];
   const toolName = latestItem?.toolName ?? "tool";
   if (!latestItem) return `Waiting for ${toolName}`;
@@ -63,7 +79,11 @@ function summarizeToolSession(session: AssistantContentModel["attachedToolSessio
 }
 
 function directExecutionRuntimeBadges(part: DirectExecutionPart) {
-  if (part.kind === "tool" || part.kind === "sandbox" || part.kind === "status_note") {
+  if (
+    part.kind === "tool" ||
+    part.kind === "sandbox" ||
+    part.kind === "status_note"
+  ) {
     return getRuntimeBadgeStrings(part.runtimeContext);
   }
   return [];
@@ -129,25 +149,34 @@ function directExecutionDefaultOpen(part: DirectExecutionPart) {
 
 function buildExecutionSections(
   item: AssistantTurnDisplayItem,
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[],
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[],
 ) {
-  const sections: ExecutionSection[] = item.attachedToolSessions.map((session) => {
-    const latestItem = session.items[session.items.length - 1];
-    const latestState = latestItem ? toolSessionStateForItem(latestItem) : ("running" as const);
-    const runtimeBadges = uniqueStrings(
-      session.items.flatMap((sessionItem) => getRuntimeBadgeStrings(sessionItem.runtimeContext)),
-    );
+  const sections: ExecutionSection[] = item.attachedToolSessions.map(
+    (session) => {
+      const latestItem = session.items[session.items.length - 1];
+      const latestState = latestItem
+        ? toolSessionStateForItem(latestItem)
+        : ("running" as const);
+      const runtimeBadges = uniqueStrings(
+        session.items.flatMap((sessionItem) =>
+          getRuntimeBadgeStrings(sessionItem.runtimeContext),
+        ),
+      );
 
-    return {
-      id: session.key,
-      kind: "tool_session",
-      label: toolSessionHeaderLabel(session.items),
-      summary: summarizeToolSession(session),
-      defaultOpen: shouldOpenToolRow(latestState),
-      runtimeBadges,
-      session,
-    };
-  });
+      return {
+        id: session.key,
+        kind: "tool_session",
+        label: toolSessionHeaderLabel(session.items),
+        summary: summarizeToolSession(session),
+        defaultOpen: shouldOpenToolRow(latestState),
+        runtimeBadges,
+        session,
+      };
+    },
+  );
 
   const directExecutionParts = supplementalParts.filter(
     (part): part is DirectExecutionPart =>
@@ -177,7 +206,9 @@ function buildExecutionSections(
   };
 }
 
-function executionSectionState(section: ExecutionSection): ExecutionHighlight["status"] {
+function executionSectionState(
+  section: ExecutionSection,
+): ExecutionHighlight["status"] {
   if (section.kind === "tool_session") {
     const latest = section.session.items[section.session.items.length - 1];
     if (!latest) return "running";
@@ -197,7 +228,9 @@ function executionSectionState(section: ExecutionSection): ExecutionHighlight["s
   }
 
   if (section.kind === "queue") {
-    return section.part.items.every((item) => item.completed) ? "completed" : "running";
+    return section.part.items.every((item) => item.completed)
+      ? "completed"
+      : "running";
   }
 
   if (section.kind === "status_note") {
@@ -209,7 +242,8 @@ function executionSectionState(section: ExecutionSection): ExecutionHighlight["s
   if ("errorText" in section.part && section.part.errorText) return "failed";
   if (
     "state" in section.part &&
-    (section.part.state === "running" || section.part.state === "input-streaming")
+    (section.part.state === "running" ||
+      section.part.state === "input-streaming")
   ) {
     return "running";
   }
@@ -220,7 +254,9 @@ function normalizeToolKey(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function sessionToolName(session: AssistantContentModel["attachedToolSessions"][number]) {
+function sessionToolName(
+  session: AssistantContentModel["attachedToolSessions"][number],
+) {
   const latestItem = session.items[session.items.length - 1];
   return latestItem?.toolName ?? session.items[0]?.toolName;
 }
@@ -336,7 +372,11 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
     let cursor = index + 1;
     while (cursor < candidates.length) {
       const next = candidates[cursor];
-      if (!next?.groupable || !next.groupKey || next.groupKey !== candidate.groupKey) {
+      if (
+        !next?.groupable ||
+        !next.groupKey ||
+        next.groupKey !== candidate.groupKey
+      ) {
         break;
       }
       grouped.push(next);
@@ -349,7 +389,9 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         label: candidate.label,
         summary: `${candidate.label} ×${grouped.length}`,
         status: aggregateExecutionStatus(grouped.map((item) => item.status)),
-        runtimeBadges: uniqueStrings(grouped.flatMap((item) => item.runtimeBadges)),
+        runtimeBadges: uniqueStrings(
+          grouped.flatMap((item) => item.runtimeBadges),
+        ),
         count: grouped.length,
       });
     }
@@ -361,17 +403,25 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
 }
 
 function buildEvidence(
-  supplementalParts: Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }>[],
+  supplementalParts: Exclude<
+    ChatRenderPart,
+    { kind: "reasoning" | "chain_of_thought" }
+  >[],
 ) {
   const citations = supplementalParts
     .filter(
-      (part): part is Extract<ChatRenderPart, { kind: "inline_citation_group" }> =>
+      (
+        part,
+      ): part is Extract<ChatRenderPart, { kind: "inline_citation_group" }> =>
         part.kind === "inline_citation_group",
     )
     .flatMap((part) => part.citations);
 
   const sources = supplementalParts
-    .filter((part): part is Extract<ChatRenderPart, { kind: "sources" }> => part.kind === "sources")
+    .filter(
+      (part): part is Extract<ChatRenderPart, { kind: "sources" }> =>
+        part.kind === "sources",
+    )
     .flatMap((part) => part.sources);
 
   const attachments = supplementalParts
@@ -385,29 +435,46 @@ function buildEvidence(
     citations,
     sources,
     attachments,
-    hasContent: citations.length > 0 || sources.length > 0 || attachments.length > 0,
+    hasContent:
+      citations.length > 0 || sources.length > 0 || attachments.length > 0,
   };
 }
 
-export function buildAssistantContentModel(item: AssistantTurnDisplayItem): AssistantContentModel {
+export function buildAssistantContentModel(
+  item: AssistantTurnDisplayItem,
+): AssistantContentModel {
   const answerText = item.message?.content ?? "";
-  const { overview, items: trajectoryItems, hasCot } = buildAssistantTrajectoryModel(item);
+  const {
+    overview,
+    items: trajectoryItems,
+    hasCot,
+  } = buildAssistantTrajectoryModel(item);
 
   const supplementalParts = [
     ...item.attachedTraceParts.map((tracePart) => tracePart.part),
     ...(item.message?.renderParts ?? []),
   ].filter(
-    (part): part is Exclude<ChatRenderPart, { kind: "reasoning" | "chain_of_thought" }> =>
-      part.kind !== "reasoning" && part.kind !== "chain_of_thought",
+    (
+      part,
+    ): part is Exclude<
+      ChatRenderPart,
+      { kind: "reasoning" | "chain_of_thought" }
+    > => part.kind !== "reasoning" && part.kind !== "chain_of_thought",
   );
   const evidence = buildEvidence(supplementalParts);
-  const { sections, directExecutionParts } = buildExecutionSections(item, supplementalParts);
+  const { sections, directExecutionParts } = buildExecutionSections(
+    item,
+    supplementalParts,
+  );
   const executionHighlights = buildExecutionHighlights(sections);
 
-  const trajectoryCount = trajectoryItems.length > 0 ? trajectoryItems.length : overview ? 1 : 0;
+  const trajectoryCount =
+    trajectoryItems.length > 0 ? trajectoryItems.length : overview ? 1 : 0;
   const runtimeBadges = uniqueStrings([
     ...(overview?.runtimeBadges ?? []),
-    ...trajectoryItems.flatMap((trajectoryItem) => trajectoryItem.runtimeBadges),
+    ...trajectoryItems.flatMap(
+      (trajectoryItem) => trajectoryItem.runtimeBadges,
+    ),
     ...sections.flatMap((section) => section.runtimeBadges),
   ]);
   const sandboxActive =
@@ -424,7 +491,11 @@ export function buildAssistantContentModel(item: AssistantTurnDisplayItem): Assi
     trajectoryCount <= 1 &&
     evidenceCategoryCount <= 1 &&
     runtimeBadges.length === 0;
-  const complex = trajectoryCount > 1 || sections.length > 1 || evidenceCategoryCount > 1 || hasCot;
+  const complex =
+    trajectoryCount > 1 ||
+    sections.length > 1 ||
+    evidenceCategoryCount > 1 ||
+    hasCot;
 
   const complexity: AssistantContentModel["complexity"] = simple
     ? "simple"
@@ -443,7 +514,8 @@ export function buildAssistantContentModel(item: AssistantTurnDisplayItem): Assi
       text: answerText,
       hasContent: answerText.length > 0,
       showStreamingShell:
-        (item.isPendingShell || Boolean(item.message?.streaming)) && answerText.length === 0,
+        (item.isPendingShell || Boolean(item.message?.streaming)) &&
+        answerText.length === 0,
     },
     trajectory: {
       overview,

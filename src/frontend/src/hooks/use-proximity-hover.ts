@@ -1,4 +1,10 @@
-import { useRef, useState, useCallback, useEffect, type RefObject } from "react";
+import {
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  type RefObject,
+} from "react";
 
 export interface ItemRect {
   top: number;
@@ -37,13 +43,16 @@ export function useProximityHover<T extends HTMLElement>(
   const sessionRef = useRef(0);
   const rafIdRef = useRef<number | null>(null);
 
-  const registerItem = useCallback((index: number, element: HTMLElement | null) => {
-    if (element) {
-      itemsRef.current.set(index, element);
-    } else {
-      itemsRef.current.delete(index);
-    }
-  }, []);
+  const registerItem = useCallback(
+    (index: number, element: HTMLElement | null) => {
+      if (element) {
+        itemsRef.current.set(index, element);
+      } else {
+        itemsRef.current.delete(index);
+      }
+    },
+    [],
+  );
 
   const measureItems = useCallback(() => {
     const container = containerRef.current;
@@ -91,16 +100,20 @@ export function useProximityHover<T extends HTMLElement>(
 
         const rects = itemRectsRef.current;
         // Convert content-relative rects to viewport coords using live scroll
-        const scrollOffset = axis === "x" ? container.scrollLeft : container.scrollTop;
-        const borderOffset = axis === "x" ? container.clientLeft : container.clientTop;
-        const containerEdge = axis === "x" ? containerRect.left : containerRect.top;
+        const scrollOffset =
+          axis === "x" ? container.scrollLeft : container.scrollTop;
+        const borderOffset =
+          axis === "x" ? container.clientLeft : container.clientTop;
+        const containerEdge =
+          axis === "x" ? containerRect.left : containerRect.top;
 
         for (let index = 0; index < rects.length; index++) {
           const r = rects[index];
           if (!r) continue;
 
           const contentPos = axis === "x" ? r.left : r.top;
-          const itemStart = containerEdge + borderOffset + contentPos - scrollOffset;
+          const itemStart =
+            containerEdge + borderOffset + contentPos - scrollOffset;
           const itemSize = axis === "x" ? r.width : r.height;
           const itemEnd = itemStart + itemSize;
 

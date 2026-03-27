@@ -26,7 +26,9 @@ import type {
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
   return (
-    frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error"
+    frame.data.kind === "final" ||
+    frame.data.kind === "cancelled" ||
+    frame.data.kind === "error"
   );
 }
 
@@ -82,7 +84,10 @@ function applyOptimisticHitlResolution(
   });
 }
 
-function revertOptimisticHitlResolution(messages: ChatMessage[], msgId: string): ChatMessage[] {
+function revertOptimisticHitlResolution(
+  messages: ChatMessage[],
+  msgId: string,
+): ChatMessage[] {
   return messages.map((message) => {
     if (message.id !== msgId || message.type !== "hitl" || !message.hitlData) {
       return message;
@@ -99,7 +104,9 @@ function revertOptimisticHitlResolution(messages: ChatMessage[], msgId: string):
 }
 
 export function useWorkspace(): ChatRuntime {
-  const setCreationPhase = useWorkspaceUiStore((state) => state.setCreationPhase);
+  const setCreationPhase = useWorkspaceUiStore(
+    (state) => state.setCreationPhase,
+  );
   const sessionRevision = useWorkspaceUiStore((state) => state.sessionRevision);
   const clearArtifactSteps = useArtifactStore((state) => state.clear);
 
@@ -165,7 +172,9 @@ export function useWorkspace(): ChatRuntime {
         applyWsFrameToArtifacts(frame);
 
         if (isTerminalFrame(frame)) {
-          const turnId = latestAssistantTurnId(useChatStore.getState().messages);
+          const turnId = latestAssistantTurnId(
+            useChatStore.getState().messages,
+          );
           if (turnId) {
             snapshotTurnArtifacts(turnId, useArtifactStore.getState().steps);
           }
@@ -253,7 +262,8 @@ export function useWorkspace(): ChatRuntime {
           },
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown streaming error";
+        const message =
+          error instanceof Error ? error.message : "Unknown streaming error";
         if (!terminalSeen) {
           useRunWorkbenchStore.getState().failRun(message);
           applyWsFrameToArtifacts({ type: "error", message });
@@ -314,7 +324,8 @@ export function useWorkspace(): ChatRuntime {
         );
       } catch (error) {
         setMessages((prev) => revertOptimisticHitlResolution(prev, msgId));
-        const message = error instanceof Error ? error.message : "Unknown command error";
+        const message =
+          error instanceof Error ? error.message : "Unknown command error";
         toast.error("Failed to resolve checkpoint", { description: message });
       }
     },
@@ -323,7 +334,8 @@ export function useWorkspace(): ChatRuntime {
 
   const resolveClarification = useCallback(() => {
     toast("Live backend mode", {
-      description: "Clarification cards are currently available when emitted by backend events.",
+      description:
+        "Clarification cards are currently available when emitted by backend events.",
     });
   }, []);
 
