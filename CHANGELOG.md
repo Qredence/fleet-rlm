@@ -11,6 +11,8 @@ All notable changes to this project are documented in this file.
 - Reworked settings into a reusable in-shell dialog/sheet that can open directly from the command palette, sidebar, and runtime warning CTAs without forcing a full route transition away from the active workspace.
 - Split the oversized settings screen into shared settings-content and event modules, so the routed `/settings` entrypoint and the shell overlay now share one implementation path.
 - Tightened shell presentation by simplifying the workspace empty state, reordering sidebar actions, removing redundant session-row chrome, and aligning switch/sidebar typography with the current UI token set.
+- Split durable volumes away from the live workspace flow, so the Volumes page now centers on provider-scoped mounted storage while the workbench stays focused on chat and execution context.
+- Refreshed the workspace shell, composer, sidebar, and workbench presentation to match the current UI direction more closely across desktop and mobile layouts.
 
 ### Added
 
@@ -18,6 +20,8 @@ All notable changes to this project are documented in this file.
   **Outcome:** Settings can now render as a desktop dialog or mobile bottom sheet from anywhere in the shell while keeping one shared implementation for section state and copy.
 - **Change:** Added focused frontend tests covering settings-event dispatch semantics and the simplified sidebar/empty-state expectations.
   **Outcome:** The new in-shell settings flow has regression coverage around dialog handoff, focus-return plumbing, and the lighter shell presentation.
+- **Change:** Added provider-scoped durable-volume coverage and supporting browser behavior for the dedicated Volumes surface.
+  **Outcome:** Operators can switch between Modal and Daytona durable storage explicitly without mixing long-lived files into the active workspace transcript/workbench flow.
 
 ### Changed
 
@@ -27,6 +31,10 @@ All notable changes to this project are documented in this file.
   **Outcome:** The `/settings` route and shell overlay stay visually and functionally aligned without duplicating large amounts of settings UI logic.
 - **Change:** Refreshed base shell/UI primitives, including the Base UI switch wrapper, sidebar group-label typography, and desktop settings header chrome.
   **Outcome:** Settings and shell surfaces read more consistently with the current design system and tokenized typography.
+- **Change:** Reworked the workspace shell and workbench presentation, including the floating sidebar, header spacing, empty state, composer shell, dropdown interactions, and canvas-aware layout behavior.
+  **Outcome:** The primary workspace feels more cohesive and intentional, with fewer visual overlaps and clearer hierarchy between navigation, chat, and inspection surfaces.
+- **Change:** Updated the Volumes page copy and layout to describe mounted durable volumes explicitly instead of treating them as part of the live workspace runtime surface.
+  **Outcome:** The storage model is easier to understand, especially when switching between Daytona and Modal-backed durable volume views.
 
 ### Removed
 
