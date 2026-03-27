@@ -179,9 +179,9 @@ def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
     assert manifest == {"rev": 7}
     assert session.read_calls == [
         "/home/daytona/memory/meta/workspaces/workspace-1/users/user-1/"
-        "react-session-session-a.json",
+        + "react-session-session-a.json",
         "/home/daytona/memory/workspaces/workspace-1/users/user-1/"
-        "memory/react-session-session-a.json",
+        + "memory/react-session-session-a.json",
     ]
 
 
