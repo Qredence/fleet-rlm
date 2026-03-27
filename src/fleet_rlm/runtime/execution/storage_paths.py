@@ -29,6 +29,9 @@ def mounted_storage_roots(mounted_root: str) -> RuntimeStorageRoots:
     """Return canonical durable roots for a mounted volume path."""
     normalized_root = str(mounted_root or "/data").rstrip("/") or "/data"
     base = PurePosixPath(normalized_root)
+    if normalized_root == "/data/memory":
+        base = base.parent
+        normalized_root = str(base)
     return RuntimeStorageRoots(
         mounted_root=normalized_root,
         memory_root=str(base / "memory"),

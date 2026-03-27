@@ -544,9 +544,7 @@ export const PromptInput = ({
         ref={formRef}
         {...props}
       >
-        <InputGroup
-          className="prompt-composer-shell flex-col items-stretch rounded-[22px] border-0 p-0"
-        >
+        <InputGroup className="prompt-composer-shell flex-col items-stretch rounded-[22px] border-0 p-0">
           {children}
         </InputGroup>
       </form>

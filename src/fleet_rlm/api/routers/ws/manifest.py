@@ -31,7 +31,20 @@ def _legacy_manifest_path(path: str) -> str | None:
     normalized = str(path or "").strip()
     if not normalized.startswith("meta/"):
         return None
-    return normalized.removeprefix("meta/")
+    stripped = normalized.removeprefix("meta/")
+    parts = PurePosixPath(stripped).parts
+    if len(parts) < 5 or parts[0] != "workspaces" or parts[2] != "users":
+        return stripped
+
+    user_prefix = PurePosixPath(*parts[:4])
+    remainder = parts[4:]
+    if not remainder:
+        return stripped
+    if remainder[0] == "memory":
+        return stripped
+    if remainder[0].startswith("react-session-"):
+        return str(user_prefix / "memory" / PurePosixPath(*remainder))
+    return stripped
 
 
 async def _aget_daytona_session(agent: ChatAgentProtocol) -> Any | None:

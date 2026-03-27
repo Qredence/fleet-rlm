@@ -7,7 +7,9 @@ function Tabs({
   className,
   ref,
   ...props
-}: React.ComponentProps<typeof BaseTabs.Root>) {
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Root> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Root>["ref"];
+}) {
   return (
     <BaseTabs.Root
       ref={ref}
@@ -22,7 +24,9 @@ function TabsList({
   className,
   ref,
   ...props
-}: React.ComponentProps<typeof BaseTabs.List>) {
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.List> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.List>["ref"];
+}) {
   return (
     <BaseTabs.List
       ref={ref}
@@ -40,7 +44,9 @@ function TabsTrigger({
   className,
   ref,
   ...props
-}: React.ComponentProps<typeof BaseTabs.Tab>) {
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Tab> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Tab>["ref"];
+}) {
   return (
     <BaseTabs.Tab
       ref={ref}
@@ -58,7 +64,9 @@ function TabsContent({
   className,
   ref,
   ...props
-}: React.ComponentProps<typeof BaseTabs.Panel>) {
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Panel> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Panel>["ref"];
+}) {
   return (
     <BaseTabs.Panel
       ref={ref}

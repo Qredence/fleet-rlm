@@ -208,7 +208,7 @@ def _load_daytona_workspace_text_sync(
         return None
 
     candidate = PurePosixPath(raw_path)
-    if candidate.is_absolute():
+    if candidate.is_absolute() or ".." in candidate.parts:
         return None
 
     session = _get_daytona_session_sync(ctx)

@@ -228,6 +228,28 @@ def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
         load_fn("missing.txt")
 
 
+def test_load_daytona_workspace_text_sync_rejects_parent_traversal(
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.runtime.tools.sandbox_common import (
+        _SandboxToolContext,
+        _load_daytona_workspace_text_sync,
+    )
+
+    agent = _make_fake_agent(tmp_path)
+    session = _FakeDaytonaSession()
+    agent.interpreter = _FakeDaytonaInterpreter(session)
+
+    loaded = _load_daytona_workspace_text_sync(
+        _SandboxToolContext(agent=agent),
+        path="../secrets.txt",
+    )
+
+    assert loaded is None
+    assert session.list_calls == []
+    assert session.read_calls == []
+
+
 def test_load_document_directory_returns_listing(tmp_path: Path):
     """load_document with a directory returns a file listing, not content."""
     from fleet_rlm.runtime.tools.document import build_document_tools

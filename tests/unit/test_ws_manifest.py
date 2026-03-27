@@ -149,6 +149,42 @@ def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> Non
     ]
 
 
+def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
+    monkeypatch,
+) -> None:
+    session = _FakeDaytonaSession()
+    session.file_contents[
+        "/home/daytona/memory/workspaces/workspace-1/users/user-1/"
+        "memory/react-session-session-a.json"
+    ] = '{"rev": 7}'
+    agent = cast(
+        Any,
+        SimpleNamespace(
+            interpreter=SimpleNamespace(volume_mount_path="/home/daytona/memory")
+        ),
+    )
+
+    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+        return session
+
+    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+
+    manifest = asyncio.run(
+        ws_manifest.load_manifest_from_volume(
+            agent,
+            "meta/workspaces/workspace-1/users/user-1/react-session-session-a.json",
+        )
+    )
+
+    assert manifest == {"rev": 7}
+    assert session.read_calls == [
+        "/home/daytona/memory/meta/workspaces/workspace-1/users/user-1/"
+        "react-session-session-a.json",
+        "/home/daytona/memory/workspaces/workspace-1/users/user-1/"
+        "memory/react-session-session-a.json",
+    ]
+
+
 def test_save_manifest_to_volume_returns_none_without_interpreter() -> None:
     agent = cast(Any, SimpleNamespace(interpreter=None))
 
