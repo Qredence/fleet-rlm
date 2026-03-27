@@ -1146,7 +1146,7 @@ describe.each([
     );
 
     expect(html).toContain("Thinking...");
-    expect(html).toContain("Let&#x27;s get to work, how can I help ?");
+    expect(html).toContain("Let&#x27;s get to work, how can I help?");
   });
 
   it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
