@@ -75,7 +75,7 @@ export function WorkspaceChatEmptyState({
                 : "text-[32px] leading-[1.1]",
             )}
           >
-            Let&apos;s get to work, how can I help ?
+            Let&apos;s get to work, how can I help?
           </h2>
           <p
             className={cn(

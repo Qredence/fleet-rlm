@@ -546,13 +546,6 @@ export const PromptInput = ({
       >
         <InputGroup
           className="prompt-composer-shell flex-col items-stretch rounded-[22px] border-0 p-0"
-          style={{
-            backgroundColor:
-              "color-mix(in srgb, var(--color-surface) 92%, var(--color-text) 8%)",
-            borderColor:
-              "color-mix(in srgb, var(--color-border) 55%, transparent)",
-            boxShadow: "0 1px 2px rgb(0 0 0 / 0.22)",
-          }}
         >
           {children}
         </InputGroup>

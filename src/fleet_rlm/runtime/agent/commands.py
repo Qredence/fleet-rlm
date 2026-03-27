@@ -184,7 +184,7 @@ async def execute_command(
         if command == "parallel_semantic_map":
             message += (
                 " Use analyze_document, summarize_document, extract_logs, "
-                "grounded_answer, rlm_query, or rlm_query_batched instead."
+                "grounded_answer, or rlm_query instead."
             )
         raise ValueError(message) from exc
 

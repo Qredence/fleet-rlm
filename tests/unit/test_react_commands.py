@@ -279,9 +279,14 @@ def test_resolve_tool_falls_back_to_agent_method():
 async def test_execute_command_rejects_unavailable_parallel_semantic_map():
     agent = _FakeAgent()
 
-    with pytest.raises(ValueError, match="not available in the current runtime"):
+    with pytest.raises(ValueError) as exc_info:
         await execute_command(
             agent,
             "parallel_semantic_map",
             {"query": "summarize"},
         )
+
+    message = str(exc_info.value)
+    assert "not available in the current runtime" in message
+    assert "rlm_query instead" in message
+    assert "rlm_query_batched" not in message

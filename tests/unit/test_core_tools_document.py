@@ -185,6 +185,35 @@ def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
     assert session.read_calls == ["/workspace/repo/paper.txt"]
 
 
+def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: Path):
+    """Daytona workspace files should win over colliding host-relative paths."""
+    from fleet_rlm.runtime.tools.document import build_document_tools
+
+    readme = tmp_path / "README.md"
+    readme.write_text("host readme")
+
+    agent = _make_fake_agent(tmp_path)
+    session = _FakeDaytonaSession()
+    session.files["/workspace/repo/README.md"] = "daytona readme"
+    agent.interpreter = _FakeDaytonaInterpreter(session)
+
+    tools = build_document_tools(agent)
+    load_fn = next(t.func for t in tools if t.name == "load_document")
+
+    result = load_fn("README.md", alias="readme")
+
+    assert result == {
+        "status": "ok",
+        "alias": "readme",
+        "path": "/workspace/repo/README.md",
+        "chars": len("daytona readme"),
+        "lines": 1,
+    }
+    assert agent._document_cache["readme"] == "daytona readme"
+    assert session.list_calls == ["/workspace/repo"]
+    assert session.read_calls == ["/workspace/repo/README.md"]
+
+
 def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
     """Missing Daytona workspace files should still fail cleanly."""
     from fleet_rlm.runtime.tools.document import build_document_tools

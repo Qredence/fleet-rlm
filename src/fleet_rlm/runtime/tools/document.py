@@ -67,7 +67,7 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
             )
 
         docs_path = Path(path)
-        if not docs_path.exists():
+        if not docs_path.is_absolute():
             loaded = _load_daytona_workspace_text_sync(ctx, path=path)
             if loaded is not None:
                 resolved_path, content = loaded
@@ -77,6 +77,8 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
                     path=resolved_path,
                     text=content,
                 )
+
+        if not docs_path.exists():
             raise FileNotFoundError(f"Document not found: {docs_path}")
 
         # Handle directory: return file listing

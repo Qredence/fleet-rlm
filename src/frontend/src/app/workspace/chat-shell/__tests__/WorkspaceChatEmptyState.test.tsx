@@ -33,7 +33,7 @@ describe("WorkspaceChatEmptyState", () => {
     const html = renderToStaticMarkup(
       <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} />,
     );
-    expect(html).toContain("Let&#x27;s get to work, how can I help ?");
+    expect(html).toContain("Let&#x27;s get to work, how can I help?");
     expect(html).toContain("Start with a task or jump into a saved session");
     expect(html).toContain("Help me write");
     expect(html).toContain("Summarize text");
