@@ -28,6 +28,16 @@ def test_mounted_storage_roots_normalizes_legacy_memory_mount() -> None:
     assert roots.meta_root == "/data/meta"
 
 
+def test_mounted_storage_roots_normalizes_non_daytona_memory_leaf_mount() -> None:
+    roots = mounted_storage_roots("/tmp/runtime/memory")
+
+    assert roots.mounted_root == "/tmp/runtime"
+    assert roots.memory_root == "/tmp/runtime/memory"
+    assert roots.artifacts_root == "/tmp/runtime/artifacts"
+    assert roots.buffers_root == "/tmp/runtime/buffers"
+    assert roots.meta_root == "/tmp/runtime/meta"
+
+
 def test_runtime_storage_roots_normalizes_legacy_interpreter_mount() -> None:
     roots = runtime_storage_roots(SimpleNamespace(volume_mount_path="/data/memory"))
 

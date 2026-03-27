@@ -2,12 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 (
   globalThis as typeof globalThis & {
@@ -15,10 +10,7 @@ import {
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-function requireNode(
-  node: HTMLElement | null,
-  label: string,
-): HTMLElement {
+function requireNode(node: HTMLElement | null, label: string): HTMLElement {
   if (!node) {
     throw new Error(`Expected ${label} ref to resolve to a DOM element`);
   }

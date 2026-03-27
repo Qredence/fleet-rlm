@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .interpreter_protocol import RLMInterpreterProtocol
 
+_CURRENT_DAYTONA_MOUNT_PARENT = PurePosixPath("/home/daytona")
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeStorageRoots:
@@ -29,7 +31,7 @@ def mounted_storage_roots(mounted_root: str) -> RuntimeStorageRoots:
     """Return canonical durable roots for a mounted volume path."""
     normalized_root = str(mounted_root or "/data").rstrip("/") or "/data"
     base = PurePosixPath(normalized_root)
-    if normalized_root == "/data/memory":
+    if base.name == "memory" and base.parent != _CURRENT_DAYTONA_MOUNT_PARENT:
         base = base.parent
         normalized_root = str(base)
     return RuntimeStorageRoots(
