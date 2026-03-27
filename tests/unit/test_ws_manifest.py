@@ -47,7 +47,7 @@ class _FakeDaytonaSession:
 def test_manifest_path_uses_default_session_id_when_missing() -> None:
     assert (
         ws_manifest._manifest_path("workspace-123", "user-456", "")
-        == "workspaces/workspace-123/users/user-456/memory/react-session-default-session.json"
+        == "meta/workspaces/workspace-123/users/user-456/react-session-default-session.json"
     )
 
 
@@ -92,7 +92,7 @@ def test_load_manifest_from_volume_parses_json_payload(monkeypatch) -> None:
 
 def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
     session = _FakeDaytonaSession()
-    session.file_contents["/home/daytona/memory/workspaces/test/session.json"] = (
+    session.file_contents["/home/daytona/memory/meta/workspaces/test/session.json"] = (
         '{"rev": 3, "state": {"ok": true}}'
     )
     agent = cast(
@@ -108,11 +108,45 @@ def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
     monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(agent, "workspaces/test/session.json")
+        ws_manifest.load_manifest_from_volume(
+            agent, "meta/workspaces/test/session.json"
+        )
     )
 
     assert manifest == {"rev": 3, "state": {"ok": True}}
-    assert session.read_calls == ["/home/daytona/memory/workspaces/test/session.json"]
+    assert session.read_calls == [
+        "/home/daytona/memory/meta/workspaces/test/session.json"
+    ]
+
+
+def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> None:
+    session = _FakeDaytonaSession()
+    session.file_contents["/home/daytona/memory/workspaces/test/session.json"] = (
+        '{"rev": 5}'
+    )
+    agent = cast(
+        Any,
+        SimpleNamespace(
+            interpreter=SimpleNamespace(volume_mount_path="/home/daytona/memory")
+        ),
+    )
+
+    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+        return session
+
+    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+
+    manifest = asyncio.run(
+        ws_manifest.load_manifest_from_volume(
+            agent, "meta/workspaces/test/session.json"
+        )
+    )
+
+    assert manifest == {"rev": 5}
+    assert session.read_calls == [
+        "/home/daytona/memory/meta/workspaces/test/session.json",
+        "/home/daytona/memory/workspaces/test/session.json",
+    ]
 
 
 def test_save_manifest_to_volume_returns_none_without_interpreter() -> None:
@@ -169,15 +203,15 @@ def test_save_manifest_to_volume_uses_daytona_session(monkeypatch) -> None:
     saved_path = asyncio.run(
         ws_manifest.save_manifest_to_volume(
             agent,
-            "workspaces/test/session.json",
+            "meta/workspaces/test/session.json",
             {"rev": 4},
         )
     )
 
-    assert saved_path == "/home/daytona/memory/workspaces/test/session.json"
+    assert saved_path == "/home/daytona/memory/meta/workspaces/test/session.json"
     assert session.write_calls == [
         (
-            "/home/daytona/memory/workspaces/test/session.json",
+            "/home/daytona/memory/meta/workspaces/test/session.json",
             '{"rev": 4}',
         )
     ]

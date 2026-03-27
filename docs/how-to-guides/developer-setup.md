@@ -158,8 +158,9 @@ MLFLOW_ENABLED=true
 MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 MLFLOW_EXPERIMENT=fleet-rlm
 
-# Optional: start MLflow automatically during local API startup
-# MLFLOW_AUTO_START=true
+# Optional: disable local MLflow auto-start and manage it yourself with
+# `make mlflow-server`
+# MLFLOW_AUTO_START=false
 
 # PostHog Analytics
 POSTHOG_ENABLED=false
@@ -168,8 +169,10 @@ POSTHOG_ENABLED=false
 > **Security:** Never commit your `.env` file. It is already in `.gitignore`. For team setups, use Modal secrets for shared API keys.
 
 > **MLflow note:** The local MLflow default is `http://127.0.0.1:5001`, which
-> matches `make mlflow-server`. If you change the port in `.env`, keep your manual
-> MLflow server command aligned, or enable `MLFLOW_AUTO_START=true` for local dev.
+> matches `make mlflow-server`. In local development, the API will auto-start that
+> localhost MLflow target by default. If you change the port in `.env`, keep your
+> manual MLflow server command aligned, or set `MLFLOW_AUTO_START=false` if you
+> want to manage MLflow yourself.
 
 ## 5. Configure Modal Credentials
 

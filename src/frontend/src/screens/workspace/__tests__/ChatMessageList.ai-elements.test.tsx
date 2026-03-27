@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
 import type { ChatMessage } from "@/screens/workspace/use-workspace";
-import { useNavigationStore } from "@/stores/navigationStore";
 import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 function renderChatMessageList(messages: ChatMessage[]) {
   return renderToStaticMarkup(
@@ -41,7 +41,10 @@ function mountChatMessageList(messages: ChatMessage[]) {
   return { container, root };
 }
 
-describe("WorkspaceMessageList (AI Elements render parts)", () => {
+describe.each([
+  { label: "AI Elements render parts" },
+  { label: "prompt-kit render parts" },
+])("WorkspaceMessageList ($label)", () => {
   beforeEach(() => {
     useNavigationStore.setState({
       isCanvasOpen: false,

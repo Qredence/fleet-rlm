@@ -8,11 +8,6 @@ export {
   UNSUPPORTED_SECTION_REASON,
   isSectionSupported,
 } from "@/lib/rlm-api/capabilities";
-export {
-  BACKEND_CAPABILITY_TOOLTIP,
-  BACKEND_CAPABILITY_TOAST,
-  BACKEND_CAPABILITY_BANNER_TITLE,
-} from "@/lib/rlm-api/messages";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 export {
   streamChatOverWs,

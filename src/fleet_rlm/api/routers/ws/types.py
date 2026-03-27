@@ -148,6 +148,13 @@ async def prepare_daytona_workspace_for_turn(
         docs_paths,
     )
 
+    normalized_batch_concurrency = (
+        max(1, int(request.batch_concurrency))
+        if isinstance(request.batch_concurrency, int) and request.batch_concurrency > 0
+        else None
+    )
+    setattr(agent, "daytona_batch_concurrency", normalized_batch_concurrency)
+
     await configure_workspace(
         repo_url=request.repo_url,
         repo_ref=request.repo_ref,

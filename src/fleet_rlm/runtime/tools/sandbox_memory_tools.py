@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fleet_rlm.runtime.agent.signatures import MemoryMigrationOperation, VolumeTreeNode
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
+from fleet_rlm.runtime.execution.storage_paths import runtime_storage_roots
 
 from .runtime_module_helpers import coerce_int as _coerce_int
 from .runtime_module_helpers import prediction_value as _prediction_value
@@ -37,11 +39,17 @@ async def _reload_memory_volume_best_effort(
             )
 
 
-def _resolve_memory_root(root_path: str) -> tuple[str | None, dict[str, Any] | None]:
+def _resolve_memory_root(
+    agent: RLMReActChatAgent,
+    root_path: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    roots = runtime_storage_roots(cast(RLMInterpreterProtocol, agent.interpreter))
+    if root_path.strip() == "/data/memory" and roots.memory_root != "/data/memory":
+        root_path = roots.memory_root
     return _resolve_path_or_error(
         path=root_path,
-        default_root="/data/memory",
-        allowed_root="/data",
+        default_root=roots.memory_root,
+        allowed_root=roots.allowed_root,
     )
 
 
@@ -126,7 +134,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
         max_depth: int = 4,
         include_hidden: bool = False,
     ) -> dict[str, Any]:
-        resolved_path, error = _resolve_memory_root(root_path)
+        resolved_path, error = _resolve_memory_root(ctx.agent, root_path)
         if error is not None:
             return error
 
@@ -336,7 +344,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
         Tool(
             _sync_compatible_tool_callable(memory_tree),
             name="memory_tree",
-            desc="Return a bounded file-tree snapshot for a path in Modal volume memory",
+            desc="Return a bounded file-tree snapshot for a path in durable volume memory",
         ),
         Tool(
             _sync_compatible_tool_callable(memory_action_intent),

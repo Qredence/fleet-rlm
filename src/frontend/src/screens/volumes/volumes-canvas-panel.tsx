@@ -142,90 +142,53 @@ function getMimeLabel(name: string, mime?: string): string {
   return "File";
 }
 
-const MOCK_FILE_CONTENT: Record<string, string> = {
-  "/sandbox/config/fleet.yaml": `# Fleet RLM Configuration
-# ─────────────────────────────────
-fleet:
-  name: "hax-fleet"
-  version: "0.4.2"
-  environment: "development"
+const DURABLE_ROOTS = ["/data", "/home/daytona/memory"] as const;
 
-api:
-  host: "0.0.0.0"
-  port: 8000
-  prefix: "/api/v1"
-  cors_origins:
-    - "http://localhost:5173"
-    - "https://fleet.qredence.ai"
+function buildMockFileContentMap(): Record<string, string> {
+  const entries = DURABLE_ROOTS.flatMap((root) => [
+    [
+      `${root}/memory/summaries/release-notes.md`,
+      `# Durable Memory Summary
 
-taxonomy:
-  max_depth: 4
-  root_domains:
-    - analytics
-    - development
-    - nlp
-    - devops
+- Captures reusable notes derived from prior runs
+- Shared across Daytona child sandboxes through the mounted durable volume
+`,
+    ],
+    [
+      `${root}/artifacts/reports/execution-summary.md`,
+      `# Execution Summary
 
-skills:
-  storage_backend: "filesystem"
-  base_path: "/sandbox/skills"
-  validation:
-    require_skill_md: true
-    require_manifest: true
-    min_quality_score: 70
-
-memory:
-  backend: "sqlite"
-  path: "/sandbox/data/cache/lru-cache.db"
-  max_entries: 10000
-  ttl_days: 90
+This report lives in the mounted durable volume so it remains available after sandbox teardown.
 `,
-  "/sandbox/config/auth.yaml": `# Authentication Configuration
-auth:
-  provider: "local"
-  session_ttl: 86400  # 24 hours
-  jwt_algorithm: "HS256"
-  require_email_verification: false
+    ],
+    [
+      `${root}/buffers/active-buffer.txt`,
+      `workspace = transient
+volume = durable
+context = staged per run
 `,
-  "/sandbox/config/policies/review-policy.yaml": `# Review Policy
-review:
-  auto_approve_threshold: 90
-  require_human_review_below: 80
-  max_review_time_hours: 48
-  reviewers:
-    - role: "admin"
-    - role: "lead"
-`,
-  "/sandbox/config/policies/publish-policy.yaml": `# Publish Policy
-publish:
-  require_validation: true
-  require_review: true
-  min_quality_score: 85
-  require_documentation: true
-  require_tests: false
-`,
-  "/sandbox/config/taxonomy.json": `{
-  "version": "1.0.0",
-  "domains": [
-    {
-      "name": "analytics",
-      "categories": ["data-processing", "preprocessing", "visualization"]
-    },
-    {
-      "name": "development",
-      "categories": ["quality-assurance", "testing", "integration"]
-    },
-    {
-      "name": "nlp",
-      "categories": ["text-processing", "analysis", "knowledge-management"]
-    },
-    {
-      "name": "devops",
-      "categories": ["automation", "observability"]
-    }
-  ]
+    ],
+    [
+      `${root}/meta/workspaces/default/react-session-default.json`,
+      `{
+  "session_id": "default",
+  "storage_mode": "durable_volume",
+  "manifest_root": "meta/workspaces/default"
 }`,
-};
+    ],
+    [
+      `${root}/meta/workspaces/default/provenance.json`,
+      `{
+  "builder_mode": "sdk_owned_runtime",
+  "volume_layout": ["memory", "artifacts", "buffers", "meta"]
+}`,
+    ],
+  ]);
+
+  return Object.fromEntries(entries);
+}
+
+const MOCK_FILE_CONTENT = buildMockFileContentMap();
 
 const METADATA_LABEL_STYLE = {
   fontFamily: "var(--font-sans)",

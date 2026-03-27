@@ -132,7 +132,7 @@ export function VolumesBrowser() {
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-muted-foreground typo-helper">
           <HardDrive className="h-3.5 w-3.5" />
-          <span>{providerLabel} volume</span>
+          <span>{providerLabel} durable volume</span>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -179,10 +179,13 @@ export function VolumesBrowser() {
         className="mb-3"
         aria-label="Volume provider"
       >
-        <ToggleGroupItem value="modal" aria-label="Browse Modal volume">
+        <ToggleGroupItem value="modal" aria-label="Browse Modal durable volume">
           Modal
         </ToggleGroupItem>
-        <ToggleGroupItem value="daytona" aria-label="Browse Daytona volume">
+        <ToggleGroupItem
+          value="daytona"
+          aria-label="Browse Daytona durable volume"
+        >
           Daytona
         </ToggleGroupItem>
       </ToggleGroup>
@@ -208,8 +211,8 @@ export function VolumesBrowser() {
             Volume Browser
           </h2>
           <p className="mb-3 text-muted-foreground typo-helper">
-            Browse the {providerLabel.toLowerCase()} runtime volume for this
-            workspace.
+            Browse the {providerLabel.toLowerCase()} mounted durable volume for
+            this workspace.
           </p>
           {headerChildren}
         </div>
@@ -222,8 +225,8 @@ export function VolumesBrowser() {
               Volume Browser
             </h2>
             <p className="mb-3 text-muted-foreground typo-helper">
-              Browse the {providerLabel.toLowerCase()} runtime volume for this
-              workspace.
+              Browse the {providerLabel.toLowerCase()} mounted durable volume
+              for this workspace.
             </p>
             {headerChildren}
           </div>
@@ -234,7 +237,7 @@ export function VolumesBrowser() {
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />
               <AlertTitle className="typo-label">
-                {providerLabel} volume unavailable
+                {providerLabel} durable volume unavailable
               </AlertTitle>
               <AlertDescription className="typo-caption">
                 {filesystemDegradedReason ??
@@ -245,13 +248,13 @@ export function VolumesBrowser() {
 
           {isLoading && filesystem.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground typo-label">
-              Loading {providerLabel.toLowerCase()} volume tree…
+              Loading {providerLabel.toLowerCase()} durable volume tree…
             </div>
           ) : filteredFs.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground typo-label">
               {isDegraded
-                ? `No ${providerLabel.toLowerCase()} volume data available.`
-                : `No files found in the ${providerLabel.toLowerCase()} volume.`}
+                ? `No ${providerLabel.toLowerCase()} durable volume data available.`
+                : `No files found in the ${providerLabel.toLowerCase()} durable volume.`}
             </div>
           ) : (
             filteredFs.map((node) => (
@@ -397,7 +400,7 @@ function FsItem({
             isVolume ? "typo-label" : "typo-caption",
           )}
         >
-          {isVolume ? `/sandbox/${node.name}` : node.name}
+          {isVolume ? node.path : node.name}
         </span>
 
         {isFile && node.size ? (

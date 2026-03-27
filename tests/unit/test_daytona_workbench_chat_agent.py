@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import dspy
 import pytest
 from typing import Any, cast
@@ -165,6 +166,137 @@ async def test_daytona_workbench_chat_agent_uses_shared_react_stream_with_dayton
     assert interpreter.repo_ref == "main"
     assert interpreter.context_paths == ["docs/spec.md"]
     assert interpreter.volume_name == "tenant-a"
+    assert agent.daytona_batch_concurrency == 6
+
+
+def test_daytona_workbench_chat_agent_registers_recursive_batch_tool() -> None:
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=cast(Any, _FakeRuntime(_FakeSession())),
+    )
+
+    tool_names = [
+        getattr(tool, "name", None) or getattr(tool, "__name__", str(tool))
+        for tool in agent.react_tools
+    ]
+
+    assert "rlm_query_batched" in tool_names
+    assert "parallel_semantic_map" not in tool_names
+
+
+def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
+    monkeypatch,
+) -> None:
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=cast(Any, _FakeRuntime(_FakeSession())),
+    )
+    agent._set_document("active", "# Header\nOne\nTwo")
+    agent.active_alias = "active"
+
+    captured: dict[str, Any] = {}
+
+    def _fake_run(agent_obj: Any, module_name: str, **kwargs: Any):
+        captured["agent"] = agent_obj
+        captured["module_name"] = module_name
+        captured["kwargs"] = kwargs
+        return (
+            {
+                "findings": ["f1"],
+                "answer": "ok",
+                "sections_examined": 2,
+                "depth": 1,
+                "sub_agent_history": 0,
+                "trajectory": [],
+            },
+            None,
+            False,
+        )
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module_via_sandbox",
+        _fake_run,
+    )
+
+    payload = agent._get_tool("analyze_long_document")("inspect this")
+
+    assert payload["status"] == "ok"
+    assert payload["answer"] == "ok"
+    assert captured["agent"] is agent
+    assert captured["module_name"] == "analyze_long_document"
+    assert captured["kwargs"]["query"] == "inspect this"
+
+
+@pytest.mark.asyncio
+async def test_daytona_parallel_semantic_map_command_is_unavailable() -> None:
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=cast(Any, _FakeRuntime(_FakeSession())),
+    )
+
+    with pytest.raises(ValueError, match="not available in the current runtime"):
+        await agent.execute_command("parallel_semantic_map", {"query": "summarize"})
+
+
+@pytest.mark.asyncio
+async def test_daytona_recursive_batch_tool_preserves_order_and_concurrency(
+    monkeypatch,
+) -> None:
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=cast(Any, _FakeRuntime(_FakeSession())),
+        delegate_max_calls_per_turn=8,
+    )
+    agent.daytona_batch_concurrency = 2
+
+    active_calls = 0
+    max_active_calls = 0
+
+    async def _fake_spawn(*_args: Any, prompt: str, context: str = "", **_kwargs: Any):
+        nonlocal active_calls, max_active_calls
+        active_calls += 1
+        max_active_calls = max(max_active_calls, active_calls)
+        await asyncio.sleep(0.01)
+        active_calls -= 1
+        if prompt == "fail":
+            return {"status": "error", "error": "child failed"}
+        return {
+            "status": "ok",
+            "answer": f"{prompt}|{context}",
+            "sub_agent_history": 1,
+            "depth": 1,
+            "trajectory": {"trajectory": [{"thought": prompt}]},
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools.spawn_delegate_sub_agent_async",
+        _fake_spawn,
+    )
+
+    result = agent._get_tool("rlm_query_batched")(
+        [
+            {"query": "alpha", "context": "ctx-a"},
+            {"query": "fail", "context": "ctx-b"},
+            {"query": "omega", "context": "ctx-c"},
+        ]
+    )
+
+    payload = await result
+
+    assert payload["status"] == "ok"
+    assert payload["batch_concurrency"] == 2
+    assert payload["task_count"] == 3
+    assert payload["success_count"] == 2
+    assert payload["error_count"] == 1
+    assert max_active_calls == 2
+    assert [item["query"] for item in payload["results"]] == [
+        "alpha",
+        "fail",
+        "omega",
+    ]
+    assert payload["results"][0]["answer"] == "alpha|ctx-a"
+    assert payload["results"][1]["status"] == "error"
+    assert payload["results"][1]["error"] == "child failed"
+    assert payload["results"][2]["answer"] == "omega|ctx-c"
+    assert all(
+        item["callback_name"] == "rlm_query_batched" for item in payload["results"]
+    )
 
 
 def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:

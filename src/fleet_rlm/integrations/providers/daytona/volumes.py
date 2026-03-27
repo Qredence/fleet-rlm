@@ -18,6 +18,7 @@ from .runtime import (
     _build_daytona_client,
     _run_async_compat,
 )
+from .runtime_helpers import _aensure_daytona_volume_layout
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,10 @@ async def _amounted_daytona_volume(volume_name: str) -> AsyncIterator[Any]:
                 ],
             )
         )
+    )
+    await _aensure_daytona_volume_layout(
+        sandbox=sandbox,
+        mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
     )
     try:
         yield sandbox

@@ -4,7 +4,9 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from dspy.primitives import FinalOutput
+from dspy.primitives.code_interpreter import CodeInterpreterError
 
 from fleet_rlm.integrations.providers.daytona.bridge import DaytonaBridgeExecution
 from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
@@ -233,6 +235,28 @@ def test_daytona_interpreter_skips_bridge_injection_for_native_sandbox_tools() -
     assert "workspace_read" not in bridge_tools
     assert "custom_tool" in bridge_tools
     assert "llm_query" in bridge_tools
+    assert "rlm_query" not in bridge_tools
+    assert "rlm_query_batched" not in bridge_tools
+
+
+def test_daytona_interpreter_rejects_recursive_rlm_query_in_sandbox_code() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    with pytest.raises(CodeInterpreterError, match="agent-level only"):
+        interpreter.execute("answer = rlm_query('hello')\nSUBMIT(answer=answer)")
+
+
+def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code() -> (
+    None
+):
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    with pytest.raises(CodeInterpreterError, match="agent-level only"):
+        interpreter.execute(
+            "answers = rlm_query_batched([{'query': 'hello'}])\nSUBMIT(answer=answers)"
+        )
 
 
 def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-import json
-import math
-import time
-from dataclasses import dataclass
 from typing import Any, Callable
 
 import dspy
-from dspy.primitives import CodeInterpreterError, FinalOutput
+from dspy.primitives import FinalOutput
 
+from . import interpreter_execution as _execution
+from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
+from .interpreter_assets import (
+    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+    _FINAL_OUTPUT_MARKER,
+    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
+    _base_setup_code,
+    _typed_submit_code,
+)
 from fleet_rlm.runtime.execution.interpreter_common import (
     async_enter as _async_enter_impl,
 )
@@ -30,16 +35,9 @@ from fleet_rlm.runtime.execution.interpreter_common import (
 from fleet_rlm.runtime.execution.interpreter_common import (
     sync_exit as _sync_exit_impl,
 )
-from fleet_rlm.runtime.execution.interpreter_events import (
-    complete_event_data,
-    emit_execution_event,
-    start_event_data,
-    summarize_code,
-)
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
-from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
@@ -48,292 +46,6 @@ from .runtime import (
     _run_async_compat,
 )
 from .state import dedupe_paths, normalized_context_sources
-
-_FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
-_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES: frozenset[str] = frozenset(
-    {"run", "workspace_write", "workspace_read"}
-)
-
-
-def _base_setup_code(*, workspace_path: str, volume_mount_path: str) -> str:
-    return f"""
-import ast as _ast
-import glob as _glob
-import json as _json
-import os as _os
-import pathlib as _pathlib
-import re as _re
-import subprocess as _subprocess
-import fcntl as _fcntl
-import glob as _glob
-from contextlib import contextmanager as _contextmanager
-
-REPO_PATH = {workspace_path!r}
-MEMORY_ROOT = _pathlib.Path({volume_mount_path!r})
-WORKSPACE_VOLUME_ROOT = MEMORY_ROOT / "workspace"
-_FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
-_buffers = globals().get("_buffers", {{}})
-
-def resolve_path(path: str) -> str:
-    candidate = _pathlib.Path(str(path or "").strip() or ".")
-    if candidate.is_absolute():
-        return str(candidate)
-    return str(_pathlib.Path(REPO_PATH) / candidate)
-
-def run(command: str, cwd: str | None = None) -> dict[str, object]:
-    completed = _subprocess.run(
-        command,
-        shell=True,
-        cwd=resolve_path(cwd) if cwd else REPO_PATH,
-        capture_output=True,
-        text=True,
-    )
-    return {{
-        "exit_code": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-        "ok": completed.returncode == 0,
-    }}
-
-def read_file(path: str) -> str:
-    with open(resolve_path(path), "r", encoding="utf-8", errors="replace") as handle:
-        return handle.read()
-
-def list_files(path: str = ".") -> list[str]:
-    target = _pathlib.Path(resolve_path(path))
-    if not target.exists():
-        return []
-    return sorted(str(item) for item in target.iterdir())
-
-def find_files(path: str = ".", pattern: str = "*") -> list[str]:
-    target = _pathlib.Path(resolve_path(path))
-    if not target.exists():
-        return []
-    return sorted(_glob.glob(str(target / pattern), recursive=True))
-
-def peek(text: str, start: int = 0, length: int = 2000) -> str:
-    source = str(text or "")
-    start_idx = max(0, int(start))
-    window = max(0, int(length))
-    return source[start_idx : start_idx + window]
-
-def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
-    if not text:
-        return []
-    compiled = _re.compile(pattern)
-    lines = str(text).splitlines()
-    radius = max(0, int(context))
-    results: list[str] = []
-    for index, line in enumerate(lines):
-        if not compiled.search(line):
-            continue
-        start_idx = max(0, index - radius)
-        end_idx = min(len(lines), index + radius + 1)
-        results.append("\\n".join(lines[start_idx:end_idx]))
-    return results
-
-def extract_python_ast(path: str) -> str:
-    target = _pathlib.Path(resolve_path(path))
-    if not target.exists():
-        return "File not found."
-    with open(target, "r", encoding="utf-8", errors="replace") as f:
-        source = f.read()
-    try:
-        tree = _ast.parse(source)
-    except Exception as e:
-        return f"AST Parse Error: {{e}}"
-    results = []
-    for node in tree.body:
-        if isinstance(node, _ast.ClassDef):
-            methods = [m.name for m in node.body if isinstance(m, _ast.FunctionDef)]
-            doc = _ast.get_docstring(node) or ""
-            results.append({{"type": "Class", "name": node.name, "methods": methods, "doc": doc[:200]}})
-        elif isinstance(node, _ast.FunctionDef):
-            doc = _ast.get_docstring(node) or ""
-            results.append({{"type": "Function", "name": node.name, "doc": doc[:200]}})
-    return _json.dumps(results, indent=2)
-
-_processes = globals().get("_processes", {{}})
-
-def start_background_process(process_id: str, command: str) -> str:
-    if process_id in _processes:
-        return f"Process {{process_id}} is already running."
-    import threading as _threading
-    import collections as _collections
-    proc = _subprocess.Popen(
-        command, shell=True, cwd=REPO_PATH,
-        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True
-    )
-    log_buffer = _collections.deque(maxlen=1000)
-    def _read_output():
-        for line in proc.stdout:
-            log_buffer.append(line)
-    t = _threading.Thread(target=_read_output, daemon=True)
-    t.start()
-    _processes[process_id] = {{"proc": proc, "logs": log_buffer}}
-    return f"Started process {{process_id}} (PID {{proc.pid}})"
-
-def read_process_logs(process_id: str, tail: int = 50) -> str:
-    if process_id not in _processes:
-        return f"Process {{process_id}} is not running."
-    pinfo = _processes[process_id]
-    proc = pinfo["proc"]
-    logs = pinfo["logs"]
-    status = "RUNNING" if proc.poll() is None else f"EXITED({{proc.returncode}})"
-    lines = list(logs)[-tail:]
-    return f"Status: {{status}}\\nLogs:\\n" + "".join(lines)
-
-def kill_process(process_id: str) -> str:
-    if process_id not in _processes:
-        return f"Process {{process_id}} is not running."
-    proc = _processes.pop(process_id)["proc"]
-    if proc.poll() is None:
-        proc.terminate()
-        return f"Terminated process {{process_id}}."
-    return f"Process {{process_id}} was already exited."
-
-
-def add_buffer(name: str, item: object) -> dict[str, object]:
-    key = str(name or "").strip() or "default"
-    items = _buffers.setdefault(key, [])
-    items.append(item)
-    return {{"status": "ok", "name": key, "count": len(items)}}
-
-def get_buffer(name: str) -> list[object]:
-    key = str(name or "").strip() or "default"
-    return list(_buffers.get(key, []))
-
-def clear_buffer(name: str | None = None) -> dict[str, object]:
-    key = str(name or "").strip()
-    if key:
-        _buffers.pop(key, None)
-        return {{"status": "ok", "scope": "single", "name": key}}
-    _buffers.clear()
-    return {{"status": "ok", "scope": "all"}}
-
-def _resolve_persistent_path(path: str, *, default_root: _pathlib.Path) -> tuple[str | None, str | None]:
-    raw = str(path or "").strip()
-    if not raw:
-        return None, f"[error: volume path cannot be empty]"
-    if not MEMORY_ROOT.exists():
-        return None, f"[error: no volume mounted at {{MEMORY_ROOT}}]"
-    candidate = _pathlib.Path(raw)
-    if candidate.is_absolute():
-        resolved = _pathlib.Path(_os.path.realpath(_os.path.normpath(str(candidate))))
-    else:
-        resolved = _pathlib.Path(_os.path.realpath(_os.path.normpath(str(default_root / candidate))))
-    memory_real = _pathlib.Path(_os.path.realpath(str(MEMORY_ROOT)))
-    if resolved != memory_real and not str(resolved).startswith(str(memory_real) + _os.sep):
-        return None, f"[error: invalid volume path: {{raw}}]"
-    return str(resolved), None
-
-def save_to_volume(path: str, content: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
-    if path_error is not None or full is None:
-        return path_error or "[error: invalid volume path]"
-    lock_path = full + ".lock"
-    _os.makedirs(_os.path.dirname(full) or str(MEMORY_ROOT), exist_ok=True)
-    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
-    try:
-        _fcntl.flock(fd, _fcntl.LOCK_EX)
-        with open(full, "w", encoding="utf-8") as handle:
-            handle.write(str(content))
-    finally:
-        _fcntl.flock(fd, _fcntl.LOCK_UN)
-        _os.close(fd)
-    return full
-
-def load_from_volume(path: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
-    if path_error is not None or full is None:
-        return path_error or "[error: invalid volume path]"
-    if not _os.path.isfile(full):
-        return f"[error: file not found: {{full}}]"
-    with open(full, "r", encoding="utf-8", errors="replace") as handle:
-        return handle.read()
-
-def workspace_write(path: str, content: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
-    if path_error is not None or full is None:
-        return path_error or "[error: invalid workspace path]"
-    lock_path = full + ".lock"
-    _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
-    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
-    try:
-        _fcntl.flock(fd, _fcntl.LOCK_EX)
-        with open(full, "w", encoding="utf-8") as handle:
-            handle.write(str(content))
-    finally:
-        _fcntl.flock(fd, _fcntl.LOCK_UN)
-        _os.close(fd)
-    return full
-
-def workspace_read(path: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
-    if path_error is not None or full is None:
-        return path_error or "[error: invalid workspace path]"
-    if not _os.path.isfile(full):
-        return f"[error: file not found: {{full}}]"
-    with open(full, "r", encoding="utf-8", errors="replace") as handle:
-        return handle.read()
-
-def workspace_append(path: str, content: str) -> str:
-    full, path_error = _resolve_persistent_path(path, default_root=WORKSPACE_VOLUME_ROOT)
-    if path_error is not None or full is None:
-        return path_error or "[error: invalid workspace path]"
-    lock_path = full + ".lock"
-    _os.makedirs(_os.path.dirname(full) or str(WORKSPACE_VOLUME_ROOT), exist_ok=True)
-    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
-    try:
-        _fcntl.flock(fd, _fcntl.LOCK_EX)
-        with open(full, "a", encoding="utf-8") as handle:
-            handle.write(str(content))
-    finally:
-        _fcntl.flock(fd, _fcntl.LOCK_UN)
-        _os.close(fd)
-    return full
-
-class _FleetFinalOutput(Exception):
-    def __init__(self, value):
-        self.value = value
-        super().__init__("Final output submitted")
-
-def SUBMIT(**kwargs):
-    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(kwargs, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
-    raise _FleetFinalOutput(kwargs)
-""".strip()
-
-
-def _typed_submit_code(output_fields: list[dict[str, Any]]) -> str:
-    sig_parts: list[str] = []
-    dict_parts: list[str] = []
-    for field in output_fields:
-        name = str(field.get("name") or "").strip()
-        if not name:
-            continue
-        part = name
-        type_hint = str(field.get("type") or "").strip()
-        if type_hint:
-            part += f": {type_hint}"
-        sig_parts.append(part)
-        dict_parts.append(f'"{name}": {name}')
-    signature = ", ".join(sig_parts)
-    payload = ", ".join(dict_parts)
-    return f"""
-def SUBMIT({signature}):
-    result = {{{payload}}}
-    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(result, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
-    raise _FleetFinalOutput(result)
-""".strip()
-
-
-@dataclass(slots=True)
-class _DaytonaExecutionResponse:
-    stdout: str = ""
-    stderr: str = ""
-    error: str | None = None
-    final_artifact: dict[str, Any] | None = None
-    callback_count: int = 0
 
 
 class DaytonaInterpreter(LLMQueryMixin):
@@ -806,27 +518,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._submit_signature_key = None
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> DaytonaInterpreter:
-        runtime = DaytonaSandboxRuntime(config=self.runtime._resolved_config)
-        child = DaytonaInterpreter(
-            runtime=runtime,
-            owns_runtime=True,
-            timeout=self.timeout,
-            execute_timeout=self.execute_timeout,
-            volume_name=self.volume_name,
-            repo_url=self.repo_url,
-            repo_ref=self.repo_ref,
-            context_paths=list(self.context_paths),
-            delete_session_on_shutdown=True,
-            sub_lm=self.sub_lm,
-            max_llm_calls=remaining_llm_budget,
-            llm_call_timeout=self.llm_call_timeout,
-            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-            async_execute=self.async_execute,
+        return _execution.build_delegate_child(
+            self, remaining_llm_budget=remaining_llm_budget
         )
-        setattr(
-            child, "_check_and_increment_llm_calls", self._check_and_increment_llm_calls
-        )
-        return child
 
     def execute(
         self,
@@ -835,8 +529,8 @@ class DaytonaInterpreter(LLMQueryMixin):
         *,
         execution_profile: ExecutionProfile | None = None,
     ) -> str | FinalOutput:
-        return _run_async_compat(
-            self.aexecute,
+        return _execution.execute(
+            self,
             code,
             variables,
             execution_profile=execution_profile,
@@ -849,105 +543,27 @@ class DaytonaInterpreter(LLMQueryMixin):
         *,
         execution_profile: ExecutionProfile | None = None,
     ) -> str | FinalOutput:
-        session = await self._aensure_session_impl()
-        await session.astart_driver(timeout=float(self.execute_timeout))
-        safe_vars = self._safe_variables(variables)
-        profile = execution_profile or self.default_execution_profile
-        profile_value = profile.value if hasattr(profile, "value") else str(profile)
-        code_hash, code_preview = summarize_code(code)
-        started_at = time.time()
-        emit_execution_event(
+        return await _execution.aexecute(
             self,
-            start_event_data(
-                execution_profile=str(profile_value),
-                code_hash=code_hash,
-                code_preview=code_preview,
-            ),
-        )
-        try:
-            response = await self._aexecute_in_session(
-                session=session,
-                code=code,
-                variables=safe_vars,
-            )
-        except Exception as exc:
-            emit_execution_event(
-                self,
-                complete_event_data(
-                    started_at=started_at,
-                    execution_profile=str(profile_value),
-                    code_hash=code_hash,
-                    code_preview=code_preview,
-                    success=False,
-                    result_kind="exception",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                ),
-            )
-            raise CodeInterpreterError(str(exc)) from exc
-        return self._finalize_execution_result(
-            response=response,
-            started_at=started_at,
-            execution_profile=str(profile_value),
-            code_hash=code_hash,
-            code_preview=code_preview,
+            code,
+            variables,
+            execution_profile=execution_profile,
         )
 
     def _safe_variables(self, variables: dict[str, Any] | None) -> dict[str, Any]:
-        safe_vars: dict[str, Any] = {}
-        for key, value in (variables or {}).items():
-            normalized_key = str(key)
-            try:
-                json.dumps(value)
-                safe_vars[normalized_key] = value
-            except TypeError:
-                safe_vars[normalized_key] = str(value)
-        return safe_vars
+        return _execution.safe_variables(self, variables)
 
     def _submit_signature(self) -> tuple[tuple[str, str], ...] | None:
-        if not self.output_fields:
-            return None
-        normalized: list[tuple[str, str]] = []
-        for field in self.output_fields:
-            name = str(field.get("name") or "").strip()
-            if not name:
-                continue
-            normalized.append((name, str(field.get("type") or "").strip()))
-        return tuple(normalized) or None
+        return _execution.submit_signature(self)
 
     async def _aensure_setup(self, session: DaytonaSandboxSession) -> Any:
-        context = await session.aensure_context()
-        if self._setup_context_id != session.context_id:
-            result = await _await_if_needed(
-                session.sandbox.code_interpreter.run_code(
-                    _base_setup_code(
-                        workspace_path=session.workspace_path,
-                        volume_mount_path=self.volume_mount_path,
-                    ),
-                    context=context,
-                )
-            )
-            if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to initialize Daytona sandbox helpers: {result.error.value}"
-                )
-            self._setup_context_id = session.context_id
-            self._submit_signature_key = None
-
-        submit_signature = self._submit_signature()
-        if submit_signature and submit_signature != self._submit_signature_key:
-            result = await _await_if_needed(
-                session.sandbox.code_interpreter.run_code(
-                    _typed_submit_code(self.output_fields or []),
-                    context=context,
-                )
-            )
-            if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to register typed SUBMIT: {result.error.value}"
-                )
-            self._submit_signature_key = submit_signature
-        return context
+        return await _execution.aensure_setup(
+            self,
+            session,
+            base_setup_code=_base_setup_code,
+            typed_submit_code=_typed_submit_code,
+            submit_signature_fn=self._submit_signature,
+        )
 
     async def _aensure_bridge(
         self,
@@ -956,30 +572,13 @@ class DaytonaInterpreter(LLMQueryMixin):
         context: Any,
         tools: dict[str, Callable[..., Any]],
     ) -> DaytonaToolBridge:
-        sandbox_id = session.sandbox_id
-        context_id = session.context_id
-        bridge = self._bridge
-        if (
-            bridge is None
-            or self._bridge_sandbox_id != sandbox_id
-            or self._bridge_context_id != context_id
-        ):
-            await self._aclose_bridge()
-            bridge = DaytonaToolBridge(
-                sandbox=session.sandbox,
-                context=context,
-            )
-            self._bridge = bridge
-            self._bridge_sandbox_id = sandbox_id
-            self._bridge_context_id = context_id
-        else:
-            bridge.bind_context(context)
-        bridge_sync = getattr(bridge, "async_tools", None)
-        if bridge_sync is not None and callable(bridge_sync):
-            await _await_if_needed(bridge_sync(tools))
-        else:
-            await _await_if_needed(bridge.sync_tools(tools))
-        return bridge
+        return await _execution.aensure_bridge(
+            self,
+            session=session,
+            context=context,
+            tools=tools,
+            bridge_cls=DaytonaToolBridge,
+        )
 
     async def _aexecute_in_session(
         self,
@@ -987,40 +586,19 @@ class DaytonaInterpreter(LLMQueryMixin):
         session: DaytonaSandboxSession,
         code: str,
         variables: dict[str, Any],
-    ) -> _DaytonaExecutionResponse:
-        context = await self._aensure_setup(session)
-        prepared_code = self._inject_variables(code, variables)
-        tools = self._bridge_tools()
-        if self._requires_bridge(prepared_code, tools):
-            bridge = await self._aensure_bridge(
-                session=session,
-                context=context,
-                tools=tools,
-            )
-            async_execute = getattr(bridge, "aexecute", None)
-            if async_execute is not None and callable(async_execute):
-                execution = await _await_if_needed(
-                    async_execute(
-                        code=prepared_code,
-                        timeout=int(self.execute_timeout),
-                        tool_executor=self._invoke_tool,
-                    )
-                )
-            else:
-                execution = await _await_if_needed(
-                    bridge.execute(
-                        code=prepared_code,
-                        timeout=int(self.execute_timeout),
-                        tool_executor=self._invoke_tool,
-                    )
-                )
-        else:
-            execution = await self._aexecute_direct(
-                session=session,
-                context=context,
-                code=prepared_code,
-            )
-        return self._response_from_execution(execution)
+    ) -> _execution._DaytonaExecutionResponse:
+        return await _execution.aexecute_in_session(
+            self,
+            session=session,
+            code=code,
+            variables=variables,
+            bridge_tools_fn=self._bridge_tools,
+            reject_unsupported_recursive_callbacks_fn=self._reject_unsupported_recursive_callbacks,
+            requires_bridge_fn=self._requires_bridge,
+            aensure_bridge_fn=self._aensure_bridge,
+            aexecute_direct_fn=self._aexecute_direct,
+            response_from_execution_fn=self._response_from_execution,
+        )
 
     async def _aexecute_direct(
         self,
@@ -1029,48 +607,28 @@ class DaytonaInterpreter(LLMQueryMixin):
         context: Any,
         code: str,
     ) -> DaytonaBridgeExecution:
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-
-        def _on_stdout(message: Any) -> None:
-            stdout_parts.append(str(getattr(message, "output", "") or ""))
-
-        def _on_stderr(message: Any) -> None:
-            stderr_parts.append(str(getattr(message, "output", "") or ""))
-
-        result = await _await_if_needed(
-            session.sandbox.code_interpreter.run_code(
-                code,
-                context=context,
-                on_stdout=_on_stdout,
-                on_stderr=_on_stderr,
-                timeout=int(self.execute_timeout),
-            )
+        return await _execution.aexecute_direct(
+            self,
+            session=session,
+            context=context,
+            code=code,
         )
-        return DaytonaBridgeExecution(
-            result=result,
-            stdout="".join(stdout_parts),
-            stderr="".join(stderr_parts),
-            callback_count=0,
+
+    def _reject_unsupported_recursive_callbacks(self, code: str) -> None:
+        _execution.reject_unsupported_recursive_callbacks(
+            self,
+            code,
+            callbacks=_UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
         )
 
     def _bridge_tools(self) -> dict[str, Callable[..., Any]]:
-        tools = {
-            name: tool
-            for name, tool in self._tools.items()
-            if name not in _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES
-        }
-        tools["llm_query"] = self.llm_query
-        tools["llm_query_batched"] = self.llm_query_batched
-        tools["rlm_query"] = self.llm_query
-        tools["rlm_query_batched"] = self.llm_query_batched
-        return tools
+        return _execution.bridge_tools(
+            self,
+            native_tool_names=_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+        )
 
     def _requires_bridge(self, code: str, tools: dict[str, Callable[..., Any]]) -> bool:
-        for tool_name in tools:
-            if f"{tool_name}(" in code:
-                return True
-        return False
+        return _execution.requires_bridge(self, code, tools)
 
     def _invoke_tool(
         self,
@@ -1078,202 +636,44 @@ class DaytonaInterpreter(LLMQueryMixin):
         args: list[Any],
         kwargs: dict[str, Any],
     ) -> Any:
-        try:
-            if name in {"llm_query", "rlm_query"}:
-                prompt = args[0] if args else kwargs.get("prompt", "")
-                value = self.llm_query(str(prompt))
-            elif name in {"llm_query_batched", "rlm_query_batched"}:
-                prompts = args[0] if args else kwargs.get("prompts", [])
-                if not isinstance(prompts, list):
-                    prompts = []
-                value = self.llm_query_batched([str(item) for item in prompts])
-            elif name in self._tools:
-                value = self._tools[name](*args, **kwargs)
-            else:
-                raise RuntimeError(f"Unknown host callback: {name}")
-            try:
-                json.dumps(value)
-                return value
-            except TypeError:
-                return str(value)
-        except Exception as exc:
-            return {"error": f"{type(exc).__name__}: {exc}"}
+        return _execution.invoke_tool(self, name, args, kwargs)
 
     def _response_from_execution(
         self,
         execution: DaytonaBridgeExecution,
-    ) -> _DaytonaExecutionResponse:
-        final_artifact = self._extract_final_artifact(execution.stdout)
-        result = execution.result
-        error = getattr(result, "error", None)
-        if error is None:
-            return _DaytonaExecutionResponse(
-                stdout=execution.stdout,
-                stderr=execution.stderr,
-                final_artifact=final_artifact,
-                callback_count=execution.callback_count,
-            )
-
-        error_name = str(getattr(error, "name", "") or "")
-        error_value = str(getattr(error, "value", "") or "")
-        if error_name == "_FleetFinalOutput" and final_artifact is not None:
-            return _DaytonaExecutionResponse(
-                stdout=execution.stdout,
-                stderr=execution.stderr,
-                final_artifact=final_artifact,
-                callback_count=execution.callback_count,
-            )
-
-        error_text = (
-            ": ".join(part for part in [error_name, error_value] if part)
-            or error_value
-            or error_name
-            or "Execution failed"
-        )
-        return _DaytonaExecutionResponse(
-            stdout=execution.stdout,
-            stderr=execution.stderr,
-            error=error_text,
-            final_artifact=final_artifact,
-            callback_count=execution.callback_count,
+    ) -> _execution._DaytonaExecutionResponse:
+        return _execution.response_from_execution(
+            self,
+            execution,
+            extract_final_artifact_fn=self._extract_final_artifact,
         )
 
     def _extract_final_artifact(self, stdout: str) -> dict[str, Any] | None:
-        marker = _FINAL_OUTPUT_MARKER
-        start = stdout.find(marker)
-        if start == -1:
-            return None
-        start += len(marker)
-        end = stdout.find(marker, start)
-        if end == -1:
-            return None
-        payload = stdout[start:end]
-        try:
-            parsed = json.loads(payload)
-        except json.JSONDecodeError:
-            return None
-        return {
-            "kind": "structured",
-            "value": parsed,
-            "finalization_mode": "SUBMIT",
-        }
+        return _execution.extract_final_artifact(stdout, marker=_FINAL_OUTPUT_MARKER)
 
     def _finalize_execution_result(
         self,
         *,
-        response: _DaytonaExecutionResponse,
+        response: _execution._DaytonaExecutionResponse,
         started_at: float,
         execution_profile: str,
         code_hash: str,
         code_preview: str,
     ) -> str | FinalOutput:
-        final_payload = None
-        if isinstance(response.final_artifact, dict):
-            final_payload = response.final_artifact.get("value")
-
-        stdout_preview = str(response.stdout or "")
-        stderr_preview = str(response.stderr or "")
-        if response.error:
-            error_text = str(response.error)
-            emit_execution_event(
-                self,
-                complete_event_data(
-                    started_at=started_at,
-                    execution_profile=execution_profile,
-                    code_hash=code_hash,
-                    code_preview=code_preview,
-                    success=False,
-                    result_kind="stderr",
-                    stdout_preview=stdout_preview or None,
-                    stderr_preview=stderr_preview or None,
-                    error_type="ExecutionError",
-                    error=error_text,
-                ),
-            )
-            combined = stdout_preview.strip()
-            return f"{combined}\n{error_text}" if combined else error_text
-
-        if final_payload is not None:
-            output_keys = (
-                list(final_payload.keys())[:50]
-                if isinstance(final_payload, dict)
-                else None
-            )
-            emit_execution_event(
-                self,
-                complete_event_data(
-                    started_at=started_at,
-                    execution_profile=execution_profile,
-                    code_hash=code_hash,
-                    code_preview=code_preview,
-                    success=True,
-                    result_kind="final_output",
-                    output_keys=output_keys,
-                    stdout_preview=stdout_preview or None,
-                    stderr_preview=stderr_preview or None,
-                ),
-            )
-            return FinalOutput(final_payload)
-
-        emit_execution_event(
+        return _execution.finalize_execution_result(
             self,
-            complete_event_data(
-                started_at=started_at,
-                execution_profile=execution_profile,
-                code_hash=code_hash,
-                code_preview=code_preview,
-                success=not bool(stderr_preview),
-                result_kind="stderr" if stderr_preview else "stdout",
-                stdout_preview=stdout_preview or None,
-                stderr_preview=stderr_preview or None,
-            ),
+            response=response,
+            started_at=started_at,
+            execution_profile=execution_profile,
+            code_hash=code_hash,
+            code_preview=code_preview,
         )
-        if stderr_preview:
-            combined = stdout_preview.strip()
-            return f"{combined}\n{stderr_preview}" if combined else stderr_preview
-        return stdout_preview
 
     def _inject_variables(self, code: str, variables: dict[str, Any]) -> str:
-        if not variables:
-            return code
-        assignments = [
-            f"{name} = {self._literal(value)}" for name, value in variables.items()
-        ]
-        return "\n".join(assignments) + "\n" + code
+        return _execution.inject_variables(self, code, variables)
 
     def _literal(self, value: Any) -> str:
-        if value is None:
-            return "None"
-        if isinstance(value, bool):
-            return "True" if value else "False"
-        if isinstance(value, int):
-            return repr(value)
-        if isinstance(value, float):
-            if math.isnan(value):
-                return "float('nan')"
-            if math.isinf(value):
-                return "float('inf')" if value > 0 else "float('-inf')"
-            return repr(value)
-        if isinstance(value, str):
-            return repr(value)
-        if isinstance(value, list):
-            return "[" + ", ".join(self._literal(item) for item in value) + "]"
-        if isinstance(value, tuple):
-            inner = ", ".join(self._literal(item) for item in value)
-            if len(value) == 1:
-                inner += ","
-            return "(" + inner + ")"
-        if isinstance(value, set):
-            if not value:
-                return "set()"
-            return "{" + ", ".join(self._literal(item) for item in value) + "}"
-        if isinstance(value, dict):
-            pairs = [
-                f"{self._literal(key)}: {self._literal(item)}"
-                for key, item in value.items()
-            ]
-            return "{" + ", ".join(pairs) + "}"
-        raise CodeInterpreterError(f"Unsupported value type: {type(value).__name__}")
+        return _execution.literal(self, value)
 
 
 __all__ = ["DaytonaInterpreter"]

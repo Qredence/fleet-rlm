@@ -113,8 +113,10 @@ describe("VolumesBrowser", () => {
 
     expect(useFilesystemMock).toHaveBeenCalled();
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("modal");
-    expect(container.textContent).toContain("Browse the modal runtime volume");
-    expect(container.textContent).toContain("/sandbox/modal-volume");
+    expect(container.textContent).toContain(
+      "Browse the modal mounted durable volume",
+    );
+    expect(container.textContent).toContain("/modal");
 
     const daytonaToggle = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Daytona",
@@ -128,9 +130,9 @@ describe("VolumesBrowser", () => {
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
     expect(clearSelectedFile).toHaveBeenCalledOnce();
     expect(container.textContent).toContain(
-      "Browse the daytona runtime volume",
+      "Browse the daytona mounted durable volume",
     );
-    expect(container.textContent).toContain("/sandbox/daytona-volume");
+    expect(container.textContent).toContain("/daytona");
 
     act(() => {
       root.unmount();
