@@ -45,6 +45,7 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         _ = planner_lm
         self.runtime = runtime or DaytonaSandboxRuntime()
         self.loaded_document_paths: list[str] = []
+        self.daytona_batch_concurrency: int | None = None
 
         interpreter = DaytonaInterpreter(
             runtime=self.runtime,
@@ -207,7 +208,12 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
     ):
-        _ = batch_concurrency
+        if batch_concurrency is not None:
+            self.daytona_batch_concurrency = (
+                max(1, int(batch_concurrency))
+                if isinstance(batch_concurrency, int) and batch_concurrency > 0
+                else None
+            )
         interpreter = cast(DaytonaInterpreter, self.interpreter)
         effective_repo_url = repo_url if repo_url is not None else interpreter.repo_url
         effective_repo_ref = repo_ref if repo_ref is not None else interpreter.repo_ref

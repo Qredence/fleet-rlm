@@ -75,7 +75,7 @@ def test_memory_read_uses_daytona_session(monkeypatch):
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
     session = _FakeDaytonaSession()
-    session.file_contents["/home/daytona/memory/notes/native.txt"] = (
+    session.file_contents["/home/daytona/memory/memory/notes/native.txt"] = (
         "hello from daytona"
     )
 
@@ -94,11 +94,11 @@ def test_memory_read_uses_daytona_session(monkeypatch):
 
     assert result == {
         "status": "ok",
-        "path": "/home/daytona/memory/notes/native.txt",
+        "path": "/home/daytona/memory/memory/notes/native.txt",
         "content": "hello from daytona",
         "chars": len("hello from daytona"),
     }
-    assert session.read_calls == ["/home/daytona/memory/notes/native.txt"]
+    assert session.read_calls == ["/home/daytona/memory/memory/notes/native.txt"]
     assert fake_interpreter.execute_calls == []
     assert fake_interpreter.reload_calls == 0
 
@@ -128,7 +128,7 @@ def test_memory_list_uses_daytona_session(monkeypatch):
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
     session = _FakeDaytonaSession()
-    session.list_entries["/home/daytona/memory/docs"] = [
+    session.list_entries["/home/daytona/memory/memory/docs"] = [
         SimpleNamespace(name="guides", is_dir=True),
         SimpleNamespace(name="readme.txt", is_dir=False),
     ]
@@ -148,14 +148,14 @@ def test_memory_list_uses_daytona_session(monkeypatch):
 
     assert result == {
         "status": "ok",
-        "path": "/home/daytona/memory/docs",
+        "path": "/home/daytona/memory/memory/docs",
         "items": [
             {"name": "guides", "type": "dir"},
             {"name": "readme.txt", "type": "file"},
         ],
         "count": 2,
     }
-    assert session.list_calls == ["/home/daytona/memory/docs"]
+    assert session.list_calls == ["/home/daytona/memory/memory/docs"]
     assert fake_interpreter.execute_calls == []
     assert fake_interpreter.reload_calls == 0
 
@@ -206,11 +206,11 @@ def test_memory_write_uses_daytona_session(monkeypatch):
 
     assert result == {
         "status": "ok",
-        "path": "/home/daytona/memory/notes/daytona.txt",
+        "path": "/home/daytona/memory/memory/notes/daytona.txt",
         "chars": len("native write"),
     }
     assert session.write_calls == [
-        ("/home/daytona/memory/notes/daytona.txt", "native write")
+        ("/home/daytona/memory/memory/notes/daytona.txt", "native write")
     ]
     assert fake_interpreter.execute_calls == []
     assert fake_interpreter.commit_calls == 0
@@ -285,7 +285,7 @@ def test_write_to_file_append_uses_daytona_session(monkeypatch):
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
     session = _FakeDaytonaSession()
-    session.file_contents["/home/daytona/memory/logs/session.txt"] = "line0\n"
+    session.file_contents["/home/daytona/memory/memory/logs/session.txt"] = "line0\n"
 
     async def _fake_get_daytona_session(ctx):
         _ = ctx
@@ -302,13 +302,13 @@ def test_write_to_file_append_uses_daytona_session(monkeypatch):
 
     assert result == {
         "status": "ok",
-        "path": "/home/daytona/memory/logs/session.txt",
+        "path": "/home/daytona/memory/memory/logs/session.txt",
         "chars": len("line1\n"),
         "mode": "append",
     }
-    assert session.read_calls == ["/home/daytona/memory/logs/session.txt"]
+    assert session.read_calls == ["/home/daytona/memory/memory/logs/session.txt"]
     assert session.write_calls == [
-        ("/home/daytona/memory/logs/session.txt", "line0\nline1\n")
+        ("/home/daytona/memory/memory/logs/session.txt", "line0\nline1\n")
     ]
     assert fake_interpreter.execute_calls == []
     assert fake_interpreter.commit_calls == 0
@@ -320,7 +320,7 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
     session = _FakeDaytonaSession()
-    session.file_contents["/home/daytona/memory/workspace/docs/spec.md"] = (
+    session.file_contents["/home/daytona/memory/artifacts/docs/spec.md"] = (
         "# Spec\nHello"
     )
 
@@ -340,11 +340,11 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
     assert result == {
         "status": "ok",
         "alias": "spec",
-        "path": "/home/daytona/memory/workspace/docs/spec.md",
+        "path": "/home/daytona/memory/artifacts/docs/spec.md",
         "chars": len("# Spec\nHello"),
         "lines": 2,
     }
-    assert session.read_calls == ["/home/daytona/memory/workspace/docs/spec.md"]
+    assert session.read_calls == ["/home/daytona/memory/artifacts/docs/spec.md"]
     assert agent.documents["spec"] == "# Spec\nHello"
     assert agent.active_alias == "spec"
     assert fake_interpreter.execute_calls == []

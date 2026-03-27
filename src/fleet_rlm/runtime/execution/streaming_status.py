@@ -135,6 +135,7 @@ def classify_tool_event_kind(tool_name: str | None) -> ToolEventKind:
         return "plan_update"
     if tool_name in {
         "rlm_query",
+        "rlm_query_batched",
         "analyze_long_document",
         "summarize_long_document",
         "extract_from_logs",

@@ -84,6 +84,45 @@ class RuntimeModuleDefinition:
     module_class: type[dspy.Module] | None = None
 
 
+@dataclass(frozen=True)
+class _RuntimeModuleConfig:
+    """Shared constructor parameters for runtime-module RLMs."""
+
+    interpreter: Any
+    max_iterations: int
+    max_llm_calls: int
+    verbose: bool
+
+
+def _module_config(
+    *,
+    interpreter: Any,
+    max_iterations: int,
+    max_llm_calls: int,
+    verbose: bool,
+) -> _RuntimeModuleConfig:
+    return _RuntimeModuleConfig(
+        interpreter=interpreter,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=verbose,
+    )
+
+
+def _create_configured_runtime_rlm(
+    config: _RuntimeModuleConfig,
+    *,
+    signature: type[dspy.Signature],
+) -> dspy.Module:
+    return create_runtime_rlm(
+        signature=signature,
+        interpreter=config.interpreter,
+        max_iterations=config.max_iterations,
+        max_llm_calls=config.max_llm_calls,
+        verbose=config.verbose,
+    )
+
+
 class _RuntimeSignatureModule(dspy.Module):
     """Generic runtime wrapper that forwards keyword arguments into one RLM."""
 
@@ -98,12 +137,14 @@ class _RuntimeSignatureModule(dspy.Module):
         verbose: bool,
     ) -> None:
         super().__init__()
-        self._rlm = create_runtime_rlm(
+        self._rlm = _create_configured_runtime_rlm(
+            _module_config(
+                interpreter=interpreter,
+                max_iterations=max_iterations,
+                max_llm_calls=max_llm_calls,
+                verbose=verbose,
+            ),
             signature=self.signature_cls,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(self, **kwargs: Any) -> dspy.Prediction:
@@ -196,12 +237,14 @@ class GroundedAnswerSynthesisModule(dspy.Module):
         verbose: bool,
     ) -> None:
         super().__init__()
-        self._grounded_answer = create_runtime_rlm(
+        self._grounded_answer = _create_configured_runtime_rlm(
+            _module_config(
+                interpreter=interpreter,
+                max_iterations=max_iterations,
+                max_llm_calls=max_llm_calls,
+                verbose=verbose,
+            ),
             signature=GroundedAnswerWithCitations,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(
@@ -240,7 +283,56 @@ class GroundedAnswerSynthesisModule(dspy.Module):
         )
 
 
-class MemoryStructureAuditPlanningModule(dspy.Module):
+class _MemoryTreePrimedModule(dspy.Module):
+    """Base helper for modules that prime work with a memory tree snapshot."""
+
+    def __init__(self, *, config: _RuntimeModuleConfig) -> None:
+        super().__init__()
+        self._memory_tree = _create_configured_runtime_rlm(
+            config,
+            signature=VolumeFileTreeSignature,
+        )
+
+    def _resolve_tree_snapshot(
+        self,
+        *,
+        root_path: str,
+        max_depth: int,
+        include_hidden: bool,
+        tree_snapshot: list[Any] | None,
+    ) -> list[Any]:
+        if tree_snapshot is not None:
+            return list(tree_snapshot or [])
+
+        tree_prediction = self._memory_tree(
+            root_path=root_path,
+            max_depth=_coerce_bounded_int(max_depth, default=4, minimum=0, maximum=12),
+            include_hidden=bool(include_hidden),
+        )
+        return list(getattr(tree_prediction, "nodes", []) or [])
+
+    def _resolve_tree_context(
+        self,
+        *,
+        root_path: str,
+        max_depth: int,
+        include_hidden: bool,
+        available_context: str,
+    ) -> str:
+        context_text = available_context.strip()
+        if context_text:
+            return context_text
+
+        tree_nodes = self._resolve_tree_snapshot(
+            root_path=root_path,
+            max_depth=max_depth,
+            include_hidden=include_hidden,
+            tree_snapshot=None,
+        )[:20]
+        return f"memory_root={root_path}; nodes_sample={tree_nodes}"
+
+
+class MemoryStructureAuditPlanningModule(_MemoryTreePrimedModule):
     """Compose a memory-tree snapshot with the audit RLM."""
 
     def __init__(
@@ -251,20 +343,16 @@ class MemoryStructureAuditPlanningModule(dspy.Module):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        super().__init__()
-        self._memory_tree = create_runtime_rlm(
-            signature=VolumeFileTreeSignature,
+        config = _module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
-        self._memory_structure_audit = create_runtime_rlm(
+        super().__init__(config=config)
+        self._memory_structure_audit = _create_configured_runtime_rlm(
+            config,
             signature=MemoryStructureAuditSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(
@@ -276,23 +364,18 @@ class MemoryStructureAuditPlanningModule(dspy.Module):
         include_hidden: bool = False,
         tree_snapshot: list[Any] | None = None,
     ) -> dspy.Prediction:
-        if tree_snapshot is None:
-            tree_prediction = self._memory_tree(
-                root_path=root_path,
-                max_depth=_coerce_bounded_int(
-                    max_depth, default=4, minimum=0, maximum=12
-                ),
-                include_hidden=bool(include_hidden),
-            )
-            tree_snapshot = list(getattr(tree_prediction, "nodes", []) or [])
-
         return self._memory_structure_audit(
-            tree_snapshot=list(tree_snapshot or []),
+            tree_snapshot=self._resolve_tree_snapshot(
+                root_path=root_path,
+                max_depth=max_depth,
+                include_hidden=include_hidden,
+                tree_snapshot=tree_snapshot,
+            ),
             usage_goals=usage_goals,
         )
 
 
-class MemoryActionPlanningModule(dspy.Module):
+class MemoryActionPlanningModule(_MemoryTreePrimedModule):
     """Compose a memory-tree snapshot with the action-intent RLM."""
 
     def __init__(
@@ -303,20 +386,16 @@ class MemoryActionPlanningModule(dspy.Module):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        super().__init__()
-        self._memory_tree = create_runtime_rlm(
-            signature=VolumeFileTreeSignature,
+        config = _module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
-        self._memory_action_intent = create_runtime_rlm(
+        super().__init__(config=config)
+        self._memory_action_intent = _create_configured_runtime_rlm(
+            config,
             signature=MemoryActionIntentSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(
@@ -329,19 +408,14 @@ class MemoryActionPlanningModule(dspy.Module):
         include_hidden: bool = False,
         current_tree: list[Any] | None = None,
     ) -> dspy.Prediction:
-        if current_tree is None:
-            tree_prediction = self._memory_tree(
-                root_path=root_path,
-                max_depth=_coerce_bounded_int(
-                    max_depth, default=4, minimum=0, maximum=12
-                ),
-                include_hidden=bool(include_hidden),
-            )
-            current_tree = list(getattr(tree_prediction, "nodes", []) or [])
-
         return self._memory_action_intent(
             user_request=user_request,
-            current_tree=list(current_tree or []),
+            current_tree=self._resolve_tree_snapshot(
+                root_path=root_path,
+                max_depth=max_depth,
+                include_hidden=include_hidden,
+                tree_snapshot=current_tree,
+            ),
             policy_constraints=policy_constraints,
         )
 
@@ -358,18 +432,21 @@ class MemoryMigrationPlanningModule(dspy.Module):
         verbose: bool,
     ) -> None:
         super().__init__()
-        self._memory_structure_audit = MemoryStructureAuditPlanningModule(
+        config = _module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
-        self._memory_structure_migration_plan = create_runtime_rlm(
+        self._memory_structure_audit = MemoryStructureAuditPlanningModule(
+            interpreter=config.interpreter,
+            max_iterations=config.max_iterations,
+            max_llm_calls=config.max_llm_calls,
+            verbose=config.verbose,
+        )
+        self._memory_structure_migration_plan = _create_configured_runtime_rlm(
+            config,
             signature=MemoryStructureMigrationPlanSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(
@@ -397,7 +474,7 @@ class MemoryMigrationPlanningModule(dspy.Module):
         )
 
 
-class ClarificationQuestionPlanningModule(dspy.Module):
+class ClarificationQuestionPlanningModule(_MemoryTreePrimedModule):
     """Compose memory context gathering with clarification-question generation."""
 
     def __init__(
@@ -408,20 +485,16 @@ class ClarificationQuestionPlanningModule(dspy.Module):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        super().__init__()
-        self._memory_tree = create_runtime_rlm(
-            signature=VolumeFileTreeSignature,
+        config = _module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
-        self._clarification_questions = create_runtime_rlm(
+        super().__init__(config=config)
+        self._clarification_questions = _create_configured_runtime_rlm(
+            config,
             signature=ClarificationQuestionSignature,
-            interpreter=interpreter,
-            max_iterations=max_iterations,
-            max_llm_calls=max_llm_calls,
-            verbose=verbose,
         )
 
     def forward(
@@ -438,21 +511,14 @@ class ClarificationQuestionPlanningModule(dspy.Module):
         if risk_norm not in {"low", "medium", "high"}:
             risk_norm = "medium"
 
-        context_text = available_context.strip()
-        if not context_text:
-            tree_prediction = self._memory_tree(
-                root_path=root_path,
-                max_depth=_coerce_bounded_int(
-                    max_depth, default=4, minimum=0, maximum=12
-                ),
-                include_hidden=bool(include_hidden),
-            )
-            tree_nodes = list(getattr(tree_prediction, "nodes", []) or [])[:20]
-            context_text = f"memory_root={root_path}; nodes_sample={tree_nodes}"
-
         return self._clarification_questions(
             ambiguous_request=request,
-            available_context=context_text,
+            available_context=self._resolve_tree_context(
+                root_path=root_path,
+                max_depth=max_depth,
+                include_hidden=include_hidden,
+                available_context=available_context,
+            ),
             operation_risk=risk_norm,
         )
 

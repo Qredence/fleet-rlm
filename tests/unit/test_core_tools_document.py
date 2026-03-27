@@ -7,6 +7,7 @@ the closure-based DSPy tool builder that binds document ops to an agent.
 from __future__ import annotations
 
 from pathlib import Path
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -28,8 +29,58 @@ def _make_fake_agent(tmp_path: Path) -> Any:
         _max_documents=10,
         active_alias=None,
         _set_document=_set_document,
+        interpreter=None,
     )
     return agent
+
+
+class _FakeDaytonaSession:
+    def __init__(self, workspace_path: str = "/workspace/repo") -> None:
+        self.workspace_path = workspace_path
+        self.files: dict[str, str] = {}
+        self.read_calls: list[str] = []
+        self.list_calls: list[str] = []
+
+    def _resolve(self, path: str) -> str:
+        candidate = PurePosixPath(path)
+        if candidate.is_absolute():
+            return str(candidate)
+        return str(PurePosixPath(self.workspace_path) / candidate)
+
+    def read_file(self, path: str) -> str:
+        resolved = self._resolve(path)
+        self.read_calls.append(resolved)
+        if resolved not in self.files:
+            raise FileNotFoundError(resolved)
+        return self.files[resolved]
+
+    def list_files(self, path: str) -> list[Any]:
+        resolved = self._resolve(path)
+        self.list_calls.append(resolved)
+        prefix = resolved.rstrip("/") + "/"
+        items: dict[str, bool] = {}
+        for file_path in self.files:
+            if not file_path.startswith(prefix):
+                continue
+            remainder = file_path[len(prefix) :]
+            if not remainder:
+                continue
+            segment, _, tail = remainder.partition("/")
+            items.setdefault(segment, bool(tail))
+        if not items:
+            raise FileNotFoundError(resolved)
+        return [
+            SimpleNamespace(name=name, is_dir=is_dir)
+            for name, is_dir in sorted(items.items())
+        ]
+
+
+class _FakeDaytonaInterpreter:
+    def __init__(self, session: _FakeDaytonaSession) -> None:
+        self._session = session
+
+    def _ensure_session_sync(self) -> _FakeDaytonaSession:
+        return self._session
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +156,98 @@ def test_load_document_missing_file_raises(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError):
         load_fn("/absolutely/nonexistent/file.txt")
+
+
+def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
+    """Daytona workspace files should load when absent on the host filesystem."""
+    from fleet_rlm.runtime.tools.document import build_document_tools
+
+    agent = _make_fake_agent(tmp_path)
+    session = _FakeDaytonaSession()
+    session.files["/workspace/repo/paper.txt"] = "paper body"
+    agent.interpreter = _FakeDaytonaInterpreter(session)
+
+    tools = build_document_tools(agent)
+    load_fn = next(t.func for t in tools if t.name == "load_document")
+
+    result = load_fn("paper.txt", alias="paper")
+
+    assert result == {
+        "status": "ok",
+        "alias": "paper",
+        "path": "/workspace/repo/paper.txt",
+        "chars": len("paper body"),
+        "lines": 1,
+    }
+    assert agent._document_cache["paper"] == "paper body"
+    assert agent.active_alias == "paper"
+    assert session.list_calls == ["/workspace/repo"]
+    assert session.read_calls == ["/workspace/repo/paper.txt"]
+
+
+def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: Path):
+    """Daytona workspace files should win over colliding host-relative paths."""
+    from fleet_rlm.runtime.tools.document import build_document_tools
+
+    readme = tmp_path / "README.md"
+    readme.write_text("host readme")
+
+    agent = _make_fake_agent(tmp_path)
+    session = _FakeDaytonaSession()
+    session.files["/workspace/repo/README.md"] = "daytona readme"
+    agent.interpreter = _FakeDaytonaInterpreter(session)
+
+    tools = build_document_tools(agent)
+    load_fn = next(t.func for t in tools if t.name == "load_document")
+
+    result = load_fn("README.md", alias="readme")
+
+    assert result == {
+        "status": "ok",
+        "alias": "readme",
+        "path": "/workspace/repo/README.md",
+        "chars": len("daytona readme"),
+        "lines": 1,
+    }
+    assert agent._document_cache["readme"] == "daytona readme"
+    assert session.list_calls == ["/workspace/repo"]
+    assert session.read_calls == ["/workspace/repo/README.md"]
+
+
+def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
+    """Missing Daytona workspace files should still fail cleanly."""
+    from fleet_rlm.runtime.tools.document import build_document_tools
+
+    agent = _make_fake_agent(tmp_path)
+    agent.interpreter = _FakeDaytonaInterpreter(_FakeDaytonaSession())
+
+    tools = build_document_tools(agent)
+    load_fn = next(t.func for t in tools if t.name == "load_document")
+
+    with pytest.raises(FileNotFoundError, match="missing.txt"):
+        load_fn("missing.txt")
+
+
+def test_load_daytona_workspace_text_sync_rejects_parent_traversal(
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.runtime.tools.sandbox_common import (
+        _SandboxToolContext,
+        _load_daytona_workspace_text_sync,
+    )
+
+    agent = _make_fake_agent(tmp_path)
+    session = _FakeDaytonaSession()
+    agent.interpreter = _FakeDaytonaInterpreter(session)
+
+    loaded = _load_daytona_workspace_text_sync(
+        _SandboxToolContext(agent=agent),
+        path="../secrets.txt",
+    )
+
+    assert loaded is None
+    assert session.list_calls == []
+    assert session.read_calls == []
 
 
 def test_load_document_directory_returns_listing(tmp_path: Path):

@@ -23,36 +23,33 @@ describe("WorkspaceChatEmptyState", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders feature-local suggestions and the shell-navigation hint", () => {
+  it("renders the workspace title block and prompt chips from the Figma empty state", () => {
     const html = renderToStaticMarkup(
       <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} />,
     );
-    expect(html).toContain("What can I help you build?");
-    expect(html).toContain("Architecture pass");
-    expect(html).toContain("Document brief");
-    expect(html).toContain("Python runner");
-    expect(html).toContain("Critique my work");
-    expect(html).not.toContain("Operator workspace");
-    expect(html).toContain("Use the left rail to jump between recent sessions");
+    expect(html).toContain("Let&#x27;s get to work, how can I help?");
+    expect(html).toContain("Start with a task or jump into a saved session");
+    expect(html).toContain("Help me write");
+    expect(html).toContain("Summarize text");
+    expect(html).toContain("Analyze image");
+    expect(html).toContain("More");
   });
 
   it("routes suggestion interactions through feature callbacks", () => {
     const onSuggestionClick = vi.fn();
     const { container, root } = mountEmptyState({ onSuggestionClick });
 
-    const architectureButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Architecture pass"),
+    const helpMeWriteButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Help me write"),
     );
 
-    expect(architectureButton).not.toBeUndefined();
+    expect(helpMeWriteButton).not.toBeUndefined();
 
     act(() => {
-      architectureButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      helpMeWriteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onSuggestionClick).toHaveBeenCalledWith(
-      "Analyze a codebase and extract its architecture",
-    );
+    expect(onSuggestionClick).toHaveBeenCalledWith("Help me write");
 
     act(() => {
       root.unmount();

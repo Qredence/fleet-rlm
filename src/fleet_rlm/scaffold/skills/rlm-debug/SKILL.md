@@ -40,7 +40,7 @@ env | grep DAYTONA
 uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
 
-Daytona persistent memory should be inspected under `/home/daytona/memory`.
+Daytona durable storage should be inspected under `/home/daytona/memory/{memory,artifacts,buffers,meta}`. The live workspace is transient.
 
 ## Contract Checks
 
@@ -67,7 +67,7 @@ The riskiest backend files are:
 ### Daytona volume confusion
 
 - Do not treat `DAYTONA_TARGET` as a workspace id or volume name
-- Use the mounted workspace volume at `/home/daytona/memory`
+- Use the mounted durable volume rooted at `/home/daytona/memory`
 
 ### UI contract drift
 

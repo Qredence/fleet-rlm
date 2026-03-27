@@ -14,7 +14,9 @@ That starts an OSS MLflow tracking server on `http://127.0.0.1:5001` using `sqli
 ### Optional: Auto-start MLflow in local development
 
 If you prefer not to keep a second terminal open for `make mlflow-server`, the API
-server can launch MLflow automatically in local development:
+server now auto-starts MLflow by default in local development whenever
+`MLFLOW_ENABLED=true` and `MLFLOW_TRACKING_URI` points at localhost. You can
+still force the behavior explicitly:
 
 ```bash
 # from repo root
@@ -27,6 +29,8 @@ Notes:
 - Auto-start only runs when `APP_ENV=local`.
 - The port comes from `MLFLOW_TRACKING_URI`, so keep that value aligned with your
   local MLflow server.
+- Set `MLFLOW_AUTO_START=false` if you prefer to manage MLflow manually with
+  `make mlflow-server`.
 - Startup still succeeds if MLflow cannot be reached; the app reports MLflow as
   degraded instead of failing boot.
 

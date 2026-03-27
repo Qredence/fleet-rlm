@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
 
 import dspy
@@ -49,6 +49,17 @@ class PreparedStreamingTurn:
     effective_max_iters: int
     ctx: StreamingContext
     stream_listeners: list[StreamListener]
+
+
+@dataclass(slots=True)
+class _ActiveStreamingTurn:
+    """Mutable per-stream state shared by sync and async iterators."""
+
+    assistant_chunks: list[str] = field(default_factory=list)
+    final_prediction: dspy.Prediction | None = None
+    last_tool_name_ref: list[str | None] = field(default_factory=lambda: [None])
+    pending_live_events: list[StreamEvent] = field(default_factory=list)
+    previous_live_callback: Any = None
 
 
 def is_terminal_stream_event_kind(kind: str) -> bool:
@@ -328,6 +339,70 @@ def _emit_prediction_trajectory_events(
         )
 
 
+def _build_stream_program(
+    agent: RLMReActChatAgent,
+    *,
+    trace: bool,
+    is_async_program: bool,
+    async_streaming: bool,
+    stream_listeners: list[StreamListener],
+) -> Any:
+    return cast(
+        Any,
+        dspy.streamify(
+            agent.react,
+            status_message_provider=ReActStatusProvider(),
+            stream_listeners=stream_listeners,
+            include_final_prediction_in_output_stream=True,
+            is_async_program=is_async_program,
+            async_streaming=async_streaming,
+        ),
+    )
+
+
+def _activate_live_event_queue(agent: RLMReActChatAgent) -> _ActiveStreamingTurn:
+    state = _ActiveStreamingTurn()
+    state.previous_live_callback = getattr(agent, "_live_event_callback", None)
+
+    def _queue_live_event(event: StreamEvent) -> None:
+        if not isinstance(event, StreamEvent):
+            return
+        if event.kind in {"final", "cancelled", "error"}:
+            return
+        state.pending_live_events.append(event)
+
+    agent._live_event_callback = _queue_live_event
+    return state
+
+
+def _restore_live_event_queue(
+    agent: RLMReActChatAgent,
+    state: _ActiveStreamingTurn,
+) -> None:
+    agent._live_event_callback = state.previous_live_callback
+
+
+def _handle_stream_value(
+    *,
+    value: Any,
+    trace: bool,
+    state: _ActiveStreamingTurn,
+    ctx: StreamingContext,
+) -> Iterable[StreamEvent]:
+    if isinstance(value, dspy.Prediction):
+        state.final_prediction = value
+        yield from _emit_prediction_trajectory_events(value, ctx)
+        return
+
+    yield from _process_stream_value(
+        value=value,
+        trace=trace,
+        assistant_chunks=state.assistant_chunks,
+        last_tool_name_ref=state.last_tool_name_ref,
+        ctx=ctx,
+    )
+
+
 def iter_chat_turn_stream(
     agent: RLMReActChatAgent,
     message: str,
@@ -344,16 +419,12 @@ def iter_chat_turn_stream(
     stream_listeners = prepared_turn.stream_listeners
 
     try:
-        stream_program = cast(
-            Any,
-            dspy.streamify(
-                agent.react,
-                status_message_provider=ReActStatusProvider(),
-                stream_listeners=stream_listeners,
-                include_final_prediction_in_output_stream=True,
-                is_async_program=False,
-                async_streaming=False,
-            ),
+        stream_program = _build_stream_program(
+            agent,
+            trace=trace,
+            is_async_program=False,
+            async_streaming=False,
+            stream_listeners=stream_listeners,
         )
     except Exception as exc:
         logger.warning(
@@ -373,20 +444,7 @@ def iter_chat_turn_stream(
         )
         return
 
-    assistant_chunks: list[str] = []
-    final_prediction: dspy.Prediction | None = None
-    last_tool_name_ref: list[str | None] = [None]
-    pending_live_events: list[StreamEvent] = []
-    previous_live_callback = getattr(agent, "_live_event_callback", None)
-
-    def _queue_live_event(event: StreamEvent) -> None:
-        if not isinstance(event, StreamEvent):
-            return
-        if event.kind in {"final", "cancelled", "error"}:
-            return
-        pending_live_events.append(event)
-
-    agent._live_event_callback = _queue_live_event
+    state = _activate_live_event_queue(agent)
 
     try:
         with build_dspy_context(allow_tool_async_sync_conversion=True):
@@ -401,24 +459,18 @@ def iter_chat_turn_stream(
                     yield build_cancelled_stream_event(
                         agent=agent,
                         message=message,
-                        assistant_chunks=assistant_chunks,
+                        assistant_chunks=state.assistant_chunks,
                         ctx=ctx,
                     )
                     return
 
-                yield from _drain_live_events(pending_live_events)
-
-                if isinstance(value, dspy.Prediction):
-                    final_prediction = value
-                    yield from _emit_prediction_trajectory_events(final_prediction, ctx)
-                else:
-                    yield from _process_stream_value(
-                        value=value,
-                        trace=trace,
-                        assistant_chunks=assistant_chunks,
-                        last_tool_name_ref=last_tool_name_ref,
-                        ctx=ctx,
-                    )
+                yield from _drain_live_events(state.pending_live_events)
+                yield from _handle_stream_value(
+                    value=value,
+                    trace=trace,
+                    state=state,
+                    ctx=ctx,
+                )
     except Exception as exc:
         logger.error(
             "Streaming error, falling back: %s",
@@ -437,14 +489,14 @@ def iter_chat_turn_stream(
         )
         return
     finally:
-        agent._live_event_callback = previous_live_callback
+        _restore_live_event_queue(agent, state)
 
-    yield from _drain_live_events(pending_live_events)
+    yield from _drain_live_events(state.pending_live_events)
     yield build_final_stream_event(
         agent=agent,
         message=message,
-        final_prediction=final_prediction,
-        assistant_chunks=assistant_chunks,
+        final_prediction=state.final_prediction,
+        assistant_chunks=state.assistant_chunks,
         ctx=ctx,
     )
 
@@ -472,16 +524,12 @@ async def aiter_chat_turn_stream(
     stream_listeners = prepared_turn.stream_listeners
 
     try:
-        stream_program = cast(
-            Any,
-            dspy.streamify(
-                agent.react,
-                status_message_provider=ReActStatusProvider(),
-                stream_listeners=stream_listeners,
-                include_final_prediction_in_output_stream=True,
-                is_async_program=True,
-                async_streaming=True,
-            ),
+        stream_program = _build_stream_program(
+            agent,
+            trace=trace,
+            is_async_program=True,
+            async_streaming=True,
+            stream_listeners=stream_listeners,
         )
     except Exception as exc:
         logger.warning(
@@ -502,20 +550,7 @@ async def aiter_chat_turn_stream(
             yield event
         return
 
-    assistant_chunks: list[str] = []
-    final_prediction: dspy.Prediction | None = None
-    last_tool_name_ref: list[str | None] = [None]
-    pending_live_events: list[StreamEvent] = []
-    previous_live_callback = getattr(agent, "_live_event_callback", None)
-
-    def _queue_live_event(event: StreamEvent) -> None:
-        if not isinstance(event, StreamEvent):
-            return
-        if event.kind in {"final", "cancelled", "error"}:
-            return
-        pending_live_events.append(event)
-
-    agent._live_event_callback = _queue_live_event
+    state = _activate_live_event_queue(agent)
 
     try:
         output_stream = stream_program(
@@ -529,27 +564,21 @@ async def aiter_chat_turn_stream(
                 yield build_cancelled_stream_event(
                     agent=agent,
                     message=message,
-                    assistant_chunks=assistant_chunks,
+                    assistant_chunks=state.assistant_chunks,
                     ctx=ctx,
                 )
                 return
 
-            for event in _drain_live_events(pending_live_events):
+            for event in _drain_live_events(state.pending_live_events):
                 yield event
 
-            if isinstance(value, dspy.Prediction):
-                final_prediction = value
-                for event in _emit_prediction_trajectory_events(final_prediction, ctx):
-                    yield event
-            else:
-                for event in _process_stream_value(
-                    value=value,
-                    trace=trace,
-                    assistant_chunks=assistant_chunks,
-                    last_tool_name_ref=last_tool_name_ref,
-                    ctx=ctx,
-                ):
-                    yield event
+            for event in _handle_stream_value(
+                value=value,
+                trace=trace,
+                state=state,
+                ctx=ctx,
+            ):
+                yield event
     except Exception as exc:
         logger.error(
             "Async streaming error, falling back: %s",
@@ -569,14 +598,14 @@ async def aiter_chat_turn_stream(
             yield event
         return
     finally:
-        agent._live_event_callback = previous_live_callback
+        _restore_live_event_queue(agent, state)
 
-    for event in _drain_live_events(pending_live_events):
+    for event in _drain_live_events(state.pending_live_events):
         yield event
     yield build_final_stream_event(
         agent=agent,
         message=message,
-        final_prediction=final_prediction,
-        assistant_chunks=assistant_chunks,
+        final_prediction=state.final_prediction,
+        assistant_chunks=state.assistant_chunks,
         ctx=ctx,
     )

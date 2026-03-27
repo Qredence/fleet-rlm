@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from prompt_toolkit.shortcuts import input_dialog, radiolist_dialog, yes_no_dialog
@@ -18,6 +20,17 @@ from .ui import _dialog_style, _prompt_choice
 
 # Valid trace modes
 _TRACE_MODES: set[str] = {"compact", "verbose", "off"}
+
+
+@dataclass(frozen=True, slots=True)
+class _AliasCommandSpec:
+    """Metadata for alias commands that delegate to agent tools."""
+
+    tool_name: str
+    payload_builder: _AliasPayloadBuilder
+
+
+_AliasPayloadBuilder = Callable[[Any, str], dict[str, Any] | None]
 
 
 def handle_slash_command(
@@ -41,63 +54,13 @@ def handle_slash_command(
     trace_modes = trace_modes or _TRACE_MODES
     command, arg_text = _split_slash_command(line)
 
-    if command in {"/", "/help", "/commands"}:
-        return print_command_palette(session, agent)
+    session_result = _dispatch_session_command(
+        session, agent, command, arg_text, trace_modes
+    )
+    if session_result is not None:
+        return session_result
 
-    if command == "/?":
-        _show_shortcuts(session)
-        return False
-
-    if command in {"/exit", "/quit"}:
-        session.console.print("[dim]bye[/dim]")
-        return True
-
-    if command == "/clear":
-        session.console.clear()
-        session._print_banner(planner_ready=True)
-        return False
-
-    if command == "/reset":
-        return handle_reset_command(session, agent)
-
-    if command == "/trace":
-        return handle_trace_command(session, arg_text, trace_modes)
-
-    if command == "/status":
-        session._print_status(agent)
-        return False
-
-    if command == "/settings":
-        session._run_settings(arg_text.strip().lower())
-        return False
-
-    if command == "/model":
-        session._run_settings("model")
-        return False
-
-    if command == "/permissions":
-        session._print_permissions()
-        return False
-
-    if command == "/permissions-reset":
-        session.command_permissions.clear()
-        session._print_warning("Permission policy reset.")
-        return False
-
-    if command == "/run-long-context":
-        session._run_long_context(arg_text)
-        return False
-
-    if command == "/check-secret":
-        session._check_secret()
-        return False
-
-    if command == "/check-secret-key":
-        key = arg_text.strip() or "DSPY_LLM_API_KEY"
-        session._check_secret_key(key=key)
-        return False
-
-    alias_result = handle_alias_command(session, agent, command, arg_text)
+    alias_result = _dispatch_alias_command(session, agent, command, arg_text)
     if alias_result is not None:
         return alias_result
 
@@ -118,175 +81,282 @@ def handle_slash_command(
     return False
 
 
-def handle_trace_command(
-    session: Any,
-    arg_text: str,
-    trace_modes: set[str] | None = None,
-) -> bool:
-    """Handle the /trace command.
-
-    Args:
-        session: The terminal chat session instance.
-        arg_text: The argument text.
-        trace_modes: Valid trace modes.
-
-    Returns:
-        False (never exits).
-    """
-    trace_modes = trace_modes or _TRACE_MODES
-    mode = arg_text.strip().lower()
-    if mode not in trace_modes:
-        session._print_error("usage: /trace <compact|verbose|off>")
-        return False
-    session.trace_mode = _normalize_trace_mode(mode)
-    session.console.print(f"[green]Trace mode set to {session.trace_mode}[/]")
-    return False
-
-
-def handle_reset_command(session: Any, agent: Any) -> bool:
-    """Handle the /reset command.
-
-    Args:
-        session: The terminal chat session instance.
-        agent: The agent instance.
-
-    Returns:
-        False (never exits).
-    """
-    if not _confirm("Reset agent history and clear sandbox buffers?"):
-        session._print_warning("Reset cancelled.")
-        return False
-    result = agent.reset(clear_sandbox_buffers=True)
-    session._print_result(result, title="reset")
-    return False
-
-
-def handle_alias_command(
+def _dispatch_alias_command(
     session: Any,
     agent: Any,
     command: str,
     arg_text: str,
 ) -> bool | None:
-    """Handle alias commands (/docs, /active, /list, etc.).
+    spec = _ALIAS_COMMAND_SPECS.get(command)
+    if spec is None:
+        return None
+    payload = spec.payload_builder(session, arg_text)
+    if payload is None:
+        return False
+    _execute_agent_command(session, agent, spec.tool_name, payload)
+    return False
 
-    Args:
-        session: The terminal chat session instance.
-        agent: The agent instance.
-        command: The command name.
-        arg_text: The argument text.
 
-    Returns:
-        False if handled, None if not an alias command.
-    """
-    args = _safe_split(arg_text)
+def _dispatch_session_command(
+    session: Any,
+    agent: Any,
+    command: str,
+    arg_text: str,
+    trace_modes: set[str],
+) -> bool | None:
+    """Dispatch a session-level slash command from the local registry."""
+    action = _SESSION_COMMAND_ACTIONS.get(command)
+    if action is None:
+        return None
+    return _run_session_action(action, session, agent, arg_text, trace_modes)
 
-    if command in {"/docs", "/load"}:
-        if not args:
-            session._print_error("usage: /docs <path> [alias]")
+
+def _run_session_action(
+    action: str,
+    session: Any,
+    agent: Any,
+    arg_text: str,
+    trace_modes: set[str],
+) -> bool:
+    if action == "palette":
+        return print_command_palette(session, agent)
+    if action == "shortcuts":
+        _show_shortcuts(session)
+        return False
+    if action == "exit":
+        session.console.print("[dim]bye[/dim]")
+        return True
+    if action == "clear":
+        session.console.clear()
+        session._print_banner(planner_ready=True)
+        return False
+    if action == "reset":
+        if not _confirm("Reset agent history and clear sandbox buffers?"):
+            session._print_warning("Reset cancelled.")
             return False
+        result = agent.reset(clear_sandbox_buffers=True)
+        session._print_result(result, title="reset")
+        return False
+    if action == "trace":
+        mode = arg_text.strip().lower()
+        if mode not in trace_modes:
+            session._print_error("usage: /trace <compact|verbose|off>")
+            return False
+        session.trace_mode = _normalize_trace_mode(mode)
+        session.console.print(f"[green]Trace mode set to {session.trace_mode}[/]")
+        return False
+    if action == "status":
+        session._print_status(agent)
+        return False
+    if action == "settings":
+        session._run_settings(arg_text.strip().lower())
+        return False
+    if action == "model":
+        session._run_settings("model")
+        return False
+    if action == "permissions":
+        session._print_permissions()
+        return False
+    if action == "permissions-reset":
+        session.command_permissions.clear()
+        session._print_warning("Permission policy reset.")
+        return False
+    if action == "run-long-context":
+        session._run_long_context(arg_text)
+        return False
+    if action == "check-secret":
+        session._check_secret()
+        return False
+    if action == "check-secret-key":
+        key = arg_text.strip() or "DSPY_LLM_API_KEY"
+        session._check_secret_key(key=key)
+        return False
+    raise ValueError(f"Unknown session action: {action}")
+
+
+def _make_required_text_payload_builder(
+    *,
+    usage: str,
+    key: str,
+) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        value = arg_text.strip()
+        if not value:
+            session._print_error(usage)
+            return None
+        return {key: value}
+
+    return builder
+
+
+def _make_required_token_payload_builder(
+    *,
+    usage: str,
+    key: str,
+) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        args = _safe_split(arg_text)
+        if not args:
+            session._print_error(usage)
+            return None
+        return {key: args[0]}
+
+    return builder
+
+
+def _make_path_alias_payload_builder(*, usage: str) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        args = _safe_split(arg_text)
+        if not args:
+            session._print_error(usage)
+            return None
         payload: dict[str, Any] = {"path": args[0]}
         if len(args) > 1:
             payload["alias"] = args[1]
-        _execute_agent_command(session, agent, "load_document", payload)
-        return False
+        return payload
 
-    if command == "/active":
+    return builder
+
+
+def _make_chunk_payload_builder(*, usage: str) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        args = _safe_split(arg_text)
         if not args:
-            session._print_error("usage: /active <alias>")
-            return False
-        _execute_agent_command(
-            session, agent, "set_active_document", {"alias": args[0]}
-        )
-        return False
-
-    if command == "/list":
-        _execute_agent_command(session, agent, "list_documents", {})
-        return False
-
-    if command == "/chunk":
-        if not args:
-            session._print_error(
-                "usage: /chunk <size|headers|timestamps|json> [chunk_size]"
-            )
-            return False
+            session._print_error(usage)
+            return None
         payload: dict[str, Any] = {"strategy": args[0]}
         if len(args) > 1 and args[1].isdigit():
             payload["size"] = int(args[1])
-        _execute_agent_command(session, agent, "chunk_host", payload)
-        return False
+        return payload
 
-    if command == "/analyze":
-        query = arg_text.strip()
-        if not query:
-            session._print_error("usage: /analyze <query>")
-            return False
-        _execute_agent_command(session, agent, "analyze_document", {"query": query})
-        return False
+    return builder
 
-    if command == "/summarize":
-        focus = arg_text.strip()
-        if not focus:
-            session._print_error("usage: /summarize <focus>")
-            return False
-        _execute_agent_command(session, agent, "summarize_document", {"focus": focus})
-        return False
 
-    if command == "/extract":
-        query = arg_text.strip()
-        if not query:
-            session._print_error("usage: /extract <query>")
-            return False
-        _execute_agent_command(session, agent, "extract_logs", {"query": query})
-        return False
-
-    if command == "/semantic":
-        query = arg_text.strip()
-        if not query:
-            session._print_error("usage: /semantic <query>")
-            return False
-        _execute_agent_command(
-            session, agent, "parallel_semantic_map", {"query": query}
-        )
-        return False
-
-    if command == "/buffer":
-        if not args:
-            session._print_error("usage: /buffer <name>")
-            return False
-        _execute_agent_command(session, agent, "read_buffer", {"name": args[0]})
-        return False
-
-    if command == "/clear-buffer":
-        payload: dict[str, Any] = {"name": args[0]} if args else {}
-        if not args and not _confirm("Clear all buffers?"):
-            session._print_warning("clear-buffer cancelled.")
-            return False
-        _execute_agent_command(session, agent, "clear_buffer", payload)
-        return False
-
-    if command == "/save-buffer":
+def _make_two_token_payload_builder(
+    *,
+    usage: str,
+    first_key: str,
+    second_key: str,
+) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        args = _safe_split(arg_text)
         if len(args) < 2:
-            session._print_error("usage: /save-buffer <buffer_name> <volume_path>")
-            return False
-        _execute_agent_command(
-            session,
-            agent,
-            "save_buffer",
-            {"name": args[0], "path": args[1]},
-        )
-        return False
+            session._print_error(usage)
+            return None
+        return {first_key: args[0], second_key: args[1]}
 
-    if command == "/load-volume":
-        if not args:
-            session._print_error("usage: /load-volume <path> [alias]")
-            return False
-        payload: dict[str, Any] = {"path": args[0]}
-        if len(args) > 1:
-            payload["alias"] = args[1]
-        _execute_agent_command(session, agent, "load_volume", payload)
-        return False
+    return builder
 
-    return None
+
+def _make_clear_buffer_payload_builder(*, usage: str) -> _AliasPayloadBuilder:
+    def builder(session: Any, arg_text: str) -> dict[str, Any] | None:
+        args = _safe_split(arg_text)
+        if args:
+            return {"name": args[0]}
+        if not _confirm("Clear all buffers?"):
+            session._print_warning("clear-buffer cancelled.")
+            return None
+        return {}
+
+    return builder
+
+
+_SESSION_COMMAND_ACTIONS: dict[str, str] = {
+    "/": "palette",
+    "/help": "palette",
+    "/commands": "palette",
+    "/?": "shortcuts",
+    "/exit": "exit",
+    "/quit": "exit",
+    "/clear": "clear",
+    "/reset": "reset",
+    "/trace": "trace",
+    "/status": "status",
+    "/settings": "settings",
+    "/model": "model",
+    "/permissions": "permissions",
+    "/permissions-reset": "permissions-reset",
+    "/run-long-context": "run-long-context",
+    "/check-secret": "check-secret",
+    "/check-secret-key": "check-secret-key",
+}
+
+
+_ALIAS_COMMAND_SPECS: dict[str, _AliasCommandSpec] = {
+    "/docs": _AliasCommandSpec(
+        "load_document",
+        _make_path_alias_payload_builder(usage="usage: /docs <path> [alias]"),
+    ),
+    "/load": _AliasCommandSpec(
+        "load_document",
+        _make_path_alias_payload_builder(usage="usage: /docs <path> [alias]"),
+    ),
+    "/active": _AliasCommandSpec(
+        "set_active_document",
+        _make_required_token_payload_builder(
+            usage="usage: /active <alias>",
+            key="alias",
+        ),
+    ),
+    "/list": _AliasCommandSpec("list_documents", lambda session, arg_text: {}),
+    "/chunk": _AliasCommandSpec(
+        "chunk_host",
+        _make_chunk_payload_builder(
+            usage="usage: /chunk <size|headers|timestamps|json> [chunk_size]"
+        ),
+    ),
+    "/analyze": _AliasCommandSpec(
+        "analyze_long_document",
+        _make_required_text_payload_builder(
+            usage="usage: /analyze <query>",
+            key="query",
+        ),
+    ),
+    "/summarize": _AliasCommandSpec(
+        "summarize_long_document",
+        _make_required_text_payload_builder(
+            usage="usage: /summarize <focus>",
+            key="focus",
+        ),
+    ),
+    "/extract": _AliasCommandSpec(
+        "extract_from_logs",
+        _make_required_text_payload_builder(
+            usage="usage: /extract <query>",
+            key="query",
+        ),
+    ),
+    "/semantic": _AliasCommandSpec(
+        "parallel_semantic_map",
+        _make_required_text_payload_builder(
+            usage="usage: /semantic <query>",
+            key="query",
+        ),
+    ),
+    "/buffer": _AliasCommandSpec(
+        "read_buffer",
+        _make_required_token_payload_builder(
+            usage="usage: /buffer <name>",
+            key="name",
+        ),
+    ),
+    "/clear-buffer": _AliasCommandSpec(
+        "clear_buffer",
+        _make_clear_buffer_payload_builder(usage="usage: /clear-buffer <name>"),
+    ),
+    "/save-buffer": _AliasCommandSpec(
+        "save_buffer_to_volume",
+        _make_two_token_payload_builder(
+            usage="usage: /save-buffer <buffer_name> <volume_path>",
+            first_key="name",
+            second_key="path",
+        ),
+    ),
+    "/load-volume": _AliasCommandSpec(
+        "load_text_from_volume",
+        _make_path_alias_payload_builder(usage="usage: /load-volume <path> [alias]"),
+    ),
+}
 
 
 def print_command_palette(session: Any, agent: Any) -> bool:

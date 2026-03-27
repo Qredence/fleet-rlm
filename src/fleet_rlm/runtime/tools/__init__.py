@@ -20,7 +20,9 @@ if TYPE_CHECKING:
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 
-_RECURSIVE_RLM_TOOL_NAMES: frozenset[str] = frozenset({"rlm_query"})
+_RECURSIVE_RLM_TOOL_NAMES: frozenset[str] = frozenset(
+    {"rlm_query", "rlm_query_batched"}
+)
 
 _SANDBOX_BATCH_RLM_TOOL_NAMES: frozenset[str] = frozenset({"parallel_semantic_map"})
 

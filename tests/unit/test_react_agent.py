@@ -43,6 +43,7 @@ def test_react_agent_constructed_with_explicit_signature_and_tools(
         "summarize_long_document",
     ]:
         assert expected in tool_names, f"Missing tool: {expected}"
+    assert "rlm_query_batched" not in tool_names
 
 
 def test_tool_registry_includes_specialized_tools_and_extra_tools(

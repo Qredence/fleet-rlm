@@ -93,11 +93,13 @@ export function WorkspaceMessageList({
   }, [activeTurnAssistantMessageId, lastUserMessageId, selectedAssistantTurnId]);
 
   return (
-    <Conversation className={cn("bg-background", messages.length === 0 && "flex-none")}>
+    <Conversation className="bg-background">
       <ConversationContent
         className={cn(
           "mx-auto w-full max-w-175",
-          messages.length === 0 ? "gap-3 pb-0" : "min-h-full",
+          messages.length === 0
+            ? "flex min-h-full items-center justify-center gap-0 pb-0"
+            : "min-h-full",
         )}
       >
         {messages.length === 0 ? (

@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 from fleet_rlm import __version__
 from fleet_rlm.integrations.observability.config import MlflowConfig, PostHogConfig
@@ -15,6 +16,11 @@ from fleet_rlm.integrations.observability.config import MlflowConfig, PostHogCon
 from .dependencies import ServerState
 
 logger = logging.getLogger(__name__)
+
+_MLFLOW_AUTO_START_TRUTHY = {"1", "true", "yes"}
+_MLFLOW_AUTO_START_FALSEY = {"0", "false", "no"}
+_MLFLOW_STARTUP_TIMEOUT_SECONDS = 60
+_MLFLOW_STARTUP_POLL_INTERVAL_SECONDS = 1
 
 
 def set_optional_service_status(
@@ -57,6 +63,55 @@ def terminate_process(proc: subprocess.Popen) -> None:
         logger.debug("Process (pid=%d) already exited", proc.pid)
 
 
+def is_local_mlflow_tracking_uri(tracking_uri: str) -> bool:
+    """Return whether *tracking_uri* targets the local MLflow OSS server."""
+
+    candidate = tracking_uri.strip()
+    if not candidate:
+        return False
+
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return False
+
+    return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
+
+
+def _mlflow_startup_socket_ready(*, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    try:
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+    finally:
+        sock.close()
+
+
+def resolve_mlflow_auto_start_enabled(
+    *,
+    app_env: str,
+    mlflow_enabled: bool,
+    tracking_uri: str,
+    auto_start_env: str | None = None,
+) -> bool:
+    """Return the effective MLflow auto-start decision for the current runtime."""
+
+    raw_value = (
+        auto_start_env if auto_start_env is not None else os.getenv("MLFLOW_AUTO_START")
+    )
+    normalized = (raw_value or "").strip().lower()
+    if normalized in _MLFLOW_AUTO_START_TRUTHY:
+        return True
+    if normalized in _MLFLOW_AUTO_START_FALSEY:
+        return False
+
+    return bool(
+        mlflow_enabled
+        and app_env == "local"
+        and is_local_mlflow_tracking_uri(tracking_uri)
+    )
+
+
 async def start_mlflow_server(
     *,
     app_env: str,
@@ -64,9 +119,7 @@ async def start_mlflow_server(
 ) -> subprocess.Popen | None:
     """Start a local MLflow tracking server if configured and not already running."""
     tracking_uri = tracking_uri.strip()
-    if not tracking_uri.startswith("http://127.0.0.1") and not tracking_uri.startswith(
-        "http://localhost"
-    ):
+    if not is_local_mlflow_tracking_uri(tracking_uri):
         logger.debug(
             "MLflow tracking URI is not localhost; skipping auto-start: %s",
             tracking_uri,
@@ -84,14 +137,9 @@ async def start_mlflow_server(
     except (ValueError, AttributeError):
         port = 5001
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    try:
-        if sock.connect_ex(("127.0.0.1", port)) == 0:
-            logger.info("MLflow tracking server already running at %s", tracking_uri)
-            return None
-    finally:
-        sock.close()
+    if _mlflow_startup_socket_ready(port=port):
+        logger.info("MLflow tracking server already running at %s", tracking_uri)
+        return None
 
     logger.info("Starting MLflow tracking server on port %d...", port)
     try:
@@ -103,36 +151,46 @@ async def start_mlflow_server(
                 "server",
                 "--backend-store-uri",
                 "sqlite:///mlruns.db",
+                "--host",
+                "127.0.0.1",
                 "--port",
                 str(port),
+                "--workers",
+                "1",
             ],
             start_new_session=True,
         )
 
-        for attempt in range(20):
-            await asyncio.sleep(1)
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            try:
-                if sock.connect_ex(("127.0.0.1", port)) == 0:
-                    logger.info(
-                        "MLflow tracking server started (pid=%d) at %s",
-                        proc.pid,
-                        tracking_uri,
-                    )
-                    return proc
-            finally:
-                sock.close()
+        attempts = max(
+            1, _MLFLOW_STARTUP_TIMEOUT_SECONDS // _MLFLOW_STARTUP_POLL_INTERVAL_SECONDS
+        )
+        for attempt in range(attempts):
+            await asyncio.sleep(_MLFLOW_STARTUP_POLL_INTERVAL_SECONDS)
+            exit_code = proc.poll()
+            if exit_code is not None:
+                logger.warning(
+                    "MLflow server exited before becoming ready (pid=%d, exit_code=%d).",
+                    proc.pid,
+                    exit_code,
+                )
+                return None
+            if _mlflow_startup_socket_ready(port=port):
+                logger.info(
+                    "MLflow tracking server started (pid=%d) at %s",
+                    proc.pid,
+                    tracking_uri,
+                )
+                return proc
             logger.info(
                 "Waiting for MLflow server... (attempt %d/%d)",
                 attempt + 1,
-                20,
+                attempts,
             )
 
         logger.warning(
             "MLflow server process started but port %d not responding after %ds",
             port,
-            20,
+            _MLFLOW_STARTUP_TIMEOUT_SECONDS,
         )
         terminate_process(proc)
         return None
@@ -181,11 +239,11 @@ async def initialize_mlflow_runtime_service(
         set_optional_service_status(state, "mlflow", "disabled")
         return
 
-    auto_start_enabled = (os.getenv("MLFLOW_AUTO_START") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    auto_start_enabled = resolve_mlflow_auto_start_enabled(
+        app_env=app_env,
+        mlflow_enabled=mlflow_cfg.enabled,
+        tracking_uri=mlflow_cfg.tracking_uri,
+    )
     state.mlflow_server_process = (
         await start_mlflow_server(app_env=app_env, tracking_uri=mlflow_cfg.tracking_uri)
         if auto_start_enabled

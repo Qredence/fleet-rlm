@@ -23,9 +23,32 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
             if path == "/home/daytona/memory":
                 return [
                     SimpleNamespace(
-                        name="docs",
+                        name="memory",
                         is_dir=True,
                         mod_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                    ),
+                    SimpleNamespace(
+                        name="artifacts",
+                        is_dir=True,
+                        mod_time=None,
+                    ),
+                    SimpleNamespace(
+                        name="buffers",
+                        is_dir=True,
+                        mod_time=None,
+                    ),
+                    SimpleNamespace(
+                        name="meta",
+                        is_dir=True,
+                        mod_time=None,
+                    ),
+                ]
+            if path == "/home/daytona/memory/artifacts":
+                return [
+                    SimpleNamespace(
+                        name="docs",
+                        is_dir=True,
+                        mod_time=None,
                     ),
                     SimpleNamespace(
                         name="hello.txt",
@@ -34,7 +57,7 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
                         mod_time=None,
                     ),
                 ]
-            if path == "/home/daytona/memory/docs":
+            if path == "/home/daytona/memory/artifacts/docs":
                 return [
                     SimpleNamespace(
                         name="notes.md",
@@ -43,6 +66,12 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
                         mod_time=None,
                     )
                 ]
+            if path in {
+                "/home/daytona/memory/memory",
+                "/home/daytona/memory/buffers",
+                "/home/daytona/memory/meta",
+            }:
+                return []
             raise AssertionError(f"unexpected list path: {path}")
 
     @asynccontextmanager
@@ -55,21 +84,37 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
         _fake_mounted_daytona_volume,
     )
 
-    payload = list_daytona_volume_tree("tenant-a", root_path="/", max_depth=2)
+    payload = list_daytona_volume_tree("tenant-a", root_path="/", max_depth=3)
 
-    assert calls == ["/home/daytona/memory", "/home/daytona/memory/docs"]
+    assert calls == [
+        "/home/daytona/memory",
+        "/home/daytona/memory/memory",
+        "/home/daytona/memory/artifacts",
+        "/home/daytona/memory/artifacts/docs",
+        "/home/daytona/memory/buffers",
+        "/home/daytona/memory/meta",
+    ]
     assert payload["volume_name"] == "tenant-a"
     assert payload["root_path"] == "/"
     assert payload["total_files"] == 2
-    assert payload["total_dirs"] == 1
+    assert payload["total_dirs"] == 5
     assert payload["truncated"] is False
 
     root = payload["nodes"][0]
     assert root["type"] == "volume"
     assert root["path"] == "/"
-    assert [child["path"] for child in root["children"]] == ["/docs", "/hello.txt"]
-    assert root["children"][0]["children"][0]["path"] == "/docs/notes.md"
+    assert [child["path"] for child in root["children"]] == [
+        "/memory",
+        "/artifacts",
+        "/buffers",
+        "/meta",
+    ]
     assert root["children"][0]["modified_at"] == "2024-01-01T00:00:00+00:00"
+    assert root["children"][1]["children"][0]["path"] == "/artifacts/docs"
+    assert root["children"][1]["children"][1]["path"] == "/artifacts/hello.txt"
+    assert root["children"][1]["children"][0]["children"][0]["path"] == (
+        "/artifacts/docs/notes.md"
+    )
 
 
 def test_list_daytona_volume_tree_rejects_path_traversal() -> None:
@@ -99,13 +144,13 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
 
     payload = read_daytona_volume_file_text(
         "tenant-a",
-        "/docs/readme.txt",
+        "/artifacts/docs/readme.txt",
         max_bytes=6,
     )
 
-    assert calls == ["/home/daytona/memory/docs/readme.txt"]
+    assert calls == ["/home/daytona/memory/artifacts/docs/readme.txt"]
     assert payload == {
-        "path": "/docs/readme.txt",
+        "path": "/artifacts/docs/readme.txt",
         "mime": "text/plain",
         "size": 10,
         "content": "abcdef",
@@ -137,4 +182,4 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
     )
 
     with pytest.raises(RuntimeError, match="Is a directory"):
-        read_daytona_volume_file_text("tenant-a", "/docs")
+        read_daytona_volume_file_text("tenant-a", "/artifacts/docs")

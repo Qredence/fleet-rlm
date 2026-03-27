@@ -43,11 +43,11 @@ function ExecutionModeDropdown({ value, onChange }: ExecutionModeDropdownProps) 
         )}
         aria-label={`Execution mode: ${currentMode.name}`}
       >
-        <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
+        <span className="font-app flex-none text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
           {currentMode.name}
         </span>
       </SelectTrigger>
-      <SelectContent align="end" className="w-44">
+      <SelectContent align="end" alignItemWithTrigger={false} className="w-44">
         <SelectGroup>
           {EXECUTION_MODE_OPTIONS.map((option) => {
             const OptionIcon = option.icon;

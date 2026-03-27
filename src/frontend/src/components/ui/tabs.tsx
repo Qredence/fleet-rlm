@@ -3,11 +3,23 @@ import { Tabs as BaseTabs } from "@base-ui/react";
 
 import { cn } from "@/lib/utils";
 
-function Tabs({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Root>) {
+function Tabs({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Root> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Root>["ref"];
+}) {
   return <BaseTabs.Root ref={ref} data-slot="tabs" className={className} {...props} />;
 }
 
-function TabsList({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.List>) {
+function TabsList({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.List> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.List>["ref"];
+}) {
   return (
     <BaseTabs.List
       ref={ref}
@@ -21,7 +33,13 @@ function TabsList({ className, ref, ...props }: React.ComponentProps<typeof Base
   );
 }
 
-function TabsTrigger({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Tab>) {
+function TabsTrigger({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Tab> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Tab>["ref"];
+}) {
   return (
     <BaseTabs.Tab
       ref={ref}
@@ -35,7 +53,13 @@ function TabsTrigger({ className, ref, ...props }: React.ComponentProps<typeof B
   );
 }
 
-function TabsContent({ className, ref, ...props }: React.ComponentProps<typeof BaseTabs.Panel>) {
+function TabsContent({
+  className,
+  ref,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.Panel> & {
+  ref?: React.ComponentPropsWithRef<typeof BaseTabs.Panel>["ref"];
+}) {
   return (
     <BaseTabs.Panel
       ref={ref}

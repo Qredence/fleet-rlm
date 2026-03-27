@@ -101,6 +101,12 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
     assert len(session.context_sources) == 1
     assert session.context_sources[0].host_path == str(context_file.resolve())
     assert fake_client.volume.calls == [("tenant-a", True)]
+    assert {
+        ("/home/daytona/memory/memory", "755"),
+        ("/home/daytona/memory/artifacts", "755"),
+        ("/home/daytona/memory/buffers", "755"),
+        ("/home/daytona/memory/meta", "755"),
+    }.issubset(set(fake_client.sandbox.fs.created))
     assert fake_client.sandbox.git.clone_calls == [
         {
             "url": "https://github.com/example/repo.git",
@@ -154,3 +160,37 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
     runtime.close()
 
     assert fake_client.close_calls == 1
+
+
+def test_create_workspace_session_ignores_local_daytona_builder_files(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".daytona").mkdir()
+    (tmp_path / ".daytona" / "devcontainer.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=None,
+        volume_name="tenant-a",
+    )
+
+    assert session.workspace_path == "/workspace/workspace/daytona-workspace"
+    assert fake_client.volume.calls == [("tenant-a", True)]
