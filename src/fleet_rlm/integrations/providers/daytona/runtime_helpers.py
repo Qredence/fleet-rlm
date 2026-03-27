@@ -51,12 +51,12 @@ def _run_async_compat(
         return _runner()
 
     result: dict[str, _T] = {}
-    error: dict[str, BaseException] = {}
+    error: dict[str, Exception] = {}
 
     def _thread_main() -> None:
         try:
             result["value"] = _runner()
-        except BaseException as exc:  # pragma: no cover - sync compat thread boundary
+        except Exception as exc:  # pragma: no cover - sync compat thread boundary
             error["exc"] = exc
 
     thread = threading.Thread(target=_thread_main, daemon=True)
@@ -64,6 +64,8 @@ def _run_async_compat(
     thread.join()
     if "exc" in error:
         raise error["exc"]
+    if "value" not in result:
+        raise RuntimeError("Async compatibility runner terminated without a result.")
     return result["value"]
 
 
