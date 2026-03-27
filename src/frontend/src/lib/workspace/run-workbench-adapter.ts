@@ -1,7 +1,4 @@
-import type {
-  ChatAttachmentItem,
-  ChatSourceItem,
-} from "@/lib/workspace/workspace-types";
+import type { ChatAttachmentItem, ChatSourceItem } from "@/lib/workspace/workspace-types";
 import type { WsServerMessage } from "@/lib/rlm-api";
 import { normalizeDaytonaMode } from "@/lib/workspace/daytona-mode";
 import type {
@@ -73,13 +70,7 @@ function preferredArtifactText(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
 
-  for (const key of [
-    "final_markdown",
-    "summary",
-    "text",
-    "content",
-    "message",
-  ]) {
+  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
     const candidate = asText(record[key]);
     if (candidate) return candidate;
   }
@@ -103,8 +94,7 @@ function normalizeContextSource(raw: unknown): ContextSourceSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sourceId =
-    asText(record.source_id ?? record.sourceId) ??
-    asText(record.host_path ?? record.hostPath);
+    asText(record.source_id ?? record.sourceId) ?? asText(record.host_path ?? record.hostPath);
   const hostPath = asText(record.host_path ?? record.hostPath);
   if (!sourceId || !hostPath) return null;
   return {
@@ -113,9 +103,7 @@ function normalizeContextSource(raw: unknown): ContextSourceSummary | null {
     hostPath,
     stagedPath: asText(record.staged_path ?? record.stagedPath),
     sourceType: asText(record.source_type ?? record.sourceType),
-    extractionMethod: asText(
-      record.extraction_method ?? record.extractionMethod,
-    ),
+    extractionMethod: asText(record.extraction_method ?? record.extractionMethod),
     fileCount: asNumber(record.file_count ?? record.fileCount),
     skippedCount: asNumber(record.skipped_count ?? record.skippedCount),
     warnings: normalizeWarnings(record.warnings),
@@ -125,8 +113,7 @@ function normalizeContextSource(raw: unknown): ContextSourceSummary | null {
 function normalizePromptHandle(raw: unknown): PromptHandleSummary | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const handleId =
-    asText(record.handle_id) ?? asText(record.handleId) ?? asText(record.id);
+  const handleId = asText(record.handle_id) ?? asText(record.handleId) ?? asText(record.id);
   if (!handleId) return null;
   return {
     handleId,
@@ -139,9 +126,7 @@ function normalizePromptHandle(raw: unknown): PromptHandleSummary | null {
   };
 }
 
-function dedupePromptHandles(
-  handles: PromptHandleSummary[],
-): PromptHandleSummary[] {
+function dedupePromptHandles(handles: PromptHandleSummary[]): PromptHandleSummary[] {
   const deduped = new Map<string, PromptHandleSummary>();
   for (const handle of handles) {
     deduped.set(handle.handleId, handle);
@@ -149,9 +134,7 @@ function dedupePromptHandles(
   return [...deduped.values()];
 }
 
-function collectPromptHandlePayloads(
-  payload?: Record<string, unknown>,
-): unknown[] {
+function collectPromptHandlePayloads(payload?: Record<string, unknown>): unknown[] {
   const node = asRecord(payload?.node);
   const promptManifest = asRecord(
     payload?.prompt_manifest ??
@@ -161,9 +144,7 @@ function collectPromptHandlePayloads(
   );
 
   return [
-    ...asArray(
-      payload?.prompts ?? payload?.prompt_handles ?? payload?.promptHandles,
-    ),
+    ...asArray(payload?.prompts ?? payload?.prompt_handles ?? payload?.promptHandles),
     ...asArray(node?.prompt_handles ?? node?.promptHandles),
     ...asArray(promptManifest?.handles),
   ];
@@ -172,10 +153,7 @@ function collectPromptHandlePayloads(
 function normalizeArtifact(raw: unknown): ArtifactSummary | null {
   const record = asRecord(raw);
   if (!record) {
-    const textPreview = previewText(
-      preferredArtifactText(raw) ?? raw,
-      ARTIFACT_PREVIEW_LIMIT,
-    );
+    const textPreview = previewText(preferredArtifactText(raw) ?? raw, ARTIFACT_PREVIEW_LIMIT);
     if (!textPreview) return null;
     return {
       value: raw,
@@ -192,9 +170,7 @@ function normalizeArtifact(raw: unknown): ArtifactSummary | null {
     kind: asText(record.kind),
     value,
     variableName: asText(record.variable_name ?? record.variableName),
-    finalizationMode: asText(
-      record.finalization_mode ?? record.finalizationMode,
-    ),
+    finalizationMode: asText(record.finalization_mode ?? record.finalizationMode),
     textPreview: textPreview || undefined,
   };
 }
@@ -203,9 +179,7 @@ function normalizeSource(raw: unknown): ChatSourceItem | null {
   const record = asRecord(raw);
   if (!record) return null;
   const sourceId =
-    asText(record.source_id ?? record.sourceId) ??
-    asText(record.id) ??
-    asText(record.path);
+    asText(record.source_id ?? record.sourceId) ?? asText(record.id) ?? asText(record.path);
   const title =
     asText(record.title) ??
     asText(record.path) ??
@@ -215,10 +189,7 @@ function normalizeSource(raw: unknown): ChatSourceItem | null {
 
   const kindRaw = asText(record.kind)?.toLowerCase();
   const kind: ChatSourceItem["kind"] =
-    kindRaw === "web" ||
-    kindRaw === "file" ||
-    kindRaw === "artifact" ||
-    kindRaw === "tool_output"
+    kindRaw === "web" || kindRaw === "file" || kindRaw === "artifact" || kindRaw === "tool_output"
       ? kindRaw
       : "other";
 
@@ -242,14 +213,8 @@ function dedupeSources(sources: ChatSourceItem[]): ChatSourceItem[] {
   for (const source of sources) {
     const key =
       source.kind === "web"
-        ? (source.canonicalUrl ??
-          source.url ??
-          source.displayUrl ??
-          source.sourceId)
-        : (source.sourceId ??
-          source.canonicalUrl ??
-          source.url ??
-          source.displayUrl);
+        ? (source.canonicalUrl ?? source.url ?? source.displayUrl ?? source.sourceId)
+        : (source.sourceId ?? source.canonicalUrl ?? source.url ?? source.displayUrl);
     deduped.set(key, source);
   }
   return [...deduped.values()];
@@ -275,9 +240,7 @@ function normalizeAttachment(raw: unknown): ChatAttachmentItem | null {
   const record = asRecord(raw);
   if (!record) return null;
   const attachmentId =
-    asText(record.attachment_id ?? record.attachmentId) ??
-    asText(record.id) ??
-    asText(record.name);
+    asText(record.attachment_id ?? record.attachmentId) ?? asText(record.id) ?? asText(record.name);
   if (!attachmentId) return null;
   return {
     attachmentId,
@@ -292,9 +255,7 @@ function normalizeAttachment(raw: unknown): ChatAttachmentItem | null {
   };
 }
 
-function dedupeAttachments(
-  attachments: ChatAttachmentItem[],
-): ChatAttachmentItem[] {
+function dedupeAttachments(attachments: ChatAttachmentItem[]): ChatAttachmentItem[] {
   const deduped = new Map<string, ChatAttachmentItem>();
   for (const attachment of attachments) {
     deduped.set(attachment.attachmentId, attachment);
@@ -302,9 +263,7 @@ function dedupeAttachments(
   return [...deduped.values()];
 }
 
-function normalizeCallbackSource(
-  raw: unknown,
-): CallbackSourceSummary | undefined {
+function normalizeCallbackSource(raw: unknown): CallbackSourceSummary | undefined {
   const record = asRecord(raw);
   if (!record) return undefined;
   return {
@@ -329,9 +288,7 @@ function normalizeCallback(raw: unknown): CallbackSummary | null {
     asText(record.tool_name ?? record.toolName);
   if (!task || !callbackName) return null;
   return {
-    id:
-      asText(record.id) ??
-      `${callbackName}-${record.iteration ?? "na"}-${task.slice(0, 24)}`,
+    id: asText(record.id) ?? `${callbackName}-${record.iteration ?? "na"}-${task.slice(0, 24)}`,
     callbackName,
     iteration: asNumber(record.iteration),
     status: asText(record.status) ?? "completed",
@@ -440,9 +397,7 @@ function normalizeIteration(raw: unknown): IterationSummary | null {
     status,
     phase: asText(record.phase),
     summary: summary || `Iteration ${iteration}`,
-    reasoningSummary: asText(
-      record.reasoning_summary ?? record.reasoningSummary,
-    ),
+    reasoningSummary: asText(record.reasoning_summary ?? record.reasoningSummary),
     code: typeof record.code === "string" ? record.code : undefined,
     stdout: typeof record.stdout === "string" ? record.stdout : undefined,
     stderr: typeof record.stderr === "string" ? record.stderr : undefined,
@@ -485,27 +440,18 @@ function normalizeSummary(raw: unknown): RunSummary | undefined {
   return {
     durationMs: asNumber(record.duration_ms ?? record.durationMs),
     sandboxesUsed: asNumber(record.sandboxes_used ?? record.sandboxesUsed),
-    terminationReason: asText(
-      record.termination_reason ?? record.terminationReason,
-    ),
+    terminationReason: asText(record.termination_reason ?? record.terminationReason),
     error: asText(record.error) ?? null,
     warnings: normalizeWarnings(record.warnings),
   };
 }
 
-function extractRuntime(
-  payload?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+function extractRuntime(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
   return asRecord(payload?.runtime) ?? payload;
 }
 
-function isExecutionCompletedPayload(
-  payload?: Record<string, unknown>,
-): boolean {
-  return (
-    asText(payload?.source_type ?? payload?.sourceType) ===
-    "execution_completed"
-  );
+function isExecutionCompletedPayload(payload?: Record<string, unknown>): boolean {
+  return asText(payload?.source_type ?? payload?.sourceType) === "execution_completed";
 }
 
 function getCanonicalRunSummary(
@@ -541,10 +487,7 @@ function resolveCompatFinalArtifact(
 
 function compatBackfillEventId(frame: WsServerMessage): string {
   if (frame.type === "error") return `frame-error-${Date.now()}`;
-  return String(
-    frame.data.event_id ??
-      `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`,
-  );
+  return String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`);
 }
 
 function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
@@ -558,10 +501,7 @@ function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
 
   const payload = asRecord(frame.data.payload);
   return {
-    id: String(
-      frame.data.event_id ??
-        `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`,
-    ),
+    id: String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`),
     kind: frame.data.kind,
     text: frame.data.text,
     timestamp: frame.data.timestamp,
@@ -619,9 +559,7 @@ function hydrateFromRunSummary(
     selectedIterationId: state.selectedIterationId ?? iterations[0]?.id ?? null,
     selectedCallbackId: state.selectedCallbackId ?? callbacks[0]?.id ?? null,
     finalArtifact:
-      normalizeArtifact(raw.final_artifact ?? raw.finalArtifact) ??
-      state.finalArtifact ??
-      null,
+      normalizeArtifact(raw.final_artifact ?? raw.finalArtifact) ?? state.finalArtifact ?? null,
     summary: normalizeSummary(raw.summary) ?? state.summary,
   };
 }
@@ -681,8 +619,7 @@ export function failRunWorkbenchRun(
   errorMessage: string,
 ): RunWorkbenchState {
   const message =
-    collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) ||
-    "Workspace run failed.";
+    collapseWhitespace(errorMessage, ARTIFACT_PREVIEW_LIMIT) || "Workspace run failed.";
 
   return {
     ...state,
@@ -725,16 +662,10 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
   );
 }
 
-export function shouldApplyRunFrame(
-  state: RunWorkbenchState,
-  frame: WsServerMessage,
-): boolean {
+export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMessage): boolean {
   const acceptsTerminalCompat =
-    state.status === "bootstrapping" ||
-    state.status === "running" ||
-    state.status === "completed";
-  const acceptsRawError =
-    state.status === "bootstrapping" || state.status === "running";
+    state.status === "bootstrapping" || state.status === "running" || state.status === "completed";
+  const acceptsRawError = state.status === "bootstrapping" || state.status === "running";
   if (frame.type === "error") {
     return acceptsRawError;
   }
@@ -792,9 +723,7 @@ export function applyFrameToRunWorkbenchState(
   const isTerminalCompatFrame =
     !isCanonicalCompletion &&
     frame.type === "event" &&
-    (frame.data.kind === "final" ||
-      frame.data.kind === "cancelled" ||
-      frame.data.kind === "error");
+    (frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error");
 
   const payloadPrompts = !isTerminalCompatFrame
     ? dedupePromptHandles([
@@ -841,12 +770,9 @@ export function applyFrameToRunWorkbenchState(
         phase: asText(payload?.phase),
         summary: frame.data.text,
         durationMs: asNumber(payload?.duration_ms ?? payload?.durationMs),
-        callbackCount: asNumber(
-          payload?.callback_count ?? payload?.callbackCount,
-        ),
+        callbackCount: asNumber(payload?.callback_count ?? payload?.callbackCount),
       }),
-      selectedIterationId:
-        next.selectedIterationId ?? `iteration-${iterationNumber}`,
+      selectedIterationId: next.selectedIterationId ?? `iteration-${iterationNumber}`,
     };
   }
 
@@ -880,9 +806,7 @@ export function applyFrameToRunWorkbenchState(
             toolResult?.count,
           ARTIFACT_PREVIEW_LIMIT,
         ) || latestRunningCallback?.resultPreview,
-      source:
-        normalizeCallbackSource(toolTask?.source) ??
-        latestRunningCallback?.source,
+      source: normalizeCallbackSource(toolTask?.source) ?? latestRunningCallback?.source,
     };
     next = {
       ...next,
@@ -920,16 +844,10 @@ export function applyFrameToRunWorkbenchState(
       )
     : undefined;
   const compatSummary = resolveCompatSummary(payload, compatRunResult);
-  const compatFinalArtifact = resolveCompatFinalArtifact(
-    payload,
-    compatRunResult,
-  );
-  const useCompatSummary =
-    !isCanonicalCompletion && next.summary == null && compatSummary != null;
+  const compatFinalArtifact = resolveCompatFinalArtifact(payload, compatRunResult);
+  const useCompatSummary = !isCanonicalCompletion && next.summary == null && compatSummary != null;
   const useCompatFinalArtifact =
-    !isCanonicalCompletion &&
-    next.finalArtifact == null &&
-    compatFinalArtifact != null;
+    !isCanonicalCompletion && next.finalArtifact == null && compatFinalArtifact != null;
 
   let compatBackfillCount = next.compatBackfillCount;
   let lastCompatBackfill = next.lastCompatBackfill;
@@ -948,10 +866,7 @@ export function applyFrameToRunWorkbenchState(
   return {
     ...next,
     status: statusFromFrame(next.status, frame),
-    runId:
-      asText(payload?.run_id ?? payload?.runId) ??
-      asText(runtime?.run_id) ??
-      next.runId,
+    runId: asText(payload?.run_id ?? payload?.runId) ?? asText(runtime?.run_id) ?? next.runId,
     daytonaMode:
       normalizeDaytonaMode(
         asText(payload?.daytona_mode ?? payload?.daytonaMode) ??
@@ -964,14 +879,8 @@ export function applyFrameToRunWorkbenchState(
       (useCompatFinalArtifact ? compatFinalArtifact : undefined) ??
       next.finalArtifact ??
       null,
-    summary:
-      canonicalSummary ??
-      (useCompatSummary ? compatSummary : undefined) ??
-      next.summary,
-    errorMessage:
-      frame.data.kind === "error"
-        ? frame.data.text
-        : (next.errorMessage ?? null),
+    summary: canonicalSummary ?? (useCompatSummary ? compatSummary : undefined) ?? next.summary,
+    errorMessage: frame.data.kind === "error" ? frame.data.text : (next.errorMessage ?? null),
     compatBackfillCount,
     lastCompatBackfill,
   };

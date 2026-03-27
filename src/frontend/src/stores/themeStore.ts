@@ -2,11 +2,7 @@
  * Theme store — dark mode toggle with localStorage persistence.
  */
 import { create } from "zustand";
-import {
-  persist,
-  type PersistStorage,
-  type StorageValue,
-} from "zustand/middleware";
+import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { telemetryClient } from "@/lib/telemetry/client";
 import { parseStoredJson } from "@/lib/utils/env";
 
@@ -29,9 +25,7 @@ function applyThemeToDocument(isDark: boolean) {
   root.style.colorScheme = isDark ? "dark" : "light";
 }
 
-function toPersistedTheme(
-  value: unknown,
-): StorageValue<ThemePersistedState> | null {
+function toPersistedTheme(value: unknown): StorageValue<ThemePersistedState> | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -53,9 +47,7 @@ function toPersistedTheme(
   return {
     state: { isDark },
     version:
-      typeof maybePersisted.version === "number"
-        ? maybePersisted.version
-        : THEME_STORAGE_VERSION,
+      typeof maybePersisted.version === "number" ? maybePersisted.version : THEME_STORAGE_VERSION,
   };
 }
 
@@ -90,10 +82,7 @@ export const useThemeStore = create<ThemeState>()(
           previous_theme: next ? "light" : "dark",
         });
 
-        setTimeout(
-          () => document.documentElement.classList.remove("theme-transition"),
-          300,
-        );
+        setTimeout(() => document.documentElement.classList.remove("theme-transition"), 300);
       },
 
       setDark: (dark) => {

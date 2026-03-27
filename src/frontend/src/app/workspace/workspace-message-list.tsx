@@ -20,10 +20,7 @@ import {
   ChatMessageLoadingState,
   WorkspaceToolSessionMessage,
 } from "@/app/workspace/chat-shell/tracePartRenderers";
-import type {
-  ChatMessage,
-  InspectorTab,
-} from "@/screens/workspace/use-workspace";
+import type { ChatMessage, InspectorTab } from "@/screens/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { useIsCanvasOpen } from "@/stores/navigationStore";
 import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
@@ -62,22 +59,15 @@ export function WorkspaceMessageList({
   onResolveClarification,
 }: WorkspaceMessageListProps) {
   const isCanvasOpen = useIsCanvasOpen();
-  const selectedAssistantTurnId = useWorkspaceUiStore(
-    (state) => state.selectedAssistantTurnId,
-  );
-  const selectInspectorTurn = useWorkspaceUiStore(
-    (state) => state.selectInspectorTurn,
-  );
+  const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
+  const selectInspectorTurn = useWorkspaceUiStore((state) => state.selectInspectorTurn);
   const prefersReduced = useReducedMotion();
   const preset = prefersReduced ? fadeUpReduced : fadeUp;
   const hasStreamingAssistant = messages.some(
     (message) => message.type === "assistant" && message.streaming,
   );
-  const lastUserIndex = messages.findLastIndex(
-    (message) => message.type === "user",
-  );
-  const lastUserMessageId =
-    lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  const lastUserMessageId = lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
   const activeTurnAssistantMessageId =
     lastUserIndex >= 0
       ? (messages
@@ -88,29 +78,19 @@ export function WorkspaceMessageList({
   const displayItems = buildChatDisplayItems(messages, {
     showPendingAssistantShell: isTyping,
   });
-  const hasVisibleAssistantTurn = displayItems.some(
-    (item) => item.kind === "assistant_turn",
-  );
-  const showTypingShimmer =
-    isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
+  const hasVisibleAssistantTurn = displayItems.some((item) => item.kind === "assistant_turn");
+  const showTypingShimmer = isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 
   useEffect(() => {
     if (!selectedAssistantTurnId || !lastUserMessageId) return;
     const pendingTurnId = buildPendingAssistantTurnId(lastUserMessageId);
-    if (
-      selectedAssistantTurnId !== pendingTurnId ||
-      !activeTurnAssistantMessageId
-    ) {
+    if (selectedAssistantTurnId !== pendingTurnId || !activeTurnAssistantMessageId) {
       return;
     }
     useWorkspaceUiStore.setState({
       selectedAssistantTurnId: activeTurnAssistantMessageId,
     });
-  }, [
-    activeTurnAssistantMessageId,
-    lastUserMessageId,
-    selectedAssistantTurnId,
-  ]);
+  }, [activeTurnAssistantMessageId, lastUserMessageId, selectedAssistantTurnId]);
 
   return (
     <Conversation className="bg-background">
@@ -124,10 +104,7 @@ export function WorkspaceMessageList({
       >
         {messages.length === 0 ? (
           <motion.div {...preset}>
-            <WorkspaceChatEmptyState
-              isMobile={isMobile}
-              onSuggestionClick={onSuggestionClick}
-            />
+            <WorkspaceChatEmptyState isMobile={isMobile} onSuggestionClick={onSuggestionClick} />
           </motion.div>
         ) : null}
 
@@ -147,8 +124,7 @@ export function WorkspaceMessageList({
                 return (
                   <motion.div key={displayItem.key} {...preset}>
                     {renderAssistantTurn(displayItem, {
-                      selected:
-                        isCanvasOpen && selectedAssistantTurnId === turnId,
+                      selected: isCanvasOpen && selectedAssistantTurnId === turnId,
                       onOpenTab: (tab) => selectInspectorTurn(turnId, tab),
                     })}
                   </motion.div>

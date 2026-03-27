@@ -1,13 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
@@ -51,8 +44,7 @@ vi.mock("@/lib/workspace/backend-artifact-event-adapter", () => ({
 }));
 
 vi.mock("@/lib/rlm-api", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/rlm-api")>("@/lib/rlm-api");
+  const actual = await vi.importActual<typeof import("@/lib/rlm-api")>("@/lib/rlm-api");
 
   return {
     ...actual,

@@ -1,14 +1,8 @@
 import { memo } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type {
-  ArtifactActorKind,
-  ArtifactStepType,
-} from "@/screens/workspace/use-workspace";
+import type { ArtifactActorKind, ArtifactStepType } from "@/screens/workspace/use-workspace";
 import { cn } from "@/lib/utils";
-import {
-  NODE_WIDTH,
-  STEP_TYPE_META,
-} from "@/app/workspace/inspector/graph-step-node.constants";
+import { NODE_WIDTH, STEP_TYPE_META } from "@/app/workspace/inspector/graph-step-node.constants";
 import {
   extractErrorDetails,
   extractReplCodePreview,
@@ -36,9 +30,7 @@ export interface GraphStepNodeData extends Record<string, unknown> {
   output?: unknown;
 }
 
-function formatActorLabel(
-  actorKind: ArtifactActorKind | null | undefined,
-): string {
+function formatActorLabel(actorKind: ArtifactActorKind | null | undefined): string {
   if (actorKind === "delegate") return "Delegate";
   if (actorKind === "sub_agent") return "Sub-agent";
   if (actorKind === "root_rlm") return "Root RLM";
@@ -89,11 +81,7 @@ const GraphStepNode = memo(function GraphStepNode({
         borderLeftColor: meta.color,
       }}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="bg-border! w-1.5! h-1.5!"
-      />
+      <Handle type="target" position={Position.Top} className="bg-border! w-1.5! h-1.5!" />
 
       <div className="flex items-start gap-2 px-2.5 py-2.5">
         {/* Icon */}
@@ -103,11 +91,7 @@ const GraphStepNode = memo(function GraphStepNode({
             backgroundColor: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
           }}
         >
-          <Icon
-            className="size-3.5"
-            style={{ color: meta.color }}
-            aria-hidden
-          />
+          <Icon className="size-3.5" style={{ color: meta.color }} aria-hidden />
         </div>
 
         {/* Content */}
@@ -152,9 +136,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle/80 bg-muted/25 px-1.5 py-px text-[9px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="whitespace-pre-wrap wrap-break-word">
-                  {data.toolName}
-                </span>
+                <span className="whitespace-pre-wrap wrap-break-word">{data.toolName}</span>
               </span>
             </div>
           )}
@@ -173,9 +155,7 @@ const GraphStepNode = memo(function GraphStepNode({
               className={cn("size-1.25 rounded-full shrink-0", statusDot)}
               aria-label={data.status}
             />
-            <span className="text-[9px] text-muted-foreground capitalize">
-              {data.status}
-            </span>
+            <span className="text-[9px] text-muted-foreground capitalize">{data.status}</span>
 
             {/* Elapsed time */}
             {data.elapsedMs != null && data.elapsedMs > 0 && (
@@ -207,9 +187,7 @@ const GraphStepNode = memo(function GraphStepNode({
             {errorDetails.message}
           </p>
           {errorDetails.code && (
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Code: {errorDetails.code}
-            </p>
+            <p className="mt-1 text-[10px] text-muted-foreground">Code: {errorDetails.code}</p>
           )}
         </div>
       )}
@@ -224,23 +202,14 @@ const GraphStepNode = memo(function GraphStepNode({
                 backgroundColor: `color-mix(in srgb, ${meta.color} 15%, transparent)`,
               }}
             >
-              <Icon
-                className="size-4"
-                style={{ color: meta.color }}
-                aria-hidden
-              />
+              <Icon className="size-4" style={{ color: meta.color }} aria-hidden />
             </div>
-            <span
-              className="text-xs font-semibold"
-              style={{ color: meta.color }}
-            >
+            <span className="text-xs font-semibold" style={{ color: meta.color }}>
               {meta.label}
             </span>
           </div>
 
-          <p className="text-xs font-semibold text-foreground mb-1 wrap-break-word">
-            {data.label}
-          </p>
+          <p className="text-xs font-semibold text-foreground mb-1 wrap-break-word">{data.label}</p>
 
           {data.toolName && (data.type === "tool" || data.type === "repl") && (
             <div className="mb-2">
@@ -248,9 +217,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 className="inline-flex max-w-full items-center rounded-full border border-border-subtle bg-muted/50 px-2 py-0.5 text-[10px] font-medium leading-tight text-foreground/90"
                 title={data.toolName}
               >
-                <span className="whitespace-pre-wrap wrap-break-word">
-                  {data.toolName}
-                </span>
+                <span className="whitespace-pre-wrap wrap-break-word">{data.toolName}</span>
               </span>
             </div>
           )}
@@ -297,9 +264,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 {errorDetails.message}
               </p>
               {errorDetails.code && (
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Code: {errorDetails.code}
-                </p>
+                <p className="mt-1 text-[10px] text-muted-foreground">Code: {errorDetails.code}</p>
               )}
               {errorDetails.trace && (
                 <pre className="mt-2 max-h-28 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 text-[10px] leading-relaxed whitespace-pre-wrap wrap-break-word font-mono">
@@ -317,9 +282,7 @@ const GraphStepNode = memo(function GraphStepNode({
               <div className="flex flex-col gap-2">
                 {trajectory.thought && (
                   <div>
-                    <p className="text-[10px] font-semibold text-foreground/80">
-                      Thought
-                    </p>
+                    <p className="text-[10px] font-semibold text-foreground/80">Thought</p>
                     <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.thought}
                     </p>
@@ -327,9 +290,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 )}
                 {trajectory.action && (
                   <div>
-                    <p className="text-[10px] font-semibold text-foreground/80">
-                      Action
-                    </p>
+                    <p className="text-[10px] font-semibold text-foreground/80">Action</p>
                     <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.action}
                     </p>
@@ -337,9 +298,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 )}
                 {trajectory.observation && (
                   <div>
-                    <p className="text-[10px] font-semibold text-foreground/80">
-                      Observation
-                    </p>
+                    <p className="text-[10px] font-semibold text-foreground/80">Observation</p>
                     <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
                       {trajectory.observation}
                     </p>
@@ -353,20 +312,14 @@ const GraphStepNode = memo(function GraphStepNode({
             <span className={cn("size-1.5 rounded-full shrink-0", statusDot)} />
             <span className="capitalize">{data.status}</span>
             {data.elapsedMs != null && data.elapsedMs > 0 && (
-              <span className="tabular-nums">
-                {formatElapsed(data.elapsedMs)}
-              </span>
+              <span className="tabular-nums">{formatElapsed(data.elapsedMs)}</span>
             )}
             {data.count > 1 && <span>{data.count} steps</span>}
           </div>
         </div>
       )}
 
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="bg-border! w-1.5! h-1.5!"
-      />
+      <Handle type="source" position={Position.Bottom} className="bg-border! w-1.5! h-1.5!" />
     </div>
   );
 });

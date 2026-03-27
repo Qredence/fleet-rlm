@@ -22,11 +22,7 @@ const DEFAULT_MAX_BACKOFF = 30000;
 // Default first-frame timeout for generic WS flows; Daytona flows should override explicitly if needed
 const DEFAULT_FIRST_FRAME_TIMEOUT = 10000;
 
-function calculateBackoff(
-  attempt: number,
-  initialBackoff: number,
-  maxBackoff: number,
-): number {
+function calculateBackoff(attempt: number, initialBackoff: number, maxBackoff: number): number {
   const backoff = initialBackoff * Math.pow(2, attempt);
   return Math.min(backoff, maxBackoff);
 }
@@ -121,10 +117,7 @@ export async function createReconnectingWs(
       };
 
       const safeClose = () => {
-        if (
-          socket.readyState === WebSocket.OPEN ||
-          socket.readyState === WebSocket.CONNECTING
-        ) {
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
           socket.close();
         }
       };
@@ -137,9 +130,7 @@ export async function createReconnectingWs(
           const cancel: WsCancelRequest = { type: "cancel" };
           socket.send(JSON.stringify(cancel));
           abortTimer = setTimeout(() => {
-            console.warn(
-              "WebSocket: Abort timeout reached. Forcibly closing connection.",
-            );
+            console.warn("WebSocket: Abort timeout reached. Forcibly closing connection.");
             safeClose();
             updateStatus("disconnected");
             finish(resolve);
@@ -166,12 +157,7 @@ export async function createReconnectingWs(
           socket.send(JSON.stringify(message));
           if (firstFrameTimeoutMs > 0) {
             firstFrameTimer = setTimeout(() => {
-              if (
-                settled ||
-                completed ||
-                retryState.aborted ||
-                firstFrameSeen
-              ) {
+              if (settled || completed || retryState.aborted || firstFrameSeen) {
                 return;
               }
               const waitSeconds = Math.ceil(firstFrameTimeoutMs / 1000);
@@ -193,10 +179,7 @@ export async function createReconnectingWs(
 
       socket.addEventListener("message", (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as Record<
-            string,
-            unknown
-          >;
+          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
           const frame = parseWsServerFrame(parsed);
           if (!frame) return;
 
@@ -226,9 +209,7 @@ export async function createReconnectingWs(
             completed = true;
             safeClose();
             updateStatus("disconnected");
-            finish(() =>
-              reject(createWsError(frame.data.text || "Server stream error")),
-            );
+            finish(() => reject(createWsError(frame.data.text || "Server stream error")));
           }
         } catch {
           // Ignore malformed frames to avoid taking down the stream.
@@ -252,21 +233,13 @@ export async function createReconnectingWs(
         if (retryState.attempt >= maxRetries) {
           updateStatus("disconnected");
           finish(() =>
-            reject(
-              createWsError(
-                `WebSocket connection failed after ${maxRetries} retries`,
-              ),
-            ),
+            reject(createWsError(`WebSocket connection failed after ${maxRetries} retries`)),
           );
           return;
         }
 
         retryState.attempt += 1;
-        const backoffMs = calculateBackoff(
-          retryState.attempt - 1,
-          initialBackoff,
-          maxBackoff,
-        );
+        const backoffMs = calculateBackoff(retryState.attempt - 1, initialBackoff, maxBackoff);
 
         const shouldContinue = await sleep(backoffMs, signal);
         if (!shouldContinue || retryState.aborted) {

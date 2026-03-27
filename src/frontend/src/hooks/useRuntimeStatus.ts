@@ -4,10 +4,7 @@ import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 
 export const runtimeStatusQueryKey = ["runtime", "status"] as const;
 
-export function useRuntimeStatus(options?: {
-  enabled?: boolean;
-  refetchIntervalMs?: number;
-}) {
+export function useRuntimeStatus(options?: { enabled?: boolean; refetchIntervalMs?: number }) {
   return useQuery({
     queryKey: runtimeStatusQueryKey,
     queryFn: ({ signal }) => runtimeEndpoints.status(signal),

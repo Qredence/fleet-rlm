@@ -46,8 +46,7 @@ const sessionButtonClassName =
 
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort(
-    (left, right) =>
-      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
   );
 }
 
@@ -80,18 +79,14 @@ function SidebarActionItem({
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
   const { toggleSidebar } = useSidebar();
-  const { newSession, requestConversationLoad, deleteConversation } =
-    useWorkspaceShellActions();
+  const { newSession, requestConversationLoad, deleteConversation } = useWorkspaceShellActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
   const { openCommandPalette } = useNavigationStore();
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
-  const sortedConversations = useMemo(
-    () => sortConversations(conversations),
-    [conversations],
-  );
+  const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
     const wasHandledByDialog = requestSettingsDialogOpen({
@@ -158,11 +153,7 @@ export function AppSidebar() {
         <SidebarGroup className="pt-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
-              <SidebarActionItem
-                label="New session"
-                icon={Plus}
-                onClick={handleNewSession}
-              />
+              <SidebarActionItem label="New session" icon={Plus} onClick={handleNewSession} />
               <SidebarActionItem
                 label="Search sessions"
                 icon={Search}
@@ -214,9 +205,7 @@ export function AppSidebar() {
                         title={`Delete conversation: ${session.title}`}
                         showOnHover
                         className="right-2 text-sidebar-foreground/40 hover:bg-sidebar-accent/70 hover:text-destructive"
-                        onClick={(event) =>
-                          handleDeleteConversation(event, session.id)
-                        }
+                        onClick={(event) => handleDeleteConversation(event, session.id)}
                       >
                         <Trash2 />
                       </SidebarMenuAction>

@@ -59,14 +59,11 @@ describe("useChatHistoryStore", () => {
       }),
     );
 
-    const { useChatHistoryStore } =
-      await import("@/screens/workspace/use-workspace");
+    const { useChatHistoryStore } = await import("@/screens/workspace/use-workspace");
 
     await useChatHistoryStore.persist.rehydrate();
 
-    expect(useChatHistoryStore.getState().conversations).toEqual([
-      conversationFixture,
-    ]);
+    expect(useChatHistoryStore.getState().conversations).toEqual([conversationFixture]);
   });
 
   it("keeps only the newest stored item for the same logical chat session", async () => {
@@ -91,8 +88,7 @@ describe("useChatHistoryStore", () => {
       }),
     );
 
-    const { useChatHistoryStore } =
-      await import("@/screens/workspace/use-workspace");
+    const { useChatHistoryStore } = await import("@/screens/workspace/use-workspace");
 
     await useChatHistoryStore.persist.rehydrate();
 
@@ -106,8 +102,7 @@ describe("useChatHistoryStore", () => {
   });
 
   it("persists turn-scoped artifacts with saved conversations", async () => {
-    const { useChatHistoryStore } =
-      await import("@/screens/workspace/use-workspace");
+    const { useChatHistoryStore } = await import("@/screens/workspace/use-workspace");
 
     const conversationId = useChatHistoryStore.getState().saveConversation(
       [
@@ -137,12 +132,8 @@ describe("useChatHistoryStore", () => {
       },
     );
 
-    const loaded = useChatHistoryStore
-      .getState()
-      .loadConversation(conversationId);
-    const persisted = JSON.parse(
-      localStorage.getItem(STORAGE_KEY) ?? "null",
-    ) as {
+    const loaded = useChatHistoryStore.getState().loadConversation(conversationId);
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as {
       state?: {
         conversations?: Array<{
           turnArtifactsByMessageId?: Record<string, unknown[]>;
@@ -160,9 +151,7 @@ describe("useChatHistoryStore", () => {
         },
       ],
     });
-    expect(
-      persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId,
-    ).toEqual({
+    expect(persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId).toEqual({
       "assistant-1": [
         {
           id: "step-1",
@@ -175,8 +164,7 @@ describe("useChatHistoryStore", () => {
   });
 
   it("updates the existing saved item when the same chat session is saved again", async () => {
-    const { useChatHistoryStore } =
-      await import("@/screens/workspace/use-workspace");
+    const { useChatHistoryStore } = await import("@/screens/workspace/use-workspace");
 
     const firstSaveId = useChatHistoryStore.getState().saveConversation(
       [

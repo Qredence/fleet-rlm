@@ -2,11 +2,7 @@ import { PanelRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -36,13 +32,9 @@ export function ShellHeader() {
     >
       <div className="flex min-w-0 items-center gap-2">
         {isMobile || sidebarState !== "collapsed" ? (
-          <SidebarTrigger
-            className={isMobile ? "size-9 rounded-xl" : "size-8"}
-          />
+          <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
         ) : null}
-        <div className="min-w-0 truncate text-sm font-medium text-foreground">
-          {title}
-        </div>
+        <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
 
       <Tooltip>

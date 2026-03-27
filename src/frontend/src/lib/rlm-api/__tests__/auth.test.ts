@@ -36,9 +36,7 @@ describe("authEndpoints", () => {
     await authEndpoints.me();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:8000/api/v1/auth/me",
-    );
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/auth/me");
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
