@@ -42,7 +42,8 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 - Same ReAct plus `dspy.RLM` orchestration core
 - Daytona is the interpreter/sandbox backend
 - Use request controls `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
-- Persistent Daytona workspace memory lives on the mounted volume at `/home/daytona/memory`
+- Daytona durable state lives on the mounted volume rooted at `/home/daytona/memory`
+- The canonical durable directories are `memory/`, `artifacts/`, `buffers/`, and `meta/`; the live workspace remains transient
 
 ## Claude Code Usage
 

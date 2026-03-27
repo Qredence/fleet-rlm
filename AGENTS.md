@@ -62,6 +62,8 @@ Shared runtime contract:
 - `runtime_mode=daytona_pilot`: Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
 - `execution_mode`: Modal-only request option
 - Daytona-only request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
+- Durable mounted-volume storage is distinct from the live sandbox workspace. The canonical durable roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`.
+- Session manifests stored on durable volumes live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`.
 
 Canonical shared endpoints:
 
@@ -82,12 +84,15 @@ Cross-stack source-of-truth boundaries:
   - `src/fleet_rlm/api/routers/ws/*`
   - `src/fleet_rlm/runtime/execution/streaming_context.py`
   - `src/frontend/src/lib/rlm-api/*`
-  - `src/frontend/src/screens/workspace/model/*`
+  - `src/frontend/src/app/workspace/assistant-content/model/*`
+  - `src/frontend/src/lib/workspace/*`
 
 ## Agent Operating Rules
 
 - Keep Modal and Daytona responsibilities distinct, but keep them on the same conversational runtime architecture. `daytona_pilot` should stay on the shared ReAct + `dspy.RLM` backbone, with Daytona acting as the interpreter/sandbox backend.
+- For Daytona, keep the public heavy-work surface limited to named `dspy.RLM` capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona surface; `llm_query*` stay internal sandbox callbacks.
 - Do not reintroduce Daytona-specific chat/runtime orchestration when the shared `RLMReActChatAgent` path can express the behavior. Daytona-specific logic belongs in the interpreter/provider layer.
+- Treat the Volumes surface as a browser for mounted durable storage only. Live workspace files remain transient execution state and should not be documented as automatically synchronized into the durable volume roots.
 - Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update generated frontend API artifacts, and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
 - Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.

@@ -409,9 +409,45 @@ def test_runtime_status_includes_mlflow_startup_state(
         "startup_error": "MLflow runtime initialization unavailable",
     }
     assert (
-        "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, or set MLFLOW_ENABLED=false for this environment."
+        "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, set MLFLOW_AUTO_START=false to keep MLflow manual in local dev, or set MLFLOW_ENABLED=false for this environment."
         in payload["guidance"]
     )
+
+
+def test_runtime_status_infers_mlflow_auto_start_for_local_localhost_when_unset(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "pending"
+    state.optional_service_errors.pop("mlflow", None)
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+    monkeypatch.delenv("MLFLOW_AUTO_START", raising=False)
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"]["auto_start_enabled"] is True
+
+
+def test_runtime_status_respects_explicit_mlflow_manual_mode(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    state.optional_service_status["mlflow"] = "pending"
+    state.optional_service_errors.pop("mlflow", None)
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+    monkeypatch.setenv("MLFLOW_AUTO_START", "false")
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mlflow"]["auto_start_enabled"] is False
 
 
 def test_runtime_status_marks_mlflow_disabled_when_env_disabled(

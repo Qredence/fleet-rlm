@@ -43,6 +43,7 @@ vi.mock("@/components/ui/sidebar", () => ({
     </button>
   ),
   SidebarProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useSidebar: () => ({ state: "expanded" as const }),
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({

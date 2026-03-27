@@ -73,8 +73,9 @@ DSPY_LLM_API_KEY=sk-...
 See [Environment Variables](#environment-variables) below for the full configuration reference.
 
 If you plan to use MLflow locally, keep `MLFLOW_TRACKING_URI=http://127.0.0.1:5001`
-aligned with the `make mlflow-server` target, or set `MLFLOW_AUTO_START=true` to
-let the API server start MLflow for local development.
+aligned with the `make mlflow-server` target. In `APP_ENV=local`, the API server
+now auto-starts that localhost MLflow target by default unless you set
+`MLFLOW_AUTO_START=false`.
 
 ### 3. Frontend Setup (Optional)
 

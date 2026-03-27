@@ -69,7 +69,7 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "DAYTONA_TARGET",
     label: "Daytona Target",
-    description: "Target workspace provider for Daytona (e.g. local).",
+    description: "Execution target/backend for Daytona provisioning (e.g. local).",
   },
   {
     key: "DSPY_LM_API_BASE",
@@ -103,13 +103,13 @@ const RUNTIME_FIELDS: RuntimeField[] = [
   {
     key: "SANDBOX_PROVIDER",
     label: "Sandbox Provider",
-    description: "Primary sandbox and volume backend (modal or daytona).",
+    description: "Primary sandbox backend (modal or daytona).",
     placeholder: "modal",
   },
   {
     key: "VOLUME_NAME",
     label: "Modal Volume Name",
-    description: "Modal volume mounted at /data for runtime state.",
+    description: "Modal durable volume mounted at /data for persisted runtime state.",
     placeholder: "rlm-volume-dspy",
   },
 ];

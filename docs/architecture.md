@@ -232,7 +232,7 @@ Important scope notes:
 - The pilot is workspace-centric: `--repo` is optional, `--context-path` is repeatable, and `--ref` is only valid when a repo is configured.
 - Each root Daytona session uses one sandbox workspace plus one persistent Daytona code-interpreter context.
 - Repo and workspace-analysis helpers are sandbox-native helper functions injected into that persistent context and survive across iterations.
-- `llm_query` / `llm_query_batched` are host-side LM callbacks bridged into the sandbox through the minimal Daytona broker process. `rlm_query` / `rlm_query_batched` remain the true recursive child-RLM helpers through the shared runtime.
+- `llm_query` / `llm_query_batched` are host-side semantic callbacks bridged into the sandbox through the minimal Daytona broker process. `rlm_query` remains the shared agent-level recursive child-RLM helper, while `rlm_query_batched` is Daytona-only and agent-level for now.
 - The pilot still does not replace `ModalInterpreter` or the default `modal_chat` product path, but it now has its own first-class websocket runtime mode while sharing the same ReAct + `dspy.RLM` orchestration core.
 - Contributors should run Daytona in this order: set `DAYTONA_API_KEY` + `DAYTONA_API_URL`, then run `fleet-rlm daytona-smoke --repo <url>` before using `daytona_pilot` in the web workspace.
 

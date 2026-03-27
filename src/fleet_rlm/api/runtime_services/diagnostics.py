@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from functools import partial
 from typing import Any, Literal
@@ -13,6 +13,7 @@ from typing import Any, Literal
 from fleet_rlm.integrations.observability.config import MlflowConfig
 from fleet_rlm.integrations.providers.daytona import DaytonaConfigError
 
+from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
 from ..dependencies import ServerState
 from ..schemas.core import (
     RuntimeActiveModels,
@@ -155,6 +156,31 @@ def daytona_preflight(
     return checks, deduped_guidance
 
 
+def build_runtime_test_result(
+    *,
+    kind: Literal["modal", "lm", "daytona"],
+    ok: bool,
+    preflight_ok: bool,
+    checked_at: str,
+    checks: dict[str, Any],
+    guidance: list[str],
+    latency_ms: int | None = None,
+    output_preview: str | None = None,
+    error: str | None = None,
+) -> RuntimeConnectivityTestResponse:
+    return RuntimeConnectivityTestResponse(
+        kind=kind,
+        ok=ok,
+        preflight_ok=preflight_ok,
+        checked_at=checked_at,
+        checks=checks,
+        guidance=guidance,
+        latency_ms=latency_ms,
+        output_preview=output_preview,
+        error=error,
+    )
+
+
 def preflight_failure_result(
     *,
     kind: Literal["modal", "lm", "daytona"],
@@ -163,7 +189,7 @@ def preflight_failure_result(
     guidance: list[str],
     error: str,
 ) -> RuntimeConnectivityTestResponse:
-    return RuntimeConnectivityTestResponse(
+    return build_runtime_test_result(
         kind=kind,
         ok=False,
         preflight_ok=False,
@@ -180,23 +206,26 @@ async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | 
     return await ensure_runtime_models(state, state.config)
 
 
-async def run_modal_connection_test(
+async def run_connectivity_test(
     *,
     state: ServerState,
-    load_modal_config: LoadModalConfig,
+    kind: Literal["modal", "lm", "daytona"],
+    preflight_ok: bool,
+    checks: dict[str, Any],
+    guidance: list[str],
+    preflight_error: str,
+    default_error: str,
+    timeout_error: str | None,
+    run_smoke: Callable[[], Awaitable[tuple[bool, str | None, str | None]]],
 ) -> RuntimeConnectivityTestResponse:
-    checks, guidance = modal_preflight(
-        secret_name=state.config.secret_name,
-        load_modal_config=load_modal_config,
-    )
     checked_at = utc_now_iso()
-    if not (checks["credentials_available"] and checks["secret_name_set"]):
+    if not preflight_ok:
         result = preflight_failure_result(
-            kind="modal",
+            kind=kind,
             checked_at=checked_at,
             checks=checks,
             guidance=guidance,
-            error="Modal preflight checks failed.",
+            error=preflight_error,
         )
         cache_runtime_test(state=state, result=result)
         return result
@@ -206,34 +235,21 @@ async def run_modal_connection_test(
     error: str | None = None
     ok = False
 
-    sandbox = None
     started = time.perf_counter()
     try:
-        import modal
-
-        app = await modal.App.lookup.aio(
-            "fleet-rlm-runtime-smoke", create_if_missing=True
-        )
-        sandbox = await modal.Sandbox.create.aio(app=app, timeout=30)
-        proc = await sandbox.exec.aio("python", "-c", "print('ok')", timeout=15)
-        await proc.wait.aio()
-        output_preview = coerce_output_text(await proc.stdout.read.aio())
-        ok = output_preview == "ok"
-        if not ok:
-            error = "Modal sandbox returned unexpected output."
-    except Exception as exc:  # pragma: no cover - network/provider path
+        ok, output_preview, error = await run_smoke()
+    except asyncio.TimeoutError:
+        error = timeout_error or f"{kind.capitalize()} connectivity test timed out."
+    except Exception as exc:  # pragma: no cover - provider/network path
         error = sanitize_error(exc)
     finally:
         latency_ms = int((time.perf_counter() - started) * 1000)
-        if sandbox is not None:
-            with suppress(Exception):
-                await sandbox.terminate.aio()
 
     if not ok and not error:
-        error = "Modal connectivity test failed."
+        error = default_error
 
-    result = RuntimeConnectivityTestResponse(
-        kind="modal",
+    result = build_runtime_test_result(
+        kind=kind,
         ok=ok,
         preflight_ok=True,
         checked_at=checked_at,
@@ -247,6 +263,53 @@ async def run_modal_connection_test(
     return result
 
 
+async def run_modal_connection_test(
+    *,
+    state: ServerState,
+    load_modal_config: LoadModalConfig,
+) -> RuntimeConnectivityTestResponse:
+    checks, guidance = modal_preflight(
+        secret_name=state.config.secret_name,
+        load_modal_config=load_modal_config,
+    )
+    sandbox = None
+
+    async def _run_smoke() -> tuple[bool, str | None, str | None]:
+        nonlocal sandbox
+        import modal
+
+        app = await modal.App.lookup.aio(
+            "fleet-rlm-runtime-smoke", create_if_missing=True
+        )
+        sandbox = await modal.Sandbox.create.aio(app=app, timeout=30)
+        proc = await sandbox.exec.aio("python", "-c", "print('ok')", timeout=15)
+        await proc.wait.aio()
+        output_preview = coerce_output_text(await proc.stdout.read.aio())
+        if output_preview != "ok":
+            return False, output_preview, "Modal sandbox returned unexpected output."
+        return True, output_preview, None
+
+    try:
+        return await run_connectivity_test(
+            state=state,
+            kind="modal",
+            preflight_ok=checks["credentials_available"] and checks["secret_name_set"],
+            checks=checks,
+            guidance=guidance,
+            preflight_error="Modal preflight checks failed.",
+            default_error="Modal connectivity test failed.",
+            timeout_error=(
+                f"Modal test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
+                "Check connectivity and credentials."
+            ),
+            run_smoke=_run_smoke,
+        )
+    finally:
+        if sandbox is not None:
+            with suppress(Exception):
+                await sandbox.terminate.aio()
+
+
 async def run_lm_connection_test(
     *,
     state: ServerState,
@@ -254,25 +317,8 @@ async def run_lm_connection_test(
     delegate_loader=None,
 ) -> RuntimeConnectivityTestResponse:
     checks, guidance = lm_preflight()
-    checked_at = utc_now_iso()
-    if not (checks["model_set"] and checks["api_key_set"]):
-        result = preflight_failure_result(
-            kind="lm",
-            checked_at=checked_at,
-            checks=checks,
-            guidance=guidance,
-            error="LM preflight checks failed.",
-        )
-        cache_runtime_test(state=state, result=result)
-        return result
 
-    latency_ms: int | None = None
-    output_preview: str | None = None
-    error: str | None = None
-    ok = False
-
-    started = time.perf_counter()
-    try:
+    async def _run_smoke() -> tuple[bool, str | None, str | None]:
         if planner_loader is None and delegate_loader is None:
             planner_lm, delegate_lm = await _ensure_runtime_models(state)
             if planner_lm is None:
@@ -318,35 +364,24 @@ async def run_lm_connection_test(
             timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
         )
 
-        ok = bool(output_preview)
         state.planner_lm = planner_lm
         state.delegate_lm = delegate_lm
-    except asyncio.TimeoutError:
-        error = (
-            f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
-            "Check API connectivity and credentials."
-        )
-    except Exception as exc:  # pragma: no cover - provider/network path
-        error = sanitize_error(exc)
-    finally:
-        latency_ms = int((time.perf_counter() - started) * 1000)
+        return bool(output_preview), output_preview, None
 
-    if not ok and not error:
-        error = "LM connectivity test failed."
-
-    result = RuntimeConnectivityTestResponse(
+    return await run_connectivity_test(
+        state=state,
         kind="lm",
-        ok=ok,
-        preflight_ok=True,
-        checked_at=checked_at,
+        preflight_ok=checks["model_set"] and checks["api_key_set"],
         checks=checks,
         guidance=guidance,
-        latency_ms=latency_ms,
-        output_preview=output_preview,
-        error=error,
+        preflight_error="LM preflight checks failed.",
+        default_error="LM connectivity test failed.",
+        timeout_error=(
+            f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
+            "Check API connectivity and credentials."
+        ),
+        run_smoke=_run_smoke,
     )
-    cache_runtime_test(state=state, result=result)
-    return result
 
 
 async def run_daytona_connection_test(
@@ -356,73 +391,51 @@ async def run_daytona_connection_test(
     checks, guidance = daytona_preflight(
         sandbox_provider=state.config.sandbox_provider,
     )
-    checked_at = utc_now_iso()
-    if not checks["configured"]:
-        result = preflight_failure_result(
-            kind="daytona",
-            checked_at=checked_at,
-            checks=checks,
-            guidance=guidance,
-            error="Daytona preflight checks failed.",
-        )
-        cache_runtime_test(state=state, result=result)
-        return result
 
-    latency_ms: int | None = None
-    output_preview: str | None = None
-    error: str | None = None
-    ok = False
+    async def _run_smoke() -> tuple[bool, str | None, str | None]:
+        try:
+            from daytona import Daytona, DaytonaConfig
 
-    started = time.perf_counter()
-    try:
-        from daytona import Daytona, DaytonaConfig
-
-        from fleet_rlm.integrations.providers.daytona import resolve_daytona_config
-
-        config = resolve_daytona_config()
-        client = Daytona(
-            DaytonaConfig(
-                api_key=config.api_key,
-                api_url=config.api_url.rstrip("/"),
-                target=config.target,
+            from fleet_rlm.integrations.providers.daytona import (
+                resolve_daytona_config,
             )
-        )
 
-        def _fetch() -> Any:
-            return client.list(limit=1)
+            config = resolve_daytona_config()
+            client = Daytona(
+                DaytonaConfig(
+                    api_key=config.api_key,
+                    api_url=config.api_url.rstrip("/"),
+                    target=config.target,
+                )
+            )
 
-        response = await run_blocking(
-            _fetch,
-            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-        )
-        items = getattr(response, "items", [])
-        output_preview = (
-            f"Daytona connectivity verified. Found {len(items)} sandboxes (limited)."
-        )
-        ok = True
-    except ImportError:
-        error = "Daytona SDK is not installed."
-    except Exception as exc:  # pragma: no cover - provider/network path
-        error = sanitize_error(exc)
-    finally:
-        latency_ms = int((time.perf_counter() - started) * 1000)
+            def _fetch() -> Any:
+                return client.list(limit=1)
 
-    if not ok and not error:
-        error = "Daytona connectivity test failed."
+            response = await run_blocking(
+                _fetch,
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            )
+            items = getattr(response, "items", [])
+            output_preview = f"Daytona connectivity verified. Found {len(items)} sandboxes (limited)."
+            return True, output_preview, None
+        except ImportError:
+            return False, None, "Daytona SDK is not installed."
 
-    result = RuntimeConnectivityTestResponse(
+    return await run_connectivity_test(
+        state=state,
         kind="daytona",
-        ok=ok,
-        preflight_ok=True,
-        checked_at=checked_at,
+        preflight_ok=checks["configured"],
         checks=checks,
         guidance=guidance,
-        latency_ms=latency_ms,
-        output_preview=output_preview,
-        error=error,
+        preflight_error="Daytona preflight checks failed.",
+        default_error="Daytona connectivity test failed.",
+        timeout_error=(
+            f"Daytona test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
+            "Check connectivity and credentials."
+        ),
+        run_smoke=_run_smoke,
     )
-    cache_runtime_test(state=state, result=result)
-    return result
 
 
 def build_runtime_status_response(
@@ -460,8 +473,16 @@ def build_runtime_status_response(
         )
     if mlflow_cfg.enabled and mlflow_startup_status == "degraded":
         guidance.append(
-            "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, or set MLFLOW_ENABLED=false for this environment."
+            "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, "
+            "set MLFLOW_AUTO_START=false to keep MLflow manual in local dev, or set "
+            "MLFLOW_ENABLED=false for this environment."
         )
+
+    mlflow_auto_start_enabled = resolve_mlflow_auto_start_enabled(
+        app_env=state.config.app_env,
+        mlflow_enabled=mlflow_cfg.enabled,
+        tracking_uri=mlflow_cfg.tracking_uri,
+    )
 
     return RuntimeStatusResponse(
         app_env=state.config.app_env,
@@ -491,10 +512,7 @@ def build_runtime_status_response(
         },
         mlflow={
             "enabled": mlflow_cfg.enabled,
-            "auto_start_enabled": (
-                (os.getenv("MLFLOW_AUTO_START") or "").strip().lower()
-                in {"1", "true", "yes"}
-            ),
+            "auto_start_enabled": mlflow_auto_start_enabled,
             "startup_status": mlflow_startup_status,
             "startup_error": mlflow_startup_error,
         },

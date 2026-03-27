@@ -5,16 +5,26 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { ExecutionModeDropdown } from "@/app/workspace/composer/ExecutionModeDropdown";
 
 let onValueChangeRef: ((value: string) => void) | undefined;
+let currentValueRef: string | undefined;
+
+const executionLabelByValue: Record<string, string> = {
+  auto: "Auto",
+  rlm_only: "RLM only",
+  tools_only: "Tools only",
+};
 
 vi.mock("@/components/ui/select", () => ({
   Select: ({
     children,
     onValueChange,
+    value,
   }: {
     children: ReactNode;
     onValueChange?: (value: string) => void;
+    value?: string;
   }) => {
     onValueChangeRef = onValueChange;
+    currentValueRef = value;
     return <div>{children}</div>;
   },
   SelectTrigger: ({
@@ -29,6 +39,13 @@ vi.mock("@/components/ui/select", () => ({
   ),
   SelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectValue: ({ children, placeholder }: { children?: ReactNode; placeholder?: string }) => (
+    <span>
+      {children ??
+        (currentValueRef ? executionLabelByValue[currentValueRef] : undefined) ??
+        placeholder}
+    </span>
+  ),
   SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
     <button type="button" role="menuitemradio" onClick={() => onValueChangeRef?.(value)}>
       {children}
@@ -46,6 +63,7 @@ describe("ExecutionModeDropdown", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     onValueChangeRef = undefined;
+    currentValueRef = undefined;
   });
 
   it("renders the current mode label", () => {

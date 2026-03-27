@@ -521,7 +521,7 @@ export const PromptInput = ({
         type="file"
       />
       <form className={cn("w-full", className)} onSubmit={handleSubmit} ref={formRef} {...props}>
-        <InputGroup className="prompt-composer-shell bg-(--color-surface-elevated)! flex-col items-stretch rounded-2xl border-0 p-1">
+        <InputGroup className="prompt-composer-shell flex-col items-stretch rounded-[22px] border-0 p-0">
           {children}
         </InputGroup>
       </form>

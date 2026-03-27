@@ -1,7 +1,7 @@
 import { PanelRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { useNavigationStore } from "@/stores/navigationStore";
 export function ShellHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas } = useNavigationStore();
   const isMobile = useIsMobile();
+  const { state: sidebarState } = useSidebar();
 
   const titleMap: Record<string, string> = {
     workspace: "Workbench",
@@ -22,11 +23,17 @@ export function ShellHeader() {
     <header
       className={cn(
         "flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
-        isMobile ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-4 py-2",
+        isMobile
+          ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]"
+          : sidebarState === "collapsed"
+            ? "px-5 py-2"
+            : "px-4 py-2",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
+        {isMobile || sidebarState !== "collapsed" ? (
+          <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
+        ) : null}
         <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
 

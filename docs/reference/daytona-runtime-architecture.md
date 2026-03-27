@@ -14,6 +14,7 @@ The current implementation treats these Daytona docs as the normative baseline:
 - Async File System: [https://www.daytona.io/docs/en/python-sdk/async/async-file-system/](https://www.daytona.io/docs/en/python-sdk/async/async-file-system/)
 - Async Volume: [https://www.daytona.io/docs/en/python-sdk/async/async-volume/](https://www.daytona.io/docs/en/python-sdk/async/async-volume/)
 - Async Code Interpreter: [https://www.daytona.io/docs/en/python-sdk/async/async-code-interpreter/](https://www.daytona.io/docs/en/python-sdk/async/async-code-interpreter/)
+- Declarative Builder: [https://www.daytona.io/docs/en/declarative-builder](https://www.daytona.io/docs/en/declarative-builder)
 - Log Streaming: [https://www.daytona.io/docs/en/log-streaming/](https://www.daytona.io/docs/en/log-streaming/)
 - Volumes: [https://www.daytona.io/docs/en/volumes/](https://www.daytona.io/docs/en/volumes/)
 - Recursive Language Models / DSPy: [https://www.daytona.io/docs/en/guides/recursive-language-models](https://www.daytona.io/docs/en/guides/recursive-language-models)
@@ -42,8 +43,9 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `RLMReActChatAgent` remains the top-level conversational runtime
   - long-context and recursive execution flow through `dspy.RLM`
   - `spawn_delegate_sub_agent_async` is the single recursive child-run path
-  - `llm_query` is semantic-only and does not create child sandboxes
-  - `rlm_query` and `rlm_query_batched` create true recursive Daytona child runs
+  - `llm_query` and `llm_query_batched` are semantic-only sandbox callbacks
+  - `rlm_query` is the shared agent-level recursive entrypoint
+  - `rlm_query_batched` is a Daytona-only agent-level recursive entrypoint for now
   - each child run uses its own Daytona sandbox session and returns synthesized results to the parent
 
 ## Current Runtime Shape
@@ -64,6 +66,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, and `types_serialization.py` own provider-local result, context, and recursion contracts
   - `volumes.py` owns provider-specific volume browsing helpers
 - `agent.py` and `state.py` remain the Daytona-specific agent/session adapters over the shared runtime.
+- Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The provider is now async-first internally:
   - `AsyncDaytona` drives sandbox/session lifecycle
   - host-side volume browsing uses async Daytona helpers directly
@@ -74,6 +77,8 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `RLMReActChatAgent` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
   - cached runtime-module execution for non-recursive helper reuse
+- Daytona's public heavy-work surface is intentionally limited to the named cached runtime-module capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona tool surface.
+- `llm_query` / `llm_query_batched` remain available inside the Daytona interpreter, but they are internal semantic sub-primitives rather than peer public heavy-work tools. New Daytona heavy capabilities should use them only as a documented last resort.
 
 ## Project-Specific Extensions
 
@@ -114,9 +119,14 @@ In practice the provider is intentionally hybrid:
 - `DAYTONA_TARGET` is used only as Daytona SDK routing/config input.
 - `DAYTONA_TARGET` must not be treated as a workspace id, sandbox id, or volume name.
 - The current internal Daytona volume mount path is `/home/daytona/memory`.
+- Session manifests on durable storage live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`.
+- Manifest readers keep a best-effort fallback to the legacy `workspaces/...` path only for migration compatibility.
 - Root and recursive child Daytona runs share the same workspace-scoped
   persistent volume when one is configured, while still using distinct Daytona
   sandbox sessions per child run.
+- The runtime remains SDK-owned. Repo-side `.daytona`, devcontainer, or
+  Declarative Builder config is not consulted at runtime in this iteration.
+- Declarative Builder is relevant only as a future base-image/bootstrap strategy.
 
 ## Persistent Memory Model
 
@@ -125,8 +135,19 @@ There are two distinct persistence layers in the Daytona runtime:
 - Volatile execution-context state:
   - Python globals, imports, helper functions, and in-memory objects live inside the Daytona code-interpreter context
   - this state persists across multiple `run_code(...)` calls while that context remains alive
-- Durable workspace memory:
-  - files written to the mounted Daytona volume under `/home/daytona/memory`
-  - this state is the persistence mechanism that survives context reset, sandbox restart, or session resume
+- Durable mounted-volume storage:
+  - the mounted volume root is `/home/daytona/memory`
+  - canonical durable directories under it are `memory/`, `artifacts/`, `buffers/`, and `meta/`
+  - session manifests and workspace provenance belong under `meta/workspaces/...`
+  - workspace repos, staged context, package installs, caches, and scratch files are not durable by default
+  - files survive context reset, sandbox restart, or session resume only when they are explicitly promoted into those durable directories
 
-When code needs durable memory, it must write to the mounted Daytona volume rather than relying on in-process globals.
+## Workspace vs. Volume vs. Context
+
+- Workspace root: the live repo checkout plus transient execution files inside the sandbox
+- Context root: run-scoped host inputs staged into the workspace under `.fleet-rlm/context`
+- Mounted volume root: durable storage only, not a pseudo-persistent workspace
+
+Workspace-aware tools target the live sandbox workspace. Volume-aware tools target the canonical durable directories. There is no automatic workspace-to-volume sync in this iteration.
+
+When code needs durable memory or durable artifacts, it must explicitly write to the mounted Daytona volume rather than relying on in-process globals or transient workspace files.

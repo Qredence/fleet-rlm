@@ -122,7 +122,7 @@ describe("AppSidebar session actions", () => {
 
     expect(findButtonByText(container, "Workbench")).toBeTruthy();
 
-    const button = findButtonByText(container, "New Session");
+    const button = findButtonByText(container, "New session");
     expect(button).toBeTruthy();
 
     act(() => {
@@ -140,11 +140,9 @@ describe("AppSidebar session actions", () => {
   it("renders an empty-state session hint in the left rail", () => {
     const { container, root } = mountSidebar();
 
-    expect(container.textContent).toContain("Recent Sessions");
-    expect(container.textContent).toContain("No recent sessions yet");
-    expect(container.textContent).toContain(
-      "Start a new session and it will appear here for quick return.",
-    );
+    expect(container.textContent).toContain("Chats");
+    expect(container.textContent).toContain("No chats yet.");
+    expect(container.textContent).toContain("Start a new session to populate this list.");
 
     act(() => {
       root.unmount();
@@ -173,7 +171,6 @@ describe("AppSidebar session actions", () => {
     const { container, root } = mountSidebar();
 
     expect(container.textContent).toContain("Saved conversation");
-    expect(container.textContent).toContain("Older");
 
     const button = findButtonByText(container, "Saved conversation");
     expect(button).toBeTruthy();
@@ -216,36 +213,6 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.deleteConversation).toHaveBeenCalledWith("conv-delete");
     expect(workspaceShellState.requestConversationLoad).not.toHaveBeenCalled();
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("clears saved sessions from the consolidated sidebar", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    workspaceShellState.conversations = [
-      {
-        id: "conv-clear",
-        title: "Clearable conversation",
-        messages: [],
-        phase: "complete",
-        createdAt: "2026-03-16T10:00:00.000Z",
-        updatedAt: "2026-03-16T12:00:00.000Z",
-      },
-    ];
-
-    const { container, root } = mountSidebar();
-    const clearButton = findButtonByText(container, "Clear all");
-
-    expect(clearButton).toBeTruthy();
-
-    act(() => {
-      clearButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(window.confirm).toHaveBeenCalledWith("Delete all saved sessions?");
-    expect(workspaceShellState.clearHistory).toHaveBeenCalledOnce();
 
     act(() => {
       root.unmount();

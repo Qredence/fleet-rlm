@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { MessagesSquare } from "lucide-react";
+import { Globe, MessagesSquare } from "lucide-react";
 
 import {
   Select,
@@ -12,17 +12,6 @@ import { cn } from "@/lib/utils";
 import type { WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
 import { PROMPT_INPUT_ACTION_BUTTON_CLASSNAME } from "./composerActionStyles";
 
-function DaytonaIcon({ className }: { className?: string }) {
-  return (
-    <img
-      src="/branding/daytona-logo.png"
-      alt=""
-      aria-hidden="true"
-      className={cn("object-contain dark:invert", className)}
-    />
-  );
-}
-
 interface RuntimeModeOption {
   id: WsRuntimeMode;
   name: string;
@@ -31,7 +20,7 @@ interface RuntimeModeOption {
 
 const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
   { id: "modal_chat", name: "Modal chat", icon: MessagesSquare },
-  { id: "daytona_pilot", name: "Daytona", icon: DaytonaIcon },
+  { id: "daytona_pilot", name: "Daytona", icon: Globe },
 ];
 
 interface RuntimeModeDropdownProps {
@@ -55,13 +44,13 @@ function RuntimeModeDropdown({ value, onChange }: RuntimeModeDropdownProps) {
         aria-label={`Runtime mode: ${currentMode.name}`}
       >
         <div className="flex items-center gap-2">
-          <CurrentModeIcon className="size-4 shrink-0" />
-          <span className="font-app text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
+          <CurrentModeIcon className="size-3.5 shrink-0" />
+          <span className="font-app flex-none text-(length:--font-text-sm-size) leading-(--font-text-sm-line-height) tracking-(--font-text-sm-tracking)">
             {currentMode.name}
           </span>
         </div>
       </SelectTrigger>
-      <SelectContent align="end" className="w-48">
+      <SelectContent align="end" alignItemWithTrigger={false} className="w-48">
         <SelectGroup>
           {RUNTIME_MODE_OPTIONS.map((option) => {
             const OptionIcon = option.icon;

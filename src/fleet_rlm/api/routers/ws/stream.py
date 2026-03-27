@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -158,13 +158,6 @@ async def run_streaming_turn(
 
     await lifecycle.emit_started()
     ws_loop = asyncio.get_running_loop()
-    mlflow_request_context = None
-    if mlflow_trace_context is not None:
-        from fleet_rlm.integrations.observability.mlflow_runtime import (
-            mlflow_request_context as _mlflow_request_context,
-        )
-
-        mlflow_request_context = _mlflow_request_context
     repl_hook_bridge = ReplHookBridge(
         ws_loop=ws_loop,
         lifecycle=lifecycle,
@@ -179,9 +172,8 @@ async def run_streaming_turn(
         last_loaded_docs_path = str(docs_path).strip()
 
     try:
-        if mlflow_trace_context is None:
-            if prepare_stream is not None:
-                await prepare_stream()
+
+        async def _stream_body() -> None:
             await _stream_agent_events(
                 websocket=websocket,
                 agent=agent,
@@ -195,24 +187,12 @@ async def run_streaming_turn(
                 analytics_enabled=analytics_enabled,
                 persist_session_state=persist_session_state,
             )
-        else:
-            assert mlflow_request_context is not None
-            with mlflow_request_context(mlflow_trace_context):
-                if prepare_stream is not None:
-                    await prepare_stream()
-                await _stream_agent_events(
-                    websocket=websocket,
-                    agent=agent,
-                    request_message=message,
-                    message=message,
-                    docs_path=docs_path,
-                    trace=trace,
-                    cancel_check=cancel_check,
-                    lifecycle=lifecycle,
-                    step_builder=step_builder,
-                    analytics_enabled=analytics_enabled,
-                    persist_session_state=persist_session_state,
-                )
+
+        await _run_prepared_stream(
+            prepare_stream=prepare_stream,
+            mlflow_trace_context=mlflow_trace_context,
+            stream_body=_stream_body,
+        )
     except WebSocketDisconnect:
         raise
     except Exception as exc:
@@ -227,6 +207,28 @@ async def run_streaming_turn(
         await repl_hook_bridge.stop()
 
     return last_loaded_docs_path
+
+
+async def _run_prepared_stream(
+    *,
+    prepare_stream: PreStreamSetupFn | None,
+    mlflow_trace_context: Any | None,
+    stream_body: Callable[[], Awaitable[None]],
+) -> None:
+    if mlflow_trace_context is None:
+        if prepare_stream is not None:
+            await prepare_stream()
+        await stream_body()
+        return
+
+    from fleet_rlm.integrations.observability.mlflow_runtime import (
+        mlflow_request_context,
+    )
+
+    with mlflow_request_context(mlflow_trace_context):
+        if prepare_stream is not None:
+            await prepare_stream()
+        await stream_body()
 
 
 async def _stream_agent_events(
@@ -299,19 +301,7 @@ async def _emit_stream_event(
         await lifecycle.persist_step(step)
         lifecycle.raise_if_persistence_error()
 
-    if event.kind in {"cancelled", "error"}:
-        await handle_terminal_stream_event(
-            websocket=websocket,
-            lifecycle=lifecycle,
-            event=event,
-            event_dict=event_dict,
-            step=step,
-            persist_session_state=persist_session_state,
-            request_message=request_message,
-        )
-        return
-
-    if event.kind == "final":
+    if is_terminal_event:
         await handle_terminal_stream_event(
             websocket=websocket,
             lifecycle=lifecycle,

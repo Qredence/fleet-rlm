@@ -110,6 +110,8 @@ describe("RuntimeForm", () => {
     expect(html).toContain("Write-only input. Configured value");
     expect(html).toContain("Clear saved value");
     expect(html).toContain("Runtime Configuration");
+    expect(html).toContain("Execution target/backend for Daytona provisioning");
+    expect(html).toContain("Modal durable volume mounted at /data for persisted runtime state.");
     expect(html).toContain("Modal Smoke");
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");
