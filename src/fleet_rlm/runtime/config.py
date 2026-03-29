@@ -448,8 +448,7 @@ def get_delegate_lm_from_env(
         return _build_lm(**delegate_lm_kwargs)
     except Exception:
         logger.warning(
-            "Failed to initialize delegate LM '%s'; using planner fallback.",
-            delegate_lm_kwargs["model"],
+            "Failed to initialize delegate LM; using planner fallback.",
             exc_info=True,
         )
         return None
