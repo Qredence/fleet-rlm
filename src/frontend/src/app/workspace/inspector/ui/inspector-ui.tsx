@@ -17,10 +17,12 @@ export function runtimeContextStrings(ctx?: RuntimeContext): string[] {
   if (ctx.executionMode && ctx.executionMode !== "react") {
     pills.push(`mode ${ctx.executionMode}`);
   }
+  if (ctx.sandboxTransition) pills.push(ctx.sandboxTransition);
   if (ctx.sandboxActive) pills.push("sandbox");
   if (ctx.executionProfile !== "ROOT_INTERLOCUTOR") {
     pills.push(ctx.executionProfile.toLowerCase().replace(/_/g, " "));
   }
+  if (ctx.workspacePath) pills.push(`workspace ${ctx.workspacePath}`);
   if (ctx.volumeName) pills.push(ctx.volumeName);
   return pills;
 }

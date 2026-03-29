@@ -79,7 +79,7 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
 
 def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
     monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_integration.trace_result_metadata",
+        "fleet_rlm.integrations.observability.mlflow_runtime.trace_result_metadata",
         lambda response_preview=None: {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",

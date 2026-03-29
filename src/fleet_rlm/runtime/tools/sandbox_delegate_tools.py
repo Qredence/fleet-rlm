@@ -94,6 +94,21 @@ def _cached_runtime_success(
     }
 
 
+def _record_runtime_failure(
+    ctx: _DelegateToolContext,
+    error: dict[str, Any] | None,
+) -> None:
+    if not isinstance(error, dict):
+        return
+    category = str(error.get("runtime_failure_category", "") or "").strip() or None
+    phase = str(error.get("runtime_failure_phase", "") or "").strip() or None
+    if category is None and phase is None:
+        return
+    recorder = getattr(ctx.agent.interpreter, "mark_runtime_degradation", None)
+    if callable(recorder):
+        recorder(category=category, phase=phase, fallback_used=False)
+
+
 def _build_tool(registration: _ToolRegistration) -> Any:
     from dspy import Tool
 
@@ -216,6 +231,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -248,6 +264,7 @@ SUBMIT(
             focus=focus,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -281,6 +298,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         raw_patterns = _prediction_value(prediction, "patterns", {})
@@ -332,6 +350,7 @@ SUBMIT(
             response_style="concise",
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         citations = _normalize_grounded_citations(
@@ -374,6 +393,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         severity = str(_prediction_value(prediction, "severity", "low")).strip().lower()
@@ -416,6 +436,7 @@ SUBMIT(
             constraints=constraints or "Keep changes minimal.",
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -452,6 +473,7 @@ SUBMIT(
             current_memory=ctx.agent.fmt_core_memory(),
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(

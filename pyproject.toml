@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "dspy==3.1.3",
-    "daytona>=0.153.0,<1",
+    "daytona>=0.158.0,<1",
     "hydra-core>=1.3,<2",
     "markitdown[all]>=0.1.0,<1",
     "omegaconf>=2.3,<3",
@@ -124,7 +124,13 @@ include = ["fleet_rlm*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"fleet_rlm.scaffold" = ["**/*.md", "**/*.py", "**/*.json"]
+"fleet_rlm.scaffold" = [
+    "agents/**/*.md",
+    "hooks/**/*.md",
+    "skills/**/*.md",
+    "skills/**/scripts/*.py",
+    "teams/**/*.json",
+]
 "fleet_rlm.integrations.config" = ["*.yaml", "*.yml"]
 "fleet_rlm" = ["py.typed"]
 "fleet_rlm.ui" = ["dist/**/*", "dist/*"]

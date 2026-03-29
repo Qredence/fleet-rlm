@@ -1,15 +1,12 @@
-"""Unit tests for HITL event wiring in streaming layer.
-
-Covers _try_parse_hitl_request in core/execution/streaming.py —
-the new implementation that detects tool outputs requiring
-human-in-the-loop interaction and emits hitl_request events.
-"""
+"""Unit tests for HITL event wiring in the streaming status helpers."""
 
 from __future__ import annotations
 
 import json
 
-from fleet_rlm.runtime.execution.streaming import _try_parse_hitl_request
+from fleet_rlm.runtime.execution.streaming_status import (
+    try_parse_hitl_request as _try_parse_hitl_request,
+)
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 

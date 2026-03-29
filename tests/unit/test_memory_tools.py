@@ -25,9 +25,6 @@ class _FakeDaytonaSession:
         self.list_calls: list[str] = []
         self.file_contents: dict[str, str] = {}
         self.list_entries: dict[str, list[object]] = {}
-        self.sandbox = SimpleNamespace(
-            fs=SimpleNamespace(list_files=self._list_files),
-        )
 
     async def aread_file(self, path: str) -> str:
         self.read_calls.append(path)
@@ -38,7 +35,7 @@ class _FakeDaytonaSession:
         self.file_contents[path] = content
         return path
 
-    async def _list_files(self, path: str) -> list[object]:
+    async def alist_files(self, path: str) -> list[object]:
         self.list_calls.append(path)
         return self.list_entries.get(path, [])
 

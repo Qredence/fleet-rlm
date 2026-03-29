@@ -85,6 +85,8 @@ export interface WsRuntimeContext {
   runtime_mode?: string;
   daytona_mode?: string;
   sandbox_id?: string;
+  workspace_path?: string;
+  sandbox_transition?: string;
 }
 
 export interface WsServerEvent {

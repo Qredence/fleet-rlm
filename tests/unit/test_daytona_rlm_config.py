@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from fleet_rlm.integrations.providers.daytona.config import (
@@ -42,6 +44,50 @@ def test_resolve_daytona_config_passes_through_target():
     )
 
     assert config.target == "europe"
+
+
+def test_resolve_daytona_config_prefers_project_env_file_in_local_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='tmp'\n", encoding="utf-8"
+    )
+    (tmp_path / ".env").write_text(
+        "DAYTONA_API_KEY=file-key\nDAYTONA_API_URL=https://file.daytona.example\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DAYTONA_API_KEY", "env-key")
+    monkeypatch.setenv("DAYTONA_API_URL", "https://env.daytona.example")
+    monkeypatch.delenv("APP_ENV", raising=False)
+
+    config = resolve_daytona_config()
+
+    assert config.api_key == "file-key"
+    assert config.api_url == "https://file.daytona.example"
+
+
+def test_resolve_daytona_config_prefers_process_env_outside_local_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='tmp'\n", encoding="utf-8"
+    )
+    (tmp_path / ".env").write_text(
+        "DAYTONA_API_KEY=file-key\nDAYTONA_API_URL=https://file.daytona.example\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DAYTONA_API_KEY", "env-key")
+    monkeypatch.setenv("DAYTONA_API_URL", "https://env.daytona.example")
+
+    config = resolve_daytona_config()
+
+    assert config.api_key == "env-key"
+    assert config.api_url == "https://env.daytona.example"
 
 
 def test_resolve_daytona_lm_runtime_config_prefers_dspy_small_model_contract():

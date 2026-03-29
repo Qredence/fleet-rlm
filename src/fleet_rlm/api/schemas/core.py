@@ -14,64 +14,6 @@ RuntimeMode = Literal["modal_chat", "daytona_pilot"]
 VolumeProvider = Literal["modal", "daytona"]
 
 
-class ChatRequest(BaseModel):
-    """Request body for the legacy one-shot chat HTTP endpoint."""
-
-    message: str = Field(description="User message to send to the runtime.")
-    docs_path: str | None = Field(
-        default=None,
-        description="Optional local documentation path to preload before the chat turn.",
-    )
-    trace: bool = Field(
-        default=False,
-        description="Whether to include trace-oriented reasoning details in the response.",
-    )
-    execution_mode: ExecutionMode = Field(
-        default="auto",
-        description="Modal-only execution mode hint for the chat turn.",
-    )
-
-
-class ChatResponse(BaseModel):
-    """Response body for the legacy one-shot chat HTTP endpoint."""
-
-    assistant_response: str = Field(
-        description="Final assistant response text returned by the runtime."
-    )
-    trajectory: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional structured trajectory details describing the executed reasoning path.",
-    )
-    history_turns: int = Field(
-        default=0,
-        description="Number of prior conversation turns included in the runtime state.",
-    )
-    guardrail_warnings: list[str] = Field(
-        default_factory=list,
-        description="Warnings raised by runtime guardrails while processing the request.",
-    )
-    effective_max_iters: int | None = Field(
-        default=None,
-        description="Resolved maximum iteration count used for the turn, when available.",
-    )
-    delegate_calls_turn: int | None = Field(
-        default=None,
-        description="Number of delegate-model calls issued while completing the turn.",
-    )
-    delegate_fallback_count_turn: int | None = Field(
-        default=None,
-        description="Number of times delegate execution fell back to a backup path during the turn.",
-    )
-    delegate_result_truncated_count_turn: int | None = Field(
-        default=None,
-        description="Number of delegate results truncated before returning the response.",
-    )
-    core_memory_snapshot: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional snapshot of core memory state after the turn completed.",
-    )
-
-
 class HealthResponse(BaseModel):
     """Response body for the lightweight health endpoint."""
 
@@ -127,66 +69,6 @@ class AuthMeResponse(BaseModel):
     user_id: str | None = Field(
         default=None,
         description="Persisted control-plane user identifier for admitted Entra users.",
-    )
-
-
-class TaskRequest(BaseModel):
-    """Request body for the legacy task-style HTTP endpoint."""
-
-    task_type: Literal[
-        "basic",
-        "architecture",
-        "api_endpoints",
-        "error_patterns",
-        "long_context",
-        "summarize",
-        "custom_tool",
-    ] = Field(description="Task template used by the legacy task endpoint.")
-    question: str = Field(
-        default="", description="Primary question or instruction to answer."
-    )
-    docs_path: str | None = Field(
-        default=None,
-        description="Optional local documentation path to preload before task execution.",
-    )
-    query: str = Field(
-        default="", description="Auxiliary query string used by some task modes."
-    )
-    max_iterations: int = Field(
-        default=15,
-        description="Maximum reasoning iterations allowed for the task execution.",
-    )
-    max_llm_calls: int = Field(
-        default=30,
-        description="Maximum total language-model calls allowed for the task execution.",
-    )
-    timeout: int = Field(
-        default=600,
-        description="Maximum task runtime in seconds before the server aborts execution.",
-    )
-    chars: int = Field(
-        default=10000,
-        description="Maximum character budget used by legacy long-context helpers.",
-    )
-    verbose: bool = Field(
-        default=True,
-        description="Whether verbose execution details should be included in the result payload.",
-    )
-
-
-class TaskResponse(BaseModel):
-    """Response body for the legacy task-style HTTP endpoint."""
-
-    ok: bool = Field(
-        default=True, description="Whether the task completed successfully."
-    )
-    result: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Structured result payload returned by the task executor.",
-    )
-    error: str | None = Field(
-        default=None,
-        description="Error message returned when the task did not complete successfully.",
     )
 
 

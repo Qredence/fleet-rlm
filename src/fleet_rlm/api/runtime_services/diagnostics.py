@@ -10,6 +10,8 @@ from contextlib import suppress
 from functools import partial
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
 from fleet_rlm.integrations.observability.config import MlflowConfig
 from fleet_rlm.integrations.providers.daytona import DaytonaConfigError
 
@@ -51,9 +53,14 @@ def connectivity_result_from_cache(
     *, state: ServerState, kind: str
 ) -> RuntimeConnectivityTestResponse | None:
     cached = state.runtime_test_results.get(kind)
+    if isinstance(cached, RuntimeConnectivityTestResponse):
+        return cached
     if not isinstance(cached, dict):
         return None
-    return RuntimeConnectivityTestResponse(**cached)
+    try:
+        return RuntimeConnectivityTestResponse(**cached)
+    except ValidationError:
+        return None
 
 
 def modal_preflight(
@@ -61,7 +68,8 @@ def modal_preflight(
     secret_name: str,
     load_modal_config: LoadModalConfig,
 ) -> tuple[dict[str, bool], list[str]]:
-    modal_cfg = load_modal_config()
+    modal_cfg_candidate = load_modal_config()
+    modal_cfg = modal_cfg_candidate if isinstance(modal_cfg_candidate, dict) else {}
     credentials_from_env = bool(
         os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET")
     )

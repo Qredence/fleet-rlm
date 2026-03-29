@@ -9,13 +9,10 @@ from fleet_rlm.api.dependencies import ServerState, get_server_state, session_ke
 from fleet_rlm.api.server_utils import sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
-    ChatRequest,
-    ChatResponse,
     HealthResponse,
     RuntimeActiveModels,
     RuntimeStatusResponse,
     RuntimeTestCache,
-    TaskRequest,
     WSMessage,
 )
 from fleet_rlm.integrations.config.env import AppConfig
@@ -257,28 +254,10 @@ def test_sanitize_id_strips_boundary_dots() -> None:
     assert sanitize_id(".workspace.", "default") == "workspace"
 
 
-def test_chat_request_defaults() -> None:
-    req = ChatRequest(message="hello")
-    assert req.docs_path is None
-    assert req.trace is False
-
-
-def test_chat_response() -> None:
-    response = ChatResponse(assistant_response="hi")
-    assert response.history_turns == 0
-    assert response.trajectory is None
-
-
 def test_health_response() -> None:
     response = HealthResponse()
     assert response.ok is True
     assert response.version == version("fleet-rlm")
-
-
-def test_task_request_defaults() -> None:
-    req = TaskRequest(task_type="basic", question="test")
-    assert req.max_iterations == 15
-    assert req.timeout == 600
 
 
 def test_auth_me_response_shape() -> None:

@@ -130,6 +130,8 @@ export interface RuntimeContext {
   executionMode?: string;
   runtimeMode?: string;
   sandboxId?: string;
+  workspacePath?: string;
+  sandboxTransition?: string;
 }
 
 export type ChatRenderPart =

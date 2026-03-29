@@ -127,6 +127,8 @@ describe("applyWsFrameToMessages", () => {
           volume_name: "shared-volume",
           execution_mode: "rlm",
           sandbox_id: "sb-1234567890",
+          workspace_path: "/workspace/workspace/repo",
+          sandbox_transition: "reused",
         },
       }),
     );
@@ -143,6 +145,8 @@ describe("applyWsFrameToMessages", () => {
         volumeName: "shared-volume",
         executionMode: "rlm",
         sandboxId: "sb-1234567890",
+        workspacePath: "/workspace/workspace/repo",
+        sandboxTransition: "reused",
       });
     }
   });
@@ -433,6 +437,8 @@ describe("applyWsFrameToMessages", () => {
           volume_name: "docs-volume",
           execution_mode: "rlm",
           sandbox_id: "sb-status-1",
+          workspace_path: "/workspace/workspace/repo",
+          sandbox_transition: "resumed",
         },
       }),
     );
@@ -452,6 +458,8 @@ describe("applyWsFrameToMessages", () => {
         volumeName: "docs-volume",
         executionMode: "rlm",
         sandboxId: "sb-status-1",
+        workspacePath: "/workspace/workspace/repo",
+        sandboxTransition: "resumed",
       });
     }
   });
@@ -472,6 +480,8 @@ describe("applyWsFrameToMessages", () => {
           effective_max_iters: 30,
           runtime_mode: "daytona_pilot",
           sandbox_id: "sbx-live-1",
+          workspace_path: "/workspace/workspace/repo",
+          sandbox_transition: "created",
         },
       }),
     );
@@ -484,6 +494,8 @@ describe("applyWsFrameToMessages", () => {
       expect(sandbox.stepIndex).toBe(2);
       expect(sandbox.output).toBe("loading repository metadata");
       expect(sandbox.runtimeContext?.runtimeMode).toBe("daytona_pilot");
+      expect(sandbox.runtimeContext?.workspacePath).toBe("/workspace/workspace/repo");
+      expect(sandbox.runtimeContext?.sandboxTransition).toBe("created");
     }
 
     const statusNote = findFirstPart(messages, (part) => part.kind === "status_note");

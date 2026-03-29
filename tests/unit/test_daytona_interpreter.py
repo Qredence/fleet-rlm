@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,7 @@ from dspy.primitives import FinalOutput
 from dspy.primitives.code_interpreter import CodeInterpreterError
 
 from fleet_rlm.integrations.providers.daytona.bridge import DaytonaBridgeExecution
+from fleet_rlm.integrations.providers.daytona.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
 from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
 
@@ -28,6 +30,8 @@ class _FakeCodeInterpreter:
     def __init__(self) -> None:
         self.contexts: list[Any] = []
         self.run_calls: list[str] = []
+        self.submit_mode = "generic"
+        self.list_contexts_error: Exception | None = None
 
     def create_context(self, cwd: str | None = None) -> Any:
         context = SimpleNamespace(id=f"ctx-{len(self.contexts) + 1}", cwd=cwd)
@@ -35,6 +39,10 @@ class _FakeCodeInterpreter:
         return context
 
     def list_contexts(self) -> list[Any]:
+        if self.list_contexts_error is not None:
+            exc = self.list_contexts_error
+            self.list_contexts_error = None
+            raise exc
         return list(self.contexts)
 
     def delete_context(self, context: Any) -> None:
@@ -51,14 +59,73 @@ class _FakeCodeInterpreter:
     ) -> _FakeExecutionResult:
         del context, timeout
         self.run_calls.append(code)
-        if "def SUBMIT" in code or "_FINAL_OUTPUT_MARKER" in code:
+        if "def SUBMIT(**kwargs)" in code:
+            self.submit_mode = "generic"
+            return _FakeExecutionResult()
+        if "def SUBMIT(" in code:
+            self.submit_mode = "typed"
+            return _FakeExecutionResult()
+        if "_FINAL_OUTPUT_MARKER" in code:
             return _FakeExecutionResult()
         if "counter += 3" in code:
             payload = f"{_FINAL_OUTPUT_MARKER}{json.dumps({'output': 5})}{_FINAL_OUTPUT_MARKER}"
             if on_stdout is not None:
                 on_stdout(SimpleNamespace(output=payload))
             return _FakeExecutionResult(stdout=payload)
+        if "SUBMIT(" in code:
+            if self.submit_mode == "typed" and any(
+                f"{field}=" in code
+                for field in (
+                    "status",
+                    "result",
+                    "error",
+                    "stdout",
+                    "stderr",
+                    "ok",
+                    "path",
+                    "content",
+                    "chars",
+                    "process_id",
+                    "message",
+                    "logs",
+                    "ast",
+                )
+            ):
+                return _FakeExecutionResult(
+                    error=SimpleNamespace(
+                        name="TypeError",
+                        value="SUBMIT() got an unexpected keyword argument 'result'",
+                    )
+                )
+            payload_dict = _submit_payload(code)
+            payload = (
+                f"{_FINAL_OUTPUT_MARKER}"
+                f"{json.dumps(payload_dict, ensure_ascii=False)}"
+                f"{_FINAL_OUTPUT_MARKER}"
+            )
+            if on_stdout is not None:
+                on_stdout(SimpleNamespace(output=payload))
+            return _FakeExecutionResult(
+                stdout=payload,
+                error=SimpleNamespace(name="_FleetFinalOutput", value="submitted"),
+            )
         return _FakeExecutionResult()
+
+
+def _submit_payload(code: str) -> dict[str, Any]:
+    tree = ast.parse(code)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "SUBMIT":
+            payload: dict[str, Any] = {}
+            for keyword in node.keywords:
+                if keyword.arg is None:
+                    continue
+                try:
+                    payload[keyword.arg] = ast.literal_eval(keyword.value)
+                except Exception:
+                    payload[keyword.arg] = f"<expr:{keyword.arg}>"
+            return payload
+    return {}
 
 
 class _FakeFs:
@@ -100,10 +167,17 @@ class _FakeRuntime:
             sandbox=_FakeSandbox(),
             repo_url="https://github.com/example/repo.git",
             ref="main",
+            volume_name=None,
             workspace_path="/workspace/repo",
             context_sources=[],
         )
+        self.create_calls: list[
+            tuple[str | None, str | None, list[str], str | None]
+        ] = []
         self.resume_calls: list[tuple[str, str | None]] = []
+        self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
+        self.fail_next_resume: Exception | None = None
+        self.fail_next_reconcile: Exception | None = None
 
     async def acreate_workspace_session(
         self,
@@ -113,7 +187,18 @@ class _FakeRuntime:
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
     ) -> DaytonaSandboxSession:
-        del repo_url, ref, context_paths, volume_name
+        self.create_calls.append(
+            (repo_url, ref, list(context_paths or []), volume_name)
+        )
+        self.session.repo_url = repo_url
+        self.session.ref = ref
+        self.session.volume_name = volume_name
+        workspace_name = (
+            str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+            or "repo"
+        )
+        self.session.workspace_path = f"/workspace/{workspace_name}"
+        del context_paths
         return self.session
 
     async def aresume_workspace_session(
@@ -122,13 +207,54 @@ class _FakeRuntime:
         sandbox_id: str,
         repo_url: str | None,
         ref: str | None,
+        volume_name: str | None = None,
         workspace_path: str,
         context_sources: list[Any] | None = None,
         context_id: str | None = None,
     ) -> DaytonaSandboxSession:
-        del repo_url, ref, workspace_path, context_sources
         self.resume_calls.append((sandbox_id, context_id))
+        if self.fail_next_resume is not None:
+            exc = self.fail_next_resume
+            self.fail_next_resume = None
+            raise exc
+        self.session.repo_url = repo_url
+        self.session.ref = ref
+        self.session.volume_name = volume_name
+        self.session.workspace_path = workspace_path
+        del context_sources
         return self.session
+
+    async def areconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        self.reconcile_calls.append((repo_url, ref, list(context_paths or [])))
+        if self.fail_next_reconcile is not None:
+            exc = self.fail_next_reconcile
+            self.fail_next_reconcile = None
+            raise exc
+        session.repo_url = repo_url
+        session.ref = ref
+        session.context_sources = []
+        if repo_url:
+            session.workspace_path = "/workspace/reconfigured"
+        return session
+
+    def reconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        raise AssertionError(
+            "internal Daytona flow should use areconcile_workspace_session"
+        )
 
 
 def test_daytona_interpreter_execute_direct_reuses_context_and_returns_final_output() -> (
@@ -216,6 +342,159 @@ def test_daytona_interpreter_exports_context_id_for_resume() -> None:
     restored.start()
 
     assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+
+
+def test_daytona_interpreter_resumed_session_recreates_context_when_persisted_one_is_stale() -> (
+    None
+):
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.start()
+
+    exported = interpreter.export_session_state()
+
+    restored = DaytonaInterpreter(runtime=runtime)
+    restored.import_session_state(exported)
+    runtime.session._context = None
+    runtime.session.sandbox.code_interpreter.list_contexts_error = RuntimeError(
+        "stale context cache"
+    )
+    restored.start()
+
+    assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+    assert runtime.session.context_id == "ctx-2"
+    assert restored.export_session_state()["daytona"]["context_id"] == "ctx-2"
+    assert restored._last_sandbox_transition == "resumed"
+
+
+def test_daytona_interpreter_restores_generic_submit_after_typed_execution() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.output_fields = [{"name": "answer", "type": "str"}]
+
+    typed = interpreter.execute("SUBMIT(answer='typed')\n")
+    interpreter.output_fields = None
+    generic = interpreter.execute(
+        "SUBMIT(status='ok', result='saved', path='workspace/out.txt')\n"
+    )
+
+    assert isinstance(typed, FinalOutput)
+    assert getattr(typed, "output") == {"answer": "typed"}
+    assert isinstance(generic, FinalOutput)
+    assert getattr(generic, "output") == {
+        "status": "ok",
+        "result": "saved",
+        "path": "workspace/out.txt",
+    }
+    run_calls = runtime.session.sandbox.code_interpreter.run_calls
+    assert any("def SUBMIT(answer: str):" in call for call in run_calls)
+    assert any("def SUBMIT(**kwargs):" in call for call in run_calls)
+
+
+def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        repo_url="https://github.com/example/repo.git",
+        repo_ref="main",
+        context_paths=["docs/a.md"],
+        volume_name="tenant-a",
+    )
+    interpreter.start()
+    active_session = interpreter._session
+    assert active_session is runtime.session
+
+    interpreter.configure_workspace(
+        repo_url="https://github.com/example/other.git",
+        repo_ref="develop",
+        context_paths=["docs/b.md"],
+        volume_name="tenant-a",
+    )
+
+    ensured = interpreter._ensure_session_sync()
+
+    assert ensured is active_session
+    assert runtime.reconcile_calls == [
+        ("https://github.com/example/other.git", "develop", ["docs/b.md"])
+    ]
+    assert interpreter._last_sandbox_transition == "reused"
+    assert interpreter._last_workspace_reconfigured is True
+
+
+def test_daytona_interpreter_marks_reconcile_recreate_fallback_as_degraded() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        repo_url="https://github.com/example/repo.git",
+        repo_ref="main",
+        context_paths=["docs/a.md"],
+        volume_name="tenant-a",
+    )
+    interpreter.start()
+    runtime.fail_next_reconcile = DaytonaDiagnosticError(
+        "reconcile failed",
+        category="sandbox_create_clone_error",
+        phase="repo_clone",
+    )
+
+    interpreter.configure_workspace(
+        repo_url="https://github.com/example/other.git",
+        repo_ref="develop",
+        context_paths=["docs/b.md"],
+        volume_name="tenant-a",
+    )
+    interpreter._ensure_session_sync()
+
+    assert runtime.reconcile_calls == [
+        ("https://github.com/example/other.git", "develop", ["docs/b.md"])
+    ]
+    assert len(runtime.create_calls) == 2
+    assert interpreter._last_sandbox_transition == "recreated"
+    assert interpreter.current_runtime_metadata() == {
+        "sandbox_active": True,
+        "workspace_reconfigured": False,
+        "runtime_degraded": True,
+        "runtime_fallback_used": True,
+        "sandbox_id": "sbx-123",
+        "workspace_path": "/workspace/other",
+        "volume_name": "tenant-a",
+        "sandbox_transition": "recreated",
+        "runtime_failure_category": "sandbox_create_clone_error",
+        "runtime_failure_phase": "repo_clone",
+    }
+
+
+def test_daytona_interpreter_marks_resume_recreate_fallback_as_degraded() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.start()
+
+    exported = interpreter.export_session_state()
+
+    restored = DaytonaInterpreter(runtime=runtime)
+    restored.import_session_state(exported)
+    runtime.fail_next_resume = DaytonaDiagnosticError(
+        "resume failed",
+        category="sandbox_resume_error",
+        phase="sandbox_resume",
+    )
+
+    restored.start()
+
+    assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+    assert len(runtime.create_calls) == 2
+    assert restored._last_sandbox_transition == "recreated"
+    assert restored.current_runtime_metadata() == {
+        "sandbox_active": True,
+        "workspace_reconfigured": False,
+        "runtime_degraded": True,
+        "runtime_fallback_used": True,
+        "sandbox_id": "sbx-123",
+        "workspace_path": "/workspace/repo",
+        "sandbox_transition": "recreated",
+        "runtime_failure_category": "sandbox_resume_error",
+        "runtime_failure_phase": "sandbox_resume",
+    }
 
 
 def test_daytona_interpreter_skips_bridge_injection_for_native_sandbox_tools() -> None:

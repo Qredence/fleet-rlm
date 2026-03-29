@@ -37,10 +37,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"final", "cancelled", "error"})
 
-# Backward-compatible alias for older tests/internal imports that still reach for
-# the pre-refactor private helper from this module.
-_try_parse_hitl_request = try_parse_hitl_request
-
 
 @dataclass(slots=True)
 class PreparedStreamingTurn:

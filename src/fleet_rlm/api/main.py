@@ -42,6 +42,16 @@ _CANONICAL_API_ROUTERS = (
 )
 
 
+_VALIDATION_ERROR_PROPERTY_DESCRIPTIONS: dict[str, str] = {
+    "detail": "Structured list of request validation issues returned by FastAPI.",
+    "loc": "Location path identifying where the validation error occurred.",
+    "msg": "Human-readable validation failure message.",
+    "type": "Pydantic validation error type identifier.",
+    "input": "Input value that failed validation, when available.",
+    "ctx": "Optional structured validation context for templated error messages.",
+}
+
+
 def _resolve_ui_dist_dir() -> Path | None:
     """Return the frontend build directory if one exists.
 
@@ -160,6 +170,31 @@ def _mount_ui_unavailable_root(app: FastAPI) -> None:
         return JSONResponse(_ui_unavailable_payload(), status_code=503)
 
 
+def _annotate_validation_error_schemas(app: FastAPI) -> None:
+    """Fill FastAPI-generated validation schemas with property descriptions."""
+
+    original_openapi = app.openapi
+
+    def custom_openapi() -> dict[str, Any]:
+        schema = original_openapi()
+        components = schema.get("components", {}).get("schemas", {})
+
+        for schema_name in ("HTTPValidationError", "ValidationError"):
+            properties = components.get(schema_name, {}).get("properties", {})
+            for (
+                property_name,
+                description,
+            ) in _VALIDATION_ERROR_PROPERTY_DESCRIPTIONS.items():
+                if property_name in properties and not properties[property_name].get(
+                    "description"
+                ):
+                    properties[property_name]["description"] = description
+
+        return schema
+
+    app.openapi = cast(Any, custom_openapi)
+
+
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     cfg = resolve_runtime_config(config)
 
@@ -178,6 +213,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+    _annotate_validation_error_schemas(app)
 
     add_middlewares(app, cfg)
     _register_api_routes(app)

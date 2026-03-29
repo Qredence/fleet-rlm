@@ -33,6 +33,8 @@ export function parseRuntimeContext(payload?: Record<string, unknown>): RuntimeC
   const executionMode = asOptionalText(raw.execution_mode);
   const runtimeMode = asOptionalText(raw.runtime_mode);
   const sandboxId = asOptionalText(raw.sandbox_id);
+  const workspacePath = asOptionalText(raw.workspace_path);
+  const sandboxTransition = asOptionalText(raw.sandbox_transition);
   return {
     depth,
     maxDepth,
@@ -43,6 +45,8 @@ export function parseRuntimeContext(payload?: Record<string, unknown>): RuntimeC
     ...(executionMode ? { executionMode } : {}),
     ...(runtimeMode ? { runtimeMode } : {}),
     ...(sandboxId ? { sandboxId } : {}),
+    ...(workspacePath ? { workspacePath } : {}),
+    ...(sandboxTransition ? { sandboxTransition } : {}),
   };
 }
 
