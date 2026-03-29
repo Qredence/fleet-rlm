@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { isEntraAuthConfigured, loginWithEntra } from "@/lib/auth/entra";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 
 export const Route = createFileRoute("/login")({
@@ -52,13 +52,19 @@ function LoginScreen() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="h-3.75 w-8 text-foreground" />
             <div className="text-center">
-              <h1 className="text-sm font-medium text-foreground">Sign in to Fleet RLM</h1>
+              <h1 className="text-sm font-medium text-foreground">
+                Sign in to Fleet RLM
+              </h1>
               <p className="mt-1 text-muted-foreground typo-caption">
                 Continue with Microsoft Entra to open your RLM workspace
               </p>
             </div>
           </div>
-          <Button type="submit" className="w-full" disabled={loading || !authConfigured}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || !authConfigured}
+          >
             {loading ? (
               <>
                 <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
@@ -68,7 +74,9 @@ function LoginScreen() {
               <span className="typo-label">Continue with Microsoft</span>
             )}
           </Button>
-          {error ? <p className="text-center text-destructive typo-helper">{error}</p> : null}
+          {error ? (
+            <p className="text-center text-destructive typo-helper">{error}</p>
+          ) : null}
           <div className="text-center">
             <Link
               to="/signup"

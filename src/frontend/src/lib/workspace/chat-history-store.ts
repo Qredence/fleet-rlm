@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
+import {
+  persist,
+  type PersistStorage,
+  type StorageValue,
+} from "zustand/middleware";
 
 import { createLocalId } from "@/lib/id";
 import { parseStoredJson } from "@/lib/utils/env";
@@ -43,7 +47,9 @@ function logicalSessionKey(messages: ChatMessage[]): string | null {
 
 function sortByUpdatedAtDesc(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort(
-    (first, second) => new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime(),
+    (first, second) =>
+      new Date(second.updatedAt).getTime() -
+      new Date(first.updatedAt).getTime(),
   );
 }
 
@@ -62,14 +68,21 @@ function normalizeConversations(conversations: Conversation[]): Conversation[] {
     }
   }
 
-  return [...dedupedBySession.values(), ...withoutSessionKey].slice(0, MAX_CONVERSATIONS);
+  return [...dedupedBySession.values(), ...withoutSessionKey].slice(
+    0,
+    MAX_CONVERSATIONS,
+  );
 }
 
 function toConversationArray(value: unknown): Conversation[] | null {
-  return Array.isArray(value) ? normalizeConversations(value as Conversation[]) : null;
+  return Array.isArray(value)
+    ? normalizeConversations(value as Conversation[])
+    : null;
 }
 
-function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersistedState> | null {
+function toPersistedChatHistory(
+  value: unknown,
+): StorageValue<ChatHistoryPersistedState> | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
@@ -92,7 +105,10 @@ function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersist
 
   return {
     state: { conversations },
-    version: typeof maybePersisted.version === "number" ? maybePersisted.version : STORAGE_VERSION,
+    version:
+      typeof maybePersisted.version === "number"
+        ? maybePersisted.version
+        : STORAGE_VERSION,
   };
 }
 
@@ -113,7 +129,12 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       conversations: [],
 
-      saveConversation: (messages, phase, conversationId, turnArtifactsByMessageId) => {
+      saveConversation: (
+        messages,
+        phase,
+        conversationId,
+        turnArtifactsByMessageId,
+      ) => {
         const now = new Date().toISOString();
 
         if (messages.length === 0) return conversationId ?? "";
@@ -123,7 +144,8 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
           conversationId ??
           (sessionKey
             ? get().conversations.find(
-                (conversation) => logicalSessionKey(conversation.messages) === sessionKey,
+                (conversation) =>
+                  logicalSessionKey(conversation.messages) === sessionKey,
               )?.id
             : undefined);
         const finalId = existingConversationId ?? createLocalId("conv");
@@ -149,7 +171,9 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               };
               updated = [
                 updatedConversation,
-                ...state.conversations.filter((_, itemIndex) => itemIndex !== index),
+                ...state.conversations.filter(
+                  (_, itemIndex) => itemIndex !== index,
+                ),
               ];
             } else {
               const newConversation: Conversation = {
@@ -185,12 +209,17 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
       },
 
       loadConversation: (id) => {
-        return get().conversations.find((conversation) => conversation.id === id) ?? null;
+        return (
+          get().conversations.find((conversation) => conversation.id === id) ??
+          null
+        );
       },
 
       deleteConversation: (id) => {
         set((state) => ({
-          conversations: state.conversations.filter((conversation) => conversation.id !== id),
+          conversations: state.conversations.filter(
+            (conversation) => conversation.id !== id,
+          ),
         }));
       },
 
@@ -207,4 +236,5 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
   ),
 );
 
-export const useConversations = () => useChatHistoryStore((state) => state.conversations);
+export const useConversations = () =>
+  useChatHistoryStore((state) => state.conversations);

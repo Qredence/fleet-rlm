@@ -9,10 +9,20 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { isEntraAuthConfigured } from "@/lib/auth/entra";
 import { useAuth } from "@/lib/auth/auth-context";
-import { useIsMobile } from "@/hooks/useIsMobile";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { BrandMark } from "@/components/brand-mark";
 
 // ── Shared form body ────────────────────────────────────────────────
@@ -57,7 +67,11 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       </div>
 
       {/* Submit */}
-      <Button type="submit" className="w-full" disabled={loading || !authConfigured}>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={loading || !authConfigured}
+      >
         {loading ? (
           <>
             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
@@ -85,7 +99,11 @@ interface LoginDialogProps {
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
-export function LoginDialog({ open, onOpenChange, returnFocusRef }: LoginDialogProps) {
+export function LoginDialog({
+  open,
+  onOpenChange,
+  returnFocusRef,
+}: LoginDialogProps) {
   const isMobile = useIsMobile();
   const wasOpenRef = useRef(open);
 
@@ -105,7 +123,10 @@ export function LoginDialog({ open, onOpenChange, returnFocusRef }: LoginDialogP
           className="surface-glass-sheet inset-x-0 bottom-0 top-auto max-h-[85dvh] rounded-t-[calc(var(--radius-xl)+0.25rem)] border-t-0 px-0 pt-0 pb-0"
         >
           <div className="flex items-center justify-center py-2 shrink-0">
-            <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />
+            <div
+              className="surface-glass-handle h-1.25 w-9 rounded-full"
+              aria-hidden="true"
+            />
           </div>
 
           <div className="flex items-center justify-between px-4 pb-2 shrink-0">
@@ -121,7 +142,9 @@ export function LoginDialog({ open, onOpenChange, returnFocusRef }: LoginDialogP
               <X className="size-5 text-muted-foreground" />
             </Button>
           </div>
-          <SheetDescription className="sr-only">Sign in to your Fleet RLM account</SheetDescription>
+          <SheetDescription className="sr-only">
+            Sign in to your Fleet RLM account
+          </SheetDescription>
 
           <div className="px-4 pb-6 pt-2">
             <LoginForm onSuccess={() => onOpenChange(false)} />
@@ -135,7 +158,9 @@ export function LoginDialog({ open, onOpenChange, returnFocusRef }: LoginDialogP
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-100 p-6 rounded-card">
         <DialogTitle className="sr-only">Sign In</DialogTitle>
-        <DialogDescription className="sr-only">Sign in to your Fleet RLM account</DialogDescription>
+        <DialogDescription className="sr-only">
+          Sign in to your Fleet RLM account
+        </DialogDescription>
         <LoginForm onSuccess={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>

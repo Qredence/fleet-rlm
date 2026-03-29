@@ -1,7 +1,7 @@
 import { MessageCircle, HardDrive } from "lucide-react";
 import type { NavItem } from "@/stores/navigation-types";
-import { useNavigationStore } from "@/stores/navigationStore";
-import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { useNavigationStore } from "@/stores/navigation-store";
+import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { isSectionSupported } from "@/lib/rlm-api";
 import { cn } from "@/lib/utils";
 

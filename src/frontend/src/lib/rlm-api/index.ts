@@ -1,4 +1,8 @@
-export { rlmApiConfig, isRlmCoreEnabled, isRlmWsEnabled } from "@/lib/rlm-api/config";
+export {
+  rlmApiConfig,
+  isRlmCoreEnabled,
+  isRlmWsEnabled,
+} from "@/lib/rlm-api/config";
 export {
   SUPPORTED_SECTIONS,
   UNSUPPORTED_SECTION_REASON,
@@ -10,7 +14,7 @@ export {
   sendCommandOverWs,
   subscribeToExecutionStream,
   createBackendSessionId,
-} from "@/lib/rlm-api/wsClient";
+} from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
 export type {
   WsTraceMode,
@@ -26,7 +30,7 @@ export type {
   WsServerEvent,
   WsServerError,
   WsServerMessage,
-} from "@/lib/rlm-api/wsClient";
+} from "@/lib/rlm-api/ws-client";
 export type {
   OpenApiPaths,
   HealthResponse,

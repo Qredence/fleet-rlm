@@ -1,7 +1,9 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import useEmblaCarousel, { type UseEmblaCarouselType } from "embla-carousel-react";
+import useEmblaCarousel, {
+  type UseEmblaCarouselType,
+} from "embla-carousel-react";
 
 type CarouselApi = UseEmblaCarouselType[1];
 type UseCarouselParameters = Parameters<typeof useEmblaCarousel>;
@@ -45,7 +47,8 @@ function Carousel({
   children,
   ref,
   ...props
-}: React.HTMLAttributes<HTMLDivElement> & CarouselProps & { ref?: React.Ref<HTMLDivElement> }) {
+}: React.HTMLAttributes<HTMLDivElement> &
+  CarouselProps & { ref?: React.Ref<HTMLDivElement> }) {
   const [carouselRef, api] = useEmblaCarousel(
     {
       ...opts,
@@ -114,7 +117,8 @@ function Carousel({
         carouselRef,
         api: api,
         opts,
-        orientation: orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
+        orientation:
+          orientation || (opts?.axis === "y" ? "vertical" : "horizontal"),
         scrollPrev,
         scrollNext,
         canScrollPrev,
@@ -144,7 +148,11 @@ function CarouselContent({
   return (
     <div ref={carouselRef} className="overflow-hidden">
       <div
-        className={cn("flex", orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col", className)}
+        className={cn(
+          "flex",
+          orientation === "horizontal" ? "-ml-4" : "-mt-4 flex-col",
+          className,
+        )}
         ref={ref}
         {...props}
       />

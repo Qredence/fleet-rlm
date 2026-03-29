@@ -100,7 +100,9 @@ export function applyMockRuntimeUpdates(
 
     fallbackValues[key] = value;
     fallbackMaskedValues[key] =
-      key.endsWith("API_KEY") || key.endsWith("TOKEN_ID") || key.endsWith("TOKEN_SECRET")
+      key.endsWith("API_KEY") ||
+      key.endsWith("TOKEN_ID") ||
+      key.endsWith("TOKEN_SECRET")
         ? value.length > 8
           ? `${value.slice(0, 2)}...${value.slice(-4)}`
           : "***"

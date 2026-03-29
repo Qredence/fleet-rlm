@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { fades } from "@/lib/utils/motion";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { PageSkeleton } from "@/components/page-skeleton";
 
@@ -24,7 +24,8 @@ export function ShellRouteOutlet() {
 
   // Derive the "section" for AnimatePresence key —
   // only animate when changing top-level sections, not sub-routes
-  const section = location.pathname.split("/").filter(Boolean)[1] || "workspace";
+  const section =
+    location.pathname.split("/").filter(Boolean)[1] || "workspace";
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">

@@ -86,7 +86,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
           ];
 
           const chatStoreModule = await import("/src/screens/workspace/use-workspace.ts");
-          const navigationStoreModule = await import("/src/stores/navigationStore.ts");
+          const navigationStoreModule = await import("/src/stores/navigation-store.ts");
           const workspaceUiStoreModule = await import("/src/screens/workspace/use-workspace.ts");
 
           chatStoreModule.useChatStore.setState({

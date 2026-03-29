@@ -84,7 +84,10 @@ function ensureStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
   ];
 }
 
-function appendAssistantToken(messages: ChatMessage[], token: string): ChatMessage[] {
+function appendAssistantToken(
+  messages: ChatMessage[],
+  token: string,
+): ChatMessage[] {
   if (!token) return messages;
   const withAssistant = ensureStreamingAssistant(messages);
   const idx = latestStreamingAssistantIndex(withAssistant);
@@ -137,7 +140,10 @@ function finishReasoning(messages: ChatMessage[]): ChatMessage[] {
   return updated ? next : messages;
 }
 
-function completeAssistant(messages: ChatMessage[], text: string): ChatMessage[] {
+function completeAssistant(
+  messages: ChatMessage[],
+  text: string,
+): ChatMessage[] {
   const idx = latestStreamingAssistantIndex(messages);
 
   if (idx >= 0) {
@@ -173,7 +179,13 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
 
-  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
+  for (const key of [
+    "final_markdown",
+    "summary",
+    "text",
+    "content",
+    "message",
+  ]) {
     const candidate = asOptionalText(record[key]);
     if (candidate) return candidate;
   }
@@ -186,19 +198,30 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
   return undefined;
 }
 
-function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
+function resolveFinalAssistantText(
+  text: string,
+  payload?: Record<string, unknown>,
+): string {
   const runResult = asRecord(payload?.run_result ?? payload?.runResult);
   const preferred =
-    preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact) ??
-    preferredFinalArtifactText(runResult?.final_artifact ?? runResult?.finalArtifact);
+    preferredFinalArtifactText(
+      payload?.final_artifact ?? payload?.finalArtifact,
+    ) ??
+    preferredFinalArtifactText(
+      runResult?.final_artifact ?? runResult?.finalArtifact,
+    );
 
   return preferred ?? text;
 }
 
-function readGuardrailWarnings(payload: Record<string, unknown> | undefined): string[] {
+function readGuardrailWarnings(
+  payload: Record<string, unknown> | undefined,
+): string[] {
   const raw = payload?.guardrail_warnings;
   if (!Array.isArray(raw)) return [];
-  return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+  return raw
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
 }
 
 function appendTracePart(
@@ -351,7 +374,10 @@ function upsertChainOfThought(
     details: trajectoryStepDetails(step),
   };
 
-  const idx = latestTraceIndex(messages, (part) => part.kind === "chain_of_thought");
+  const idx = latestTraceIndex(
+    messages,
+    (part) => part.kind === "chain_of_thought",
+  );
   if (idx < 0) {
     return appendTracePart(
       messages,
@@ -372,14 +398,21 @@ function upsertChainOfThought(
     if (part.kind !== "chain_of_thought") return part;
     const withoutCurrent = part.steps.filter((s) => s.index !== step.index);
     const sortedSteps = [...withoutCurrent, traceStep].sort((left, right) => {
-      const leftIndex = typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
-      const rightIndex = typeof right.index === "number" ? right.index : Number.POSITIVE_INFINITY;
+      const leftIndex =
+        typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
+      const rightIndex =
+        typeof right.index === "number"
+          ? right.index
+          : Number.POSITIVE_INFINITY;
       if (leftIndex !== rightIndex) return leftIndex - rightIndex;
       return left.id.localeCompare(right.id);
     });
     const updatedSteps = sortedSteps.map((candidate) => ({
       ...candidate,
-      status: candidate.index === step.index ? ("active" as const) : ("complete" as const),
+      status:
+        candidate.index === step.index
+          ? ("active" as const)
+          : ("complete" as const),
     }));
     return { ...part, steps: updatedSteps };
   });
@@ -429,7 +462,13 @@ function appendFinalTrajectoryThoughts(
 
   return steps.reduce<ChatMessage[]>((acc, step) => {
     if (!step.thought) return acc;
-    return appendReasoningEvent(acc, step.thought, "summary", payload, `thought_${step.index}`);
+    return appendReasoningEvent(
+      acc,
+      step.thought,
+      "summary",
+      payload,
+      `thought_${step.index}`,
+    );
   }, messages);
 }
 
@@ -451,7 +490,9 @@ function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
             items: part.items.map((it) => ({ ...it, completed: true })),
           };
         case "task":
-          return part.status === "in_progress" ? { ...part, status: "completed" as const } : part;
+          return part.status === "in_progress"
+            ? { ...part, status: "completed" as const }
+            : part;
         default:
           return part;
       }
@@ -467,7 +508,12 @@ function resolveHitlByMessageId(
 ): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+    if (
+      changed ||
+      msg.id !== messageId ||
+      msg.type !== "hitl" ||
+      !msg.hitlData
+    ) {
       return msg;
     }
     changed = true;
@@ -483,10 +529,18 @@ function resolveHitlByMessageId(
   return changed ? next : messages;
 }
 
-function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): ChatMessage[] {
+function rollbackHitlByMessageId(
+  messages: ChatMessage[],
+  messageId: string,
+): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
+    if (
+      changed ||
+      msg.id !== messageId ||
+      msg.type !== "hitl" ||
+      !msg.hitlData
+    ) {
       return msg;
     }
     changed = true;
@@ -541,7 +595,12 @@ function applyEvent(
         };
       }
       return {
-        messages: appendStatusTrace(messages, text, inferStatusTone(text, payload), payload),
+        messages: appendStatusTrace(
+          messages,
+          text,
+          inferStatusTone(text, payload),
+          payload,
+        ),
         terminal: false,
         errored: false,
       };
@@ -555,14 +614,26 @@ function applyEvent(
     }
     case "tool_call": {
       return {
-        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart),
+        messages: appendToolLikePart(
+          messages,
+          "tool_call",
+          text,
+          payload,
+          appendTracePart,
+        ),
         terminal: false,
         errored: false,
       };
     }
     case "tool_result": {
       return {
-        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart),
+        messages: appendToolLikePart(
+          messages,
+          "tool_result",
+          text,
+          payload,
+          appendTracePart,
+        ),
         terminal: false,
         errored: false,
       };
@@ -619,9 +690,13 @@ function applyEvent(
     }
     case "hitl_request": {
       const hitlPayload = asRecord(payload?.hitl ?? payload);
-      const question = asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
+      const question =
+        asOptionalText(hitlPayload?.question) ||
+        text.trim() ||
+        "Approval needed";
       const messageId =
-        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ?? nextId("hitl");
+        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ??
+        nextId("hitl");
       const rawActions = hitlPayload?.actions;
       const actions = Array.isArray(rawActions)
         ? rawActions
@@ -633,11 +708,16 @@ function applyEvent(
               const variant = asOptionalText(rec.variant);
               return {
                 label,
-                variant: variant === "primary" || variant === "secondary" ? variant : "secondary",
+                variant:
+                  variant === "primary" || variant === "secondary"
+                    ? variant
+                    : "secondary",
               } as const;
             })
             .filter(
-              (value): value is { label: string; variant: "primary" | "secondary" } =>
+              (
+                value,
+              ): value is { label: string; variant: "primary" | "secondary" } =>
                 value != null,
             )
         : [];
@@ -667,9 +747,13 @@ function applyEvent(
       };
     }
     case "hitl_resolved": {
-      const messageId = asOptionalText(payload?.message_id ?? payload?.messageId);
+      const messageId = asOptionalText(
+        payload?.message_id ?? payload?.messageId,
+      );
       const resolution =
-        asOptionalText(payload?.resolution) ?? asOptionalText(payload?.label) ?? text.trim();
+        asOptionalText(payload?.resolution) ??
+        asOptionalText(payload?.label) ??
+        text.trim();
       if (!resolution) return { messages, terminal: false, errored: false };
 
       if (messageId) {
@@ -682,7 +766,12 @@ function applyEvent(
 
       let updated = false;
       const next = messages.map((msg) => {
-        if (updated || msg.type !== "hitl" || !msg.hitlData || msg.hitlData.resolved) {
+        if (
+          updated ||
+          msg.type !== "hitl" ||
+          !msg.hitlData ||
+          msg.hitlData.resolved
+        ) {
           return msg;
         }
         updated = true;
@@ -701,7 +790,9 @@ function applyEvent(
       const command = asOptionalText(payload?.command);
       const result = asRecord(payload?.result);
       const messageId = asOptionalText(result?.message_id ?? result?.messageId);
-      const resolution = asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
+      const resolution =
+        asOptionalText(result?.resolution) ??
+        asOptionalText(result?.action_label);
       let next = messages;
       if (command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);
@@ -743,22 +834,36 @@ function applyEvent(
       };
     }
     case "final": {
-      let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
+      let next = completeAssistant(
+        messages,
+        resolveFinalAssistantText(text, payload),
+      );
       next = finishReasoning(next);
       next = finalizeTraceParts(next);
       next = appendFinalTrajectoryThoughts(next, payload);
 
       const finalReasoning =
-        typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
+        typeof payload?.final_reasoning === "string"
+          ? payload.final_reasoning.trim()
+          : "";
       if (finalReasoning) {
-        next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
+        next = appendReasoningEvent(
+          next,
+          finalReasoning,
+          "summary",
+          payload,
+          "final_reasoning",
+        );
       }
 
       next = attachFinalReferences(next, payload);
 
       const warnings = readGuardrailWarnings(payload);
       if (warnings.length > 0) {
-        next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
+        next = appendSystem(
+          next,
+          `Guardrail warnings:\n- ${warnings.join("\n- ")}`,
+        );
       }
 
       return { messages: next, terminal: true, errored: false };
@@ -772,7 +877,10 @@ function applyEvent(
     case "error": {
       let next = finishReasoning(messages);
       next = finalizeTraceParts(next);
-      next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
+      next = appendSystem(
+        next,
+        `Backend error: ${text || "Unknown server error."}`,
+      );
       return { messages: next, terminal: true, errored: true };
     }
     default: {
@@ -787,7 +895,9 @@ export function applyWsFrameToMessages(
   queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
-    const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
+    const next = finalizeTraceParts(
+      appendSystem(messages, `Backend error: ${frame.message}`),
+    );
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
   return applyEvent(messages, frame, queryClient);

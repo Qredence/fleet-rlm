@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 import { ArrowUp, FileText, Square, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
-import { AttachmentDropdown } from "@/app/workspace/composer/AttachmentDropdown";
-import { ExecutionModeDropdown } from "@/app/workspace/composer/ExecutionModeDropdown";
-import { RuntimeModeDropdown } from "@/app/workspace/composer/RuntimeModeDropdown";
+import {
+  ExecutionModeSelect,
+  PromptComposerAttachmentMenu,
+  RuntimeModeSelect,
+} from "@/app/workspace/composer/composer-controls";
 import {
   PromptInput,
   PromptInputBody,
@@ -14,10 +22,10 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-} from "@/components/ui/prompt-input";
+} from "@/components/ai-elements/prompt-input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
 interface AttachedFile {
   id: string;
@@ -43,7 +51,10 @@ interface WorkspaceComposerProps {
 }
 
 function createAttachmentId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `attachment-${nanoid()}`;
@@ -72,6 +83,7 @@ function WorkspaceComposer({
   className,
 }: WorkspaceComposerProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasContent = value.trim().length > 0;
   const canSubmitMessage = hasContent && canSubmit;
   const isStreamingActive = isLoading && isReceiving;
@@ -88,11 +100,24 @@ function WorkspaceComposer({
       const newAttachments: AttachedFile[] = Array.from(files).map((file) => ({
         id: createAttachmentId(),
         file,
-        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
       }));
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
   }, []);
+
+  const handleAttachmentInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.currentTarget.files;
+      if (files) {
+        handleFilesSelected(files);
+      }
+      event.currentTarget.value = "";
+    },
+    [handleFilesSelected],
+  );
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -112,7 +137,8 @@ function WorkspaceComposer({
 
   const handleUnsupportedAttachmentSelect = useCallback(() => {
     toast.info("File upload is not available yet", {
-      description: "This backend currently does not accept binary upload payloads.",
+      description:
+        "This backend currently does not accept binary upload payloads.",
     });
   }, []);
 
@@ -156,6 +182,14 @@ function WorkspaceComposer({
 
   return (
     <div className={className}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,.pdf,.csv"
+        className="hidden"
+        onChange={handleAttachmentInputChange}
+      />
       <PromptInput
         className="w-full"
         onSubmit={async () => {
@@ -177,13 +211,19 @@ function WorkspaceComposer({
 
         <PromptInputFooter className="px-3 pb-3 pt-0">
           <PromptInputTools className="gap-1.5">
-            <AttachmentDropdown
+            <PromptComposerAttachmentMenu
+              onAttachFiles={() => fileInputRef.current?.click()}
               uploadsEnabled={attachmentsEnabled}
-              onFilesSelected={handleFilesSelected}
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
-            <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
-            <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
+            <ExecutionModeSelect
+              value={executionMode}
+              onChange={onExecutionModeChange}
+            />
+            <RuntimeModeSelect
+              value={runtimeMode}
+              onChange={onRuntimeModeChange}
+            />
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (
@@ -211,7 +251,11 @@ function WorkspaceComposer({
               size="icon-sm"
               variant="ghost"
             >
-              {isLoading ? <Spinner size="sm" /> : <ArrowUp className="size-4.5" />}
+              {isLoading ? (
+                <Spinner size="sm" />
+              ) : (
+                <ArrowUp className="size-4.5" />
+              )}
             </PromptInputSubmit>
           )}
         </PromptInputFooter>

@@ -4,14 +4,28 @@
  * Mirrors the current product shell: Workbench, Volumes, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Search, Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
-import { Command } from "cmdk";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import type { NavItem } from "@/stores/navigation-types";
 import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import { useWorkspaceShellActions } from "@/screens/workspace/workspace-shell-contract";
-import { useThemeStore } from "@/stores/themeStore";
-import { useAppNavigate } from "@/hooks/useAppNavigate";
+import { useThemeStore } from "@/stores/theme-store";
+import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { cn } from "@/lib/utils";
 
 interface PageItem {
@@ -92,23 +106,24 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     [navigateTo, close, openSettings, telemetry],
   );
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-100">
-      <div className="surface-glass-overlay absolute inset-0" onClick={close} aria-hidden="true" />
-
-      <div
-        className="absolute inset-0 flex items-start justify-center pt-[min(20vh,120px)] px-4"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        onClick={close}
-      >
-        <div
-          className="rounded-card-token w-full max-w-140 overflow-hidden border-subtle bg-popover shadow-(--shadow-200-stronger)"
-          onClick={(e) => e.stopPropagation()}
-        >
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange(nextOpen);
+        if (!nextOpen) {
+          setSearch("");
+        }
+      }}
+    >
+      <DialogContent className="rounded-card-token top-[min(20vh,120px)] translate-y-0 w-full max-w-140 overflow-hidden border-subtle bg-popover p-0 shadow-(--shadow-200-stronger) [&>button:last-child]:hidden">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Command palette</DialogTitle>
+          <DialogDescription>
+            Search pages and run quick actions.
+          </DialogDescription>
+        </DialogHeader>
+        <div onClick={(event) => event.stopPropagation()}>
           <Command
             loop
             shouldFilter
@@ -117,32 +132,35 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               if (e.key === "Escape") close();
             }}
           >
-            <div className="flex items-center gap-2 px-4 border-b border-border-subtle focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/50">
-              <Search className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
-              <Command.Input
-                value={search}
+            <div className="flex items-center gap-2 border-b border-border-subtle pr-4">
+              <CommandInput
+                autoFocus
+                className="h-12 flex-1 border-0 bg-transparent px-4 text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
                 onValueChange={setSearch}
                 placeholder="Search pages and actions..."
-                className="flex-1 h-12 bg-transparent text-foreground placeholder:text-muted-foreground border-0 focus-visible:outline-none typo-label"
-                autoFocus
+                value={search}
               />
-              <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
+              <kbd className="hidden rounded bg-muted px-1.5 py-0.5 text-muted-foreground typo-micro sm:inline-flex sm:items-center sm:gap-0.5">
                 ESC
               </kbd>
             </div>
 
-            <Command.List className="max-h-90 overflow-y-auto overscroll-contain p-2">
-              <Command.Empty className="py-8 text-center text-muted-foreground typo-caption">
+            <CommandList className="max-h-90 overflow-y-auto overscroll-contain p-2">
+              <CommandEmpty className="py-8 text-center text-muted-foreground typo-caption">
                 No results found.
-              </Command.Empty>
+              </CommandEmpty>
 
-              <Command.Group
-                heading={<span className="text-muted-foreground px-2 pb-1 typo-micro">Pages</span>}
+              <CommandGroup
+                heading={
+                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
+                    Pages
+                  </span>
+                }
               >
                 {pages.map((page) => {
                   const Icon = page.icon;
                   return (
-                    <Command.Item
+                    <CommandItem
                       key={page.key}
                       value={`page ${page.label}`}
                       onSelect={() => navigateToPage(page.key)}
@@ -157,17 +175,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         strokeWidth={1.5}
                       />
                       <span className="typo-label">{page.label}</span>
-                    </Command.Item>
+                    </CommandItem>
                   );
                 })}
-              </Command.Group>
+              </CommandGroup>
 
-              <Command.Group
+              <CommandGroup
                 heading={
-                  <span className="text-muted-foreground px-2 pb-1 typo-micro">Actions</span>
+                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
+                    Actions
+                  </span>
                 }
               >
-                <Command.Item
+                <CommandItem
                   value="action new session new chat"
                   onSelect={() => {
                     telemetry.capture("command_palette_action_selected", {
@@ -189,9 +209,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     strokeWidth={1.5}
                   />
                   <span className="typo-label">New Session</span>
-                </Command.Item>
+                </CommandItem>
 
-                <Command.Item
+                <CommandItem
                   value={`action toggle theme ${isDark ? "light" : "dark"} mode`}
                   onSelect={() => {
                     telemetry.capture("command_palette_action_selected", {
@@ -220,10 +240,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       strokeWidth={1.5}
                     />
                   )}
-                  <span className="typo-label">Switch to {isDark ? "Light" : "Dark"} Mode</span>
-                </Command.Item>
+                  <span className="typo-label">
+                    Switch to {isDark ? "Light" : "Dark"} Mode
+                  </span>
+                </CommandItem>
 
-                <Command.Item
+                <CommandItem
                   value="action open settings preferences"
                   onSelect={() => {
                     telemetry.capture("command_palette_action_selected", {
@@ -243,12 +265,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     strokeWidth={1.5}
                   />
                   <span className="typo-label">Open Settings</span>
-                </Command.Item>
-              </Command.Group>
-            </Command.List>
+                </CommandItem>
+              </CommandGroup>
+            </CommandList>
 
-            <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle">
-              <span className="text-muted-foreground typo-micro">Navigate with</span>
+            <div className="flex items-center gap-3 border-t border-border-subtle px-4 py-2.5">
+              <span className="text-muted-foreground typo-micro">
+                Navigate with
+              </span>
               <div className="flex items-center gap-1">
                 <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                   &uarr;
@@ -257,14 +281,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   &darr;
                 </kbd>
               </div>
-              <span className="text-muted-foreground typo-micro">to select</span>
+              <span className="text-muted-foreground typo-micro">
+                to select
+              </span>
               <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                 &crarr;
               </kbd>
             </div>
           </Command>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

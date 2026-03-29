@@ -18,7 +18,7 @@ vi.mock("@/screens/volumes/use-volumes", () => ({
   },
 }));
 
-vi.mock("@/hooks/useIsMobile", () => ({
+vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 

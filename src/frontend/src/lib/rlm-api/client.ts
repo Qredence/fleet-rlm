@@ -1,5 +1,5 @@
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { getAccessToken } from "@/lib/auth/tokenStore";
+import { getAccessToken } from "@/lib/auth/token-store";
 
 export class RlmApiError extends Error {
   readonly status: number;
@@ -62,7 +62,10 @@ async function requestJson<T>(
   },
 ): Promise<T> {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), rlmApiConfig.timeoutMs);
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    rlmApiConfig.timeoutMs,
+  );
 
   const signal = options?.signal
     ? anySignal([options.signal, timeoutController.signal])
@@ -79,7 +82,9 @@ async function requestJson<T>(
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...options?.headers,
       },
-      ...(options?.body && method !== "GET" ? { body: JSON.stringify(options.body) } : {}),
+      ...(options?.body && method !== "GET"
+        ? { body: JSON.stringify(options.body) }
+        : {}),
     });
 
     if (!response.ok) {

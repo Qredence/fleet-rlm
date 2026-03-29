@@ -216,10 +216,10 @@ export default defineConfig({
     },
     warmup: {
       clientFiles: [
-        "src/app/App.tsx",
+        "src/app/app.tsx",
         "src/screens/shell/app-shell-screen.tsx",
         "src/screens/workspace/workspace-screen.tsx",
-        "src/app/workspace/workspace-message-list.tsx",
+        "src/app/workspace/transcript/workspace-message-list.tsx",
         "src/app/workspace/workspace-composer.tsx",
         "src/screens/settings/settings-screen.tsx",
         "src/screens/settings/runtime-form.tsx",
