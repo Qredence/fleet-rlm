@@ -168,6 +168,7 @@ def build_turn_payload(
         "history_turns": history_turns(agent),
         "guardrail_warnings": list(guardrail_warnings),
         **turn_metrics.as_payload(),
+        **runtime_degradation_payload(agent),
     }
     if extra_payload:
         payload.update(extra_payload)
@@ -176,6 +177,7 @@ def build_turn_payload(
 
 def prepare_turn(agent: RLMReActChatAgent, user_request: str) -> int:
     """Initialize per-turn counters and compute the effective iteration budget."""
+    _reset_runtime_degradation_state(agent)
     return _turn_delegation_state(agent).reset(
         effective_max_iters=compute_effective_max_iters(agent, user_request)
     )
@@ -185,6 +187,7 @@ def prepare_routed_turn(
     agent: RLMReActChatAgent, *, effective_max_iters: int | None = None
 ) -> int:
     """Reset per-turn counters for an externally-routed RLM turn."""
+    _reset_runtime_degradation_state(agent)
     return _turn_delegation_state(agent).reset(
         effective_max_iters=max(
             1,
@@ -248,6 +251,44 @@ def record_delegate_truncation(agent: RLMReActChatAgent) -> None:
     _turn_delegation_state(agent).record_truncation()
 
 
+def runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
+    """Return additive runtime degradation markers from the active interpreter."""
+    interpreter = getattr(agent, "interpreter", None)
+    metadata_fn = getattr(interpreter, "current_runtime_metadata", None)
+    metadata = metadata_fn() if callable(metadata_fn) else {}
+    if not isinstance(metadata, dict) or not metadata:
+        return {}
+
+    payload: dict[str, Any] = {
+        "runtime_degraded": bool(metadata.get("runtime_degraded", False)),
+        "runtime_fallback_used": bool(metadata.get("runtime_fallback_used", False)),
+    }
+    category = str(metadata.get("runtime_failure_category", "") or "").strip()
+    phase = str(metadata.get("runtime_failure_phase", "") or "").strip()
+    if category:
+        payload["runtime_failure_category"] = category
+    if phase:
+        payload["runtime_failure_phase"] = phase
+    return payload
+
+
+def record_runtime_degradation(
+    agent: RLMReActChatAgent,
+    *,
+    category: str | None = None,
+    phase: str | None = None,
+    fallback_used: bool = False,
+) -> None:
+    """Record one degraded runtime event for the active turn."""
+    recorder = getattr(agent.interpreter, "mark_runtime_degradation", None)
+    if callable(recorder):
+        recorder(
+            category=category,
+            phase=phase,
+            fallback_used=fallback_used,
+        )
+
+
 def process_prediction_to_turn_result(
     agent: RLMReActChatAgent,
     *,
@@ -293,3 +334,9 @@ def _turn_delegation_state(agent: RLMReActChatAgent) -> TurnDelegationState:
     )
     setattr(agent, "_turn_delegation_state", fallback)
     return fallback
+
+
+def _reset_runtime_degradation_state(agent: RLMReActChatAgent) -> None:
+    reset = getattr(agent.interpreter, "reset_runtime_degradation_state", None)
+    if callable(reset):
+        reset()

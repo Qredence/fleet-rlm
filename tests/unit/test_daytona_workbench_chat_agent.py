@@ -5,7 +5,7 @@ import dspy
 import pytest
 from typing import Any, cast
 
-from fleet_rlm.cli import runners
+from fleet_rlm.cli import runtime_factory
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.integrations.providers.daytona.agent import (
@@ -487,7 +487,7 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
         _FakeDaytonaWorkbenchChatAgent,
     )
 
-    agent = runners.build_daytona_workbench_chat_agent(
+    agent = runtime_factory.build_daytona_workbench_chat_agent(
         timeout=123,
         max_depth=4,
         interpreter_async_execute=False,

@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable
 
 import dspy
 from dspy.primitives import FinalOutput
 
-from . import interpreter_execution as _execution
-from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
-from .interpreter_assets import (
-    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
-    _FINAL_OUTPUT_MARKER,
-    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
-    _base_setup_code,
-    _typed_submit_code,
-)
 from fleet_rlm.runtime.execution.interpreter_common import (
     async_enter as _async_enter_impl,
 )
@@ -38,6 +30,15 @@ from fleet_rlm.runtime.execution.interpreter_common import (
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
+from . import interpreter_execution as _execution
+from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
+from .interpreter_assets import (
+    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+    _FINAL_OUTPUT_MARKER,
+    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
+    _base_setup_code,
+    _typed_submit_code,
+)
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
@@ -105,11 +106,19 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._persisted_workspace_path: str | None = None
         self._persisted_context_sources: list[Any] = []
         self._persisted_context_id: str | None = None
+        self._persisted_volume_name: str | None = None
         self._bridge: DaytonaToolBridge | None = None
         self._bridge_sandbox_id: str | None = None
         self._bridge_context_id: str | None = None
         self._setup_context_id: str | None = None
+        self._setup_workspace_path: str | None = None
         self._submit_signature_key: tuple[tuple[str, str], ...] | None = None
+        self._last_sandbox_transition: str | None = None
+        self._last_workspace_reconfigured = False
+        self._runtime_degraded = False
+        self._runtime_failure_category: str | None = None
+        self._runtime_failure_phase: str | None = None
+        self._runtime_fallback_used = False
 
     def __enter__(self) -> DaytonaInterpreter:
         return _sync_enter_impl(self)
@@ -157,9 +166,10 @@ class DaytonaInterpreter(LLMQueryMixin):
             context_paths=context_paths,
             volume_name=volume_name,
         )
-        if force_new_session or (
-            self._session is not None and self._session_source_key != source_key
-        ):
+        should_recreate = force_new_session or self._session_needs_recreation(
+            desired_volume=normalized_volume
+        )
+        if should_recreate:
             self._detach_session(delete=True)
         self._apply_workspace_config(
             repo_url=normalized_repo_url,
@@ -167,6 +177,9 @@ class DaytonaInterpreter(LLMQueryMixin):
             context_paths=normalized_context_paths,
             volume_name=normalized_volume,
         )
+        if not should_recreate and self._session is not None:
+            self._last_sandbox_transition = "reused"
+            self._last_workspace_reconfigured = self._session_source_key != source_key
 
     async def aconfigure_workspace(
         self,
@@ -189,9 +202,10 @@ class DaytonaInterpreter(LLMQueryMixin):
             context_paths=context_paths,
             volume_name=volume_name,
         )
-        if force_new_session or (
-            self._session is not None and self._session_source_key != source_key
-        ):
+        should_recreate = force_new_session or self._session_needs_recreation(
+            desired_volume=normalized_volume
+        )
+        if should_recreate:
             await self._adetach_session(delete=True)
         self._apply_workspace_config(
             repo_url=normalized_repo_url,
@@ -199,6 +213,9 @@ class DaytonaInterpreter(LLMQueryMixin):
             context_paths=normalized_context_paths,
             volume_name=normalized_volume,
         )
+        if not should_recreate and self._session is not None:
+            self._last_sandbox_transition = "reused"
+            self._last_workspace_reconfigured = self._session_source_key != source_key
 
     def _normalized_workspace_config(
         self,
@@ -245,6 +262,70 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.context_paths = context_paths
         self.volume_name = volume_name
 
+    def _session_needs_recreation(self, *, desired_volume: str | None) -> bool:
+        active_session = self._session
+        if active_session is not None:
+            return getattr(active_session, "volume_name", None) != desired_volume
+        if self._persisted_sandbox_id is None:
+            return False
+        return self._persisted_volume_name != desired_volume
+
+    @staticmethod
+    def _callable_accepts_kwarg(func: Callable[..., Any] | None, name: str) -> bool:
+        if not callable(func):
+            return False
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):
+            return False
+        if name in signature.parameters:
+            return True
+        return any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+
+    async def _aresume_workspace_session(
+        self,
+        *,
+        sandbox_id: str,
+        repo_url: str | None,
+        ref: str | None,
+        workspace_path: str,
+        context_sources: list[Any],
+        context_id: str | None,
+    ) -> DaytonaSandboxSession:
+        resume_workspace_session = getattr(self.runtime, "aresume_workspace_session")
+        resume_kwargs: dict[str, Any] = {
+            "sandbox_id": sandbox_id,
+            "repo_url": repo_url,
+            "ref": ref,
+            "workspace_path": workspace_path,
+            "context_sources": context_sources,
+            "context_id": context_id,
+        }
+        if self._callable_accepts_kwarg(resume_workspace_session, "volume_name"):
+            resume_kwargs["volume_name"] = (
+                self._persisted_volume_name or self.volume_name
+            )
+        return await resume_workspace_session(**resume_kwargs)
+
+    async def _areconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+    ) -> DaytonaSandboxSession:
+        reconcile_workspace_session = getattr(
+            self.runtime, "areconcile_workspace_session", None
+        )
+        if not callable(reconcile_workspace_session):
+            raise RuntimeError("Runtime does not support workspace reconciliation")
+        return await reconcile_workspace_session(
+            session,
+            repo_url=self.repo_url,
+            ref=self.repo_ref,
+            context_paths=list(self.context_paths),
+        )
+
     def _apply_imported_session_state(self, state: dict[str, Any]) -> None:
         raw_daytona = state.get("daytona", {})
         daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
@@ -265,7 +346,16 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._persisted_context_id = (
             str(daytona_state.get("context_id", "") or "").strip() or None
         )
-        self._session_source_key = None
+        self._persisted_volume_name = (
+            str(daytona_state.get("volume_name", "") or "").strip() or None
+        )
+        self.volume_name = self._persisted_volume_name or self.volume_name
+        self._session_source_key = (
+            self.repo_url,
+            self.repo_ref,
+            tuple(self.context_paths),
+            self.volume_name,
+        )
 
     def export_session_state(self) -> dict[str, Any]:
         self._persist_session_snapshot()
@@ -297,6 +387,11 @@ class DaytonaInterpreter(LLMQueryMixin):
                     self._session.context_id
                     if self._session is not None
                     else self._persisted_context_id
+                ),
+                "volume_name": (
+                    getattr(self._session, "volume_name", None) or self.volume_name
+                    if self._session is not None
+                    else self._persisted_volume_name or self.volume_name
                 ),
             }
         }
@@ -340,19 +435,44 @@ class DaytonaInterpreter(LLMQueryMixin):
             tuple(self.context_paths),
             self.volume_name,
         )
-        if self._session is not None and self._session_source_key == source_key:
-            return self._session
-
+        should_report_recreated = False
         if self._session is not None:
-            await self._adetach_session(delete=True)
+            if self._session_needs_recreation(desired_volume=self.volume_name):
+                should_report_recreated = True
+                await self._adetach_session(delete=True)
+            elif self._session_source_key == source_key:
+                self._last_sandbox_transition = "reused"
+                self._last_workspace_reconfigured = False
+                self._persist_session_snapshot()
+                return self._session
+            else:
+                try:
+                    self._session = await self._areconcile_workspace_session(
+                        self._session
+                    )
+                except Exception as exc:
+                    self._mark_runtime_degradation_from_exception(exc)
+                    should_report_recreated = True
+                    await self._adetach_session(delete=True)
+                else:
+                    self._session_source_key = source_key
+                    await self._areset_execution_state()
+                    self._persist_session_snapshot()
+                    self._last_sandbox_transition = "reused"
+                    self._last_workspace_reconfigured = True
+                    return self._session
 
         if (
-            self._persisted_sandbox_id
-            and self._persisted_workspace_path
-            and self._session_source_key in {None, source_key}
+            self._persisted_sandbox_id is not None
+            and self._persisted_volume_name != self.volume_name
         ):
+            should_report_recreated = True
+            self._clear_persisted_session()
+
+        if self._persisted_sandbox_id and self._persisted_workspace_path:
             try:
-                self._session = await self.runtime.aresume_workspace_session(
+                persisted_source_key = self._session_source_key
+                self._session = await self._aresume_workspace_session(
                     sandbox_id=self._persisted_sandbox_id,
                     repo_url=self.repo_url,
                     ref=self.repo_ref,
@@ -360,12 +480,25 @@ class DaytonaInterpreter(LLMQueryMixin):
                     context_sources=self._persisted_context_sources,
                     context_id=self._persisted_context_id,
                 )
+                if (
+                    persisted_source_key is not None
+                    and persisted_source_key != source_key
+                ):
+                    self._session = await self._areconcile_workspace_session(
+                        self._session
+                    )
+                    self._last_workspace_reconfigured = True
+                else:
+                    self._last_workspace_reconfigured = False
                 self._session_source_key = source_key
                 await self._areset_execution_state()
                 self._persist_session_snapshot()
+                self._last_sandbox_transition = "resumed"
                 return self._session
-            except Exception:
+            except Exception as exc:
+                self._mark_runtime_degradation_from_exception(exc)
                 self._clear_persisted_session()
+                should_report_recreated = True
 
         self._session = await self.runtime.acreate_workspace_session(
             repo_url=self.repo_url,
@@ -376,6 +509,10 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._session_source_key = source_key
         await self._areset_execution_state()
         self._persist_session_snapshot()
+        self._last_sandbox_transition = (
+            "recreated" if should_report_recreated else "created"
+        )
+        self._last_workspace_reconfigured = False
         return self._session
 
     async def _aensure_session(self) -> DaytonaSandboxSession:
@@ -395,12 +532,16 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._persisted_workspace_path = active_session.workspace_path
         self._persisted_context_sources = list(active_session.context_sources)
         self._persisted_context_id = active_session.context_id
+        self._persisted_volume_name = (
+            getattr(active_session, "volume_name", None) or self.volume_name
+        )
 
     def _clear_persisted_session(self) -> None:
         self._persisted_sandbox_id = None
         self._persisted_workspace_path = None
         self._persisted_context_sources = []
         self._persisted_context_id = None
+        self._persisted_volume_name = None
 
     def _detach_session(self, *, delete: bool) -> None:
         _run_async_compat(self._adetach_session, delete=delete)
@@ -425,7 +566,8 @@ class DaytonaInterpreter(LLMQueryMixin):
             if delete:
                 self._clear_persisted_session()
             self._session = None
-            self._session_source_key = None
+            if delete:
+                self._session_source_key = None
             await self._areset_execution_state()
             self._started = False
 
@@ -465,7 +607,73 @@ class DaytonaInterpreter(LLMQueryMixin):
     async def _areset_execution_state(self) -> None:
         await self._aclose_bridge()
         self._setup_context_id = None
+        self._setup_workspace_path = None
         self._submit_signature_key = None
+
+    def reset_runtime_degradation_state(self) -> None:
+        self._runtime_degraded = False
+        self._runtime_failure_category = None
+        self._runtime_failure_phase = None
+        self._runtime_fallback_used = False
+
+    def mark_runtime_degradation(
+        self,
+        *,
+        category: str | None = None,
+        phase: str | None = None,
+        fallback_used: bool = False,
+    ) -> None:
+        self._runtime_degraded = True
+        category_value = str(category or "").strip() or None
+        phase_value = str(phase or "").strip() or None
+        if self._runtime_failure_category is None and category_value is not None:
+            self._runtime_failure_category = category_value
+        if self._runtime_failure_phase is None and phase_value is not None:
+            self._runtime_failure_phase = phase_value
+        if fallback_used:
+            self._runtime_fallback_used = True
+
+    def _mark_runtime_degradation_from_exception(self, exc: BaseException) -> None:
+        self.mark_runtime_degradation(
+            category=str(getattr(exc, "category", "") or "").strip() or None,
+            phase=str(getattr(exc, "phase", "") or "").strip() or None,
+            fallback_used=True,
+        )
+
+    def current_runtime_metadata(self) -> dict[str, Any]:
+        session = self._session
+        metadata: dict[str, Any] = {
+            "sandbox_active": session is not None,
+            "workspace_reconfigured": self._last_workspace_reconfigured,
+            "runtime_degraded": bool(self._runtime_degraded),
+            "runtime_fallback_used": bool(self._runtime_fallback_used),
+        }
+        sandbox_id = (
+            session.sandbox_id if session is not None else self._persisted_sandbox_id
+        )
+        workspace_path = (
+            session.workspace_path
+            if session is not None
+            else self._persisted_workspace_path
+        )
+        volume_name = (
+            getattr(session, "volume_name", None) or self.volume_name
+            if session is not None
+            else self._persisted_volume_name or self.volume_name
+        )
+        if sandbox_id:
+            metadata["sandbox_id"] = sandbox_id
+        if workspace_path:
+            metadata["workspace_path"] = workspace_path
+        if volume_name:
+            metadata["volume_name"] = volume_name
+        if self._last_sandbox_transition:
+            metadata["sandbox_transition"] = self._last_sandbox_transition
+        if self._runtime_failure_category:
+            metadata["runtime_failure_category"] = self._runtime_failure_category
+        if self._runtime_failure_phase:
+            metadata["runtime_failure_phase"] = self._runtime_failure_phase
+        return metadata
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> DaytonaInterpreter:
         return _execution.build_delegate_child(

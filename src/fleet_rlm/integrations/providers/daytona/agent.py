@@ -219,6 +219,11 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
             context_paths=effective_context_inputs,
             volume_name=effective_volume_name,
         )
+        if (
+            interpreter._session is not None
+            or interpreter._persisted_sandbox_id is not None
+        ):
+            await interpreter.aget_session()
         effective_context_paths = self._effective_context_paths(
             docs_path=docs_path,
             context_paths=effective_context_inputs,

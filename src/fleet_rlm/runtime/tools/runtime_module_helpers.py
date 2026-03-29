@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
 from fleet_rlm.runtime.agent.delegation_policy import (
     RuntimeModuleExecutionRequest,
     invoke_runtime_module,
@@ -75,7 +76,7 @@ def runtime_metadata(
     fallback_used: bool,
 ) -> dict[str, Any]:
     """Return stable metadata shared by cached runtime-module tool results."""
-    return {
+    metadata: dict[str, Any] = {
         "depth": coerce_int(
             prediction_value(prediction, "depth", agent._current_depth + 1),
             default=agent._current_depth + 1,
@@ -87,4 +88,8 @@ def runtime_metadata(
             minimum=0,
         ),
         "delegate_lm_fallback": bool(fallback_used),
+        "runtime_degraded": False,
+        "runtime_fallback_used": False,
     }
+    metadata.update(runtime_degradation_payload(agent))
+    return metadata
