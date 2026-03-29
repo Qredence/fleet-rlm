@@ -10,8 +10,9 @@ from importlib.util import find_spec
 
 import typer
 
+from fleet_rlm.api.config import ServerRuntimeConfig
+
 from ..config import require_current_app_config
-from ..runtime_factory import build_mcp_runtime_config, build_server_runtime_config
 
 
 def serve_api_command(
@@ -35,7 +36,7 @@ def serve_api_command(
 
     from fleet_rlm.api.main import create_app
 
-    app_obj = create_app(config=build_server_runtime_config(config))
+    app_obj = create_app(config=ServerRuntimeConfig.from_app_config(config))
     uvicorn.run(app_obj, host=host, port=port)
 
 
@@ -60,10 +61,11 @@ def serve_mcp_command(
         raise typer.Exit(code=2)
 
     from fleet_rlm.integrations.mcp.server import (
+        MCPRuntimeConfig,
         create_mcp_server,
     )
 
-    server = create_mcp_server(config=build_mcp_runtime_config(config))
+    server = create_mcp_server(config=MCPRuntimeConfig.from_app_config(config))
 
     transport_norm = transport.strip().lower()
     if transport_norm == "stdio":

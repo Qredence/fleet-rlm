@@ -2,7 +2,7 @@
 
 NOTE: All imports of rlm_runtime_modules are intentionally deferred inside
 each test function to avoid triggering the circular import chain:
-  core.agent → core.execution.runtime_factory → core.models.rlm_runtime_modules
+  core.agent.chat_agent → core.models.rlm_runtime_modules
   → core.agent.signatures → core.agent
 
 Verifies:

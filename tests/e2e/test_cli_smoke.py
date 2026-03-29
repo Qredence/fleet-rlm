@@ -6,9 +6,9 @@ import re
 import pytest
 from typer.testing import CliRunner
 
+from fleet_rlm.api.config import resolve_server_volume_name
 from fleet_rlm.cli import app
 from fleet_rlm.cli.config import set_current_app_config
-from fleet_rlm.cli.runtime_factory import resolve_server_volume_name
 from fleet_rlm.integrations.config.env import AppConfig
 
 
