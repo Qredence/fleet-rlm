@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.runtime.tools import sandbox as sandbox_tools
+from fleet_rlm.runtime.tools import sandbox_storage_tools
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from tests.unit.fixtures_react import FakeInterpreter
 
@@ -84,7 +84,7 @@ def test_memory_read_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -138,7 +138,7 @@ def test_memory_list_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -196,7 +196,7 @@ def test_memory_write_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -292,7 +292,7 @@ def test_write_to_file_append_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -329,7 +329,7 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}

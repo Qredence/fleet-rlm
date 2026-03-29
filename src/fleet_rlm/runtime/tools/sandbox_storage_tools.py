@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
@@ -12,6 +11,7 @@ from .sandbox_common import (
     _adaytona_list_items,
     _adaytona_read_text,
     _adaytona_write_text,
+    _aget_daytona_session,
     _aexecute_submit_ctx,
     _commit_volume_best_effort,
     _document_load_result,
@@ -24,11 +24,6 @@ from .sandbox_common import (
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
-
-
-async def _aget_daytona_session_via_sandbox(ctx: _SandboxToolContext) -> Any | None:
-    sandbox_module = import_module("fleet_rlm.runtime.tools.sandbox")
-    return await sandbox_module._aget_daytona_session(ctx)
 
 
 def build_storage_tools(agent: RLMReActChatAgent) -> list[Any]:
@@ -107,7 +102,7 @@ else:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             result = await _aexecute_submit_ctx(
                 ctx,
@@ -154,7 +149,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 text = await _adaytona_read_text(daytona_session, resolved_path)
@@ -211,7 +206,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 content = await _adaytona_read_text(daytona_session, resolved_path)
@@ -250,7 +245,7 @@ except Exception as e:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 await _adaytona_write_text(daytona_session, resolved_path, content)
@@ -313,7 +308,7 @@ except Exception as e:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 saved_path = await _adaytona_write_text(
@@ -412,7 +407,7 @@ except Exception as e:
             resolved_path = roots.memory_root
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 items = await _adaytona_list_items(daytona_session, resolved_path)

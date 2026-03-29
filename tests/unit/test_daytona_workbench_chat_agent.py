@@ -212,7 +212,7 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module_via_sandbox",
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module",
         _fake_run,
     )
 

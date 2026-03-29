@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.recursive_runtime import spawn_delegate_sub_agent_async
@@ -14,6 +13,7 @@ from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callab
 from .runtime_module_helpers import coerce_int as _coerce_int
 from .runtime_module_helpers import coerce_str_list as _coerce_str_list
 from .runtime_module_helpers import prediction_value as _prediction_value
+from .runtime_module_helpers import run_cached_runtime_module as _run_runtime_module
 from .runtime_module_helpers import runtime_metadata as _runtime_metadata
 from .sandbox_common import _aexecute_submit_ctx, _SandboxToolContext
 from .shared import (
@@ -65,18 +65,13 @@ def _normalize_grounded_citations(value: Any) -> list[GroundedCitation]:
     return citations
 
 
-def _run_runtime_module_via_sandbox(*args: Any, **kwargs: Any):
-    sandbox_module = import_module("fleet_rlm.runtime.tools.sandbox")
-    return sandbox_module._run_runtime_module(*args, **kwargs)
-
-
 def _run_cached_runtime_module(
     ctx: _DelegateToolContext,
     *,
     module_name: str,
     **kwargs: Any,
 ) -> tuple[Any, dict[str, Any] | None, bool]:
-    return _run_runtime_module_via_sandbox(
+    return _run_runtime_module(
         ctx.agent,
         module_name,
         **kwargs,

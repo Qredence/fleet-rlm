@@ -1,6 +1,6 @@
 """Runtime module factory for ReAct agent long-context operations.
 
-This module provides lazy-loading constructors for DSPy modules that handle
+This module provides lazy-loading access to cached DSPy modules that handle
 long-context operations like document analysis, summarization, and memory management.
 """
 
@@ -33,18 +33,18 @@ def get_runtime_module(agent: RLMReActChatAgent, name: str) -> dspy.Module:
     # Import lazily to avoid circular dependency:
     # core.agent → core.execution.runtime_factory → core.models.rlm_runtime_modules
     # → core.agent.signatures → core.agent.__init__ → chat_agent → runtime_factory
-    module = agent._runtime_modules.get(name)
-    if module is not None:
-        return module
-
-    from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
-
-    module = build_runtime_module(
-        name,
-        interpreter=agent.interpreter,
-        max_iterations=agent.rlm_max_iterations,
-        max_llm_calls=agent.rlm_max_llm_calls,
-        verbose=agent.verbose,
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        build_runtime_module_config,
+        get_or_build_runtime_module,
     )
-    agent._runtime_modules[name] = module
-    return module
+
+    return get_or_build_runtime_module(
+        agent._runtime_modules,
+        name,
+        config=build_runtime_module_config(
+            interpreter=agent.interpreter,
+            max_iterations=agent.rlm_max_iterations,
+            max_llm_calls=agent.rlm_max_llm_calls,
+            verbose=agent.verbose,
+        ),
+    )
