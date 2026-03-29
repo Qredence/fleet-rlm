@@ -141,6 +141,39 @@ def test_sessions_state_endpoint_exists_and_returns_expected_shape(
     assert isinstance(payload["sessions"], list)
 
 
+def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    state = default_client.app.state.server_state
+    state.sessions["broken"] = "stale-session-record"
+    state.sessions["partial"] = {
+        "workspace_id": ["workspace-a"],
+        "user_id": {"value": "user-a"},
+        "session_id": ["session-a"],
+        "manifest": {"metadata": {"updated_at": ["invalid"]}},
+        "session": {"state": {"history": "invalid", "documents": []}},
+    }
+
+    response = default_client.get("/api/v1/sessions/state", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert isinstance(payload["sessions"], list)
+    assert {session["key"] for session in payload["sessions"]} == {"broken", "partial"}
+    broken, partial = payload["sessions"]
+    assert broken["workspace_id"] == "default"
+    assert broken["user_id"] == "anonymous"
+    assert broken["session_id"] is None
+    assert partial["workspace_id"] == "default"
+    assert partial["user_id"] == "anonymous"
+    assert partial["session_id"] is None
+    assert partial["updated_at"] is None
+    assert partial["history_turns"] == 0
+    assert partial["document_count"] == 0
+
+
 def test_runtime_contract_endpoints_remain_available(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

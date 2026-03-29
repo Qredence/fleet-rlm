@@ -482,6 +482,32 @@ def test_runtime_status_uses_cached_results(
     assert payload["daytona"]["configured"] is True
 
 
+def test_runtime_status_ignores_malformed_cached_runtime_tests(
+    local_client: TestClient,
+) -> None:
+    state = _server_state(local_client)
+    state.runtime_test_results = {
+        "modal": {"ok": True},
+        "lm": "invalid",
+        "daytona": {"checked_at": object()},
+    }
+
+    response = local_client.get("/api/v1/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert payload["tests"] == {
+        "modal": None,
+        "lm": None,
+        "daytona": None,
+    }
+    assert (
+        "Run Runtime connection tests to validate live provider connectivity."
+        in payload["guidance"]
+    )
+
+
 def test_runtime_status_includes_mlflow_startup_state(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
