@@ -142,6 +142,50 @@ def test_runtime_settings_patch_writes_to_configured_env_path(
     assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in env_path.read_text()
 
 
+def test_runtime_settings_patch_config_only_updates_keep_loaded_models(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(local_client)
+    planner = object()
+    delegate = object()
+    state.planner_lm = planner
+    state.delegate_lm = delegate
+
+    def _unexpected_reload(**kwargs):
+        _ = kwargs
+        raise AssertionError(
+            "runtime model reload should not run for config-only updates"
+        )
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
+        _unexpected_reload,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.get_delegate_lm_from_env",
+        _unexpected_reload,
+    )
+
+    response = local_client.patch(
+        "/api/v1/runtime/settings",
+        json={
+            "updates": {
+                "SECRET_NAME": "ALT_SECRET",
+                "VOLUME_NAME": "alt-volume",
+                "SANDBOX_PROVIDER": "daytona",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert state.config.secret_name == "ALT_SECRET"
+    assert state.config.volume_name == "alt-volume"
+    assert state.config.sandbox_provider == "daytona"
+    assert state.planner_lm is planner
+    assert state.delegate_lm is delegate
+
+
 def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
     local_client: TestClient,
     tmp_path: Path,
@@ -179,6 +223,58 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
     assert "DSPY_LLM_API_KEY=supersecret66" in text
     assert "MODAL_TOKEN_ID=modaltokenN2" in text
     assert "MODAL_TOKEN_SECRET=modalsecretg4" in text
+
+
+def test_runtime_settings_patch_reload_failure_restores_runtime_state(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env"
+    original_text = (
+        "DSPY_LM_MODEL=openai/gpt-4o-mini\n"
+        "DSPY_LLM_API_KEY=sk-existing\n"
+        "SECRET_NAME=LITELLM\n"
+    )
+    env_path.write_text(original_text, encoding="utf-8")
+
+    state = _server_state(local_client)
+    state.config.env_path = env_path
+    state.config.agent_model = "openai/gpt-4o-mini"
+    state.config.secret_name = "LITELLM"
+    planner = object()
+    delegate = object()
+    state.planner_lm = planner
+    state.delegate_lm = delegate
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-existing")
+
+    def _planner_factory(*, model_name=None, env_file=None):
+        _ = model_name, env_file
+        raise RuntimeError("planner init failed")
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
+        _planner_factory,
+    )
+
+    with pytest.raises(RuntimeError, match="planner init failed"):
+        local_client.patch(
+            "/api/v1/runtime/settings",
+            json={"updates": {"DSPY_LM_MODEL": "openai/gpt-4.1-mini"}},
+        )
+
+    assert state.config.agent_model == "openai/gpt-4o-mini"
+    assert state.config.secret_name == "LITELLM"
+    assert state.planner_lm is planner
+    assert state.delegate_lm is delegate
+    assert env_path.read_text(encoding="utf-8") == original_text
+    assert os.environ.get("DSPY_LM_MODEL") == "openai/gpt-4o-mini"
+    assert os.environ.get("DSPY_LLM_API_KEY") == "sk-existing"
+
+    response = local_client.get("/api/v1/runtime/settings")
+    assert response.status_code == 200
+    assert response.json()["values"]["DSPY_LM_MODEL"] == "openai/gpt-4o-mini"
 
 
 def test_runtime_settings_patch_non_local_forbidden(staging_client: TestClient):
