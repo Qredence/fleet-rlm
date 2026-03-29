@@ -657,7 +657,7 @@ def test_daytona_workbench_chat_agent_threads_interpreter_async_execute() -> Non
     assert _interpreter(agent).async_execute is False
 
 
-def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
+def test_build_chat_agent_for_runtime_mode_threads_interpreter_async_execute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -671,7 +671,8 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
         _FakeDaytonaWorkbenchChatAgent,
     )
 
-    agent = runners.build_daytona_workbench_chat_agent(
+    agent = runners.build_chat_agent_for_runtime_mode(
+        runtime_mode="daytona_pilot",
         timeout=123,
         max_depth=4,
         interpreter_async_execute=False,
