@@ -5,9 +5,12 @@ import pytest
 
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from fleet_rlm.runtime.agent.forced_routing import (
+    ForcedFinalPayloadInput,
     arun_forced_rlm_turn,
+    forced_stream_final_payload,
     run_forced_rlm_turn,
 )
+from fleet_rlm.runtime.execution.streaming_context import StreamingContext
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
@@ -61,3 +64,27 @@ async def test_arun_forced_rlm_turn_invokes_recursive_runtime_handoff(
     assert captured["agent"] is agent
     assert captured["prompt"] == "deep async task"
     assert captured["stream_event_callback"] is None
+
+
+def test_forced_stream_final_payload_reuses_canonical_turn_metadata() -> None:
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter(), execution_mode="rlm_only")
+    agent.history = dspy.History(
+        messages=[{"user_request": "hi", "assistant_response": "forced"}]
+    )
+    agent.prepare_routed_turn(effective_max_iters=9)
+
+    payload = forced_stream_final_payload(
+        agent,
+        payload_input=ForcedFinalPayloadInput(
+            trajectory={"tool_name_0": "rlm_query"},
+            guardrail_warnings=["check"],
+            final_reasoning="delegate done",
+        ),
+        ctx=StreamingContext.from_agent(agent, effective_max_iters=9),
+    )
+
+    assert payload["history_turns"] == 1
+    assert payload["guardrail_warnings"] == ["check"]
+    assert payload["final_reasoning"] == "delegate done"
+    assert payload["effective_max_iters"] == 9
+    assert payload["runtime"]["effective_max_iters"] == 9

@@ -29,94 +29,7 @@ from fleet_rlm.runtime.execution.validation import (
 from fleet_rlm.runtime.models.streaming import StreamEvent
 from fleet_rlm.runtime.tools import ExecutionMode
 
-from .chat_runtime_helpers import (
-    areset_agent_state as _areset_agent_state,
-)
-from .chat_runtime_helpers import (
-    ashutdown_agent_session as _ashutdown_agent_session,
-)
-from .chat_runtime_helpers import (
-    astart_agent_session as _astart_agent_session,
-)
-from .chat_runtime_helpers import (
-    build_react_module as _build_react_module,
-)
-from .chat_runtime_helpers import (
-    collect_chat_turn_stream as _collect_chat_turn_stream,
-)
-from .chat_runtime_helpers import (
-    reset_agent_state as _reset_agent_state,
-)
-from .chat_runtime_helpers import (
-    resolve_tool as _resolve_tool,
-)
-from .chat_runtime_helpers import (
-    resolve_tool_delegate as _resolve_tool_delegate,
-)
-from .chat_runtime_helpers import (
-    shutdown_agent_session as _shutdown_agent_session,
-)
-from .chat_runtime_helpers import (
-    start_agent_session as _start_agent_session,
-)
-from .chat_session_state import (
-    aimport_session_state as _aimport_session_state,
-)
-from .chat_session_state import (
-    append_history as _append_history_state,
-)
-from .chat_session_state import (
-    export_session_state as _export_session_state,
-)
-from .chat_session_state import (
-    history_messages as _history_messages,
-)
-from .chat_session_state import (
-    history_turns as _history_turns,
-)
-from .chat_session_state import (
-    import_session_state as _import_session_state,
-)
-from .chat_turns import (
-    TurnDelegationState,
-    TurnMetricsSnapshot,
-)
-from .chat_turns import (
-    build_turn_result as _build_turn_result_payload,
-)
-from .chat_turns import (
-    claim_delegate_slot as _claim_delegate_slot_state,
-)
-from .chat_turns import (
-    finalize_turn as _finalize_turn_state,
-)
-from .chat_turns import (
-    prediction_guardrail_warnings as _prediction_guardrail_warnings_state,
-)
-from .chat_turns import (
-    prediction_response_and_trajectory as _prediction_response_and_trajectory_state,
-)
-from .chat_turns import (
-    prepare_routed_turn as _prepare_routed_turn_state,
-)
-from .chat_turns import (
-    prepare_turn as _prepare_turn_state,
-)
-from .chat_turns import (
-    process_prediction_to_turn_result as _process_prediction_to_turn_result,
-)
-from .chat_turns import (
-    record_delegate_fallback as _record_delegate_fallback_state,
-)
-from .chat_turns import (
-    record_delegate_truncation as _record_delegate_truncation_state,
-)
-from .chat_turns import (
-    snapshot_turn_metrics as _snapshot_turn_metrics,
-)
-from .chat_turns import (
-    turn_metrics_from_prediction as _turn_metrics_from_prediction,
-)
+from . import chat_runtime_helpers, chat_session_state, chat_turns
 from .commands import execute_command as _execute_command
 from .forced_routing import (
     arun_forced_rlm_turn as _arun_forced_rlm_turn_impl,
@@ -195,7 +108,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         )
         self.execution_mode: ExecutionMode = execution_mode
         self._last_tool_error_count = 0
-        self._turn_delegation_state = TurnDelegationState(
+        self._turn_delegation_state = chat_turns.TurnDelegationState(
             effective_max_iters=react_max_iters
         )
         self._live_event_callback: Callable[[StreamEvent], Any] | None = None
@@ -292,19 +205,19 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def start(self) -> None:
         """Start the underlying Modal interpreter session if needed."""
-        _start_agent_session(self)
+        chat_runtime_helpers.start_agent_session(self)
 
     def shutdown(self) -> None:
         """Shutdown the interpreter and mark this agent session as stopped."""
-        _shutdown_agent_session(self)
+        chat_runtime_helpers.shutdown_agent_session(self)
 
     async def astart(self) -> None:
         """Start the underlying Modal interpreter session if needed (async)."""
-        await _astart_agent_session(self)
+        await chat_runtime_helpers.astart_agent_session(self)
 
     async def ashutdown(self) -> None:
         """Shutdown the interpreter and mark this agent session as stopped (async)."""
-        await _ashutdown_agent_session(self)
+        await chat_runtime_helpers.ashutdown_agent_session(self)
 
     async def __aenter__(self) -> Self:
         await self.astart()
@@ -321,25 +234,28 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         """Reset chat history, document cache, and (optionally) sandbox buffers."""
-        return _reset_agent_state(self, clear_sandbox_buffers=clear_sandbox_buffers)
+        return chat_runtime_helpers.reset_agent_state(
+            self,
+            clear_sandbox_buffers=clear_sandbox_buffers,
+        )
 
     async def areset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         """Async reset variant that can safely await async sandbox tools."""
-        return await _areset_agent_state(
+        return await chat_runtime_helpers.areset_agent_state(
             self, clear_sandbox_buffers=clear_sandbox_buffers
         )
 
     def export_session_state(self) -> dict[str, Any]:
         """Export serializable session state for persistence."""
-        return _export_session_state(self)
+        return chat_session_state.export_session_state(self)
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Restore session state from a previously exported payload."""
-        return _import_session_state(self, state)
+        return chat_session_state.import_session_state(self, state)
 
     async def aimport_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Async restore path for interpreters with async session hooks."""
-        return await _aimport_session_state(self, state)
+        return await chat_session_state.aimport_session_state(self, state)
 
     # -----------------------------------------------------------------
     # DSPy Module forward
@@ -396,13 +312,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         # Invoke the DSPy module call path (`self(...)`) instead of calling
         # `forward(...)` directly to preserve DSPy module semantics.
         prediction = self(user_request=message)
-        return _process_prediction_to_turn_result(
+        return chat_turns.process_prediction_to_turn_result(
             self,
             prediction=prediction,
             message=message,
             include_core_memory_snapshot=True,
-            turn_metrics=_turn_metrics_from_prediction(
-                prediction, _snapshot_turn_metrics(self)
+            turn_metrics=chat_turns.turn_metrics_from_prediction(
+                prediction,
+                chat_turns.snapshot_turn_metrics(self),
             ),
         )
 
@@ -428,7 +345,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
         """Compatibility stream collector for existing CLI/tests."""
-        return _collect_chat_turn_stream(self, message=message, trace=trace)
+        return chat_runtime_helpers.collect_chat_turn_stream(
+            self,
+            message=message,
+            trace=trace,
+        )
 
     # -----------------------------------------------------------------
     # Public chat API - async (native DSPy async)
@@ -444,12 +365,12 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
         if self.execution_mode == "rlm_only":
             prediction = await _arun_forced_rlm_turn_impl(self, message=message)
-            return _process_prediction_to_turn_result(
+            return chat_turns.process_prediction_to_turn_result(
                 self,
                 prediction=prediction,
                 message=message,
                 include_core_memory_snapshot=False,
-                turn_metrics=_snapshot_turn_metrics(self),
+                turn_metrics=chat_turns.snapshot_turn_metrics(self),
             )
 
         self.start()
@@ -460,12 +381,12 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             core_memory=self.fmt_core_memory(),
             max_iters=effective_max_iters,
         )
-        return _process_prediction_to_turn_result(
+        return chat_turns.process_prediction_to_turn_result(
             self,
             prediction=prediction,
             message=message,
             include_core_memory_snapshot=False,
-            turn_metrics=_snapshot_turn_metrics(self),
+            turn_metrics=chat_turns.snapshot_turn_metrics(self),
             finalize_and_validate=True,
         )
 
@@ -547,7 +468,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         Raises:
             AttributeError: If no tool with the given name exists
         """
-        return _resolve_tool(self, name)
+        return chat_runtime_helpers.resolve_tool(self, name)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         """Dynamically dispatch to tool methods.
@@ -555,14 +476,17 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         This enables backward-compatible access like `agent.load_document(...)`
         without defining 25+ boilerplate delegator methods.
         """
-        return _resolve_tool_delegate(self, name)
+        return chat_runtime_helpers.resolve_tool_delegate(self, name)
 
     # -----------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------
 
     def _build_agent(self) -> dspy.Module:
-        return _build_react_module(self, signature=RLMReActChatSignature)
+        return chat_runtime_helpers.build_react_module(
+            self,
+            signature=RLMReActChatSignature,
+        )
 
     def get_runtime_module(self, name: str) -> dspy.Module:
         """Return a cached long-context runtime module by name.
@@ -573,27 +497,27 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""
-        return _history_messages(self)
+        return chat_session_state.history_messages(self)
 
     def history_turns(self) -> int:
         """Return number of stored history turns safely."""
-        return _history_turns(self)
+        return chat_session_state.history_turns(self)
 
     def _append_history(self, user_request: str, assistant_response: str) -> None:
-        _append_history_state(self, user_request, assistant_response)
+        chat_session_state.append_history(self, user_request, assistant_response)
 
     def _turn_metrics(self) -> dict[str, int]:
-        return _snapshot_turn_metrics(self).as_payload()
+        return chat_turns.snapshot_turn_metrics(self).as_payload()
 
     @staticmethod
     def _prediction_response_and_trajectory(
         prediction: dspy.Prediction,
     ) -> tuple[str, dict[str, Any]]:
-        return _prediction_response_and_trajectory_state(prediction)
+        return chat_turns.prediction_response_and_trajectory(prediction)
 
     @staticmethod
     def _prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
-        return _prediction_guardrail_warnings_state(prediction)
+        return chat_turns.prediction_guardrail_warnings(prediction)
 
     def _build_turn_result(
         self,
@@ -602,11 +526,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         trajectory: dict[str, Any],
         guardrail_warnings: list[str],
         include_core_memory_snapshot: bool,
-        turn_metrics: TurnMetricsSnapshot,
+        turn_metrics: chat_turns.TurnMetricsSnapshot,
     ) -> dict[str, Any]:
-        if not isinstance(turn_metrics, TurnMetricsSnapshot):
-            turn_metrics = _snapshot_turn_metrics(self)
-        return _build_turn_result_payload(
+        if not isinstance(turn_metrics, chat_turns.TurnMetricsSnapshot):
+            turn_metrics = chat_turns.snapshot_turn_metrics(self)
+        return chat_turns.build_turn_result(
             self,
             assistant_response=assistant_response,
             trajectory=trajectory,
@@ -617,27 +541,30 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def _prepare_turn(self, user_request: str) -> int:
         """Initialize per-turn counters and compute effective iteration budget."""
-        return _prepare_turn_state(self, user_request)
+        return chat_turns.prepare_turn(self, user_request)
 
     def prepare_routed_turn(self, *, effective_max_iters: int | None = None) -> int:
         """Reset per-turn counters for an externally-routed RLM turn."""
-        return _prepare_routed_turn_state(self, effective_max_iters=effective_max_iters)
+        return chat_turns.prepare_routed_turn(
+            self,
+            effective_max_iters=effective_max_iters,
+        )
 
     def _finalize_turn(self, trajectory: Any) -> None:
         """Capture post-turn metrics for adaptive follow-up turns."""
-        _finalize_turn_state(self, trajectory)
+        chat_turns.finalize_turn(self, trajectory)
 
     def _count_tool_errors(self, trajectory: Any) -> int:
         return count_tool_errors(trajectory)
 
     def _claim_delegate_slot(self) -> tuple[bool, int]:
-        return _claim_delegate_slot_state(self)
+        return chat_turns.claim_delegate_slot(self)
 
     def _record_delegate_fallback(self) -> None:
-        _record_delegate_fallback_state(self)
+        chat_turns.record_delegate_fallback(self)
 
     def _record_delegate_truncation(self) -> None:
-        _record_delegate_truncation_state(self)
+        chat_turns.record_delegate_truncation(self)
 
     def _validate_assistant_response(
         self,
