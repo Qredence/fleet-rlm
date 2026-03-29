@@ -110,12 +110,12 @@ async def apply_runtime_settings_patch(
     state.planner_lm = None
     state.delegate_lm = None
     if planner_loader is None and delegate_loader is None:
-        await ensure_runtime_models(state, config)
+        await ensure_runtime_models(state)
     else:
         planner_model_name = config.agent_model
         delegate_model_name = config.agent_delegate_model
         if planner_loader is None:
-            await ensure_runtime_models(state, config)
+            await ensure_runtime_models(state)
         else:
             state.planner_lm = await asyncio.to_thread(
                 planner_loader,
@@ -131,5 +131,5 @@ async def apply_runtime_settings_patch(
                 model_name=delegate_model_name,
                 default_max_tokens=config.agent_delegate_max_tokens,
             )
-    schedule_optional_runtime_startup(state, config)
+    schedule_optional_runtime_startup(state)
     return RuntimeSettingsUpdateResponse(**result)

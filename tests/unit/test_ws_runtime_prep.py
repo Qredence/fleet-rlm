@@ -60,9 +60,8 @@ def _runtime_cfg() -> SimpleNamespace:
 
 
 def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
-    async def fake_ensure_runtime_models(state: object, cfg: object) -> tuple[str, str]:
+    async def fake_ensure_runtime_models(state: object) -> tuple[str, str]:
         assert state is fake_state
-        assert cfg is fake_cfg
         return ("planner-lm", "delegate-lm")
 
     fake_cfg = _runtime_cfg()
@@ -112,10 +111,8 @@ def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
 def test_prepare_chat_runtime_reports_planner_initialization_failure(
     monkeypatch,
 ) -> None:
-    async def failing_ensure_runtime_models(
-        state: object, cfg: object
-    ) -> tuple[object, object]:
-        _ = state, cfg
+    async def failing_ensure_runtime_models(state: object) -> tuple[object, object]:
+        _ = state
         raise RuntimeError("planner boom")
 
     fake_state = SimpleNamespace(config=_runtime_cfg(), repository=None)

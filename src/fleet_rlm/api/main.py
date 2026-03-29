@@ -33,6 +33,14 @@ from .routers import (
 
 logger = logging.getLogger(__name__)
 
+_CANONICAL_API_ROUTERS = (
+    auth.router,
+    ws.router,
+    sessions.router,
+    runtime.router,
+    traces.router,
+)
+
 
 def _resolve_ui_dist_dir() -> Path | None:
     """Return the frontend build directory if one exists.
@@ -57,11 +65,8 @@ def _register_api_routes(app: FastAPI) -> None:
     app.include_router(health.router)
 
     api_router = APIRouter(prefix="/api/v1")
-    api_router.include_router(auth.router)
-    api_router.include_router(ws.router)
-    api_router.include_router(sessions.router)
-    api_router.include_router(runtime.router)
-    api_router.include_router(traces.router)
+    for route_group in _CANONICAL_API_ROUTERS:
+        api_router.include_router(route_group)
     app.include_router(api_router)
 
 
@@ -129,7 +134,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         state = build_server_state(cfg)
         app.state.server_state = state
-        await startup_server_state(state, cfg)
+        await startup_server_state(state)
         yield
         await shutdown_server_state(state)
 

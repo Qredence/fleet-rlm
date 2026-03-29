@@ -203,7 +203,7 @@ def preflight_failure_result(
 async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | None]:
     from ..bootstrap import ensure_runtime_models
 
-    return await ensure_runtime_models(state, state.config)
+    return await ensure_runtime_models(state)
 
 
 async def run_connectivity_test(
