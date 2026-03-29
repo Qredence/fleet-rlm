@@ -6,8 +6,8 @@ import logging
 import uuid
 from typing import Any
 
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.models import (
+from fleet_rlm.integrations.database import (
+    FleetRepository,
     MemoryKind,
     MemoryScope,
     MemorySource,

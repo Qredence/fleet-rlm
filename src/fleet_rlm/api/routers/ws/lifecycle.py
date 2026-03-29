@@ -6,8 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import FleetRepository, RunStatus
 from fleet_rlm.integrations.database.types import (
     IdentityUpsertResult,
     RunStepCreateRequest,

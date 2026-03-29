@@ -7,7 +7,9 @@ from fleet_rlm.integrations.config.env import AppConfig
 
 
 def test_main_uses_python_ui(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fleet_cli, "_initialize_config", lambda _overrides: AppConfig())
+    monkeypatch.setattr(
+        fleet_cli, "initialize_app_config", lambda _overrides: AppConfig()
+    )
     called: dict[str, object] = {}
 
     def fake_run_terminal_chat(*, config: AppConfig, options: object) -> None:

@@ -492,7 +492,7 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    import fleet_rlm.runtime.execution.runtime_factory as runtime_factory
+    import fleet_rlm.runtime.models.rlm_runtime_modules as runtime_modules
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()
@@ -509,7 +509,7 @@ def test_get_runtime_module_caches_instances(monkeypatch):
         return fake_module
 
     monkeypatch.setattr(
-        runtime_factory, "build_runtime_module", _fake_build_runtime_module
+        runtime_modules, "build_runtime_module", _fake_build_runtime_module
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter(), verbose=True)

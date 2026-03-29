@@ -7,7 +7,7 @@ import time
 
 from fastapi import WebSocket
 
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
 from ...execution import ExecutionStepBuilder

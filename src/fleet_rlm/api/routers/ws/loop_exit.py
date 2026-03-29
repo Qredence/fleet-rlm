@@ -7,7 +7,7 @@ import logging
 
 from fastapi import WebSocket
 
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 
 from .failures import PersistenceRequiredError, classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json

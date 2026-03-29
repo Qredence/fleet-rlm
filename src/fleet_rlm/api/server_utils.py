@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fleet_rlm.integrations.database.models import SandboxProvider
+from fleet_rlm.integrations.database import SandboxProvider
 
 
 def sanitize_id(value: str, default_value: str) -> str:

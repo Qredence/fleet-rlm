@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
 from ...execution import ExecutionStep

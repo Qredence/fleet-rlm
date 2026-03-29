@@ -7,8 +7,7 @@ from typing import Any
 
 from fleet_rlm.api.execution import ExecutionStepBuilder
 from fleet_rlm.api.server_utils import parse_model_identity, resolve_sandbox_provider
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import FleetRepository, RunStatus
 from fleet_rlm.integrations.database.types import IdentityUpsertResult, RunCreateRequest
 
 from .failures import PersistenceRequiredError

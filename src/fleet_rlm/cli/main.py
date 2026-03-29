@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
-from fleet_rlm.integrations.config.env import AppConfig
 
 from .config import initialize_app_config, split_hydra_overrides
 
@@ -59,11 +58,6 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _initialize_config(overrides: list[str]) -> AppConfig:
-    """Compatibility shim for tests and callers patching the old helper name."""
-    return initialize_app_config(overrides)
-
-
 def main() -> None:
     # Quick check for 'web' subcommand before strict parsing
     if len(sys.argv) > 1 and sys.argv[1] == "web":
@@ -112,7 +106,7 @@ def main() -> None:
         parser.error(f"Unknown arguments: {' '.join(unknown_args)}")
 
     try:
-        config = _initialize_config(hydra_overrides)
+        config = initialize_app_config(hydra_overrides)
     except Exception as exc:
         print(f"Configuration Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
