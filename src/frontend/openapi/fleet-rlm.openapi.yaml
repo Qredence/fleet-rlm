@@ -6,98 +6,98 @@ paths:
   /health:
     get:
       tags:
-        - health
+      - health
       summary: Health
       description: Report a lightweight server health signal and package version.
       operationId: health_health_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
-        "503":
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
           description: Health status could not be determined.
   /ready:
     get:
       tags:
-        - health
+      - health
       summary: Ready
       description: Report whether critical startup dependencies are ready for requests.
       operationId: ready_ready_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReadyResponse"
-        "503":
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
           description: Readiness evaluation could not complete.
   /api/v1/auth/me:
     get:
       tags:
-        - auth
+      - auth
       summary: Get Me
       description: Return the authenticated identity and any admitted control-plane
         IDs.
       operationId: get_me_api_v1_auth_me_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthMeResponse"
-        "401":
+                $ref: '#/components/schemas/AuthMeResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "403":
+        '403':
           description: The authenticated tenant or user is not admitted to Fleet RLM.
-        "503":
+        '503':
           description: Authentication or repository services are not configured yet.
   /api/v1/sessions/state:
     get:
       tags:
-        - sessions
+      - sessions
       summary: List Session State
       description: Return lightweight summaries of active/restored in-memory session
         state.
       operationId: list_session_state_api_v1_sessions_state_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SessionStateResponse"
-        "401":
+                $ref: '#/components/schemas/SessionStateResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Session state is unavailable because server startup is incomplete.
   /api/v1/runtime/settings:
     get:
       tags:
-        - runtime
+      - runtime
       summary: Get Runtime Settings
       description: Return the effective runtime settings snapshot used by the local
         server.
       operationId: get_runtime_settings_api_v1_runtime_settings_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeSettingsSnapshot"
-        "401":
+                $ref: '#/components/schemas/RuntimeSettingsSnapshot'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
     patch:
       tags:
-        - runtime
+      - runtime
       summary: Patch Runtime Settings
       description: Persist allowed runtime setting changes and hot-apply them in-process.
       operationId: patch_runtime_settings_api_v1_runtime_settings_patch
@@ -105,256 +105,256 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RuntimeSettingsUpdateRequest"
+              $ref: '#/components/schemas/RuntimeSettingsUpdateRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeSettingsUpdateResponse"
-        "401":
+                $ref: '#/components/schemas/RuntimeSettingsUpdateResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
-        "400":
+        '400':
           description: The supplied runtime setting values failed validation.
-        "403":
+        '403':
           description: Runtime settings can only be updated when APP_ENV=local.
-        "422":
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/runtime/tests/modal:
     post:
       tags:
-        - runtime
+      - runtime
       summary: Test Modal Connection
       description: Run the Modal preflight and smoke test used by the Settings diagnostics
         UI.
       operationId: test_modal_connection_api_v1_runtime_tests_modal_post
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-        "401":
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
   /api/v1/runtime/tests/lm:
     post:
       tags:
-        - runtime
+      - runtime
       summary: Test Lm Connection
       description: Verify that the planner and delegate language-model configuration
         can load.
       operationId: test_lm_connection_api_v1_runtime_tests_lm_post
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-        "401":
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
   /api/v1/runtime/tests/daytona:
     post:
       tags:
-        - runtime
+      - runtime
       summary: Test Daytona Connection
       description: Run the Daytona preflight and connectivity check exposed in runtime
         diagnostics.
       operationId: test_daytona_connection_api_v1_runtime_tests_daytona_post
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-        "401":
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
   /api/v1/runtime/status:
     get:
       tags:
-        - runtime
+      - runtime
       summary: Get Runtime Status
       description: Return the combined runtime readiness, model, and provider diagnostics
         snapshot.
       operationId: get_runtime_status_api_v1_runtime_status_get
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RuntimeStatusResponse"
-        "401":
+                $ref: '#/components/schemas/RuntimeStatusResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
   /api/v1/runtime/volume/tree:
     get:
       tags:
-        - runtime
+      - runtime
       summary: Get Volume Tree
       description: List the runtime volume tree for the active workspace and provider.
       operationId: get_volume_tree_api_v1_runtime_volume_tree_get
       parameters:
-        - name: root_path
-          in: query
-          required: false
-          schema:
-            type: string
-            description: Directory path to list within the selected runtime volume.
-            default: /
-            title: Root Path
+      - name: root_path
+        in: query
+        required: false
+        schema:
+          type: string
           description: Directory path to list within the selected runtime volume.
-        - name: max_depth
-          in: query
-          required: false
-          schema:
-            type: integer
-            maximum: 10
-            minimum: 1
-            description: Maximum directory depth to traverse while building the file
-              tree.
-            default: 3
-            title: Max Depth
-          description: Maximum directory depth to traverse while building the file tree.
-        - name: provider
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - enum:
-                  - modal
-                  - daytona
-                type: string
-              - type: "null"
-            description: Optional runtime volume backend override. Defaults to the active
-              sandbox provider.
-            title: Provider
+          default: /
+          title: Root Path
+        description: Directory path to list within the selected runtime volume.
+      - name: max_depth
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10
+          minimum: 1
+          description: Maximum directory depth to traverse while building the file
+            tree.
+          default: 3
+          title: Max Depth
+        description: Maximum directory depth to traverse while building the file tree.
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - modal
+            - daytona
+            type: string
+          - type: 'null'
           description: Optional runtime volume backend override. Defaults to the active
             sandbox provider.
+          title: Provider
+        description: Optional runtime volume backend override. Defaults to the active
+          sandbox provider.
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VolumeTreeResponse"
-        "401":
+                $ref: '#/components/schemas/VolumeTreeResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
-        "400":
+        '400':
           description: The requested root path is invalid.
-        "502":
+        '502':
           description: The runtime volume provider failed to list the requested path.
-        "504":
+        '504':
           description: Volume listing timed out before the backend returned a result.
-        "422":
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/runtime/volume/file:
     get:
       tags:
-        - runtime
+      - runtime
       summary: Get Volume File Content
       description: Read a text preview for a single file from the runtime volume.
       operationId: get_volume_file_content_api_v1_runtime_volume_file_get
       parameters:
-        - name: path
-          in: query
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            description: Absolute or volume-relative file path to preview from the runtime
-              volume.
-            title: Path
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
           description: Absolute or volume-relative file path to preview from the runtime
             volume.
-        - name: max_bytes
-          in: query
-          required: false
-          schema:
-            type: integer
-            maximum: 1000000
-            minimum: 1
-            description: Maximum number of bytes of text content to return in the preview
-              response.
-            default: 200000
-            title: Max Bytes
+          title: Path
+        description: Absolute or volume-relative file path to preview from the runtime
+          volume.
+      - name: max_bytes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000000
+          minimum: 1
           description: Maximum number of bytes of text content to return in the preview
             response.
-        - name: provider
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - enum:
-                  - modal
-                  - daytona
-                type: string
-              - type: "null"
-            description: Optional runtime volume backend override. Defaults to the active
-              sandbox provider.
-            title: Provider
+          default: 200000
+          title: Max Bytes
+        description: Maximum number of bytes of text content to return in the preview
+          response.
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - modal
+            - daytona
+            type: string
+          - type: 'null'
           description: Optional runtime volume backend override. Defaults to the active
             sandbox provider.
+          title: Provider
+        description: Optional runtime volume backend override. Defaults to the active
+          sandbox provider.
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VolumeFileContentResponse"
-        "401":
+                $ref: '#/components/schemas/VolumeFileContentResponse'
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "503":
+        '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
-        "400":
+        '400':
           description: The requested file path is invalid or points to a directory.
-        "404":
+        '404':
           description: The requested runtime volume file does not exist.
-        "502":
+        '502':
           description: The runtime volume provider failed to read the requested file.
-        "504":
+        '504':
           description: Volume file reading timed out before the backend returned a
             result.
-        "422":
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/traces/feedback:
     post:
       tags:
-        - traces
+      - traces
       summary: Create Trace Feedback
       description: Record human feedback and optional ground truth for an MLflow trace.
       operationId: create_trace_feedback_api_v1_traces_feedback_post
@@ -362,31 +362,31 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TraceFeedbackRequest"
+              $ref: '#/components/schemas/TraceFeedbackRequest'
         required: true
       responses:
-        "200":
+        '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TraceFeedbackResponse"
-        "400":
+                $ref: '#/components/schemas/TraceFeedbackResponse'
+        '400':
           description: The feedback request did not include a valid trace identifier.
-        "401":
+        '401':
           description: Authentication is required or the provided token is invalid.
-        "403":
+        '403':
           description: The authenticated user is not allowed to annotate this trace.
-        "404":
+        '404':
           description: No MLflow trace matched the provided identifier.
-        "503":
+        '503':
           description: MLflow feedback services are unavailable or misconfigured.
-        "422":
+        '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HTTPValidationError"
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthMeResponse:
@@ -401,41 +401,41 @@ components:
           description: User claim resolved from auth.
         email:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Email
           description: User email address when the auth provider returned one.
         name:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Name
           description: Display name returned by the auth provider, when available.
         tenant_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Tenant Id
           description: Persisted control-plane tenant identifier for admitted Entra
             users.
         user_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: User Id
           description: Persisted control-plane user identifier for admitted Entra
             users.
       type: object
       required:
-        - tenant_claim
-        - user_claim
+      - tenant_claim
+      - user_claim
       title: AuthMeResponse
       description: Resolved identity payload returned to authenticated clients.
     HTTPValidationError:
       properties:
         detail:
           items:
-            $ref: "#/components/schemas/ValidationError"
+            $ref: '#/components/schemas/ValidationError'
           type: array
           title: Detail
       type: object
@@ -468,17 +468,17 @@ components:
         planner:
           type: string
           enum:
-            - ready
-            - missing
+          - ready
+          - missing
           title: Planner
           description: Planner readiness classification.
         database:
           type: string
           enum:
-            - ready
-            - missing
-            - disabled
-            - degraded
+          - ready
+          - missing
+          - disabled
+          - degraded
           title: Database
           description: Database readiness classification for persistence-backed features.
         database_required:
@@ -492,12 +492,12 @@ components:
           description: Active sandbox backend selected for runtime execution.
       type: object
       required:
-        - ready
-        - planner_configured
-        - planner
-        - database
-        - database_required
-        - sandbox_provider
+      - ready
+      - planner_configured
+      - planner
+      - database
+      - database_required
+      - sandbox_provider
       title: ReadyResponse
       description: Response body for the readiness endpoint.
     RuntimeActiveModels:
@@ -506,17 +506,17 @@ components:
           type: string
           title: Planner
           description: Planner model identifier currently in use.
-          default: ""
+          default: ''
         delegate:
           type: string
           title: Delegate
           description: Delegate model identifier currently in use.
-          default: ""
+          default: ''
         delegate_small:
           type: string
           title: Delegate Small
           description: Small delegate model identifier currently in use, when configured.
-          default: ""
+          default: ''
       type: object
       title: RuntimeActiveModels
       description: Resolved active model identifiers currently loaded by the runtime.
@@ -525,9 +525,9 @@ components:
         kind:
           type: string
           enum:
-            - modal
-            - lm
-            - daytona
+          - modal
+          - lm
+          - daytona
           title: Kind
           description: Runtime subsystem that was tested.
         ok:
@@ -557,28 +557,28 @@ components:
             cleanly.
         latency_ms:
           anyOf:
-            - type: integer
-            - type: "null"
+          - type: integer
+          - type: 'null'
           title: Latency Ms
           description: Observed latency for the successful smoke test, when applicable.
         output_preview:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Output Preview
           description: Short preview of the smoke-test output, when available.
         error:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Error
           description: Error summary when the test failed.
       type: object
       required:
-        - kind
-        - ok
-        - preflight_ok
-        - checked_at
+      - kind
+      - ok
+      - preflight_ok
+      - checked_at
       title: RuntimeConnectivityTestResponse
       description: Result payload for runtime connectivity and preflight diagnostics.
     RuntimeSettingsSnapshot:
@@ -608,7 +608,7 @@ components:
           description: Masked secret values returned for display-only settings fields.
       type: object
       required:
-        - env_path
+      - env_path
       title: RuntimeSettingsSnapshot
       description: Current runtime settings snapshot returned by the Settings API.
     RuntimeSettingsUpdateRequest:
@@ -635,7 +635,7 @@ components:
           description: Filesystem path to the environment file that was updated.
       type: object
       required:
-        - env_path
+      - env_path
       title: RuntimeSettingsUpdateResponse
       description: Result payload after runtime settings are persisted and hot-applied.
     RuntimeStatusResponse:
@@ -653,13 +653,13 @@ components:
           title: Ready
           description: Whether critical runtime services are ready to serve requests.
         active_models:
-          $ref: "#/components/schemas/RuntimeActiveModels"
+          $ref: '#/components/schemas/RuntimeActiveModels'
           description: Resolved planner and delegate model identities.
         sandbox_provider:
           type: string
           enum:
-            - modal
-            - daytona
+          - modal
+          - daytona
           title: Sandbox Provider
           description: Active sandbox backend selected for runtime execution and volume
             browsing.
@@ -685,7 +685,7 @@ components:
           title: Daytona
           description: Daytona configuration and readiness diagnostics.
         tests:
-          $ref: "#/components/schemas/RuntimeTestCache"
+          $ref: '#/components/schemas/RuntimeTestCache'
           description: Cached runtime connectivity test results exposed in the Settings
             UI.
         guidance:
@@ -696,11 +696,11 @@ components:
           description: Human-readable remediation steps for incomplete runtime setup.
       type: object
       required:
-        - app_env
-        - write_enabled
-        - ready
-        - active_models
-        - tests
+      - app_env
+      - write_enabled
+      - ready
+      - active_models
+      - tests
       title: RuntimeStatusResponse
       description: Combined readiness and diagnostics snapshot for the runtime settings
         UI.
@@ -708,20 +708,20 @@ components:
       properties:
         modal:
           anyOf:
-            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-            - type: "null"
+          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+          - type: 'null'
           description: Most recent Modal connectivity test result, if one has been
             run.
         lm:
           anyOf:
-            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-            - type: "null"
+          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+          - type: 'null'
           description: Most recent language-model connectivity test result, if one
             has been run.
         daytona:
           anyOf:
-            - $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
-            - type: "null"
+          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+          - type: 'null'
           description: Most recent Daytona connectivity test result, if one has been
             run.
       type: object
@@ -736,7 +736,7 @@ components:
           default: true
         sessions:
           items:
-            $ref: "#/components/schemas/SessionStateSummary"
+            $ref: '#/components/schemas/SessionStateSummary'
           type: array
           title: Sessions
           description: Active or restored session summaries currently known to the
@@ -760,8 +760,8 @@ components:
           description: User identifier owning the session.
         session_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Session Id
           description: Optional explicit session identifier when one has been assigned.
         history_turns:
@@ -791,31 +791,31 @@ components:
           default: 0
         updated_at:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Updated At
           description: Last updated timestamp recorded in the session manifest, when
             available.
       type: object
       required:
-        - key
-        - workspace_id
-        - user_id
+      - key
+      - workspace_id
+      - user_id
       title: SessionStateSummary
       description: Lightweight summary of a persisted or active chat session.
     TraceFeedbackRequest:
       properties:
         trace_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Trace Id
           description: Resolved MLflow trace identifier when the client already knows
             it.
         client_request_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Client Request Id
           description: Client request identifier used to resolve the trace when trace_id
             is absent.
@@ -825,20 +825,20 @@ components:
           description: Whether the model output was considered correct.
         comment:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Comment
           description: Optional free-form reviewer comment explaining the feedback.
         expected_response:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Expected Response
           description: Optional ground-truth response or correction to log alongside
             the feedback.
       type: object
       required:
-        - is_correct
+      - is_correct
       title: TraceFeedbackRequest
       description: Feedback payload for annotating an MLflow trace.
     TraceFeedbackResponse:
@@ -854,8 +854,8 @@ components:
           description: Resolved MLflow trace identifier that received the feedback.
         client_request_id:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Client Request Id
           description: Resolved client request identifier associated with the trace,
             when available.
@@ -871,7 +871,7 @@ components:
           default: false
       type: object
       required:
-        - trace_id
+      - trace_id
       title: TraceFeedbackResponse
       description: Result payload after MLflow feedback has been recorded.
     ValidationError:
@@ -879,8 +879,8 @@ components:
         loc:
           items:
             anyOf:
-              - type: string
-              - type: integer
+            - type: string
+            - type: integer
           type: array
           title: Location
         msg:
@@ -896,17 +896,17 @@ components:
           title: Context
       type: object
       required:
-        - loc
-        - msg
-        - type
+      - loc
+      - msg
+      - type
       title: ValidationError
     VolumeFileContentResponse:
       properties:
         provider:
           type: string
           enum:
-            - modal
-            - daytona
+          - modal
+          - daytona
           title: Provider
           description: Runtime volume backend used to satisfy the request.
         path:
@@ -933,11 +933,11 @@ components:
           default: false
       type: object
       required:
-        - provider
-        - path
-        - mime
-        - size
-        - content
+      - provider
+      - path
+      - mime
+      - size
+      - content
       title: VolumeFileContentResponse
       description: Response for runtime volume file-content preview endpoint.
     VolumeTreeNode:
@@ -957,35 +957,35 @@ components:
         type:
           type: string
           enum:
-            - volume
-            - directory
-            - file
+          - volume
+          - directory
+          - file
           title: Type
           description: Kind of file-system node represented by this entry.
         children:
           items:
-            $ref: "#/components/schemas/VolumeTreeNode"
+            $ref: '#/components/schemas/VolumeTreeNode'
           type: array
           title: Children
           description: Child nodes for directory or volume entries.
         size:
           anyOf:
-            - type: integer
-            - type: "null"
+          - type: integer
+          - type: 'null'
           title: Size
           description: File size in bytes when the provider reports one.
         modified_at:
           anyOf:
-            - type: string
-            - type: "null"
+          - type: string
+          - type: 'null'
           title: Modified At
           description: Last modified timestamp when the provider reports one.
       type: object
       required:
-        - id
-        - name
-        - path
-        - type
+      - id
+      - name
+      - path
+      - type
       title: VolumeTreeNode
       description: A single node in the volume file tree.
     VolumeTreeResponse:
@@ -993,8 +993,8 @@ components:
         provider:
           type: string
           enum:
-            - modal
-            - daytona
+          - modal
+          - daytona
           title: Provider
           description: Runtime volume backend used to satisfy the request.
         volume_name:
@@ -1007,7 +1007,7 @@ components:
           description: Normalized root path used for the listing request.
         nodes:
           items:
-            $ref: "#/components/schemas/VolumeTreeNode"
+            $ref: '#/components/schemas/VolumeTreeNode'
           type: array
           title: Nodes
           description: Tree nodes rooted at the requested path.
@@ -1029,9 +1029,9 @@ components:
           default: false
       type: object
       required:
-        - provider
-        - volume_name
-        - root_path
-        - nodes
+      - provider
+      - volume_name
+      - root_path
+      - nodes
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.
