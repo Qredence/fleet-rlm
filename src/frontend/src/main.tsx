@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { lazy, Suspense } from "react";
-import App from "@/app/app.tsx";
+import App from "@/app/App.tsx";
 import "./styles/globals.css";
 
 const Agentation = import.meta.env.DEV
