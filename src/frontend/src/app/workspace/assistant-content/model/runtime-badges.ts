@@ -16,6 +16,7 @@ export function getRuntimeBadgeStrings(ctx?: RuntimeContext): string[] {
   if (ctx.executionMode && ctx.executionMode !== "react") {
     pills.push(`mode ${ctx.executionMode}`);
   }
+  if (ctx.sandboxTransition) pills.push(ctx.sandboxTransition);
   if (ctx.sandboxActive) pills.push("sandbox");
   if (ctx.sandboxId) pills.push(`sandbox ${ctx.sandboxId.slice(0, 10)}`);
   if (ctx.volumeName) pills.push(ctx.volumeName);

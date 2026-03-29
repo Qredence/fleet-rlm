@@ -45,13 +45,11 @@ from .runtime_factory import (
     _read_docs,
     _require_planner_ready,
     build_chat_agent_for_runtime_mode,
-    build_daytona_workbench_chat_agent,
     build_react_chat_agent,
 )
 
 __all__ = [
     "build_chat_agent_for_runtime_mode",
-    "build_daytona_workbench_chat_agent",
     "build_react_chat_agent",
     "check_secret_key",
     "check_secret_presence",

@@ -24,6 +24,7 @@ from .interpreter_assets import (
     _FINAL_OUTPUT_MARKER,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
     _base_setup_code,
+    _generic_submit_code,
     _typed_submit_code,
 )
 from .runtime import (
@@ -173,12 +174,16 @@ async def aensure_setup(
     session: DaytonaSandboxSession,
     *,
     base_setup_code: Callable[..., str] = _base_setup_code,
+    generic_submit_code: Callable[[], str] = _generic_submit_code,
     typed_submit_code: Callable[[list[dict[str, Any]]], str] = _typed_submit_code,
     submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None] | None = None,
 ) -> Any:
     submit_signature_fn = submit_signature_fn or (lambda: submit_signature(interpreter))
     context = await session.aensure_context()
-    if interpreter._setup_context_id != session.context_id:
+    if (
+        interpreter._setup_context_id != session.context_id
+        or interpreter._setup_workspace_path != session.workspace_path
+    ):
         result = await _await_if_needed(
             session.sandbox.code_interpreter.run_code(
                 base_setup_code(
@@ -193,13 +198,26 @@ async def aensure_setup(
                 f"Failed to initialize Daytona sandbox helpers: {result.error.value}"
             )
         interpreter._setup_context_id = session.context_id
+        interpreter._setup_workspace_path = session.workspace_path
         interpreter._submit_signature_key = None
 
     current_submit_signature = submit_signature_fn()
-    if (
-        current_submit_signature
-        and current_submit_signature != interpreter._submit_signature_key
-    ):
+    if current_submit_signature is None:
+        if interpreter._submit_signature_key is not None:
+            result = await _await_if_needed(
+                session.sandbox.code_interpreter.run_code(
+                    generic_submit_code(),
+                    context=context,
+                )
+            )
+            if result.error:
+                raise CodeInterpreterError(
+                    f"Failed to restore generic SUBMIT: {result.error.value}"
+                )
+            interpreter._submit_signature_key = None
+        return context
+
+    if current_submit_signature != interpreter._submit_signature_key:
         result = await _await_if_needed(
             session.sandbox.code_interpreter.run_code(
                 typed_submit_code(interpreter.output_fields or []),

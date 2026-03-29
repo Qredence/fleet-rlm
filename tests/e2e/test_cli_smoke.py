@@ -38,8 +38,16 @@ def _normalized_help_text(text: str) -> str:
 def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "chat" in result.stdout
-    assert "init" in result.stdout
+    normalized_help = _normalized_help_text(result.stdout)
+
+    for command_name in (
+        "chat",
+        "init",
+        "serve-api",
+        "serve-mcp",
+        "daytona-smoke",
+    ):
+        assert command_name in normalized_help
 
 
 def test_init_list_shows_all_categories():

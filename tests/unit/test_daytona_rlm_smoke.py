@@ -26,6 +26,7 @@ class _FakeSession:
 class _FakeRuntime:
     def __init__(self, session: _FakeSession | None = None) -> None:
         self.session = session or _FakeSession()
+        self.close_calls = 0
 
     def create_workspace_session(
         self,
@@ -38,12 +39,16 @@ class _FakeRuntime:
         del repo_url, ref, context_paths, volume_name
         return self.session
 
+    def close(self) -> None:
+        self.close_calls += 1
+
 
 class _FakeInterpreter:
     def __init__(
         self,
         *,
         runtime: _FakeRuntime,
+        owns_runtime: bool = False,
         repo_url: str | None,
         repo_ref: str | None,
         timeout: int,
@@ -51,6 +56,7 @@ class _FakeInterpreter:
     ) -> None:
         del repo_url, repo_ref, timeout, execute_timeout
         self.runtime = runtime
+        self.owns_runtime = owns_runtime
         self.session = runtime.create_workspace_session(repo_url=None, ref=None)
         self.counter = 0
 
@@ -71,6 +77,8 @@ class _FakeInterpreter:
 
     def shutdown(self) -> None:
         self.session.delete()
+        if self.owns_runtime:
+            self.runtime.close()
 
 
 def test_run_daytona_smoke_validates_context_persistence(monkeypatch) -> None:
@@ -169,3 +177,31 @@ def test_run_daytona_smoke_reports_execution_failures_and_cleans_up(
     assert result.error_category == "driver_execution_error"
     assert "execution broke" in str(result.error_message)
     assert runtime.session.deleted is True
+
+
+def test_run_daytona_smoke_closes_owned_runtime_after_startup_failure(
+    monkeypatch,
+) -> None:
+    class _BrokenInterpreter(_FakeInterpreter):
+        def _ensure_session_sync(self) -> _FakeSession:
+            raise DaytonaDiagnosticError(
+                "Daytona sandbox create failure: invalid credentials",
+                category="sandbox_create_clone_error",
+                phase="sandbox_create",
+            )
+
+    runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaSandboxRuntime",
+        lambda: runtime,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaInterpreter",
+        _BrokenInterpreter,
+    )
+
+    result = run_daytona_smoke(repo="https://github.com/example/repo.git")
+
+    assert result.error_category == "sandbox_create_clone_error"
+    assert result.termination_phase == "sandbox_create"
+    assert runtime.close_calls == 1

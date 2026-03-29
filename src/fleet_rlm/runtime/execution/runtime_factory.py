@@ -14,15 +14,6 @@ if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
 
 
-def build_runtime_module(*args, **kwargs):
-    """Compatibility wrapper for tests patching the old module-level symbol."""
-    from fleet_rlm.runtime.models.rlm_runtime_modules import (
-        build_runtime_module as _impl,
-    )
-
-    return _impl(*args, **kwargs)
-
-
 def get_runtime_module(agent: RLMReActChatAgent, name: str) -> dspy.Module:
     """Return a cached long-context runtime module by name.
 
@@ -45,6 +36,8 @@ def get_runtime_module(agent: RLMReActChatAgent, name: str) -> dspy.Module:
     module = agent._runtime_modules.get(name)
     if module is not None:
         return module
+
+    from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
 
     module = build_runtime_module(
         name,

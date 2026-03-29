@@ -18,6 +18,7 @@ from .chat_turns import (
     finalize_turn,
     prediction_guardrail_warnings,
     prediction_response_and_trajectory,
+    runtime_degradation_payload,
     snapshot_turn_metrics,
 )
 from .recursive_runtime import spawn_delegate_sub_agent_async
@@ -120,6 +121,7 @@ def forced_stream_final_payload(
             "guardrail_warnings": payload_input.guardrail_warnings,
             "final_reasoning": payload_input.final_reasoning,
             **snapshot_turn_metrics(agent).as_payload(),
+            **runtime_degradation_payload(agent),
         }
     )
 

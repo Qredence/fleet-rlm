@@ -417,27 +417,6 @@ def build_chat_agent_for_runtime_mode(
     return provider.build_agent(options=options, planner_lm=planner_lm)
 
 
-def build_daytona_workbench_chat_agent(
-    *,
-    timeout: int = 900,
-    max_depth: int = 2,
-    history_max_turns: int | None = None,
-    planner_lm: Any | None = None,
-    delegate_lm: Any | None = None,
-    interpreter_async_execute: bool = True,
-) -> Any:
-    """Compatibility wrapper for the Daytona shared-runtime chat builder."""
-    return build_chat_agent_for_runtime_mode(
-        runtime_mode="daytona_pilot",
-        timeout=timeout,
-        max_depth=max_depth,
-        history_max_turns=history_max_turns,
-        planner_lm=planner_lm,
-        delegate_lm=delegate_lm,
-        interpreter_async_execute=interpreter_async_execute,
-    )
-
-
 def resolve_server_volume_name(config: AppConfig) -> str | None:
     """Resolve the server-side volume name from config, falling back to default."""
     volume_name = config.interpreter.volume_name

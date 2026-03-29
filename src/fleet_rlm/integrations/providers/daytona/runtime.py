@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+import threading
 from typing import Any
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
@@ -17,6 +19,7 @@ from .runtime_helpers import (
     _aclone_repo,
     _aensure_daytona_volume_layout,
     _aensure_workspace_root,
+    _areconcile_repo_checkout,
     _aresolve_clone_ref,
     _astage_context_paths,
     _await_if_needed,
@@ -34,6 +37,7 @@ class DaytonaSandboxSession:
     sandbox: Any
     repo_url: str | None
     ref: str | None
+    volume_name: str | None
     workspace_path: str
     context_sources: list[ContextSource] = field(default_factory=list)
     phase_timings_ms: dict[str, int] = field(default_factory=dict)
@@ -50,13 +54,16 @@ class DaytonaSandboxSession:
         if self._context is not None:
             return self._context
         if self.context_id:
-            existing_contexts = await _await_if_needed(
-                self.sandbox.code_interpreter.list_contexts()
-            )
-            for existing in existing_contexts:
-                if str(getattr(existing, "id", "") or "") == self.context_id:
-                    self._context = existing
-                    return existing
+            existing_contexts: list[Any] | None = None
+            with suppress(Exception):
+                existing_contexts = await _await_if_needed(
+                    self.sandbox.code_interpreter.list_contexts()
+                )
+            if existing_contexts is not None:
+                for existing in existing_contexts:
+                    if str(getattr(existing, "id", "") or "") == self.context_id:
+                        self._context = existing
+                        return existing
         context = await _await_if_needed(
             self.sandbox.code_interpreter.create_context(cwd=self.workspace_path)
         )
@@ -152,16 +159,31 @@ class DaytonaSandboxRuntime:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
         self._client: Any | None = _build_daytona_client(resolved)
+        self._client_owner: tuple[int, int] | None = None
 
-    def _require_client(self) -> Any:
+    async def _aget_client(self) -> Any:
+        owner = (threading.get_ident(), id(asyncio.get_running_loop()))
         client = self._client
         if client is None:
             raise RuntimeError("Daytona runtime client is closed")
-        return client
+        if self._client_owner is None:
+            self._client_owner = owner
+            return client
+        if self._client_owner == owner:
+            return client
+        close = getattr(client, "close", None)
+        if close is not None and callable(close):
+            with suppress(Exception):
+                await _await_if_needed(close())
+        rebuilt = _build_daytona_client(self._resolved_config)
+        self._client = rebuilt
+        self._client_owner = owner
+        return rebuilt
 
     async def aclose(self) -> None:
         client = self._client
         self._client = None
+        self._client_owner = None
         if client is None:
             return
         close = getattr(client, "close", None)
@@ -178,7 +200,7 @@ class DaytonaSandboxRuntime:
         except ImportError as exc:  # pragma: no cover - environment specific
             raise _daytona_import_error(exc) from exc
 
-        client = self._require_client()
+        client = await self._aget_client()
         volume = await _await_if_needed(client.volume.get(volume_name, create=True))
         return await _await_if_needed(
             client.create(
@@ -198,7 +220,8 @@ class DaytonaSandboxRuntime:
         try:
             if volume_name:
                 return await self._acreate_volume_mounted_sandbox(volume_name)
-            return await _await_if_needed(self._require_client().create())
+            client = await self._aget_client()
+            return await _await_if_needed(client.create())
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox create failure: {exc}",
@@ -208,7 +231,8 @@ class DaytonaSandboxRuntime:
 
     async def _aget_sandbox(self, sandbox_id: str) -> Any:
         try:
-            return await _await_if_needed(self._require_client().get(sandbox_id))
+            client = await self._aget_client()
+            return await _await_if_needed(client.get(sandbox_id))
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox resume failure: {exc}",
@@ -222,6 +246,7 @@ class DaytonaSandboxRuntime:
         sandbox: Any,
         repo_url: str | None,
         resolved_ref: str | None,
+        volume_name: str | None,
         workspace_path: str,
         context_sources: list[ContextSource],
         timings: dict[str, int],
@@ -231,6 +256,7 @@ class DaytonaSandboxRuntime:
             sandbox=sandbox,
             repo_url=repo_url,
             ref=resolved_ref,
+            volume_name=volume_name,
             workspace_path=workspace_path,
             context_sources=context_sources,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
@@ -293,6 +319,7 @@ class DaytonaSandboxRuntime:
                 sandbox=sandbox,
                 repo_url=repo_url,
                 resolved_ref=resolved_ref,
+                volume_name=volume_name,
                 workspace_path=workspace_path,
                 context_sources=context_sources,
                 timings=timings,
@@ -325,6 +352,7 @@ class DaytonaSandboxRuntime:
         sandbox_id: str,
         repo_url: str | None,
         ref: str | None,
+        volume_name: str | None = None,
         workspace_path: str,
         context_sources: list[ContextSource] | None = None,
         context_id: str | None = None,
@@ -335,6 +363,7 @@ class DaytonaSandboxRuntime:
             sandbox=sandbox,
             repo_url=repo_url,
             resolved_ref=ref,
+            volume_name=volume_name,
             workspace_path=workspace_path,
             context_sources=list(context_sources or []),
             timings={
@@ -342,6 +371,11 @@ class DaytonaSandboxRuntime:
             },
             context_id=context_id,
         )
+        if volume_name:
+            await _aensure_daytona_volume_layout(
+                sandbox=sandbox,
+                mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            )
         return session
 
     def resume_workspace_session(
@@ -350,6 +384,7 @@ class DaytonaSandboxRuntime:
         sandbox_id: str,
         repo_url: str | None,
         ref: str | None,
+        volume_name: str | None = None,
         workspace_path: str,
         context_sources: list[ContextSource] | None = None,
         context_id: str | None = None,
@@ -359,9 +394,63 @@ class DaytonaSandboxRuntime:
             sandbox_id=sandbox_id,
             repo_url=repo_url,
             ref=ref,
+            volume_name=volume_name,
             workspace_path=workspace_path,
             context_sources=context_sources,
             context_id=context_id,
+        )
+
+    async def areconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        workspace_started = time.perf_counter()
+        workspace_path = await _abuild_workspace_path(session.sandbox, repo_url)
+        resolved_ref = await _aresolve_clone_ref(repo_url, ref) if repo_url else ref
+        await _areconcile_repo_checkout(
+            sandbox=session.sandbox,
+            repo_url=repo_url,
+            ref=resolved_ref,
+            workspace_path=workspace_path,
+        )
+        session.phase_timings_ms["workspace_reconcile"] = int(
+            (time.perf_counter() - workspace_started) * 1000
+        )
+
+        context_started = time.perf_counter()
+        context_sources = await _astage_context_paths(
+            sandbox=session.sandbox,
+            workspace_path=workspace_path,
+            context_paths=context_paths,
+            reset_existing=True,
+        )
+        session.phase_timings_ms["context_stage"] = int(
+            (time.perf_counter() - context_started) * 1000
+        )
+        session.repo_url = repo_url
+        session.ref = resolved_ref
+        session.workspace_path = workspace_path
+        session.context_sources = context_sources
+        return session
+
+    def reconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        return _run_async_compat(
+            self.areconcile_workspace_session,
+            session,
+            repo_url=repo_url,
+            ref=ref,
+            context_paths=context_paths,
         )
 
 

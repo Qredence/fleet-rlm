@@ -188,6 +188,9 @@ make test-fast
 make quality-gate
 make release-artifacts
 make release-check
+
+# Focused backend/runtime regression lane
+uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_runtime.py tests/unit/test_daytona_interpreter.py tests/unit/test_daytona_workbench_chat_agent.py -m "not live_llm and not live_daytona and not benchmark"
 ```
 
 Focused docs validation:
@@ -204,6 +207,8 @@ Use this order for Daytona work:
 
 1. Set `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional `DAYTONA_TARGET`.
 2. Run `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch-or-sha>]`.
+
+In local/default-local source checkouts, Daytona config resolution prefers repo `.env` / `.env.local` values over inherited shell exports so branch-local validation uses the checkout's intended credentials.
 
 This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_URL` instead.
 

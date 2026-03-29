@@ -46,6 +46,8 @@ def test_health_endpoint_and_request_id_header(local_client: TestClient) -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
+    assert isinstance(payload["version"], str)
+    assert payload["version"]
     assert "X-Request-ID" in response.headers
 
 
@@ -54,6 +56,14 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
     response = local_client.get("/ready")
     assert response.status_code == 200
     payload = response.json()
+    assert set(payload) == {
+        "ready",
+        "planner_configured",
+        "planner",
+        "database",
+        "database_required",
+        "sandbox_provider",
+    }
     assert payload["ready"] is False
     assert payload["planner_configured"] is False
     assert payload["planner"] == "missing"
@@ -131,6 +141,39 @@ def test_sessions_state_endpoint_exists_and_returns_expected_shape(
     assert isinstance(payload["sessions"], list)
 
 
+def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    state = default_client.app.state.server_state
+    state.sessions["broken"] = "stale-session-record"
+    state.sessions["partial"] = {
+        "workspace_id": ["workspace-a"],
+        "user_id": {"value": "user-a"},
+        "session_id": ["session-a"],
+        "manifest": {"metadata": {"updated_at": ["invalid"]}},
+        "session": {"state": {"history": "invalid", "documents": []}},
+    }
+
+    response = default_client.get("/api/v1/sessions/state", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert isinstance(payload["sessions"], list)
+    assert {session["key"] for session in payload["sessions"]} == {"broken", "partial"}
+    broken, partial = payload["sessions"]
+    assert broken["workspace_id"] == "default"
+    assert broken["user_id"] == "anonymous"
+    assert broken["session_id"] is None
+    assert partial["workspace_id"] == "default"
+    assert partial["user_id"] == "anonymous"
+    assert partial["session_id"] is None
+    assert partial["updated_at"] is None
+    assert partial["history_turns"] == 0
+    assert partial["document_count"] == 0
+
+
 def test_runtime_contract_endpoints_remain_available(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -153,6 +196,17 @@ def test_runtime_contract_endpoints_remain_available(
     assert status.status_code == 200
     assert modal.status_code == 200
     assert lm.status_code == 200
+
+
+def test_openapi_excludes_legacy_one_shot_and_task_schemas(
+    local_client: TestClient,
+) -> None:
+    schema_names = set(local_client.app.openapi()["components"]["schemas"])
+
+    assert "ChatRequest" not in schema_names
+    assert "ChatResponse" not in schema_names
+    assert "TaskRequest" not in schema_names
+    assert "TaskResponse" not in schema_names
 
 
 def _patch_main_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

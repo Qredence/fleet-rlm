@@ -1,11 +1,21 @@
 """Router for session state management."""
 
+from collections.abc import Mapping
+
 from fastapi import APIRouter
 
 from fleet_rlm.api.dependencies import ServerStateDep
 from fleet_rlm.api.schemas.core import SessionStateResponse, SessionStateSummary
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+def _string_or_default(value: object, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 @router.get(
@@ -24,34 +34,41 @@ async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []
     for key, payload in state.sessions.items():
-        manifest = payload.get("manifest", {}) if isinstance(payload, dict) else {}
-        session = payload.get("session", {}) if isinstance(payload, dict) else {}
-        session_state = session.get("state", {}) if isinstance(session, dict) else {}
+        payload_dict = payload if isinstance(payload, Mapping) else {}
+        manifest = payload_dict.get("manifest", {})
+        session = payload_dict.get("session", {})
+        session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
         history = (
-            session_state.get("history", []) if isinstance(session_state, dict) else []
+            session_state.get("history", [])
+            if isinstance(session_state, Mapping)
+            else []
         )
         documents = (
             session_state.get("documents", {})
-            if isinstance(session_state, dict)
+            if isinstance(session_state, Mapping)
             else {}
         )
-        memory = manifest.get("memory", []) if isinstance(manifest, dict) else []
-        logs = manifest.get("logs", []) if isinstance(manifest, dict) else []
-        artifacts = manifest.get("artifacts", []) if isinstance(manifest, dict) else []
-        metadata = manifest.get("metadata", {}) if isinstance(manifest, dict) else {}
+        memory = manifest.get("memory", []) if isinstance(manifest, Mapping) else []
+        logs = manifest.get("logs", []) if isinstance(manifest, Mapping) else []
+        artifacts = (
+            manifest.get("artifacts", []) if isinstance(manifest, Mapping) else []
+        )
+        metadata = manifest.get("metadata", {}) if isinstance(manifest, Mapping) else {}
         summaries.append(
             SessionStateSummary(
-                key=key,
-                workspace_id=str(payload.get("workspace_id", "default")),
-                user_id=str(payload.get("user_id", "anonymous")),
-                session_id=payload.get("session_id"),
+                key=str(key),
+                workspace_id=_string_or_default(
+                    payload_dict.get("workspace_id"), "default"
+                ),
+                user_id=_string_or_default(payload_dict.get("user_id"), "anonymous"),
+                session_id=_optional_string(payload_dict.get("session_id")),
                 history_turns=len(history) if isinstance(history, list) else 0,
                 document_count=len(documents) if isinstance(documents, dict) else 0,
                 memory_count=len(memory) if isinstance(memory, list) else 0,
                 log_count=len(logs) if isinstance(logs, list) else 0,
                 artifact_count=len(artifacts) if isinstance(artifacts, list) else 0,
-                updated_at=metadata.get("updated_at")
-                if isinstance(metadata, dict)
+                updated_at=_optional_string(metadata.get("updated_at"))
+                if isinstance(metadata, Mapping)
                 else None,
             )
         )

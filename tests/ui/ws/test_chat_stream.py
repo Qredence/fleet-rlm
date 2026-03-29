@@ -607,7 +607,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
     )
     monkeypatch.setattr(
         "fleet_rlm.api.routers.ws.stream.merge_trace_result_metadata",
-        lambda payload, response_preview=None: {
+        lambda payload, response_preview=None, trace_metadata=None: {
             **(payload or {}),
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
@@ -625,6 +625,71 @@ def test_websocket_final_event_can_include_mlflow_metadata(
     assert data["data"]["payload"]["history_turns"] == 1
     assert data["data"]["payload"]["mlflow_trace_id"] == "trace-123"
     assert data["data"]["payload"]["mlflow_client_request_id"] == "req-123"
+
+
+def test_websocket_final_event_forwards_runtime_degradation_metadata_to_mlflow(
+    ws_client,
+    fake_agent: FakeChatAgent,
+    websocket_auth_headers,
+    monkeypatch,
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="done",
+                payload={
+                    "history_turns": 1,
+                    "runtime_degraded": True,
+                    "runtime_failure_category": "sandbox_resume_error",
+                    "runtime_failure_phase": "sandbox_resume",
+                    "runtime_fallback_used": True,
+                },
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.ws.stream.merge_trace_result_metadata",
+        lambda payload, response_preview=None, trace_metadata=None: (
+            captured.update(
+                {
+                    "response_preview": response_preview,
+                    "trace_metadata": trace_metadata,
+                }
+            )
+            or {
+                **(payload or {}),
+                "mlflow_trace_id": "trace-degraded",
+                "mlflow_client_request_id": "req-degraded",
+            }
+        ),
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json({"type": "message", "content": "hello"})
+        data = websocket.receive_json()
+
+    assert captured == {
+        "response_preview": "done",
+        "trace_metadata": {
+            "runtime_degraded": True,
+            "runtime_failure_category": "sandbox_resume_error",
+            "runtime_failure_phase": "sandbox_resume",
+            "runtime_fallback_used": True,
+        },
+    }
+    assert data["data"]["payload"]["runtime_degraded"] is True
+    assert data["data"]["payload"]["runtime_failure_category"] == (
+        "sandbox_resume_error"
+    )
+    assert data["data"]["payload"]["runtime_failure_phase"] == "sandbox_resume"
+    assert data["data"]["payload"]["runtime_fallback_used"] is True
+    assert data["data"]["payload"]["mlflow_trace_id"] == "trace-degraded"
 
 
 def test_websocket_multiple_messages_sequential(

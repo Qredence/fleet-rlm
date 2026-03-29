@@ -2,8 +2,6 @@
 
 from .core import (
     AuthMeResponse,
-    ChatRequest,
-    ChatResponse,
     HealthResponse,
     ReadyResponse,
     RuntimeActiveModels,
@@ -11,19 +9,14 @@ from .core import (
     RuntimeTestCache,
     SessionStateResponse,
     SessionStateSummary,
-    TaskRequest,
-    TaskResponse as CoreTaskResponse,
     WSCommandMessage,
     WSCommandResult,
     WSMessage,
 )
 from .session import SessionCreate, SessionResponse, SessionUpdate
-from .task import TaskCreate, TaskResponse, TaskUpdate
 
 __all__ = [
     "AuthMeResponse",
-    "ChatRequest",
-    "ChatResponse",
     "HealthResponse",
     "ReadyResponse",
     "RuntimeActiveModels",
@@ -31,15 +24,10 @@ __all__ = [
     "RuntimeTestCache",
     "SessionStateSummary",
     "SessionStateResponse",
-    "TaskRequest",
-    "CoreTaskResponse",
     "WSMessage",
     "WSCommandMessage",
     "WSCommandResult",
     "SessionCreate",
     "SessionUpdate",
     "SessionResponse",
-    "TaskCreate",
-    "TaskUpdate",
-    "TaskResponse",
 ]

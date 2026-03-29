@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
 import asyncio
+import base64
 import inspect
 import json
 import os
@@ -26,6 +28,100 @@ _REMOTE_DIRECTORY_MODE = "755"
 _T = TypeVar("_T")
 
 
+class _AsyncCompatRunner:
+    """Keep one background event loop alive for sync Daytona compatibility calls."""
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._thread_id: int | None = None
+        self._started = threading.Event()
+        self._lock = threading.Lock()
+
+    def _thread_main(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        self._thread_id = threading.get_ident()
+        self._started.set()
+        try:
+            loop.run_forever()
+        finally:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+            loop.close()
+
+    def _ensure_started(self) -> asyncio.AbstractEventLoop:
+        loop = self._loop
+        thread = self._thread
+        if (
+            loop is not None
+            and not loop.is_closed()
+            and thread is not None
+            and thread.is_alive()
+        ):
+            return loop
+
+        with self._lock:
+            loop = self._loop
+            thread = self._thread
+            if (
+                loop is not None
+                and not loop.is_closed()
+                and thread is not None
+                and thread.is_alive()
+            ):
+                return loop
+
+            self._loop = None
+            self._thread_id = None
+            self._started.clear()
+            self._thread = threading.Thread(
+                target=self._thread_main,
+                name="daytona-async-compat",
+                daemon=True,
+            )
+            self._thread.start()
+
+        self._started.wait()
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            raise RuntimeError("Async compatibility runner failed to start.")
+        return loop
+
+    def run(self, awaitable: Awaitable[_T]) -> _T:
+        loop = self._ensure_started()
+        if self._thread_id == threading.get_ident():
+            raise RuntimeError(
+                "Async compatibility runner cannot be called from its own loop thread."
+            )
+        future = asyncio.run_coroutine_threadsafe(
+            cast(Coroutine[Any, Any, _T], awaitable),
+            loop,
+        )
+        return future.result()
+
+    def shutdown(self) -> None:
+        loop = self._loop
+        thread = self._thread
+        if loop is None or loop.is_closed() or thread is None:
+            return
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=1)
+        self._loop = None
+        self._thread = None
+        self._thread_id = None
+
+
+_ASYNC_COMPAT_RUNNER = _AsyncCompatRunner()
+atexit.register(_ASYNC_COMPAT_RUNNER.shutdown)
+
+
 def _daytona_import_error(exc: ImportError) -> RuntimeError:
     return RuntimeError(
         "Daytona SDK is not available. Install dependencies with `uv sync` "
@@ -40,33 +136,9 @@ def _run_async_compat(
     *args: Any,
     **kwargs: Any,
 ) -> _T:
-    """Run an async implementation from sync code, even inside an active loop."""
+    """Run an async implementation from sync code on one persistent loop."""
 
-    def _runner() -> _T:
-        return asyncio.run(cast(Coroutine[Any, Any, _T], async_fn(*args, **kwargs)))
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return _runner()
-
-    result: dict[str, _T] = {}
-    error: dict[str, Exception] = {}
-
-    def _thread_main() -> None:
-        try:
-            result["value"] = _runner()
-        except Exception as exc:  # pragma: no cover - sync compat thread boundary
-            error["exc"] = exc
-
-    thread = threading.Thread(target=_thread_main, daemon=True)
-    thread.start()
-    thread.join()
-    if "exc" in error:
-        raise error["exc"]
-    if "value" not in result:
-        raise RuntimeError("Async compatibility runner terminated without a result.")
-    return result["value"]
+    return _ASYNC_COMPAT_RUNNER.run(async_fn(*args, **kwargs))
 
 
 async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
@@ -279,6 +351,204 @@ async def _aclone_repo(
         ) from exc
 
 
+async def _arun_admin_code(
+    *,
+    sandbox: Any,
+    code: str,
+    phase: str,
+    error_prefix: str,
+    category: str = "sandbox_create_clone_error",
+) -> str:
+    encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
+    command = f"printf '%s' '{encoded}' | base64 -d | python3 -u -"
+    try:
+        result = await _await_if_needed(sandbox.process.exec(command))
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"{error_prefix}: {exc}",
+            category=category,
+            phase=phase,
+        ) from exc
+
+    exit_code = getattr(result, "exit_code", 0)
+    if exit_code:
+        detail = str(
+            getattr(result, "stderr", "")
+            or getattr(result, "result", "")
+            or getattr(result, "output", "")
+            or f"process exited with status {exit_code}"
+        )
+        raise DaytonaDiagnosticError(
+            f"{error_prefix}: {detail}",
+            category=category,
+            phase=phase,
+        )
+    return str(
+        getattr(result, "stdout", "")
+        or getattr(result, "result", "")
+        or getattr(result, "output", "")
+        or ""
+    )
+
+
+async def _areconcile_repo_checkout(
+    *,
+    sandbox: Any,
+    repo_url: str | None,
+    ref: str | None,
+    workspace_path: str,
+) -> None:
+    if repo_url is None:
+        await _aensure_workspace_root(
+            sandbox=sandbox,
+            workspace_path=workspace_path,
+        )
+        return
+
+    await _arun_admin_code(
+        sandbox=sandbox,
+        phase="repo_clone",
+        error_prefix="Daytona repo reconcile failure",
+        code=f"""
+import json as _json
+import pathlib as _pathlib
+import shutil as _shutil
+import subprocess as _subprocess
+
+repo_url = {repo_url!r}
+ref = {ref!r}
+workspace_path = {workspace_path!r}
+workspace = _pathlib.Path(workspace_path)
+workspace.parent.mkdir(parents=True, exist_ok=True)
+
+def _run(*args: str, check: bool = True):
+    completed = _subprocess.run(
+        list(args),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if check and completed.returncode != 0:
+        raise RuntimeError(
+            completed.stderr.strip()
+            or completed.stdout.strip()
+            or f"command failed: {{' '.join(args)}}"
+        )
+    return completed
+
+if not workspace.exists():
+    _run("git", "clone", repo_url, workspace_path)
+else:
+    git_dir = workspace / ".git"
+    if not git_dir.exists():
+        if any(workspace.iterdir()):
+            raise RuntimeError(
+                f"workspace exists without git metadata: {{workspace_path}}"
+            )
+        _run("git", "clone", repo_url, workspace_path)
+    else:
+        remote = _run(
+            "git",
+            "-C",
+            workspace_path,
+            "remote",
+            "get-url",
+            "origin",
+            check=False,
+        )
+        remote_url = remote.stdout.strip()
+        if remote.returncode != 0 or remote_url != repo_url:
+            _shutil.rmtree(workspace)
+            _run("git", "clone", repo_url, workspace_path)
+        else:
+            _run("git", "-C", workspace_path, "fetch", "--all", "--tags", "--prune")
+
+if ref:
+    remote_ref = f"refs/remotes/origin/{{ref}}"
+    remote_probe = _run(
+        "git",
+        "-C",
+        workspace_path,
+        "rev-parse",
+        "--verify",
+        remote_ref,
+        check=False,
+    )
+    local_probe = _run(
+        "git",
+        "-C",
+        workspace_path,
+        "rev-parse",
+        "--verify",
+        ref,
+        check=False,
+    )
+    if remote_probe.returncode == 0:
+        branch_probe = _run(
+            "git",
+            "-C",
+            workspace_path,
+            "show-ref",
+            "--verify",
+            f"refs/heads/{{ref}}",
+            check=False,
+        )
+        if branch_probe.returncode == 0:
+            _run("git", "-C", workspace_path, "checkout", "--force", ref)
+        else:
+            _run(
+                "git",
+                "-C",
+                workspace_path,
+                "checkout",
+                "--force",
+                "-B",
+                ref,
+                remote_ref,
+            )
+        _run("git", "-C", workspace_path, "reset", "--hard", remote_ref)
+    elif local_probe.returncode == 0:
+        _run("git", "-C", workspace_path, "checkout", "--force", ref)
+    else:
+        raise RuntimeError(f"requested ref is not available: {{ref}}")
+
+print(
+    _json.dumps(
+        {{
+            "repo_url": repo_url,
+            "ref": ref,
+            "workspace_path": workspace_path,
+        }},
+        ensure_ascii=False,
+    )
+)
+""".strip(),
+    )
+
+
+async def _aclear_staged_context_paths(
+    *,
+    sandbox: Any,
+    workspace_path: str,
+) -> None:
+    context_root = PurePosixPath(workspace_path) / ".fleet-rlm" / "context"
+    await _arun_admin_code(
+        sandbox=sandbox,
+        phase="context_stage",
+        category="context_stage_error",
+        error_prefix="Daytona context reset failure",
+        code=f"""
+import pathlib as _pathlib
+import shutil as _shutil
+
+context_root = _pathlib.Path({str(context_root)!r})
+if context_root.exists():
+    _shutil.rmtree(context_root)
+print(str(context_root))
+""".strip(),
+    )
+
+
 async def _aupload_remote_text(
     fs: Any, remote_path: PurePosixPath, content: str
 ) -> None:
@@ -394,10 +664,16 @@ async def _astage_context_paths(
     sandbox: Any,
     workspace_path: str,
     context_paths: list[str] | None,
+    reset_existing: bool = False,
 ) -> list[ContextSource]:
     raw_paths = [
         str(item).strip() for item in (context_paths or []) if str(item).strip()
     ]
+    if reset_existing:
+        await _aclear_staged_context_paths(
+            sandbox=sandbox,
+            workspace_path=workspace_path,
+        )
     if not raw_paths:
         return []
 
@@ -459,11 +735,14 @@ __all__ = [
     "_aget_work_dir",
     "_aclone_repo",
     "_abuild_workspace_path",
+    "_aclear_staged_context_paths",
     "_aensure_remote_directory",
     "_aensure_remote_parent",
     "_aensure_workspace_root",
     "_aensure_daytona_volume_layout",
+    "_areconcile_repo_checkout",
     "_aread_document_content",
+    "_arun_admin_code",
     "_aresolve_clone_ref",
     "_astage_context_paths",
     "_astage_local_directory",
