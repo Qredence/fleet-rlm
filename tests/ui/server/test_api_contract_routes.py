@@ -155,6 +155,17 @@ def test_runtime_contract_endpoints_remain_available(
     assert lm.status_code == 200
 
 
+def test_openapi_excludes_legacy_one_shot_and_task_schemas(
+    local_client: TestClient,
+) -> None:
+    schema_names = set(local_client.app.openapi()["components"]["schemas"])
+
+    assert "ChatRequest" not in schema_names
+    assert "ChatResponse" not in schema_names
+    assert "TaskRequest" not in schema_names
+    assert "TaskResponse" not in schema_names
+
+
 def _patch_main_resolve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from fleet_rlm.api import main as server_main
 
