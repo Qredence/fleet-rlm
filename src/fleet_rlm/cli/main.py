@@ -54,47 +54,41 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _run_web_ui() -> None:
+    """Delegate `fleet web` to the canonical `fleet-rlm serve-api` command."""
+    try:
+        import fastapi  # noqa: F401
+        import jwt  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError:
+        print(
+            "Error: Required Web UI dependencies not found. "
+            "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
+            "Optional server extras remain available via `fleet-rlm[server]`.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
+    from .fleet_cli import main as cli_main
+
+    hydra_args = [arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")]
+    sys.argv = [
+        "fleet-rlm",
+        "serve-api",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        *hydra_args,
+    ]
+    cli_main()
 
 
 def main() -> None:
     # Quick check for 'web' subcommand before strict parsing
     if len(sys.argv) > 1 and sys.argv[1] == "web":
-        # Check if required Web UI/API dependencies are available.
-        try:
-            import fastapi  # noqa: F401
-            import jwt  # noqa: F401
-            import uvicorn  # noqa: F401
-        except ImportError:
-            print(
-                "Error: Required Web UI dependencies not found. "
-                "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
-                "Optional server extras remain available via `fleet-rlm[server]`.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-
-        print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
-        # Delegate to the fleet-rlm CLI's serve-api command
-        # This reuses all the existing config initialization and uvicorn setup
-        from .fleet_cli import main as cli_main
-
-        # Rewrite sys.argv to simulate running `fleet-rlm serve-api --host 0.0.0.0`
-        # Keep any hydra overrides that might have been passed
-        hydra_args = [
-            arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")
-        ]
-        sys.argv = [
-            "fleet-rlm",
-            "serve-api",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8000",
-        ] + hydra_args
-
-        cli_main()
+        _run_web_ui()
         return
 
     parser = _build_parser()

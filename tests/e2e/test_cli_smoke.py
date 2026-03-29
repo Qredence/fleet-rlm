@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fleet_rlm.cli import app
+from fleet_rlm.cli.config import set_current_app_config
 from fleet_rlm.cli.runtime_factory import resolve_server_volume_name
 from fleet_rlm.integrations.config.env import AppConfig
 
@@ -15,14 +16,16 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _seed_cli_config(monkeypatch):
+def _seed_cli_config():
     """Initialize CLI config for tests that invoke Typer app directly.
 
     In production, config is initialized by `fleet_rlm.cli.main()` before
     Typer dispatch. These tests call `app` directly, so seed a non-None value
     to exercise command logic instead of the entrypoint guardrail.
     """
-    monkeypatch.setattr("fleet_rlm.cli.fleet_cli._CONFIG", object())
+    set_current_app_config(AppConfig())
+    yield
+    set_current_app_config(None)
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -38,8 +41,9 @@ def _normalized_help_text(text: str) -> str:
 def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "chat" in result.stdout
-    assert "init" in result.stdout
+    help_text = _normalized_help_text(result.stdout)
+    for command in ("init", "serve-api", "serve-mcp", "chat", "daytona-smoke"):
+        assert command in help_text
 
 
 def test_init_list_shows_all_categories():
@@ -49,6 +53,14 @@ def test_init_list_shows_all_categories():
     assert "Available Agents:" in result.stdout
     assert "Available Teams:" in result.stdout
     assert "Available Hooks:" in result.stdout
+
+
+def test_daytona_smoke_help_exposes_repo_and_ref_options():
+    result = runner.invoke(app, ["daytona-smoke", "--help"])
+    assert result.exit_code == 0
+    help_text = _normalized_help_text(result.stdout)
+    assert "--repo" in help_text
+    assert "--ref" in help_text
 
 
 def test_init_default_installs_all_categories(tmp_path: Path):
