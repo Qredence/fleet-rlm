@@ -79,7 +79,7 @@ def test_chat_turn_appends_history_and_preserves_session(monkeypatch):
 
 def test_chat_turn_defers_mlflow_metadata_merge_to_callers(monkeypatch):
     monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_integration.trace_result_metadata",
+        "fleet_rlm.integrations.observability.mlflow_runtime.trace_result_metadata",
         lambda response_preview=None: {
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
@@ -492,7 +492,7 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    import fleet_rlm.runtime.execution.runtime_factory as runtime_factory
+    import fleet_rlm.runtime.models.rlm_runtime_modules as runtime_modules
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()
@@ -509,7 +509,7 @@ def test_get_runtime_module_caches_instances(monkeypatch):
         return fake_module
 
     monkeypatch.setattr(
-        runtime_factory, "build_runtime_module", _fake_build_runtime_module
+        runtime_modules, "build_runtime_module", _fake_build_runtime_module
     )
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter(), verbose=True)

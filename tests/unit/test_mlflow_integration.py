@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.observability.config import MlflowConfig
-import fleet_rlm.integrations.observability.mlflow_integration as mlflow_integration
+import fleet_rlm.integrations.observability.mlflow_runtime as mlflow_integration
 from tests.unit.fixtures_env import clear_env
 
 
