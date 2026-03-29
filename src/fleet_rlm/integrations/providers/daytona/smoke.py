@@ -50,9 +50,10 @@ def run_daytona_smoke(
     driver_started = False
     persisted_state_value: Any = None
     finalization_mode = "unknown"
+    owns_runtime = runtime is None
+    runtime_instance = runtime
 
     try:
-        runtime_instance = runtime
         if runtime_instance is None:
             runtime_instance = _run_timed(
                 phase_timings_ms,
@@ -62,6 +63,7 @@ def run_daytona_smoke(
 
         interpreter = DaytonaInterpreter(
             runtime=runtime_instance,
+            owns_runtime=owns_runtime,
             timeout=int(timeout),
             execute_timeout=int(timeout),
             repo_url=repo,
@@ -131,6 +133,23 @@ def run_daytona_smoke(
                     phase_timings_ms,
                     "cleanup",
                     interpreter.shutdown,
+                )
+            except Exception as cleanup_exc:
+                if error_category is None:
+                    cleanup_error = as_diagnostic_error(cleanup_exc, phase="cleanup")
+                    error_category = cleanup_error.category
+                    error_message = str(cleanup_error)
+                    termination_phase = cleanup_error.phase
+                elif error_message is not None:
+                    error_message = (
+                        f"{error_message} Cleanup also failed: {cleanup_exc}"
+                    )
+        elif owns_runtime and runtime_instance is not None:
+            try:
+                _run_timed(
+                    phase_timings_ms,
+                    "cleanup",
+                    runtime_instance.close,
                 )
             except Exception as cleanup_exc:
                 if error_category is None:

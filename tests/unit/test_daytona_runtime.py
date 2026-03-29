@@ -95,6 +95,36 @@ class _FakeClient:
         self.close_calls += 1
 
 
+class _LoopBoundCodeInterpreter:
+    def __init__(self, sandbox: "_LoopBoundSandbox") -> None:
+        self._sandbox = sandbox
+        self.context_calls: list[str] = []
+
+    async def create_context(self, cwd: str):
+        current_loop_id = id(asyncio.get_running_loop())
+        assert self._sandbox.owner_loop_id is not None
+        assert current_loop_id == self._sandbox.owner_loop_id
+        self.context_calls.append(cwd)
+        return SimpleNamespace(id="ctx-123")
+
+
+class _LoopBoundSandbox(_FakeSandbox):
+    def __init__(self) -> None:
+        super().__init__()
+        self.owner_loop_id: int | None = None
+        self.code_interpreter = _LoopBoundCodeInterpreter(self)
+
+
+class _LoopBoundClient(_FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sandbox = _LoopBoundSandbox()
+
+    def create(self, request=None):
+        self.sandbox.owner_loop_id = id(asyncio.get_running_loop())
+        return super().create(request=request)
+
+
 def test_create_workspace_session_stages_context_and_mounts_volume(
     monkeypatch,
     tmp_path: Path,
@@ -224,6 +254,35 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
     runtime.close()
 
     assert fake_client.close_calls == 1
+
+
+def test_create_workspace_session_and_context_share_async_owner_loop(
+    monkeypatch,
+) -> None:
+    fake_client = _LoopBoundClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        context_paths=None,
+        volume_name=None,
+    )
+
+    context = session.ensure_context()
+
+    assert getattr(context, "id", None) == "ctx-123"
+    assert fake_client.sandbox.code_interpreter.context_calls == [
+        "/workspace/workspace/daytona-workspace"
+    ]
 
 
 def test_create_workspace_session_ignores_local_daytona_builder_files(
