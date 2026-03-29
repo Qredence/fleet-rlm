@@ -193,8 +193,14 @@ def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
         )
     )
 
-    first = asyncio.run(runtime._aget_client())
-    second = asyncio.run(runtime._aget_client())
+    first_loop = asyncio.new_event_loop()
+    second_loop = asyncio.new_event_loop()
+    try:
+        first = first_loop.run_until_complete(runtime._aget_client())
+        second = second_loop.run_until_complete(runtime._aget_client())
+    finally:
+        first_loop.close()
+        second_loop.close()
 
     assert first is clients[0]
     assert second is clients[1]
