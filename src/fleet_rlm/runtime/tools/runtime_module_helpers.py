@@ -14,6 +14,7 @@ from fleet_rlm.runtime.agent.delegation_policy import (
     RuntimeModuleExecutionRequest,
     invoke_runtime_module,
 )
+from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
@@ -87,4 +88,5 @@ def runtime_metadata(
             minimum=0,
         ),
         "delegate_lm_fallback": bool(fallback_used),
+        **runtime_degradation_payload(agent),
     }

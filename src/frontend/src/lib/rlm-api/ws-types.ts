@@ -3,7 +3,11 @@ export type WsTraceMode = "compact" | "verbose" | "off";
 export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
 export type WsRuntimeMode = "modal_chat" | "daytona_pilot";
 
-export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
+export type WsConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
 
 export interface WsConnectionOptions {
   maxRetries?: number; // default 5
@@ -43,7 +47,10 @@ export interface WsCommandRequest {
   session_id?: string;
 }
 
-export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
+export type WsClientMessage =
+  | WsMessageRequest
+  | WsCancelRequest
+  | WsCommandRequest;
 
 export type WsEventKind =
   | "assistant_token"
@@ -85,6 +92,8 @@ export interface WsRuntimeContext {
   runtime_mode?: string;
   daytona_mode?: string;
   sandbox_id?: string;
+  workspace_path?: string;
+  sandbox_transition?: string;
 }
 
 export interface WsServerEvent {

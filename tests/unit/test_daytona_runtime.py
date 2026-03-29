@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 from fleet_rlm.integrations.providers.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
 )
+from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+    _areconcile_repo_checkout,
+)
+
+
+class _FakeProcessExecResult:
+    def __init__(
+        self,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        result: str | None = None,
+        exit_code: int = 0,
+    ) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.result = stdout if result is None else result
+        self.exit_code = exit_code
 
 
 class _FakeFs:
@@ -34,12 +54,17 @@ class _FakeSandbox:
         self.id = "sbx-123"
         self.fs = _FakeFs()
         self.git = _FakeGit()
+        self.process = SimpleNamespace(exec_calls=[], exec=self._exec)
 
     async def get_work_dir(self) -> str:
         return "/workspace"
 
     def delete(self) -> None:
         return None
+
+    def _exec(self, command: str):
+        self.process.exec_calls.append(command)
+        return _FakeProcessExecResult()
 
 
 class _FakeVolumeService:
@@ -97,6 +122,7 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
 
     assert session.sandbox_id == "sbx-123"
     assert session.workspace_path == "/workspace/workspace/repo"
+    assert session.volume_name == "tenant-a"
     assert session.volume_mount_path == str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)
     assert len(session.context_sources) == 1
     assert session.context_sources[0].host_path == str(context_file.resolve())
@@ -142,6 +168,38 @@ def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
 
     assert session.sandbox_id == "sbx-123"
     assert session.context_id == "ctx-1"
+    assert session.volume_name is None
+
+
+def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
+    monkeypatch,
+) -> None:
+    clients: list[_FakeClient] = []
+
+    def _build_client(config):
+        _ = config
+        client = _FakeClient()
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        _build_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+
+    first = asyncio.run(runtime._aget_client())
+    second = asyncio.run(runtime._aget_client())
+
+    assert first is clients[0]
+    assert second is clients[1]
+    assert clients[0].close_calls == 1
+    assert runtime._client is clients[1]
 
 
 def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
@@ -193,4 +251,136 @@ def test_create_workspace_session_ignores_local_daytona_builder_files(
     )
 
     assert session.workspace_path == "/workspace/workspace/daytona-workspace"
+    assert session.volume_name == "tenant-a"
     assert fake_client.volume.calls == [("tenant-a", True)]
+
+
+def test_reconcile_workspace_session_updates_repo_and_context_in_place(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    first_context = tmp_path / "notes-a.md"
+    first_context.write_text("# A\n", encoding="utf-8")
+    second_context = tmp_path / "notes-b.md"
+    second_context.write_text("# B\n", encoding="utf-8")
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        context_paths=[str(first_context)],
+        volume_name="tenant-a",
+    )
+
+    reconciled = runtime.reconcile_workspace_session(
+        session,
+        repo_url="https://github.com/example/other.git",
+        ref="develop",
+        context_paths=[str(second_context)],
+    )
+
+    assert reconciled is session
+    assert session.repo_url == "https://github.com/example/other.git"
+    assert session.ref == "develop"
+    assert session.workspace_path == "/workspace/workspace/other"
+    assert session.volume_name == "tenant-a"
+    assert len(session.context_sources) == 1
+    assert session.context_sources[0].host_path == str(second_context.resolve())
+    assert "workspace_reconcile" in session.phase_timings_ms
+    assert "context_stage" in session.phase_timings_ms
+    assert len(fake_client.sandbox.process.exec_calls) == 2
+    upload_paths = set(fake_client.sandbox.fs.uploads)
+    assert any(path.endswith("notes-b.md") for path in upload_paths)
+
+
+def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sandbox(
+    tmp_path: Path,
+) -> None:
+    def _init_repo(path: Path, *, text: str) -> Path:
+        path.mkdir(parents=True)
+        subprocess.run(
+            ["git", "init", "-b", "main", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "config", "user.email", "test@example.com"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "config", "user.name", "Test User"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (path / "README.md").write_text(text, encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(path), "add", "README.md"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "-m", "init"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return path
+
+    repo_a = _init_repo(tmp_path / "org-a" / "repo", text="repo A\n")
+    repo_b = _init_repo(tmp_path / "org-b" / "repo", text="repo B\n")
+    workspace_path = tmp_path / "workspace" / "repo"
+    workspace_path.parent.mkdir(parents=True)
+    subprocess.run(
+        ["git", "clone", str(repo_a), str(workspace_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def _exec(command: str):
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return _FakeProcessExecResult(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            exit_code=completed.returncode,
+        )
+
+    sandbox = SimpleNamespace(process=SimpleNamespace(exec=_exec))
+    asyncio.run(
+        _areconcile_repo_checkout(
+            sandbox=sandbox,
+            repo_url=str(repo_b),
+            ref="main",
+            workspace_path=str(workspace_path),
+        )
+    )
+
+    remote_url = subprocess.run(
+        ["git", "-C", str(workspace_path), "remote", "get-url", "origin"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_url == str(repo_b)
+    assert (workspace_path / "README.md").read_text(encoding="utf-8") == "repo B\n"
