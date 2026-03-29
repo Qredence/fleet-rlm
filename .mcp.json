@@ -11,28 +11,17 @@
     "playwright": {
       "type": "local",
       "command": "npx",
-      "tools": [
-        "*"
-      ],
-      "args": [
-        "@playwright/mcp@latest"
-      ]
+      "tools": ["*"],
+      "args": ["@playwright/mcp@latest"]
     },
     "daytona": {
       "type": "local",
       "command": "daytona",
-      "args": [
-        "mcp",
-        "start"
-      ]
+      "args": ["mcp", "start"]
     },
     "agentation": {
       "command": "npx",
-      "args": [
-        "-y",
-        "agentation-mcp",
-        "server"
-      ]
+      "args": ["-y", "agentation-mcp@1.2.0", "server"]
     }
   }
 }

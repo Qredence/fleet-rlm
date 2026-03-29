@@ -7,15 +7,23 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from "@/app/workspace/confirmation";
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import { ClarificationCard } from "@/app/workspace/clarification-card";
 import {
   ChatMessageLoadingState,
   WorkspaceLegacyStatusCard,
   WorkspaceTracePart,
 } from "@/app/workspace/transcript/trace-part-renderers";
-import type { ChatMessage } from "@/screens/workspace/use-workspace";
+import type { ChatMessage } from "@/lib/workspace/workspace-types";
 import { cn } from "@/lib/utils";
 import { mapConfirmationState } from "@/lib/utils/prompt-kit-state";
 
@@ -64,7 +72,9 @@ export function WorkspaceChatMessageItem({
         </Message>
       ) : null}
 
-      {message.type === "assistant" || message.type === "trace" || message.type === "reasoning" ? (
+      {message.type === "assistant" ||
+      message.type === "trace" ||
+      message.type === "reasoning" ? (
         <Message from="assistant" className="mb-2.5">
           <MessageContent className="w-full flex flex-col gap-2.5">
             {message.renderParts?.map((part, index) => (
@@ -79,7 +89,9 @@ export function WorkspaceChatMessageItem({
                 <MessageResponse>{message.content}</MessageResponse>
               </div>
             ) : null}
-            {message.type === "assistant" && message.streaming && !message.content ? (
+            {message.type === "assistant" &&
+            message.streaming &&
+            !message.content ? (
               <div className="max-w-content rounded-bubble border border-border-subtle/60 bg-card/60 px-4 py-3.5 md:px-5 md:py-4">
                 <ChatMessageLoadingState />
               </div>
@@ -102,8 +114,12 @@ export function WorkspaceChatMessageItem({
                     : undefined,
             }}
           >
-            <ConfirmationTitle className="text-sm font-medium">Checkpoint</ConfirmationTitle>
-            <div className="mt-2 text-sm text-muted-foreground">{message.hitlData.question}</div>
+            <ConfirmationTitle className="text-sm font-medium">
+              Checkpoint
+            </ConfirmationTitle>
+            <div className="mt-2 text-sm text-muted-foreground">
+              {message.hitlData.question}
+            </div>
             <ConfirmationRequest>
               <ConfirmationActions>
                 {message.hitlData.actions.map((action) => (
@@ -143,7 +159,9 @@ export function WorkspaceChatMessageItem({
         </div>
       ) : null}
 
-      {message.type === "reasoning" && message.reasoningData && !message.renderParts?.length ? (
+      {message.type === "reasoning" &&
+      message.reasoningData &&
+      !message.renderParts?.length ? (
         <div className="mb-2.5">
           <Reasoning
             isStreaming={message.reasoningData.isThinking}

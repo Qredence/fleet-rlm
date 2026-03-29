@@ -5,14 +5,22 @@ import type { ComponentProps } from "react";
 import { useCallback } from "react";
 
 export type SuggestionsProps = ComponentProps<typeof ScrollArea> & {
+  contentClassName?: string;
   wrap?: boolean;
 };
 
-export const Suggestions = ({ className, children, wrap = false, ...props }: SuggestionsProps) => (
+export const Suggestions = ({
+  className,
+  contentClassName,
+  children,
+  wrap = false,
+  ...props
+}: SuggestionsProps) => (
   <ScrollArea
     className={cn(
       "w-full whitespace-nowrap",
       wrap ? "overflow-visible whitespace-normal" : "overflow-x-auto",
+      className,
     )}
     {...props}
   >
@@ -20,7 +28,7 @@ export const Suggestions = ({ className, children, wrap = false, ...props }: Sug
       className={cn(
         "flex items-center gap-2",
         wrap ? "flex-wrap justify-center" : "w-max flex-nowrap",
-        className,
+        contentClassName,
       )}
     >
       {children}
