@@ -9,6 +9,8 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 
+from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+
 from .diagnostics import DaytonaDiagnosticError
 from .types_budget import SandboxLmRuntimeConfig
 
@@ -33,16 +35,23 @@ class ResolvedDaytonaConfig:
 
 
 def _load_env_sources() -> dict[str, str]:
-    merged: dict[str, str] = {}
-    for candidate in (Path(".env"), Path(".env.local")):
+    file_values: dict[str, str] = {}
+    env_path = resolve_env_path(start_paths=[Path.cwd()])
+    candidates = (env_path, env_path.with_name(".env.local"))
+    for candidate in candidates:
         if not candidate.exists():
             continue
         values = dotenv_values(candidate)
         for key, value in values.items():
             if key and value is not None:
-                merged[str(key)] = str(value)
-    for key, value in os.environ.items():
-        merged[str(key)] = str(value)
+                file_values[str(key)] = str(value)
+
+    merged: dict[str, str] = {str(key): str(value) for key, value in os.environ.items()}
+    app_env = (os.getenv("APP_ENV") or "local").strip().lower()
+    if app_env == "local":
+        merged.update(file_values)
+    else:
+        merged = dict(file_values) | merged
     return merged
 
 
