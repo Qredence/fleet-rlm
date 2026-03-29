@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -11,7 +10,6 @@ import dspy
 
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 if TYPE_CHECKING:
     from fleet_rlm.integrations.config.env import AppConfig
@@ -45,23 +43,6 @@ class _ReActAgentOptions:
     delegate_result_truncation_chars: int = 8000
 
 
-@dataclass(frozen=True, slots=True)
-class _ChatProviderCapabilities:
-    """Capability flags that control provider-specific runtime setup."""
-
-    consumes_secret_name: bool = False
-    consumes_volume_name: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class _ChatProviderFactory:
-    """Provider-aware builder used by shared CLI/runtime chat construction."""
-
-    runtime_mode: str
-    capabilities: _ChatProviderCapabilities
-    build_agent: Callable[..., Any]
-
-
 def _require_planner_ready(env_file: Path | None = None) -> None:
     """Ensure the DSPy planner LM is configured.
 
@@ -80,45 +61,6 @@ def _require_planner_ready(env_file: Path | None = None) -> None:
         raise RuntimeError(
             "Planner LM not configured. Set DSPY_LM_MODEL and DSPY_LLM_API_KEY (or DSPY_LM_API_KEY)."
         )
-
-
-def _read_docs(path: Path | str) -> str:
-    """Read documentation text from a file.
-
-    Args:
-        path: Path to the documentation file (string or Path).
-
-    Returns:
-        The file contents as a string.
-
-    Raises:
-        FileNotFoundError: If the specified path does not exist.
-    """
-    docs_path = Path(path)
-    if not docs_path.exists():
-        raise FileNotFoundError(f"Docs path does not exist: {docs_path}")
-    return docs_path.read_text()
-
-
-def _interpreter(
-    *,
-    timeout: int = 600,
-    secret_name: str = "LITELLM",
-    volume_name: str | None = None,
-) -> ModalInterpreter:
-    """Create a ModalInterpreter with the specified configuration.
-
-    Args:
-        timeout: Sandbox timeout in seconds (default: 600).
-        secret_name: Name of the Modal secret containing API keys.
-        volume_name: Optional name of a Modal volume for persistent storage.
-
-    Returns:
-        A configured ModalInterpreter instance (not yet started).
-    """
-    return ModalInterpreter(
-        timeout=timeout, secret_name=secret_name, volume_name=volume_name
-    )
 
 
 def _build_react_agent_from_options(
@@ -204,35 +146,9 @@ def _build_daytona_workbench_chat_agent_from_options(
     )
 
 
-def _resolve_chat_provider(runtime_mode: str) -> _ChatProviderFactory:
-    """Resolve the provider builder for a runtime mode.
-
-    Unknown modes intentionally fall back to the shared Modal path to preserve
-    existing CLI/runtime behavior.
-    """
-    if runtime_mode == "daytona_pilot":
-        return _ChatProviderFactory(
-            runtime_mode="daytona_pilot",
-            capabilities=_ChatProviderCapabilities(
-                consumes_secret_name=False,
-                consumes_volume_name=False,
-            ),
-            build_agent=_build_daytona_workbench_chat_agent_from_options,
-        )
-
-    return _ChatProviderFactory(
-        runtime_mode="modal_chat",
-        capabilities=_ChatProviderCapabilities(
-            consumes_secret_name=True,
-            consumes_volume_name=True,
-        ),
-        build_agent=_build_modal_chat_agent_from_options,
-    )
-
-
-def _build_provider_options(
+def _build_runtime_mode_options(
     *,
-    provider: _ChatProviderFactory,
+    runtime_mode: str,
     react_max_iters: int = 15,
     deep_react_max_iters: int = 35,
     enable_adaptive_iters: bool = True,
@@ -252,7 +168,8 @@ def _build_provider_options(
     delegate_max_calls_per_turn: int = 8,
     delegate_result_truncation_chars: int = 8000,
 ) -> _ReActAgentOptions:
-    """Build normalized shared chat options using provider capabilities."""
+    """Build normalized shared chat options for the requested runtime mode."""
+    is_daytona = runtime_mode == "daytona_pilot"
     return _ReActAgentOptions(
         react_max_iters=react_max_iters,
         deep_react_max_iters=deep_react_max_iters,
@@ -261,10 +178,8 @@ def _build_provider_options(
         rlm_max_llm_calls=rlm_max_llm_calls,
         max_depth=max_depth,
         timeout=timeout,
-        secret_name=secret_name
-        if provider.capabilities.consumes_secret_name
-        else "LITELLM",
-        volume_name=volume_name if provider.capabilities.consumes_volume_name else None,
+        secret_name=secret_name if not is_daytona else "LITELLM",
+        volume_name=volume_name if not is_daytona else None,
         verbose=verbose,
         history_max_turns=history_max_turns,
         interpreter_async_execute=interpreter_async_execute,
@@ -392,9 +307,8 @@ def build_chat_agent_for_runtime_mode(
     reuses the shared ReAct settings but defers workspace/session wiring until
     request-time, so those Modal-only settings are stripped automatically.
     """
-    provider = _resolve_chat_provider(runtime_mode)
-    options = _build_provider_options(
-        provider=provider,
+    options = _build_runtime_mode_options(
+        runtime_mode=runtime_mode,
         react_max_iters=react_max_iters,
         deep_react_max_iters=deep_react_max_iters,
         enable_adaptive_iters=enable_adaptive_iters,
@@ -414,7 +328,15 @@ def build_chat_agent_for_runtime_mode(
         delegate_max_calls_per_turn=delegate_max_calls_per_turn,
         delegate_result_truncation_chars=delegate_result_truncation_chars,
     )
-    return provider.build_agent(options=options, planner_lm=planner_lm)
+    if runtime_mode == "daytona_pilot":
+        return _build_daytona_workbench_chat_agent_from_options(
+            options=options,
+            planner_lm=planner_lm,
+        )
+    return _build_modal_chat_agent_from_options(
+        options=options,
+        planner_lm=planner_lm,
+    )
 
 
 def build_daytona_workbench_chat_agent(

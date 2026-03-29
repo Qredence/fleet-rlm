@@ -21,7 +21,6 @@ from typing_extensions import Self
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
-from fleet_rlm.runtime.execution.runtime_factory import get_runtime_module
 from fleet_rlm.runtime.execution.validation import (
     ValidationConfig,
     validate_assistant_response,
@@ -491,9 +490,24 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     def get_runtime_module(self, name: str) -> dspy.Module:
         """Return a cached long-context runtime module by name.
 
-        Delegates to :func:`fleet_rlm.runtime.execution.runtime_factory.get_runtime_module`.
+        Runtime-module ownership lives under ``runtime.models``; keep the import
+        local here to avoid circular imports during agent initialization.
         """
-        return get_runtime_module(self, name)
+        from fleet_rlm.runtime.models.rlm_runtime_modules import (
+            build_runtime_module_config,
+            get_or_build_runtime_module,
+        )
+
+        return get_or_build_runtime_module(
+            self._runtime_modules,
+            name,
+            config=build_runtime_module_config(
+                interpreter=self.interpreter,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                verbose=self.verbose,
+            ),
+        )
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""

@@ -197,6 +197,80 @@ def _build_adapter(
     return dspy.ChatAdapter(use_native_function_calling=use_native_function_calling)
 
 
+def _resolve_max_tokens(value: int | str | None, *, default: int = 64000) -> int:
+    try:
+        return int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_lm(
+    *,
+    model: str,
+    api_key: str,
+    api_base: str | None = None,
+    max_tokens: int,
+) -> Any:
+    return _import_dspy().LM(
+        model,
+        api_base=api_base,
+        api_key=api_key,
+        max_tokens=max_tokens,
+    )
+
+
+def _planner_lm_kwargs(
+    *,
+    model_name: str | None = None,
+) -> dict[str, Any] | None:
+    api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
+    model = model_name or os.environ.get("DSPY_LM_MODEL")
+    if not model or not api_key:
+        return None
+
+    return {
+        "model": model,
+        "api_key": api_key,
+        "api_base": os.environ.get("DSPY_LM_API_BASE"),
+        "max_tokens": _resolve_max_tokens(os.environ.get("DSPY_LM_MAX_TOKENS")),
+    }
+
+
+def _delegate_lm_kwargs(
+    *,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | str | None = None,
+) -> dict[str, Any] | None:
+    model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
+    if not model:
+        return None
+
+    api_key = (
+        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
+        or default_api_key
+        or os.environ.get("DSPY_LLM_API_KEY")
+        or os.environ.get("DSPY_LM_API_KEY")
+    )
+    if not api_key:
+        logger.warning(
+            "Delegate LM model is configured but no API key is available; using planner fallback."
+        )
+        return None
+
+    return {
+        "model": model,
+        "api_key": api_key,
+        "api_base": (
+            os.environ.get("DSPY_DELEGATE_LM_API_BASE")
+            or default_api_base
+            or os.environ.get("DSPY_LM_API_BASE")
+        ),
+        "max_tokens": _resolve_max_tokens(default_max_tokens),
+    }
+
+
 def get_default_dspy_adapter_from_env(*, env_file: Path | None = None) -> Any | None:
     """Return the optional default adapter for non-runtime-module DSPy contexts."""
     _prepare_env(env_file=env_file)
@@ -304,19 +378,12 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
 
     _prepare_env(env_file=env_file)
 
-    api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    model = os.environ.get("DSPY_LM_MODEL")
-
-    if not model or not api_key:
+    planner_lm_kwargs = _planner_lm_kwargs()
+    if planner_lm_kwargs is None:
         return False
 
     dspy = _import_dspy()
-    planner_lm = dspy.LM(
-        model,
-        api_base=os.environ.get("DSPY_LM_API_BASE"),
-        api_key=api_key,
-        max_tokens=int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000")),
-    )
+    planner_lm = _build_lm(**planner_lm_kwargs)
     configure_kwargs: dict[str, Any] = {"lm": planner_lm}
     adapter = get_default_dspy_adapter_from_env(env_file=env_file)
     if adapter is not None:
@@ -342,20 +409,10 @@ def get_planner_lm_from_env(
         A configured dspy.LM instance if configuration is available, None otherwise.
     """
     _prepare_env(env_file=env_file)
-
-    api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    model = model_name or os.environ.get("DSPY_LM_MODEL")
-
-    if not model or not api_key:
+    planner_lm_kwargs = _planner_lm_kwargs(model_name=model_name)
+    if planner_lm_kwargs is None:
         return None
-
-    dspy = _import_dspy()
-    return dspy.LM(
-        model,
-        api_base=os.environ.get("DSPY_LM_API_BASE"),
-        api_key=api_key,
-        max_tokens=int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000")),
-    )
+    return _build_lm(**planner_lm_kwargs)
 
 
 def get_delegate_lm_from_env(
@@ -377,46 +434,22 @@ def get_delegate_lm_from_env(
     inputs or init failures so callers can fall back to the parent planner LM.
     """
     _prepare_env(env_file=env_file)
-
-    model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
-    if not model:
-        return None
-
-    api_key = (
-        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
-        or default_api_key
-        or os.environ.get("DSPY_LLM_API_KEY")
-        or os.environ.get("DSPY_LM_API_KEY")
+    delegate_lm_kwargs = _delegate_lm_kwargs(
+        model_name=model_name,
+        default_api_key=default_api_key,
+        default_api_base=default_api_base,
+        default_max_tokens=default_max_tokens
+        if default_max_tokens is not None
+        else os.environ.get("DSPY_LM_MAX_TOKENS"),
     )
-    if not api_key:
-        logger.warning(
-            "Delegate LM model is configured but no API key is available; using planner fallback."
-        )
+    if delegate_lm_kwargs is None:
         return None
-
-    raw_max_tokens = default_max_tokens
-    if raw_max_tokens is None:
-        try:
-            raw_max_tokens = int(os.environ.get("DSPY_LM_MAX_TOKENS", "64000"))
-        except (TypeError, ValueError):
-            raw_max_tokens = 64000
-
     try:
-        dspy = _import_dspy()
-        return dspy.LM(
-            model,
-            api_base=(
-                os.environ.get("DSPY_DELEGATE_LM_API_BASE")
-                or default_api_base
-                or os.environ.get("DSPY_LM_API_BASE")
-            ),
-            api_key=api_key,
-            max_tokens=int(raw_max_tokens),
-        )
+        return _build_lm(**delegate_lm_kwargs)
     except Exception:
         logger.warning(
             "Failed to initialize delegate LM '%s'; using planner fallback.",
-            model,
+            delegate_lm_kwargs["model"],
             exc_info=True,
         )
         return None
