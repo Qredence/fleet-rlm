@@ -230,6 +230,7 @@ def test_create_app_serves_spa_index_from_frontend_dist(
     assets_dir.mkdir(parents=True)
     branding_dir.mkdir(parents=True)
     (ui_dist / "index.html").write_text("<html><body>Fleet UI</body></html>")
+    (ui_dist / "favicon.ico").write_text("ico")
     (branding_dir / "logo-mark.svg").write_text("<svg>logo</svg>")
 
     monkeypatch.setattr(server_main, "_resolve_ui_dist_dir", lambda: ui_dist)
@@ -246,9 +247,48 @@ def test_create_app_serves_spa_index_from_frontend_dist(
     assert response.status_code == 200
     assert "Fleet UI" in response.text
 
+    workspace = client.get("/app/workspace")
+    assert workspace.status_code == 200
+    assert "Fleet UI" in workspace.text
+
     logo = client.get("/branding/logo-mark.svg")
     assert logo.status_code == 200
     assert logo.text == "<svg>logo</svg>"
+
+    favicon = client.get("/favicon.ico")
+    assert favicon.status_code == 200
+    assert favicon.text == "ico"
+
+
+def test_create_app_does_not_serve_spa_for_unknown_api_or_missing_static_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api import main as server_main
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.main import create_app
+
+    ui_dist = tmp_path / "src" / "frontend" / "dist"
+    ui_dist.mkdir(parents=True)
+    (ui_dist / "index.html").write_text("<html><body>Fleet UI</body></html>")
+
+    monkeypatch.setattr(server_main, "_resolve_ui_dist_dir", lambda: ui_dist)
+
+    app = create_app(
+        config=ServerRuntimeConfig(
+            app_env="local",
+            database_required=False,
+        )
+    )
+    client = TestClient(app)
+
+    api_response = client.get("/api/v1/not-a-route")
+    assert api_response.status_code == 404
+    assert api_response.json() == {"detail": "Not Found"}
+
+    missing_asset = client.get("/missing.js")
+    assert missing_asset.status_code == 404
+    assert missing_asset.json() == {"detail": "Not Found"}
 
 
 def test_create_app_returns_helpful_root_response_when_ui_assets_are_missing(
