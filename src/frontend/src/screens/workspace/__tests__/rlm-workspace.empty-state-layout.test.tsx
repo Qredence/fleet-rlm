@@ -67,9 +67,9 @@ vi.mock("@/lib/telemetry/use-telemetry", () => ({
 }));
 
 vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/screens/workspace/use-workspace")
-  >("@/screens/workspace/use-workspace");
+  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
+    "@/screens/workspace/use-workspace",
+  );
 
   return {
     ...actual,
@@ -84,12 +84,7 @@ vi.mock("@/screens/workspace/use-workspace", async () => {
       selector(chatStoreMockState),
     useWorkspace: () => backendRuntimeState,
     useRunWorkbenchStore: (
-      selector: (state: {
-        status: "idle";
-        activity: [];
-        iterations: [];
-        callbacks: [];
-      }) => unknown,
+      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
     ) =>
       selector({
         status: "idle",

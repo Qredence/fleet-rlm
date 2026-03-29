@@ -21,8 +21,7 @@ const authority =
   trimOrEmpty(import.meta.env.VITE_ENTRA_AUTHORITY) ||
   "https://login.microsoftonline.com/organizations";
 const scopes = parseCsv(import.meta.env.VITE_ENTRA_SCOPES);
-const redirectPath =
-  trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH) || "/login";
+const redirectPath = trimOrEmpty(import.meta.env.VITE_ENTRA_REDIRECT_PATH) || "/login";
 
 export const entraAuthConfig = {
   clientId,
@@ -40,10 +39,7 @@ let initPromise: Promise<PublicClientApplication> | null = null;
 
 function getRedirectUri(): string {
   if (typeof window === "undefined") return entraAuthConfig.redirectPath;
-  return new URL(
-    entraAuthConfig.redirectPath,
-    window.location.origin,
-  ).toString();
+  return new URL(entraAuthConfig.redirectPath, window.location.origin).toString();
 }
 
 async function getMsalClient(): Promise<PublicClientApplication> {
@@ -79,9 +75,7 @@ async function getMsalClient(): Promise<PublicClientApplication> {
   return initPromise;
 }
 
-async function acquireAccessTokenForAccount(
-  account: AccountInfo,
-): Promise<AuthenticationResult> {
+async function acquireAccessTokenForAccount(account: AccountInfo): Promise<AuthenticationResult> {
   const client = await getMsalClient();
   const request: SilentRequest = {
     account,
@@ -89,9 +83,7 @@ async function acquireAccessTokenForAccount(
   };
   const result = await client.acquireTokenSilent(request);
   if (!result.accessToken) {
-    throw new Error(
-      "Entra login succeeded, but no API access token was returned.",
-    );
+    throw new Error("Entra login succeeded, but no API access token was returned.");
   }
   client.setActiveAccount(result.account);
   setAccessToken(result.accessToken);
@@ -103,8 +95,7 @@ export async function initializeEntraSession(): Promise<string | null> {
     return null;
   }
   const client = await getMsalClient();
-  const account =
-    client.getActiveAccount() ?? client.getAllAccounts()[0] ?? null;
+  const account = client.getActiveAccount() ?? client.getAllAccounts()[0] ?? null;
   if (!account) {
     clearAccessToken();
     return null;
@@ -135,8 +126,7 @@ export async function logoutWithEntra(): Promise<void> {
   }
 
   const client = await getMsalClient();
-  const account =
-    client.getActiveAccount() ?? client.getAllAccounts()[0] ?? undefined;
+  const account = client.getActiveAccount() ?? client.getAllAccounts()[0] ?? undefined;
   clearAccessToken();
   await client.logoutPopup({
     account,

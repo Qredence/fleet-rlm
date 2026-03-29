@@ -119,9 +119,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <DialogContent className="rounded-card-token top-[min(20vh,120px)] translate-y-0 w-full max-w-140 overflow-hidden border-subtle bg-popover p-0 shadow-(--shadow-200-stronger) [&>button:last-child]:hidden">
         <DialogHeader className="sr-only">
           <DialogTitle>Command palette</DialogTitle>
-          <DialogDescription>
-            Search pages and run quick actions.
-          </DialogDescription>
+          <DialogDescription>Search pages and run quick actions.</DialogDescription>
         </DialogHeader>
         <div onClick={(event) => event.stopPropagation()}>
           <Command
@@ -151,11 +149,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </CommandEmpty>
 
               <CommandGroup
-                heading={
-                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
-                    Pages
-                  </span>
-                }
+                heading={<span className="text-muted-foreground px-2 pb-1 typo-micro">Pages</span>}
               >
                 {pages.map((page) => {
                   const Icon = page.icon;
@@ -182,9 +176,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
               <CommandGroup
                 heading={
-                  <span className="text-muted-foreground px-2 pb-1 typo-micro">
-                    Actions
-                  </span>
+                  <span className="text-muted-foreground px-2 pb-1 typo-micro">Actions</span>
                 }
               >
                 <CommandItem
@@ -240,9 +232,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       strokeWidth={1.5}
                     />
                   )}
-                  <span className="typo-label">
-                    Switch to {isDark ? "Light" : "Dark"} Mode
-                  </span>
+                  <span className="typo-label">Switch to {isDark ? "Light" : "Dark"} Mode</span>
                 </CommandItem>
 
                 <CommandItem
@@ -270,9 +260,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             </CommandList>
 
             <div className="flex items-center gap-3 border-t border-border-subtle px-4 py-2.5">
-              <span className="text-muted-foreground typo-micro">
-                Navigate with
-              </span>
+              <span className="text-muted-foreground typo-micro">Navigate with</span>
               <div className="flex items-center gap-1">
                 <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                   &uarr;
@@ -281,9 +269,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   &darr;
                 </kbd>
               </div>
-              <span className="text-muted-foreground typo-micro">
-                to select
-              </span>
+              <span className="text-muted-foreground typo-micro">to select</span>
               <kbd className="inline-flex items-center px-1.5 py-0.5 rounded bg-muted border-subtle text-muted-foreground typo-micro">
                 &crarr;
               </kbd>

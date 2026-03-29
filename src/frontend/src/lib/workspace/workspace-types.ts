@@ -1,18 +1,9 @@
 import type { WsServerMessage } from "@/lib/rlm-api";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
-export type CreationPhase =
-  | "idle"
-  | "understanding"
-  | "generating"
-  | "validating"
-  | "complete";
+export type CreationPhase = "idle" | "understanding" | "generating" | "validating" | "complete";
 
-export type PromptFeature =
-  | "library"
-  | "contextMemory"
-  | "capabilities"
-  | "webSearch";
+export type PromptFeature = "library" | "contextMemory" | "capabilities" | "webSearch";
 
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
@@ -104,12 +95,7 @@ export interface ChatInlineCitation {
   endChar?: number;
 }
 
-export type ChatSourceKind =
-  | "web"
-  | "file"
-  | "artifact"
-  | "tool_output"
-  | "other";
+export type ChatSourceKind = "web" | "file" | "artifact" | "tool_output" | "other";
 
 export interface ChatSourceItem {
   sourceId: string;
@@ -230,11 +216,7 @@ export type ChatRenderPart =
 
 export type ArtifactStepType = "llm" | "repl" | "tool" | "memory" | "output";
 
-export type ArtifactActorKind =
-  | "root_rlm"
-  | "sub_agent"
-  | "delegate"
-  | "unknown";
+export type ArtifactActorKind = "root_rlm" | "sub_agent" | "delegate" | "unknown";
 
 export interface ExecutionStep {
   id: string;
@@ -301,12 +283,7 @@ export type RunStatus =
   | "error"
   | "cancelled";
 
-export type DetailTab =
-  | "iterations"
-  | "evidence"
-  | "callbacks"
-  | "prompts"
-  | "final";
+export type DetailTab = "iterations" | "evidence" | "callbacks" | "prompts" | "final";
 
 export interface PromptHandleSummary {
   handleId: string;

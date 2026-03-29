@@ -1,17 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  detectRepoContext,
-  normalizeRepoUrl,
-  resolveRepoContext,
-} from "@/lib/utils/repo-context";
+import { detectRepoContext, normalizeRepoUrl, resolveRepoContext } from "@/lib/utils/repo-context";
 
 describe("repoContext", () => {
   it("detects a bare GitHub repo URL from prompt text", () => {
     expect(
-      detectRepoContext(
-        "Please inspect https://github.com/qredence/fleet-rlm and summarize it.",
-      ),
+      detectRepoContext("Please inspect https://github.com/qredence/fleet-rlm and summarize it."),
     ).toEqual({
       repoUrl: "https://github.com/qredence/fleet-rlm",
       repoRef: undefined,
@@ -45,16 +39,13 @@ describe("repoContext", () => {
       repoRef: "release",
       repoRefCandidate: "release/2026-03/src/frontend",
       source: "prompt_url",
-      matchedText:
-        "https://github.com/qredence/fleet-rlm/tree/release/2026-03/src/frontend",
+      matchedText: "https://github.com/qredence/fleet-rlm/tree/release/2026-03/src/frontend",
     });
   });
 
   it("detects an explicit branch hint when the prompt uses a bare repo URL", () => {
     expect(
-      detectRepoContext(
-        "Analyze https://github.com/qredence/fleet-rlm on branch release/2026-03.",
-      ),
+      detectRepoContext("Analyze https://github.com/qredence/fleet-rlm on branch release/2026-03."),
     ).toEqual({
       repoUrl: "https://github.com/qredence/fleet-rlm",
       repoRef: "release/2026-03",
@@ -66,9 +57,7 @@ describe("repoContext", () => {
 
   it("ignores non-repository URLs", () => {
     expect(
-      detectRepoContext(
-        "Use https://example.com/docs and then answer the question.",
-      ),
+      detectRepoContext("Use https://example.com/docs and then answer the question."),
     ).toBeNull();
   });
 

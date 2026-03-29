@@ -2,11 +2,7 @@ import { PanelRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
 import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
@@ -32,16 +28,12 @@ export function ShellHeader() {
     <header
       className={cn(
         "flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
-        isMobile
-          ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]"
-          : "px-5 py-2",
+        isMobile ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-5 py-2",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
         <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
-        <div className="min-w-0 truncate text-sm font-medium text-foreground">
-          {title}
-        </div>
+        <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
 
       {showCanvasToggle ? (

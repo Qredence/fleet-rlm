@@ -14,8 +14,7 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
     case "volumes":
       return {
         title: "Preview",
-        description:
-          "Inspect the selected file without leaving the mounted storage browser.",
+        description: "Inspect the selected file without leaving the mounted storage browser.",
         toggleLabel: "Preview",
         toggleDescription: "Inspect selected files",
         emptyTitle: "Nothing selected yet",
@@ -25,8 +24,7 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
     case "settings":
       return {
         title: "Details",
-        description:
-          "Keep contextual help and future previews adjacent to the settings workspace.",
+        description: "Keep contextual help and future previews adjacent to the settings workspace.",
         toggleLabel: "Details",
         toggleDescription: "Reference panel",
         emptyTitle: "Settings stay focused in the dialog",

@@ -47,8 +47,7 @@ const sessionButtonClassName =
 
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort(
-    (left, right) =>
-      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
   );
 }
 
@@ -81,18 +80,14 @@ function SidebarActionItem({
 export function AppSidebar() {
   const conversations = useWorkspaceShellHistory();
   const { toggleSidebar, state: sidebarState } = useSidebar();
-  const { newSession, requestConversationLoad, deleteConversation } =
-    useWorkspaceShellActions();
+  const { newSession, requestConversationLoad, deleteConversation } = useWorkspaceShellActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
   const { openCommandPalette } = useNavigationStore();
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
-  const sortedConversations = useMemo(
-    () => sortConversations(conversations),
-    [conversations],
-  );
+  const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
     const wasHandledByDialog = requestSettingsDialogOpen({
@@ -139,12 +134,7 @@ export function AppSidebar() {
       collapsible="icon"
       className="border-0 !pr-0 [&_[data-slot=sidebar-inner]]:rounded-[16px] [&_[data-slot=sidebar-inner]]:border [&_[data-slot=sidebar-inner]]:border-sidebar-border/80 [&_[data-slot=sidebar-inner]]:bg-sidebar [&_[data-slot=sidebar-inner]]:ring-0 [&_[data-slot=sidebar-inner]]:shadow-none"
     >
-      <SidebarHeader
-        className={cn(
-          "pt-4 pb-2",
-          sidebarState === "collapsed" ? "px-2" : "px-4",
-        )}
-      >
+      <SidebarHeader className={cn("pt-4 pb-2", sidebarState === "collapsed" ? "px-2" : "px-4")}>
         <div
           className={cn(
             "flex w-full items-center rounded-[10px]",
@@ -154,9 +144,7 @@ export function AppSidebar() {
           <QredenceLogo
             className={cn(
               "size-[18px] shrink-0 text-sidebar-foreground",
-              sidebarState === "collapsed"
-                ? "pointer-events-none absolute opacity-0"
-                : "ml-2.5",
+              sidebarState === "collapsed" ? "pointer-events-none absolute opacity-0" : "ml-2.5",
             )}
           />
           <Button
@@ -167,9 +155,7 @@ export function AppSidebar() {
             onClick={toggleSidebar}
             className={cn(
               "size-9 rounded-lg text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
-              sidebarState === "collapsed"
-                ? "mx-auto"
-                : "pointer-events-none opacity-0",
+              sidebarState === "collapsed" ? "mx-auto" : "pointer-events-none opacity-0",
             )}
           >
             <PanelLeftIcon className="size-4" />
@@ -181,11 +167,7 @@ export function AppSidebar() {
         <SidebarGroup className="pt-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
-              <SidebarActionItem
-                label="New session"
-                icon={Plus}
-                onClick={handleNewSession}
-              />
+              <SidebarActionItem label="New session" icon={Plus} onClick={handleNewSession} />
               <SidebarActionItem
                 label="Search sessions"
                 icon={Search}
@@ -237,9 +219,7 @@ export function AppSidebar() {
                         title={`Delete conversation: ${session.title}`}
                         showOnHover
                         className="right-2 text-sidebar-foreground/40 hover:bg-sidebar-accent/70 hover:text-destructive"
-                        onClick={(event) =>
-                          handleDeleteConversation(event, session.id)
-                        }
+                        onClick={(event) => handleDeleteConversation(event, session.id)}
                       >
                         <Trash2 />
                       </SidebarMenuAction>

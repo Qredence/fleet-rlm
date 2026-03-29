@@ -22,9 +22,7 @@ export function asOptionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-export function parseRuntimeContext(
-  payload?: Record<string, unknown>,
-): RuntimeContext | undefined {
+export function parseRuntimeContext(payload?: Record<string, unknown>): RuntimeContext | undefined {
   const raw = asRecord(payload?.runtime) ?? payload;
   if (!raw) return undefined;
   const depth = asOptionalNumber(raw.depth);

@@ -18,8 +18,7 @@ import { useNavigationStore } from "@/stores/navigation-store";
 function RouteSync() {
   const routerState = useRouterState();
   const location = routerState.location;
-  const { setActiveNav, openCanvas, closeCanvas, activeNav } =
-    useNavigationStore();
+  const { setActiveNav, openCanvas, closeCanvas, activeNav } = useNavigationStore();
   const { clearSelectedFile } = useVolumesShellSelection();
 
   // Track previous section to avoid redundant updates

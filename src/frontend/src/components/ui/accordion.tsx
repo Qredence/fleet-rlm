@@ -22,10 +22,7 @@ function Accordion({ type, collapsible, ...props }: AccordionProps) {
   return <BaseAccordion.Root {...accordionProps} />;
 }
 
-function AccordionItem({
-  className,
-  ...props
-}: React.ComponentProps<typeof BaseAccordion.Item>) {
+function AccordionItem({ className, ...props }: React.ComponentProps<typeof BaseAccordion.Item>) {
   return (
     <BaseAccordion.Item
       className={cn("border-b border-border-subtle last:border-b-0", className)}

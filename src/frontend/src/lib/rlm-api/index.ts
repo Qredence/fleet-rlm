@@ -1,8 +1,4 @@
-export {
-  rlmApiConfig,
-  isRlmCoreEnabled,
-  isRlmWsEnabled,
-} from "@/lib/rlm-api/config";
+export { rlmApiConfig, isRlmCoreEnabled, isRlmWsEnabled } from "@/lib/rlm-api/config";
 export {
   SUPPORTED_SECTIONS,
   UNSUPPORTED_SECTION_REASON,

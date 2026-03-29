@@ -4,20 +4,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { WorkspaceChatEmptyState } from "@/app/workspace/transcript/workspace-chat-empty-state";
 
-function mountEmptyState(
-  props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>,
-) {
+function mountEmptyState(props?: Partial<ComponentProps<typeof WorkspaceChatEmptyState>>) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
 
   act(() => {
     root.render(
-      <WorkspaceChatEmptyState
-        isMobile={false}
-        onSuggestionClick={() => {}}
-        {...props}
-      />,
+      <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} {...props} />,
     );
   });
 
@@ -45,16 +39,14 @@ describe("WorkspaceChatEmptyState", () => {
     const onSuggestionClick = vi.fn();
     const { container, root } = mountEmptyState({ onSuggestionClick });
 
-    const helpMeWriteButton = Array.from(
-      container.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Help me write"));
+    const helpMeWriteButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Help me write"),
+    );
 
     expect(helpMeWriteButton).not.toBeUndefined();
 
     act(() => {
-      helpMeWriteButton?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
+      helpMeWriteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(onSuggestionClick).toHaveBeenCalledWith("Help me write");

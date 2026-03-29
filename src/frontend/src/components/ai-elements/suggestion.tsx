@@ -8,12 +8,7 @@ export type SuggestionsProps = ComponentProps<typeof ScrollArea> & {
   wrap?: boolean;
 };
 
-export const Suggestions = ({
-  className,
-  children,
-  wrap = false,
-  ...props
-}: SuggestionsProps) => (
+export const Suggestions = ({ className, children, wrap = false, ...props }: SuggestionsProps) => (
   <ScrollArea
     className={cn(
       "w-full whitespace-nowrap",

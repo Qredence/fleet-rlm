@@ -1,12 +1,4 @@
-import {
-  AtSign,
-  Brain,
-  Globe,
-  MessagesSquare,
-  Paperclip,
-  Sparkles,
-  Wrench,
-} from "lucide-react";
+import { AtSign, Brain, Globe, MessagesSquare, Paperclip, Sparkles, Wrench } from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
@@ -63,8 +55,7 @@ function PromptComposerSelect<T extends string>({
   showCurrentIcon = false,
   value,
 }: PromptComposerSelectProps<T>) {
-  const currentOption =
-    options.find((option) => option.id === value) ?? options[0];
+  const currentOption = options.find((option) => option.id === value) ?? options[0];
 
   if (!currentOption) {
     return null;
@@ -73,10 +64,7 @@ function PromptComposerSelect<T extends string>({
   const CurrentIcon = currentOption.icon;
 
   return (
-    <PromptInputSelect
-      value={value}
-      onValueChange={(nextValue) => onChange(nextValue as T)}
-    >
+    <PromptInputSelect value={value} onValueChange={(nextValue) => onChange(nextValue as T)}>
       <PromptInputSelectTrigger
         aria-label={`${ariaLabel}: ${currentOption.label}`}
         className={cn(
@@ -140,9 +128,7 @@ function PromptComposerAttachmentMenu({
         >
           <Paperclip />
           <span>
-            {uploadsEnabled
-              ? "Add images, PDFs or CSVs"
-              : "Add images, PDFs or CSVs (coming soon)"}
+            {uploadsEnabled ? "Add images, PDFs or CSVs" : "Add images, PDFs or CSVs (coming soon)"}
           </span>
         </PromptInputActionMenuItem>
         <PromptInputActionMenuItem

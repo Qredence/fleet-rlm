@@ -16,9 +16,7 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-function mapProfile(
-  me: Awaited<ReturnType<typeof authEndpoints.me>>,
-): UserProfile {
+function mapProfile(me: Awaited<ReturnType<typeof authEndpoints.me>>): UserProfile {
   return {
     id: me.user_id ?? me.user_claim ?? MOCK_USER.id,
     name: me.name ?? "Authenticated User",

@@ -196,15 +196,9 @@ function DropdownMenuSeparator({
   );
 }
 
-function DropdownMenuShortcut({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
+function DropdownMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   return (
-    <span
-      className={cn("text-muted-foreground ml-auto tracking-widest", className)}
-      {...props}
-    />
+    <span className={cn("text-muted-foreground ml-auto tracking-widest", className)} {...props} />
   );
 }
 

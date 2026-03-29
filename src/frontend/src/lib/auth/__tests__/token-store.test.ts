@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const CANONICAL_KEY = "fleet-rlm:access-token";
 
@@ -58,8 +51,7 @@ describe("tokenStore", () => {
   });
 
   it("clears canonical token", async () => {
-    const { setAccessToken, clearAccessToken, getAccessToken } =
-      await loadTokenStore();
+    const { setAccessToken, clearAccessToken, getAccessToken } = await loadTokenStore();
 
     setAccessToken("to-clear");
 

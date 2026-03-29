@@ -17,10 +17,7 @@ export function ExecutionHighlightsGroup({
   if (!execution.hasChatHighlights) return null;
 
   return (
-    <section
-      className="flex flex-col gap-2.5"
-      data-slot="assistant-execution-highlights"
-    >
+    <section className="flex flex-col gap-2.5" data-slot="assistant-execution-highlights">
       <div className={inspectorStyles.heading.section}>Execution</div>
       <div className={inspectorStyles.stack.compact}>
         {execution.highlights.map((highlight) => {
@@ -37,23 +34,15 @@ export function ExecutionHighlightsGroup({
                   <div className="text-sm font-medium leading-5 text-foreground">
                     {highlight.label}
                   </div>
-                  <div className="text-sm leading-5 text-muted-foreground">
-                    {highlight.summary}
-                  </div>
+                  <div className="text-sm leading-5 text-muted-foreground">{highlight.summary}</div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
-                    <Badge
-                      variant="secondary"
-                      className={inspectorStyles.badge.meta}
-                    >
+                    <Badge variant="secondary" className={inspectorStyles.badge.meta}>
                       {highlight.count}x
                     </Badge>
                   ) : null}
-                  <Badge
-                    variant={tone.variant}
-                    className={inspectorStyles.badge.status}
-                  >
+                  <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
                     {tone.label}
                   </Badge>
                 </div>

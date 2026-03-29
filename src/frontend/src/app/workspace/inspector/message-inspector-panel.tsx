@@ -1,11 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
@@ -18,11 +13,7 @@ import { useChatStore } from "@/screens/workspace/use-workspace";
 import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 import type { InspectorTab } from "@/screens/workspace/use-workspace";
 import { inspectorStyles } from "@/app/workspace/inspector/inspector-styles";
-import {
-  executionSectionState,
-  renderBadges,
-  statusTone,
-} from "./ui/inspector-ui";
+import { executionSectionState, renderBadges, statusTone } from "./ui/inspector-ui";
 
 import { TrajectoryInspectorTab } from "./tabs/trajectory-inspector-tab";
 import { ExecutionInspectorTab } from "./tabs/execution-inspector-tab";
@@ -34,11 +25,7 @@ type TabOption = {
   label: string;
 };
 
-function EmptyInspectorState({
-  hasAssistantTurns,
-}: {
-  hasAssistantTurns: boolean;
-}) {
+function EmptyInspectorState({ hasAssistantTurns }: { hasAssistantTurns: boolean }) {
   return (
     <div className="flex h-full items-center justify-center px-4 py-6">
       <Card className="w-full max-w-md border-border-subtle/80 bg-card/75 shadow-none">
@@ -60,21 +47,12 @@ function hasMeaningfulGraph(steps: ExecutionStep[]) {
 
   const lanes = new Set(
     steps
-      .map(
-        (step) =>
-          step.lane_key ??
-          `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`,
-      )
+      .map((step) => step.lane_key ?? `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`)
       .filter(Boolean),
   );
   if (lanes.size > 1) return true;
 
-  if (
-    steps.some(
-      (step) =>
-        step.actor_kind === "delegate" || step.actor_kind === "sub_agent",
-    )
-  ) {
+  if (steps.some((step) => step.actor_kind === "delegate" || step.actor_kind === "sub_agent")) {
     return true;
   }
 
@@ -90,11 +68,7 @@ function hasMeaningfulGraph(steps: ExecutionStep[]) {
 function selectedTurnStatus(
   model: AssistantContentModel,
 ): "pending" | "running" | "completed" | "failed" {
-  if (
-    model.execution.sections.some(
-      (section) => executionSectionState(section) === "failed",
-    )
-  ) {
+  if (model.execution.sections.some((section) => executionSectionState(section) === "failed")) {
     return "failed";
   }
   if (model.trajectory.items.some((item) => item.status === "failed")) {
@@ -106,9 +80,7 @@ function selectedTurnStatus(
       const state = executionSectionState(section);
       return state === "pending" || state === "running";
     }) ||
-    model.trajectory.items.some(
-      (item) => item.status === "pending" || item.status === "running",
-    ) ||
+    model.trajectory.items.some((item) => item.status === "pending" || item.status === "running") ||
     model.trajectory.overview?.isStreaming
   ) {
     return "running";
@@ -119,21 +91,12 @@ function selectedTurnStatus(
 export function MessageInspectorPanel() {
   const messages = useChatStore((state) => state.messages);
   const isStreaming = useChatStore((state) => state.isStreaming);
-  const turnArtifactsByMessageId = useChatStore(
-    (state) => state.turnArtifactsByMessageId,
-  );
-  const selectedAssistantTurnId = useWorkspaceUiStore(
-    (state) => state.selectedAssistantTurnId,
-  );
-  const activeInspectorTab = useWorkspaceUiStore(
-    (state) => state.activeInspectorTab,
-  );
+  const turnArtifactsByMessageId = useChatStore((state) => state.turnArtifactsByMessageId);
+  const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
+  const activeInspectorTab = useWorkspaceUiStore((state) => state.activeInspectorTab);
   const setInspectorTab = useWorkspaceUiStore((state) => state.setInspectorTab);
 
-  const hasAssistantTurns = useMemo(
-    () => messages.some((m) => m.type === "assistant"),
-    [messages],
-  );
+  const hasAssistantTurns = useMemo(() => messages.some((m) => m.type === "assistant"), [messages]);
 
   const selectedTurn = useMemo(() => {
     if (!selectedAssistantTurnId) return null;
@@ -141,9 +104,7 @@ export function MessageInspectorPanel() {
       buildChatDisplayItems(messages, {
         showPendingAssistantShell: isStreaming,
       }).find(
-        (item) =>
-          item.kind === "assistant_turn" &&
-          item.turnId === selectedAssistantTurnId,
+        (item) => item.kind === "assistant_turn" && item.turnId === selectedAssistantTurnId,
       ) ?? null
     );
   }, [isStreaming, messages, selectedAssistantTurnId]) as Extract<
@@ -157,8 +118,7 @@ export function MessageInspectorPanel() {
   );
 
   const graphSteps = useMemo(
-    () =>
-      selectedTurn ? (turnArtifactsByMessageId[selectedTurn.turnId] ?? []) : [],
+    () => (selectedTurn ? (turnArtifactsByMessageId[selectedTurn.turnId] ?? []) : []),
     [selectedTurn, turnArtifactsByMessageId],
   );
 
@@ -188,8 +148,7 @@ export function MessageInspectorPanel() {
     return <EmptyInspectorState hasAssistantTurns={hasAssistantTurns} />;
   }
 
-  const currentTab =
-    tabs.find((tab) => tab.id === activeInspectorTab)?.id ?? "trajectory";
+  const currentTab = tabs.find((tab) => tab.id === activeInspectorTab)?.id ?? "trajectory";
   const turnStatus = statusTone(selectedTurnStatus(model));
   const summaryBadges = [
     ...model.summary.runtimeBadges,
@@ -200,13 +159,8 @@ export function MessageInspectorPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border-subtle/70 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-sm font-medium text-foreground">
-            Assistant turn
-          </div>
-          <Badge
-            variant={turnStatus.variant}
-            className={inspectorStyles.badge.status}
-          >
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">Assistant turn</div>
+          <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
             {turnStatus.label}
           </Badge>
         </div>
@@ -235,9 +189,7 @@ export function MessageInspectorPanel() {
               {model.summary.attachmentCount === 1 ? "" : "s"}
             </Badge>
           ) : null}
-          {summaryBadges.length > 0
-            ? renderBadges(summaryBadges, "secondary")
-            : null}
+          {summaryBadges.length > 0 ? renderBadges(summaryBadges, "secondary") : null}
         </div>
       </div>
 
@@ -247,10 +199,7 @@ export function MessageInspectorPanel() {
         className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
       >
         <div className="px-4 py-2">
-          <TabsList
-            variant="segmented"
-            className="border border-border-subtle/70 bg-muted/40"
-          >
+          <TabsList variant="segmented" className="border border-border-subtle/70 bg-muted/40">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
                 {tab.label}
@@ -262,12 +211,8 @@ export function MessageInspectorPanel() {
         <Separator className="bg-border-subtle/70" />
 
         <TrajectoryInspectorTab model={model} />
-        {model.execution.hasContent ? (
-          <ExecutionInspectorTab model={model} />
-        ) : null}
-        {model.evidence.hasContent ? (
-          <EvidenceInspectorTab model={model} />
-        ) : null}
+        {model.execution.hasContent ? <ExecutionInspectorTab model={model} /> : null}
+        {model.evidence.hasContent ? <EvidenceInspectorTab model={model} /> : null}
         {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
       </Tabs>
     </div>

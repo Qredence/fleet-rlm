@@ -9,10 +9,7 @@ import {
   shouldApplyRunFrame,
   startRunWorkbenchRun,
 } from "@/lib/workspace/run-workbench-adapter";
-import type {
-  DetailTab,
-  RunWorkbenchState,
-} from "@/lib/workspace/workspace-types";
+import type { DetailTab, RunWorkbenchState } from "@/lib/workspace/workspace-types";
 
 interface RunWorkbenchStore extends RunWorkbenchState {
   reset: () => void;
@@ -33,8 +30,7 @@ export const useRunWorkbenchStore = create<RunWorkbenchStore>((set, get) => ({
   ...createInitialRunWorkbenchState(),
   reset: () => set(createInitialRunWorkbenchState()),
   beginRun: (input) => set((state) => startRunWorkbenchRun(state, input)),
-  failRun: (errorMessage) =>
-    set((state) => failRunWorkbenchRun(state, errorMessage)),
+  failRun: (errorMessage) => set((state) => failRunWorkbenchRun(state, errorMessage)),
   applyFrame: (frame) =>
     set((state) => {
       if (!shouldApplyRunFrame(state, frame)) return state;

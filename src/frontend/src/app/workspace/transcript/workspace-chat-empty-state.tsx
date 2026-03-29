@@ -59,20 +59,14 @@ export function WorkspaceChatEmptyState({
       <motion.div
         initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={
-          prefersReduced
-            ? { duration: 0.01 }
-            : { duration: 0.28, ease: "easeOut" }
-        }
+        transition={prefersReduced ? { duration: 0.01 } : { duration: 0.28, ease: "easeOut" }}
         className="flex w-full max-w-3xl flex-col items-center gap-3"
       >
         <div className="flex w-full flex-col items-center gap-[3px]">
           <h2
             className={cn(
               "font-medium tracking-[-0.02em] text-foreground",
-              isMobile
-                ? "text-[2rem] leading-[1.1]"
-                : "text-[32px] leading-[1.1]",
+              isMobile ? "text-[2rem] leading-[1.1]" : "text-[32px] leading-[1.1]",
             )}
           >
             Let&apos;s get to work, how can I help?
@@ -87,12 +81,7 @@ export function WorkspaceChatEmptyState({
           </p>
         </div>
 
-        <Suggestions
-          wrap
-          className="w-full"
-          aria-live="polite"
-          aria-label="Suggestion actions"
-        >
+        <Suggestions wrap className="w-full" aria-live="polite" aria-label="Suggestion actions">
           {suggestions.map((suggestion, index) => (
             <AnimatedSuggestion
               key={suggestion.label}
@@ -140,9 +129,7 @@ function AnimatedSuggestion({
         )}
       >
         {suggestion.Icon ? (
-          <suggestion.Icon
-            className={cn("size-4 shrink-0", suggestion.accentClassName)}
-          />
+          <suggestion.Icon className={cn("size-4 shrink-0", suggestion.accentClassName)} />
         ) : null}
         <span>{suggestion.label}</span>
       </Suggestion>

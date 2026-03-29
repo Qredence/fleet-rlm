@@ -34,10 +34,7 @@ function hasLocalBackendBaseUrl(): boolean {
 function isRetryableRuntimeFailure(error: unknown): boolean {
   if (error instanceof RlmApiError) {
     return (
-      error.status === 404 ||
-      error.status === 502 ||
-      error.status === 503 ||
-      error.status === 504
+      error.status === 404 || error.status === 502 || error.status === 503 || error.status === 504
     );
   }
 
@@ -52,8 +49,7 @@ function shouldUseRuntimeReadFallback(error: unknown): boolean {
 }
 
 function shouldUseRuntimeWriteFallback(error: unknown): boolean {
-  const supportsFrontendFallback =
-    rlmApiConfig.mockMode || rlmApiConfig.e2eMode;
+  const supportsFrontendFallback = rlmApiConfig.mockMode || rlmApiConfig.e2eMode;
 
   return supportsFrontendFallback && isRetryableRuntimeFailure(error);
 }
@@ -76,11 +72,7 @@ async function withRuntimeFallback<T>(
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        rlmApiClient.get<RuntimeSettingsSnapshot>(
-          "/api/v1/runtime/settings",
-          signal,
-        ),
+      () => rlmApiClient.get<RuntimeSettingsSnapshot>("/api/v1/runtime/settings", signal),
       () => getMockRuntimeSettings(),
     );
   },
@@ -136,11 +128,7 @@ export const runtimeEndpoints = {
 
   status(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        rlmApiClient.get<RuntimeStatusResponse>(
-          "/api/v1/runtime/status",
-          signal,
-        ),
+      () => rlmApiClient.get<RuntimeStatusResponse>("/api/v1/runtime/status", signal),
       () => getMockRuntimeStatus(),
     );
   },
