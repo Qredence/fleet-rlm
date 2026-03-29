@@ -42,9 +42,8 @@ from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
-    _await_if_needed,
-    _run_async_compat,
 )
+from .runtime_helpers import _run_async_compat
 from .state import dedupe_paths, normalized_context_sources
 
 
@@ -353,58 +352,27 @@ class DaytonaInterpreter(LLMQueryMixin):
             and self._session_source_key in {None, source_key}
         ):
             try:
-                async_resume = getattr(self.runtime, "aresume_workspace_session", None)
-                if async_resume is not None and callable(async_resume):
-                    self._session = await _await_if_needed(
-                        async_resume(
-                            sandbox_id=self._persisted_sandbox_id,
-                            repo_url=self.repo_url,
-                            ref=self.repo_ref,
-                            workspace_path=self._persisted_workspace_path,
-                            context_sources=self._persisted_context_sources,
-                            context_id=self._persisted_context_id,
-                        )
-                    )
-                else:
-                    self._session = await _await_if_needed(
-                        self.runtime.resume_workspace_session(
-                            sandbox_id=self._persisted_sandbox_id,
-                            repo_url=self.repo_url,
-                            ref=self.repo_ref,
-                            workspace_path=self._persisted_workspace_path,
-                            context_sources=self._persisted_context_sources,
-                            context_id=self._persisted_context_id,
-                        )
-                    )
+                self._session = await self.runtime.aresume_workspace_session(
+                    sandbox_id=self._persisted_sandbox_id,
+                    repo_url=self.repo_url,
+                    ref=self.repo_ref,
+                    workspace_path=self._persisted_workspace_path,
+                    context_sources=self._persisted_context_sources,
+                    context_id=self._persisted_context_id,
+                )
                 self._session_source_key = source_key
                 await self._areset_execution_state()
                 self._persist_session_snapshot()
                 return self._session
             except Exception:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
+                self._clear_persisted_session()
 
-        async_create = getattr(self.runtime, "acreate_workspace_session", None)
-        if async_create is not None and callable(async_create):
-            self._session = await _await_if_needed(
-                async_create(
-                    repo_url=self.repo_url,
-                    ref=self.repo_ref,
-                    context_paths=list(self.context_paths),
-                    volume_name=self.volume_name,
-                )
-            )
-        else:
-            self._session = await _await_if_needed(
-                self.runtime.create_workspace_session(
-                    repo_url=self.repo_url,
-                    ref=self.repo_ref,
-                    context_paths=list(self.context_paths),
-                    volume_name=self.volume_name,
-                )
-            )
+        self._session = await self.runtime.acreate_workspace_session(
+            repo_url=self.repo_url,
+            ref=self.repo_ref,
+            context_paths=list(self.context_paths),
+            volume_name=self.volume_name,
+        )
         self._session_source_key = source_key
         await self._areset_execution_state()
         self._persist_session_snapshot()
@@ -428,6 +396,12 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._persisted_context_sources = list(active_session.context_sources)
         self._persisted_context_id = active_session.context_id
 
+    def _clear_persisted_session(self) -> None:
+        self._persisted_sandbox_id = None
+        self._persisted_workspace_path = None
+        self._persisted_context_sources = []
+        self._persisted_context_id = None
+
     def _detach_session(self, *, delete: bool) -> None:
         _run_async_compat(self._adetach_session, delete=delete)
 
@@ -435,10 +409,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         active_session = self._session
         if active_session is None:
             if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
+                self._clear_persisted_session()
             await self._areset_execution_state()
             self._started = False
             return
@@ -447,23 +418,12 @@ class DaytonaInterpreter(LLMQueryMixin):
         await self._aclose_bridge()
         try:
             if delete:
-                async_delete = getattr(active_session, "adelete", None)
-                if async_delete is not None and callable(async_delete):
-                    await _await_if_needed(async_delete())
-                else:
-                    await _await_if_needed(active_session.delete())
+                await active_session.adelete()
             else:
-                async_close = getattr(active_session, "aclose_driver", None)
-                if async_close is not None and callable(async_close):
-                    await _await_if_needed(async_close())
-                else:
-                    await _await_if_needed(active_session.close_driver())
+                await active_session.aclose_driver()
         finally:
             if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
+                self._clear_persisted_session()
             self._session = None
             self._session_source_key = None
             await self._areset_execution_state()
@@ -478,22 +438,12 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._bridge_sandbox_id = None
         self._bridge_context_id = None
         if bridge is not None:
-            close = getattr(bridge, "aclose", None)
-            if close is not None and callable(close):
-                await _await_if_needed(close())
-            else:
-                await _await_if_needed(bridge.close())
+            await bridge.aclose()
 
     async def _aclose_runtime(self) -> None:
         if not self._owns_runtime or self._runtime_closed:
             return
-        close = getattr(self.runtime, "aclose", None)
-        if close is not None and callable(close):
-            await _await_if_needed(close())
-        else:
-            close = getattr(self.runtime, "close", None)
-            if close is not None and callable(close):
-                await _await_if_needed(close())
+        await self.runtime.aclose()
         self._runtime_closed = True
 
     def _ensure_runtime_available(self) -> None:

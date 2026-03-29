@@ -21,7 +21,7 @@ from .bridge_assets import (
     _BROKER_SESSION_COMMAND,
     generate_tool_wrapper,
 )
-from .runtime import _await_if_needed, _run_async_compat
+from .runtime_helpers import _await_if_needed, _run_async_compat
 
 
 @dataclass(slots=True)

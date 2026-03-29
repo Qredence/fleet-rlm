@@ -105,7 +105,7 @@ class _FakeRuntime:
         )
         self.resume_calls: list[tuple[str, str | None]] = []
 
-    def create_workspace_session(
+    async def acreate_workspace_session(
         self,
         *,
         repo_url: str | None,
@@ -116,7 +116,7 @@ class _FakeRuntime:
         del repo_url, ref, context_paths, volume_name
         return self.session
 
-    def resume_workspace_session(
+    async def aresume_workspace_session(
         self,
         *,
         sandbox_id: str,
@@ -165,10 +165,10 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
         def bind_context(self, context: Any) -> None:
             captured["bound_context"] = context
 
-        def sync_tools(self, tools: dict[str, Any]) -> None:
+        async def async_tools(self, tools: dict[str, Any]) -> None:
             captured["tools"] = dict(tools)
 
-        def execute(
+        async def aexecute(
             self,
             *,
             code: str,
@@ -189,7 +189,7 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
                 callback_count=1,
             )
 
-        def close(self) -> None:
+        async def aclose(self) -> None:
             captured["closed"] = True
 
     monkeypatch.setattr(

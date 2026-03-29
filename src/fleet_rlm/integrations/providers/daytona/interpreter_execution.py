@@ -29,9 +29,8 @@ from .interpreter_assets import (
 from .runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
-    _await_if_needed,
-    _run_async_compat,
 )
+from .runtime_helpers import _await_if_needed, _run_async_compat
 
 
 @dataclass(slots=True)
@@ -240,11 +239,7 @@ async def aensure_bridge(
         interpreter._bridge_context_id = context_id
     else:
         bridge.bind_context(context)
-    bridge_sync = getattr(bridge, "async_tools", None)
-    if bridge_sync is not None and callable(bridge_sync):
-        await _await_if_needed(bridge_sync(tools))
-    else:
-        await _await_if_needed(bridge.sync_tools(tools))
+    await bridge.async_tools(tools)
     return bridge
 
 
@@ -305,33 +300,16 @@ async def aexecute_in_session(
             context=context,
             tools=tools,
         )
-        async_execute = getattr(bridge, "aexecute", None)
-        if async_execute is not None and callable(async_execute):
-            execution = await _await_if_needed(
-                async_execute(
-                    code=prepared_code,
-                    timeout=int(interpreter.execute_timeout),
-                    tool_executor=lambda name, args, kwargs: invoke_tool(
-                        interpreter,
-                        name,
-                        args,
-                        kwargs,
-                    ),
-                )
-            )
-        else:
-            execution = await _await_if_needed(
-                bridge.execute(
-                    code=prepared_code,
-                    timeout=int(interpreter.execute_timeout),
-                    tool_executor=lambda name, args, kwargs: invoke_tool(
-                        interpreter,
-                        name,
-                        args,
-                        kwargs,
-                    ),
-                )
-            )
+        execution = await bridge.aexecute(
+            code=prepared_code,
+            timeout=int(interpreter.execute_timeout),
+            tool_executor=lambda name, args, kwargs: invoke_tool(
+                interpreter,
+                name,
+                args,
+                kwargs,
+            ),
+        )
     else:
         execution = await execute_direct_call(
             session=session,
