@@ -9,7 +9,34 @@ import re
 import subprocess
 from typing import Any
 
-from fleet_rlm.runtime.tools.volume_helpers import resolve_realpath_within_root
+try:
+    from fleet_rlm.runtime.tools.volume_helpers import resolve_realpath_within_root
+except ModuleNotFoundError:
+    # The Modal sandbox bootstraps from bundled source text, so package imports
+    # are not available until the host explicitly installs this repo inside the
+    # remote environment. Keep a local fallback so the bundled helpers remain
+    # self-contained for live sandbox startup.
+    def resolve_realpath_within_root(
+        path: str,
+        *,
+        root: str,
+        empty_error: str,
+        invalid_error_prefix: str,
+    ) -> tuple[str | None, str | None]:
+        root_real = os.path.realpath(root)
+        raw = str(path or "").strip()
+        if not raw:
+            return None, empty_error
+
+        joined = (
+            os.path.normpath(raw)
+            if os.path.isabs(raw)
+            else os.path.normpath(os.path.join(root, raw))
+        )
+        resolved = os.path.realpath(joined)
+        if resolved != root_real and not resolved.startswith(root_real + os.sep):
+            return None, f"{invalid_error_prefix}{raw}]"
+        return resolved, None
 
 
 def peek(text: str, start: int = 0, length: int = 2000) -> str:
