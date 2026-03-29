@@ -90,6 +90,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
                 "DSPY_LM_MODEL": "openai/gpt-4o-mini",
                 "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4.1-mini",
                 "DSPY_DELEGATE_LM_SMALL_MODEL": "openai/gpt-4.1-nano",
+                "DSPY_DELEGATE_LM_MAX_TOKENS": "2048",
                 "DSPY_LLM_API_KEY": "sk-test",
                 "SECRET_NAME": "ALT_SECRET",
                 "VOLUME_NAME": "alt-volume",
@@ -104,6 +105,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         "DSPY_LM_MODEL",
         "DSPY_DELEGATE_LM_MODEL",
         "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "DSPY_DELEGATE_LM_MAX_TOKENS",
         "DSPY_LLM_API_KEY",
         "SECRET_NAME",
         "VOLUME_NAME",
@@ -113,6 +115,7 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
     assert state.config.agent_model == "openai/gpt-4o-mini"
     assert state.config.agent_delegate_model == "openai/gpt-4.1-mini"
     assert state.config.agent_delegate_small_model == "openai/gpt-4.1-nano"
+    assert state.config.agent_delegate_max_tokens == 2048
     assert state.config.secret_name == "ALT_SECRET"
     assert state.config.volume_name == "alt-volume"
     assert state.config.sandbox_provider == "daytona"

@@ -35,6 +35,8 @@ RUNTIME_MODEL_RELOAD_KEYS = frozenset(
     {
         "DSPY_LM_MODEL",
         "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "DSPY_DELEGATE_LM_MAX_TOKENS",
         "DSPY_LM_API_BASE",
         "DSPY_LM_MAX_TOKENS",
         "DSPY_LLM_API_KEY",
@@ -48,6 +50,7 @@ class RuntimeConfigSnapshot(TypedDict):
     agent_model: str | None
     agent_delegate_model: str | None
     agent_delegate_small_model: str | None
+    agent_delegate_max_tokens: int
     sandbox_provider: str
     planner_lm: object | None
     delegate_lm: object | None
@@ -87,6 +90,12 @@ def apply_runtime_settings_to_config(
         ].strip()
         config.agent_delegate_small_model = resolved_delegate_small_model or None
 
+    if "DSPY_DELEGATE_LM_MAX_TOKENS" in normalized:
+        config.agent_delegate_max_tokens = max(
+            int(normalized["DSPY_DELEGATE_LM_MAX_TOKENS"].strip() or "64000"),
+            1,
+        )
+
     if "SANDBOX_PROVIDER" in normalized:
         resolved_sandbox_provider = normalized["SANDBOX_PROVIDER"].strip().lower()
         if resolved_sandbox_provider in {"modal", "daytona"}:
@@ -101,6 +110,7 @@ def _capture_runtime_config_snapshot(*, state: ServerState) -> RuntimeConfigSnap
         "agent_model": config.agent_model,
         "agent_delegate_model": config.agent_delegate_model,
         "agent_delegate_small_model": config.agent_delegate_small_model,
+        "agent_delegate_max_tokens": config.agent_delegate_max_tokens,
         "sandbox_provider": config.sandbox_provider,
         "planner_lm": state.planner_lm,
         "delegate_lm": state.delegate_lm,
@@ -118,6 +128,7 @@ def _restore_runtime_config_snapshot(
     config.agent_model = snapshot["agent_model"]
     config.agent_delegate_model = snapshot["agent_delegate_model"]
     config.agent_delegate_small_model = snapshot["agent_delegate_small_model"]
+    config.agent_delegate_max_tokens = snapshot["agent_delegate_max_tokens"]
     config.sandbox_provider = str(snapshot["sandbox_provider"])
     state.planner_lm = snapshot["planner_lm"]
     state.delegate_lm = snapshot["delegate_lm"]
