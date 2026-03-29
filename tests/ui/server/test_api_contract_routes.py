@@ -46,6 +46,8 @@ def test_health_endpoint_and_request_id_header(local_client: TestClient) -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
+    assert isinstance(payload["version"], str)
+    assert payload["version"]
     assert "X-Request-ID" in response.headers
 
 
@@ -54,6 +56,14 @@ def test_ready_endpoint_reports_missing_planner(local_client: TestClient) -> Non
     response = local_client.get("/ready")
     assert response.status_code == 200
     payload = response.json()
+    assert set(payload) == {
+        "ready",
+        "planner_configured",
+        "planner",
+        "database",
+        "database_required",
+        "sandbox_provider",
+    }
     assert payload["ready"] is False
     assert payload["planner_configured"] is False
     assert payload["planner"] == "missing"
