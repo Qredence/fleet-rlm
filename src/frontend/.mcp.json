@@ -2,7 +2,7 @@
   "mcpServers": {
     "agentation": {
       "command": "npx",
-      "args": ["-y", "agentation-mcp", "server"]
+      "args": ["-y", "agentation-mcp@1.2.0", "server"]
     }
   }
 }

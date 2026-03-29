@@ -15,7 +15,7 @@ import {
   WorkspaceLegacyStatusCard,
   WorkspaceTracePart,
 } from "@/app/workspace/transcript/trace-part-renderers";
-import type { ChatMessage } from "@/screens/workspace/use-workspace";
+import type { ChatMessage } from "@/lib/workspace/workspace-types";
 import { cn } from "@/lib/utils";
 import { mapConfirmationState } from "@/lib/utils/prompt-kit-state";
 

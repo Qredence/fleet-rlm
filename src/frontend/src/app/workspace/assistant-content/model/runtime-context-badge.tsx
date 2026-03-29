@@ -1,5 +1,5 @@
 import { inspectorStyles } from "@/app/workspace/inspector/inspector-styles";
-import type { RuntimeContext } from "@/screens/workspace/use-workspace";
+import type { RuntimeContext } from "@/lib/workspace/workspace-types";
 import { getRuntimeBadgeStrings } from "./runtime-badges";
 
 export function RuntimeContextBadge({ ctx }: { ctx?: RuntimeContext }) {

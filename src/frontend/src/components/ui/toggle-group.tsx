@@ -10,10 +10,7 @@ type ToggleGroupVariant = NonNullable<VariantProps<typeof toggleVariants>["varia
 const ToggleGroupContext = React.createContext<{
   size?: VariantProps<typeof toggleVariants>["size"];
   variant?: ToggleGroupVariant;
-}>({
-  size: "default",
-  variant: "default",
-});
+}>({});
 
 function ToggleGroup({
   className,
@@ -56,8 +53,8 @@ function ToggleGroupItem({
     variant?: ToggleGroupVariant;
   }) {
   const context = React.useContext(ToggleGroupContext);
-  const resolvedVariant = context.variant || variant;
-  const resolvedSize = context.size || size;
+  const resolvedVariant = context.variant ?? variant ?? "default";
+  const resolvedSize = context.size ?? size ?? "default";
 
   return (
     <ToggleGroupPrimitive.Item
