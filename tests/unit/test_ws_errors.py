@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, cast
 
 from fleet_rlm.api.routers.ws.errors import handle_stream_error
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 
 
 class _ClosedSendWebSocket:

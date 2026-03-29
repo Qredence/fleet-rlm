@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
+
+import pytest
+
 import fleet_rlm
 from fleet_rlm.integrations import database
-from fleet_rlm.integrations.database import models as database_models
 
 
 def test_root_all_exports_are_resolvable() -> None:
@@ -24,7 +27,6 @@ def test_database_package_exports_are_resolvable() -> None:
         assert getattr(database, name) is not None
 
 
-def test_database_models_facade_exports_are_resolvable() -> None:
-    for name in database_models.__all__:
-        assert hasattr(database_models, name)
-        assert getattr(database_models, name) is not None
+def test_database_models_facade_module_is_removed() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("fleet_rlm.integrations.database.models")

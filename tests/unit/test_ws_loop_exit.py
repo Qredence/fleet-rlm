@@ -8,7 +8,7 @@ from fleet_rlm.api.routers.ws.loop_exit import (
     handle_chat_disconnect,
     handle_chat_loop_exception,
 )
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 
 
 class _RecordingWebSocket:

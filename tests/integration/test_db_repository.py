@@ -6,10 +6,10 @@ import pytest
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.models import (
+from fleet_rlm.integrations.database import (
     ArtifactKind,
     BillingSource,
+    FleetRepository,
     JobStatus,
     JobType,
     Membership,

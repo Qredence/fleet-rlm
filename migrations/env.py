@@ -19,8 +19,7 @@ if str(SRC) not in sys.path:
 
 load_dotenv(ROOT / ".env", override=True)
 
-from fleet_rlm.integrations.database.engine import to_sync_database_url  # noqa: E402
-from fleet_rlm.integrations.database.models import Base  # noqa: E402
+from fleet_rlm.integrations.database import Base, to_sync_database_url  # noqa: E402
 
 config = context.config
 
