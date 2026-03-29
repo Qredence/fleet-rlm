@@ -1,5 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -83,5 +84,28 @@ describe("Tabs refs", () => {
     act(() => {
       root.unmount();
     });
+  });
+
+  it("supports shared segmented and underline variants", () => {
+    const segmentedHtml = renderToStaticMarkup(
+      <Tabs value="turn">
+        <TabsList variant="segmented" className="border border-border-subtle/70">
+          <TabsTrigger value="turn">Turn</TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    );
+
+    const underlineHtml = renderToStaticMarkup(
+      <Tabs value="turn">
+        <TabsList variant="underline">
+          <TabsTrigger value="turn">Turn</TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    );
+
+    expect(segmentedHtml).toContain('data-variant="segmented"');
+    expect(segmentedHtml).toContain("border-border-subtle/70");
+    expect(underlineHtml).toContain('data-variant="underline"');
+    expect(underlineHtml).toContain("border-b-2");
   });
 });

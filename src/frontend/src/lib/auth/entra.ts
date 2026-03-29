@@ -6,7 +6,7 @@ import {
   type PopupRequest,
   type SilentRequest,
 } from "@azure/msal-browser";
-import { clearAccessToken, setAccessToken } from "@/lib/auth/tokenStore";
+import { clearAccessToken, setAccessToken } from "@/lib/auth/token-store";
 import { trimOrEmpty } from "@/lib/utils/env";
 
 function parseCsv(value: string | undefined): string[] {

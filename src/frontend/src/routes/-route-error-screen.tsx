@@ -2,7 +2,7 @@ import { AlertTriangle, Home, RotateCcw } from "lucide-react";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { cn } from "@/lib/utils";
 
 function extractErrorMessage(error: unknown): string {

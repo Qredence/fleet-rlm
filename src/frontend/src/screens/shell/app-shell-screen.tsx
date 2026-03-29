@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { GroupImperativeHandle } from "react-resizable-panels";
 
 import { AppProviders } from "@/app/providers";
 import { CommandPalette } from "@/app/shell/command-palette";
 import { LoginDialog } from "@/app/shell/login-dialog";
-import { SettingsDialog } from "@/components/settings-dialog";
+import { SettingsDialog } from "@/app/shell/settings-dialog";
 import { MobileTabBar } from "@/app/shell/mobile-tab-bar";
 import { RouteSync } from "@/app/shell/route-sync";
 import { ShellRouteOutlet } from "@/app/shell/shell-route-outlet";
@@ -18,7 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
 import {
   OPEN_SETTINGS_EVENT,
@@ -27,11 +27,12 @@ import {
 import type { SettingsSection } from "@/screens/settings/settings-screen";
 import { AppSidebar } from "@/screens/shell/app-sidebar";
 import { ShellHeader } from "@/screens/shell/shell-header";
+import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
 import { ShellSidepanel } from "@/screens/shell/shell-sidepanel";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { useNavigationStore } from "@/stores/navigation-store";
 
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
-const OPEN_LAYOUT = { content: 64, canvas: 36 };
+const OPEN_LAYOUT = { content: 68, canvas: 32 };
 const CLOSED_LAYOUT = { content: 100, canvas: 0 };
 
 type OpenLoginEventDetail = {
@@ -49,7 +50,8 @@ function ShellLayout() {
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+  const panelMeta = getShellPanelMeta(activeNav);
 
   useEffect(() => {
     registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
@@ -141,7 +143,15 @@ function ShellLayout() {
   return (
     <>
       <RouteSync />
-      <SidebarProvider defaultOpen>
+      <SidebarProvider
+        defaultOpen
+        style={
+          {
+            "--sidebar-width": "17.5rem",
+            "--sidebar-width-icon": "3.5rem",
+          } as CSSProperties
+        }
+      >
         <div className="flex h-dvh w-full overflow-hidden bg-background">
           <AppSidebar />
           <SidebarInset className="min-w-0 border-0 bg-background">
@@ -207,8 +217,8 @@ function ShellLayout() {
             className="h-[min(85dvh,44rem)] gap-0 rounded-t-3xl border-x-0 border-b-0 p-0 sm:max-w-none"
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Canvas</SheetTitle>
-              <SheetDescription>Workspace detail and artifact view.</SheetDescription>
+              <SheetTitle>{panelMeta.title}</SheetTitle>
+              <SheetDescription>{panelMeta.description}</SheetDescription>
             </SheetHeader>
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex items-center justify-center py-3">

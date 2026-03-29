@@ -76,7 +76,7 @@ State management:
 Backend integration:
 
 - `src/lib/rlm-api/client.ts` for REST calls
-- `src/lib/rlm-api/wsClient.ts` and related websocket helpers for streaming
+- `src/lib/rlm-api/ws-client.ts` and related websocket helpers for streaming
 - `src/lib/rlm-api/generated/openapi.ts` for generated API types
 
 Feature layout:
@@ -88,14 +88,19 @@ Feature layout:
 - Thin route wrappers under `src/routes/` should render screen modules rather than page-layer wrappers
 - Shell code should consume workspace/volumes through top-level screen contracts like `workspace-shell-contract.ts`, `workspace-canvas-panel.tsx`, `volumes-shell-contract.ts`, and `volumes-canvas-panel.tsx` instead of reaching into deep workspace/volumes subdirectories
 - `src/screens/workspace/`, `src/screens/volumes/`, `src/screens/settings/`, and `src/screens/shell/` should keep only the top-level screen entry files plus `__tests__/`; move shell-private helpers to `src/app/shell/`, workspace UI internals to `src/app/workspace/`, and workspace adapter logic to `src/lib/workspace/`
+- Keep `__tests__/` colocated with the module owner. Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly instead of reaching back through `src/screens/workspace/use-workspace` compatibility barrels.
 
 Component layout:
 
 - `src/components/ui/` for shared shadcn/Base UI primitives and thin local extensions
-- `src/components/ai-elements/` for transcript/message/source/task/tool rendering
+- Keep `src/components/ui/` strict: if a compound is specific to workspace, shell, transcript, or composer behavior, it belongs under `src/app/...`, not here
+- `src/components/ai-elements/` for shared AI chat primitives such as conversation, message, source, task, tool, prompt-input, reasoning, inline-citation, and suggestion
 - `src/components/` for a very small set of handwritten global components such as `brand-mark.tsx`, `error-boundary.tsx`, and `page-skeleton.tsx`
 - `src/app/workspace/` for behavior-bearing workspace UI internals (transcript/composer/inspector/workbench and related helpers)
+- Keep transcript/chat primitives in `src/components/ai-elements/`; workspace-specific transcript orchestration belongs under `src/app/workspace/transcript/`, while queue helpers stay under `src/app/workspace/queue/`
+- Shell-specific composed surfaces such as the command palette should live under `src/app/shell/` while consuming `src/components/ui/` primitives instead of re-implementing them
 - `src/lib/workspace/` for workspace-only adapter and frame-normalization helpers
+- Frontend filenames should use `kebab-case` by default. Keep React component symbols in `PascalCase` and hooks in `useThing` form; only generated files and TanStack route magic files (for example `routeTree.gen.ts`, `__root.tsx`, and `$.tsx`) are exceptions.
 - Prefer shadcn field composition (`FieldGroup`, `Field`, `FieldContent`, `FieldLabel`, `FieldDescription`, `FieldTitle`, `Switch`, `ToggleGroup`) over bespoke settings row wrappers when building forms
 - Prefer behavior-bearing screen subcomponents over micro-wrappers; tiny layout-only wrappers should usually be inlined back into the screen component
 
@@ -115,7 +120,7 @@ React/runtime rules:
 - `modal_chat` is the default runtime path and sends `execution_mode`
 - `daytona_pilot` is the experimental workbench path and sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 - Runtime labels shown to users are `"Modal chat"` and `"Daytona pilot"`
-- Shared runtime status queries belong in `src/hooks/useRuntimeStatus.ts`; settings should compose that hook rather than own the query contract
+- Shared runtime status queries belong in `src/hooks/use-runtime-status.ts`; settings should compose that hook rather than own the query contract
 - The Volumes surface represents mounted durable storage, not the transient live workspace. Keep provider copy and mock data aligned with the canonical durable roots: `memory`, `artifacts`, `buffers`, and `meta`.
 
 ## Environment and Contract Sync
@@ -130,6 +135,7 @@ Expected frontend environment:
 Optional frontend environment:
 
 - `VITE_FLEET_WS_URL` (optional explicit override; when unset, websocket URLs are derived from `VITE_FLEET_API_URL`)
+- `VITE_AGENTATION_ENDPOINT` (optional Agentation MCP HTTP URL for dev toolbar sync; defaults to `http://127.0.0.1:4747` in development)
 - `VITE_ENTRA_CLIENT_ID`
 - `VITE_ENTRA_SCOPES`
 - `VITE_PUBLIC_POSTHOG_API_KEY`

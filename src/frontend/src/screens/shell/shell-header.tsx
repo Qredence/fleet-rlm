@@ -1,16 +1,16 @@
 import { PanelRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
+import { useNavigationStore } from "@/stores/navigation-store";
 
 export function ShellHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas } = useNavigationStore();
   const isMobile = useIsMobile();
-  const { state: sidebarState } = useSidebar();
 
   const titleMap: Record<string, string> = {
     workspace: "Workbench",
@@ -18,47 +18,65 @@ export function ShellHeader() {
     settings: "Settings",
   };
   const title = titleMap[activeNav] || "Dashboard";
+  const panelMeta = getShellPanelMeta(activeNav);
+  const canvasActionLabel = isCanvasOpen
+    ? `Hide ${panelMeta.toggleLabel}`
+    : `Show ${panelMeta.toggleLabel}`;
+  const showCanvasToggle = activeNav !== "settings";
 
   return (
     <header
       className={cn(
         "flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
-        isMobile
-          ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]"
-          : sidebarState === "collapsed"
-            ? "px-5 py-2"
-            : "px-4 py-2",
+        isMobile ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-5 py-2",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
-        {isMobile || sidebarState !== "collapsed" ? (
-          <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
-        ) : null}
+        <SidebarTrigger className={isMobile ? "size-9 rounded-xl" : "size-8"} />
         <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">
-            <Button
-              type="button"
-              size={isMobile ? "icon" : "icon-sm"}
-              variant={isCanvasOpen ? "secondary" : "ghost"}
-              aria-label={isCanvasOpen ? "Close side panel" : "Open side panel"}
-              className={cn(isMobile && "rounded-xl")}
-              onClick={toggleCanvas}
-            >
-              <PanelRight />
-              <span className="sr-only">
-                {isCanvasOpen ? "Close side panel" : "Open side panel"}
-              </span>
-            </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          {isCanvasOpen ? "Close side panel" : "Open side panel"}
-        </TooltipContent>
-      </Tooltip>
+      {showCanvasToggle ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                type="button"
+                size={isMobile ? "icon" : "sm"}
+                variant={isCanvasOpen ? "secondary" : "outline"}
+                aria-label={canvasActionLabel}
+                className={cn(
+                  isMobile
+                    ? "rounded-xl"
+                    : "h-11 min-w-[9.25rem] justify-start gap-3 rounded-2xl border-border-subtle/80 px-3.5 text-foreground/82 shadow-xs",
+                )}
+                onClick={toggleCanvas}
+              >
+                <PanelRight className="size-4" />
+                {!isMobile ? (
+                  <span className="flex min-w-0 flex-col items-start leading-tight">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/78">
+                      {isCanvasOpen ? "Hide panel" : "Show panel"}
+                    </span>
+                    <span className="text-xs font-medium text-foreground/90">
+                      {panelMeta.toggleLabel}
+                    </span>
+                  </span>
+                ) : null}
+                <span className="sr-only">{canvasActionLabel}</span>
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <div className="space-y-1">
+              <p className="text-xs font-medium">{canvasActionLabel}</p>
+              <p className="max-w-[14rem] text-[11px] leading-5 text-muted-foreground">
+                {panelMeta.toggleDescription}
+              </p>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
     </header>
   );
 }

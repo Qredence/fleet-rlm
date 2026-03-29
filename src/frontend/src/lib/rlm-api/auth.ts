@@ -1,4 +1,4 @@
-import { clearAccessToken, setAccessToken } from "@/lib/auth/tokenStore";
+import { clearAccessToken, setAccessToken } from "@/lib/auth/token-store";
 import { rlmApiClient } from "@/lib/rlm-api/client";
 import type { AuthMeResponse } from "@/lib/rlm-api/types";
 

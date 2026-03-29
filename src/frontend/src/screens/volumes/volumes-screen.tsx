@@ -22,8 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useIsMobile } from "@/hooks/useIsMobile";
-import { useRuntimeStatus } from "@/hooks/useRuntimeStatus";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import {
   collectExpandableIds,
@@ -36,7 +36,7 @@ import {
   useFilesystem,
   useVolumesSelectionStore,
 } from "@/screens/volumes/use-volumes";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { useNavigationStore } from "@/stores/navigation-store";
 
 export function VolumesScreen() {
   return <VolumesBrowser />;

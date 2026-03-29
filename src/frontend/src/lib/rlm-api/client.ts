@@ -1,5 +1,5 @@
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { getAccessToken } from "@/lib/auth/tokenStore";
+import { getAccessToken } from "@/lib/auth/token-store";
 
 export class RlmApiError extends Error {
   readonly status: number;

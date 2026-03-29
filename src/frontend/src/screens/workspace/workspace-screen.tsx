@@ -2,25 +2,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
-import { useAppNavigate } from "@/hooks/useAppNavigate";
-import { useIsMobile } from "@/hooks/useIsMobile";
-import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/useRuntimeStatus";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
+import { useAppNavigate } from "@/hooks/use-app-navigate";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
-import { WorkspaceMessageList } from "@/app/workspace/workspace-message-list";
+import { WorkspaceChatEmptyState } from "@/app/workspace/transcript/workspace-chat-empty-state";
+import { WorkspaceMessageList } from "@/app/workspace/transcript/workspace-message-list";
 import {
   useChatHistoryStore,
   useChatStore,
   useWorkspace,
   useWorkspaceUiStore,
 } from "@/screens/workspace/use-workspace";
-import { detectRepoContext } from "@/lib/utils/repoContext";
-import { detectContextPaths } from "@/lib/utils/sourceContext";
+import { detectRepoContext } from "@/lib/utils/repo-context";
+import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 
@@ -221,6 +222,7 @@ export function WorkspaceScreen() {
   const runtimeWarningTitle =
     runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
   const hasMessages = messages.length > 0;
+  const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
 
@@ -250,29 +252,16 @@ export function WorkspaceScreen() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      {/* Messages */}
-      <div className="flex-1 min-h-0">
-        <WorkspaceMessageList
-          messages={messages}
-          isTyping={isTyping}
-          isMobile={isMobile}
-          onSuggestionClick={setInputValue}
-          onResolveHitl={resolveHitl}
-          onResolveClarification={resolveClarification}
-        />
-      </div>
+      {showDesktopLandingState ? (
+        <div className="flex min-h-0 flex-1 items-start justify-center px-6 pt-16 pb-8 lg:pt-24">
+          <div
+            data-slot="workspace-landing-state"
+            className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
+          >
+            <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
 
-      {/* Input composer */}
-      <div
-        className={cn(
-          "sticky bottom-0 z-0 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
-          hasMessages || showRuntimeWarning ? "pt-5" : "pt-2",
-        )}
-      >
-        <div className="mx-auto w-full max-w-200">
-          <div className="flex flex-col gap-4">
             {showRuntimeWarning ? (
-              <Alert className="border-accent/25 bg-accent/5 text-foreground">
+              <Alert className="w-full border-accent/25 bg-accent/5 text-foreground">
                 <TriangleAlert className="size-4" />
                 <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
@@ -283,7 +272,7 @@ export function WorkspaceScreen() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="rounded-lg"
+                      className="w-fit rounded-lg"
                       onClick={handleOpenRuntimeSettings}
                     >
                       Open Runtime Settings
@@ -292,10 +281,66 @@ export function WorkspaceScreen() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <div className="mx-auto w-full max-w-175">{composer}</div>
+
+            <div
+              data-slot="workspace-landing-composer"
+              className="w-full rounded-[30px] border border-border-subtle/70 bg-background/96 p-1.5 shadow-[0_18px_48px_rgba(15,23,42,0.08)]"
+            >
+              {composer}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Messages */}
+          <div className="flex-1 min-h-0">
+            <WorkspaceMessageList
+              messages={messages}
+              isTyping={isTyping}
+              isMobile={isMobile}
+              showEmptyState={isMobile}
+              onSuggestionClick={setInputValue}
+              onResolveHitl={resolveHitl}
+              onResolveClarification={resolveClarification}
+            />
+          </div>
+
+          {/* Input composer */}
+          <div
+            className={cn(
+              "sticky bottom-0 z-0 shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-6 md:px-6",
+              hasMessages || showRuntimeWarning ? "pt-5" : "pt-2",
+            )}
+          >
+            <div className="mx-auto w-full max-w-200">
+              <div className="flex flex-col gap-4">
+                {showRuntimeWarning ? (
+                  <Alert className="border-accent/25 bg-accent/5 text-foreground">
+                    <TriangleAlert className="size-4" />
+                    <AlertTitle>{runtimeWarningTitle}</AlertTitle>
+                    <AlertDescription>
+                      <div className="flex flex-col gap-3">
+                        {warningGuidance.map((msg) => (
+                          <p key={msg}>{msg}</p>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-lg"
+                          onClick={handleOpenRuntimeSettings}
+                        >
+                          Open Runtime Settings
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="mx-auto w-full max-w-175">{composer}</div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

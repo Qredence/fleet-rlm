@@ -10,7 +10,7 @@ import {
 import { telemetryClient } from "@/lib/telemetry/client";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
 import type { ChatMessage, ExecutionStep } from "@/lib/workspace/workspace-types";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
 const DAYTONA_FIRST_FRAME_TIMEOUT_MS = 60_000;
 

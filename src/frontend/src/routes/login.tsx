@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { isEntraAuthConfigured, loginWithEntra } from "@/lib/auth/entra";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 
 export const Route = createFileRoute("/login")({

@@ -9,6 +9,8 @@ import {
   FieldContent,
   FieldDescription,
   FieldGroup,
+  FieldLegend,
+  FieldSet,
   FieldTitle,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -29,7 +31,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { telemetryClient } from "@/lib/telemetry/client";
-import { cn } from "@/lib/utils";
 import { RuntimeForm } from "@/screens/settings/runtime-form";
 import {
   computeLmRuntimeUpdates,
@@ -46,13 +47,14 @@ export const settingsSections = [
 export type SettingsSection = (typeof settingsSections)[number]["key"];
 
 export const sectionDescriptions: Record<SettingsSection, string> = {
-  appearance: "Control theme and interface appearance.",
-  telemetry: "Configure anonymous telemetry preferences.",
-  litellm: "Manage LiteLLM-compatible runtime model and provider integration settings.",
-  runtime: "Configure runtime credentials and run Modal/LM connection tests.",
+  appearance: "Theme and interface defaults.",
+  telemetry: "Privacy and communication preferences.",
+  litellm: "Set planner models, provider endpoint, and API key.",
+  runtime: "Manage runtime credentials and connectivity checks.",
 };
 
-const SETTINGS_FIELD_CLASSNAME = "border-b border-border-subtle py-4 last:border-b-0";
+const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
+const SETTINGS_SECTION_CLASSNAME = "max-w-[44rem] gap-4";
 
 export function resolveSettingsSection(section?: string): SettingsSection | undefined {
   return section && settingsSections.some((entry) => entry.key === section)
@@ -83,18 +85,20 @@ interface SettingsSidebarNavProps {
 
 export function SettingsSidebarNav({ section, onSectionChange }: SettingsSidebarNavProps) {
   return (
-    <SidebarContent>
-      <SidebarGroup>
+    <SidebarContent className="bg-sidebar/20">
+      <SidebarGroup className="flex h-full flex-col gap-2 p-4">
         <SidebarGroupContent>
-          <SidebarMenu>
+          <SidebarMenu className="gap-1.5">
             {settingsSections.map(({ key, label, icon: Icon }) => (
               <SidebarMenuItem key={key}>
                 <SidebarMenuButton
                   isActive={section === key || (section == null && key === "appearance")}
+                  size="default"
                   tooltip={label}
                   onClick={() => onSectionChange(key)}
+                  className="h-10 gap-3 rounded-xl px-3 font-medium text-sidebar-foreground/78 shadow-none data-[active=true]:bg-sidebar-accent/90 data-[active=true]:text-sidebar-accent-foreground"
                 >
-                  <Icon />
+                  <Icon className="text-sidebar-foreground/65 group-data-[active=true]/menu-button:text-sidebar-accent-foreground" />
                   <span>{label}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -247,21 +251,27 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
   const saveDisabled = dirtyKeys.length === 0 || saveSettings.isPending || !writeEnabled;
   const showAllSections = section == null;
   const showSection = (key: SettingsSection) => showAllSections || section === key;
+  const appearanceLegend = showAllSections ? "Appearance" : "General";
+  const telemetryLegend = showAllSections ? "Telemetry" : "Communication preferences";
+  const liteLlmLegend = showAllSections ? "LiteLLM Integration" : "Model routing";
 
   return (
-    <div>
+    <div className="flex flex-col gap-10">
       {showSection("appearance") ? (
-        <>
-          {showAllSections ? (
-            <div className="border-b border-border-subtle py-3">
-              <span className="text-sm font-medium text-muted-foreground">Appearance</span>
-            </div>
-          ) : null}
+        <FieldSet className={SETTINGS_SECTION_CLASSNAME}>
+          <div className="flex flex-col gap-1">
+            <FieldLegend variant="label" className="mb-0 text-sm font-semibold">
+              {appearanceLegend}
+            </FieldLegend>
+            <FieldDescription>
+              {showAllSections
+                ? sectionDescriptions.appearance
+                : "Choose how Fleet looks during focused work."}
+            </FieldDescription>
+          </div>
 
           <FieldGroup className="gap-0">
-            <Field
-              className={cn(SETTINGS_FIELD_CLASSNAME, section === "appearance" && "border-b-0")}
-            >
+            <Field className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Theme</FieldTitle>
                 <FieldDescription>
@@ -270,10 +280,10 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               </FieldContent>
               <ToggleGroup
                 type="single"
-                size="sm"
-                variant="outline"
+                variant="card"
                 value={isDark ? "dark" : "light"}
                 aria-label="Theme mode"
+                className="mt-1 flex w-full flex-wrap gap-4"
                 onValueChange={(nextValue) => {
                   if (nextValue === "light" && isDark) {
                     onToggleTheme();
@@ -285,30 +295,61 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                   }
                 }}
               >
-                <ToggleGroupItem value="light" aria-label="Light mode">
-                  <Sun aria-hidden="true" />
-                  Light
+                <ToggleGroupItem
+                  value="light"
+                  aria-label="Light mode"
+                  className="group/theme-item min-w-[8.5rem] flex-col items-start gap-3"
+                >
+                  <span className="flex h-14 w-full min-w-[8.5rem] items-start rounded-lg border border-border-subtle bg-white p-3 shadow-xs">
+                    <span className="flex w-full gap-2">
+                      <span className="w-4 rounded-md bg-zinc-100" />
+                      <span className="flex flex-1 flex-col gap-1.5 pt-0.5">
+                        <span className="h-1.5 w-9 rounded-full bg-zinc-200" />
+                        <span className="h-1.5 w-12 rounded-full bg-zinc-100" />
+                      </span>
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Sun aria-hidden="true" />
+                    Light
+                  </span>
                 </ToggleGroupItem>
-                <ToggleGroupItem value="dark" aria-label="Dark mode">
-                  <Moon aria-hidden="true" />
-                  Dark
+                <ToggleGroupItem
+                  value="dark"
+                  aria-label="Dark mode"
+                  className="group/theme-item min-w-[8.5rem] flex-col items-start gap-3"
+                >
+                  <span className="flex h-14 w-full min-w-[8.5rem] items-start rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-xs">
+                    <span className="flex w-full gap-2">
+                      <span className="w-4 rounded-md bg-zinc-800" />
+                      <span className="flex flex-1 flex-col gap-1.5 pt-0.5">
+                        <span className="h-1.5 w-9 rounded-full bg-zinc-600" />
+                        <span className="h-1.5 w-12 rounded-full bg-zinc-800" />
+                      </span>
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Moon aria-hidden="true" />
+                    Dark
+                  </span>
                 </ToggleGroupItem>
               </ToggleGroup>
             </Field>
           </FieldGroup>
-        </>
+        </FieldSet>
       ) : null}
 
       {showSection("telemetry") ? (
-        <>
-          {showAllSections ? (
-            <div className="border-b border-border-subtle py-3">
-              <span className="text-sm font-medium text-muted-foreground">Telemetry</span>
-            </div>
-          ) : null}
+        <FieldSet className={SETTINGS_SECTION_CLASSNAME}>
+          <div className="flex flex-col gap-1">
+            <FieldLegend variant="label" className="mb-0 text-sm font-semibold">
+              {telemetryLegend}
+            </FieldLegend>
+            <FieldDescription>{sectionDescriptions.telemetry}</FieldDescription>
+          </div>
 
           <FieldGroup className="gap-0">
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Anonymous telemetry</FieldTitle>
                 <FieldDescription>
@@ -335,9 +376,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field
-              className={cn(SETTINGS_FIELD_CLASSNAME, section === "telemetry" && "border-b-0")}
-            >
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Telemetry scope</FieldTitle>
                 <FieldDescription>
@@ -350,16 +389,17 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               </Badge>
             </Field>
           </FieldGroup>
-        </>
+        </FieldSet>
       ) : null}
 
       {showSection("litellm") ? (
-        <>
-          {showAllSections ? (
-            <div className="border-b border-border-subtle py-3">
-              <span className="text-sm font-medium text-muted-foreground">LiteLLM Integration</span>
-            </div>
-          ) : null}
+        <FieldSet className={SETTINGS_SECTION_CLASSNAME}>
+          <div className="flex flex-col gap-1">
+            <FieldLegend variant="label" className="mb-0 text-sm font-semibold">
+              {liteLlmLegend}
+            </FieldLegend>
+            <FieldDescription>{sectionDescriptions.litellm}</FieldDescription>
+          </div>
 
           <FieldGroup className="gap-0">
             <Field className={SETTINGS_FIELD_CLASSNAME}>
@@ -374,7 +414,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
             </Field>
 
             {!writeEnabled ? (
-              <Field className={SETTINGS_FIELD_CLASSNAME}>
+              <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
                 <FieldContent>
                   <FieldTitle>Write Protection</FieldTitle>
                   <FieldDescription>
@@ -387,7 +427,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               </Field>
             ) : null}
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Planner LM model</FieldTitle>
                 <FieldDescription>
@@ -404,7 +444,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Delegate LM model</FieldTitle>
                 <FieldDescription>
@@ -421,7 +461,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Delegate small LM model</FieldTitle>
                 <FieldDescription>
@@ -438,7 +478,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Custom API endpoint</FieldTitle>
                 <FieldDescription>Optional LiteLLM (or provider proxy) base URL.</FieldDescription>
@@ -453,7 +493,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>API key</FieldTitle>
                 <FieldDescription>
@@ -500,7 +540,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               </div>
             </Field>
 
-            <Field className="py-4">
+            <Field orientation="responsive" className="gap-5 py-5">
               <FieldContent>
                 <FieldTitle>Save LM integration settings</FieldTitle>
                 <FieldDescription>
@@ -519,7 +559,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               </Button>
             </Field>
           </FieldGroup>
-        </>
+        </FieldSet>
       ) : null}
 
       {showSection("runtime") ? <RuntimeForm /> : null}

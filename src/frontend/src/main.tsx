@@ -6,6 +6,9 @@ import "./styles/globals.css";
 const Agentation = import.meta.env.DEV
   ? lazy(() => import("agentation").then((m) => ({ default: m.Agentation })))
   : () => null;
+const agentationEndpoint = import.meta.env.DEV
+  ? (import.meta.env.VITE_AGENTATION_ENDPOINT ?? "http://127.0.0.1:4747")
+  : undefined;
 
 // PostHog analytics initialization
 import posthog from "posthog-js";
@@ -43,7 +46,7 @@ createRoot(document.getElementById("root")!).render(
     <App />
     {import.meta.env.DEV ? (
       <Suspense fallback={null}>
-        <Agentation />
+        <Agentation endpoint={agentationEndpoint} />
       </Suspense>
     ) : null}
   </PostHogProvider>,

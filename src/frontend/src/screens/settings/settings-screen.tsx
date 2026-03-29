@@ -1,5 +1,5 @@
 import { useSearch, useRouter } from "@tanstack/react-router";
-import { SettingsDialog } from "@/components/settings-dialog";
+import { SettingsDialog } from "@/app/shell/settings-dialog";
 import { resolveSettingsSection } from "@/screens/settings/settings-content";
 
 export {

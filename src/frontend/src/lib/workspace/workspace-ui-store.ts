@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import type { CreationPhase, InspectorTab } from "@/lib/workspace/workspace-types";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { useNavigationStore } from "@/stores/navigation-store";
 
 export interface WorkspaceUiState {
   selectedAssistantTurnId: string | null;

@@ -9,7 +9,7 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { isEntraAuthConfigured } from "@/lib/auth/entra";
 import { useAuth } from "@/lib/auth/auth-context";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";

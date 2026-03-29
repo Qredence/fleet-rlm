@@ -25,6 +25,14 @@
         "mcp",
         "start"
       ]
+    },
+    "agentation": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "agentation-mcp",
+        "server"
+      ]
     }
   }
 }
