@@ -371,7 +371,7 @@ def test_configure_planner_from_env_can_opt_into_native_function_calling(
 
 
 def test_get_delegate_lm_from_env_returns_none_on_init_error(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ):
     env_file = write_env_file(
         tmp_path,
@@ -382,13 +382,18 @@ def test_get_delegate_lm_from_env_returns_none_on_init_error(
     )
 
     def _raise_lm(*args, **kwargs):
-        raise RuntimeError("boom")
+        raise RuntimeError(f"delegate init failed for api_key={kwargs['api_key']}")
 
     monkeypatch.setattr(config.dspy, "LM", _raise_lm)
     clear_env(monkeypatch, "DSPY_DELEGATE_LM_MODEL", "DSPY_DELEGATE_LM_API_KEY")
 
-    lm = config.get_delegate_lm_from_env(env_file=env_file)
+    with caplog.at_level("WARNING", logger=config.logger.name):
+        lm = config.get_delegate_lm_from_env(env_file=env_file)
+
     assert lm is None
+    assert "delegate init failed" not in caplog.text
+    assert "sk-delegate" not in caplog.text
+    assert "Failed to initialize delegate LM (RuntimeError)" in caplog.text
 
 
 def test_get_planner_lm_from_env_local_overrides_process_env(
