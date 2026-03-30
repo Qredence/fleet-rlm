@@ -6,7 +6,12 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 describe("ToggleGroup", () => {
   it("supports the shared card variant for option-card layouts", () => {
     const html = renderToStaticMarkup(
-      <ToggleGroup type="single" value="dark" variant="card" className="flex-col">
+      <ToggleGroup
+        type="single"
+        value="dark"
+        variant="card"
+        className="flex-col"
+      >
         <ToggleGroupItem value="light">Light</ToggleGroupItem>
         <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
       </ToggleGroup>,

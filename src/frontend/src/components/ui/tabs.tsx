@@ -18,7 +18,14 @@ function Tabs({
 }: React.ComponentPropsWithoutRef<typeof BaseTabs.Root> & {
   ref?: React.ComponentPropsWithRef<typeof BaseTabs.Root>["ref"];
 }) {
-  return <BaseTabs.Root ref={ref} data-slot="tabs" className={className} {...props} />;
+  return (
+    <BaseTabs.Root
+      ref={ref}
+      data-slot="tabs"
+      className={className}
+      {...props}
+    />
+  );
 }
 
 function TabsList({

@@ -16,10 +16,20 @@ import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
-import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
+import {
+  isRlmCoreEnabled,
+  isSectionSupported,
+  UNSUPPORTED_SECTION_REASON,
+} from "@/lib/rlm-api";
 import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
 
-function EmptyPanel({ title, description }: { title: string; description: string }) {
+function EmptyPanel({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <Empty className="h-full rounded-none border-0 bg-transparent">
       <EmptyMedia variant="icon">
@@ -33,16 +43,30 @@ function EmptyPanel({ title, description }: { title: string; description: string
   );
 }
 
-function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
+function UnsupportedPanel({
+  sectionLabel,
+  reason,
+}: {
+  sectionLabel: string;
+  reason?: string;
+}) {
   return (
     <EmptyPanel
       title={`${sectionLabel} unavailable`}
-      description={reason || "This functionality is currently disabled or unsupported."}
+      description={
+        reason || "This functionality is currently disabled or unsupported."
+      }
     />
   );
 }
 
-function EmptyCanvas({ title, description }: { title: string; description: string }) {
+function EmptyCanvas({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return <EmptyPanel title={title} description={description} />;
 }
 
@@ -117,7 +141,10 @@ export function ShellSidepanel() {
             <VolumesCanvasPanel />
           </ErrorBoundary>
         ) : (
-          <EmptyCanvas title={panelMeta.emptyTitle} description={panelMeta.emptyDescription} />
+          <EmptyCanvas
+            title={panelMeta.emptyTitle}
+            description={panelMeta.emptyDescription}
+          />
         )}
       </div>
     </div>

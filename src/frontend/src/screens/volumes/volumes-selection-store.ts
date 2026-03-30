@@ -8,8 +8,10 @@ export interface VolumesSelectionState {
   clearSelectedFile: () => void;
 }
 
-export const useVolumesSelectionStore = create<VolumesSelectionState>((set) => ({
-  selectedFileNode: null,
-  selectFile: (selectedFileNode) => set({ selectedFileNode }),
-  clearSelectedFile: () => set({ selectedFileNode: null }),
-}));
+export const useVolumesSelectionStore = create<VolumesSelectionState>(
+  (set) => ({
+    selectedFileNode: null,
+    selectFile: (selectedFileNode) => set({ selectedFileNode }),
+    clearSelectedFile: () => set({ selectedFileNode: null }),
+  }),
+);

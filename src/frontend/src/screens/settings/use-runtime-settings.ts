@@ -1,7 +1,10 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { runtimeStatusQueryKey, useRuntimeStatus } from "@/hooks/use-runtime-status";
+import {
+  runtimeStatusQueryKey,
+  useRuntimeStatus,
+} from "@/hooks/use-runtime-status";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 
 export const runtimeKeys = {
@@ -34,7 +37,8 @@ export const RUNTIME_SECRET_EDITABLE_KEYS = [
   "MODAL_TOKEN_ID",
   "MODAL_TOKEN_SECRET",
 ] as const;
-export type RuntimeSecretEditableKey = (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
+export type RuntimeSecretEditableKey =
+  (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
 
 export const RUNTIME_LM_EDITABLE_KEYS = [
   "DSPY_LM_MODEL",
@@ -46,9 +50,12 @@ export const RUNTIME_LM_EDITABLE_KEYS = [
 
 export type RuntimeLmEditableKey = (typeof RUNTIME_LM_EDITABLE_KEYS)[number];
 export const RUNTIME_LM_SECRET_EDITABLE_KEYS = ["DSPY_LLM_API_KEY"] as const;
-export type RuntimeLmSecretEditableKey = (typeof RUNTIME_LM_SECRET_EDITABLE_KEYS)[number];
+export type RuntimeLmSecretEditableKey =
+  (typeof RUNTIME_LM_SECRET_EDITABLE_KEYS)[number];
 
-export interface RuntimeUpdateComputationOptions<SecretKey extends RuntimeSecretEditableKey> {
+export interface RuntimeUpdateComputationOptions<
+  SecretKey extends RuntimeSecretEditableKey,
+> {
   secretInputs?: Partial<Record<SecretKey, string>>;
   clearedSecrets?: Iterable<SecretKey>;
 }
@@ -136,7 +143,8 @@ export function useRuntimeSettings() {
   const statusQuery = useRuntimeStatus();
 
   const saveSettings = useMutation({
-    mutationFn: (updates: Record<string, string>) => runtimeEndpoints.patchSettings({ updates }),
+    mutationFn: (updates: Record<string, string>) =>
+      runtimeEndpoints.patchSettings({ updates }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: runtimeKeys.settings() }),

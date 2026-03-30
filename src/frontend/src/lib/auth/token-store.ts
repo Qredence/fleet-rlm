@@ -10,7 +10,10 @@ function safeLocalStorage(): Storage | undefined {
   return localStorage;
 }
 
-function readTokenFromStorage(storage: Storage | undefined, key: string): string | null {
+function readTokenFromStorage(
+  storage: Storage | undefined,
+  key: string,
+): string | null {
   if (!storage) return null;
   try {
     const token = storage.getItem(key);
@@ -20,7 +23,10 @@ function readTokenFromStorage(storage: Storage | undefined, key: string): string
   }
 }
 
-function removeTokenFromStorage(storage: Storage | undefined, key: string): void {
+function removeTokenFromStorage(
+  storage: Storage | undefined,
+  key: string,
+): void {
   if (!storage) return;
   try {
     storage.removeItem(key);
@@ -29,7 +35,11 @@ function removeTokenFromStorage(storage: Storage | undefined, key: string): void
   }
 }
 
-function writeTokenToStorage(storage: Storage | undefined, key: string, token: string): void {
+function writeTokenToStorage(
+  storage: Storage | undefined,
+  key: string,
+  token: string,
+): void {
   if (!storage) return;
   try {
     storage.setItem(key, token);

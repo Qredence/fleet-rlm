@@ -62,7 +62,9 @@ function SignupScreen() {
           <div className="flex flex-col items-center gap-3 pb-2">
             <BrandMark className="h-3.75 w-8 text-foreground" />
             <div className="text-center">
-              <h1 className="text-sm font-medium text-foreground">Create your account</h1>
+              <h1 className="text-sm font-medium text-foreground">
+                Create your account
+              </h1>
               <p className="mt-1 text-muted-foreground typo-caption">
                 Get started with Skill Fleet
               </p>
@@ -138,7 +140,9 @@ function SignupScreen() {
           <Button
             type="submit"
             className="w-full"
-            disabled={loading || !email || !name || !password || !confirmPassword}
+            disabled={
+              loading || !email || !name || !password || !confirmPassword
+            }
           >
             {loading ? (
               <>

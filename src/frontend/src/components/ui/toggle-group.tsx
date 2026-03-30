@@ -5,7 +5,9 @@ import { type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { toggleVariants } from "@/components/ui/toggle-variants";
 
-type ToggleGroupVariant = NonNullable<VariantProps<typeof toggleVariants>["variant"]> | "card";
+type ToggleGroupVariant =
+  | NonNullable<VariantProps<typeof toggleVariants>["variant"]>
+  | "card";
 
 const ToggleGroupContext = React.createContext<{
   size?: VariantProps<typeof toggleVariants>["size"];
@@ -67,7 +69,9 @@ function ToggleGroupItem({
           : cn(
               toggleVariants({
                 size: resolvedSize,
-                variant: resolvedVariant as VariantProps<typeof toggleVariants>["variant"],
+                variant: resolvedVariant as VariantProps<
+                  typeof toggleVariants
+                >["variant"],
               }),
               "min-w-0 flex-1 shrink-0 rounded-none shadow-none first:rounded-l-md last:rounded-r-md focus:z-10 focus-visible:z-10 data-[variant=outline]:border-l-0 data-[variant=outline]:first:border-l",
             ),

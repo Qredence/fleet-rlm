@@ -9,7 +9,11 @@ import { MobileTabBar } from "@/app/shell/mobile-tab-bar";
 import { RouteSync } from "@/app/shell/route-sync";
 import { ShellRouteOutlet } from "@/app/shell/shell-route-outlet";
 import { Toaster } from "@/components/ui/sonner";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import {
   Sheet,
   SheetContent,
@@ -45,12 +49,15 @@ function ShellLayout() {
   const { registerCommandPaletteHandlers } = useNavigationStore();
   const [loginOpen, setLoginOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
+  const [settingsSection, setSettingsSection] = useState<
+    SettingsSection | undefined
+  >(undefined);
   const loginReturnFocusRef = useRef<HTMLElement | null>(null);
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
+    useNavigationStore();
   const panelMeta = getShellPanelMeta(activeNav);
 
   useEffect(() => {
@@ -60,7 +67,8 @@ function ShellLayout() {
   useEffect(() => {
     const handleOpenLogin = (event: Event) => {
       const customEvent = event as CustomEvent<OpenLoginEventDetail>;
-      loginReturnFocusRef.current = customEvent.detail?.returnFocusTarget ?? null;
+      loginReturnFocusRef.current =
+        customEvent.detail?.returnFocusTarget ?? null;
       setLoginOpen(true);
       customEvent.preventDefault();
     };
@@ -74,7 +82,8 @@ function ShellLayout() {
   useEffect(() => {
     const handleOpenSettings = (event: Event) => {
       const customEvent = event as CustomEvent<OpenSettingsEventDetail>;
-      settingsReturnFocusRef.current = customEvent.detail?.returnFocusTarget ?? null;
+      settingsReturnFocusRef.current =
+        customEvent.detail?.returnFocusTarget ?? null;
       setSettingsSection(customEvent.detail?.section);
       setSettingsOpen(true);
       customEvent.preventDefault();
@@ -115,7 +124,9 @@ function ShellLayout() {
     if (isMobile) {
       return;
     }
-    panelGroupRef.current?.setLayout(isCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT);
+    panelGroupRef.current?.setLayout(
+      isCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT,
+    );
   }, [isCanvasOpen, isMobile]);
 
   useEffect(() => {
@@ -179,7 +190,9 @@ function ShellLayout() {
                   <ResizableHandle
                     className={cn(
                       "relative transition-colors",
-                      isCanvasOpen ? "w-px bg-border hover:bg-accent" : "pointer-events-none w-0",
+                      isCanvasOpen
+                        ? "w-px bg-border hover:bg-accent"
+                        : "pointer-events-none w-0",
                     )}
                     onPointerDown={() => setIsResizing(true)}
                     disabled={!isCanvasOpen}
@@ -191,7 +204,9 @@ function ShellLayout() {
                     collapsedSize="0%"
                     minSize="26%"
                     style={panelStyle}
-                    onResize={({ asPercentage }) => setIsCanvasOpen(asPercentage > 0)}
+                    onResize={({ asPercentage }) =>
+                      setIsCanvasOpen(asPercentage > 0)
+                    }
                   >
                     <div
                       className={cn(
@@ -222,7 +237,10 @@ function ShellLayout() {
             </SheetHeader>
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex items-center justify-center py-3">
-                <div className="h-1.5 w-10 rounded-full bg-border" aria-hidden="true" />
+                <div
+                  className="h-1.5 w-10 rounded-full bg-border"
+                  aria-hidden="true"
+                />
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ShellSidepanel />
