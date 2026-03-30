@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient } from "@tanstack/react-query";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
-import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-types";
+import type {
+  ChatMessage,
+  ChatRenderPart,
+} from "@/lib/workspace/workspace-types";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
-function makeEvent(kind: string, text: string, payload?: Record<string, unknown>): WsServerMessage {
+function makeEvent(
+  kind: string,
+  text: string,
+  payload?: Record<string, unknown>,
+): WsServerMessage {
   return {
     type: "event",
     data: { kind: kind as never, text, payload },
@@ -84,8 +91,14 @@ describe("applyWsFrameToMessages", () => {
 
   it("accumulates assistant tokens into a streaming assistant message", () => {
     let msgs: ChatMessage[] = [];
-    msgs = applyWsFrameToMessages(msgs, makeEvent("assistant_token", "Hello")).messages;
-    msgs = applyWsFrameToMessages(msgs, makeEvent("assistant_token", " world")).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("assistant_token", "Hello"),
+    ).messages;
+    msgs = applyWsFrameToMessages(
+      msgs,
+      makeEvent("assistant_token", " world"),
+    ).messages;
 
     const assistant = msgs.find((m) => m.type === "assistant");
     expect(assistant?.content).toBe("Hello world");
@@ -105,12 +118,15 @@ describe("applyWsFrameToMessages", () => {
 
     const reasoningRows = traceRows(
       messages,
-      (part, message) => part.kind === "reasoning" && message.traceSource === "live",
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "live",
     );
 
     expect(reasoningRows).toHaveLength(2);
     expect(
-      reasoningRows.map((row) => (row.part.kind === "reasoning" ? row.part.parts[0]?.text : "")),
+      reasoningRows.map((row) =>
+        row.part.kind === "reasoning" ? row.part.parts[0]?.text : "",
+      ),
     ).toEqual(["Analyzing input ", "and checking constraints"]);
   });
 
@@ -133,7 +149,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    const reasoning = findFirstPart(messages, (part) => part.kind === "reasoning");
+    const reasoning = findFirstPart(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
     expect(reasoning).toBeDefined();
     if (reasoning?.kind === "reasoning") {
       expect(reasoning.runtimeContext).toEqual({
@@ -159,7 +178,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    const reasoning = findFirstPart(messages, (part) => part.kind === "reasoning");
+    const reasoning = findFirstPart(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
     expect(reasoning).toBeDefined();
     if (reasoning?.kind === "reasoning") {
       expect(reasoning.label).toBe("prompt_iter_1");
@@ -227,10 +249,16 @@ describe("applyWsFrameToMessages", () => {
     );
     expect(trajectoryPrimary).toHaveLength(0);
 
-    const reasoningRows = traceRows(messages, (part) => part.kind === "reasoning");
+    const reasoningRows = traceRows(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
     expect(reasoningRows).toHaveLength(1);
 
-    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps).toHaveLength(1);
@@ -255,7 +283,8 @@ describe("applyWsFrameToMessages", () => {
 
     const trajectoryReasoning = traceRows(
       messages,
-      (part, message) => part.kind === "reasoning" && message.traceSource === "trajectory",
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "trajectory",
     );
     expect(
       trajectoryReasoning.map((row) =>
@@ -266,7 +295,10 @@ describe("applyWsFrameToMessages", () => {
     const tools = findAllParts(messages, (part) => part.kind === "tool");
     expect(tools).toHaveLength(0);
 
-    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps).toHaveLength(2);
@@ -297,7 +329,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
-    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      messages,
+      (part) => part.kind === "chain_of_thought",
+    );
     expect(cot).toBeDefined();
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps.map((step) => step.index)).toEqual([0, 1]);
@@ -308,7 +343,10 @@ describe("applyWsFrameToMessages", () => {
 
   it("keeps exact interleaved order for reasoning and tool events", () => {
     let messages: ChatMessage[] = [];
-    messages = applyWsFrameToMessages(messages, makeEvent("reasoning_step", "r1")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r1"),
+    ).messages;
     messages = applyWsFrameToMessages(
       messages,
       makeEvent("tool_call", "call", {
@@ -316,7 +354,10 @@ describe("applyWsFrameToMessages", () => {
         tool_args: { pattern: "foo" },
       }),
     ).messages;
-    messages = applyWsFrameToMessages(messages, makeEvent("reasoning_step", "r2")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r2"),
+    ).messages;
     messages = applyWsFrameToMessages(
       messages,
       makeEvent("tool_result", "result", {
@@ -324,13 +365,18 @@ describe("applyWsFrameToMessages", () => {
         tool_output: "match",
       }),
     ).messages;
-    messages = applyWsFrameToMessages(messages, makeEvent("reasoning_step", "r3")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "r3"),
+    ).messages;
 
     const primaryRows = traceRows(
       messages,
       (part, message) =>
         message.traceSource === "live" &&
-        (part.kind === "reasoning" || part.kind === "tool" || part.kind === "sandbox"),
+        (part.kind === "reasoning" ||
+          part.kind === "tool" ||
+          part.kind === "sandbox"),
     );
 
     expect(primaryRows.map((row) => row.part.kind)).toEqual([
@@ -343,7 +389,10 @@ describe("applyWsFrameToMessages", () => {
 
     const toolRows = primaryRows.filter((row) => row.part.kind === "tool");
     expect(toolRows).toHaveLength(2);
-    if (toolRows[0]?.part.kind === "tool" && toolRows[1]?.part.kind === "tool") {
+    if (
+      toolRows[0]?.part.kind === "tool" &&
+      toolRows[1]?.part.kind === "tool"
+    ) {
       expect(toolRows[0].part.state).toBe("running");
       expect(toolRows[1].part.state).toBe("output-available");
     }
@@ -373,7 +422,9 @@ describe("applyWsFrameToMessages", () => {
     );
     expect(taskRows).toHaveLength(3);
 
-    const taskTitles = taskRows.map((row) => (row.part.kind === "task" ? row.part.title : ""));
+    const taskTitles = taskRows.map((row) =>
+      row.part.kind === "task" ? row.part.title : "",
+    );
     expect(taskTitles).toEqual([
       "Plan update",
       "Executing PythonInterpreter",
@@ -388,7 +439,9 @@ describe("applyWsFrameToMessages", () => {
     const queue = findFirstPart(messages, (p) => p.kind === "queue");
     expect(queue).toBeDefined();
     if (queue?.kind === "queue") {
-      expect(queue.items[queue.items.length - 1]?.label).toBe("Moving to step 2");
+      expect(queue.items[queue.items.length - 1]?.label).toBe(
+        "Moving to step 2",
+      );
     }
   });
 
@@ -494,11 +547,16 @@ describe("applyWsFrameToMessages", () => {
       expect(sandbox.stepIndex).toBe(2);
       expect(sandbox.output).toBe("loading repository metadata");
       expect(sandbox.runtimeContext?.runtimeMode).toBe("daytona_pilot");
-      expect(sandbox.runtimeContext?.workspacePath).toBe("/workspace/workspace/repo");
+      expect(sandbox.runtimeContext?.workspacePath).toBe(
+        "/workspace/workspace/repo",
+      );
       expect(sandbox.runtimeContext?.sandboxTransition).toBe("created");
     }
 
-    const statusNote = findFirstPart(messages, (part) => part.kind === "status_note");
+    const statusNote = findFirstPart(
+      messages,
+      (part) => part.kind === "status_note",
+    );
     expect(statusNote).toBeUndefined();
   });
 
@@ -562,7 +620,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     ).messages;
 
-    const reasoningRows = traceRows(messages, (part) => part.kind === "reasoning");
+    const reasoningRows = traceRows(
+      messages,
+      (part) => part.kind === "reasoning",
+    );
     const toolRows = traceRows(messages, (part) => part.kind === "tool");
 
     expect(reasoningRows).toHaveLength(1);
@@ -604,7 +665,10 @@ describe("applyWsFrameToMessages", () => {
       }),
     );
 
-    const env = findFirstPart(messages, (p) => p.kind === "environment_variables");
+    const env = findFirstPart(
+      messages,
+      (p) => p.kind === "environment_variables",
+    );
     expect(env).toBeDefined();
     if (env?.kind === "environment_variables") {
       expect(env.variables.map((v) => v.name)).toContain("OPENAI_API_KEY");
@@ -635,8 +699,14 @@ describe("applyWsFrameToMessages", () => {
 
   it("final finalizes trace summaries and attaches citations/sources/attachments", () => {
     let messages: ChatMessage[] = [];
-    messages = applyWsFrameToMessages(messages, makeEvent("assistant_token", "Hello")).messages;
-    messages = applyWsFrameToMessages(messages, makeEvent("reasoning_step", "Thinking")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("assistant_token", "Hello"),
+    ).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning_step", "Thinking"),
+    ).messages;
     messages = applyWsFrameToMessages(
       messages,
       makeEvent("trajectory_step", "trace", {
@@ -644,7 +714,10 @@ describe("applyWsFrameToMessages", () => {
         step_data: { thought: "step one", tool_name: "read_file" },
       }),
     ).messages;
-    messages = applyWsFrameToMessages(messages, makeEvent("plan_update", "Do X")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("plan_update", "Do X"),
+    ).messages;
 
     const result = applyWsFrameToMessages(
       messages,
@@ -699,11 +772,19 @@ describe("applyWsFrameToMessages", () => {
 
     const assistant = result.messages.find((m) => m.type === "assistant");
     expect(assistant?.streaming).toBe(false);
-    expect(assistant?.renderParts?.some((p) => p.kind === "inline_citation_group")).toBe(true);
-    expect(assistant?.renderParts?.some((p) => p.kind === "sources")).toBe(true);
-    expect(assistant?.renderParts?.some((p) => p.kind === "attachments")).toBe(true);
+    expect(
+      assistant?.renderParts?.some((p) => p.kind === "inline_citation_group"),
+    ).toBe(true);
+    expect(assistant?.renderParts?.some((p) => p.kind === "sources")).toBe(
+      true,
+    );
+    expect(assistant?.renderParts?.some((p) => p.kind === "attachments")).toBe(
+      true,
+    );
 
-    const citationGroup = assistant?.renderParts?.find((p) => p.kind === "inline_citation_group");
+    const citationGroup = assistant?.renderParts?.find(
+      (p) => p.kind === "inline_citation_group",
+    );
     if (citationGroup?.kind === "inline_citation_group") {
       expect(citationGroup.citations[0]?.title).toBe("Doc A");
       expect(citationGroup.citations[0]?.number).toBe("1");
@@ -718,7 +799,10 @@ describe("applyWsFrameToMessages", () => {
       expect(sources.sources[1]?.sourceId).toBe("src-b");
     }
 
-    const cot = findFirstPart(result.messages, (p) => p.kind === "chain_of_thought");
+    const cot = findFirstPart(
+      result.messages,
+      (p) => p.kind === "chain_of_thought",
+    );
     if (cot?.kind === "chain_of_thought") {
       expect(cot.steps.every((step) => step.status === "complete")).toBe(true);
     }
@@ -737,35 +821,48 @@ describe("applyWsFrameToMessages", () => {
 
     const finalReasoningRows = traceRows(
       result.messages,
-      (part, message) => part.kind === "reasoning" && message.traceSource === "summary",
+      (part, message) =>
+        part.kind === "reasoning" && message.traceSource === "summary",
     );
     expect(finalReasoningRows).toHaveLength(3);
 
     const summaryLabels = finalReasoningRows.map((row) =>
       row.part.kind === "reasoning" ? row.part.label : undefined,
     );
-    expect(summaryLabels).toEqual(["thought_0", "thought_1", "final_reasoning"]);
+    expect(summaryLabels).toEqual([
+      "thought_0",
+      "thought_1",
+      "final_reasoning",
+    ]);
 
     const finalReasoning = finalReasoningRows[2]?.part;
     if (finalReasoning?.kind === "reasoning") {
-      expect(finalReasoning.parts[0]?.text).toBe("The evidence lines up with the cited sources.");
+      expect(finalReasoning.parts[0]?.text).toBe(
+        "The evidence lines up with the cited sources.",
+      );
     }
   });
 
   it("prefers final_artifact markdown over raw final event JSON text", () => {
     const result = applyWsFrameToMessages(
       [],
-      makeEvent("final", '{ "final_markdown": "Hello there, it is great to meet you!" }', {
-        final_artifact: {
-          kind: "markdown",
-          value: {
-            final_markdown: "Hello there, it is great to meet you!",
+      makeEvent(
+        "final",
+        '{ "final_markdown": "Hello there, it is great to meet you!" }',
+        {
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              final_markdown: "Hello there, it is great to meet you!",
+            },
           },
         },
-      }),
+      ),
     );
 
-    const assistant = result.messages.find((message) => message.type === "assistant");
+    const assistant = result.messages.find(
+      (message) => message.type === "assistant",
+    );
     expect(assistant?.content).toBe("Hello there, it is great to meet you!");
   });
 

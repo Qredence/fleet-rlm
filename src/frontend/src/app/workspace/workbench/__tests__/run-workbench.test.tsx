@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { RunWorkbench } from "@/app/workspace/workbench/run-workbench";
-import type { DetailTab, RunWorkbenchState } from "@/lib/workspace/workspace-types";
+import type {
+  DetailTab,
+  RunWorkbenchState,
+} from "@/lib/workspace/workspace-types";
 
 type MockedRunWorkbenchStore = RunWorkbenchState & {
   selectIteration: (iterationId: string | null) => void;

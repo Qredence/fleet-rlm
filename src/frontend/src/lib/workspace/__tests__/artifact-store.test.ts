@@ -84,6 +84,10 @@ describe("artifactStore sequence ordering", () => {
     ]);
 
     const steps = useArtifactStore.getState().steps;
-    expect(steps.map((step) => step.id)).toEqual(["step-a", "step-b", "step-c"]);
+    expect(steps.map((step) => step.id)).toEqual([
+      "step-a",
+      "step-b",
+      "step-c",
+    ]);
   });
 });

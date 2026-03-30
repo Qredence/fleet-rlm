@@ -20,7 +20,9 @@ describe("WorkspaceComposer", () => {
   };
 
   it("disables submit when the composer is empty", () => {
-    const html = renderToStaticMarkup(<WorkspaceComposer value="   " {...baseProps} />);
+    const html = renderToStaticMarkup(
+      <WorkspaceComposer value="   " {...baseProps} />,
+    );
 
     expect(html).toContain("disabled");
     expect(html).toContain('aria-label="Submit"');
@@ -39,7 +41,11 @@ describe("WorkspaceComposer", () => {
 
   it("keeps the composer generic even in Daytona mode", () => {
     const html = renderToStaticMarkup(
-      <WorkspaceComposer value="summarize this repo" {...baseProps} runtimeMode="daytona_pilot" />,
+      <WorkspaceComposer
+        value="summarize this repo"
+        {...baseProps}
+        runtimeMode="daytona_pilot"
+      />,
     );
 
     expect(html).not.toContain("Experimental Daytona runtime");

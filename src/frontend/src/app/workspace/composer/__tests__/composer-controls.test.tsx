@@ -20,8 +20,12 @@ const labelByValue: Record<string, string> = {
 };
 
 vi.mock("@/components/ai-elements/prompt-input", () => ({
-  PromptInputActionMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PromptInputActionMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PromptInputActionMenu: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PromptInputActionMenuContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
   PromptInputActionMenuItem: ({
     children,
     onSelect,
@@ -29,9 +33,9 @@ vi.mock("@/components/ai-elements/prompt-input", () => ({
     children: ReactNode;
     onSelect?: () => void;
   }) => <button onClick={onSelect}>{children}</button>,
-  PromptInputActionMenuTrigger: (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button type="button" {...props} />
-  ),
+  PromptInputActionMenuTrigger: (
+    props: React.ButtonHTMLAttributes<HTMLButtonElement>,
+  ) => <button type="button" {...props} />,
   PromptInputSelect: ({
     children,
     onValueChange,
@@ -45,10 +49,24 @@ vi.mock("@/components/ai-elements/prompt-input", () => ({
     currentValueRef = value;
     return <div>{children}</div>;
   },
-  PromptInputSelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PromptInputSelectGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PromptInputSelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
-    <button type="button" role="menuitemradio" onClick={() => onValueChangeRef?.(value)}>
+  PromptInputSelectContent: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PromptInputSelectGroup: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  PromptInputSelectItem: ({
+    children,
+    value,
+  }: {
+    children: ReactNode;
+    value: string;
+  }) => (
+    <button
+      type="button"
+      role="menuitemradio"
+      onClick={() => onValueChangeRef?.(value)}
+    >
       {children}
     </button>
   ),
@@ -63,7 +81,9 @@ vi.mock("@/components/ai-elements/prompt-input", () => ({
     </button>
   ),
   PromptInputSelectValue: ({ children }: { children?: ReactNode }) => (
-    <span>{children ?? (currentValueRef ? labelByValue[currentValueRef] : null)}</span>
+    <span>
+      {children ?? (currentValueRef ? labelByValue[currentValueRef] : null)}
+    </span>
   ),
 }));
 
@@ -92,12 +112,14 @@ describe("composer-controls", () => {
 
     expect(container.textContent).toContain("Auto");
 
-    const toolsOnlyOption = Array.from(container.querySelectorAll('[role="menuitemradio"]')).find(
-      (item) => item.textContent?.includes("Tools only") ?? false,
-    );
+    const toolsOnlyOption = Array.from(
+      container.querySelectorAll('[role="menuitemradio"]'),
+    ).find((item) => item.textContent?.includes("Tools only") ?? false);
 
     act(() => {
-      toolsOnlyOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      toolsOnlyOption?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
 
     expect(onChange).toHaveBeenCalledWith("tools_only");
@@ -119,9 +141,9 @@ describe("composer-controls", () => {
 
     expect(container.textContent).toContain("Modal chat");
 
-    const daytonaOption = Array.from(container.querySelectorAll('[role="menuitemradio"]')).find(
-      (item) => item.textContent?.includes("Daytona") ?? false,
-    );
+    const daytonaOption = Array.from(
+      container.querySelectorAll('[role="menuitemradio"]'),
+    ).find((item) => item.textContent?.includes("Daytona") ?? false);
 
     act(() => {
       daytonaOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -150,7 +172,8 @@ describe("composer-controls", () => {
     });
 
     const uploadButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Add images, PDFs or CSVs") ?? false,
+      (button) =>
+        button.textContent?.includes("Add images, PDFs or CSVs") ?? false,
     );
 
     expect(uploadButton?.textContent).toContain("(coming soon)");

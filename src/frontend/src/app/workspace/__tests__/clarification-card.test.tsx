@@ -59,9 +59,11 @@ describe("ClarificationCard", () => {
       },
       onResolve,
     );
-    const customOption = container.querySelector('button[aria-label="Write your own"]');
-    const confirmButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Confirm"),
+    const customOption = container.querySelector(
+      'button[aria-label="Write your own"]',
+    );
+    const confirmButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Confirm"),
     );
 
     expect(container.querySelector("textarea")).toBeNull();
@@ -77,12 +79,17 @@ describe("ClarificationCard", () => {
     const textareaId = textarea?.getAttribute("id");
     expect(textareaId).toBeTruthy();
 
-    const label = textareaId ? container.querySelector(`label[for="${textareaId}"]`) : null;
+    const label = textareaId
+      ? container.querySelector(`label[for="${textareaId}"]`)
+      : null;
     expect(label).not.toBeNull();
     expect(label?.className).toContain("sr-only");
 
     act(() => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
 
       setValue?.call(textarea, "  Focus on the sandbox runner  ");
       textarea?.dispatchEvent(new Event("input", { bubbles: true }));

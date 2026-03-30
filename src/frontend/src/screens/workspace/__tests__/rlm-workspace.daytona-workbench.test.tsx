@@ -12,7 +12,8 @@ const chatStoreState = {
 const backendRuntimeState = {
   messages: [{ id: "m1", type: "assistant", content: "existing chat row" }],
   turnArtifactsByMessageId: {},
-  inputValue: "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.",
+  inputValue:
+    "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.",
   setInputValue: vi.fn(),
   phase: "idle",
   isTyping: false,
@@ -25,9 +26,9 @@ const backendRuntimeState = {
 let capturedOnSend: ((attachments: never[]) => void) | null = null;
 
 vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
-    "@/screens/workspace/use-workspace",
-  );
+  const actual = await vi.importActual<
+    typeof import("@/screens/workspace/use-workspace")
+  >("@/screens/workspace/use-workspace");
 
   return {
     ...actual,
@@ -39,9 +40,15 @@ vi.mock("@/screens/workspace/use-workspace", async () => {
       deleteConversation: vi.fn(),
       clearHistory: vi.fn(),
     }),
-    useChatStore: (selector: (state: typeof chatStoreState) => unknown) => selector(chatStoreState),
+    useChatStore: (selector: (state: typeof chatStoreState) => unknown) =>
+      selector(chatStoreState),
     useRunWorkbenchStore: (
-      selector: (state: { status: "idle"; activity: []; iterations: []; callbacks: [] }) => unknown,
+      selector: (state: {
+        status: "idle";
+        activity: [];
+        iterations: [];
+        callbacks: [];
+      }) => unknown,
     ) =>
       selector({
         status: "idle",
@@ -74,7 +81,9 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/app/workspace/transcript/workspace-message-list", () => ({
-  WorkspaceMessageList: () => <div data-testid="chat-message-list">WorkspaceMessageList</div>,
+  WorkspaceMessageList: () => (
+    <div data-testid="chat-message-list">WorkspaceMessageList</div>
+  ),
 }));
 
 vi.mock("@/app/workspace/workspace-composer", () => ({
@@ -112,7 +121,9 @@ describe("WorkspaceScreen run workbench mode", () => {
     vi.clearAllMocks();
     capturedOnSend = null;
     chatStoreState.runtimeMode = "daytona_pilot";
-    backendRuntimeState.messages = [{ id: "m1", type: "assistant", content: "existing chat row" }];
+    backendRuntimeState.messages = [
+      { id: "m1", type: "assistant", content: "existing chat row" },
+    ];
     backendRuntimeState.inputValue =
       "Analyze https://github.com/qredence/fleet-rlm and summarize the tracing flow.";
     backendRuntimeState.phase = "idle";

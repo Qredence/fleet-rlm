@@ -1,4 +1,8 @@
-import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/ws-types";
+import type {
+  WsEventKind,
+  WsServerEvent,
+  WsServerMessage,
+} from "@/lib/rlm-api/ws-types";
 
 function isWsEventKind(value: string): value is WsEventKind {
   return [
@@ -58,7 +62,9 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind {
+function normalizeExecutionStepKind(
+  step: Record<string, unknown>,
+): WsEventKind {
   const rawType = String(step.type ?? "")
     .trim()
     .toLowerCase();
@@ -77,7 +83,9 @@ function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind 
   return "status";
 }
 
-function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent | null {
+function parseExecutionEnvelope(
+  parsed: Record<string, unknown>,
+): WsServerEvent | null {
   const frameType = String(parsed.type ?? "").trim();
   if (!frameType.startsWith("execution_")) return null;
 
@@ -91,14 +99,17 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           source_type: frameType,
           ...parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp:
+          typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
       },
     };
   }
 
   if (frameType === "execution_completed") {
     const summary = asRecord(parsed.summary) ?? asRecord(parsed.payload);
-    const artifact = asRecord(summary?.final_artifact ?? summary?.finalArtifact);
+    const artifact = asRecord(
+      summary?.final_artifact ?? summary?.finalArtifact,
+    );
     const artifactValue = asRecord(artifact?.value);
     return {
       type: "event",
@@ -120,7 +131,8 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           ...(summary ? { run_summary: summary, ...summary } : {}),
           raw: parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp:
+          typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
       },
     };
   }
@@ -141,14 +153,20 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           source_type: frameType,
           raw: parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp:
+          typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
       },
     };
   }
 
   const kind = normalizeExecutionStepKind(step);
   const text = asText(
-    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind,
+    step.label ??
+      step.output ??
+      step.input ??
+      step.content ??
+      step.message ??
+      kind,
   );
 
   return {
@@ -171,7 +189,9 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
   };
 }
 
-export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMessage | null {
+export function parseWsServerFrame(
+  parsed: Record<string, unknown>,
+): WsServerMessage | null {
   const frameType = String(parsed.type ?? "");
 
   if (frameType === "event") {
@@ -208,7 +228,8 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
     const result = asRecord(parsed.result) ?? {};
     const command = asText(parsed.command || "command");
     const status = String(result.status ?? "ok").toLowerCase();
-    const kind: WsEventKind = status === "ok" ? "command_ack" : "command_reject";
+    const kind: WsEventKind =
+      status === "ok" ? "command_ack" : "command_reject";
 
     return {
       type: "event",
@@ -224,7 +245,8 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
           raw: parsed,
         },
         version: asNumber(parsed.version),
-        event_id: typeof parsed.event_id === "string" ? parsed.event_id : undefined,
+        event_id:
+          typeof parsed.event_id === "string" ? parsed.event_id : undefined,
       },
     };
   }

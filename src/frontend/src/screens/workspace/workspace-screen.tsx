@@ -5,10 +5,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/use-runtime-status";
+import {
+  useRuntimeStatus,
+  runtimeStatusQueryKey,
+} from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
+import {
+  WorkspaceComposer,
+  type AttachedFile,
+} from "@/app/workspace/workspace-composer";
 import { WorkspaceChatEmptyState } from "@/app/workspace/transcript/workspace-chat-empty-state";
 import { WorkspaceMessageList } from "@/app/workspace/transcript/workspace-message-list";
 import {
@@ -70,7 +76,8 @@ export function WorkspaceScreen() {
     const provider = runtimeStatus.data?.sandbox_provider;
     if (!provider) return;
     didInitRuntimeMode.current = true;
-    const mapped: WsRuntimeMode = provider === "daytona" ? "daytona_pilot" : "modal_chat";
+    const mapped: WsRuntimeMode =
+      provider === "daytona" ? "daytona_pilot" : "modal_chat";
     setRuntimeMode(mapped);
   }, [runtimeStatus.data?.sandbox_provider, setRuntimeMode]);
 
@@ -81,7 +88,9 @@ export function WorkspaceScreen() {
       const sandboxProvider = mode === "daytona_pilot" ? "daytona" : "modal";
       runtimeEndpoints
         .patchSettings({ updates: { SANDBOX_PROVIDER: sandboxProvider } })
-        .then(() => queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }))
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }),
+        )
         .catch(() => {
           // silent — settings PATCH failures don't block the chat
         });
@@ -105,10 +114,14 @@ export function WorkspaceScreen() {
       originalHandleSubmit({
         executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
         runtimeMode,
-        repoUrl: runtimeMode === "daytona_pilot" ? inferredRepoContext?.repoUrl : undefined,
+        repoUrl:
+          runtimeMode === "daytona_pilot"
+            ? inferredRepoContext?.repoUrl
+            : undefined,
         repoRef:
           runtimeMode === "daytona_pilot"
-            ? (inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef)
+            ? (inferredRepoContext?.repoRefCandidate ??
+              inferredRepoContext?.repoRef)
             : undefined,
         contextPaths:
           runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
@@ -133,11 +146,15 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const { sessionRevision, requestedConversationId, clearRequestedConversation } =
-    useWorkspaceUiStore();
+  const {
+    sessionRevision,
+    requestedConversationId,
+    clearRequestedConversation,
+  } = useWorkspaceUiStore();
 
   // Chat history
-  const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
+  const { saveConversation, loadConversation: loadConv } =
+    useChatHistoryStore();
 
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
@@ -181,8 +198,16 @@ export function WorkspaceScreen() {
       return;
     }
 
-    if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
-      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
+    if (
+      messagesRef.current.length > 0 &&
+      messagesRef.current !== conversation.messages
+    ) {
+      saveConversation(
+        messagesRef.current,
+        phaseRef.current,
+        undefined,
+        turnArtifactsRef.current,
+      );
     }
 
     loadConversation(conversation);
@@ -211,8 +236,11 @@ export function WorkspaceScreen() {
         guidance?: string[];
       }
     | undefined;
-  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
-  const warningGuidance = runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
+  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance)
+    ? daytonaStatus.guidance
+    : [];
+  const warningGuidance =
+    runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
@@ -220,9 +248,12 @@ export function WorkspaceScreen() {
       ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
       : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
   const runtimeWarningTitle =
-    runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
+    runtimeMode === "daytona_pilot"
+      ? "Daytona setup required"
+      : "Runtime warning";
   const hasMessages = messages.length > 0;
-  const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
+  const showDesktopLandingState =
+    !isMobile && !hasMessages && phase === "idle" && !isTyping;
   const composerDisabled = isTyping || !backendEnabled;
   const isReceivingResponse = backendEnabled && isTyping;
 
@@ -258,7 +289,10 @@ export function WorkspaceScreen() {
             data-slot="workspace-landing-state"
             className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
           >
-            <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
+            <WorkspaceChatEmptyState
+              isMobile={false}
+              onSuggestionClick={setInputValue}
+            />
 
             {showRuntimeWarning ? (
               <Alert className="w-full border-accent/25 bg-accent/5 text-foreground">

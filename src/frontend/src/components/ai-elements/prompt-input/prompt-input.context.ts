@@ -1,5 +1,10 @@
 import type { FileUIPart, SourceDocumentUIPart } from "ai";
-import { createContext, useContext, type PropsWithChildren, type RefObject } from "react";
+import {
+  createContext,
+  useContext,
+  type PropsWithChildren,
+  type RefObject,
+} from "react";
 
 export interface AttachmentsContext {
   files: (FileUIPart & { id: string })[];
@@ -19,15 +24,22 @@ export interface TextInputContext {
 export interface PromptInputControllerProps {
   textInput: TextInputContext;
   attachments: AttachmentsContext;
-  __registerFileInput: (ref: RefObject<HTMLInputElement | null>, open: () => void) => void;
+  __registerFileInput: (
+    ref: RefObject<HTMLInputElement | null>,
+    open: () => void,
+  ) => void;
 }
 
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
 }>;
 
-const PromptInputController = createContext<PromptInputControllerProps | null>(null);
-const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(null);
+const PromptInputController = createContext<PromptInputControllerProps | null>(
+  null,
+);
+const ProviderAttachmentsContext = createContext<AttachmentsContext | null>(
+  null,
+);
 const LocalAttachmentsContext = createContext<AttachmentsContext | null>(null);
 
 export interface ReferencedSourcesContext {
@@ -37,7 +49,8 @@ export interface ReferencedSourcesContext {
   clear: () => void;
 }
 
-const LocalReferencedSourcesContext = createContext<ReferencedSourcesContext | null>(null);
+const LocalReferencedSourcesContext =
+  createContext<ReferencedSourcesContext | null>(null);
 
 export const usePromptInputController = () => {
   const ctx = useContext(PromptInputController);
@@ -49,7 +62,8 @@ export const usePromptInputController = () => {
   return ctx;
 };
 
-export const useOptionalPromptInputController = () => useContext(PromptInputController);
+export const useOptionalPromptInputController = () =>
+  useContext(PromptInputController);
 
 export const useProviderAttachments = () => {
   const ctx = useContext(ProviderAttachmentsContext);
@@ -61,7 +75,8 @@ export const useProviderAttachments = () => {
   return ctx;
 };
 
-export const useOptionalProviderAttachments = () => useContext(ProviderAttachmentsContext);
+export const useOptionalProviderAttachments = () =>
+  useContext(ProviderAttachmentsContext);
 
 export const usePromptInputAttachments = () => {
   const provider = useContext(ProviderAttachmentsContext);
