@@ -2,11 +2,13 @@ import { useId, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { CircleCheck, MessageSquare, Pencil } from "lucide-react";
 import type { ChatMessage } from "@/screens/workspace/use-workspace";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { RadioOptionCard } from "@/components/ui/radio-option-card";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 
 interface Props {
   data: NonNullable<ChatMessage["clarificationData"]>;
@@ -47,14 +49,9 @@ export function ClarificationCard({ data, onResolve }: Props) {
               </div>
               <p className="text-muted-foreground typo-caption">{data.question}</p>
             </div>
-            <div
-              data-slot="resolved-chip"
-              className="inline-flex w-fit items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-foreground border-subtle"
-            >
-              <span data-slot="resolved-chip-label" className="text-sm font-medium leading-5">
-                {data.resolvedAnswer}
-              </span>
-            </div>
+            <Badge variant="secondary" className="w-fit px-3 py-1.5 text-sm">
+              {data.resolvedAnswer}
+            </Badge>
           </CardContent>
         </Card>
       </motion.div>
@@ -82,23 +79,58 @@ export function ClarificationCard({ data, onResolve }: Props) {
             <p className="text-foreground typo-label">{data.question}</p>
           </div>
 
-          <div className="flex flex-col gap-2" role="radiogroup" aria-label={data.question}>
+          <ToggleGroup
+            type="single"
+            value={selectedId ?? ""}
+            onValueChange={(nextValue) => {
+              setSelectedId(nextValue || null);
+              if (nextValue !== data.customOptionId) {
+                setCustomText("");
+              }
+            }}
+            className="w-full flex-col"
+            variant="card"
+            aria-label={data.question}
+          >
             {data.options.map((option) => {
               const isSelected = selectedId === option.id;
               const isWriteOwn = option.id === data.customOptionId;
 
               return (
                 <div key={option.id} className="flex flex-col gap-2">
-                  <RadioOptionCard
-                    selected={isSelected}
-                    onSelect={() => {
-                      setSelectedId(option.id);
-                      if (!isWriteOwn) setCustomText("");
-                    }}
-                    label={option.label}
-                    description={option.description}
-                    icon={isWriteOwn ? <Pencil /> : undefined}
-                  />
+                  <ToggleGroupItem
+                    value={option.id}
+                    className="group/clarification-option w-full"
+                    aria-label={option.label}
+                  >
+                    <div
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                        isSelected ? "border-foreground" : "border-muted-foreground/40",
+                      )}
+                      aria-hidden="true"
+                    >
+                      <div
+                        className={cn(
+                          "size-2.5 rounded-full bg-foreground transition-transform",
+                          isSelected ? "scale-100" : "scale-0",
+                        )}
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {isWriteOwn ? (
+                          <Pencil className="shrink-0 text-muted-foreground" aria-hidden="true" />
+                        ) : null}
+                        <span className="text-left text-foreground typo-label">{option.label}</span>
+                      </div>
+                      {option.description ? (
+                        <p className="mt-0.5 text-left text-muted-foreground typo-caption">
+                          {option.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  </ToggleGroupItem>
 
                   <AnimatePresence>
                     {isWriteOwn && isSelected && (
@@ -130,7 +162,7 @@ export function ClarificationCard({ data, onResolve }: Props) {
                 </div>
               );
             })}
-          </div>
+          </ToggleGroup>
 
           <div className="flex justify-end">
             <Button size="sm" disabled={!canConfirm} onClick={handleConfirm}>

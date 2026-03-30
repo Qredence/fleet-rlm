@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { logoutWithEntra } from "@/lib/auth/entra";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { fades, springs } from "@/lib/utils/motion";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 

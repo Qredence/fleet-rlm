@@ -140,6 +140,7 @@ def _has_active_mlflow_trace(mlflow: Any) -> bool:
 def update_current_mlflow_trace(
     *,
     response_preview: str | None = None,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> str | None:
     """Apply the current request context to the active MLflow trace."""
     context = current_request_context()
@@ -156,9 +157,12 @@ def update_current_mlflow_trace(
     try:
         config = runtime.get_mlflow_config()
         model_id = context.model_id or config.active_model_id
+        metadata = _trace_metadata_from_context(context)
+        if trace_metadata:
+            metadata.update(trace_metadata)
         mlflow.update_current_trace(
             client_request_id=context.client_request_id,
-            metadata=_trace_metadata_from_context(context),
+            metadata=metadata,
             request_preview=_trim_preview(context.request_preview),
             response_preview=_trim_preview(response_preview),
             model_id=model_id,
@@ -225,7 +229,11 @@ def capture_last_active_trace_id() -> str | None:
     return trace_id
 
 
-def trace_result_metadata(*, response_preview: str | None = None) -> dict[str, str]:
+def trace_result_metadata(
+    *,
+    response_preview: str | None = None,
+    trace_metadata: dict[str, Any] | None = None,
+) -> dict[str, str]:
     """Return optional MLflow metadata to attach to final/result payloads."""
     if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
         return {}
@@ -239,7 +247,10 @@ def trace_result_metadata(*, response_preview: str | None = None) -> dict[str, s
     if not runtime.initialize_mlflow(config):
         return {}
 
-    trace_id = update_current_mlflow_trace(response_preview=response_preview)
+    trace_id = update_current_mlflow_trace(
+        response_preview=response_preview,
+        trace_metadata=trace_metadata,
+    )
     context = current_request_context()
     payload: dict[str, str] = {}
     if trace_id:
@@ -253,10 +264,16 @@ def merge_trace_result_metadata(
     payload: dict[str, Any] | None,
     *,
     response_preview: str | None = None,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a payload with optional MLflow metadata merged in."""
     merged = dict(payload or {})
-    merged.update(trace_result_metadata(response_preview=response_preview))
+    merged.update(
+        trace_result_metadata(
+            response_preview=response_preview,
+            trace_metadata=trace_metadata,
+        )
+    )
     return merged
 
 

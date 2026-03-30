@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ArrowUp, FileText, Square, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 
-import { AttachmentDropdown } from "@/app/workspace/composer/AttachmentDropdown";
-import { ExecutionModeDropdown } from "@/app/workspace/composer/ExecutionModeDropdown";
-import { RuntimeModeDropdown } from "@/app/workspace/composer/RuntimeModeDropdown";
+import {
+  ExecutionModeSelect,
+  PromptComposerAttachmentMenu,
+  RuntimeModeSelect,
+} from "@/app/workspace/composer/composer-controls";
 import {
   PromptInput,
   PromptInputBody,
@@ -14,10 +16,10 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-} from "@/components/ui/prompt-input";
+} from "@/components/ai-elements/prompt-input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
 interface AttachedFile {
   id: string;
@@ -72,6 +74,7 @@ function WorkspaceComposer({
   className,
 }: WorkspaceComposerProps) {
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasContent = value.trim().length > 0;
   const canSubmitMessage = hasContent && canSubmit;
   const isStreamingActive = isLoading && isReceiving;
@@ -93,6 +96,17 @@ function WorkspaceComposer({
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
   }, []);
+
+  const handleAttachmentInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.currentTarget.files;
+      if (files) {
+        handleFilesSelected(files);
+      }
+      event.currentTarget.value = "";
+    },
+    [handleFilesSelected],
+  );
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -156,6 +170,14 @@ function WorkspaceComposer({
 
   return (
     <div className={className}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,.pdf,.csv"
+        className="hidden"
+        onChange={handleAttachmentInputChange}
+      />
       <PromptInput
         className="w-full"
         onSubmit={async () => {
@@ -177,13 +199,13 @@ function WorkspaceComposer({
 
         <PromptInputFooter className="px-3 pb-3 pt-0">
           <PromptInputTools className="gap-1.5">
-            <AttachmentDropdown
+            <PromptComposerAttachmentMenu
+              onAttachFiles={() => fileInputRef.current?.click()}
               uploadsEnabled={attachmentsEnabled}
-              onFilesSelected={handleFilesSelected}
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
-            <ExecutionModeDropdown value={executionMode} onChange={onExecutionModeChange} />
-            <RuntimeModeDropdown value={runtimeMode} onChange={onRuntimeModeChange} />
+            <ExecutionModeSelect value={executionMode} onChange={onExecutionModeChange} />
+            <RuntimeModeSelect value={runtimeMode} onChange={onRuntimeModeChange} />
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (

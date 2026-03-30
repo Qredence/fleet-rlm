@@ -74,15 +74,64 @@ def _delegate_streaming_context(
     interpreter: Any,
     effective_max_iters: int,
 ) -> StreamingContext:
+    runtime_metadata_fn = getattr(interpreter, "current_runtime_metadata", None)
+    runtime_metadata = runtime_metadata_fn() if callable(runtime_metadata_fn) else {}
+    fallback_sandbox_active = getattr(interpreter, "_sandbox", None) is not None
     return StreamingContext(
         depth=agent._current_depth + 1,
         max_depth=agent._max_depth,
         execution_profile=_execution_profile_name(interpreter),
-        volume_name=getattr(interpreter, "volume_name", None),
-        sandbox_active=getattr(interpreter, "_sandbox", None) is not None,
+        volume_name=(
+            runtime_metadata.get("volume_name")
+            if isinstance(runtime_metadata, dict)
+            else getattr(interpreter, "volume_name", None)
+        ),
+        sandbox_active=bool(
+            runtime_metadata.get("sandbox_active", fallback_sandbox_active)
+            if isinstance(runtime_metadata, dict)
+            else fallback_sandbox_active
+        ),
         effective_max_iters=effective_max_iters,
         execution_mode="rlm",
-        sandbox_id=None,
+        sandbox_id=(
+            str(runtime_metadata.get("sandbox_id")).strip() or None
+            if isinstance(runtime_metadata, dict) and runtime_metadata.get("sandbox_id")
+            else None
+        ),
+        workspace_path=(
+            str(runtime_metadata.get("workspace_path")).strip() or None
+            if isinstance(runtime_metadata, dict)
+            and runtime_metadata.get("workspace_path")
+            else None
+        ),
+        sandbox_transition=(
+            str(runtime_metadata.get("sandbox_transition")).strip() or None
+            if isinstance(runtime_metadata, dict)
+            and runtime_metadata.get("sandbox_transition")
+            else None
+        ),
+        runtime_degraded=bool(
+            runtime_metadata.get("runtime_degraded", False)
+            if isinstance(runtime_metadata, dict)
+            else False
+        ),
+        runtime_failure_category=(
+            str(runtime_metadata.get("runtime_failure_category")).strip() or None
+            if isinstance(runtime_metadata, dict)
+            and runtime_metadata.get("runtime_failure_category")
+            else None
+        ),
+        runtime_failure_phase=(
+            str(runtime_metadata.get("runtime_failure_phase")).strip() or None
+            if isinstance(runtime_metadata, dict)
+            and runtime_metadata.get("runtime_failure_phase")
+            else None
+        ),
+        runtime_fallback_used=bool(
+            runtime_metadata.get("runtime_fallback_used", False)
+            if isinstance(runtime_metadata, dict)
+            else False
+        ),
     )
 
 

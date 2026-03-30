@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { AuthProvider } from "@/lib/auth/AuthProvider";
+import { AuthProvider } from "@/lib/auth/auth-provider";
 
 const QUERY_STALE_TIME_MS = 5 * 60 * 1000;
 const QUERY_RETRY_COUNT = 2;

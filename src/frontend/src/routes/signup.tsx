@@ -7,7 +7,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useTelemetry } from "@/lib/telemetry/useTelemetry";
+import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { springs } from "@/lib/utils/motion";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 

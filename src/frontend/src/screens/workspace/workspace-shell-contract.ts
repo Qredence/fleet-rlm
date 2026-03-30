@@ -1,9 +1,6 @@
-import {
-  type Conversation,
-  useChatHistoryStore,
-  useConversations,
-} from "@/screens/workspace/chat-history-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/workspace-ui-store";
+import { useChatHistoryStore, useConversations } from "@/lib/workspace/chat-history-store";
+import type { Conversation } from "@/lib/workspace/workspace-types";
+import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 
 function useWorkspaceShellHistory(): Conversation[] {
   return useConversations();

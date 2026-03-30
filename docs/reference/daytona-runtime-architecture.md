@@ -72,13 +72,54 @@ The current implementation treats these Daytona docs as the normative baseline:
   - host-side volume browsing uses async Daytona helpers directly
   - async sandbox helpers such as `get_work_dir()` and `get_preview_link()` must be awaited before their values are used
   - owned `AsyncDaytona` clients should be closed when an interpreter/runtime is discarded to avoid leaking HTTP sessions
-  - sync helper methods remain as compatibility shims over the async implementation
+  - sync helper methods remain only as public compatibility shims over the async implementation
+  - internal Daytona interpreter flow assumes the canonical async provider contract and does not probe for older sync-only runtime/session shapes
 - Shared runtime control is intentionally split across three paths:
   - `RLMReActChatAgent` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
   - cached runtime-module execution for non-recursive helper reuse
 - Daytona's public heavy-work surface is intentionally limited to the named cached runtime-module capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona tool surface.
 - `llm_query` / `llm_query_batched` remain available inside the Daytona interpreter, but they are internal semantic sub-primitives rather than peer public heavy-work tools. New Daytona heavy capabilities should use them only as a documented last resort.
+
+## Session Continuity Model
+
+The Daytona runtime now treats sandbox continuity as the default operating mode
+for a chat session:
+
+- one long-lived root Daytona sandbox session per agent session
+- one persistent Daytona code-interpreter context reused across warm turns
+- repo/ref/context changes reconcile in place inside that sandbox
+- the mounted Daytona volume remains the canonical durable target for
+  `memory/`, `artifacts/`, `buffers/`, and `meta/`
+
+The runtime deliberately separates:
+
+- sandbox identity: the long-lived Daytona sandbox and mounted volume
+- workspace configuration: repo checkout, ref selection, staged
+  `.fleet-rlm/context` inputs, and helper setup inside that sandbox
+
+Repo, ref, or staged-context changes are no longer treated as automatic reasons
+to delete the root sandbox. Instead, the runtime:
+
+- clones a repo if the desired checkout is missing
+- fetches and updates the checkout in place when the ref changes
+- clears and restages `.fleet-rlm/context` when host context inputs change
+- reruns sandbox helper setup when the workspace target changes so the live
+  interpreter context retargets the new workspace path without discarding its
+  in-memory state
+
+The runtime only forces sandbox recreation when continuity would be unsafe or
+incorrect:
+
+- explicit session reset / `force_new_session`
+- mounted volume incompatibility
+- unrecoverable sandbox or reconcile failure
+- resume failure for a persisted sandbox/context snapshot
+
+This is the intended foundation for deeper `dspy.RLM` analysis flows: warm
+turns continue in the same sandbox, durable outputs accumulate on the mounted
+volume, and resumed sessions become a first-class continuity path instead of a
+best-effort fallback.
 
 ## Project-Specific Extensions
 
@@ -151,3 +192,11 @@ There are two distinct persistence layers in the Daytona runtime:
 Workspace-aware tools target the live sandbox workspace. Volume-aware tools target the canonical durable directories. There is no automatic workspace-to-volume sync in this iteration.
 
 When code needs durable memory or durable artifacts, it must explicitly write to the mounted Daytona volume rather than relying on in-process globals or transient workspace files.
+
+Sandbox/file helper code should treat `DaytonaSandboxSession` as the canonical
+interface:
+
+- async flows use `aread_file`, `awrite_file`, and `alist_files`
+- sync helpers use `_ensure_session_sync()` only at the public sync boundary
+- helper code should not fall back to raw `sandbox.fs.*` access or mixed
+  ad hoc session shapes

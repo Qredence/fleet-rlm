@@ -25,6 +25,7 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
     RuntimeSettingDefinition("DSPY_LM_MODEL"),
     RuntimeSettingDefinition("DSPY_DELEGATE_LM_MODEL"),
     RuntimeSettingDefinition("DSPY_DELEGATE_LM_SMALL_MODEL"),
+    RuntimeSettingDefinition("DSPY_DELEGATE_LM_MAX_TOKENS"),
     RuntimeSettingDefinition("DSPY_LLM_API_KEY", secret=True),
     RuntimeSettingDefinition("DSPY_LM_API_BASE"),
     RuntimeSettingDefinition("DSPY_LM_MAX_TOKENS"),

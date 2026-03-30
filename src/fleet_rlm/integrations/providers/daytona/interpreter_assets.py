@@ -14,6 +14,14 @@ _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS: tuple[str, ...] = (
 )
 
 
+def _generic_submit_code() -> str:
+    return """
+def SUBMIT(**kwargs):
+    print(f"{_FINAL_OUTPUT_MARKER}{_json.dumps(kwargs, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}")
+    raise _FleetFinalOutput(kwargs)
+""".strip()
+
+
 def _base_setup_code(*, workspace_path: str, volume_mount_path: str) -> str:
     return f"""
 import ast as _ast
@@ -24,13 +32,14 @@ import pathlib as _pathlib
 import re as _re
 import subprocess as _subprocess
 import fcntl as _fcntl
-import glob as _glob
 from contextlib import contextmanager as _contextmanager
 
 REPO_PATH = {workspace_path!r}
 MEMORY_ROOT = _pathlib.Path({volume_mount_path!r})
 _FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
 _buffers = globals().get("_buffers", {{}})
+_os.makedirs(REPO_PATH, exist_ok=True)
+_os.chdir(REPO_PATH)
 
 def resolve_path(path: str) -> str:
     candidate = _pathlib.Path(str(path or "").strip() or ".")
@@ -271,9 +280,7 @@ class _FleetFinalOutput(Exception):
         self.value = value
         super().__init__("Final output submitted")
 
-def SUBMIT(**kwargs):
-    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(kwargs, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
-    raise _FleetFinalOutput(kwargs)
+{_generic_submit_code()}
 """.strip()
 
 
@@ -303,6 +310,7 @@ def SUBMIT({signature}):
 __all__ = [
     "_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES",
     "_FINAL_OUTPUT_MARKER",
+    "_generic_submit_code",
     "_UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS",
     "_base_setup_code",
     "_typed_submit_code",

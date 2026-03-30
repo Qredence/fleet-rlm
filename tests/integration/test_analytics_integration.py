@@ -11,7 +11,7 @@ import dspy
 import pytest
 
 from fleet_rlm.integrations.observability.config import MlflowConfig, PostHogConfig
-from fleet_rlm.integrations.observability.mlflow_integration import (
+from fleet_rlm.integrations.observability.mlflow_runtime import (
     MlflowTraceRequestContext,
     flush_mlflow_traces,
     initialize_mlflow,
@@ -104,10 +104,10 @@ def test_mlflow_integration_captures_real_trace(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_integration._INIT_IDENTITY", None
+        "fleet_rlm.integrations.observability.mlflow_runtime._INIT_IDENTITY", None
     )
     monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_integration._ACTIVE_CONFIG", None
+        "fleet_rlm.integrations.observability.mlflow_runtime._ACTIVE_CONFIG", None
     )
 
     experiment_name = f"fleet-rlm-test-{uuid4().hex}"

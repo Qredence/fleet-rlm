@@ -7,6 +7,7 @@ import dspy
 from fleet_rlm.runtime.agent.chat_turns import (
     TurnDelegationState,
     TurnMetricsSnapshot,
+    build_turn_payload,
     process_prediction_to_turn_result,
 )
 
@@ -111,3 +112,36 @@ def test_process_prediction_to_turn_result_finalizes_and_validates() -> None:
     assert result["assistant_response"] == "NEEDS VALIDATION"
     assert result["guardrail_warnings"] == ["validated"]
     assert agent._last_tool_error_count == 3
+
+
+def test_build_turn_payload_merges_metrics_and_extra_payload() -> None:
+    agent = SimpleNamespace(
+        history=dspy.History(
+            messages=[{"user_request": "hi", "assistant_response": "ok"}]
+        ),
+        history_max_turns=None,
+    )
+
+    payload = build_turn_payload(
+        agent,
+        trajectory={"tool_name_0": "finish"},
+        guardrail_warnings=["warned"],
+        turn_metrics=TurnMetricsSnapshot(
+            effective_max_iters=7,
+            delegate_calls_turn=3,
+            delegate_fallback_count_turn=1,
+            delegate_result_truncated_count_turn=2,
+        ),
+        extra_payload={"final_reasoning": "wrapped up"},
+    )
+
+    assert payload == {
+        "trajectory": {"tool_name_0": "finish"},
+        "history_turns": 1,
+        "guardrail_warnings": ["warned"],
+        "effective_max_iters": 7,
+        "delegate_calls_turn": 3,
+        "delegate_fallback_count_turn": 1,
+        "delegate_result_truncated_count_turn": 2,
+        "final_reasoning": "wrapped up",
+    }

@@ -10,7 +10,7 @@ export {
   sendCommandOverWs,
   subscribeToExecutionStream,
   createBackendSessionId,
-} from "@/lib/rlm-api/wsClient";
+} from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
 export type {
   WsTraceMode,
@@ -26,7 +26,7 @@ export type {
   WsServerEvent,
   WsServerError,
   WsServerMessage,
-} from "@/lib/rlm-api/wsClient";
+} from "@/lib/rlm-api/ws-client";
 export type {
   OpenApiPaths,
   HealthResponse,

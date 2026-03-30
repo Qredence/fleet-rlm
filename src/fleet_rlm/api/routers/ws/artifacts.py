@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.models import ArtifactKind
+from fleet_rlm.integrations.database import ArtifactKind
 from fleet_rlm.integrations.database.types import (
     ArtifactCreateRequest,
     IdentityUpsertResult,

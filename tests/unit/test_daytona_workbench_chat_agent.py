@@ -5,7 +5,7 @@ import dspy
 import pytest
 from typing import Any, cast
 
-from fleet_rlm.cli import runners
+from fleet_rlm.cli import runtime_factory
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.integrations.providers.daytona.agent import (
@@ -27,20 +27,10 @@ class _FakeSession:
         _ = timeout
         self.driver_started += 1
 
-    def start_driver(self, *, timeout: float) -> None:
-        _ = timeout
-        self.driver_started += 1
-
     async def aclose_driver(self) -> None:
         self.closed += 1
 
-    def close_driver(self) -> None:
-        self.closed += 1
-
     async def adelete(self) -> None:
-        self.deleted += 1
-
-    def delete(self) -> None:
         self.deleted += 1
 
 
@@ -53,19 +43,6 @@ class _FakeRuntime:
         ] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
 
-    def create_workspace_session(
-        self,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-        volume_name: str | None = None,
-    ) -> _FakeSession:
-        self.create_calls.append(
-            (repo_url, ref, list(context_paths or []), volume_name)
-        )
-        return self.session
-
     async def acreate_workspace_session(
         self,
         *,
@@ -77,20 +54,6 @@ class _FakeRuntime:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
-        return self.session
-
-    def resume_workspace_session(
-        self,
-        *,
-        sandbox_id: str,
-        repo_url: str | None,
-        ref: str | None,
-        workspace_path: str,
-        context_sources=None,
-        context_id: str | None = None,
-    ) -> _FakeSession:
-        _ = context_sources, context_id
-        self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
         return self.session
 
     async def aresume_workspace_session(
@@ -106,6 +69,9 @@ class _FakeRuntime:
         _ = context_sources, context_id
         self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
         return self.session
+
+    async def aclose(self) -> None:
+        return None
 
 
 def _interpreter(agent: DaytonaWorkbenchChatAgent) -> Any:
@@ -212,7 +178,7 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module_via_sandbox",
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module",
         _fake_run,
     )
 
@@ -521,7 +487,7 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
         _FakeDaytonaWorkbenchChatAgent,
     )
 
-    agent = runners.build_daytona_workbench_chat_agent(
+    agent = runtime_factory.build_daytona_workbench_chat_agent(
         timeout=123,
         max_depth=4,
         interpreter_async_execute=False,

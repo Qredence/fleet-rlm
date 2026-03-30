@@ -288,10 +288,6 @@ def patch_runtime_lm_loaders(
         lambda *args, **kwargs: delegate,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.bootstrap.emit_posthog_startup_event",
-        lambda *args, **kwargs: False,
-    )
-    monkeypatch.setattr(
         "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
         lambda *args, **kwargs: planner,
     )
@@ -337,10 +333,6 @@ def build_ws_test_app(monkeypatch, fake_agent: FakeChatAgent):
     )
     monkeypatch.setattr(
         "fleet_rlm.cli.runners.build_react_chat_agent", _fake_build_agent
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_daytona_workbench_chat_agent",
-        _fake_build_agent,
     )
     return create_app(
         config=ServerRuntimeConfig(

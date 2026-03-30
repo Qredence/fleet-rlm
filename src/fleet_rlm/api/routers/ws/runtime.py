@@ -77,7 +77,7 @@ async def _prepare_chat_runtime(
 
     cfg = state.config
     try:
-        planner_lm, delegate_lm = await ensure_runtime_models(state, cfg)
+        planner_lm, delegate_lm = await ensure_runtime_models(state)
     except Exception as exc:
         if await _try_send_json(
             websocket,

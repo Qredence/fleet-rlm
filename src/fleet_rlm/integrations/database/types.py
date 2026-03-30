@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .models import (
+from .models_enums import (
     ArtifactKind,
     JobStatus,
     JobType,

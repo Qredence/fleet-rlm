@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.runtime.tools import sandbox as sandbox_tools
+from fleet_rlm.runtime.tools import sandbox_storage_tools
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from tests.unit.fixtures_react import FakeInterpreter
 
@@ -25,9 +25,6 @@ class _FakeDaytonaSession:
         self.list_calls: list[str] = []
         self.file_contents: dict[str, str] = {}
         self.list_entries: dict[str, list[object]] = {}
-        self.sandbox = SimpleNamespace(
-            fs=SimpleNamespace(list_files=self._list_files),
-        )
 
     async def aread_file(self, path: str) -> str:
         self.read_calls.append(path)
@@ -38,7 +35,7 @@ class _FakeDaytonaSession:
         self.file_contents[path] = content
         return path
 
-    async def _list_files(self, path: str) -> list[object]:
+    async def alist_files(self, path: str) -> list[object]:
         self.list_calls.append(path)
         return self.list_entries.get(path, [])
 
@@ -84,7 +81,7 @@ def test_memory_read_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -138,7 +135,7 @@ def test_memory_list_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -196,7 +193,7 @@ def test_memory_write_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -292,7 +289,7 @@ def test_write_to_file_append_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
@@ -329,7 +326,7 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_tools, "_aget_daytona_session", _fake_get_daytona_session
+        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}

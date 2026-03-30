@@ -1351,26 +1351,6 @@ li {
   line-height: 1.4;
 }
 
-/* ── Radio Option Card ─────────────────────────────────────────── */
-[data-slot="radio-option-card"] {
-}
-
-[data-slot="radio-option-card-label"] {
-  font-size: var(--font-text-sm-size);
-  font-weight: var(--font-weight-regular);
-  line-height: 1.4;
-}
-
-[data-slot="radio-option-card"][aria-checked="true"] [data-slot="radio-option-card-label"] {
-  font-weight: var(--font-weight-medium);
-}
-
-[data-slot="radio-option-card-description"] {
-  font-size: var(--font-text-2xs-size);
-  font-weight: var(--font-weight-regular);
-  line-height: 1.3;
-}
-
 /* ── Resolved Chip ─────────────────────────────────────────────── */
 [data-slot="resolved-chip-label"] {
   font-size: var(--font-text-sm-size);

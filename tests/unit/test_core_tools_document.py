@@ -169,8 +169,11 @@ def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
-
-    result = load_fn("paper.txt", alias="paper")
+    with patch(
+        "fleet_rlm.runtime.tools.sandbox_common._get_daytona_session_sync",
+        return_value=session,
+    ):
+        result = load_fn("paper.txt", alias="paper")
 
     assert result == {
         "status": "ok",
@@ -199,8 +202,11 @@ def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: 
 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
-
-    result = load_fn("README.md", alias="readme")
+    with patch(
+        "fleet_rlm.runtime.tools.sandbox_common._get_daytona_session_sync",
+        return_value=session,
+    ):
+        result = load_fn("README.md", alias="readme")
 
     assert result == {
         "status": "ok",

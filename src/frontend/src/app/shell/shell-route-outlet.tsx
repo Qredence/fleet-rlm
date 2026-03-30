@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { fades } from "@/lib/utils/motion";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { PageSkeleton } from "@/components/page-skeleton";
 

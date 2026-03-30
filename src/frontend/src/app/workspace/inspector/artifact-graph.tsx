@@ -14,7 +14,7 @@ import type { ArtifactActorKind, ExecutionStep } from "@/screens/workspace/use-w
 import { NODE_WIDTH, STEP_TYPE_META } from "@/app/workspace/inspector/graph-step-node.constants";
 import { GraphStepNode, type GraphStepNodeData } from "@/app/workspace/inspector/graph-step-node";
 import { extractToolBadgeFromStep } from "@/app/workspace/inspector/graph-tool-badge";
-import { summarizeArtifactStep } from "@/app/workspace/inspector/parsers/artifactPayloadSummaries";
+import { summarizeArtifactStep } from "@/app/workspace/inspector/parsers/artifact-payload-summaries";
 
 interface ArtifactGraphProps {
   steps: ExecutionStep[];

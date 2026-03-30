@@ -81,31 +81,7 @@ def get_server_state_from_websocket(websocket: WebSocket) -> ServerState:
     return _require_server_state(websocket.app)
 
 
-def get_config(request: Request) -> ServerRuntimeConfig:
-    """Return the request-scoped server configuration snapshot."""
-    return get_server_state(request).config
-
-
-def get_server_config(request: Request) -> ServerRuntimeConfig:
-    """Compatibility alias for FastAPI DI callers that expect a request-bound getter."""
-    return get_config(request)
-
-
-def get_planner_lm(request: Request) -> Any:
-    """Return the planner model currently loaded in server state."""
-    return get_server_state(request).planner_lm
-
-
-def get_delegate_lm(request: Request) -> Any:
-    """Return the delegate model currently loaded in server state."""
-    return get_server_state(request).delegate_lm
-
-
 ServerStateDep = Annotated[ServerState, Depends(get_server_state)]
-RequestConfigDep = Annotated[ServerRuntimeConfig, Depends(get_config)]
-ServerConfigDep = Annotated[ServerRuntimeConfig, Depends(get_server_config)]
-PlannerLMDep = Annotated[Any, Depends(get_planner_lm)]
-DelegateLMDep = Annotated[Any, Depends(get_delegate_lm)]
 
 
 def get_db_manager(request: Request) -> DatabaseManager | None:
@@ -121,11 +97,6 @@ def get_repository(request: Request) -> FleetRepository | None:
 RepositoryDep = Annotated[FleetRepository | None, Depends(get_repository)]
 
 
-def get_auth_provider(request: Request) -> AuthProvider | None:
-    """Return the configured auth provider, if auth bootstrap has completed."""
-    return get_server_state(request).auth_provider
-
-
 def build_unauthenticated_identity(
     config: ServerRuntimeConfig | None = None,
 ) -> NormalizedIdentity:
@@ -137,17 +108,6 @@ def build_unauthenticated_identity(
         name="Dev Anonymous",
         raw_claims={"auth": "disabled"},
     )
-
-
-def require_repository(request: Request) -> FleetRepository:
-    """Require that database-backed repository services are configured."""
-    repository = get_repository(request)
-    if repository is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Database repository unavailable. Configure DATABASE_URL for server runtime.",
-        )
-    return repository
 
 
 async def require_http_identity(request: Request) -> NormalizedIdentity:

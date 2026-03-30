@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.recursive_runtime import spawn_delegate_sub_agent_async
@@ -14,6 +13,7 @@ from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callab
 from .runtime_module_helpers import coerce_int as _coerce_int
 from .runtime_module_helpers import coerce_str_list as _coerce_str_list
 from .runtime_module_helpers import prediction_value as _prediction_value
+from .runtime_module_helpers import run_cached_runtime_module as _run_runtime_module
 from .runtime_module_helpers import runtime_metadata as _runtime_metadata
 from .sandbox_common import _aexecute_submit_ctx, _SandboxToolContext
 from .shared import (
@@ -65,18 +65,13 @@ def _normalize_grounded_citations(value: Any) -> list[GroundedCitation]:
     return citations
 
 
-def _run_runtime_module_via_sandbox(*args: Any, **kwargs: Any):
-    sandbox_module = import_module("fleet_rlm.runtime.tools.sandbox")
-    return sandbox_module._run_runtime_module(*args, **kwargs)
-
-
 def _run_cached_runtime_module(
     ctx: _DelegateToolContext,
     *,
     module_name: str,
     **kwargs: Any,
 ) -> tuple[Any, dict[str, Any] | None, bool]:
-    return _run_runtime_module_via_sandbox(
+    return _run_runtime_module(
         ctx.agent,
         module_name,
         **kwargs,
@@ -97,6 +92,21 @@ def _cached_runtime_success(
         **_runtime_metadata(ctx.agent, prediction, fallback_used=fallback_used),
         **build_trajectory_payload(prediction, include_trajectory=include_trajectory),
     }
+
+
+def _record_runtime_failure(
+    ctx: _DelegateToolContext,
+    error: dict[str, Any] | None,
+) -> None:
+    if not isinstance(error, dict):
+        return
+    category = str(error.get("runtime_failure_category", "") or "").strip() or None
+    phase = str(error.get("runtime_failure_phase", "") or "").strip() or None
+    if category is None and phase is None:
+        return
+    recorder = getattr(ctx.agent.interpreter, "mark_runtime_degradation", None)
+    if callable(recorder):
+        recorder(category=category, phase=phase, fallback_used=False)
 
 
 def _build_tool(registration: _ToolRegistration) -> Any:
@@ -221,6 +231,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -253,6 +264,7 @@ SUBMIT(
             focus=focus,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -286,6 +298,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         raw_patterns = _prediction_value(prediction, "patterns", {})
@@ -337,6 +350,7 @@ SUBMIT(
             response_style="concise",
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         citations = _normalize_grounded_citations(
@@ -379,6 +393,7 @@ SUBMIT(
             query=query,
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         severity = str(_prediction_value(prediction, "severity", "low")).strip().lower()
@@ -421,6 +436,7 @@ SUBMIT(
             constraints=constraints or "Keep changes minimal.",
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(
@@ -457,6 +473,7 @@ SUBMIT(
             current_memory=ctx.agent.fmt_core_memory(),
         )
         if error is not None:
+            _record_runtime_failure(ctx, error)
             return error
 
         return _cached_runtime_success(

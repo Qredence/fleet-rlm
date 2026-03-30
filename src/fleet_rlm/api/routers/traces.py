@@ -6,30 +6,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from fleet_rlm.integrations.observability import log_trace_feedback, resolve_trace
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..dependencies import HTTPIdentityDep
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
 
 router = APIRouter(prefix="/traces", tags=["traces"])
-
-
-def resolve_trace(**kwargs):
-    """Compatibility shim for MLflow trace lookup used by tests and routes."""
-    from fleet_rlm.integrations.observability.mlflow_traces import (
-        resolve_trace as _impl,
-    )
-
-    return _impl(**kwargs)
-
-
-def log_trace_feedback(**kwargs):
-    """Compatibility shim for MLflow feedback logging used by tests and routes."""
-    from fleet_rlm.integrations.observability.mlflow_traces import (
-        log_trace_feedback as _impl,
-    )
-
-    return _impl(**kwargs)
 
 
 def _trace_info_payload(trace: object) -> dict[str, Any]:

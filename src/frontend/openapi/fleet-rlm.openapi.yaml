@@ -438,6 +438,7 @@ components:
             $ref: "#/components/schemas/ValidationError"
           type: array
           title: Detail
+          description: Structured list of request validation issues returned by FastAPI.
       type: object
       title: HTTPValidationError
     HealthResponse:
@@ -883,17 +884,23 @@ components:
               - type: integer
           type: array
           title: Location
+          description: Location path identifying where the validation error occurred.
         msg:
           type: string
           title: Message
+          description: Human-readable validation failure message.
         type:
           type: string
           title: Error Type
+          description: Pydantic validation error type identifier.
         input:
           title: Input
+          description: Input value that failed validation, when available.
         ctx:
           type: object
           title: Context
+          description: Optional structured validation context for templated error
+            messages.
       type: object
       required:
         - loc

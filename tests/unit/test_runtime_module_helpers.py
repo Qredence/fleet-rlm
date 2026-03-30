@@ -74,11 +74,15 @@ def test_runtime_metadata_reads_prediction_fields_from_dict_and_object() -> None
         "depth": 5,
         "sub_agent_history": 3,
         "delegate_lm_fallback": False,
+        "runtime_degraded": False,
+        "runtime_fallback_used": False,
     }
     assert object_metadata == {
         "depth": 4,
         "sub_agent_history": 1,
         "delegate_lm_fallback": True,
+        "runtime_degraded": False,
+        "runtime_fallback_used": False,
     }
 
 
@@ -96,6 +100,37 @@ def test_runtime_metadata_defaults_depth_and_clamps_negative_values() -> None:
         "depth": 3,
         "sub_agent_history": 0,
         "delegate_lm_fallback": True,
+        "runtime_degraded": False,
+        "runtime_fallback_used": False,
+    }
+
+
+def test_runtime_metadata_preserves_runtime_degradation_fields() -> None:
+    interpreter = SimpleNamespace(
+        current_runtime_metadata=lambda: {
+            "runtime_degraded": True,
+            "runtime_fallback_used": True,
+            "runtime_failure_category": "sandbox_error",
+            "runtime_failure_phase": "execute",
+        }
+    )
+    agent = RLMReActChatAgent(interpreter=interpreter)
+    agent._current_depth = 1
+
+    metadata = runtime_metadata(
+        agent,
+        {"depth": 2, "sub_agent_history": 0},
+        fallback_used=False,
+    )
+
+    assert metadata == {
+        "depth": 2,
+        "sub_agent_history": 0,
+        "delegate_lm_fallback": False,
+        "runtime_degraded": True,
+        "runtime_fallback_used": True,
+        "runtime_failure_category": "sandbox_error",
+        "runtime_failure_phase": "execute",
     }
 
 

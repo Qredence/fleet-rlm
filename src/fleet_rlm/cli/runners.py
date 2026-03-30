@@ -20,6 +20,7 @@ All runners automatically:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,7 @@ from fleet_rlm.runtime.agent.signatures import (
     SummarizeLongDocument,
 )
 from fleet_rlm.runtime.config import build_dspy_context
+from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 from fleet_rlm.integrations.observability.mlflow_runtime import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
@@ -40,18 +42,14 @@ from fleet_rlm.integrations.observability.mlflow_runtime import (
 )
 from .runtime_factory import (
     _build_react_agent_from_options,
-    _interpreter,
     _ReActAgentOptions,
-    _read_docs,
     _require_planner_ready,
     build_chat_agent_for_runtime_mode,
-    build_daytona_workbench_chat_agent,
     build_react_chat_agent,
 )
 
 __all__ = [
     "build_chat_agent_for_runtime_mode",
-    "build_daytona_workbench_chat_agent",
     "build_react_chat_agent",
     "check_secret_key",
     "check_secret_presence",
@@ -220,7 +218,7 @@ async def arun_react_chat_once(
         planner_lm=planner_lm,
     )
     try:
-        with build_dspy_context(lm=planner_lm) if planner_lm else _nullcontext():
+        with build_dspy_context(lm=planner_lm) if planner_lm else nullcontext():
             with agent:
                 with mlflow_request_context(
                     _runner_trace_context(
@@ -238,16 +236,6 @@ async def arun_react_chat_once(
     except Exception:
         agent.shutdown()
         raise
-
-
-class _nullcontext:
-    """Minimal no-op context manager (avoid importing contextlib)."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc: object) -> bool:
-        return False
 
 
 def run_long_context(
@@ -293,13 +281,16 @@ def run_long_context(
     if mode not in ("analyze", "summarize"):
         raise ValueError(f"mode must be 'analyze' or 'summarize', got {mode!r}")
 
-    docs = _read_docs(docs_path)
+    docs_path = Path(docs_path)
+    if not docs_path.exists():
+        raise FileNotFoundError(f"Docs path does not exist: {docs_path}")
+    docs = docs_path.read_text()
     _require_planner_ready(env_file)
 
     sig = AnalyzeLongDocument if mode == "analyze" else SummarizeLongDocument
 
     with (
-        _interpreter(
+        ModalInterpreter(
             timeout=timeout, secret_name=secret_name, volume_name=volume_name
         ) as interpreter,
         mlflow_request_context(

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.observability.config import MlflowConfig
-import fleet_rlm.integrations.observability.mlflow_integration as mlflow_integration
+import fleet_rlm.integrations.observability.mlflow_runtime as mlflow_integration
 from tests.unit.fixtures_env import clear_env
 
 
@@ -271,7 +271,7 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
     )
     monkeypatch.setattr(
         "fleet_rlm.integrations.observability.mlflow_context.update_current_mlflow_trace",
-        lambda response_preview=None: "trace-123",
+        lambda response_preview=None, trace_metadata=None: "trace-123",
     )
 
     with mlflow_integration.mlflow_request_context(
@@ -281,6 +281,47 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
             "mlflow_trace_id": "trace-123",
             "mlflow_client_request_id": "req-123",
         }
+
+
+def test_trace_result_metadata_forwards_trace_metadata_to_mlflow_update(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", object)
+    monkeypatch.setattr(
+        mlflow_integration, "initialize_mlflow", lambda config=None: True
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_context.update_current_mlflow_trace",
+        lambda response_preview=None, trace_metadata=None: (
+            captured.update(
+                {
+                    "response_preview": response_preview,
+                    "trace_metadata": trace_metadata,
+                }
+            )
+            or "trace-789"
+        ),
+    )
+
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-789")
+    ):
+        payload = mlflow_integration.trace_result_metadata(
+            response_preview="done",
+            trace_metadata={"runtime_degraded": True},
+        )
+
+    assert captured == {
+        "response_preview": "done",
+        "trace_metadata": {"runtime_degraded": True},
+    }
+    assert payload == {
+        "mlflow_trace_id": "trace-789",
+        "mlflow_client_request_id": "req-789",
+    }
 
 
 def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(

@@ -11,14 +11,14 @@
  */
 import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { pathToNav } from "@/hooks/useAppNavigate";
+import { pathToNav } from "@/hooks/use-app-navigate";
 import { useVolumesShellSelection } from "@/screens/volumes/volumes-shell-contract";
-import { useNavigationStore } from "@/stores/navigationStore";
+import { useNavigationStore } from "@/stores/navigation-store";
 
 function RouteSync() {
   const routerState = useRouterState();
   const location = routerState.location;
-  const { setActiveNav, openCanvas, activeNav } = useNavigationStore();
+  const { setActiveNav, openCanvas, closeCanvas, activeNav } = useNavigationStore();
   const { clearSelectedFile } = useVolumesShellSelection();
 
   // Track previous section to avoid redundant updates
@@ -39,6 +39,8 @@ function RouteSync() {
     // ── Sync skill deep-linking ──────────────────────────────────
     if (section === "volumes") {
       openCanvas();
+    } else if (section === "settings") {
+      closeCanvas();
     } else if (prevSection === "volumes") {
       clearSelectedFile();
     }

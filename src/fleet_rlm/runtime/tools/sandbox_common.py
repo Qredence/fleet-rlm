@@ -18,6 +18,7 @@ from .volume_helpers import resolve_mounted_volume_path
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
 
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,9 @@ def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
             logger.exception("Best-effort volume commit failed: %s", exc)
 
 
-async def _aget_daytona_session(ctx: _SandboxToolContext) -> Any | None:
+async def _aget_daytona_session(
+    ctx: _SandboxToolContext,
+) -> DaytonaSandboxSession | None:
     try:
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
@@ -102,12 +105,20 @@ async def _aget_daytona_session(ctx: _SandboxToolContext) -> Any | None:
     return await interpreter._aensure_session()
 
 
-def _get_daytona_session_sync(ctx: _SandboxToolContext) -> Any | None:
-    interpreter = getattr(ctx.agent, "interpreter", None)
-    ensure_session = getattr(interpreter, "_ensure_session_sync", None)
-    if not callable(ensure_session):
+def _get_daytona_session_sync(
+    ctx: _SandboxToolContext,
+) -> DaytonaSandboxSession | None:
+    try:
+        from fleet_rlm.integrations.providers.daytona.interpreter import (
+            DaytonaInterpreter,
+        )
+    except Exception:
         return None
-    return ensure_session()
+
+    interpreter = getattr(ctx.agent, "interpreter", None)
+    if not isinstance(interpreter, DaytonaInterpreter):
+        return None
+    return interpreter._ensure_session_sync()
 
 
 def _daytona_file_error(*, path: str, exc: Exception) -> dict[str, Any]:
@@ -125,12 +136,12 @@ def _is_daytona_missing_file_error(exc: Exception) -> bool:
     return "no such file" in message or "not found" in message
 
 
-async def _adaytona_read_text(daytona_session: Any, path: str) -> str:
+async def _adaytona_read_text(daytona_session: DaytonaSandboxSession, path: str) -> str:
     return await daytona_session.aread_file(path)
 
 
 async def _adaytona_write_text(
-    daytona_session: Any,
+    daytona_session: DaytonaSandboxSession,
     path: str,
     content: str,
     *,
@@ -146,22 +157,10 @@ async def _adaytona_write_text(
     return await daytona_session.awrite_file(path, payload)
 
 
-async def _adaytona_list_items(daytona_session: Any, path: str) -> list[dict[str, str]]:
-    if hasattr(daytona_session, "alist_files"):
-        entries = await daytona_session.alist_files(path)
-    elif hasattr(daytona_session, "list_files"):
-        entries = daytona_session.list_files(path)
-        if hasattr(entries, "__await__"):
-            entries = await entries
-    else:
-        list_files = getattr(getattr(daytona_session, "sandbox", None), "fs", None)
-        if list_files is None or not hasattr(list_files, "list_files"):
-            raise AttributeError(
-                f"{type(daytona_session).__name__!r} object has no async Daytona file-listing API"
-            )
-        entries = list_files.list_files(path)
-        if hasattr(entries, "__await__"):
-            entries = await entries
+async def _adaytona_list_items(
+    daytona_session: DaytonaSandboxSession, path: str
+) -> list[dict[str, str]]:
+    entries = await daytona_session.alist_files(path)
     items: list[dict[str, str]] = []
     for entry in entries:
         name = str(getattr(entry, "name", "") or "")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fleet_rlm.integrations.database.models import RunStepType
+from fleet_rlm.integrations.database import RunStepType
 
 from ...dependencies import ServerState
 from ...execution import (

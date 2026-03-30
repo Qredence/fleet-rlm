@@ -1,14 +1,6 @@
-"""CLI command modules for fleet-rlm.
+"""Command implementations for the fleet-rlm CLI."""
 
-This package contains extracted command implementations for the CLI.
-Commands are organized by category and registered via registration functions.
+from .init_cmd import init_command
+from .serve_cmds import serve_api_command, serve_mcp_command
 
-Modules:
-- init_cmd: Bootstrap Claude Code scaffold assets
-- serve_cmds: FastAPI and FastMCP server commands
-"""
-
-from .init_cmd import register_init_command
-from .serve_cmds import register_serve_commands
-
-__all__ = ["register_init_command", "register_serve_commands"]
+__all__ = ["init_command", "serve_api_command", "serve_mcp_command"]

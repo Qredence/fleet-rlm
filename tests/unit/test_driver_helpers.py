@@ -417,6 +417,30 @@ class TestWorkspaceHelpers:
         )
         assert "invalid workspace path" in msgs[0]["final"]["output"].lower()
 
+    def test_bundled_sandbox_assets_source_has_import_free_path_helper(
+        self, monkeypatch
+    ):
+        """Bundled helper source should still work when ``fleet_rlm`` is absent."""
+        from fleet_rlm.runtime.execution import sandbox_assets
+        from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "fleet_rlm.runtime.tools.volume_helpers":
+                raise ModuleNotFoundError("No module named 'fleet_rlm'")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        namespace: dict[str, object] = {}
+        exec(ModalInterpreter._module_source_for_sandbox(sandbox_assets), namespace)
+
+        resolved, error = namespace["_resolve_workspace_path"]("../outside.txt")
+        assert resolved is None
+        assert error is not None
+        assert "invalid workspace path" in error.lower()
+
 
 # ---------------------------------------------------------------------------
 # Session history helpers

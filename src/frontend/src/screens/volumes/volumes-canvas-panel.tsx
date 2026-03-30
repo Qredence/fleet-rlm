@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile } from "@/hooks/use-is-mobile";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { cn } from "@/lib/utils";
 import {

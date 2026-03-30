@@ -17,44 +17,26 @@ Usage:
 
 from __future__ import annotations
 
+from functools import wraps
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import typer
 
-from fleet_rlm.integrations.config.env import AppConfig
-from .config import initialize_app_config, split_hydra_overrides
-from .commands.init_cmd import register_init_command
-from .commands.serve_cmds import register_serve_commands
-
-# We use a global variable to store the hydra config so Typer commands can access it
-# This is a common pattern when combining Hydra (app wrapper) with Typer (subcommands)
-_CONFIG: AppConfig | None = None
+from .commands import init_command, serve_api_command, serve_mcp_command
+from .config import (
+    initialize_app_config,
+    require_current_app_config,
+    set_current_app_config,
+    split_hydra_overrides,
+)
 
 app = typer.Typer(
     help="Run fleet-rlm demos and experimental runtimes.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-
-
-def _print_result(result: dict[str, Any], *, verbose: bool) -> None:
-    """Print a result dictionary to stdout.
-
-    Formats the output based on verbosity level. In verbose mode,
-    outputs pretty-printed JSON. In non-verbose mode, outputs a
-    simplified key-value format.
-    """
-    if verbose:
-        typer.echo(json.dumps(result, indent=2, sort_keys=True))
-        return
-
-    for key, value in result.items():
-        if isinstance(value, (dict, list)):
-            typer.echo(f"{key}: {json.dumps(value)}")
-        else:
-            typer.echo(f"{key}: {value}")
 
 
 def _handle_error(exc: Exception) -> None:
@@ -65,9 +47,26 @@ def _handle_error(exc: Exception) -> None:
     raise typer.Exit(code=1) from exc
 
 
-# --- Register extracted commands ---
-register_init_command(app, _handle_error=_handle_error)
-register_serve_commands(app, get_config=lambda: _CONFIG, _handle_error=_handle_error)
+def _register_command(name: str, callback: Callable[..., None]) -> None:
+    """Register a command implementation with shared error handling."""
+
+    @wraps(callback)
+    def wrapped(*args: Any, **kwargs: Any) -> None:
+        try:
+            callback(*args, **kwargs)
+        except Exception as exc:
+            _handle_error(exc)
+
+    app.command(name)(wrapped)
+
+
+def _require_config(*, error_message: str | None = None) -> Any:
+    return require_current_app_config(error_message=error_message)
+
+
+_register_command("init", init_command)
+_register_command("serve-api", serve_api_command)
+_register_command("serve-mcp", serve_mcp_command)
 
 
 # --- Chat commands (remain inline for simplicity) ---
@@ -92,18 +91,15 @@ def chat(
     """Start standalone in-process interactive terminal chat."""
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
 
-    global _CONFIG
-    if _CONFIG is None:
-        typer.echo(
-            "Error: Config not initialized. Run via python -m fleet_rlm.cli", err=True
-        )
-        raise typer.Exit(code=1)
+    config = _require_config(
+        error_message="Error: Config not initialized. Run via python -m fleet_rlm.cli"
+    )
 
     resolved_trace_mode = trace_mode
     if resolved_trace_mode is None:
         resolved_trace_mode = "verbose" if trace else "compact"
     run_terminal_chat(
-        config=_CONFIG,
+        config=config,
         options=TerminalChatOptions(
             docs_path=docs_path,
             trace_mode=resolved_trace_mode,  # type: ignore[arg-type]
@@ -145,9 +141,8 @@ def daytona_smoke(
 
 def main() -> None:
     """Entry point that runs Typer with optional Hydra config initialization."""
-    global _CONFIG
-
     hydra_overrides, typer_args = split_hydra_overrides(sys.argv[1:])
+    set_current_app_config(None)
 
     # Help and completion output should be available without initializing runtime config.
     if any(
@@ -159,7 +154,7 @@ def main() -> None:
 
     # Initialize config (with optional overrides)
     try:
-        _CONFIG = initialize_app_config(hydra_overrides)
+        set_current_app_config(initialize_app_config(hydra_overrides))
     except Exception as e:
         print(f"Configuration Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1)

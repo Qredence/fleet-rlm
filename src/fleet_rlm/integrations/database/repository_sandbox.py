@@ -6,7 +6,8 @@ import uuid
 
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import SandboxProvider, SandboxSession, SandboxSessionStatus
+from .models_enums import SandboxProvider, SandboxSessionStatus
+from .models_sandbox import SandboxSession
 from .repository_shared import RepositoryContextMixin, _utc_now
 
 

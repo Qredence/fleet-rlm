@@ -24,14 +24,14 @@ from .interpreter_assets import (
     _FINAL_OUTPUT_MARKER,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
     _base_setup_code,
+    _generic_submit_code,
     _typed_submit_code,
 )
 from .runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
-    _await_if_needed,
-    _run_async_compat,
 )
+from .runtime_helpers import _await_if_needed, _run_async_compat
 
 
 @dataclass(slots=True)
@@ -173,12 +173,16 @@ async def aensure_setup(
     session: DaytonaSandboxSession,
     *,
     base_setup_code: Callable[..., str] = _base_setup_code,
+    generic_submit_code: Callable[[], str] = _generic_submit_code,
     typed_submit_code: Callable[[list[dict[str, Any]]], str] = _typed_submit_code,
     submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None] | None = None,
 ) -> Any:
     submit_signature_fn = submit_signature_fn or (lambda: submit_signature(interpreter))
     context = await session.aensure_context()
-    if interpreter._setup_context_id != session.context_id:
+    if (
+        interpreter._setup_context_id != session.context_id
+        or interpreter._setup_workspace_path != session.workspace_path
+    ):
         result = await _await_if_needed(
             session.sandbox.code_interpreter.run_code(
                 base_setup_code(
@@ -193,13 +197,26 @@ async def aensure_setup(
                 f"Failed to initialize Daytona sandbox helpers: {result.error.value}"
             )
         interpreter._setup_context_id = session.context_id
+        interpreter._setup_workspace_path = session.workspace_path
         interpreter._submit_signature_key = None
 
     current_submit_signature = submit_signature_fn()
-    if (
-        current_submit_signature
-        and current_submit_signature != interpreter._submit_signature_key
-    ):
+    if current_submit_signature is None:
+        if interpreter._submit_signature_key is not None:
+            result = await _await_if_needed(
+                session.sandbox.code_interpreter.run_code(
+                    generic_submit_code(),
+                    context=context,
+                )
+            )
+            if result.error:
+                raise CodeInterpreterError(
+                    f"Failed to restore generic SUBMIT: {result.error.value}"
+                )
+            interpreter._submit_signature_key = None
+        return context
+
+    if current_submit_signature != interpreter._submit_signature_key:
         result = await _await_if_needed(
             session.sandbox.code_interpreter.run_code(
                 typed_submit_code(interpreter.output_fields or []),
@@ -240,11 +257,7 @@ async def aensure_bridge(
         interpreter._bridge_context_id = context_id
     else:
         bridge.bind_context(context)
-    bridge_sync = getattr(bridge, "async_tools", None)
-    if bridge_sync is not None and callable(bridge_sync):
-        await _await_if_needed(bridge_sync(tools))
-    else:
-        await _await_if_needed(bridge.sync_tools(tools))
+    await bridge.async_tools(tools)
     return bridge
 
 
@@ -305,33 +318,16 @@ async def aexecute_in_session(
             context=context,
             tools=tools,
         )
-        async_execute = getattr(bridge, "aexecute", None)
-        if async_execute is not None and callable(async_execute):
-            execution = await _await_if_needed(
-                async_execute(
-                    code=prepared_code,
-                    timeout=int(interpreter.execute_timeout),
-                    tool_executor=lambda name, args, kwargs: invoke_tool(
-                        interpreter,
-                        name,
-                        args,
-                        kwargs,
-                    ),
-                )
-            )
-        else:
-            execution = await _await_if_needed(
-                bridge.execute(
-                    code=prepared_code,
-                    timeout=int(interpreter.execute_timeout),
-                    tool_executor=lambda name, args, kwargs: invoke_tool(
-                        interpreter,
-                        name,
-                        args,
-                        kwargs,
-                    ),
-                )
-            )
+        execution = await bridge.aexecute(
+            code=prepared_code,
+            timeout=int(interpreter.execute_timeout),
+            tool_executor=lambda name, args, kwargs: invoke_tool(
+                interpreter,
+                name,
+                args,
+                kwargs,
+            ),
+        )
     else:
         execution = await execute_direct_call(
             session=session,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
@@ -12,6 +11,7 @@ from .sandbox_common import (
     _adaytona_list_items,
     _adaytona_read_text,
     _adaytona_write_text,
+    _aget_daytona_session,
     _aexecute_submit_ctx,
     _commit_volume_best_effort,
     _document_load_result,
@@ -24,11 +24,6 @@ from .sandbox_common import (
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
-
-
-async def _aget_daytona_session_via_sandbox(ctx: _SandboxToolContext) -> Any | None:
-    sandbox_module = import_module("fleet_rlm.runtime.tools.sandbox")
-    return await sandbox_module._aget_daytona_session(ctx)
 
 
 def build_storage_tools(agent: RLMReActChatAgent) -> list[Any]:
@@ -107,7 +102,7 @@ else:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             result = await _aexecute_submit_ctx(
                 ctx,
@@ -154,7 +149,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 text = await _adaytona_read_text(daytona_session, resolved_path)
@@ -211,7 +206,7 @@ SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 content = await _adaytona_read_text(daytona_session, resolved_path)
@@ -250,7 +245,7 @@ except Exception as e:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 await _adaytona_write_text(daytona_session, resolved_path, content)
@@ -313,7 +308,7 @@ except Exception as e:
             return error
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 saved_path = await _adaytona_write_text(
@@ -412,7 +407,7 @@ except Exception as e:
             resolved_path = roots.memory_root
         assert resolved_path is not None
 
-        daytona_session = await _aget_daytona_session_via_sandbox(ctx)
+        daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:
             try:
                 items = await _adaytona_list_items(daytona_session, resolved_path)
@@ -443,37 +438,76 @@ except Exception as e:
 
     async def run(command: str) -> dict[str, Any]:
         """Execute a bash command in the sandbox environment."""
-        code = f"SUBMIT(result=run({command!r}))"
+        code = f"""
+result = run({command!r})
+status = "ok" if bool(result.get("ok")) else "error"
+SUBMIT(
+    status=status,
+    result=result,
+    exit_code=result.get("exit_code"),
+    stdout=result.get("stdout", ""),
+    stderr=result.get("stderr", ""),
+    ok=bool(result.get("ok")),
+)
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def workspace_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in the workspace directory."""
-        code = f"SUBMIT(result=workspace_write({path!r}, {content!r}))"
+        code = f"""
+saved_path = workspace_write({path!r}, {content!r})
+if str(saved_path).startswith("[error:"):
+    SUBMIT(status="error", result=saved_path, error=saved_path, path={path!r})
+SUBMIT(status="ok", result=saved_path, path=saved_path, chars=len({content!r}))
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def workspace_read(path: str) -> dict[str, Any]:
         """Read content from a file in the workspace directory."""
-        code = f"SUBMIT(result=workspace_read({path!r}))"
+        code = f"""
+content = workspace_read({path!r})
+if str(content).startswith("[error:"):
+    SUBMIT(status="error", result=content, error=content, path={path!r})
+SUBMIT(status="ok", result=content, path={path!r}, content=content, chars=len(content))
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def extract_python_ast(path: str) -> dict[str, Any]:
         """Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file"""
-        code = f"SUBMIT(result=extract_python_ast({path!r}))"
+        code = f"""
+ast_json = extract_python_ast({path!r})
+is_error = str(ast_json).startswith("File not found.") or str(ast_json).startswith("AST Parse Error:")
+if is_error:
+    SUBMIT(status="error", result=ast_json, error=ast_json, path={path!r})
+SUBMIT(status="ok", result=ast_json, path={path!r}, ast=ast_json)
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def start_background_process(process_id: str, command: str) -> dict[str, Any]:
         """Start a non-blocking background process (daemon) in the sandbox."""
-        code = f"SUBMIT(result=start_background_process({process_id!r}, {command!r}))"
+        code = f"""
+message = start_background_process({process_id!r}, {command!r})
+status = "error" if "already running" in str(message).lower() else "ok"
+SUBMIT(status=status, result=message, process_id={process_id!r}, message=message)
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def read_process_logs(process_id: str, tail: int = 50) -> dict[str, Any]:
         """Read the live stdout/stderr logs of an active background process."""
-        code = f"SUBMIT(result=read_process_logs({process_id!r}, tail={tail}))"
+        code = f"""
+logs = read_process_logs({process_id!r}, tail={tail})
+status = "error" if "is not running" in str(logs).lower() else "ok"
+SUBMIT(status=status, result=logs, process_id={process_id!r}, logs=logs)
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     async def kill_process(process_id: str) -> dict[str, Any]:
         """Terminate a running background process by its ID."""
-        code = f"SUBMIT(result=kill_process({process_id!r}))"
+        code = f"""
+message = kill_process({process_id!r})
+status = "error" if "is not running" in str(message).lower() else "ok"
+SUBMIT(status=status, result=message, process_id={process_id!r}, message=message)
+""".strip()
         return await _aexecute_submit_ctx(ctx, code)
 
     tools.append(

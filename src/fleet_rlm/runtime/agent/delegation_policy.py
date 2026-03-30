@@ -205,21 +205,30 @@ def invoke_runtime_module(
         with lm_context:
             prediction = module(**request.module_kwargs)
     except Exception as exc:
+        runtime_failure_category = (
+            str(getattr(exc, "category", "") or "").strip() or None
+        )
+        runtime_failure_phase = str(getattr(exc, "phase", "") or "").strip() or None
         if delegate_lm is not None and parent_lm is not None:
             record_delegate_fallback(request.agent)
             fallback_used = True
             with build_dspy_context(lm=parent_lm, module_name=request.module_name):
                 prediction = module(**request.module_kwargs)
         else:
+            error_payload: dict[str, Any] = {
+                "status": "error",
+                "error": (
+                    f"Runtime module '{request.module_name}' failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            }
+            if runtime_failure_category:
+                error_payload["runtime_failure_category"] = runtime_failure_category
+            if runtime_failure_phase:
+                error_payload["runtime_failure_phase"] = runtime_failure_phase
             return RuntimeModuleExecutionResult(
                 prediction=None,
-                error={
-                    "status": "error",
-                    "error": (
-                        f"Runtime module '{request.module_name}' failed: "
-                        f"{type(exc).__name__}: {exc}"
-                    ),
-                },
+                error=error_payload,
                 fallback_used=fallback_used,
             )
 

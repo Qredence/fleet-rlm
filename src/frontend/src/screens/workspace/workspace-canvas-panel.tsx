@@ -9,8 +9,8 @@ import {
 } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { RunWorkbench } from "@/app/workspace/workbench/RunWorkbench";
-import { MessageInspectorPanel } from "@/app/workspace/inspector/MessageInspectorPanel";
+import { RunWorkbench } from "@/app/workspace/workbench/run-workbench";
+import { MessageInspectorPanel } from "@/app/workspace/inspector/message-inspector-panel";
 import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 
 export function useWorkspaceCanvasTitle() {
@@ -49,7 +49,7 @@ export function WorkspaceCanvasPanel() {
       className="flex h-full min-h-0 flex-col gap-0 overflow-hidden"
     >
       <div className="border-b border-border-subtle/70 px-3 py-2">
-        <TabsList className="inline-flex rounded-lg border border-border-subtle/70 bg-muted/40 p-1">
+        <TabsList variant="segmented" className="border border-border-subtle/70 bg-muted/40">
           <TabsTrigger value="turn">Turn</TabsTrigger>
           {hasRunContent ? <TabsTrigger value="run">Run</TabsTrigger> : null}
         </TabsList>

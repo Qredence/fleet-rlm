@@ -10,8 +10,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from fleet_rlm import __version__
-from fleet_rlm.integrations.observability.config import PostHogConfig
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
@@ -43,12 +41,6 @@ def _runtime_config_helpers():
     )
 
 
-def configure_posthog_analytics_from_env() -> object | None:
-    """Compatibility shim for callers/tests patching bootstrap runtime hooks."""
-    configure_posthog, _, _ = _runtime_config_helpers()
-    return configure_posthog()
-
-
 def get_planner_lm_from_env(*args, **kwargs):
     """Compatibility shim for lazy planner LM loading."""
     _, planner_loader, _ = _runtime_config_helpers()
@@ -59,39 +51,6 @@ def get_delegate_lm_from_env(*args, **kwargs):
     """Compatibility shim for lazy delegate LM loading."""
     _, _, delegate_loader = _runtime_config_helpers()
     return delegate_loader(*args, **kwargs)
-
-
-def get_posthog_client(config: PostHogConfig):
-    """Compatibility shim for PostHog client lookup used by tests and startup."""
-    from fleet_rlm.integrations.observability.client import (
-        get_posthog_client as _impl,
-    )
-
-    return _impl(config)
-
-
-def emit_posthog_startup_event(cfg: ServerRuntimeConfig) -> bool:
-    """Compatibility wrapper for tests patching bootstrap observability hooks."""
-    client = get_posthog_client(PostHogConfig.from_env())
-    if client is None:
-        return False
-
-    try:
-        client.capture(
-            "posthog_analytics_initialized",
-            distinct_id=(os.getenv("POSTHOG_DISTINCT_ID") or "fleet-server").strip(),
-            properties={
-                "component": "server",
-                "app_env": cfg.app_env,
-                "auth_mode": cfg.auth_mode,
-                "database_required": cfg.database_required,
-                "version": __version__,
-            },
-        )
-        return True
-    except Exception:
-        logger.warning("posthog_startup_event_failed", exc_info=True)
-        return False
 
 
 def resolve_runtime_config(
@@ -166,9 +125,11 @@ async def initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -
     )
 
 
-def initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
+def initialize_lms(state: ServerState) -> None:
     """Load planner/delegate LMs into process state."""
-    configure_posthog_analytics_from_env()
+    cfg = state.config
+    configure_posthog, _, _ = _runtime_config_helpers()
+    configure_posthog()
     model_name = cfg.agent_model
     if model_name is None:
         state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
@@ -186,19 +147,17 @@ def initialize_lms(state: ServerState, cfg: ServerRuntimeConfig) -> None:
 
 async def ensure_runtime_models(
     state: ServerState,
-    cfg: ServerRuntimeConfig | None = None,
 ) -> tuple[object | None, object | None]:
     """Initialize planner/delegate LMs on demand without blocking server startup."""
     if state.planner_lm is not None:
         return state.planner_lm, state.delegate_lm
 
-    resolved_cfg = cfg or state.config
     async with state.runtime_model_lock:
         if state.planner_lm is not None:
             return state.planner_lm, state.delegate_lm
 
         try:
-            await asyncio.to_thread(initialize_lms, state, resolved_cfg)
+            await asyncio.to_thread(initialize_lms, state)
         except Exception as exc:
             set_optional_service_status(
                 state,
@@ -229,36 +188,33 @@ async def ensure_runtime_models(
 
 async def _initialize_mlflow_runtime(
     state: ServerState,
-    cfg: ServerRuntimeConfig,
 ) -> None:
     await initialize_mlflow_runtime_service(
         state,
-        app_env=cfg.app_env,
+        app_env=state.config.app_env,
     )
 
 
 async def _initialize_posthog_runtime(
     state: ServerState,
-    cfg: ServerRuntimeConfig,
 ) -> None:
     await initialize_posthog_runtime_service(
         state,
-        app_env=cfg.app_env,
-        auth_mode=cfg.auth_mode,
-        database_required=cfg.database_required,
+        app_env=state.config.app_env,
+        auth_mode=state.config.auth_mode,
+        database_required=state.config.database_required,
     )
 
 
 async def _warm_optional_runtime_services(
     state: ServerState,
-    cfg: ServerRuntimeConfig,
 ) -> None:
     for service_name, initializer in (
         ("mlflow", _initialize_mlflow_runtime),
         ("posthog", _initialize_posthog_runtime),
     ):
         try:
-            await initializer(state, cfg)
+            await initializer(state)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -266,7 +222,7 @@ async def _warm_optional_runtime_services(
             set_optional_service_status(state, service_name, "degraded", error=str(exc))
 
     try:
-        await ensure_runtime_models(state, cfg)
+        await ensure_runtime_models(state)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -275,11 +231,10 @@ async def _warm_optional_runtime_services(
 
 def schedule_optional_runtime_startup(
     state: ServerState,
-    cfg: ServerRuntimeConfig,
 ) -> asyncio.Task[None]:
     """Start optional runtime warmup in the background and keep the task on state."""
     task = asyncio.create_task(
-        _warm_optional_runtime_services(state, cfg),
+        _warm_optional_runtime_services(state),
         name="fleet-optional-startup",
     )
     state.optional_startup_task = task
@@ -297,13 +252,14 @@ async def cancel_optional_runtime_startup(state: ServerState) -> None:
         await optional_task
 
 
-async def startup_server_state(state: ServerState, cfg: ServerRuntimeConfig) -> None:
+async def startup_server_state(state: ServerState) -> None:
     """Run startup initialization for server state and runtime services."""
+    cfg = state.config
 
     prime_runtime_env(cfg)
 
     await initialize_persistence(state, cfg)
-    schedule_optional_runtime_startup(state, cfg)
+    schedule_optional_runtime_startup(state)
 
 
 async def shutdown_server_state(state: ServerState) -> None:

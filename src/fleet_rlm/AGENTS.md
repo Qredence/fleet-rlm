@@ -136,6 +136,7 @@ Auth, persistence, and analytics constraints:
   - `api/routers/ws/types.py` and `execution_support.py` for typed helpers and shared execution-event plumbing
 - Treat `/api/v1/ws/chat` as the conversational stream and `/api/v1/ws/execution` as the canonical execution/workbench stream. Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping.
 - Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution through the shared ReAct/RLM flow plus interpreter callbacks; do not defer the entire trace to the terminal `final` payload.
+- When a Daytona primary path fails but the turn recovers through a controlled fallback, keep the fallback answer but mark the turn as degraded in both websocket final payloads and MLflow trace metadata via additive fields: `runtime_degraded`, `runtime_failure_category`, `runtime_failure_phase`, and `runtime_fallback_used`.
 - Keep runtime streaming websocket-first. FastAPI `StreamingResponse` / SSE may be used only for narrow read-only HTTP flows with a clear product win; they are not the default replacement for workspace/chat/execution websockets.
 - Treat the official Daytona docs as the normative baseline for backend integration:
   - Python SDK: [docs](https://www.daytona.io/docs/en/python-sdk/)
@@ -158,8 +159,19 @@ Auth, persistence, and analytics constraints:
 - The runtime remains SDK-owned. Do not require repo-side `.daytona`, devcontainer, or Declarative Builder config to create Daytona sandboxes in this iteration. Declarative Builder is reserved as an optional future base-image/bootstrap layer.
 - Keep Daytona aligned to the official SDK surface with direct `from daytona import ...` imports in the owning modules. Do not reintroduce a local Daytona SDK façade.
 - Keep async websocket/session-switch paths on the async helpers (`agent.areset()`, `agent.aimport_session_state()`, `interpreter.aconfigure_workspace()`, and `interpreter.aexecute()`). The Daytona provider is now async-first internally on `AsyncDaytona`; sync methods remain compatibility shims over that async implementation.
+- Inside the Daytona provider, treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract. Async interpreter/runtime flow should call `acreate_workspace_session`, `aresume_workspace_session`, `areconcile_workspace_session`, `aclose_driver`, and `adelete` directly rather than probing for older sync fallbacks.
 - Root and recursive Daytona child runs should share the same workspace-scoped persistent volume when one is configured, while still using distinct Daytona sandbox sessions per child run.
 - Daytona interpreter execution is now implemented on top of `sandbox.code_interpreter.run_code()`. The repo keeps only a minimal bridge for host callbacks (`llm_query`, `llm_query_batched`, custom tools) and `SUBMIT(...)` final-artifact capture. Recursive `rlm_query*` tools are agent-level only and should fail loudly if referenced from sandbox-authored code.
+- Keep one long-lived root Daytona sandbox session per agent session whenever
+  the mounted volume remains compatible. Repo/ref/context changes should
+  reconcile inside that sandbox instead of triggering automatic sandbox
+  recreation.
+- Preserve the persistent Daytona code-interpreter context across warm turns.
+  When the workspace target changes, rerun the sandbox helper bootstrap so the
+  active context retargets the new workspace path without discarding its
+  in-memory state.
+- Only force Daytona sandbox recreation on explicit reset, mounted-volume
+  incompatibility, unrecoverable reconcile failure, or resume failure.
 - Keep canonical Daytona internals under `integrations/providers/daytona/` with the provider root modules as the real implementation surface:
   - `runtime.py`
   - `interpreter.py`
@@ -184,6 +196,7 @@ Auth, persistence, and analytics constraints:
   - `process_document` / `load_text_from_volume` target durable mounted-volume content
   - `workspace_read` is a low-level transient-workspace helper, not a durable storage API
 - Treat the live Daytona workspace as transient repo/execution state. `context_paths` are staged into the workspace for the current run only, and there is no automatic workspace-to-volume sync.
+- Sandbox/file helpers should target the `DaytonaSandboxSession` API (`aread_file`, `awrite_file`, `alist_files`) in async flows and use `_ensure_session_sync()` only at the public sync boundary. Do not fall back to raw `sandbox.fs.*` access from those helpers.
 - Keep Daytona chat/session normalization helpers in `integrations/providers/daytona/state.py` so `agent.py` stays a focused Daytona-specific agent/session adapter over the shared runtime.
 - Keep terminal session actions in `cli/terminal/session_actions.py` and transcript/rendering helpers in `cli/terminal/session_view.py`.
 - Keep MLflow runtime bootstrap, callback registration, and request-context helpers in `integrations/observability/mlflow_runtime.py`; keep trace lookup, feedback logging, and dataset/export helpers in `integrations/observability/mlflow_traces.py`.

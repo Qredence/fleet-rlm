@@ -7,7 +7,8 @@ import uuid
 from sqlalchemy import Select, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import MemoryItem, MemoryKind, MemoryScope, MemorySource
+from .models_enums import MemoryKind, MemoryScope, MemorySource
+from .models_memory import MemoryItem
 from .repository_shared import RepositoryContextMixin
 from .types import MemoryItemCreateRequest
 

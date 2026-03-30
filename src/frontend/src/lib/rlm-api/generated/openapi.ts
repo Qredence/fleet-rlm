@@ -137,7 +137,10 @@ export interface components {
     };
     /** HTTPValidationError */
     HTTPValidationError: {
-      /** Detail */
+      /**
+       * Detail
+       * @description Structured list of request validation issues returned by FastAPI.
+       */
       detail?: components["schemas"]["ValidationError"][];
     };
     /**
@@ -555,15 +558,30 @@ export interface components {
     };
     /** ValidationError */
     ValidationError: {
-      /** Location */
+      /**
+       * Location
+       * @description Location path identifying where the validation error occurred.
+       */
       loc: (string | number)[];
-      /** Message */
+      /**
+       * Message
+       * @description Human-readable validation failure message.
+       */
       msg: string;
-      /** Error Type */
+      /**
+       * Error Type
+       * @description Pydantic validation error type identifier.
+       */
       type: string;
-      /** Input */
+      /**
+       * Input
+       * @description Input value that failed validation, when available.
+       */
       input?: unknown;
-      /** Context */
+      /**
+       * Context
+       * @description Optional structured validation context for templated error messages.
+       */
       ctx?: Record<string, never>;
     };
     /**

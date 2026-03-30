@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
 from ...execution import ExecutionStep
@@ -48,7 +48,16 @@ async def handle_terminal_stream_event(
 ) -> None:
     """Handle final/cancelled/error websocket events without changing ordering."""
     if event.kind == "final":
-        await persist_session_state(include_volume_save=True)
+        try:
+            await persist_session_state(include_volume_save=True)
+        except Exception:
+            # Preserve the happy-path websocket response even if session persistence
+            # regresses during cleanup. The final answer is already available, so
+            # continue run completion and delivery instead of downgrading to a
+            # transport error.
+            logger.exception(
+                "Failed to persist session state before final event; continuing"
+            )
         await lifecycle.complete_run(
             RunStatus.COMPLETED,
             step=step,

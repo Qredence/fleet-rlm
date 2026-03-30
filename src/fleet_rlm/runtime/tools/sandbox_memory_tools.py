@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
 from fleet_rlm.runtime.agent.signatures import MemoryMigrationOperation, VolumeTreeNode
@@ -13,6 +12,7 @@ from fleet_rlm.runtime.execution.storage_paths import runtime_storage_roots
 
 from .runtime_module_helpers import coerce_int as _coerce_int
 from .runtime_module_helpers import prediction_value as _prediction_value
+from .runtime_module_helpers import run_cached_runtime_module as _run_runtime_module
 from .runtime_module_helpers import runtime_metadata as _runtime_metadata
 from .sandbox_common import _resolve_path_or_error, _SandboxToolContext
 
@@ -118,11 +118,6 @@ def _normalize_non_empty_strings(value: Any) -> list[str]:
     return normalized
 
 
-def _run_runtime_module_via_sandbox(*args: Any, **kwargs: Any):
-    sandbox_module = import_module("fleet_rlm.runtime.tools.sandbox")
-    return sandbox_module._run_runtime_module(*args, **kwargs)
-
-
 def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
     """Build memory-analysis tools backed by cached runtime modules."""
     from dspy import Tool
@@ -139,7 +134,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
             return error
 
         await _reload_memory_volume_best_effort(ctx, reason="memory_tree")
-        prediction, runtime_error, fallback_used = _run_runtime_module_via_sandbox(
+        prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx.agent,
             "memory_tree",
             root_path=resolved_path,
@@ -182,7 +177,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
             policy_constraints
             or "Prefer non-destructive operations and ask for confirmation on risky actions."
         )
-        prediction, runtime_error, fallback_used = _run_runtime_module_via_sandbox(
+        prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx.agent,
             "memory_action_intent",
             user_request=user_request,
@@ -232,7 +227,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
         }
 
     async def memory_structure_audit(usage_goals: str = "") -> dict[str, Any]:
-        prediction, runtime_error, fallback_used = _run_runtime_module_via_sandbox(
+        prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx.agent,
             "memory_structure_audit",
             usage_goals=(
@@ -266,7 +261,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
     async def memory_structure_migration_plan(
         approved_constraints: str = "",
     ) -> dict[str, Any]:
-        prediction, runtime_error, fallback_used = _run_runtime_module_via_sandbox(
+        prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx.agent,
             "memory_structure_migration_plan",
             approved_constraints=(
@@ -310,7 +305,7 @@ def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
         if risk_norm not in {"low", "medium", "high"}:
             risk_norm = "medium"
 
-        prediction, runtime_error, fallback_used = _run_runtime_module_via_sandbox(
+        prediction, runtime_error, fallback_used = _run_runtime_module(
             ctx.agent,
             "clarification_questions",
             request=request,

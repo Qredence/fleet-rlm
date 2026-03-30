@@ -4,20 +4,18 @@ from fastapi import HTTPException
 from importlib.metadata import version
 from types import SimpleNamespace
 
-from fleet_rlm.api.config import ServerRuntimeConfig
+from fleet_rlm.api.config import ServerRuntimeConfig, resolve_server_volume_name
 from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
 from fleet_rlm.api.server_utils import sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
-    ChatRequest,
-    ChatResponse,
     HealthResponse,
     RuntimeActiveModels,
     RuntimeStatusResponse,
     RuntimeTestCache,
-    TaskRequest,
     WSMessage,
 )
+from fleet_rlm.integrations.config.env import AppConfig
 
 
 def test_default_config(monkeypatch: pytest.MonkeyPatch):
@@ -65,6 +63,61 @@ def test_default_config_uses_agent_model_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4.1-mini")
     cfg = ServerRuntimeConfig()
     assert cfg.agent_model == "openai/gpt-4.1-mini"
+
+
+def test_resolve_server_volume_name_defaults_to_persistent_volume() -> None:
+    config = AppConfig()
+    assert resolve_server_volume_name(config) == "rlm-volume-dspy"
+
+
+def test_server_runtime_config_from_app_config_maps_shared_settings() -> None:
+    config = AppConfig(
+        interpreter={
+            "secrets": ["ALT_SECRET"],
+            "timeout": 321,
+            "async_execute": False,
+        },
+        agent={
+            "model": "openai/gpt-4.1-mini",
+            "delegate_model": "openai/gpt-4.1-nano",
+            "delegate_max_tokens": 2048,
+            "rlm_max_iterations": 17,
+            "guardrail_mode": "warn",
+            "min_substantive_chars": 55,
+        },
+        rlm_settings={
+            "max_iters": 12,
+            "deep_max_iters": 21,
+            "enable_adaptive_iters": False,
+            "max_llm_calls": 88,
+            "max_depth": 4,
+            "delegate_max_calls_per_turn": 3,
+            "delegate_result_truncation_chars": 987,
+            "max_output_chars": 4321,
+        },
+    )
+
+    cfg = ServerRuntimeConfig.from_app_config(config)
+
+    assert cfg.secret_name == "ALT_SECRET"
+    assert cfg.volume_name == "rlm-volume-dspy"
+    assert cfg.timeout == 321
+    assert cfg.react_max_iters == 12
+    assert cfg.deep_react_max_iters == 21
+    assert cfg.enable_adaptive_iters is False
+    assert cfg.rlm_max_iterations == 17
+    assert cfg.rlm_max_llm_calls == 88
+    assert cfg.rlm_max_depth == 4
+    assert cfg.delegate_max_calls_per_turn == 3
+    assert cfg.delegate_result_truncation_chars == 987
+    assert cfg.interpreter_async_execute is False
+    assert cfg.agent_guardrail_mode == "warn"
+    assert cfg.agent_min_substantive_chars == 55
+    assert cfg.agent_max_output_chars == 4321
+    assert cfg.agent_model == "openai/gpt-4.1-mini"
+    assert cfg.agent_delegate_model == "openai/gpt-4.1-nano"
+    assert cfg.agent_delegate_max_tokens == 2048
+    assert cfg.db_validate_on_startup is True
 
 
 def test_custom_config():
@@ -201,28 +254,10 @@ def test_sanitize_id_strips_boundary_dots() -> None:
     assert sanitize_id(".workspace.", "default") == "workspace"
 
 
-def test_chat_request_defaults() -> None:
-    req = ChatRequest(message="hello")
-    assert req.docs_path is None
-    assert req.trace is False
-
-
-def test_chat_response() -> None:
-    response = ChatResponse(assistant_response="hi")
-    assert response.history_turns == 0
-    assert response.trajectory is None
-
-
 def test_health_response() -> None:
     response = HealthResponse()
     assert response.ok is True
     assert response.version == version("fleet-rlm")
-
-
-def test_task_request_defaults() -> None:
-    req = TaskRequest(task_type="basic", question="test")
-    assert req.max_iterations == 15
-    assert req.timeout == 600
 
 
 def test_auth_me_response_shape() -> None:

@@ -1,5 +1,5 @@
 import type { WsServerMessage } from "@/lib/rlm-api";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/wsTypes";
+import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
 export type CreationPhase = "idle" | "understanding" | "generating" | "validating" | "complete";
 
@@ -130,6 +130,8 @@ export interface RuntimeContext {
   executionMode?: string;
   runtimeMode?: string;
   sandboxId?: string;
+  workspacePath?: string;
+  sandboxTransition?: string;
 }
 
 export type ChatRenderPart =

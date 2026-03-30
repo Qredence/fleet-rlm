@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.integrations.database.models import RunStatus
+from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.mlflow_context import (
     merge_trace_result_metadata as _merge_trace_result_metadata,
 )
@@ -51,9 +51,37 @@ def merge_trace_result_metadata(
     payload: dict[str, Any] | None,
     *,
     response_preview: str | None = None,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compatibility shim for MLflow final-event metadata enrichment."""
-    return _merge_trace_result_metadata(payload, response_preview=response_preview)
+    return _merge_trace_result_metadata(
+        payload,
+        response_preview=response_preview,
+        trace_metadata=trace_metadata,
+    )
+
+
+def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+
+    runtime_payload = payload.get("runtime")
+    runtime = runtime_payload if isinstance(runtime_payload, dict) else {}
+
+    metadata: dict[str, Any] = {}
+    for key in (
+        "runtime_degraded",
+        "runtime_failure_category",
+        "runtime_failure_phase",
+        "runtime_fallback_used",
+    ):
+        value = payload.get(key, runtime.get(key))
+        if value in (None, "", False):
+            if key in {"runtime_degraded", "runtime_fallback_used"} and value is False:
+                metadata[key] = False
+            continue
+        metadata[key] = value
+    return metadata
 
 
 class ReplHookBridge:
@@ -283,6 +311,9 @@ async def _emit_stream_event(
         payload = merge_trace_result_metadata(
             payload if isinstance(payload, dict) else None,
             response_preview=event.text,
+            trace_metadata=_runtime_trace_metadata(
+                payload if isinstance(payload, dict) else None
+            ),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = is_terminal_stream_event_kind(event.kind)
