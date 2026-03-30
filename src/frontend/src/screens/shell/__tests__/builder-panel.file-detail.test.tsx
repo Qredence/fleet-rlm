@@ -10,9 +10,7 @@ const fileDetailState = {
 };
 
 vi.mock("@/stores/navigation-store", () => ({
-  useNavigationStore: (
-    selector?: (state: { activeNav: "volumes" }) => unknown,
-  ) =>
+  useNavigationStore: (selector?: (state: { activeNav: "volumes" }) => unknown) =>
     selector
       ? selector({ activeNav: fileDetailState.activeNav })
       : { activeNav: fileDetailState.activeNav },

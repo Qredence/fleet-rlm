@@ -1,6 +1,4 @@
-export function statusTone(
-  status: "pending" | "running" | "completed" | "failed",
-): {
+export function statusTone(status: "pending" | "running" | "completed" | "failed"): {
   label: string;
   variant: "secondary" | "default" | "destructive" | "outline";
 } {

@@ -29,13 +29,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({
 }));
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    className,
-  }: {
-    children: ReactNode;
-    className?: string;
-  }) => (
+  Button: ({ children, className }: { children: ReactNode; className?: string }) => (
     <button type="button" className={className}>
       {children}
     </button>

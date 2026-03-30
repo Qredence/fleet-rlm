@@ -89,10 +89,7 @@ describe("Tabs refs", () => {
   it("supports shared segmented and underline variants", () => {
     const segmentedHtml = renderToStaticMarkup(
       <Tabs value="turn">
-        <TabsList
-          variant="segmented"
-          className="border border-border-subtle/70"
-        >
+        <TabsList variant="segmented" className="border border-border-subtle/70">
           <TabsTrigger value="turn">Turn</TabsTrigger>
         </TabsList>
       </Tabs>,

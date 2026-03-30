@@ -6,9 +6,7 @@ function titleCaseWords(value: string): string {
     .join(" ");
 }
 
-export function formatDaytonaModeLabel(
-  mode?: string | null,
-): string | undefined {
+export function formatDaytonaModeLabel(mode?: string | null): string | undefined {
   const trimmed = normalizeDaytonaMode(mode);
   if (!trimmed) return undefined;
 

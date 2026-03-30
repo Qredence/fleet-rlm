@@ -20,8 +20,7 @@ export function ClarificationCard({ data, onResolve }: Props) {
   const [customText, setCustomText] = useState("");
   const customAnswerId = useId();
   const isCustom = selectedId === data.customOptionId;
-  const canConfirm =
-    selectedId !== null && (!isCustom || customText.trim().length > 0);
+  const canConfirm = selectedId !== null && (!isCustom || customText.trim().length > 0);
   const prefersReduced = useReducedMotion();
 
   const handleConfirm = () => {
@@ -43,19 +42,12 @@ export function ClarificationCard({ data, onResolve }: Props) {
           <CardContent className="flex flex-col gap-3 p-4">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                <span
-                  className="shrink-0 [&_svg]:h-4 [&_svg]:w-4"
-                  aria-hidden="true"
-                >
+                <span className="shrink-0 [&_svg]:h-4 [&_svg]:w-4" aria-hidden="true">
                   <CircleCheck className="text-chart-3" />
                 </span>
-                <span className="text-muted-foreground typo-helper">
-                  {data.stepLabel}
-                </span>
+                <span className="text-muted-foreground typo-helper">{data.stepLabel}</span>
               </div>
-              <p className="text-muted-foreground typo-caption">
-                {data.question}
-              </p>
+              <p className="text-muted-foreground typo-caption">{data.question}</p>
             </div>
             <Badge variant="secondary" className="w-fit px-3 py-1.5 text-sm">
               {data.resolvedAnswer}
@@ -72,24 +64,17 @@ export function ClarificationCard({ data, onResolve }: Props) {
       initial={{ opacity: 0, y: prefersReduced ? 0 : 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={
-        prefersReduced
-          ? { duration: 0.01 }
-          : { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }
+        prefersReduced ? { duration: 0.01 } : { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }
       }
     >
       <Card className="border-border-subtle bg-card rounded-xl">
         <CardContent className="flex flex-col gap-4 p-4">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <span
-                className="shrink-0 [&_svg]:h-4 [&_svg]:w-4"
-                aria-hidden="true"
-              >
+              <span className="shrink-0 [&_svg]:h-4 [&_svg]:w-4" aria-hidden="true">
                 <MessageSquare className="text-muted-foreground" />
               </span>
-              <span className="text-muted-foreground typo-helper">
-                {data.stepLabel}
-              </span>
+              <span className="text-muted-foreground typo-helper">{data.stepLabel}</span>
             </div>
             <p className="text-foreground typo-label">{data.question}</p>
           </div>
@@ -121,9 +106,7 @@ export function ClarificationCard({ data, onResolve }: Props) {
                     <div
                       className={cn(
                         "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                        isSelected
-                          ? "border-foreground"
-                          : "border-muted-foreground/40",
+                        isSelected ? "border-foreground" : "border-muted-foreground/40",
                       )}
                       aria-hidden="true"
                     >
@@ -137,14 +120,9 @@ export function ClarificationCard({ data, onResolve }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         {isWriteOwn ? (
-                          <Pencil
-                            className="shrink-0 text-muted-foreground"
-                            aria-hidden="true"
-                          />
+                          <Pencil className="shrink-0 text-muted-foreground" aria-hidden="true" />
                         ) : null}
-                        <span className="text-left text-foreground typo-label">
-                          {option.label}
-                        </span>
+                        <span className="text-left text-foreground typo-label">{option.label}</span>
                       </div>
                       {option.description ? (
                         <p className="mt-0.5 text-left text-muted-foreground typo-caption">
@@ -161,25 +139,18 @@ export function ClarificationCard({ data, onResolve }: Props) {
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={
-                          prefersReduced
-                            ? { duration: 0.01 }
-                            : { duration: 0.2, ease: "easeOut" }
+                          prefersReduced ? { duration: 0.01 } : { duration: 0.2, ease: "easeOut" }
                         }
                         className="overflow-hidden"
                       >
                         <Field className="ml-7">
-                          <FieldLabel
-                            className="sr-only"
-                            htmlFor={customAnswerId}
-                          >
+                          <FieldLabel className="sr-only" htmlFor={customAnswerId}>
                             Describe your specific requirement
                           </FieldLabel>
                           <Textarea
                             id={customAnswerId}
                             value={customText}
-                            onChange={(event) =>
-                              setCustomText(event.currentTarget.value)
-                            }
+                            onChange={(event) => setCustomText(event.currentTarget.value)}
                             placeholder="Describe your specific requirement&#x2026;"
                             rows={2}
                             className="min-h-16 bg-background"

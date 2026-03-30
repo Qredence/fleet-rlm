@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import {
-  RuntimeForm,
-  shouldHydrateRuntimeForm,
-} from "@/screens/settings/runtime-form";
+import { RuntimeForm, shouldHydrateRuntimeForm } from "@/screens/settings/runtime-form";
 
 vi.mock("@/screens/settings/use-runtime-settings", () => ({
   useRuntimeSettings: () => ({
@@ -84,10 +81,7 @@ vi.mock("@/screens/settings/use-runtime-settings", () => ({
     },
     testAllConnections: vi.fn(),
   }),
-  computeRuntimeUpdates: (
-    current: Record<string, string>,
-    baseline: Record<string, string>,
-  ) => {
+  computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of Object.keys(current)) {
       if ((current[key] ?? "") !== (baseline[key] ?? "")) {
@@ -117,9 +111,7 @@ describe("RuntimeForm", () => {
     expect(html).toContain("Clear saved value");
     expect(html).toContain("Runtime Configuration");
     expect(html).toContain("Execution target/backend for Daytona provisioning");
-    expect(html).toContain(
-      "Modal durable volume mounted at /data for persisted runtime state.",
-    );
+    expect(html).toContain("Modal durable volume mounted at /data for persisted runtime state.");
     expect(html).toContain("Modal Smoke");
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");

@@ -3,11 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { useControllableState } from "@/hooks/use-controllable-state";
 import { Badge } from "@/components/ui/badge";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { BrainIcon, ChevronDownIcon, DotIcon } from "lucide-react";
 import { createContext, memo, useContext, useMemo } from "react";
@@ -17,16 +13,12 @@ interface ChainOfThoughtContextValue {
   setIsOpen: (open: boolean) => void;
 }
 
-const ChainOfThoughtContext = createContext<ChainOfThoughtContextValue | null>(
-  null,
-);
+const ChainOfThoughtContext = createContext<ChainOfThoughtContextValue | null>(null);
 
 const useChainOfThought = () => {
   const context = useContext(ChainOfThoughtContext);
   if (!context) {
-    throw new Error(
-      "ChainOfThought components must be used within ChainOfThought",
-    );
+    throw new Error("ChainOfThought components must be used within ChainOfThought");
   }
   return context;
 };
@@ -52,17 +44,11 @@ export const ChainOfThought = memo(
       prop: open,
     });
 
-    const chainOfThoughtContext = useMemo(
-      () => ({ isOpen, setIsOpen }),
-      [isOpen, setIsOpen],
-    );
+    const chainOfThoughtContext = useMemo(() => ({ isOpen, setIsOpen }), [isOpen, setIsOpen]);
 
     return (
       <ChainOfThoughtContext.Provider value={chainOfThoughtContext}>
-        <div
-          className={cn("not-prose w-full flex flex-col gap-4", className)}
-          {...props}
-        >
+        <div className={cn("not-prose w-full flex flex-col gap-4", className)} {...props}>
           {children}
         </div>
       </ChainOfThoughtContext.Provider>
@@ -70,9 +56,7 @@ export const ChainOfThought = memo(
   },
 );
 
-export type ChainOfThoughtHeaderProps = ComponentProps<
-  typeof CollapsibleTrigger
->;
+export type ChainOfThoughtHeaderProps = ComponentProps<typeof CollapsibleTrigger>;
 
 export const ChainOfThoughtHeader = memo(
   ({ className, children, ...props }: ChainOfThoughtHeaderProps) => {
@@ -88,14 +72,9 @@ export const ChainOfThoughtHeader = memo(
           {...props}
         >
           <BrainIcon className="size-4" />
-          <span className="flex-1 text-left">
-            {children ?? "Chain of Thought"}
-          </span>
+          <span className="flex-1 text-left">{children ?? "Chain of Thought"}</span>
           <ChevronDownIcon
-            className={cn(
-              "size-4 transition-transform",
-              isOpen ? "rotate-180" : "rotate-0",
-            )}
+            className={cn("size-4 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
           />
         </CollapsibleTrigger>
       </Collapsible>
@@ -141,9 +120,7 @@ export const ChainOfThoughtStep = memo(
       </div>
       <div className="flex-1 flex flex-col gap-2 overflow-hidden">
         <div>{label}</div>
-        {description && (
-          <div className="text-muted-foreground text-xs">{description}</div>
-        )}
+        {description && <div className="text-muted-foreground text-xs">{description}</div>}
         {children}
       </div>
     </div>
@@ -154,10 +131,7 @@ export type ChainOfThoughtSearchResultsProps = ComponentProps<"div">;
 
 export const ChainOfThoughtSearchResults = memo(
   ({ className, ...props }: ChainOfThoughtSearchResultsProps) => (
-    <div
-      className={cn("flex flex-wrap items-center gap-2", className)}
-      {...props}
-    />
+    <div className={cn("flex flex-wrap items-center gap-2", className)} {...props} />
   ),
 );
 
@@ -175,9 +149,7 @@ export const ChainOfThoughtSearchResult = memo(
   ),
 );
 
-export type ChainOfThoughtContentProps = ComponentProps<
-  typeof CollapsibleContent
->;
+export type ChainOfThoughtContentProps = ComponentProps<typeof CollapsibleContent>;
 
 export const ChainOfThoughtContent = memo(
   ({ className, children, ...props }: ChainOfThoughtContentProps) => {
