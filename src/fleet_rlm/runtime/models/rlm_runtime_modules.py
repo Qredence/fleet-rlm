@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from functools import lru_cache
+from typing import Any, MutableMapping, Protocol, cast
 
 import dspy
 
@@ -85,7 +86,7 @@ class RuntimeModuleDefinition:
 
 
 @dataclass(frozen=True)
-class _RuntimeModuleConfig:
+class RuntimeModuleBuildConfig:
     """Shared constructor parameters for runtime-module RLMs."""
 
     interpreter: Any
@@ -94,14 +95,14 @@ class _RuntimeModuleConfig:
     verbose: bool
 
 
-def _module_config(
+def build_runtime_module_config(
     *,
     interpreter: Any,
     max_iterations: int,
     max_llm_calls: int,
     verbose: bool,
-) -> _RuntimeModuleConfig:
-    return _RuntimeModuleConfig(
+) -> RuntimeModuleBuildConfig:
+    return RuntimeModuleBuildConfig(
         interpreter=interpreter,
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,
@@ -110,7 +111,7 @@ def _module_config(
 
 
 def _create_configured_runtime_rlm(
-    config: _RuntimeModuleConfig,
+    config: RuntimeModuleBuildConfig,
     *,
     signature: type[dspy.Signature],
 ) -> dspy.Module:
@@ -138,7 +139,7 @@ class _RuntimeSignatureModule(dspy.Module):
     ) -> None:
         super().__init__()
         self._rlm = _create_configured_runtime_rlm(
-            _module_config(
+            build_runtime_module_config(
                 interpreter=interpreter,
                 max_iterations=max_iterations,
                 max_llm_calls=max_llm_calls,
@@ -238,7 +239,7 @@ class GroundedAnswerSynthesisModule(dspy.Module):
     ) -> None:
         super().__init__()
         self._grounded_answer = _create_configured_runtime_rlm(
-            _module_config(
+            build_runtime_module_config(
                 interpreter=interpreter,
                 max_iterations=max_iterations,
                 max_llm_calls=max_llm_calls,
@@ -286,7 +287,7 @@ class GroundedAnswerSynthesisModule(dspy.Module):
 class _MemoryTreePrimedModule(dspy.Module):
     """Base helper for modules that prime work with a memory tree snapshot."""
 
-    def __init__(self, *, config: _RuntimeModuleConfig) -> None:
+    def __init__(self, *, config: RuntimeModuleBuildConfig) -> None:
         super().__init__()
         self._memory_tree = _create_configured_runtime_rlm(
             config,
@@ -343,7 +344,7 @@ class MemoryStructureAuditPlanningModule(_MemoryTreePrimedModule):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        config = _module_config(
+        config = build_runtime_module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
@@ -386,7 +387,7 @@ class MemoryActionPlanningModule(_MemoryTreePrimedModule):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        config = _module_config(
+        config = build_runtime_module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
@@ -432,7 +433,7 @@ class MemoryMigrationPlanningModule(dspy.Module):
         verbose: bool,
     ) -> None:
         super().__init__()
-        config = _module_config(
+        config = build_runtime_module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
@@ -485,7 +486,7 @@ class ClarificationQuestionPlanningModule(_MemoryTreePrimedModule):
         max_llm_calls: int,
         verbose: bool,
     ) -> None:
-        config = _module_config(
+        config = build_runtime_module_config(
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
@@ -592,30 +593,40 @@ RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
 }
 
 
-def _register_runtime_module_classes() -> dict[str, type[dspy.Module]]:
-    classes: dict[str, type[dspy.Module]] = {}
-    for definition in RUNTIME_MODULE_REGISTRY.values():
-        if definition.module_class is not None:
-            module_class = definition.module_class
-        else:
-            module_class = cast(
-                type[_RuntimeSignatureModule],
-                type(
-                    definition.class_name,
-                    (_RuntimeSignatureModule,),
-                    {
-                        "signature_cls": definition.signature,
-                        "__doc__": definition.doc,
-                    },
-                ),
-            )
-        globals()[definition.class_name] = module_class
-        classes[definition.class_name] = module_class
-    return classes
-
-
-RUNTIME_MODULE_CLASSES = _register_runtime_module_classes()
 RUNTIME_MODULE_NAMES: frozenset[str] = frozenset(RUNTIME_MODULE_REGISTRY)
+
+
+@lru_cache(maxsize=None)
+def _signature_runtime_module_class(
+    class_name: str,
+    signature: type[dspy.Signature],
+    doc: str,
+) -> type[dspy.Module]:
+    return cast(
+        type[dspy.Module],
+        type(
+            class_name,
+            (_RuntimeSignatureModule,),
+            {
+                "signature_cls": signature,
+                "__doc__": doc,
+            },
+        ),
+    )
+
+
+def runtime_module_class(definition: RuntimeModuleDefinition) -> type[dspy.Module]:
+    """Return the concrete module class for one registry definition."""
+    if definition.module_class is not None:
+        module_class = definition.module_class
+    else:
+        module_class = _signature_runtime_module_class(
+            definition.class_name,
+            definition.signature,
+            definition.doc,
+        )
+    globals().setdefault(definition.class_name, module_class)
+    return module_class
 
 
 def build_runtime_module(
@@ -634,7 +645,7 @@ def build_runtime_module(
 
     wrapper_class = cast(
         _RuntimeModuleFactory,
-        RUNTIME_MODULE_CLASSES[definition.class_name],
+        runtime_module_class(definition),
     )
     return wrapper_class(
         interpreter=interpreter,
@@ -642,3 +653,25 @@ def build_runtime_module(
         max_llm_calls=max_llm_calls,
         verbose=verbose,
     )
+
+
+def get_or_build_runtime_module(
+    cache: MutableMapping[str, dspy.Module],
+    name: str,
+    *,
+    config: RuntimeModuleBuildConfig,
+) -> dspy.Module:
+    """Return a cached runtime module, building it on first access."""
+    module = cache.get(name)
+    if module is not None:
+        return module
+
+    module = build_runtime_module(
+        name,
+        interpreter=config.interpreter,
+        max_iterations=config.max_iterations,
+        max_llm_calls=config.max_llm_calls,
+        verbose=config.verbose,
+    )
+    cache[name] = module
+    return module

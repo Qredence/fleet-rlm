@@ -382,13 +382,25 @@ def test_get_delegate_lm_from_env_returns_none_on_init_error(
     )
 
     def _raise_lm(*args, **kwargs):
-        raise RuntimeError("boom")
+        raise RuntimeError(f"delegate init failed for api_key={kwargs['api_key']}")
+
+    warning_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def _capture_warning(message: str, *args: object, **kwargs: object) -> None:
+        warning_calls.append((message, args))
 
     monkeypatch.setattr(config.dspy, "LM", _raise_lm)
+    monkeypatch.setattr(config.logger, "warning", _capture_warning)
     clear_env(monkeypatch, "DSPY_DELEGATE_LM_MODEL", "DSPY_DELEGATE_LM_API_KEY")
 
     lm = config.get_delegate_lm_from_env(env_file=env_file)
     assert lm is None
+    assert warning_calls == [
+        (
+            "Failed to initialize delegate LM (%s); using planner fallback.",
+            ("RuntimeError",),
+        )
+    ]
 
 
 def test_get_planner_lm_from_env_local_overrides_process_env(

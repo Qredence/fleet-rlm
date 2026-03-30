@@ -8,7 +8,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -32,6 +32,14 @@ from .routers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CANONICAL_API_ROUTERS = (
+    auth.router,
+    ws.router,
+    sessions.router,
+    runtime.router,
+    traces.router,
+)
 
 
 _VALIDATION_ERROR_PROPERTY_DESCRIPTIONS: dict[str, str] = {
@@ -67,11 +75,8 @@ def _register_api_routes(app: FastAPI) -> None:
     app.include_router(health.router)
 
     api_router = APIRouter(prefix="/api/v1")
-    api_router.include_router(auth.router)
-    api_router.include_router(ws.router)
-    api_router.include_router(sessions.router)
-    api_router.include_router(runtime.router)
-    api_router.include_router(traces.router)
+    for route_group in _CANONICAL_API_ROUTERS:
+        api_router.include_router(route_group)
     app.include_router(api_router)
 
 
@@ -88,12 +93,47 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
     ui_root = ui_dir.resolve()
 
+    def resolve_ui_file(full_path: str) -> Path | None:
+        requested_path = (ui_root / full_path).resolve(strict=False)
+        try:
+            requested_path.relative_to(ui_root)
+        except ValueError:
+            return None
+        return requested_path if requested_path.is_file() else None
+
+    def should_serve_spa_index(full_path: str) -> bool:
+        normalized_path = full_path.strip("/")
+        if normalized_path == "":
+            return True
+
+        reserved_prefixes = ("api/", "docs/", "redoc/", "scalar/")
+        reserved_paths = {
+            "api",
+            "docs",
+            "health",
+            "openapi.json",
+            "ready",
+            "redoc",
+            "scalar",
+        }
+        if normalized_path in reserved_paths:
+            return False
+        if normalized_path.startswith(reserved_prefixes):
+            return False
+        return Path(normalized_path).suffix == ""
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        _ = full_path
+        requested_file = resolve_ui_file(full_path)
+        if requested_file is not None:
+            return FileResponse(requested_file)
+
         index_path = ui_root / "index.html"
-        if index_path.exists():
+        if index_path.exists() and should_serve_spa_index(full_path):
             return FileResponse(index_path)
+
+        if index_path.exists():
+            raise HTTPException(status_code=404, detail="Not Found")
 
         return JSONResponse(_ui_unavailable_payload(), status_code=503)
 
@@ -164,7 +204,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         state = build_server_state(cfg)
         app.state.server_state = state
-        await startup_server_state(state, cfg)
+        await startup_server_state(state)
         yield
         await shutdown_server_state(state)
 

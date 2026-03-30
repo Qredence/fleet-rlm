@@ -5,7 +5,7 @@ import dspy
 import pytest
 from typing import Any, cast
 
-from fleet_rlm.cli import runners
+from fleet_rlm.cli import runtime_factory
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.integrations.providers.daytona.agent import (
@@ -19,7 +19,6 @@ class _FakeSession:
         self.workspace_path = "/workspace/session"
         self.sandbox_id = "sbx-root"
         self.context_id = "ctx-root"
-        self.volume_name: str | None = None
         self.closed = 0
         self.deleted = 0
         self.driver_started = 0
@@ -28,20 +27,10 @@ class _FakeSession:
         _ = timeout
         self.driver_started += 1
 
-    def start_driver(self, *, timeout: float) -> None:
-        _ = timeout
-        self.driver_started += 1
-
     async def aclose_driver(self) -> None:
         self.closed += 1
 
-    def close_driver(self) -> None:
-        self.closed += 1
-
     async def adelete(self) -> None:
-        self.deleted += 1
-
-    def delete(self) -> None:
         self.deleted += 1
 
 
@@ -53,19 +42,6 @@ class _FakeRuntime:
             tuple[str | None, str | None, list[str], str | None]
         ] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
-        self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
-
-    def create_workspace_session(
-        self,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-        volume_name: str | None = None,
-    ) -> _FakeSession:
-        raise AssertionError(
-            "internal Daytona flow should use acreate_workspace_session"
-        )
 
     async def acreate_workspace_session(
         self,
@@ -78,23 +54,7 @@ class _FakeRuntime:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
-        self.session.volume_name = volume_name
         return self.session
-
-    def resume_workspace_session(
-        self,
-        *,
-        sandbox_id: str,
-        repo_url: str | None,
-        ref: str | None,
-        volume_name: str | None = None,
-        workspace_path: str,
-        context_sources=None,
-        context_id: str | None = None,
-    ) -> _FakeSession:
-        raise AssertionError(
-            "internal Daytona flow should use aresume_workspace_session"
-        )
 
     async def aresume_workspace_session(
         self,
@@ -102,40 +62,16 @@ class _FakeRuntime:
         sandbox_id: str,
         repo_url: str | None,
         ref: str | None,
-        volume_name: str | None = None,
         workspace_path: str,
         context_sources=None,
         context_id: str | None = None,
     ) -> _FakeSession:
         _ = context_sources, context_id
         self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
-        self.session.volume_name = volume_name
         return self.session
 
-    def reconcile_workspace_session(
-        self,
-        session: _FakeSession,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-    ) -> _FakeSession:
-        raise AssertionError(
-            "internal Daytona flow should use areconcile_workspace_session"
-        )
-
-    async def areconcile_workspace_session(
-        self,
-        session: _FakeSession,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-    ) -> _FakeSession:
-        self.reconcile_calls.append((repo_url, ref, list(context_paths or [])))
-        session.workspace_path = "/workspace/reconfigured"
-        session.context_sources = []
-        return session
+    async def aclose(self) -> None:
+        return None
 
 
 def _interpreter(agent: DaytonaWorkbenchChatAgent) -> Any:
@@ -242,7 +178,7 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module_via_sandbox",
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module",
         _fake_run,
     )
 
@@ -253,47 +189,6 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
     assert captured["agent"] is agent
     assert captured["module_name"] == "analyze_long_document"
     assert captured["kwargs"]["query"] == "inspect this"
-
-
-def test_daytona_cached_runtime_module_error_marks_degraded_without_fallback(
-    monkeypatch,
-) -> None:
-    agent = DaytonaWorkbenchChatAgent(
-        runtime=cast(Any, _FakeRuntime(_FakeSession())),
-    )
-    agent._set_document("active", "# Header\nOne\nTwo")
-    agent.active_alias = "active"
-
-    def _fake_run(agent_obj: Any, module_name: str, **kwargs: Any):
-        del agent_obj, module_name, kwargs
-        return (
-            None,
-            {
-                "status": "error",
-                "error": "runtime module failed",
-                "runtime_failure_category": "sandbox_resume_error",
-                "runtime_failure_phase": "sandbox_resume",
-            },
-            False,
-        )
-
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module_via_sandbox",
-        _fake_run,
-    )
-
-    payload = agent._get_tool("analyze_long_document")("inspect this")
-
-    assert payload == {
-        "status": "error",
-        "error": "runtime module failed",
-        "runtime_failure_category": "sandbox_resume_error",
-        "runtime_failure_phase": "sandbox_resume",
-    }
-    assert agent.interpreter.current_runtime_metadata()["runtime_degraded"] is True
-    assert (
-        agent.interpreter.current_runtime_metadata()["runtime_fallback_used"] is False
-    )
 
 
 @pytest.mark.asyncio
@@ -476,7 +371,7 @@ async def test_async_imported_daytona_session_state_can_resume_existing_sandbox(
 
 
 @pytest.mark.asyncio
-async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_without_releasing_session(
+async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_and_releases_old_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _FakeRuntime(_FakeSession())
@@ -491,7 +386,6 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
     )
 
     async def _fake_stream(self, *args, **kwargs):
-        _interpreter(agent)._ensure_session_sync()
         yield StreamEvent(kind="final", text="done", payload={})
 
     monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
@@ -506,11 +400,8 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
     ]
 
     assert [event.kind for event in events] == ["status", "final"]
-    assert runtime.session.deleted == 0
+    assert runtime.session.deleted == 1
     assert runtime.session.closed == 0
-    assert runtime.reconcile_calls == [
-        ("https://github.com/example/new.git", "main", [])
-    ]
 
 
 @pytest.mark.asyncio
@@ -558,81 +449,6 @@ async def test_daytona_workbench_chat_agent_preserves_existing_workspace_when_st
     assert interpreter.volume_name == "tenant-a"
 
 
-@pytest.mark.asyncio
-async def test_daytona_workbench_chat_agent_status_payload_surfaces_existing_session_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime = _FakeRuntime(_FakeSession())
-    agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
-    interpreter = _interpreter(agent)
-    interpreter.configure_workspace(
-        repo_url="https://github.com/example/repo.git",
-        repo_ref="main",
-        context_paths=["docs/spec.md"],
-        volume_name="tenant-a",
-    )
-    interpreter._session = runtime.session
-    runtime.session.volume_name = "tenant-a"
-    interpreter._session_source_key = (
-        "https://github.com/example/repo.git",
-        "main",
-        ("docs/spec.md",),
-        "tenant-a",
-    )
-    interpreter._last_sandbox_transition = "reused"
-
-    async def _fake_stream(self, *args, **kwargs):
-        yield StreamEvent(kind="final", text="done", payload={})
-
-    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
-
-    events = [
-        event
-        async for event in agent.aiter_chat_turn_stream("inspect recursive reasoning")
-    ]
-
-    runtime_payload = events[0].payload["runtime"]
-    assert runtime_payload["sandbox_active"] is True
-    assert runtime_payload["sandbox_id"] == "sbx-root"
-    assert runtime_payload["workspace_path"] == "/workspace/session"
-    assert runtime_payload["sandbox_transition"] == "reused"
-    assert runtime_payload["volume_name"] == "tenant-a"
-
-
-@pytest.mark.asyncio
-async def test_daytona_workbench_chat_agent_stream_surfaces_degraded_runtime_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime = _FakeRuntime(_FakeSession())
-    agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
-    interpreter = _interpreter(agent)
-    interpreter.mark_runtime_degradation(
-        category="sandbox_resume_error",
-        phase="sandbox_resume",
-        fallback_used=True,
-    )
-
-    async def _fake_stream(self, *args, **kwargs):
-        yield StreamEvent(kind="final", text="done", payload={})
-
-    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
-
-    events = [
-        event async for event in agent.aiter_chat_turn_stream("recover from failure")
-    ]
-
-    payload = events[1].payload
-    runtime_payload = payload["runtime"]
-    assert payload["runtime_degraded"] is True
-    assert payload["runtime_failure_category"] == "sandbox_resume_error"
-    assert payload["runtime_failure_phase"] == "sandbox_resume"
-    assert payload["runtime_fallback_used"] is True
-    assert runtime_payload["runtime_degraded"] is True
-    assert runtime_payload["runtime_failure_category"] == "sandbox_resume_error"
-    assert runtime_payload["runtime_failure_phase"] == "sandbox_resume"
-    assert runtime_payload["runtime_fallback_used"] is True
-
-
 def test_shutdown_preserves_remote_session_when_configured() -> None:
     session = _FakeSession()
     runtime = _FakeRuntime(session)
@@ -657,7 +473,7 @@ def test_daytona_workbench_chat_agent_threads_interpreter_async_execute() -> Non
     assert _interpreter(agent).async_execute is False
 
 
-def test_build_chat_agent_for_runtime_mode_threads_interpreter_async_execute(
+def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -671,8 +487,7 @@ def test_build_chat_agent_for_runtime_mode_threads_interpreter_async_execute(
         _FakeDaytonaWorkbenchChatAgent,
     )
 
-    agent = runners.build_chat_agent_for_runtime_mode(
-        runtime_mode="daytona_pilot",
+    agent = runtime_factory.build_daytona_workbench_chat_agent(
         timeout=123,
         max_depth=4,
         interpreter_async_execute=False,

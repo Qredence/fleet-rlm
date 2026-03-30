@@ -142,14 +142,36 @@ def build_turn_result(
     """Build the stable chat turn response payload."""
     payload: dict[str, Any] = {
         "assistant_response": assistant_response,
-        "trajectory": trajectory,
-        "history_turns": history_turns(agent),
-        "guardrail_warnings": guardrail_warnings,
-        **turn_metrics.as_payload(),
-        **runtime_degradation_payload(agent),
+        **build_turn_payload(
+            agent,
+            trajectory=trajectory,
+            guardrail_warnings=guardrail_warnings,
+            turn_metrics=turn_metrics,
+        ),
     }
     if include_core_memory_snapshot:
         payload["core_memory_snapshot"] = agent.get_core_memory_snapshot()
+    return payload
+
+
+def build_turn_payload(
+    agent: RLMReActChatAgent,
+    *,
+    trajectory: dict[str, Any],
+    guardrail_warnings: list[str],
+    turn_metrics: TurnMetricsSnapshot,
+    extra_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the canonical shared payload used by turn and stream finals."""
+    payload: dict[str, Any] = {
+        "trajectory": trajectory,
+        "history_turns": history_turns(agent),
+        "guardrail_warnings": list(guardrail_warnings),
+        **turn_metrics.as_payload(),
+        **runtime_degradation_payload(agent),
+    }
+    if extra_payload:
+        payload.update(extra_payload)
     return payload
 
 
@@ -231,9 +253,10 @@ def record_delegate_truncation(agent: RLMReActChatAgent) -> None:
 
 def runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
     """Return additive runtime degradation markers from the active interpreter."""
-    metadata_fn = getattr(agent.interpreter, "current_runtime_metadata", None)
+    interpreter = getattr(agent, "interpreter", None)
+    metadata_fn = getattr(interpreter, "current_runtime_metadata", None)
     metadata = metadata_fn() if callable(metadata_fn) else {}
-    if not isinstance(metadata, dict):
+    if not isinstance(metadata, dict) or not metadata:
         return {}
 
     payload: dict[str, Any] = {

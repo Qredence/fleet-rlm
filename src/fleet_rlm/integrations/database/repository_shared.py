@@ -10,7 +10,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .engine import DatabaseManager
-from .models import Membership, MembershipRole, User
+from .models_enums import MembershipRole
+from .models_identity import Membership, User
 
 
 def _utc_now() -> datetime:

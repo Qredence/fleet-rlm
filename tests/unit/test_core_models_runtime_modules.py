@@ -2,7 +2,7 @@
 
 NOTE: All imports of rlm_runtime_modules are intentionally deferred inside
 each test function to avoid triggering the circular import chain:
-  core.agent → core.execution.runtime_factory → core.models.rlm_runtime_modules
+  core.agent.chat_agent → core.models.rlm_runtime_modules
   → core.agent.signatures → core.agent
 
 Verifies:
@@ -134,6 +134,57 @@ def test_build_runtime_module_each_call_is_new_instance(fake_interpreter: Any):
         )
 
     assert m1 is not m2
+
+
+def test_get_or_build_runtime_module_reuses_cached_instance(fake_interpreter: Any):
+    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        build_runtime_module_config,
+        get_or_build_runtime_module,
+    )
+
+    created: list[str] = []
+    fake_module = MagicMock(name="RuntimeModule")
+
+    def _fake_build_runtime_module(
+        name: str,
+        *,
+        interpreter: Any,
+        max_iterations: int,
+        max_llm_calls: int,
+        verbose: bool,
+    ) -> MagicMock:
+        created.append(name)
+        assert interpreter is fake_interpreter
+        assert max_iterations == 10
+        assert max_llm_calls == 20
+        assert verbose is False
+        return fake_module
+
+    with patch(
+        "fleet_rlm.runtime.models.rlm_runtime_modules.build_runtime_module",
+        side_effect=_fake_build_runtime_module,
+    ):
+        cache: dict[str, dspy.Module] = {}
+        config = build_runtime_module_config(
+            interpreter=fake_interpreter,
+            max_iterations=10,
+            max_llm_calls=20,
+            verbose=False,
+        )
+
+        first = get_or_build_runtime_module(
+            cache,
+            "grounded_answer",
+            config=config,
+        )
+        second = get_or_build_runtime_module(
+            cache,
+            "grounded_answer",
+            config=config,
+        )
+
+    assert first is second is fake_module
+    assert created == ["grounded_answer"]
 
 
 # ---------------------------------------------------------------------------

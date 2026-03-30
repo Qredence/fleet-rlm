@@ -15,10 +15,10 @@ from fleet_rlm.runtime.models.streaming import StreamEvent
 
 from .chat_session_state import append_history, forced_delegate_context, history_turns
 from .chat_turns import (
+    build_turn_payload,
     finalize_turn,
     prediction_guardrail_warnings,
     prediction_response_and_trajectory,
-    runtime_degradation_payload,
     snapshot_turn_metrics,
 )
 from .recursive_runtime import spawn_delegate_sub_agent_async
@@ -115,14 +115,13 @@ def forced_stream_final_payload(
 ) -> dict[str, Any]:
     """Build the canonical terminal payload for forced-RLM streaming."""
     return ctx.enrich(
-        {
-            "trajectory": payload_input.trajectory,
-            "history_turns": history_turns(agent),
-            "guardrail_warnings": payload_input.guardrail_warnings,
-            "final_reasoning": payload_input.final_reasoning,
-            **snapshot_turn_metrics(agent).as_payload(),
-            **runtime_degradation_payload(agent),
-        }
+        build_turn_payload(
+            agent,
+            trajectory=payload_input.trajectory,
+            guardrail_warnings=payload_input.guardrail_warnings,
+            turn_metrics=snapshot_turn_metrics(agent),
+            extra_payload={"final_reasoning": payload_input.final_reasoning},
+        )
     )
 
 

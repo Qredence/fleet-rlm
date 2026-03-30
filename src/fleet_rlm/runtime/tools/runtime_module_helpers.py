@@ -9,15 +9,20 @@ spawn recursive child runs; explicit recursion still flows through
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-
 from fleet_rlm.runtime.agent.delegation_policy import (
     RuntimeModuleExecutionRequest,
     invoke_runtime_module,
 )
-from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
+
+
+def _runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
+    """Load runtime degradation metadata without a fragile module-level import."""
+    from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
+
+    return runtime_degradation_payload(agent)
 
 
 def coerce_int(
@@ -76,7 +81,7 @@ def runtime_metadata(
     fallback_used: bool,
 ) -> dict[str, Any]:
     """Return stable metadata shared by cached runtime-module tool results."""
-    return {
+    metadata: dict[str, Any] = {
         "depth": coerce_int(
             prediction_value(prediction, "depth", agent._current_depth + 1),
             default=agent._current_depth + 1,
@@ -88,5 +93,8 @@ def runtime_metadata(
             minimum=0,
         ),
         "delegate_lm_fallback": bool(fallback_used),
-        **runtime_degradation_payload(agent),
+        "runtime_degraded": False,
+        "runtime_fallback_used": False,
     }
+    metadata.update(_runtime_degradation_payload(agent))
+    return metadata

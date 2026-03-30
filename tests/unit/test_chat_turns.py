@@ -7,6 +7,7 @@ import dspy
 from fleet_rlm.runtime.agent.chat_turns import (
     TurnDelegationState,
     TurnMetricsSnapshot,
+    build_turn_payload,
     process_prediction_to_turn_result,
 )
 
@@ -53,7 +54,6 @@ def test_process_prediction_to_turn_result_updates_history_and_payload() -> None
         history=dspy.History(messages=[]),
         history_max_turns=None,
         get_core_memory_snapshot=lambda: {"persona": "test"},
-        interpreter=SimpleNamespace(current_runtime_metadata=lambda: {}),
     )
     prediction = dspy.Prediction(
         assistant_response="hello",
@@ -89,7 +89,6 @@ def test_process_prediction_to_turn_result_finalizes_and_validates() -> None:
             kwargs["assistant_response"].upper(),
             ["validated"],
         ),
-        interpreter=SimpleNamespace(current_runtime_metadata=lambda: {}),
     )
     prediction = dspy.Prediction(
         assistant_response="needs validation",
@@ -115,41 +114,34 @@ def test_process_prediction_to_turn_result_finalizes_and_validates() -> None:
     assert agent._last_tool_error_count == 3
 
 
-def test_process_prediction_to_turn_result_includes_runtime_degradation_metadata() -> (
-    None
-):
+def test_build_turn_payload_merges_metrics_and_extra_payload() -> None:
     agent = SimpleNamespace(
-        history=dspy.History(messages=[]),
+        history=dspy.History(
+            messages=[{"user_request": "hi", "assistant_response": "ok"}]
+        ),
         history_max_turns=None,
-        get_core_memory_snapshot=lambda: {"persona": "test"},
-        interpreter=SimpleNamespace(
-            current_runtime_metadata=lambda: {
-                "runtime_degraded": True,
-                "runtime_failure_category": "sandbox_create_clone_error",
-                "runtime_failure_phase": "sandbox_create",
-                "runtime_fallback_used": True,
-            }
-        ),
-    )
-    prediction = dspy.Prediction(
-        assistant_response="hello",
-        trajectory={"tool_name_0": "finish"},
     )
 
-    result = process_prediction_to_turn_result(
+    payload = build_turn_payload(
         agent,
-        prediction=prediction,
-        message="say hi",
-        include_core_memory_snapshot=False,
+        trajectory={"tool_name_0": "finish"},
+        guardrail_warnings=["warned"],
         turn_metrics=TurnMetricsSnapshot(
-            effective_max_iters=4,
-            delegate_calls_turn=1,
-            delegate_fallback_count_turn=0,
-            delegate_result_truncated_count_turn=0,
+            effective_max_iters=7,
+            delegate_calls_turn=3,
+            delegate_fallback_count_turn=1,
+            delegate_result_truncated_count_turn=2,
         ),
+        extra_payload={"final_reasoning": "wrapped up"},
     )
 
-    assert result["runtime_degraded"] is True
-    assert result["runtime_failure_category"] == "sandbox_create_clone_error"
-    assert result["runtime_failure_phase"] == "sandbox_create"
-    assert result["runtime_fallback_used"] is True
+    assert payload == {
+        "trajectory": {"tool_name_0": "finish"},
+        "history_turns": 1,
+        "guardrail_warnings": ["warned"],
+        "effective_max_iters": 7,
+        "delegate_calls_turn": 3,
+        "delegate_fallback_count_turn": 1,
+        "delegate_result_truncated_count_turn": 2,
+        "final_reasoning": "wrapped up",
+    }

@@ -244,33 +244,6 @@ class _FakeRuntime:
             session.workspace_path = "/workspace/reconfigured"
         return session
 
-    def create_workspace_session(
-        self,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-        volume_name: str | None = None,
-    ) -> DaytonaSandboxSession:
-        raise AssertionError(
-            "internal Daytona flow should use acreate_workspace_session"
-        )
-
-    def resume_workspace_session(
-        self,
-        *,
-        sandbox_id: str,
-        repo_url: str | None,
-        ref: str | None,
-        volume_name: str | None = None,
-        workspace_path: str,
-        context_sources: list[Any] | None = None,
-        context_id: str | None = None,
-    ) -> DaytonaSandboxSession:
-        raise AssertionError(
-            "internal Daytona flow should use aresume_workspace_session"
-        )
-
     def reconcile_workspace_session(
         self,
         session: DaytonaSandboxSession,
@@ -318,10 +291,10 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
         def bind_context(self, context: Any) -> None:
             captured["bound_context"] = context
 
-        def sync_tools(self, tools: dict[str, Any]) -> None:
+        async def async_tools(self, tools: dict[str, Any]) -> None:
             captured["tools"] = dict(tools)
 
-        def execute(
+        async def aexecute(
             self,
             *,
             code: str,
@@ -341,9 +314,6 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
                 stderr="",
                 callback_count=1,
             )
-
-        def close(self) -> None:
-            captured["closed"] = True
 
         async def aclose(self) -> None:
             captured["closed"] = True

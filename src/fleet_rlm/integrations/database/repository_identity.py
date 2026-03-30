@@ -7,7 +7,8 @@ import uuid
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import MembershipRole, Tenant, TenantStatus, User
+from .models_enums import MembershipRole, TenantStatus
+from .models_identity import Tenant, User
 from .repository_shared import RepositoryContextMixin, _utc_now
 from .types import ControlPlaneIdentityResolution, IdentityUpsertResult
 

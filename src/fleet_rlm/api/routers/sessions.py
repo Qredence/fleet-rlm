@@ -4,8 +4,8 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter
 
-from fleet_rlm.api.dependencies import ServerStateDep
-from fleet_rlm.api.schemas.core import SessionStateResponse, SessionStateSummary
+from ..dependencies import ServerStateDep
+from ..schemas.core import SessionStateResponse, SessionStateSummary
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 

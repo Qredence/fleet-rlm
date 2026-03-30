@@ -105,6 +105,35 @@ def test_runtime_metadata_defaults_depth_and_clamps_negative_values() -> None:
     }
 
 
+def test_runtime_metadata_preserves_runtime_degradation_fields() -> None:
+    interpreter = SimpleNamespace(
+        current_runtime_metadata=lambda: {
+            "runtime_degraded": True,
+            "runtime_fallback_used": True,
+            "runtime_failure_category": "sandbox_error",
+            "runtime_failure_phase": "execute",
+        }
+    )
+    agent = RLMReActChatAgent(interpreter=interpreter)
+    agent._current_depth = 1
+
+    metadata = runtime_metadata(
+        agent,
+        {"depth": 2, "sub_agent_history": 0},
+        fallback_used=False,
+    )
+
+    assert metadata == {
+        "depth": 2,
+        "sub_agent_history": 0,
+        "delegate_lm_fallback": False,
+        "runtime_degraded": True,
+        "runtime_fallback_used": True,
+        "runtime_failure_category": "sandbox_error",
+        "runtime_failure_phase": "execute",
+    }
+
+
 def test_run_cached_runtime_module_returns_error_payloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

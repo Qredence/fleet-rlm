@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import Artifact, ArtifactKind, Run, RunStatus, RunStep, RunStepType
+from .models_enums import ArtifactKind, RunStatus, RunStepType
+from .models_runs import Artifact, Run, RunStep
 from .repository_shared import RepositoryContextMixin, _utc_now
 from .types import ArtifactCreateRequest, RunCreateRequest, RunStepCreateRequest
 

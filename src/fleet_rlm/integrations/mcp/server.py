@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fleet_rlm.cli import runners
 from fleet_rlm.runtime.config import get_delegate_lm_from_env
+
+if TYPE_CHECKING:
+    from fleet_rlm.integrations.config.env import AppConfig
 
 
 @dataclass
@@ -28,6 +31,31 @@ class MCPRuntimeConfig:
     agent_max_output_chars: int = 10000
     agent_delegate_model: str | None = None
     agent_delegate_max_tokens: int = 64000
+
+    @classmethod
+    def from_app_config(cls, config: AppConfig) -> MCPRuntimeConfig:
+        """Build MCP runtime settings from the shared application config."""
+        return cls(
+            secret_name=config.interpreter.secrets[0]
+            if config.interpreter.secrets
+            else "LITELLM",
+            volume_name=config.interpreter.volume_name,
+            timeout=config.interpreter.timeout,
+            react_max_iters=config.rlm_settings.max_iters,
+            rlm_max_iterations=config.agent.rlm_max_iterations,
+            rlm_max_llm_calls=config.rlm_settings.max_llm_calls,
+            rlm_max_depth=config.rlm_settings.max_depth,
+            deep_react_max_iters=config.rlm_settings.deep_max_iters,
+            enable_adaptive_iters=config.rlm_settings.enable_adaptive_iters,
+            delegate_max_calls_per_turn=config.rlm_settings.delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=config.rlm_settings.delegate_result_truncation_chars,
+            interpreter_async_execute=config.interpreter.async_execute,
+            agent_guardrail_mode=config.agent.guardrail_mode,
+            agent_min_substantive_chars=config.agent.min_substantive_chars,
+            agent_max_output_chars=config.rlm_settings.max_output_chars,
+            agent_delegate_model=config.agent.delegate_model,
+            agent_delegate_max_tokens=config.agent.delegate_max_tokens,
+        )
 
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):

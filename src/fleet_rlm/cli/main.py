@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
-from fleet_rlm.integrations.config.env import AppConfig
 
 from .config import initialize_app_config, split_hydra_overrides
 
@@ -55,52 +54,41 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _run_web_ui() -> None:
+    """Delegate `fleet web` to the canonical `fleet-rlm serve-api` command."""
+    try:
+        import fastapi  # noqa: F401
+        import jwt  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError:
+        print(
+            "Error: Required Web UI dependencies not found. "
+            "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
+            "Optional server extras remain available via `fleet-rlm[server]`.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
+    print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
+    from .fleet_cli import main as cli_main
 
-def _initialize_config(overrides: list[str]) -> AppConfig:
-    """Compatibility shim for tests and callers patching the old helper name."""
-    return initialize_app_config(overrides)
+    hydra_args = [arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")]
+    sys.argv = [
+        "fleet-rlm",
+        "serve-api",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        *hydra_args,
+    ]
+    cli_main()
 
 
 def main() -> None:
     # Quick check for 'web' subcommand before strict parsing
     if len(sys.argv) > 1 and sys.argv[1] == "web":
-        # Check if required Web UI/API dependencies are available.
-        try:
-            import fastapi  # noqa: F401
-            import jwt  # noqa: F401
-            import uvicorn  # noqa: F401
-        except ImportError:
-            print(
-                "Error: Required Web UI dependencies not found. "
-                "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
-                "Optional server extras remain available via `fleet-rlm[server]`.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-
-        print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
-        # Delegate to the fleet-rlm CLI's serve-api command
-        # This reuses all the existing config initialization and uvicorn setup
-        from .fleet_cli import main as cli_main
-
-        # Rewrite sys.argv to simulate running `fleet-rlm serve-api --host 0.0.0.0`
-        # Keep any hydra overrides that might have been passed
-        hydra_args = [
-            arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")
-        ]
-        sys.argv = [
-            "fleet-rlm",
-            "serve-api",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8000",
-        ] + hydra_args
-
-        cli_main()
+        _run_web_ui()
         return
 
     parser = _build_parser()
@@ -112,7 +100,7 @@ def main() -> None:
         parser.error(f"Unknown arguments: {' '.join(unknown_args)}")
 
     try:
-        config = _initialize_config(hydra_overrides)
+        config = initialize_app_config(hydra_overrides)
     except Exception as exc:
         print(f"Configuration Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

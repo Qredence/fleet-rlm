@@ -7,7 +7,8 @@ from datetime import timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models import Job, JobStatus, JobType
+from .models_enums import JobStatus, JobType
+from .models_jobs import Job
 from .repository_shared import RepositoryContextMixin, _utc_now
 from .types import JobCreateRequest, JobLeaseRequest
 

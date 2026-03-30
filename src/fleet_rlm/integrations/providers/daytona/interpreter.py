@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable
 
 import dspy
 from dspy.primitives import FinalOutput
 
-from . import interpreter_execution as _execution
-from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
-from .interpreter_assets import (
-    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
-    _FINAL_OUTPUT_MARKER,
-    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
-    _base_setup_code,
-    _typed_submit_code,
-)
 from fleet_rlm.runtime.execution.interpreter_common import (
     async_enter as _async_enter_impl,
 )
@@ -38,12 +30,21 @@ from fleet_rlm.runtime.execution.interpreter_common import (
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
+from . import interpreter_execution as _execution
+from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
+from .interpreter_assets import (
+    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+    _FINAL_OUTPUT_MARKER,
+    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
+    _base_setup_code,
+    _typed_submit_code,
+)
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
-    _run_async_compat,
 )
+from .runtime_helpers import _run_async_compat
 from .state import dedupe_paths, normalized_context_sources
 
 
@@ -269,6 +270,62 @@ class DaytonaInterpreter(LLMQueryMixin):
             return False
         return self._persisted_volume_name != desired_volume
 
+    @staticmethod
+    def _callable_accepts_kwarg(func: Callable[..., Any] | None, name: str) -> bool:
+        if not callable(func):
+            return False
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):
+            return False
+        if name in signature.parameters:
+            return True
+        return any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+
+    async def _aresume_workspace_session(
+        self,
+        *,
+        sandbox_id: str,
+        repo_url: str | None,
+        ref: str | None,
+        workspace_path: str,
+        context_sources: list[Any],
+        context_id: str | None,
+    ) -> DaytonaSandboxSession:
+        resume_workspace_session = getattr(self.runtime, "aresume_workspace_session")
+        resume_kwargs: dict[str, Any] = {
+            "sandbox_id": sandbox_id,
+            "repo_url": repo_url,
+            "ref": ref,
+            "workspace_path": workspace_path,
+            "context_sources": context_sources,
+            "context_id": context_id,
+        }
+        if self._callable_accepts_kwarg(resume_workspace_session, "volume_name"):
+            resume_kwargs["volume_name"] = (
+                self._persisted_volume_name or self.volume_name
+            )
+        return await resume_workspace_session(**resume_kwargs)
+
+    async def _areconcile_workspace_session(
+        self,
+        session: DaytonaSandboxSession,
+    ) -> DaytonaSandboxSession:
+        reconcile_workspace_session = getattr(
+            self.runtime, "areconcile_workspace_session", None
+        )
+        if not callable(reconcile_workspace_session):
+            raise RuntimeError("Runtime does not support workspace reconciliation")
+        return await reconcile_workspace_session(
+            session,
+            repo_url=self.repo_url,
+            ref=self.repo_ref,
+            context_paths=list(self.context_paths),
+        )
+
     def _apply_imported_session_state(self, state: dict[str, Any]) -> None:
         raw_daytona = state.get("daytona", {})
         daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
@@ -390,11 +447,8 @@ class DaytonaInterpreter(LLMQueryMixin):
                 return self._session
             else:
                 try:
-                    self._session = await self.runtime.areconcile_workspace_session(
-                        self._session,
-                        repo_url=self.repo_url,
-                        ref=self.repo_ref,
-                        context_paths=list(self.context_paths),
+                    self._session = await self._areconcile_workspace_session(
+                        self._session
                     )
                 except Exception as exc:
                     self._mark_runtime_degradation_from_exception(exc)
@@ -413,20 +467,15 @@ class DaytonaInterpreter(LLMQueryMixin):
             and self._persisted_volume_name != self.volume_name
         ):
             should_report_recreated = True
-            self._persisted_sandbox_id = None
-            self._persisted_workspace_path = None
-            self._persisted_context_sources = []
-            self._persisted_context_id = None
-            self._persisted_volume_name = None
+            self._clear_persisted_session()
 
         if self._persisted_sandbox_id and self._persisted_workspace_path:
             try:
                 persisted_source_key = self._session_source_key
-                self._session = await self.runtime.aresume_workspace_session(
+                self._session = await self._aresume_workspace_session(
                     sandbox_id=self._persisted_sandbox_id,
                     repo_url=self.repo_url,
                     ref=self.repo_ref,
-                    volume_name=self._persisted_volume_name or self.volume_name,
                     workspace_path=self._persisted_workspace_path,
                     context_sources=self._persisted_context_sources,
                     context_id=self._persisted_context_id,
@@ -435,11 +484,8 @@ class DaytonaInterpreter(LLMQueryMixin):
                     persisted_source_key is not None
                     and persisted_source_key != source_key
                 ):
-                    self._session = await self.runtime.areconcile_workspace_session(
-                        self._session,
-                        repo_url=self.repo_url,
-                        ref=self.repo_ref,
-                        context_paths=list(self.context_paths),
+                    self._session = await self._areconcile_workspace_session(
+                        self._session
                     )
                     self._last_workspace_reconfigured = True
                 else:
@@ -451,11 +497,7 @@ class DaytonaInterpreter(LLMQueryMixin):
                 return self._session
             except Exception as exc:
                 self._mark_runtime_degradation_from_exception(exc)
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
-                self._persisted_volume_name = None
+                self._clear_persisted_session()
                 should_report_recreated = True
 
         self._session = await self.runtime.acreate_workspace_session(
@@ -494,6 +536,13 @@ class DaytonaInterpreter(LLMQueryMixin):
             getattr(active_session, "volume_name", None) or self.volume_name
         )
 
+    def _clear_persisted_session(self) -> None:
+        self._persisted_sandbox_id = None
+        self._persisted_workspace_path = None
+        self._persisted_context_sources = []
+        self._persisted_context_id = None
+        self._persisted_volume_name = None
+
     def _detach_session(self, *, delete: bool) -> None:
         _run_async_compat(self._adetach_session, delete=delete)
 
@@ -501,11 +550,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         active_session = self._session
         if active_session is None:
             if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
-                self._persisted_volume_name = None
+                self._clear_persisted_session()
             await self._areset_execution_state()
             self._started = False
             return
@@ -519,11 +564,7 @@ class DaytonaInterpreter(LLMQueryMixin):
                 await active_session.aclose_driver()
         finally:
             if delete:
-                self._persisted_sandbox_id = None
-                self._persisted_workspace_path = None
-                self._persisted_context_sources = []
-                self._persisted_context_id = None
-                self._persisted_volume_name = None
+                self._clear_persisted_session()
             self._session = None
             if delete:
                 self._session_source_key = None

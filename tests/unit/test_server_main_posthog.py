@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.api.config import ServerRuntimeConfig
-from fleet_rlm.api import bootstrap as server_bootstrap
+from fleet_rlm.api import bootstrap_observability
 
 
 class _CaptureClient:
@@ -19,10 +18,15 @@ class _CaptureClient:
 
 
 def test_emit_posthog_startup_event_returns_false_without_client(monkeypatch):
-    monkeypatch.setattr(server_bootstrap, "get_posthog_client", lambda _: None)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.client.get_posthog_client",
+        lambda _: None,
+    )
 
-    emitted = server_bootstrap.emit_posthog_startup_event(
-        ServerRuntimeConfig(database_required=False)
+    emitted = bootstrap_observability.emit_posthog_startup_event(
+        app_env="local",
+        auth_mode="dev",
+        database_required=False,
     )
 
     assert emitted is False
@@ -31,14 +35,15 @@ def test_emit_posthog_startup_event_returns_false_without_client(monkeypatch):
 def test_emit_posthog_startup_event_captures_event(monkeypatch):
     client = _CaptureClient()
     monkeypatch.setenv("POSTHOG_DISTINCT_ID", "runtime-user")
-    monkeypatch.setattr(server_bootstrap, "get_posthog_client", lambda _: client)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.client.get_posthog_client",
+        lambda _: client,
+    )
 
-    emitted = server_bootstrap.emit_posthog_startup_event(
-        ServerRuntimeConfig(
-            app_env="staging",
-            auth_mode="dev",
-            database_required=True,
-        )
+    emitted = bootstrap_observability.emit_posthog_startup_event(
+        app_env="staging",
+        auth_mode="dev",
+        database_required=True,
     )
 
     assert emitted is True
@@ -57,11 +62,14 @@ def test_emit_posthog_startup_event_handles_capture_error(monkeypatch):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(
-        server_bootstrap, "get_posthog_client", lambda _: _FailingClient()
+        "fleet_rlm.integrations.observability.client.get_posthog_client",
+        lambda _: _FailingClient(),
     )
 
-    emitted = server_bootstrap.emit_posthog_startup_event(
-        ServerRuntimeConfig(database_required=False)
+    emitted = bootstrap_observability.emit_posthog_startup_event(
+        app_env="local",
+        auth_mode="dev",
+        database_required=False,
     )
 
     assert emitted is False

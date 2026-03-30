@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
@@ -14,13 +14,6 @@ from .state import (
     dedupe_paths,
     normalize_history_turn,
 )
-
-
-class _WorkspaceRequest(TypedDict):
-    repo_url: str | None
-    repo_ref: str | None
-    context_paths: list[str]
-    volume_name: str | None
 
 
 class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
@@ -95,13 +88,42 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
 
     def export_session_state(self) -> dict[str, Any]:
         payload = super().export_session_state()
-        payload["history"] = self._normalize_history(payload.get("history"))
+        history = []
+        raw_history = payload.get("history", [])
+        if not isinstance(raw_history, list):
+            raw_history = []
+        for item in raw_history:
+            if not isinstance(item, dict):
+                continue
+            turn = normalize_history_turn(item)
+            if turn is not None:
+                history.append(turn)
+        payload["history"] = history
         daytona = payload.get("daytona", {})
         if not isinstance(daytona, dict):
             daytona = {}
         daytona["loaded_document_paths"] = list(self.loaded_document_paths)
         payload["daytona"] = daytona
         return payload
+
+    def _normalized_import_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        raw_daytona = state.get("daytona", {})
+        daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
+        self.loaded_document_paths = dedupe_paths(
+            [str(item) for item in daytona_state.get("loaded_document_paths", []) or []]
+        )
+        history = state.get("history", [])
+        if isinstance(history, list):
+            normalized_history = []
+            for item in history:
+                if not isinstance(item, dict):
+                    continue
+                turn = normalize_history_turn(item)
+                if turn is not None:
+                    normalized_history.append(turn)
+            state = dict(state)
+            state["history"] = normalized_history
+        return state
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
         return super().import_session_state(self._normalized_import_state(state))
@@ -130,18 +152,14 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         volume_name: str | None,
     ) -> None:
         interpreter = cast(DaytonaInterpreter, self.interpreter)
-        workspace_request = self._resolve_workspace_request(
-            docs_path=docs_path,
+        interpreter.configure_workspace(
             repo_url=repo_url,
             repo_ref=repo_ref,
-            context_paths=context_paths,
+            context_paths=self._effective_context_paths(
+                docs_path=docs_path,
+                context_paths=context_paths,
+            ),
             volume_name=volume_name,
-        )
-        interpreter.configure_workspace(
-            repo_url=workspace_request["repo_url"],
-            repo_ref=workspace_request["repo_ref"],
-            context_paths=workspace_request["context_paths"],
-            volume_name=workspace_request["volume_name"],
         )
 
     async def _aconfigure_daytona_workspace(
@@ -154,18 +172,14 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         volume_name: str | None,
     ) -> None:
         interpreter = cast(DaytonaInterpreter, self.interpreter)
-        workspace_request = self._resolve_workspace_request(
-            docs_path=docs_path,
+        await interpreter.aconfigure_workspace(
             repo_url=repo_url,
             repo_ref=repo_ref,
-            context_paths=context_paths,
+            context_paths=self._effective_context_paths(
+                docs_path=docs_path,
+                context_paths=context_paths,
+            ),
             volume_name=volume_name,
-        )
-        await interpreter.aconfigure_workspace(
-            repo_url=workspace_request["repo_url"],
-            repo_ref=workspace_request["repo_ref"],
-            context_paths=workspace_request["context_paths"],
-            volume_name=workspace_request["volume_name"],
         )
 
     async def aiter_chat_turn_stream(
@@ -205,28 +219,15 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
             context_paths=effective_context_inputs,
             volume_name=effective_volume_name,
         )
+        if (
+            interpreter._session is not None
+            or interpreter._persisted_sandbox_id is not None
+        ):
+            await interpreter.aget_session()
         effective_context_paths = self._effective_context_paths(
             docs_path=docs_path,
             context_paths=effective_context_inputs,
         )
-        runtime_metadata = interpreter.current_runtime_metadata()
-        runtime_payload = {
-            "runtime_mode": "daytona_pilot",
-            "execution_mode": self.execution_mode,
-            "depth": self.current_depth,
-            "max_depth": self._max_depth,
-            "execution_profile": str(
-                getattr(
-                    self.interpreter.default_execution_profile,
-                    "value",
-                    self.interpreter.default_execution_profile,
-                )
-            ),
-            "effective_max_iters": max(self.react_max_iters, self.rlm_max_iterations),
-            **runtime_metadata,
-        }
-        runtime_payload.setdefault("sandbox_active", False)
-        runtime_payload.setdefault("volume_name", self.interpreter.volume_name)
 
         yield StreamEvent(
             kind="status",
@@ -236,7 +237,25 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
                 "repo_url": effective_repo_url,
                 "repo_ref": effective_repo_ref,
                 "context_paths": effective_context_paths,
-                "runtime": runtime_payload,
+                "runtime": {
+                    "runtime_mode": "daytona_pilot",
+                    "execution_mode": self.execution_mode,
+                    "depth": self.current_depth,
+                    "max_depth": self._max_depth,
+                    "execution_profile": str(
+                        getattr(
+                            self.interpreter.default_execution_profile,
+                            "value",
+                            self.interpreter.default_execution_profile,
+                        )
+                    ),
+                    "sandbox_active": False,
+                    "sandbox_id": None,
+                    "effective_max_iters": max(
+                        self.react_max_iters, self.rlm_max_iterations
+                    ),
+                    "volume_name": self.interpreter.volume_name,
+                },
             },
         )
 
@@ -250,11 +269,6 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
             runtime_payload = dict(payload.get("runtime", {}) or {})
             runtime_payload.setdefault("runtime_mode", "daytona_pilot")
             runtime_payload.setdefault("volume_name", self.interpreter.volume_name)
-            current_runtime = interpreter.current_runtime_metadata()
-            for key, value in current_runtime.items():
-                runtime_payload.setdefault(key, value)
-                if key.startswith("runtime_"):
-                    payload.setdefault(key, value)
             payload["runtime"] = runtime_payload
             payload.setdefault("runtime_mode", "daytona_pilot")
             yield StreamEvent(
@@ -264,44 +278,3 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
                 timestamp=event.timestamp,
                 flush_tokens=event.flush_tokens,
             )
-
-    def _normalized_import_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        raw_daytona = state.get("daytona", {})
-        daytona_state = raw_daytona if isinstance(raw_daytona, dict) else {}
-        self.loaded_document_paths = dedupe_paths(
-            [str(item) for item in daytona_state.get("loaded_document_paths", []) or []]
-        )
-        normalized_state = dict(state)
-        normalized_state["history"] = self._normalize_history(state.get("history"))
-        return normalized_state
-
-    def _normalize_history(self, history: Any) -> list[dict[str, str]]:
-        if not isinstance(history, list):
-            return []
-        normalized_history: list[dict[str, str]] = []
-        for item in history:
-            if not isinstance(item, dict):
-                continue
-            turn = normalize_history_turn(item)
-            if turn is not None:
-                normalized_history.append(turn)
-        return normalized_history
-
-    def _resolve_workspace_request(
-        self,
-        *,
-        docs_path: str | None,
-        repo_url: str | None,
-        repo_ref: str | None,
-        context_paths: list[str] | None,
-        volume_name: str | None,
-    ) -> _WorkspaceRequest:
-        return {
-            "repo_url": repo_url,
-            "repo_ref": repo_ref,
-            "context_paths": self._effective_context_paths(
-                docs_path=docs_path,
-                context_paths=context_paths,
-            ),
-            "volume_name": volume_name,
-        }

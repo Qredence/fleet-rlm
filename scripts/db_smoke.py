@@ -10,9 +10,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
-from fleet_rlm.integrations.database.models import (
+from fleet_rlm.integrations.database import (
     ArtifactKind,
+    DatabaseManager,
+    FleetRepository,
     JobType,
     MemoryKind,
     MemoryScope,

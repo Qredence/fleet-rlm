@@ -25,7 +25,6 @@ from .runtime_helpers import (
     _await_if_needed,
     _build_daytona_client,
     _daytona_import_error,
-    _resolve_clone_ref,
     _run_async_compat,
 )
 
@@ -458,7 +457,4 @@ __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
-    "_await_if_needed",
-    "_resolve_clone_ref",
-    "_run_async_compat",
 ]

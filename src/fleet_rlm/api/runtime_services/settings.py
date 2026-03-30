@@ -232,11 +232,11 @@ async def apply_runtime_settings_patch(
             env_snapshot=env_snapshot,
         )
         _restore_runtime_config_snapshot(state=state, snapshot=runtime_snapshot)
-        schedule_optional_runtime_startup(state, config)
+        schedule_optional_runtime_startup(state)
         raise
 
     apply_runtime_settings_to_config(config=config, normalized=applied_updates)
     state.planner_lm = next_planner_lm
     state.delegate_lm = next_delegate_lm
-    schedule_optional_runtime_startup(state, config)
+    schedule_optional_runtime_startup(state)
     return RuntimeSettingsUpdateResponse(**result)
