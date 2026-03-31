@@ -67,7 +67,7 @@ export function ShellSidepanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">
-      <div className="shrink-0 border-b border-border-subtle/80 bg-card/95 backdrop-blur-sm px-4 py-3">
+      <div className="shrink-0 border-b border-border-subtle/80 px-4 py-3">
         <div className="truncate text-sm font-semibold tracking-tight text-foreground">
           {panelMeta.title}
         </div>
