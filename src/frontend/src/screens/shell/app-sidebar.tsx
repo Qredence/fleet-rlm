@@ -236,7 +236,7 @@ export function AppSidebar() {
         <div
           className={cn(
             "rounded-[14px] border border-sidebar-border/75 bg-sidebar-accent/[0.34] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]",
-            sidebarState === "collapsed" && "bg-transparent shadow-none",
+            sidebarState === "collapsed" && "border-transparent bg-transparent shadow-none",
           )}
         >
           <SidebarMenu className="gap-0.5">
