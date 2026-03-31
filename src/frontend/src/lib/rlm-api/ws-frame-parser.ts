@@ -1,8 +1,4 @@
-import type {
-  WsEventKind,
-  WsServerEvent,
-  WsServerMessage,
-} from "@/lib/rlm-api/ws-types";
+import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/ws-types";
 
 function isWsEventKind(value: string): value is WsEventKind {
   return [
@@ -68,9 +64,7 @@ function asTimestamp(value: unknown): string | number | undefined {
   return undefined;
 }
 
-function normalizeExecutionStepKind(
-  step: Record<string, unknown>,
-): WsEventKind {
+function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind {
   const rawType = String(step.type ?? "")
     .trim()
     .toLowerCase();
@@ -89,9 +83,7 @@ function normalizeExecutionStepKind(
   return "status";
 }
 
-function parseExecutionEnvelope(
-  parsed: Record<string, unknown>,
-): WsServerEvent | null {
+function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent | null {
   const frameType = String(parsed.type ?? "").trim();
   if (!frameType.startsWith("execution_")) return null;
 
@@ -112,9 +104,7 @@ function parseExecutionEnvelope(
 
   if (frameType === "execution_completed") {
     const summary = asRecord(parsed.summary) ?? asRecord(parsed.payload);
-    const artifact = asRecord(
-      summary?.final_artifact ?? summary?.finalArtifact,
-    );
+    const artifact = asRecord(summary?.final_artifact ?? summary?.finalArtifact);
     const artifactValue = asRecord(artifact?.value);
     return {
       type: "event",
@@ -164,12 +154,7 @@ function parseExecutionEnvelope(
 
   const kind = normalizeExecutionStepKind(step);
   const text = asText(
-    step.label ??
-      step.output ??
-      step.input ??
-      step.content ??
-      step.message ??
-      kind,
+    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind,
   );
 
   return {
@@ -187,9 +172,7 @@ function parseExecutionEnvelope(
   };
 }
 
-export function parseWsServerFrame(
-  parsed: Record<string, unknown>,
-): WsServerMessage | null {
+export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMessage | null {
   const frameType = String(parsed.type ?? "");
 
   if (frameType === "event") {
@@ -205,8 +188,7 @@ export function parseWsServerFrame(
         kind,
         text: asText(envelope.text),
         payload: asRecord(envelope.payload) ?? undefined,
-        timestamp:
-          asTimestamp(envelope.timestamp) ?? asTimestamp(parsed.timestamp),
+        timestamp: asTimestamp(envelope.timestamp) ?? asTimestamp(parsed.timestamp),
         version: asNumber(envelope.version ?? parsed.version),
         event_id:
           typeof envelope.event_id === "string"
@@ -222,8 +204,7 @@ export function parseWsServerFrame(
     const result = asRecord(parsed.result) ?? {};
     const command = asText(parsed.command || "command");
     const status = String(result.status ?? "ok").toLowerCase();
-    const kind: WsEventKind =
-      status === "ok" ? "command_ack" : "command_reject";
+    const kind: WsEventKind = status === "ok" ? "command_ack" : "command_reject";
 
     return {
       type: "event",
@@ -239,8 +220,7 @@ export function parseWsServerFrame(
           raw: parsed,
         },
         version: asNumber(parsed.version),
-        event_id:
-          typeof parsed.event_id === "string" ? parsed.event_id : undefined,
+        event_id: typeof parsed.event_id === "string" ? parsed.event_id : undefined,
       },
     };
   }
