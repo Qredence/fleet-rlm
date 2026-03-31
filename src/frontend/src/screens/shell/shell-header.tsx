@@ -54,13 +54,8 @@ export function ShellHeader() {
               >
                 <PanelRight className="size-4" />
                 {!isMobile ? (
-                  <span className="flex min-w-0 flex-col items-start leading-tight">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/78">
-                      {isCanvasOpen ? "Hide panel" : "Show panel"}
-                    </span>
-                    <span className="text-xs font-medium text-foreground/90">
-                      {panelMeta.toggleLabel}
-                    </span>
+                  <span className="text-xs font-medium text-foreground/90">
+                    {panelMeta.toggleLabel}
                   </span>
                 ) : null}
                 <span className="sr-only">{canvasActionLabel}</span>
