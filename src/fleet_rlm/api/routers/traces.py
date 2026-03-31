@@ -11,7 +11,7 @@ from fleet_rlm.integrations.observability import log_trace_feedback, resolve_tra
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..dependencies import HTTPIdentityDep
-from ..runtime_services.common import run_blocking
+from ..runtime_services.common import RUNTIME_TEST_TIMEOUT_SECONDS, run_blocking
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
 
 router = APIRouter(prefix="/traces", tags=["traces"])
@@ -108,7 +108,7 @@ async def create_trace_feedback(
                 client_request_id=request.client_request_id,
                 config=config,
             ),
-            timeout=20,
+            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         raise HTTPException(
@@ -154,7 +154,7 @@ async def create_trace_feedback(
                     "name": identity.name or "",
                 },
             ),
-            timeout=20,
+            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         raise HTTPException(

@@ -43,12 +43,16 @@ async def switch_session_if_needed(
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,
+            "authenticated_workspace_id": workspace_id,
+            "authenticated_user_id": user_id,
             "session_id": sess_id,
             "manifest": manifest if isinstance(manifest, dict) else {},
             "session": {"state": {}, "session_id": sess_id},
         }
 
     cached["session_id"] = sess_id
+    cached["authenticated_workspace_id"] = workspace_id
+    cached["authenticated_user_id"] = user_id
     state.sessions[key] = cached
 
     session_data = cached.get("session")

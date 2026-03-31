@@ -153,6 +153,8 @@ def test_sessions_state_endpoint_is_scoped_to_resolved_identity(
             "tenant-a:user-a:session-a": {
                 "workspace_id": "tenant-a",
                 "user_id": "user-a",
+                "authenticated_workspace_id": "tenant-a",
+                "authenticated_user_id": "user-a",
                 "session_id": "session-a",
                 "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
                 "manifest": {"artifacts": [{"name": "artifact-a"}]},
@@ -160,6 +162,8 @@ def test_sessions_state_endpoint_is_scoped_to_resolved_identity(
             "tenant-b:user-b:session-b": {
                 "workspace_id": "tenant-b",
                 "user_id": "user-b",
+                "authenticated_workspace_id": "tenant-b",
+                "authenticated_user_id": "user-b",
                 "session_id": "session-b",
                 "session": {"state": {"history": [{"role": "user", "content": "bye"}]}},
                 "manifest": {"artifacts": [{"name": "artifact-b"}]},
@@ -191,6 +195,8 @@ def test_sessions_state_endpoint_matches_sanitized_identity_claims(
     state.sessions[session_key] = {
         "workspace_id": workspace_id,
         "user_id": user_id,
+        "authenticated_workspace_id": workspace_id,
+        "authenticated_user_id": user_id,
         "session_id": "session-a",
         "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
         "manifest": {"artifacts": [{"name": "artifact-a"}]},
@@ -229,18 +235,7 @@ def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert isinstance(payload["sessions"], list)
-    assert {session["key"] for session in payload["sessions"]} == {"broken", "partial"}
-    broken, partial = payload["sessions"]
-    assert broken["workspace_id"] == "default"
-    assert broken["user_id"] == "anonymous"
-    assert broken["session_id"] is None
-    assert partial["workspace_id"] == "default"
-    assert partial["user_id"] == "anonymous"
-    assert partial["session_id"] is None
-    assert partial["updated_at"] is None
-    assert partial["history_turns"] == 0
-    assert partial["document_count"] == 0
+    assert payload["sessions"] == []
 
 
 def test_openapi_publishes_http_bearer_security_for_protected_routes(
