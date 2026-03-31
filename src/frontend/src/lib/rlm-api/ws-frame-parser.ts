@@ -58,6 +58,12 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function asTimestamp(value: unknown): string | number | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
+}
+
 function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind {
   const rawType = String(step.type ?? "")
     .trim()
@@ -91,7 +97,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           source_type: frameType,
           ...parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp: asTimestamp(parsed.timestamp),
       },
     };
   }
@@ -120,7 +126,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           ...(summary ? { run_summary: summary, ...summary } : {}),
           raw: parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp: asTimestamp(parsed.timestamp),
       },
     };
   }
@@ -141,7 +147,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
           source_type: frameType,
           raw: parsed,
         },
-        timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : undefined,
+        timestamp: asTimestamp(parsed.timestamp),
       },
     };
   }
@@ -161,12 +167,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
         step,
         raw: parsed,
       },
-      timestamp:
-        typeof step.timestamp === "string"
-          ? step.timestamp
-          : typeof parsed.timestamp === "string"
-            ? parsed.timestamp
-            : undefined,
+      timestamp: asTimestamp(step.timestamp) ?? asTimestamp(parsed.timestamp),
     },
   };
 }
@@ -187,12 +188,7 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
         kind,
         text: asText(envelope.text),
         payload: asRecord(envelope.payload) ?? undefined,
-        timestamp:
-          typeof envelope.timestamp === "string"
-            ? envelope.timestamp
-            : typeof parsed.timestamp === "string"
-              ? parsed.timestamp
-              : undefined,
+        timestamp: asTimestamp(envelope.timestamp) ?? asTimestamp(parsed.timestamp),
         version: asNumber(envelope.version ?? parsed.version),
         event_id:
           typeof envelope.event_id === "string"

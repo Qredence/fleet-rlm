@@ -69,7 +69,7 @@ describe("parseWsServerFrame", () => {
     const frame = parseWsServerFrame({
       type: "execution_completed",
       output: "Done",
-      timestamp: "2026-03-19T12:00:00.000Z",
+      timestamp: 1710849600,
       summary: {
         run_id: "run-123",
         runtime_mode: "daytona_pilot",
@@ -92,5 +92,25 @@ describe("parseWsServerFrame", () => {
       warnings: ["One warning"],
     });
     expect(frame.data.text).toBe("Done");
+    expect(frame.data.timestamp).toBe(1710849600);
+  });
+
+  it("preserves numeric timestamps on execution_step frames", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_step",
+      timestamp: 1710849601,
+      step: {
+        id: "step-1",
+        type: "tool",
+        label: "Tool result",
+        output: "ok",
+        timestamp: 1710849602,
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("tool_result");
+    expect(frame.data.timestamp).toBe(1710849602);
   });
 });

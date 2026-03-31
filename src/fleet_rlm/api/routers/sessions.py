@@ -4,8 +4,9 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter
 
-from ..dependencies import ServerStateDep
+from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..schemas.core import SessionStateResponse, SessionStateSummary
+from ..server_utils import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -16,6 +17,21 @@ def _string_or_default(value: object, default: str) -> str:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _parse_session_key_owner(key: object) -> tuple[str | None, str | None]:
+    if not isinstance(key, str):
+        return None, None
+    workspace_id, separator, remainder = key.partition(":")
+    if not separator:
+        return None, None
+    user_id, separator, _session_id = remainder.partition(":")
+    if not separator:
+        return None, None
+    return (
+        workspace_id or None,
+        user_id or None,
+    )
 
 
 @router.get(
@@ -30,11 +46,32 @@ def _optional_string(value: object) -> str | None:
         },
     },
 )
-async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
+async def list_session_state(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []
+    expected_workspace_id = _sanitize_id(identity.tenant_claim, "default")
+    expected_user_id = _sanitize_id(identity.user_claim, "anonymous")
     for key, payload in state.sessions.items():
-        payload_dict = payload if isinstance(payload, Mapping) else {}
+        if not isinstance(payload, Mapping):
+            continue
+        payload_dict = payload
+        key_workspace_id, key_user_id = _parse_session_key_owner(key)
+        authenticated_workspace_id = _optional_string(
+            payload_dict.get("authenticated_workspace_id")
+        )
+        authenticated_user_id = _optional_string(
+            payload_dict.get("authenticated_user_id")
+        )
+        if authenticated_workspace_id is None or authenticated_user_id is None:
+            if key_workspace_id is None or key_user_id is None:
+                continue
+        workspace_id = authenticated_workspace_id or key_workspace_id or "default"
+        user_id = authenticated_user_id or key_user_id or "anonymous"
+        if workspace_id != expected_workspace_id or user_id != expected_user_id:
+            continue
         manifest = payload_dict.get("manifest", {})
         session = payload_dict.get("session", {})
         session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
@@ -57,10 +94,8 @@ async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
         summaries.append(
             SessionStateSummary(
                 key=str(key),
-                workspace_id=_string_or_default(
-                    payload_dict.get("workspace_id"), "default"
-                ),
-                user_id=_string_or_default(payload_dict.get("user_id"), "anonymous"),
+                workspace_id=workspace_id,
+                user_id=user_id,
                 session_id=_optional_string(payload_dict.get("session_id")),
                 history_turns=len(history) if isinstance(history, list) else 0,
                 document_count=len(documents) if isinstance(documents, dict) else 0,

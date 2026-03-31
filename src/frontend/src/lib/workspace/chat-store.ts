@@ -1,12 +1,7 @@
 import { create } from "zustand";
 import type { QueryClient } from "@tanstack/react-query";
 
-import {
-  createBackendSessionId,
-  rlmApiConfig,
-  streamChatOverWs,
-  type WsServerMessage,
-} from "@/lib/rlm-api";
+import { createBackendSessionId, streamChatOverWs, type WsServerMessage } from "@/lib/rlm-api";
 import { telemetryClient } from "@/lib/telemetry/client";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
 import type { ChatMessage, ExecutionStep } from "@/lib/workspace/workspace-types";
@@ -132,8 +127,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       trace: traceEnabled,
       runtime_mode: resolvedRuntimeMode,
       analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
-      workspace_id: rlmApiConfig.workspaceId,
-      user_id: rlmApiConfig.userId,
       session_id: sessionId,
       trace_mode: traceEnabled ? "compact" : "off",
     } as const;
