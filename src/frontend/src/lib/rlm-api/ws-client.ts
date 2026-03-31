@@ -1,6 +1,9 @@
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { createWsError } from "@/lib/rlm-api/ws-frame-parser";
-import { createBackendSessionId, createReconnectingWs } from "@/lib/rlm-api/ws-reconnecting";
+import {
+  createBackendSessionId,
+  createReconnectingWs,
+} from "@/lib/rlm-api/ws-reconnecting";
 import type {
   WsCommandRequest,
   StreamWsOptions,
@@ -102,12 +105,6 @@ export function subscribeToExecutionStream(
 
   const urlObj = new URL(rlmApiConfig.wsExecutionUrl);
   urlObj.searchParams.set("session_id", String(sessionId));
-  if (rlmApiConfig.workspaceId) {
-    urlObj.searchParams.set("workspace_id", rlmApiConfig.workspaceId);
-  }
-  if (rlmApiConfig.userId) {
-    urlObj.searchParams.set("user_id", rlmApiConfig.userId);
-  }
 
   createReconnectingWs(null, {
     ...options,

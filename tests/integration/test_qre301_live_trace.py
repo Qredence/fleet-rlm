@@ -89,8 +89,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
         assert status_resp.status_code == 200
 
         with client.websocket_connect(
-            f"/api/v1/ws/execution?workspace_id={workspace_id}&user_id={user_id}"
-            f"&session_id={session_id}",
+            f"/api/v1/ws/execution?session_id={session_id}",
             headers=headers,
         ) as execution_ws:
             with client.websocket_connect(
@@ -102,8 +101,6 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                         "content": prompt,
                         "docs_path": docs_path,
                         "trace": True,
-                        "workspace_id": workspace_id,
-                        "user_id": user_id,
                         "session_id": session_id,
                     }
                 )
@@ -137,8 +134,6 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                             "content": "QRE-301 artifact persistence probe",
                             "append": False,
                         },
-                        "workspace_id": workspace_id,
-                        "user_id": user_id,
                         "session_id": session_id,
                     }
                 )
@@ -150,8 +145,6 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                 chat_ws.send_json(
                     {
                         "type": "cancel",
-                        "workspace_id": workspace_id,
-                        "user_id": user_id,
                         "session_id": session_id,
                     }
                 )
@@ -201,7 +194,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                     }
                     assert isinstance(step.get("timestamp"), (int, float))
 
-        session_state_resp = client.get("/api/v1/sessions/state")
+        session_state_resp = client.get("/api/v1/sessions/state", headers=headers)
         assert session_state_resp.status_code == 200
         session_payload = session_state_resp.json()
         sessions = session_payload.get("sessions", [])

@@ -489,7 +489,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/execution?workspace_id=default&user_id=alice&session_id=session-123",
+        "/api/v1/ws/execution?session_id=session-123",
         headers=websocket_auth_headers,
     ) as execution_ws:
         with ws_client.websocket_connect(
@@ -499,8 +499,6 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
                 {
                     "type": "message",
                     "content": "test execution events",
-                    "workspace_id": "default",
-                    "user_id": "alice",
                     "session_id": "session-123",
                 }
             )
@@ -754,6 +752,35 @@ def test_websocket_session_state_isolated_by_session_id(
     ]
     assert "default:alice:session-a" in keys
     assert "default:alice:session-b" in keys
+
+
+def test_websocket_ignores_client_workspace_and_user_identity_fields(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(kind="final", text="Canonical identity", timestamp=ts(1.0)),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "use canonical auth identity",
+                "workspace_id": "spoofed-workspace",
+                "user_id": "spoofed-user",
+                "session_id": "canonical-session",
+            }
+        )
+        frame = websocket.receive_json()
+
+    assert frame["data"]["text"] == "Canonical identity"
+    keys = list(ws_client.app.state.server_state.sessions.keys())
+    assert "default:alice:canonical-session" in keys
+    assert "spoofed-workspace:spoofed-user:canonical-session" not in keys
 
 
 def test_websocket_with_docs_path(

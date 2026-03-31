@@ -3,7 +3,11 @@ export type WsTraceMode = "compact" | "verbose" | "off";
 export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
 export type WsRuntimeMode = "modal_chat" | "daytona_pilot";
 
-export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
+export type WsConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
 
 export interface WsConnectionOptions {
   maxRetries?: number; // default 5
@@ -25,8 +29,6 @@ export interface WsMessageRequest {
   context_paths?: string[] | null;
   batch_concurrency?: number | null;
   analytics_enabled?: boolean;
-  workspace_id?: string;
-  user_id?: string;
   session_id?: string;
 }
 
@@ -38,12 +40,13 @@ export interface WsCommandRequest {
   type: "command";
   command: string;
   args?: Record<string, unknown>;
-  workspace_id?: string;
-  user_id?: string;
   session_id?: string;
 }
 
-export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
+export type WsClientMessage =
+  | WsMessageRequest
+  | WsCancelRequest
+  | WsCommandRequest;
 
 export type WsEventKind =
   | "assistant_token"
@@ -68,7 +71,7 @@ export interface WsEventPayload {
   kind: WsEventKind;
   text: string;
   payload?: Record<string, unknown>;
-  timestamp?: string;
+  timestamp?: string | number;
   version?: number;
   event_id?: string;
 }

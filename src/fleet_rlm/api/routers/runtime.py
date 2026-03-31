@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
 from fleet_rlm.utils.modal import load_modal_config
@@ -15,7 +14,6 @@ from ..runtime_services import (
     apply_runtime_settings_patch,
     build_runtime_settings_snapshot,
     build_runtime_status_response,
-    json_model_response,
     load_volume_file_content,
     load_volume_tree,
     run_daytona_connection_test,
@@ -85,9 +83,9 @@ VOLUME_FILE_RESPONSES = {
     response_model=RuntimeSettingsSnapshot,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
+async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
-    return json_model_response(build_runtime_settings_snapshot(state=state))
+    return build_runtime_settings_snapshot(state=state)
 
 
 @router.patch(
@@ -98,15 +96,13 @@ async def get_runtime_settings(state: ServerStateDep) -> JSONResponse:
 async def patch_runtime_settings(
     state: ServerStateDep,
     request: RuntimeSettingsUpdateRequest,
-) -> JSONResponse:
+) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
-    return json_model_response(
-        await apply_runtime_settings_patch(
-            state=state,
-            request=request,
-            planner_loader=get_planner_lm_from_env,
-            delegate_loader=get_delegate_lm_from_env,
-        )
+    return await apply_runtime_settings_patch(
+        state=state,
+        request=request,
+        planner_loader=get_planner_lm_from_env,
+        delegate_loader=get_delegate_lm_from_env,
     )
 
 
@@ -117,13 +113,11 @@ async def patch_runtime_settings(
 )
 async def test_modal_connection(
     state: ServerStateDep,
-) -> JSONResponse:
+) -> RuntimeConnectivityTestResponse:
     """Run the Modal preflight and smoke test used by the Settings diagnostics UI."""
-    return json_model_response(
-        await run_modal_connection_test(
-            state=state,
-            load_modal_config=load_modal_config,
-        )
+    return await run_modal_connection_test(
+        state=state,
+        load_modal_config=load_modal_config,
     )
 
 
@@ -132,14 +126,12 @@ async def test_modal_connection(
     response_model=RuntimeConnectivityTestResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
+async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestResponse:
     """Verify that the planner and delegate language-model configuration can load."""
-    return json_model_response(
-        await run_lm_connection_test(
-            state=state,
-            planner_loader=get_planner_lm_from_env,
-            delegate_loader=get_delegate_lm_from_env,
-        )
+    return await run_lm_connection_test(
+        state=state,
+        planner_loader=get_planner_lm_from_env,
+        delegate_loader=get_delegate_lm_from_env,
     )
 
 
@@ -148,9 +140,11 @@ async def test_lm_connection(state: ServerStateDep) -> JSONResponse:
     response_model=RuntimeConnectivityTestResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def test_daytona_connection(state: ServerStateDep) -> JSONResponse:
+async def test_daytona_connection(
+    state: ServerStateDep,
+) -> RuntimeConnectivityTestResponse:
     """Run the Daytona preflight and connectivity check exposed in runtime diagnostics."""
-    return json_model_response(await run_daytona_connection_test(state=state))
+    return await run_daytona_connection_test(state=state)
 
 
 @router.get(
@@ -158,13 +152,11 @@ async def test_daytona_connection(state: ServerStateDep) -> JSONResponse:
     response_model=RuntimeStatusResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_status(state: ServerStateDep) -> JSONResponse:
+async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
-    return json_model_response(
-        build_runtime_status_response(
-            state=state,
-            load_modal_config=load_modal_config,
-        )
+    return build_runtime_status_response(
+        state=state,
+        load_modal_config=load_modal_config,
     )
 
 
@@ -194,16 +186,14 @@ async def get_volume_tree(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
-) -> JSONResponse:
+) -> VolumeTreeResponse:
     """List the runtime volume tree for the active workspace and provider."""
-    return json_model_response(
-        await load_volume_tree(
-            state=state,
-            identity=identity,
-            provider=provider,
-            root_path=root_path,
-            max_depth=max_depth,
-        )
+    return await load_volume_tree(
+        state=state,
+        identity=identity,
+        provider=provider,
+        root_path=root_path,
+        max_depth=max_depth,
     )
 
 
@@ -236,14 +226,12 @@ async def get_volume_file_content(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
-) -> JSONResponse:
+) -> VolumeFileContentResponse:
     """Read a text preview for a single file from the runtime volume."""
-    return json_model_response(
-        await load_volume_file_content(
-            state=state,
-            identity=identity,
-            provider=provider,
-            path=path,
-            max_bytes=max_bytes,
-        )
+    return await load_volume_file_content(
+        state=state,
+        identity=identity,
+        provider=provider,
+        path=path,
+        max_bytes=max_bytes,
     )

@@ -4,8 +4,9 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter
 
-from ..dependencies import ServerStateDep
+from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..schemas.core import SessionStateResponse, SessionStateSummary
+from ..server_utils import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -30,11 +31,20 @@ def _optional_string(value: object) -> str | None:
         },
     },
 )
-async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
+async def list_session_state(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []
+    expected_workspace_id = _sanitize_id(identity.tenant_claim, "default")
+    expected_user_id = _sanitize_id(identity.user_claim, "anonymous")
     for key, payload in state.sessions.items():
         payload_dict = payload if isinstance(payload, Mapping) else {}
+        workspace_id = _string_or_default(payload_dict.get("workspace_id"), "default")
+        user_id = _string_or_default(payload_dict.get("user_id"), "anonymous")
+        if workspace_id != expected_workspace_id or user_id != expected_user_id:
+            continue
         manifest = payload_dict.get("manifest", {})
         session = payload_dict.get("session", {})
         session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
@@ -57,10 +67,8 @@ async def list_session_state(state: ServerStateDep) -> SessionStateResponse:
         summaries.append(
             SessionStateSummary(
                 key=str(key),
-                workspace_id=_string_or_default(
-                    payload_dict.get("workspace_id"), "default"
-                ),
-                user_id=_string_or_default(payload_dict.get("user_id"), "anonymous"),
+                workspace_id=workspace_id,
+                user_id=user_id,
                 session_id=_optional_string(payload_dict.get("session_id")),
                 history_turns=len(history) if isinstance(history, list) else 0,
                 document_count=len(documents) if isinstance(documents, dict) else 0,
