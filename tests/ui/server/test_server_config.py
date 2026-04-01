@@ -294,11 +294,17 @@ def test_ws_message_defaults() -> None:
     assert msg.session_id is None
 
 
-def test_ws_message_rejects_legacy_identity_fields() -> None:
+@pytest.mark.parametrize(
+    ("payload"),
+    [
+        {"workspace_id": "legacy-workspace", "user_id": "legacy-user"},
+        {"workspace_id": None, "user_id": None},
+    ],
+)
+def test_ws_message_rejects_legacy_identity_fields(
+    payload: dict[str, str | None],
+) -> None:
     with pytest.raises(ValidationError) as exc_info:
-        WSMessage(
-            workspace_id="legacy-workspace",
-            user_id="legacy-user",
-        )
+        WSMessage(**payload)
 
     assert "unsupported_identity_fields" in str(exc_info.value)

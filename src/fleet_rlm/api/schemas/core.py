@@ -137,7 +137,7 @@ class WSMessage(BaseModel):
         if not isinstance(raw, dict):
             return raw
 
-        if raw.get("workspace_id") is not None or raw.get("user_id") is not None:
+        if "workspace_id" in raw or "user_id" in raw:
             raise PydanticCustomError(
                 "unsupported_identity_fields",
                 "WebSocket identity is derived from auth. Remove workspace_id/user_id and use session_id only.",

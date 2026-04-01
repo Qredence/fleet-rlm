@@ -61,3 +61,27 @@ def test_websocket_command_rejects_legacy_identity_fields(
     assert data["type"] == "error"
     assert data["code"] == "unsupported_identity_fields"
     assert "session_id only" in data["message"]
+
+
+def test_websocket_command_rejects_null_legacy_identity_fields(
+    ws_client,
+    websocket_auth_headers,
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "command",
+                "command": "list_documents",
+                "args": {},
+                "workspace_id": None,
+                "user_id": None,
+            }
+        )
+
+        data = websocket.receive_json()
+
+    assert data["type"] == "error"
+    assert data["code"] == "unsupported_identity_fields"
+    assert "session_id only" in data["message"]

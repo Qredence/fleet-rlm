@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...dependencies import ServerState, session_key
+from ...server_utils import owner_fingerprint
 from .manifest import _manifest_path, load_manifest_from_volume
 from .types import ChatAgentProtocol, LocalPersistFn
 

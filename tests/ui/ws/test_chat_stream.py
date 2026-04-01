@@ -799,6 +799,31 @@ def test_websocket_rejects_legacy_identity_fields(ws_client, websocket_auth_head
     assert not any("canonical-session" in key for key in keys)
 
 
+def test_websocket_rejects_null_legacy_identity_fields(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "use canonical auth identity",
+                "workspace_id": None,
+                "user_id": None,
+                "session_id": "canonical-session",
+            }
+        )
+        frame = websocket.receive_json()
+
+    assert frame["type"] == "error"
+    assert frame["code"] == "unsupported_identity_fields"
+    assert "session_id only" in frame["message"]
+    keys = list(ws_client.app.state.server_state.sessions.keys())
+    assert session_key("default", "alice", "canonical-session") not in keys
+    assert not any("canonical-session" in key for key in keys)
+
+
 def test_websocket_with_docs_path(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
