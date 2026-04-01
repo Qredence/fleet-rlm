@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 import pytest
 from fastapi import WebSocketDisconnect
 
+from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.routers.ws.stream import (
     _emit_stream_event,
@@ -262,6 +263,8 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
         interpreter=None,
         workspace_id="tenant-a",
         user_id="user-a",
+        owner_tenant_claim="tenant-a",
+        owner_user_claim="user-a",
         sess_id="session-a",
         active_key=None,
         session_record=None,
@@ -269,7 +272,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
         local_persist=_noop_persist,
     )
 
-    assert key == "tenant-a:user-a:session-a"
+    assert key == session_key("tenant-a", "user-a", "session-a")
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
@@ -281,7 +284,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
 async def test_switch_session_uses_async_import_for_restored_state() -> None:
     state = SimpleNamespace(
         sessions={
-            "tenant-a:user-a:session-a": {
+            session_key("tenant-a", "user-a", "session-a"): {
                 "session_id": "session-a",
                 "manifest": {},
                 "session": {"state": {"history": [{"user_request": "hi"}]}},
@@ -296,6 +299,8 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
         interpreter=None,
         workspace_id="tenant-a",
         user_id="user-a",
+        owner_tenant_claim="tenant-a",
+        owner_user_claim="user-a",
         sess_id="session-a",
         active_key=None,
         session_record=None,
@@ -303,7 +308,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
         local_persist=_noop_persist,
     )
 
-    assert key == "tenant-a:user-a:session-a"
+    assert key == session_key("tenant-a", "user-a", "session-a")
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None

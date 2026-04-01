@@ -28,8 +28,8 @@ All commands below run from `src/frontend/`:
 | `pnpm run type-check` | Run TypeScript type checks |
 | `pnpm run lint` | Run the frontend lint rules |
 | `pnpm run lint:robustness` | Run the repo-aligned frontend lint lane |
-| `pnpm run format` | Format frontend source files with Prettier |
-| `pnpm run format:check` | Check frontend formatting without writing changes |
+| `pnpm run format` | Format frontend source files with Vite+ `vp fmt` (backed by Oxc/Oxfmt) |
+| `pnpm run format:check` | Check frontend formatting with `vp fmt --check` |
 | `pnpm run test:unit` | Run Vitest unit tests |
 | `pnpm run test:watch` | Run Vitest in watch mode |
 | `pnpm run test:coverage` | Run Vitest with coverage output |
@@ -81,8 +81,6 @@ Frontend source lives under `src/frontend/src/`.
 Expected frontend environment:
 
 - `VITE_FLEET_API_URL=http://localhost:8000`
-- `VITE_FLEET_WORKSPACE_ID=default`
-- `VITE_FLEET_USER_ID=fleetwebapp-user`
 - `VITE_FLEET_TRACE=true`
 
 Optional overrides:

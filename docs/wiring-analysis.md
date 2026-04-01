@@ -251,8 +251,6 @@ openapi.yaml  ──(api:sync-spec)──►  openapi/fleet-rlm.openapi.yaml
 |----------|---------|---------|
 | `VITE_FLEET_API_URL` | `http://localhost:8000` | Base URL for REST API calls |
 | `VITE_FLEET_WS_URL` | *(derived)* | Explicit WebSocket URL override |
-| `VITE_FLEET_WORKSPACE_ID` | `"default"` | Session workspace identifier |
-| `VITE_FLEET_USER_ID` | `"fleetwebapp-user"` | Session user identifier |
 | `VITE_FLEET_TRACE` | `true` | Include trace/reasoning data from backend |
 | `VITE_MOCK_MODE` | `false` | Run frontend with mock data (no backend) |
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from fleet_rlm.integrations.database import SandboxProvider
@@ -22,6 +23,12 @@ def sanitize_id(value: str, default_value: str) -> str:
     if not re.search(r"[A-Za-z0-9]", cleaned):
         return default_value
     return cleaned[:128] or default_value
+
+
+def owner_fingerprint(tenant_claim: str, user_claim: str) -> str:
+    """Return a collision-resistant owner fingerprint for session scoping."""
+    payload = f"{tenant_claim}\0{user_claim}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:

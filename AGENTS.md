@@ -138,7 +138,7 @@ Use subsystem-specific AGENTS files for narrower backend/frontend test lists and
 Mandatory baseline for code changes before commit or PR:
 
 - Backend or shared Python edits: `make format`, `make lint`, `make typecheck`
-- Frontend edits: `cd src/frontend && pnpm run format`, `pnpm run lint:robustness`, `pnpm run type-check`
+- Frontend edits: `cd src/frontend && pnpm run format` (Vite+ `vp fmt`, backed by Oxc/Oxfmt), `pnpm run lint:robustness`, `pnpm run type-check`
 
 Docs-only changes:
 

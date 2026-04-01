@@ -8,9 +8,7 @@ import {
 } from "@/components/ui/empty";
 
 import { useNavigationStore } from "@/stores/navigation-store";
-import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { cn } from "@/lib/utils";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
@@ -59,7 +57,6 @@ function navLabel(nav: string): string {
 
 export function ShellSidepanel() {
   const activeNav = useNavigationStore((state) => state.activeNav);
-  const isMobile = useIsMobile();
   const panelMeta = getShellPanelMeta(activeNav);
 
   const isUnsupportedNav = !isSectionSupported(activeNav);

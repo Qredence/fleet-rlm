@@ -118,14 +118,6 @@ class WSMessage(BaseModel):
         default=None,
         description="Optional Daytona concurrency hint for batched repository work.",
     )
-    workspace_id: str = Field(
-        default="default",
-        description="Workspace identifier used to scope server-side session state.",
-    )
-    user_id: str = Field(
-        default="anonymous",
-        description="User identifier used to scope server-side session state.",
-    )
     session_id: str | None = Field(
         default=None,
         description="Optional session identifier for restoring an existing websocket session.",
@@ -144,6 +136,12 @@ class WSMessage(BaseModel):
     def _validate_daytona_message_contract(cls, raw: Any) -> Any:
         if not isinstance(raw, dict):
             return raw
+
+        if "workspace_id" in raw or "user_id" in raw:
+            raise PydanticCustomError(
+                "unsupported_identity_fields",
+                "WebSocket identity is derived from auth. Remove workspace_id/user_id and use session_id only.",
+            )
 
         message_type = str(raw.get("type", "message") or "message").strip()
         runtime_mode = str(
@@ -181,8 +179,6 @@ class WSCommandMessage(BaseModel):
     type: Literal["command"] = "command"
     command: str
     args: dict[str, Any] = Field(default_factory=dict)
-    workspace_id: str = "default"
-    user_id: str = "anonymous"
     session_id: str | None = None
 
 

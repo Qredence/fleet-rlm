@@ -39,6 +39,8 @@ class _PreparedChatRuntime:
 class _ChatSessionState:
     canonical_workspace_id: str
     canonical_user_id: str
+    owner_tenant_claim: str
+    owner_user_claim: str
     cancel_flag: dict[str, bool]
     active_key: str | None = None
     active_manifest_path: str | None = None
@@ -193,5 +195,7 @@ def _new_chat_session_state(
         canonical_user_id=_sanitize_id(
             identity.user_claim, runtime.cfg.ws_default_user_id
         ),
+        owner_tenant_claim=identity.tenant_claim,
+        owner_user_claim=identity.user_claim,
         cancel_flag={"cancelled": False},
     )

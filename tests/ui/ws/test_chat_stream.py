@@ -5,7 +5,9 @@ from __future__ import annotations
 import time
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
+from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.runtime.models import StreamEvent
 
 from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
@@ -426,6 +428,26 @@ def test_execution_websocket_requires_session_id_query_param(
     assert "session_id" in error["message"]
 
 
+def test_execution_websocket_rejects_legacy_identity_query_params(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        (
+            "/api/v1/ws/execution?session_id=session-123"
+            "&workspace_id=spoofed-workspace&user_id=spoofed-user"
+        ),
+        headers=websocket_auth_headers,
+    ) as websocket:
+        error = websocket.receive_json()
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "unsupported_identity_query_params"
+    assert "session_id only" in error["message"]
+    assert exc_info.value.code == 1008
+
+
 def test_execution_websocket_streams_execution_events_for_matching_session(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
@@ -748,21 +770,13 @@ def test_websocket_session_state_isolated_by_session_id(
     keys = [
         key
         for key in ws_client.app.state.server_state.sessions.keys()
-        if key.startswith("default:alice:")
+        if key.startswith("owner:")
     ]
-    assert "default:alice:session-a" in keys
-    assert "default:alice:session-b" in keys
+    assert session_key("default", "alice", "session-a") in keys
+    assert session_key("default", "alice", "session-b") in keys
 
 
-def test_websocket_ignores_client_workspace_and_user_identity_fields(
-    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
-):
-    fake_agent.set_events(
-        [
-            StreamEvent(kind="final", text="Canonical identity", timestamp=ts(1.0)),
-        ]
-    )
-
+def test_websocket_rejects_legacy_identity_fields(ws_client, websocket_auth_headers):
     with ws_client.websocket_connect(
         "/api/v1/ws/chat", headers=websocket_auth_headers
     ) as websocket:
@@ -777,10 +791,37 @@ def test_websocket_ignores_client_workspace_and_user_identity_fields(
         )
         frame = websocket.receive_json()
 
-    assert frame["data"]["text"] == "Canonical identity"
+    assert frame["type"] == "error"
+    assert frame["code"] == "unsupported_identity_fields"
+    assert "session_id only" in frame["message"]
     keys = list(ws_client.app.state.server_state.sessions.keys())
-    assert "default:alice:canonical-session" in keys
-    assert "spoofed-workspace:spoofed-user:canonical-session" not in keys
+    assert session_key("default", "alice", "canonical-session") not in keys
+    assert not any("canonical-session" in key for key in keys)
+
+
+def test_websocket_rejects_null_legacy_identity_fields(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "message",
+                "content": "use canonical auth identity",
+                "workspace_id": None,
+                "user_id": None,
+                "session_id": "canonical-session",
+            }
+        )
+        frame = websocket.receive_json()
+
+    assert frame["type"] == "error"
+    assert frame["code"] == "unsupported_identity_fields"
+    assert "session_id only" in frame["message"]
+    keys = list(ws_client.app.state.server_state.sessions.keys())
+    assert session_key("default", "alice", "canonical-session") not in keys
+    assert not any("canonical-session" in key for key in keys)
 
 
 def test_websocket_with_docs_path(

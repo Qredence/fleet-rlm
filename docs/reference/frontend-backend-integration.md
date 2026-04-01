@@ -102,7 +102,7 @@ Deprecated/planned surfaces removed from backend:
   user/assistant exchange plus lightweight live trace.
 - Auth claims are canonical tenant/user authority.
 - `session_id` is the only authoritative client-controlled selector for websocket binding.
-- `workspace_id` and `user_id` are compatibility-only fields on the wire; they do not override auth-derived identity.
+- `workspace_id` and `user_id` are unsupported on websocket payloads and should be rejected immediately.
 - `runtime_mode` selects the top-level runtime:
   - `modal_chat` for the default product path
   - `daytona_pilot` for the Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
@@ -174,8 +174,8 @@ Trajectory payload handling:
 ### `/api/v1/ws/execution`
 
 - Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
-- Filters by subscription identity (`workspace_id`, `user_id`, `session_id`).
-- `workspace_id` and `user_id` are compatibility-only fields; the backend resolves canonical identity from auth or server defaults and binds the stream using `session_id`.
+- Filters by auth-derived identity plus `session_id`.
+- `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
 - Emits `execution_started`, `execution_step`, `execution_completed`.
 - `execution_completed.summary` is the canonical canvas/workbench summary for both runtimes.
   Frontend workbench state should hydrate from this summary rather than scraping Daytona-only
@@ -261,8 +261,6 @@ Frontend connectivity is typically driven by:
 
 - `VITE_FLEET_API_URL`
 - `VITE_FLEET_WS_URL`
-- `VITE_FLEET_WORKSPACE_ID`
-- `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
 
 Execution stream payload-size controls (backend):
