@@ -19,8 +19,10 @@ def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _parse_session_key_owner(key: object) -> tuple[str | None, str | None]:
+def _parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None]:
     if not isinstance(key, str):
+        return None, None
+    if key.startswith("owner:"):
         return None, None
     workspace_id, separator, remainder = key.partition(":")
     if not separator:
@@ -58,20 +60,30 @@ async def list_session_state(
         if not isinstance(payload, Mapping):
             continue
         payload_dict = payload
-        key_workspace_id, key_user_id = _parse_session_key_owner(key)
-        authenticated_workspace_id = _optional_string(
-            payload_dict.get("authenticated_workspace_id")
-        )
-        authenticated_user_id = _optional_string(
-            payload_dict.get("authenticated_user_id")
-        )
-        if authenticated_workspace_id is None or authenticated_user_id is None:
-            if key_workspace_id is None or key_user_id is None:
+        owner_tenant_claim = _optional_string(payload_dict.get("owner_tenant_claim"))
+        owner_user_claim = _optional_string(payload_dict.get("owner_user_claim"))
+        if owner_tenant_claim is not None and owner_user_claim is not None:
+            if (
+                owner_tenant_claim != identity.tenant_claim
+                or owner_user_claim != identity.user_claim
+            ):
                 continue
-        workspace_id = authenticated_workspace_id or key_workspace_id or "default"
-        user_id = authenticated_user_id or key_user_id or "anonymous"
-        if workspace_id != expected_workspace_id or user_id != expected_user_id:
-            continue
+        else:
+            key_workspace_id, key_user_id = _parse_legacy_session_key_owner(key)
+            workspace_id_fallback = _optional_string(payload_dict.get("workspace_id"))
+            user_id_fallback = _optional_string(payload_dict.get("user_id"))
+            legacy_workspace_id = workspace_id_fallback or key_workspace_id
+            legacy_user_id = user_id_fallback or key_user_id
+            if legacy_workspace_id is None or legacy_user_id is None:
+                continue
+            if (
+                legacy_workspace_id != expected_workspace_id
+                or legacy_user_id != expected_user_id
+            ):
+                continue
+
+        workspace_id = _string_or_default(payload_dict.get("workspace_id"), "default")
+        user_id = _string_or_default(payload_dict.get("user_id"), "anonymous")
         manifest = payload_dict.get("manifest", {})
         session = payload_dict.get("session", {})
         session_state = session.get("state", {}) if isinstance(session, Mapping) else {}

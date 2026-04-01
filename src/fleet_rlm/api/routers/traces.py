@@ -154,7 +154,7 @@ async def create_trace_feedback(
                     "name": identity.name or "",
                 },
             ),
-            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            timeout=None,
         )
     except Exception as exc:
         raise HTTPException(

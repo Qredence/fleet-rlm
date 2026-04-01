@@ -8,7 +8,8 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
-from fleet_rlm.api.server_utils import sanitize_id
+from fleet_rlm.api.dependencies import session_key
+from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
 
 
 _REQUIRED_HTTP_PATHS = {
@@ -148,22 +149,26 @@ def test_sessions_state_endpoint_is_scoped_to_resolved_identity(
     auth_headers: dict[str, str],
 ) -> None:
     state = default_client.app.state.server_state
+    session_a_key = session_key("tenant-a", "user-a", "session-a")
+    session_b_key = session_key("tenant-b", "user-b", "session-b")
     state.sessions.update(
         {
-            "tenant-a:user-a:session-a": {
+            session_a_key: {
                 "workspace_id": "tenant-a",
                 "user_id": "user-a",
-                "authenticated_workspace_id": "tenant-a",
-                "authenticated_user_id": "user-a",
+                "owner_tenant_claim": "tenant-a",
+                "owner_user_claim": "user-a",
+                "owner_fingerprint": owner_fingerprint("tenant-a", "user-a"),
                 "session_id": "session-a",
                 "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
                 "manifest": {"artifacts": [{"name": "artifact-a"}]},
             },
-            "tenant-b:user-b:session-b": {
+            session_b_key: {
                 "workspace_id": "tenant-b",
                 "user_id": "user-b",
-                "authenticated_workspace_id": "tenant-b",
-                "authenticated_user_id": "user-b",
+                "owner_tenant_claim": "tenant-b",
+                "owner_user_claim": "user-b",
+                "owner_fingerprint": owner_fingerprint("tenant-b", "user-b"),
                 "session_id": "session-b",
                 "session": {"state": {"history": [{"role": "user", "content": "bye"}]}},
                 "manifest": {"artifacts": [{"name": "artifact-b"}]},
@@ -175,9 +180,7 @@ def test_sessions_state_endpoint_is_scoped_to_resolved_identity(
 
     assert response.status_code == 200
     payload = response.json()
-    assert [session["key"] for session in payload["sessions"]] == [
-        "tenant-a:user-a:session-a"
-    ]
+    assert [session["key"] for session in payload["sessions"]] == [session_a_key]
     assert payload["sessions"][0]["workspace_id"] == "tenant-a"
     assert payload["sessions"][0]["user_id"] == "user-a"
     assert payload["sessions"][0]["session_id"] == "session-a"
@@ -191,12 +194,10 @@ def test_sessions_state_endpoint_matches_sanitized_identity_claims(
     raw_user_id = "alice@example.com"
     workspace_id = sanitize_id(raw_workspace_id, "default")
     user_id = sanitize_id(raw_user_id, "anonymous")
-    session_key = f"{workspace_id}:{user_id}:session-a"
-    state.sessions[session_key] = {
+    legacy_key = f"{workspace_id}:{user_id}:session-a"
+    state.sessions[legacy_key] = {
         "workspace_id": workspace_id,
         "user_id": user_id,
-        "authenticated_workspace_id": workspace_id,
-        "authenticated_user_id": user_id,
         "session_id": "session-a",
         "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
         "manifest": {"artifacts": [{"name": "artifact-a"}]},
@@ -212,7 +213,77 @@ def test_sessions_state_endpoint_matches_sanitized_identity_claims(
 
     assert response.status_code == 200
     payload = response.json()
-    assert [session["key"] for session in payload["sessions"]] == [session_key]
+    assert [session["key"] for session in payload["sessions"]] == [legacy_key]
+    assert payload["sessions"][0]["workspace_id"] == workspace_id
+    assert payload["sessions"][0]["user_id"] == user_id
+
+
+def test_sessions_state_endpoint_separates_colliding_sanitized_identities(
+    default_client: TestClient,
+) -> None:
+    state = default_client.app.state.server_state
+    raw_workspace_id = "tenant/acme"
+    raw_user_id = "alice@example.com"
+    colliding_workspace_id = "tenant-acme"
+    colliding_user_id = "alice-example.com"
+    workspace_id = sanitize_id(raw_workspace_id, "default")
+    user_id = sanitize_id(raw_user_id, "anonymous")
+
+    assert workspace_id == sanitize_id(colliding_workspace_id, "default")
+    assert user_id == sanitize_id(colliding_user_id, "anonymous")
+
+    session_a_key = session_key(raw_workspace_id, raw_user_id, "session-a")
+    session_b_key = session_key(
+        colliding_workspace_id,
+        colliding_user_id,
+        "session-b",
+    )
+
+    assert owner_fingerprint(raw_workspace_id, raw_user_id) != owner_fingerprint(
+        colliding_workspace_id,
+        colliding_user_id,
+    )
+    assert session_a_key != session_b_key
+
+    state.sessions.update(
+        {
+            session_a_key: {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "owner_tenant_claim": raw_workspace_id,
+                "owner_user_claim": raw_user_id,
+                "owner_fingerprint": owner_fingerprint(raw_workspace_id, raw_user_id),
+                "session_id": "session-a",
+                "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-a"}]},
+            },
+            session_b_key: {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "owner_tenant_claim": colliding_workspace_id,
+                "owner_user_claim": colliding_user_id,
+                "owner_fingerprint": owner_fingerprint(
+                    colliding_workspace_id,
+                    colliding_user_id,
+                ),
+                "session_id": "session-b",
+                "session": {"state": {"history": [{"role": "user", "content": "bye"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-b"}]},
+            },
+        }
+    )
+
+    response = default_client.get(
+        "/api/v1/sessions/state",
+        headers={
+            "X-Debug-Tenant-Id": raw_workspace_id,
+            "X-Debug-User-Id": raw_user_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["key"] for session in payload["sessions"]] == [session_a_key]
     assert payload["sessions"][0]["workspace_id"] == workspace_id
     assert payload["sessions"][0]["user_id"] == user_id
 
@@ -673,7 +744,7 @@ def test_trace_feedback_offloads_lookup_and_logging_with_run_blocking(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[str, int]] = []
+    calls: list[tuple[str, int | None]] = []
     fake_trace = _fake_trace_feedback_trace(
         trace_id="trace-offloaded",
         client_request_id="req-offloaded",
@@ -687,7 +758,7 @@ def test_trace_feedback_offloads_lookup_and_logging_with_run_blocking(
         _ = kwargs
         return {"feedback_logged": True, "expectation_logged": False}
 
-    async def fake_run_blocking(fn, *args, timeout: int):
+    async def fake_run_blocking(fn, *args, timeout: int | None):
         _ = args
         target = getattr(fn, "func", fn)
         calls.append((getattr(target, "__name__", repr(target)), timeout))
@@ -719,5 +790,5 @@ def test_trace_feedback_offloads_lookup_and_logging_with_run_blocking(
     assert response.status_code == 200
     assert calls == [
         ("fake_resolve_trace", 20),
-        ("fake_log_trace_feedback", 20),
+        ("fake_log_trace_feedback", None),
     ]

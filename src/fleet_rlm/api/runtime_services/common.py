@@ -54,6 +54,9 @@ def coerce_output_text(value: Any) -> str:
 async def run_blocking(
     fn: Callable[..., _BlockingResultT],
     *args: Any,
-    timeout: int,
+    timeout: int | None,
 ) -> _BlockingResultT:
-    return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
+    task = asyncio.to_thread(fn, *args)
+    if timeout is None:
+        return await task
+    return await asyncio.wait_for(task, timeout=timeout)

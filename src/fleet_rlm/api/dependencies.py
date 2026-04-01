@@ -14,6 +14,7 @@ from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .execution import ExecutionEventEmitter
+from .server_utils import owner_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,12 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     return None
 
 
-def session_key(workspace_id: str, user_id: str, session_id: str | None = None) -> str:
+def session_key(
+    tenant_claim: str,
+    user_claim: str,
+    session_id: str | None = None,
+) -> str:
     """Build a stable in-memory key for a stateful user/workspace session."""
     resolved_session_id = (session_id or "").strip() or "__default__"
-    return f"{workspace_id}:{user_id}:{resolved_session_id}"
+    owner_id = owner_fingerprint(tenant_claim, user_claim)
+    return f"owner:{owner_id}:{resolved_session_id}"

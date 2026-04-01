@@ -1,12 +1,13 @@
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from importlib.metadata import version
 from types import SimpleNamespace
 
 from fleet_rlm.api.config import ServerRuntimeConfig, resolve_server_volume_name
 from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
-from fleet_rlm.api.server_utils import sanitize_id
+from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
     HealthResponse,
@@ -240,8 +241,11 @@ def test_get_server_state_missing_raises_http_503() -> None:
 
 
 def test_session_key() -> None:
-    assert session_key("workspace", "user") == "workspace:user:__default__"
-    assert session_key("workspace", "user", "session-1") == "workspace:user:session-1"
+    owner_id = owner_fingerprint("workspace", "user")
+    assert session_key("workspace", "user") == f"owner:{owner_id}:__default__"
+    assert session_key("workspace", "user", "session-1") == (
+        f"owner:{owner_id}:session-1"
+    )
 
 
 def test_sanitize_id_rejects_dot_only_segments() -> None:
@@ -287,6 +291,14 @@ def test_ws_message_defaults() -> None:
     msg = WSMessage()
     assert msg.type == "message"
     assert msg.content == ""
-    assert msg.workspace_id == "default"
-    assert msg.user_id == "anonymous"
     assert msg.session_id is None
+
+
+def test_ws_message_rejects_legacy_identity_fields() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        WSMessage(
+            workspace_id="legacy-workspace",
+            user_id="legacy-user",
+        )
+
+    assert "unsupported_identity_fields" in str(exc_info.value)

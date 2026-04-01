@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...dependencies import ServerState, session_key
+from ...server_utils import owner_fingerprint
 from .manifest import _manifest_path, load_manifest_from_volume
 from .types import ChatAgentProtocol, LocalPersistFn
 
@@ -17,13 +18,16 @@ async def switch_session_if_needed(
     workspace_id: str,
     user_id: str,
     sess_id: str,
+    owner_tenant_claim: str,
+    owner_user_claim: str,
     active_key: str | None,
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
 ) -> tuple[str, str, dict[str, Any], str | None]:
     """Switch and restore session state when session identity changed."""
-    key = session_key(workspace_id, user_id, sess_id)
+    key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
+    owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
     manifest_path = _manifest_path(workspace_id, user_id, sess_id)
 
     if active_key == key and session_record is not None:
@@ -43,16 +47,20 @@ async def switch_session_if_needed(
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,
-            "authenticated_workspace_id": workspace_id,
-            "authenticated_user_id": user_id,
+            "owner_tenant_claim": owner_tenant_claim,
+            "owner_user_claim": owner_user_claim,
+            "owner_fingerprint": owner_id,
             "session_id": sess_id,
             "manifest": manifest if isinstance(manifest, dict) else {},
             "session": {"state": {}, "session_id": sess_id},
         }
 
     cached["session_id"] = sess_id
-    cached["authenticated_workspace_id"] = workspace_id
-    cached["authenticated_user_id"] = user_id
+    cached["workspace_id"] = workspace_id
+    cached["user_id"] = user_id
+    cached["owner_tenant_claim"] = owner_tenant_claim
+    cached["owner_user_claim"] = owner_user_claim
+    cached["owner_fingerprint"] = owner_id
     state.sessions[key] = cached
 
     session_data = cached.get("session")

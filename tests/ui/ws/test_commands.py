@@ -37,3 +37,27 @@ def test_websocket_command_validation(
             assert data["result"]["status"] == "ok"
         else:
             assert expected_substring in data["message"].lower()
+
+
+def test_websocket_command_rejects_legacy_identity_fields(
+    ws_client,
+    websocket_auth_headers,
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/chat", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json(
+            {
+                "type": "command",
+                "command": "list_documents",
+                "args": {},
+                "workspace_id": "spoofed-workspace",
+                "user_id": "spoofed-user",
+            }
+        )
+
+        data = websocket.receive_json()
+
+    assert data["type"] == "error"
+    assert data["code"] == "unsupported_identity_fields"
+    assert "session_id only" in data["message"]

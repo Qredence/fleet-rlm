@@ -81,8 +81,6 @@ Frontend source lives under `src/frontend/src/`.
 Expected frontend environment:
 
 - `VITE_FLEET_API_URL=http://localhost:8000`
-- `VITE_FLEET_WORKSPACE_ID=default`
-- `VITE_FLEET_USER_ID=fleetwebapp-user`
 - `VITE_FLEET_TRACE=true`
 
 Optional overrides:

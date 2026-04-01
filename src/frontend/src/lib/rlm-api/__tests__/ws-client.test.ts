@@ -311,10 +311,8 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
-  it("includes workspace, user, and session identity on execution subscriptions", async () => {
+  it("includes only session identity on execution subscriptions", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
-    vi.stubEnv("VITE_FLEET_WORKSPACE_ID", "workspace-7");
-    vi.stubEnv("VITE_FLEET_USER_ID", "user-9");
     const { subscribeToExecutionStream } = await loadWsClientModule();
     installSocketFactory();
 

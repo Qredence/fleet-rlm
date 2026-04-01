@@ -52,6 +52,21 @@ async def execution_stream(
     session_id: str | None = None,
 ) -> None:
     """Dedicated execution stream for Artifact Canvas consumers."""
+    if workspace_id is not None or user_id is not None:
+        await websocket.accept()
+        if await _try_send_json(
+            websocket,
+            _error_envelope(
+                code="unsupported_identity_query_params",
+                message=(
+                    "Execution stream identity is derived from auth. Remove "
+                    "workspace_id/user_id query params and use session_id only."
+                ),
+            ),
+        ):
+            await _close_websocket_safely(websocket, code=1008)
+        return
+
     state = get_server_state_from_websocket(websocket)
     identity = await _authenticate_websocket(websocket, state)
     if identity is None:

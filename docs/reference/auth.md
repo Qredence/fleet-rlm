@@ -331,7 +331,7 @@ The `/api/v1/auth/me` endpoint returns both external claims and internal IDs:
 Auth claims are the **canonical** source of tenant/user identity:
 
 - `tenant_claim` and `user_claim` from auth are authoritative
-- `workspace_id` and `user_id` on websocket payloads and query strings are compatibility fields, not authoritative
+- `workspace_id` and `user_id` on websocket payloads and query strings are unsupported and should be rejected
 - `session_id` is the only authoritative client-controlled websocket selector
 - Internal `tenant_id` and `user_id` are resolved via database lookup during admission
 
