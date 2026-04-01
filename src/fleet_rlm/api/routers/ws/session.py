@@ -27,7 +27,6 @@ async def switch_session_if_needed(
 ) -> tuple[str, str, dict[str, Any], str | None]:
     """Switch and restore session state when session identity changed."""
     key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
-    owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
     manifest_path = _manifest_path(workspace_id, user_id, sess_id)
 
     if active_key == key and session_record is not None:
