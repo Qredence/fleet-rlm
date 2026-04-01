@@ -8,6 +8,7 @@ This is a React + Vite frontend managed by `pnpm` and the Vite+ (`vp`) toolchain
 
 - **Install**: `vp install`
 - **Dev Server**: `vp dev`
+- **Format**: `pnpm run format` (Vite+ `vp fmt`, backed by Oxc/Oxfmt)
 - **Lint**: `vp lint`
 - **Type Check**: `vp run type-check`
 - **Unit Tests**: `vp test` (interactive watch mode by default) or `vp run test:unit` (single pass). To run a single test: `vp test <filename>`
