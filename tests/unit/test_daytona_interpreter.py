@@ -441,7 +441,10 @@ def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
     ensured = interpreter._ensure_session_sync()
 
     assert ensured is runtime.session
-    assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+    # context_id is cleared on loop-owner mismatch so a fresh interpreter
+    # context is created on the current event loop (prevents "Future attached
+    # to a different loop" errors in child dspy.RLM modules).
+    assert runtime.resume_calls == [("sbx-123", None)]
     assert interpreter._last_sandbox_transition == "resumed"
     assert interpreter._last_workspace_reconfigured is False
 

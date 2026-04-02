@@ -449,6 +449,12 @@ class DaytonaInterpreter(LLMQueryMixin):
         if self._session is not None:
             if not self._session_matches_current_async_owner(self._session):
                 await self._adetach_session(delete=False)
+                # Clear the persisted context_id so the resumed session
+                # creates a fresh interpreter context on the current loop
+                # instead of reusing one bound to the old loop.
+                # (Fixes "Future attached to a different loop" errors when
+                # child dspy.RLM modules run from worker threads.)
+                self._persisted_context_id = None
             elif self._session_needs_recreation(desired_volume=self.volume_name):
                 should_report_recreated = True
                 await self._adetach_session(delete=True)
