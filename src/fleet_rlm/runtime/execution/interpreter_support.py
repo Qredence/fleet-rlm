@@ -44,6 +44,17 @@ def initialize_llm_query_state(
     target._sub_lm_executor_lock = threading.Lock()
 
 
+def initialize_sub_rlm_state(
+    target: Any,
+    *,
+    depth: int = 0,
+    max_depth: int = 2,
+) -> None:
+    """Populate recursion-depth state for sub_rlm() calls."""
+    target._sub_rlm_depth = depth
+    target._sub_rlm_max_depth = max_depth
+
+
 def initialize_tool_runtime_state(target: Any) -> None:
     """Populate shared tool and execution callback state."""
     target.output_fields = None

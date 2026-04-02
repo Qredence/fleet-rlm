@@ -279,7 +279,7 @@ def daytona_run_result_public_dict(result: Any) -> dict[str, Any]:
         "repo": result.repo,
         "ref": result.ref,
         "task": _persisted_text_preview(result.task),
-        "daytona_mode": "host_loop_rlm",
+        "daytona_mode": "daytona_pilot",
         "root_id": result.root_id,
         "nodes": {node_id: node.to_dict() for node_id, node in result.nodes.items()},
         "context_sources": [item.to_dict() for item in result.context_sources],

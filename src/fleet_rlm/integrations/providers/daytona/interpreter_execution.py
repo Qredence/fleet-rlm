@@ -48,6 +48,8 @@ def build_delegate_child(
     *,
     remaining_llm_budget: int,
 ) -> Any:
+    from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
+
     runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
     child = interpreter.__class__(
         runtime=runtime,
@@ -71,6 +73,11 @@ def build_delegate_child(
         "_check_and_increment_llm_calls",
         interpreter._check_and_increment_llm_calls,
     )
+    # Propagate recursion depth so sub_rlm() inside child REPL code
+    # is depth-aware (Algorithm 1 from arXiv 2512.24601v2).
+    parent_depth = getattr(interpreter, "_sub_rlm_depth", 0)
+    parent_max = getattr(interpreter, "_sub_rlm_max_depth", 2)
+    initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
     return child
 
 
@@ -403,6 +410,12 @@ def bridge_tools(
         tools["llm_query"] = interpreter.llm_query
     if "llm_query_batched" not in tools:
         tools["llm_query_batched"] = interpreter.llm_query_batched
+    # True-RLM symbolic recursion primitives (Algorithm 1, arXiv 2512.24601v2).
+    # These allow sandbox code to call sub_rlm() inside loops.
+    if "sub_rlm" not in tools and hasattr(interpreter, "sub_rlm"):
+        tools["sub_rlm"] = interpreter.sub_rlm
+    if "sub_rlm_batched" not in tools and hasattr(interpreter, "sub_rlm_batched"):
+        tools["sub_rlm_batched"] = interpreter.sub_rlm_batched
     return tools
 
 

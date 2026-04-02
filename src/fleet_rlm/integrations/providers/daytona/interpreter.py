@@ -18,6 +18,7 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     execution_profile_context,
     get_registered_tools,
     initialize_llm_query_state,
+    initialize_sub_rlm_state,
     initialize_tool_runtime_state,
     set_registered_tools,
 )
@@ -93,6 +94,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             max_llm_calls=max_llm_calls,
             llm_call_timeout=llm_call_timeout,
         )
+        initialize_sub_rlm_state(self)
         self.output_fields: list[dict[str, Any]] | None
         self._tools: dict[str, Callable[..., Any]]
         self.execution_event_callback: Callable[[dict[str, Any]], None] | None

@@ -15,7 +15,7 @@ const mockedWorkbenchStore: MockedRunWorkbenchStore = {
   runId: "run-123",
   repoUrl: "https://github.com/qredence/fleet-rlm",
   repoRef: "main",
-  daytonaMode: "host_loop_rlm",
+  daytonaMode: "daytona_pilot",
   task: "Inspect tracing architecture",
   contextSources: [
     {
