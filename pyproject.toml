@@ -42,7 +42,7 @@ dependencies = [
     "sqlalchemy>=2.0.48,<3",
     "greenlet>=3.3.1,<4",
     "psycopg>=3.3.2,<4",
-    "fastapi[standard]==0.135.2",
+    "fastapi[standard]==0.135.1",
     "websockets>=15.0.0,<16.0.0",
     "uvicorn>=0.42.0,<1",
     "dspy-ai>=3.1.3",
