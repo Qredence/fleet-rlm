@@ -257,7 +257,7 @@ async def test_daytona_recursive_batch_tool_preserves_order_and_concurrency(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools.spawn_delegate_sub_agent_async",
+        "fleet_rlm.runtime.tools.batch_tools.spawn_delegate_sub_agent_async",
         _fake_spawn,
     )
 

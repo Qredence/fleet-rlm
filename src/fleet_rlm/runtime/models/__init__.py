@@ -1,3 +1,22 @@
+from .builders import (
+    ClarificationQuestionPlanningModule,
+    GroundedAnswerSynthesisModule,
+    MemoryActionPlanningModule,
+    MemoryMigrationPlanningModule,
+    MemoryStructureAuditPlanningModule,
+    RuntimeModuleBuildConfig,
+    build_recursive_subquery_rlm,
+    build_runtime_module_config,
+    create_runtime_rlm,
+)
+from .registry import (
+    RUNTIME_MODULE_NAMES,
+    RUNTIME_MODULE_REGISTRY,
+    RuntimeModuleDefinition,
+    build_runtime_module,
+    get_or_build_runtime_module,
+    runtime_module_class,
+)
 from .streaming import (
     ProfileConfig,
     SessionConfig,
@@ -8,10 +27,25 @@ from .streaming import (
 )
 
 __all__ = [
+    "RUNTIME_MODULE_NAMES",
+    "RUNTIME_MODULE_REGISTRY",
+    "ClarificationQuestionPlanningModule",
+    "GroundedAnswerSynthesisModule",
+    "MemoryActionPlanningModule",
+    "MemoryMigrationPlanningModule",
+    "MemoryStructureAuditPlanningModule",
     "ProfileConfig",
+    "RuntimeModuleBuildConfig",
+    "RuntimeModuleDefinition",
     "SessionConfig",
     "StreamEvent",
     "StreamEventKind",
     "TraceMode",
     "TurnState",
+    "build_recursive_subquery_rlm",
+    "build_runtime_module",
+    "build_runtime_module_config",
+    "create_runtime_rlm",
+    "get_or_build_runtime_module",
+    "runtime_module_class",
 ]
