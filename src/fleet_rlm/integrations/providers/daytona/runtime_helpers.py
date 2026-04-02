@@ -19,7 +19,7 @@ from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
 
 from .config import ResolvedDaytonaConfig
 from .diagnostics import DaytonaDiagnosticError
-from .types_context import ContextSource
+from .types import ContextSource
 
 DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 

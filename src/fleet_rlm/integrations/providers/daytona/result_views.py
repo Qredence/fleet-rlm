@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .types_context import ContextSource
-from .types_recursive import ChildLink
-from .types_serialization import _persisted_text_preview
+from .types import _persisted_text_preview
+
+if TYPE_CHECKING:
+    from .types import ChildLink, ContextSource
 
 
 def final_artifact_dict(artifact: Any) -> dict[str, Any]:

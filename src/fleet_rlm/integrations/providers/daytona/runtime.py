@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
-from .types_context import ContextSource
+from .types import ContextSource
 from .runtime_helpers import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     _abuild_workspace_path,

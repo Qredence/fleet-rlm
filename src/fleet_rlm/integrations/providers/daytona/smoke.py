@@ -10,7 +10,7 @@ from dspy.primitives import FinalOutput
 from .diagnostics import SMOKE_PHASES, as_diagnostic_error
 from .interpreter import DaytonaInterpreter
 from .runtime import DaytonaSandboxRuntime
-from .types_result import DaytonaSmokeResult
+from .types import DaytonaSmokeResult
 
 _T = TypeVar("_T")
 
