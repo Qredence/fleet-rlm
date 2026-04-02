@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fleet_rlm.runtime.execution.streaming_status import (
+from fleet_rlm.runtime.execution.streaming import (
     try_parse_hitl_request as _try_parse_hitl_request,
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent

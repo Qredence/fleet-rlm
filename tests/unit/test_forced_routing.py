@@ -10,7 +10,7 @@ from fleet_rlm.runtime.agent.forced_routing import (
     forced_stream_final_payload,
     run_forced_rlm_turn,
 )
-from fleet_rlm.runtime.execution.streaming_context import StreamingContext
+from fleet_rlm.runtime.execution.streaming import StreamingContext
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from dspy.primitives import FinalOutput
 
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-from fleet_rlm.runtime.execution.streaming_citations import _normalize_trajectory
+from fleet_rlm.runtime.execution.streaming import _normalize_trajectory
 from fleet_rlm.runtime.content.chunking import (
     chunk_by_headers,
     chunk_by_json_keys,

@@ -9,7 +9,7 @@ from fleet_rlm.runtime.execution.streaming import (
     aiter_chat_turn_stream as _aiter_stream,
 )
 from fleet_rlm.runtime.execution.streaming import iter_chat_turn_stream as _iter_stream
-from fleet_rlm.runtime.execution.streaming_context import StreamingContext
+from fleet_rlm.runtime.execution.streaming import StreamingContext
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 from .chat_session_state import append_history, forced_delegate_context
