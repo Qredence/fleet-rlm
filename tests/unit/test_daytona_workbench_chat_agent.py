@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import dspy
 import pytest
 from typing import Any, cast
@@ -22,6 +23,23 @@ class _FakeSession:
         self.closed = 0
         self.deleted = 0
         self.driver_started = 0
+        self.owner_thread_id: int | None = None
+        self.owner_loop_id: int | None = None
+
+    def bind_current_async_owner(self) -> None:
+        self.owner_thread_id = threading.get_ident()
+        self.owner_loop_id = id(asyncio.get_running_loop())
+
+    def matches_current_async_owner(self) -> bool:
+        if self.owner_thread_id is None or self.owner_loop_id is None:
+            return False
+        try:
+            return (
+                self.owner_thread_id,
+                self.owner_loop_id,
+            ) == (threading.get_ident(), id(asyncio.get_running_loop()))
+        except RuntimeError:
+            return False
 
     async def astart_driver(self, *, timeout: float) -> None:
         _ = timeout
@@ -57,6 +75,7 @@ class _FakeRuntime:
             (repo_url, ref, list(context_paths or []), volume_name)
         )
         self.create_specs.append(spec)
+        self.session.bind_current_async_owner()
         return self.session
 
     async def aresume_workspace_session(
@@ -71,6 +90,7 @@ class _FakeRuntime:
     ) -> _FakeSession:
         _ = context_sources, context_id
         self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
+        self.session.bind_current_async_owner()
         return self.session
 
     async def aclose(self) -> None:
@@ -380,6 +400,7 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
     runtime = _FakeRuntime(_FakeSession())
     agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
     interpreter = _interpreter(agent)
+    runtime.session.bind_current_async_owner()
     interpreter._session = runtime.session
     interpreter._session_source_key = (
         "https://github.com/example/old.git",
