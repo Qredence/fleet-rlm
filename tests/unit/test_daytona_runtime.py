@@ -484,3 +484,30 @@ def test_session_refresh_activity_is_silent_on_error() -> None:
     )
     # Must not raise
     asyncio.run(session.arefresh_activity())
+
+
+def test_session_resize_calls_sandbox_resize() -> None:
+    """``aresize`` delegates to the sandbox ``resize()`` method."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    resize_calls: list[object] = []
+
+    class _ResizableSandbox(_FakeSandbox):
+        def resize(self, resources: object, timeout: float | None = 60) -> None:
+            resize_calls.append(resources)
+
+    session = DaytonaSandboxSession(
+        sandbox=_ResizableSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id=None,
+    )
+    asyncio.run(session.aresize(cpu=4, memory=8, disk=20))
+    assert len(resize_calls) == 1
+    r = resize_calls[0]
+    assert getattr(r, "cpu") == 4
+    assert getattr(r, "memory") == 8
+    assert getattr(r, "disk") == 20

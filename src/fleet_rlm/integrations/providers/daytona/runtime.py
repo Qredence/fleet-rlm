@@ -193,6 +193,17 @@ class DaytonaSandboxSession:
     def refresh_activity(self) -> None:
         _run_async_compat(self.arefresh_activity)
 
+    async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:
+        """Hot-resize sandbox resources (CPU cores, memory GiB, disk GiB)."""
+        from daytona import Resources
+
+        await _await_if_needed(
+            self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
+        )
+
+    def resize(self, *, cpu: int, memory: int, disk: int) -> None:
+        _run_async_compat(self.aresize, cpu=cpu, memory=memory, disk=disk)
+
 
 class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
