@@ -62,6 +62,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         repo_url: str | None = None,
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
+        sandbox_spec: Any | None = None,
         delete_session_on_shutdown: bool = True,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
@@ -81,6 +82,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.repo_url = repo_url
         self.repo_ref = repo_ref
         self.context_paths = dedupe_paths(list(context_paths or []))
+        self.sandbox_spec = sandbox_spec  # SandboxSpec with optional Image builder
         self.delete_session_on_shutdown = delete_session_on_shutdown
         self.default_execution_profile = default_execution_profile
         self.async_execute = async_execute
@@ -505,6 +507,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             ref=self.repo_ref,
             context_paths=list(self.context_paths),
             volume_name=self.volume_name,
+            spec=self.sandbox_spec,
         )
         self._session_source_key = source_key
         await self._areset_execution_state()

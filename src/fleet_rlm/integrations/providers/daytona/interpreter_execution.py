@@ -58,6 +58,7 @@ def build_delegate_child(
         repo_url=interpreter.repo_url,
         repo_ref=interpreter.repo_ref,
         context_paths=list(interpreter.context_paths),
+        sandbox_spec=getattr(interpreter, "sandbox_spec", None),
         delete_session_on_shutdown=True,
         sub_lm=interpreter.sub_lm,
         max_llm_calls=remaining_llm_budget,

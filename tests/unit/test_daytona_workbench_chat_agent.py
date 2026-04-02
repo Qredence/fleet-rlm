@@ -41,6 +41,7 @@ class _FakeRuntime:
         self.create_calls: list[
             tuple[str | None, str | None, list[str], str | None]
         ] = []
+        self.create_specs: list[object | None] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
 
     async def acreate_workspace_session(
@@ -50,10 +51,12 @@ class _FakeRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: object | None = None,
     ) -> _FakeSession:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
+        self.create_specs.append(spec)
         return self.session
 
     async def aresume_workspace_session(
@@ -497,3 +500,59 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
     assert captured["timeout"] == 123
     assert captured["max_depth"] == 4
     assert captured["interpreter_async_execute"] is False
+
+
+@pytest.mark.asyncio
+async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
+    """Verify SandboxSpec is threaded from agent → interpreter → runtime."""
+    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+
+    spec = SandboxSpec(
+        language="python",
+        labels={"env": "test"},
+        env_vars={"MY_VAR": "hello"},
+    )
+    session = _FakeSession()
+    runtime = _FakeRuntime(session)
+
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=runtime,
+        sandbox_spec=spec,
+    )
+
+    # The interpreter should carry the spec
+    interpreter = cast("Any", agent.interpreter)
+    assert interpreter.sandbox_spec is spec
+
+    # Trigger session creation via start()
+    await agent.astart()
+
+    # The spec should have been forwarded to the runtime
+    assert len(runtime.create_specs) == 1
+    assert runtime.create_specs[0] is spec
+
+
+@pytest.mark.asyncio
+async def test_sandbox_spec_with_declarative_image_flows_through() -> None:
+    """Verify a daytona.Image declarative builder reaches the runtime."""
+    from daytona import Image
+    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+
+    img = Image.debian_slim("3.12").pip_install(["dspy"])
+    spec = SandboxSpec(image=img, labels={"managed-by": "fleet-rlm"})
+
+    session = _FakeSession()
+    runtime = _FakeRuntime(session)
+
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=runtime,
+        sandbox_spec=spec,
+    )
+
+    await agent.astart()
+
+    forwarded_spec = runtime.create_specs[0]
+    assert forwarded_spec is spec
+    assert forwarded_spec.uses_declarative_image is True
+    assert forwarded_spec.image is img
+    assert "dspy" in img.dockerfile()

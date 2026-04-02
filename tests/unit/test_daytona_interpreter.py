@@ -186,6 +186,7 @@ class _FakeRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: object | None = None,
     ) -> DaytonaSandboxSession:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)

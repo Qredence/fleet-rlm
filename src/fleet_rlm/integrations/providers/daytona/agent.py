@@ -41,6 +41,7 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
         interpreter_async_execute: bool = True,
+        sandbox_spec: Any | None = None,
     ) -> None:
         _ = planner_lm
         self.runtime = runtime or DaytonaSandboxRuntime()
@@ -53,6 +54,7 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
             delete_session_on_shutdown=delete_session_on_shutdown,
             max_llm_calls=rlm_max_llm_calls,
             async_execute=interpreter_async_execute,
+            sandbox_spec=sandbox_spec,
         )
 
         super().__init__(
