@@ -19,7 +19,7 @@ class TestSandboxSpecDefaults:
         assert spec.language == "python"
         assert spec.volume_name is None
         assert spec.ephemeral is True
-        assert spec.auto_stop_interval == 0
+        assert spec.auto_stop_interval == 1800
         assert spec.env_vars is None
         assert spec.labels is None
         assert spec.snapshot is None
@@ -31,7 +31,7 @@ class TestSandboxSpecDefaults:
         params = spec.to_create_params()
         assert params["language"] == "python"
         assert params["ephemeral"] is True
-        assert params["auto_stop_interval"] == 0
+        assert params["auto_stop_interval"] == 1800
         assert "volumes" not in params
         assert "env_vars" not in params
         assert "image" not in params

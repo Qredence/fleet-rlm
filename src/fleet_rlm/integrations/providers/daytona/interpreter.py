@@ -529,7 +529,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         return self._session
 
     async def _aensure_session(self) -> DaytonaSandboxSession:
-        return await self._aensure_session_impl()
+        session = await self._aensure_session_impl()
+        await session.arefresh_activity()
+        return session
 
     async def aget_session(self) -> DaytonaSandboxSession:
         """Public async accessor to ensure and return the active sandbox session."""

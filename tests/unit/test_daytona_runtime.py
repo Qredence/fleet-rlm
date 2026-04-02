@@ -70,6 +70,9 @@ class _FakeSandbox:
     def stop(self, timeout: float = 60) -> None:
         return None
 
+    def refresh_activity(self) -> None:
+        return None
+
     def _exec(self, command: str):
         self.process.exec_calls.append(command)
         return _FakeProcessExecResult()
@@ -460,3 +463,24 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
     ).stdout.strip()
     assert remote_url == str(repo_b)
     assert (workspace_path / "README.md").read_text(encoding="utf-8") == "repo B\n"
+
+
+def test_session_refresh_activity_is_silent_on_error() -> None:
+    """``arefresh_activity`` swallows exceptions so callers never break."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    class _ExplodingSandbox(_FakeSandbox):
+        def refresh_activity(self) -> None:
+            raise RuntimeError("boom")
+
+    session = DaytonaSandboxSession(
+        sandbox=_ExplodingSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id=None,
+    )
+    # Must not raise
+    asyncio.run(session.arefresh_activity())

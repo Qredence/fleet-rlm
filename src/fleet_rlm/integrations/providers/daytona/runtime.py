@@ -185,6 +185,14 @@ class DaytonaSandboxSession:
     def recover(self, *, timeout: float = 60.0) -> None:
         _run_async_compat(self.arecover, timeout=timeout)
 
+    async def arefresh_activity(self) -> None:
+        """Reset the sandbox auto-stop timer without changing state."""
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.refresh_activity())
+
+    def refresh_activity(self) -> None:
+        _run_async_compat(self.arefresh_activity)
+
 
 class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
@@ -263,7 +271,6 @@ class DaytonaSandboxRuntime:
             env_vars=env_vars or None,
             labels=merged_labels,
             ephemeral=True,
-            auto_stop_interval=0,
             auto_delete_interval=auto_delete_interval,
             cpu=cpu,
             memory=memory,

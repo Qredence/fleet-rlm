@@ -51,6 +51,9 @@ class _FakeSession:
     async def adelete(self) -> None:
         self.deleted += 1
 
+    async def arefresh_activity(self) -> None:
+        pass
+
 
 class _FakeRuntime:
     def __init__(self, session: _FakeSession) -> None:

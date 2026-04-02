@@ -110,7 +110,7 @@ class SandboxSpec:
     env_vars: dict[str, str] | None = None
     labels: dict[str, str] | None = None
     ephemeral: bool = True
-    auto_stop_interval: int | None = 0
+    auto_stop_interval: int | None = 1800  # 30 min; refresh_activity() resets
     auto_archive_interval: int | None = None
     auto_delete_interval: int | None = None
     cpu: int | None = None
