@@ -85,7 +85,7 @@ def build_tool_list(
     from .chunking import build_chunking_tools
     from .document import build_document_tools
     from .filesystem import build_filesystem_tools
-    from .sandbox import build_sandbox_tools
+    from .sandbox_common import build_sandbox_tools
 
     tools: list[Tool] = []
 

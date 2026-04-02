@@ -14,7 +14,7 @@ from fleet_rlm.runtime.execution.storage_paths import (
 )
 
 from .shared import aexecute_submit, execute_submit
-from .volume_helpers import resolve_mounted_volume_path
+from .modal_volumes import resolve_mounted_volume_path
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
@@ -248,3 +248,25 @@ def _load_daytona_workspace_text_sync(
             return None
         raise
     return resolved_path, text
+
+
+# ---------------------------------------------------------------------------
+# Aggregate sandbox tool builder (merged from sandbox.py)
+# ---------------------------------------------------------------------------
+
+
+def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
+    """Build sandbox / buffer / volume tools bound to *agent*.
+
+    Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
+    main tool list built by ``build_tool_list``.
+    """
+    from .sandbox_delegate_tools import build_rlm_delegate_tools
+    from .sandbox_memory_tools import build_memory_intelligence_tools
+    from .sandbox_storage_tools import build_storage_tools
+
+    tools: list[Any] = []
+    tools.extend(build_rlm_delegate_tools(agent))
+    tools.extend(build_memory_intelligence_tools(agent))
+    tools.extend(build_storage_tools(agent))
+    return tools
