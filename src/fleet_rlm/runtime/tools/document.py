@@ -19,7 +19,7 @@ from fleet_rlm.runtime.execution.document_sources import (
     fetch_url_document_content,
     is_http_url,
 )
-from fleet_rlm.runtime.content.document_ingestion.main import (
+from fleet_rlm.runtime.content.ingestion import (
     read_document_content as _read_document_content,
 )
 from fleet_rlm.runtime.tools.sandbox_common import (

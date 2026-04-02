@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from fleet_rlm.runtime.content.logs.execution_limits import execution_max_text_chars
+from fleet_rlm.runtime.content.execution_limits import execution_max_text_chars
 
 
 class SupportsExecutionEventCallback(Protocol):

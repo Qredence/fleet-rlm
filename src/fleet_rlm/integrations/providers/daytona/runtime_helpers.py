@@ -14,7 +14,7 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 
-from fleet_rlm.runtime.content.document_ingestion.main import read_document_content
+from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
 
 from .config import ResolvedDaytonaConfig
