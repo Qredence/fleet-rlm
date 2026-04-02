@@ -29,6 +29,10 @@ from .runtime_helpers import (
 )
 
 
+def _current_async_owner() -> tuple[int, int]:
+    return (threading.get_ident(), id(asyncio.get_running_loop()))
+
+
 @dataclass(slots=True)
 class DaytonaSandboxSession:
     """Concrete Daytona workspace session backed by a sandbox and interpreter context."""
@@ -42,12 +46,25 @@ class DaytonaSandboxSession:
     phase_timings_ms: dict[str, int] = field(default_factory=dict)
     volume_mount_path: str = str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)
     context_id: str | None = None
+    owner_thread_id: int | None = None
+    owner_loop_id: int | None = None
     _context: Any | None = field(default=None, init=False, repr=False)
     _driver_started: bool = field(default=False, init=False, repr=False)
 
     @property
     def sandbox_id(self) -> str | None:
         return str(getattr(self.sandbox, "id", "") or "") or None
+
+    def bind_current_async_owner(self) -> None:
+        self.owner_thread_id, self.owner_loop_id = _current_async_owner()
+
+    def matches_current_async_owner(self) -> bool:
+        if self.owner_thread_id is None or self.owner_loop_id is None:
+            return False
+        try:
+            return (self.owner_thread_id, self.owner_loop_id) == _current_async_owner()
+        except RuntimeError:
+            return False
 
     async def aensure_context(self) -> Any:
         if self._context is not None:
@@ -343,6 +360,7 @@ class DaytonaSandboxRuntime:
             context_id=context_id,
         )
         session.phase_timings_ms.update(timings)
+        session.bind_current_async_owner()
         return session
 
     async def acreate_workspace_session(
@@ -520,6 +538,7 @@ class DaytonaSandboxRuntime:
         session.ref = resolved_ref
         session.workspace_path = workspace_path
         session.context_sources = context_sources
+        session.bind_current_async_owner()
         return session
 
     def reconcile_workspace_session(

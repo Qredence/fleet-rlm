@@ -429,6 +429,14 @@ class DaytonaInterpreter(LLMQueryMixin):
     def _ensure_session_sync(self) -> DaytonaSandboxSession:
         return _run_async_compat(self._aensure_session_impl)
 
+    def _session_matches_current_async_owner(
+        self, session: DaytonaSandboxSession
+    ) -> bool:
+        matches_current_owner = getattr(session, "matches_current_async_owner", None)
+        if callable(matches_current_owner):
+            return bool(matches_current_owner())
+        return False
+
     async def _aensure_session_impl(self) -> DaytonaSandboxSession:
         self._ensure_runtime_available()
         source_key = (
@@ -439,7 +447,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         )
         should_report_recreated = False
         if self._session is not None:
-            if self._session_needs_recreation(desired_volume=self.volume_name):
+            if not self._session_matches_current_async_owner(self._session):
+                await self._adetach_session(delete=False)
+            elif self._session_needs_recreation(desired_volume=self.volume_name):
                 should_report_recreated = True
                 await self._adetach_session(delete=True)
             elif self._session_source_key == source_key:

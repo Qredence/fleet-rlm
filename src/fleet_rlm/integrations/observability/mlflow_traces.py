@@ -187,6 +187,25 @@ def _trace_assessment_dicts(trace: Trace) -> list[dict[str, Any]]:
     return assessments
 
 
+def _trace_span_types(trace: Trace) -> list[str]:
+    span_types: list[str] = []
+    seen: set[str] = set()
+    try:
+        raw_spans = trace.search_spans()
+    except Exception:
+        raw_spans = []
+
+    for span in raw_spans or []:
+        candidate = str(
+            getattr(span, "span_type", None) or getattr(span, "type", None) or ""
+        ).strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        span_types.append(candidate)
+    return span_types
+
+
 def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
     """Convert an MLflow trace into an evaluation/export dataset row."""
     payload = trace.to_dict()
@@ -226,6 +245,9 @@ def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
         "outputs": outputs,
         "expectations": expectations,
     }
+    span_types = _trace_span_types(trace)
+    if span_types:
+        row["span_types"] = span_types
     if feedback:
         row["feedback"] = feedback
     return row

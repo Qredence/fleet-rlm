@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -194,6 +196,8 @@ class _FakeRuntime:
         self.session.repo_url = repo_url
         self.session.ref = ref
         self.session.volume_name = volume_name
+        self.session.owner_thread_id = threading.get_ident()
+        self.session.owner_loop_id = id(asyncio.get_running_loop())
         workspace_name = (
             str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
             or "repo"
@@ -222,6 +226,8 @@ class _FakeRuntime:
         self.session.ref = ref
         self.session.volume_name = volume_name
         self.session.workspace_path = workspace_path
+        self.session.owner_thread_id = threading.get_ident()
+        self.session.owner_loop_id = id(asyncio.get_running_loop())
         del context_sources
         return self.session
 
@@ -241,6 +247,8 @@ class _FakeRuntime:
         session.repo_url = repo_url
         session.ref = ref
         session.context_sources = []
+        session.owner_thread_id = threading.get_ident()
+        session.owner_loop_id = id(asyncio.get_running_loop())
         if repo_url:
             session.workspace_path = "/workspace/reconfigured"
         return session
@@ -420,6 +428,22 @@ def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -
     ]
     assert interpreter._last_sandbox_transition == "reused"
     assert interpreter._last_workspace_reconfigured is True
+
+
+def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.start()
+
+    runtime.session.owner_thread_id = -1
+    runtime.session.owner_loop_id = -1
+
+    ensured = interpreter._ensure_session_sync()
+
+    assert ensured is runtime.session
+    assert runtime.resume_calls == [("sbx-123", "ctx-1")]
+    assert interpreter._last_sandbox_transition == "resumed"
+    assert interpreter._last_workspace_reconfigured is False
 
 
 def test_daytona_interpreter_marks_reconcile_recreate_fallback_as_degraded() -> None:

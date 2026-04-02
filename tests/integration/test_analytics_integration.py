@@ -156,6 +156,7 @@ def test_mlflow_integration_captures_real_trace(
         trace_metadata = info.get("trace_metadata", {})
         assert info["trace_id"] == metadata["mlflow_trace_id"]
         assert info["client_request_id"] == "integration-trace-request"
+        assert info["state"] == "OK"
         assert info["request_preview"] == "hello trace"
         assert "echo:hello trace" in info["response_preview"]
         assert trace_metadata["mlflow.trace.session"] == "integration-session"

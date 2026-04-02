@@ -324,6 +324,51 @@ def test_trace_result_metadata_forwards_trace_metadata_to_mlflow_update(
     }
 
 
+def test_mlflow_request_context_finalizes_trace_state_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        get_active_trace_id=lambda: "trace-123",
+        update_current_trace=lambda **kwargs: calls.append(kwargs),
+        get_last_active_trace_id=lambda thread_local=True: "trace-123",
+    )
+
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-ok")
+    ):
+        pass
+
+    assert calls[-1] == {"state": "OK"}
+
+
+def test_mlflow_request_context_finalizes_trace_state_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        get_active_trace_id=lambda: "trace-123",
+        update_current_trace=lambda **kwargs: calls.append(kwargs),
+        get_last_active_trace_id=lambda thread_local=True: "trace-123",
+    )
+
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with mlflow_integration.mlflow_request_context(
+            mlflow_integration.MlflowTraceRequestContext(client_request_id="req-error")
+        ):
+            raise RuntimeError("boom")
+
+    assert calls[-1] == {"state": "ERROR"}
+
+
 def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -493,6 +538,11 @@ def test_trace_to_dataset_row_extracts_expectations_and_feedback():
                 }
             ),
         ],
+        search_spans=lambda: [
+            SimpleNamespace(span_type="LLM"),
+            SimpleNamespace(span_type="RETRIEVER"),
+            SimpleNamespace(span_type="LLM"),
+        ],
     )
 
     row = mlflow_integration.trace_to_dataset_row(trace)
@@ -502,4 +552,5 @@ def test_trace_to_dataset_row_extracts_expectations_and_feedback():
     assert row["inputs"] == {"question": "What is MLflow?"}
     assert row["outputs"] == "MLflow is an ML platform"
     assert row["expectations"] == {"expected_response": "MLflow is an ML platform"}
+    assert row["span_types"] == ["LLM", "RETRIEVER"]
     assert row["feedback"]["response_is_correct"]["value"] is True
