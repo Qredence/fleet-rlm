@@ -10,7 +10,7 @@ from typing import AbstractSet, Any, Callable
 
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
-from fleet_rlm.runtime.execution.interpreter_events import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     complete_event_data,
     emit_execution_event,
     start_event_data,
