@@ -24,7 +24,6 @@ import pytest
 
 EXPECTED_MODULE_NAMES = frozenset(
     {
-        "analyze_long_document",
         "summarize_long_document",
         "extract_from_logs",
         "grounded_answer",

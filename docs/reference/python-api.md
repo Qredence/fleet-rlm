@@ -72,7 +72,6 @@ Long-document analysis/summarization helper backed by DSPy RLM signatures.
 
 Modes:
 
-- `analyze` → `AnalyzeLongDocument`
 - `summarize` → `SummarizeLongDocument`
 
 ### Secret Diagnostics
@@ -86,7 +85,6 @@ These execute Modal-side checks for required environment keys.
 
 Current maintained signatures include:
 
-- `AnalyzeLongDocument`
 - `SummarizeLongDocument`
 - `ExtractFromLogs`
 - `GroundedAnswerWithCitations`
@@ -116,5 +114,5 @@ print(result["answer"])
 
 ```bash
 uv run python -c "from fleet_rlm.cli.runners import run_long_context, run_react_chat_once"
-uv run python -c "from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument"
+uv run python -c "from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument"
 ```

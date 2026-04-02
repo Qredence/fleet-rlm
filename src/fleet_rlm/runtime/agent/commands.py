@@ -41,11 +41,6 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
         ["chunk_strategy", "max_chunks", "buffer_name"],
     ),
     "rlm_query": ("rlm_query", ["query"], ["context"]),
-    "analyze_document": (
-        "analyze_long_document",
-        ["query"],
-        ["alias", "include_trajectory"],
-    ),
     "summarize_document": (
         "summarize_long_document",
         ["focus"],

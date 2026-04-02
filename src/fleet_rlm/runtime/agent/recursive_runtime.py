@@ -21,11 +21,9 @@ from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 #   → chat_agent/recursive_runtime → rlm_runtime_modules
 from fleet_rlm.runtime.execution.streaming import (
     ReActStatusProvider,
-    _process_stream_value,
-)
-from fleet_rlm.runtime.execution.streaming import (
     StreamingContext,
     _normalize_trajectory,
+    _process_stream_value,
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent
 

@@ -99,6 +99,31 @@ class ServerRuntimeConfig(BaseSettings):
     entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
 
+    @field_validator("sandbox_provider", mode="after")
+    @classmethod
+    def _validate_sandbox_provider(cls, value: str) -> str:
+        _allowed = {"modal", "daytona", "aca_jobs", "local"}
+        if value.lower() not in _allowed:
+            raise ValueError(
+                f"SANDBOX_PROVIDER must be one of {sorted(_allowed)!r}, got {value!r}"
+            )
+        return value.lower()
+
+    @field_validator(
+        "agent_model",
+        "agent_delegate_model",
+        "agent_delegate_small_model",
+        mode="after",
+    )
+    @classmethod
+    def _validate_model_identifier(cls, value: str | None) -> str | None:
+        if value is not None and "/" not in value:
+            raise ValueError(
+                f"LiteLLM model identifiers must include a provider prefix "
+                f"(e.g. 'openai/gpt-4o' or 'anthropic/claude-3-5-sonnet'), got {value!r}"
+            )
+        return value
+
     @classmethod
     def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
         """Build server runtime settings from the shared application config."""

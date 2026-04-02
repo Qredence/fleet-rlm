@@ -40,7 +40,7 @@ PY
 ## What This Uses
 
 - `fleet_rlm.cli.runners.run_long_context`
-- `AnalyzeLongDocument` / `SummarizeLongDocument`
+- `SummarizeLongDocument`
 - Modal sandbox helper stack (`peek`, `grep`, chunking helpers, buffer tools)
 
 ## Validation

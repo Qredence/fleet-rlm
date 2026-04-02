@@ -116,6 +116,5 @@ Defined in `src/fleet_rlm/react/signatures.py`:
 - `ExtractAPIEndpoints`: `docs -> api_endpoints`
 - `FindErrorPatterns`: `docs -> error_categories, total_errors_found`
 - `ExtractWithCustomTool`: `docs -> headers, code_blocks, structure_summary`
-- `AnalyzeLongDocument`: `document, query -> findings, answer, sections_examined`
 - `SummarizeLongDocument`: `document, focus -> summary, key_points, coverage_pct`
 - `ExtractFromLogs`: `logs, query -> matches, patterns, time_range`

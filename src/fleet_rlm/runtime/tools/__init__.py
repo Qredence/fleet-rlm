@@ -39,7 +39,6 @@ _MEMORY_INTELLIGENCE_TOOL_NAMES: frozenset[str] = frozenset(
 _CACHED_RUNTIME_MODULE_TOOL_NAMES: frozenset[str] = (
     frozenset(
         {
-            "analyze_long_document",
             "summarize_long_document",
             "extract_from_logs",
             "grounded_answer",

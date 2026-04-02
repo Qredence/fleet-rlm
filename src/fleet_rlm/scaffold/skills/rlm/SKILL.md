@@ -102,11 +102,11 @@ For fully automated RLM execution (the LLM writes its own code):
 
 ```python
 import dspy
-from fleet_rlm import ModalInterpreter, AnalyzeLongDocument
+from fleet_rlm import ModalInterpreter, SummarizeLongDocument
 
 with ModalInterpreter(timeout=900, volume_name='rlm-volume-dspy') as interp:
     rlm = dspy.RLM(
-        signature=AnalyzeLongDocument,
+        signature=SummarizeLongDocument,
         interpreter=interp,
         max_iterations=20,
         max_llm_calls=30,
@@ -114,8 +114,8 @@ with ModalInterpreter(timeout=900, volume_name='rlm-volume-dspy') as interp:
     )
     result = rlm(
         document=open('rlm_content/dspy-knowledge/dspy-doc.txt').read(),
-        query="What are the main design decisions?",
+        focus="What are the main design decisions?",
     )
-    print(f"Findings: {result.findings}")
-    print(f"Answer: {result.answer}")
+    print(f"Key Points: {result.key_points}")
+    print(f"Summary: {result.summary}")
 ```

@@ -54,33 +54,6 @@ class RLMReActChatSignature(dspy.Signature):
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 
-class AnalyzeLongDocument(dspy.Signature):
-    """Analyze a long document by navigating, querying, and synthesizing.
-
-    The LLM should use sandbox helpers (``peek``, ``grep``,
-    ``chunk_by_size``, ``chunk_by_headers``, ``extract_python_ast``) to explore the document
-    programmatically, call ``llm_query`` on relevant sections, and
-    aggregate findings via ``SUBMIT``.
-    When analyzing large Python codebases, prefer using the `extract_python_ast` tool
-    to quickly map out structural architectures before dropping down into raw regex grepping.
-
-    Input Fields:
-        document: Full text of the document loaded into the sandbox
-        query: What to find or analyse
-
-    Output Fields:
-        findings: List of extracted facts / answers
-        answer: Synthesised prose answer
-        sections_examined: How many sections were inspected
-    """
-
-    document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
-    query: str = dspy.InputField(desc="Analysis query or question")
-    findings: list[str] = dspy.OutputField(desc="List of extracted facts / answers")
-    answer: str = dspy.OutputField(desc="Synthesised prose answer")
-    sections_examined: int = dspy.OutputField(desc="Number of sections inspected")
-
-
 class SummarizeLongDocument(dspy.Signature):
     """Summarize a long document with controllable focus.
 
@@ -336,7 +309,6 @@ class RLMVariableSignature(dspy.Signature):
 
 
 __all__ = [
-    "AnalyzeLongDocument",
     "ClarificationQuestionSignature",
     "CodeChangePlan",
     "CoreMemoryUpdateProposal",

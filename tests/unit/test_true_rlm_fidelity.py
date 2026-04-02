@@ -216,7 +216,6 @@ class TestAutoRouting:
             name for name, defn in RUNTIME_MODULE_REGISTRY.items() if defn.variable_mode
         }
         assert variable_mode_names == {
-            "analyze_long_document",
             "summarize_long_document",
             "extract_from_logs",
         }

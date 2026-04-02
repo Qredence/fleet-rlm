@@ -54,18 +54,18 @@ with ModalInterpreter(timeout=600) as interp:
 These functions are injected automatically by the driver and available inside
 `interp.execute()` code:
 
-| Helper             | Signature                                      | Returns                                   |
-| ------------------ | ---------------------------------------------- | ----------------------------------------- |
-| `peek`             | `peek(text, start=0, length=2000)`             | `str` — slice of text                     |
-| `grep`             | `grep(text, pattern, *, context=0)`            | `list[str]` — matching lines              |
-| `chunk_by_size`    | `chunk_by_size(text, size=4000, overlap=200)`  | `list[str]`                               |
-| `chunk_by_headers` | `chunk_by_headers(text, pattern=r"^#{1,3}\s")` | `list[dict]` with keys `header`, `content`|
-| `add_buffer`       | `add_buffer(name, value)`                      | `None` — append to named buffer           |
-| `get_buffer`       | `get_buffer(name)`                             | `list` — buffer contents                  |
-| `clear_buffer`     | `clear_buffer(name=None)`                      | `None` — clear one or all buffers         |
-| `save_to_volume`   | `save_to_volume(path, content)`                | `str` — full path written                 |
-| `load_from_volume` | `load_from_volume(path)`                       | `str` — file contents                     |
-| `SUBMIT`           | `SUBMIT(**kwargs)`                             | Ends execution, returns structured output |
+| Helper             | Signature                                      | Returns                                    |
+| ------------------ | ---------------------------------------------- | ------------------------------------------ |
+| `peek`             | `peek(text, start=0, length=2000)`             | `str` — slice of text                      |
+| `grep`             | `grep(text, pattern, *, context=0)`            | `list[str]` — matching lines               |
+| `chunk_by_size`    | `chunk_by_size(text, size=4000, overlap=200)`  | `list[str]`                                |
+| `chunk_by_headers` | `chunk_by_headers(text, pattern=r"^#{1,3}\s")` | `list[dict]` with keys `header`, `content` |
+| `add_buffer`       | `add_buffer(name, value)`                      | `None` — append to named buffer            |
+| `get_buffer`       | `get_buffer(name)`                             | `list` — buffer contents                   |
+| `clear_buffer`     | `clear_buffer(name=None)`                      | `None` — clear one or all buffers          |
+| `save_to_volume`   | `save_to_volume(path, content)`                | `str` — full path written                  |
+| `load_from_volume` | `load_from_volume(path)`                       | `str` — file contents                      |
+| `SUBMIT`           | `SUBMIT(**kwargs)`                             | Ends execution, returns structured output  |
 
 ## DSPy Signatures
 
@@ -77,7 +77,6 @@ Built-in signatures from `src/fleet_rlm/react/signatures.py`:
 | `ExtractAPIEndpoints`   | `docs`              | `api_endpoints` (list)                                            |
 | `FindErrorPatterns`     | `docs`              | `error_categories` (dict), `total_errors_found` (int)             |
 | `ExtractWithCustomTool` | `docs`              | `headers` (list), `code_blocks` (list), `structure_summary` (str) |
-| `AnalyzeLongDocument`   | `document`, `query` | `findings` (list), `answer` (str), `sections_examined` (int)      |
 | `SummarizeLongDocument` | `document`, `focus` | `summary` (str), `key_points` (list), `coverage_pct` (int)        |
 | `ExtractFromLogs`       | `logs`, `query`     | `matches` (list), `patterns` (dict), `time_range` (str)           |
 

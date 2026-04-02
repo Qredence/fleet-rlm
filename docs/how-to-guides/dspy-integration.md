@@ -44,23 +44,22 @@ class MySignature(dspy.Signature):
 
 Fleet-rlm provides several production-ready signatures:
 
-#### Long-Document Analysis
+#### Long-Document Summarization
 
 ```python
-from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument
+from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 
-class AnalyzeLongDocument(dspy.Signature):
-    """Analyze a long document by navigating, querying, and synthesizing.
+class SummarizeLongDocument(dspy.Signature):
+    """Summarize a long document with controllable focus.
 
     The LLM should use sandbox helpers (peek, grep, chunk_by_size,
     chunk_by_headers) to explore the document programmatically, call
     llm_query on relevant sections, and aggregate findings via SUBMIT.
     """
     document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
-    query: str = dspy.InputField(desc="Analysis query or question")
-    findings: list[str] = dspy.OutputField(desc="List of extracted facts / answers")
-    answer: str = dspy.OutputField(desc="Synthesised prose answer")
-    sections_examined: int = dspy.OutputField(desc="Number of sections inspected")
+    focus: str = dspy.InputField(desc="Summarization focus or topic")
+    key_points: list[str] = dspy.OutputField(desc="List of key points extracted")
+    summary: str = dspy.OutputField(desc="Synthesised prose summary")
 ```
 
 ```python
@@ -214,7 +213,7 @@ Use `create_runtime_rlm()` for canonical RLM construction:
 
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
-from fleet_rlm.react.signatures import AnalyzeLongDocument
+from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 # Set up the Modal interpreter
@@ -227,7 +226,7 @@ interpreter = ModalInterpreter(
 
 # Create the RLM module
 rlm = create_runtime_rlm(
-    signature=AnalyzeLongDocument,
+    signature=SummarizeLongDocument,
     interpreter=interpreter,
     max_iterations=30,     # Max reasoning iterations
     max_llm_calls=50,      # Max LLM calls within RLM
@@ -237,10 +236,10 @@ rlm = create_runtime_rlm(
 # Execute
 result = rlm(
     document="Full text of document...",
-    query="What are the main themes?",
+    focus="What are the main themes?",
 )
-print(result.answer)
-print(result.findings)
+print(result.summary)
+print(result.key_points)
 ```
 
 ### Using the Runtime Module Registry
@@ -255,7 +254,7 @@ interpreter = ModalInterpreter(timeout=600, secret_name="LITELLM")
 
 # Build by name (strings are validated against RUNTIME_MODULE_NAMES)
 rlm = build_runtime_module(
-    "analyze_long_document",
+    "summarize_long_document",
     interpreter=interpreter,
     max_iterations=30,
     max_llm_calls=50,
@@ -267,7 +266,6 @@ Available module names:
 
 | Name                              | Signature                               | Purpose                                |
 | --------------------------------- | --------------------------------------- | -------------------------------------- |
-| `analyze_long_document`           | `AnalyzeLongDocument`                   | Navigate and synthesize long documents |
 | `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                  |
 | `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs           |
 | `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations  |

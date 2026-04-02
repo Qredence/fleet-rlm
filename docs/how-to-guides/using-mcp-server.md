@@ -33,15 +33,16 @@ Options:
 
 ### Transport Options
 
-| Transport | Description |
-|-----------|-------------|
-| `stdio` | Standard input/output transport (default). Best for local CLI integration and Claude Desktop. |
-| `sse` | Server-Sent Events transport. Runs an HTTP server on the specified host and port. |
-| `streamable-http` | Streaming HTTP transport. Runs an HTTP server on the specified host and port. |
+| Transport         | Description                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `stdio`           | Standard input/output transport (default). Best for local CLI integration and Claude Desktop. |
+| `sse`             | Server-Sent Events transport. Runs an HTTP server on the specified host and port.             |
+| `streamable-http` | Streaming HTTP transport. Runs an HTTP server on the specified host and port.                 |
 
 ### HTTP Transport Defaults
 
 When using `sse` or `streamable-http` transports:
+
 - **Host:** `127.0.0.1` (localhost only by default)
 - **Port:** `8001`
 
@@ -84,6 +85,7 @@ uv run fleet-rlm serve-mcp --transport stdio \
 ```
 
 Common overrides include:
+
 - `interpreter.async_execute=true|false` - Enable async tool execution
 - `agent.guardrail_mode=off|warn|strict` - Set output guardrail behavior
 - `agent.max_output_chars=10000` - Limit output length
@@ -93,15 +95,14 @@ Common overrides include:
 The MCP server exposes the following tools from
 `src/fleet_rlm/integrations/mcp/server.py`:
 
-| Tool | Description |
-|------|-------------|
-| `chat_turn` | Single ReAct turn for chat-style interaction |
-| `analyze_long_document` | Long-context analysis of documents |
-| `summarize_long_document` | Long-context summarization of documents |
-| `grounded_answer` | Chunked answer with citations |
-| `triage_incident_logs` | Incident/log triage workflow |
-| `memory_tree` | Bounded memory/volume tree inspection |
-| `memory_structure_audit` | Memory layout audit recommendations |
+| Tool                      | Description                                             |
+| ------------------------- | ------------------------------------------------------- |
+| `chat_turn`               | Single ReAct turn for chat-style interaction            |
+| `summarize_long_document` | Long-context summarization of documents                 |
+| `grounded_answer`         | Chunked answer with citations                           |
+| `triage_incident_logs`    | Incident/log triage workflow                            |
+| `memory_tree`             | Bounded memory/volume tree inspection                   |
+| `memory_structure_audit`  | Memory layout audit recommendations                     |
 | `clarification_questions` | Generate safe clarifying questions for risky operations |
 
 ## Prerequisites
@@ -125,11 +126,13 @@ uv sync --extra mcp
 1. **Check client logs** (for Claude Desktop: `~/Library/Logs/Claude/mcp.log`)
 
 2. **Verify MCP dependencies** are installed:
+
    ```bash
    uv add "fleet-rlm[mcp]"
    ```
 
 3. **Test server launch locally**:
+
    ```bash
    uv run fleet-rlm serve-mcp --transport stdio
    ```

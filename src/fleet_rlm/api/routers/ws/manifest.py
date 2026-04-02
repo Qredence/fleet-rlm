@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import posixpath
 from pathlib import PurePosixPath
 from typing import Any
@@ -11,6 +12,8 @@ from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 from ...server_utils import sanitize_id as _sanitize_id
 from .types import ChatAgentProtocol
+
+logger = logging.getLogger(__name__)
 
 
 def _is_final_output(result: Any) -> bool:
@@ -52,7 +55,7 @@ async def _aget_daytona_session(agent: ChatAgentProtocol) -> Any | None:
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
         )
-    except Exception:
+    except ImportError:
         return None
 
     interpreter = getattr(agent, "interpreter", None)
@@ -93,6 +96,11 @@ async def load_manifest_from_volume(agent: ChatAgentProtocol, path: str) -> dict
             try:
                 text = await daytona_session.aread_file(storage_path)
             except Exception:
+                logger.debug(
+                    "manifest_load_daytona_read_error",
+                    extra={"path": storage_path},
+                    exc_info=True,
+                )
                 continue
             if not text:
                 continue
@@ -143,6 +151,11 @@ async def save_manifest_to_volume(
         try:
             return await daytona_session.awrite_file(storage_path, payload)
         except Exception:
+            logger.warning(
+                "manifest_save_daytona_write_error",
+                extra={"path": storage_path},
+                exc_info=True,
+            )
             return None
     result = await interpreter.aexecute(
         "saved_path = save_to_volume(path, payload)\nSUBMIT(saved_path=saved_path)",

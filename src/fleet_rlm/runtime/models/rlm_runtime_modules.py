@@ -6,9 +6,10 @@ from ``fleet_rlm.runtime.models.rlm_runtime_modules`` keep working.
 """
 
 import sys as _sys
-from typing import Any as _Any, MutableMapping as _MutableMapping
+from typing import Any as _Any
+from typing import MutableMapping as _MutableMapping
 
-import dspy  # noqa: F401  — kept so patch targets like ``…rlm_runtime_modules.dspy.RLM`` resolve
+import dspy  # — kept so patch targets like ``…rlm_runtime_modules.dspy.RLM`` resolve
 
 from fleet_rlm.runtime.models.builders import (
     ClarificationQuestionPlanningModule,
@@ -17,11 +18,11 @@ from fleet_rlm.runtime.models.builders import (
     MemoryMigrationPlanningModule,
     MemoryStructureAuditPlanningModule,
     RuntimeModuleBuildConfig,
-    _MemoryTreePrimedModule,
     _chunk_document,
     _chunk_to_text,
     _coerce_bounded_int,
     _create_configured_runtime_rlm,
+    _MemoryTreePrimedModule,
     _normalize_chunk_strategy,
     build_recursive_subquery_rlm,
     build_runtime_module_config,

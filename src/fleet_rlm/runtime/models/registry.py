@@ -9,7 +9,6 @@ from typing import Any, MutableMapping, Protocol, cast
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import (
-    AnalyzeLongDocument,
     ClarificationQuestionSignature,
     CodeChangePlan,
     CoreMemoryUpdateProposal,
@@ -92,12 +91,6 @@ class RuntimeModuleDefinition:
 
 
 RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
-    "analyze_long_document": RuntimeModuleDefinition(
-        signature=AnalyzeLongDocument,
-        class_name="AnalyzeLongDocumentModule",
-        doc="Runtime wrapper for ``AnalyzeLongDocument`` RLM execution.",
-        variable_mode=True,
-    ),
     "summarize_long_document": RuntimeModuleDefinition(
         signature=SummarizeLongDocument,
         class_name="SummarizeLongDocumentModule",

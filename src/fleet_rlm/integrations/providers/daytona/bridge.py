@@ -10,6 +10,7 @@ import asyncio
 import inspect
 import json
 import keyword
+import os
 import time
 import urllib.error
 import urllib.request
@@ -69,7 +70,7 @@ def tool_call():
             "lease_token": None,
         }
 
-    timeout = 120.0
+    timeout = __DAYTONA_TOOL_CALL_TIMEOUT_S__
     interval = 0.05
     elapsed = 0.0
     while elapsed < timeout:
@@ -148,6 +149,16 @@ def post_result(call_id: str):
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000, threaded=True)
 """.strip()
+
+# Allow the broker tool-call polling timeout to be tuned via the host env.
+# The value is injected directly into the embedded server code at import time.
+_DAYTONA_BROKER_TOOL_CALL_TIMEOUT: float = float(
+    os.environ.get("DAYTONA_BROKER_TIMEOUT", "120.0")
+)
+_BROKER_SERVER_CODE = _BROKER_SERVER_CODE.replace(
+    "__DAYTONA_TOOL_CALL_TIMEOUT_S__",
+    repr(_DAYTONA_BROKER_TOOL_CALL_TIMEOUT),
+)
 
 _TOOL_WRAPPER_TEMPLATE = """
 def {tool_name}({signature}):

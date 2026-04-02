@@ -29,7 +29,6 @@ from typing import Any, Literal
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import (
-    AnalyzeLongDocument,
     SummarizeLongDocument,
 )
 from fleet_rlm.runtime.config import build_dspy_context
@@ -278,8 +277,8 @@ def run_long_context(
     Raises:
         ValueError: If *mode* is not ``"analyze"`` or ``"summarize"``.
     """
-    if mode not in ("analyze", "summarize"):
-        raise ValueError(f"mode must be 'analyze' or 'summarize', got {mode!r}")
+    if mode not in ("summarize",):
+        raise ValueError(f"mode must be 'summarize', got {mode!r}")
 
     docs_path = Path(docs_path)
     if not docs_path.exists():
@@ -287,7 +286,7 @@ def run_long_context(
     docs = docs_path.read_text()
     _require_planner_ready(env_file)
 
-    sig = AnalyzeLongDocument if mode == "analyze" else SummarizeLongDocument
+    sig = SummarizeLongDocument
 
     with (
         ModalInterpreter(

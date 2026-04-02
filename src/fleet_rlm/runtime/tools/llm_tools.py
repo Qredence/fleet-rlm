@@ -70,7 +70,6 @@ class LLMQueryMixin:
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         """Create a child interpreter — implemented by the host class."""
-        ...
 
     def _check_and_increment_llm_calls(self, n: int = 1) -> None:
         """Check and increment the LLM call counter.

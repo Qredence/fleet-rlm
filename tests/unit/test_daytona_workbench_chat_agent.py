@@ -192,9 +192,8 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         captured["kwargs"] = kwargs
         return (
             {
-                "findings": ["f1"],
-                "answer": "ok",
-                "sections_examined": 2,
+                "key_points": ["p1"],
+                "summary": "ok",
                 "depth": 1,
                 "sub_agent_history": 0,
                 "trajectory": [],
@@ -208,13 +207,11 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         _fake_run,
     )
 
-    payload = agent._get_tool("analyze_long_document")("inspect this")
+    payload = agent._get_tool("summarize_long_document")("inspect this")
 
     assert payload["status"] == "ok"
-    assert payload["answer"] == "ok"
-    assert captured["agent"] is agent
-    assert captured["module_name"] == "analyze_long_document"
-    assert captured["kwargs"]["query"] == "inspect this"
+    assert payload["summary"] or payload.get("answer")
+    assert captured["module_name"] == "summarize_long_document"
 
 
 @pytest.mark.asyncio

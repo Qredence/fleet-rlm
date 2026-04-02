@@ -46,7 +46,6 @@ TOOL_DELEGATE_NAMES: frozenset[str] = frozenset(
         "parallel_semantic_map",
         "rlm_query",
         "rlm_query_batched",
-        "analyze_long_document",
         "summarize_long_document",
         "extract_from_logs",
         # Buffer tools

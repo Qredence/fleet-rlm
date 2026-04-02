@@ -118,7 +118,6 @@ def test_registry_long_document_modules_have_variable_mode():
     from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
 
     for name in (
-        "analyze_long_document",
         "summarize_long_document",
         "extract_from_logs",
     ):
@@ -145,7 +144,7 @@ def test_build_runtime_module_variable_mode_returns_variable_module():
     ) as mock_cls:
         mock_cls.return_value = MagicMock(spec=RLMVariableExecutionModule)
         build_runtime_module(
-            "analyze_long_document",
+            "summarize_long_document",
             interpreter=mock_interp,
             max_iterations=10,
             max_llm_calls=30,

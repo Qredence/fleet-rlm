@@ -188,39 +188,6 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
     """Build cached-runtime and recursive delegation tools bound to *agent*."""
     ctx = _DelegateToolContext(agent=agent)
 
-    async def analyze_long_document(
-        query: str, alias: str = "active", include_trajectory: bool = True
-    ) -> dict[str, Any]:
-        document = resolve_document(ctx.agent, alias)
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="analyze_long_document",
-            document=document,
-            query=query,
-        )
-        if error is not None:
-            _record_runtime_failure(ctx, error)
-            return error
-
-        return _cached_runtime_success(
-            ctx,
-            prediction=prediction,
-            fallback_used=fallback_used,
-            include_trajectory=include_trajectory,
-            payload={
-                "findings": _coerce_str_list(
-                    _prediction_value(prediction, "findings", [])
-                ),
-                "answer": str(_prediction_value(prediction, "answer", "")),
-                "sections_examined": _coerce_int(
-                    _prediction_value(prediction, "sections_examined", 0),
-                    default=0,
-                    minimum=0,
-                ),
-                "doc_chars": len(document),
-            },
-        )
-
     async def summarize_long_document(
         focus: str, alias: str = "active", include_trajectory: bool = True
     ) -> dict[str, Any]:
@@ -482,11 +449,6 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
         }
 
     registrations = [
-        _ToolRegistration(
-            name="analyze_long_document",
-            desc="Analyze a long document with the cached runtime module and return findings plus an answer",
-            func=analyze_long_document,
-        ),
         _ToolRegistration(
             name="summarize_long_document",
             desc="Summarize a long document with key points and coverage metadata",

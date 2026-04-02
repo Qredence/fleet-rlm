@@ -96,24 +96,6 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
         )
 
     @server.tool
-    def analyze_long_document(
-        docs_path: str,
-        query: str,
-        include_trajectory: bool = True,
-    ) -> dict:
-        return runners.run_long_context(
-            docs_path=docs_path,
-            query=query,
-            mode="analyze",
-            max_iterations=cfg.rlm_max_iterations,
-            max_llm_calls=cfg.rlm_max_llm_calls,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            include_trajectory=include_trajectory,
-        )
-
-    @server.tool
     def summarize_long_document(
         docs_path: str,
         query: str,

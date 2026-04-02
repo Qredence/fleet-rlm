@@ -79,20 +79,20 @@ result = rlm(question="What is 15 factorial?")
 print(result.answer)
 ```
 
-### Document Analysis
+### Document Summarization
 
 ```python
-from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument
+from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 
 doc = open("large_document.txt").read()
 rlm = dspy.RLM(
-    signature=AnalyzeLongDocument,
+    signature=SummarizeLongDocument,
     interpreter=ModalInterpreter(timeout=300, volume_name="analysis"),
     max_iterations=20,
     verbose=True,
 )
-result = rlm(document=doc, query="Find key design decisions")
-print(result.findings)
+result = rlm(document=doc, focus="Find key design decisions")
+print(result.key_points)
 print(result.answer)
 ```
 

@@ -14,8 +14,8 @@ from fleet_rlm.runtime.agent.signatures import (
     MemoryActionIntentSignature,
     MemoryStructureAuditSignature,
     MemoryStructureMigrationPlanSignature,
-    RLMVariableSignature,
     RecursiveSubQuerySignature,
+    RLMVariableSignature,
     VolumeFileTreeSignature,
 )
 from fleet_rlm.runtime.content.chunking import (
