@@ -453,3 +453,34 @@ def runtime_metadata(
     }
     metadata.update(_runtime_degradation_payload(agent))
     return metadata
+
+
+# ---------------------------------------------------------------------------
+# Output metadata helper (Algorithm 1 variable-mode support)
+# ---------------------------------------------------------------------------
+
+
+def metadata_summary(
+    text: str,
+    *,
+    preview_length: int = 200,
+    label: str = "Output",
+) -> str:
+    """Produce a metadata-only summary of a large text result.
+
+    Use this in tool return values when the full output is large and the
+    caller should use REPL variables or sub_rlm() to process it rather
+    than reading the whole string in the LLM context.
+
+    Returns a short string like:
+        ``[Output: 45,230 chars] First 200 chars: ...``
+
+    This pattern is aligned with how ``dspy.RLM``'s ``REPLEntry.format()``
+    shows ``Output (N chars):`` — keeping things concise forces the LLM
+    to work through REPL state.
+    """
+    length = len(text)
+    if length <= preview_length:
+        return text
+    preview = text[:preview_length].rstrip()
+    return f"[{label}: {length:,} chars] First {preview_length} chars: {preview}..."

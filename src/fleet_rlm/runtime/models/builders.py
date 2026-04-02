@@ -94,6 +94,12 @@ def build_recursive_subquery_rlm(
 # Threshold (chars) above which rlm_query auto-routes to variable mode
 VARIABLE_MODE_THRESHOLD = 32_000
 
+# Lower max_output_chars for variable-mode forces the LLM to use
+# variables (peek, grep, sub_rlm) instead of printing large output.
+# dspy.RLM's REPLEntry.format() already shows "Output (N chars):" as
+# metadata — this keeps it short so the LLM relies on REPL state.
+VARIABLE_MODE_MAX_OUTPUT_CHARS = 5_000
+
 
 class RLMVariableExecutionModule(dspy.Module):
     """True-RLM module that delegates to ``dspy.RLM`` with ``sub_rlm`` tools.
@@ -134,7 +140,9 @@ class RLMVariableExecutionModule(dspy.Module):
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
-            max_output_chars=max_output_chars,
+            # Use a tighter output limit for variable mode to force the LLM
+            # to work through REPL variables rather than printing large output.
+            max_output_chars=max_output_chars or VARIABLE_MODE_MAX_OUTPUT_CHARS,
             verbose=verbose,
             tools=tools or None,
             sub_lm=sub_lm,
