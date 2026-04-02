@@ -397,8 +397,12 @@ def bridge_tools(
         for name, tool in interpreter._tools.items()
         if name not in native_tool_names
     }
-    tools["llm_query"] = interpreter.llm_query
-    tools["llm_query_batched"] = interpreter.llm_query_batched
+    # Prefer dspy.RLM-injected llm_query (fresh per-forward counter + sub_lm);
+    # fall back to interpreter methods when running outside dspy.RLM.
+    if "llm_query" not in tools:
+        tools["llm_query"] = interpreter.llm_query
+    if "llm_query_batched" not in tools:
+        tools["llm_query_batched"] = interpreter.llm_query_batched
     return tools
 
 
@@ -420,7 +424,11 @@ def invoke_tool(
     kwargs: dict[str, Any],
 ) -> Any:
     try:
-        if name == "llm_query":
+        # Prefer dspy.RLM-injected tools (fresh counter + sub_lm per forward());
+        # fall back to interpreter methods for standalone use.
+        if name in interpreter._tools:
+            value = interpreter._tools[name](*args, **kwargs)
+        elif name == "llm_query":
             prompt = args[0] if args else kwargs.get("prompt", "")
             value = interpreter.llm_query(str(prompt))
         elif name == "llm_query_batched":
@@ -428,8 +436,6 @@ def invoke_tool(
             if not isinstance(prompts, list):
                 prompts = []
             value = interpreter.llm_query_batched([str(item) for item in prompts])
-        elif name in interpreter._tools:
-            value = interpreter._tools[name](*args, **kwargs)
         else:
             raise RuntimeError(f"Unknown host callback: {name}")
         try:

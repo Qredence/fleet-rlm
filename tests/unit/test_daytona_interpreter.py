@@ -539,6 +539,43 @@ def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code
         )
 
 
+def test_bridge_tools_prefers_dspy_rlm_injected_llm_query() -> None:
+    """When dspy.RLM injects llm_query into interpreter._tools, the bridge
+    should use that version (fresh counter per forward) rather than the
+    interpreter's own LLMQueryMixin method."""
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    # Simulate dspy.RLM injection via interpreter.tools.update(...)
+    calls: list[str] = []
+
+    def injected_llm_query(prompt: str) -> str:
+        calls.append(prompt)
+        return "injected"
+
+    interpreter.tools = {"llm_query": injected_llm_query}
+
+    bridge = interpreter._bridge_tools()
+    assert bridge["llm_query"] is injected_llm_query
+
+    # invoke_tool should also use the injected version
+    result = interpreter._invoke_tool("llm_query", ["hello"], {})
+    assert result == "injected"
+    assert calls == ["hello"]
+
+
+def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
+    """When no dspy.RLM injection has happened, bridge_tools falls back to
+    the interpreter's LLMQueryMixin.llm_query method."""
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    # No injection — _tools should be empty
+    bridge = interpreter._bridge_tools()
+    assert bridge["llm_query"] == interpreter.llm_query
+    assert bridge["llm_query_batched"] == interpreter.llm_query_batched
+
+
 def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     runtime = _FakeRuntime()
     runtime.closed = 0
