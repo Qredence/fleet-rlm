@@ -360,7 +360,7 @@ export interface ActivityEntry {
   id: string;
   kind: string;
   text: string;
-  timestamp?: string;
+  timestamp?: string | number;
   iteration?: number;
   phase?: string;
   status?: string;

@@ -130,7 +130,7 @@ function markLiveTraceSeen(): void {
 
 function normalizeExecutionStepFromPayload(
   payload: Record<string, unknown> | undefined,
-  fallbackTimestamp: string | undefined,
+  fallbackTimestamp: string | number | undefined,
 ): ExecutionStep | null {
   const step = asRecord(payload?.step);
   const sourceType = asText(payload?.source_type);

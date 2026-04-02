@@ -6,15 +6,32 @@ import asyncio
 import logging
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, Request, WebSocket
+from fastapi import Depends, HTTPException, Request, Security, WebSocket
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .execution import ExecutionEventEmitter
+from .server_utils import owner_fingerprint
 
 logger = logging.getLogger(__name__)
+
+http_bearer = HTTPBearer(
+    auto_error=False,
+    bearerFormat="JWT",
+    description=(
+        "Bearer token used when HTTP authentication is enabled. "
+        "When auth is optional, requests without a token fall back to the "
+        "configured default server identity."
+    ),
+)
+
+HTTPBearerCredentialsDep = Annotated[
+    HTTPAuthorizationCredentials | None,
+    Security(http_bearer),
+]
 
 
 class ServerState:
@@ -110,8 +127,12 @@ def build_unauthenticated_identity(
     )
 
 
-async def require_http_identity(request: Request) -> NormalizedIdentity:
+async def require_http_identity(
+    request: Request,
+    credentials: HTTPBearerCredentialsDep,
+) -> NormalizedIdentity:
     """Authenticate an HTTP request or fall back to the configured dev identity."""
+    _ = credentials
     state = get_server_state(request)
     provider = state.auth_provider
     cfg = state.config
@@ -147,7 +168,12 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     return None
 
 
-def session_key(workspace_id: str, user_id: str, session_id: str | None = None) -> str:
+def session_key(
+    tenant_claim: str,
+    user_claim: str,
+    session_id: str | None = None,
+) -> str:
     """Build a stable in-memory key for a stateful user/workspace session."""
     resolved_session_id = (session_id or "").strip() or "__default__"
-    return f"{workspace_id}:{user_id}:{resolved_session_id}"
+    owner_id = owner_fingerprint(tenant_claim, user_claim)
+    return f"owner:{owner_id}:{resolved_session_id}"

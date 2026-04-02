@@ -508,6 +508,8 @@ async def _chat_message_loop(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 sess_id=sess_id,
+                owner_tenant_claim=session.owner_tenant_claim,
+                owner_user_claim=session.owner_user_claim,
                 active_key=session.active_key,
                 session_record=session.session_record,
                 last_loaded_docs_path=session.last_loaded_docs_path,

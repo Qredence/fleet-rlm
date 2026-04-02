@@ -56,6 +56,8 @@ paths:
           description: The authenticated tenant or user is not admitted to Fleet RLM.
         "503":
           description: Authentication or repository services are not configured yet.
+      security:
+        - HTTPBearer: []
   /api/v1/sessions/state:
     get:
       tags:
@@ -75,6 +77,8 @@ paths:
           description: Authentication is required or the provided token is invalid.
         "503":
           description: Session state is unavailable because server startup is incomplete.
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/settings:
     get:
       tags:
@@ -95,6 +99,8 @@ paths:
         "503":
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+        - HTTPBearer: []
     patch:
       tags:
         - runtime
@@ -129,6 +135,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/tests/modal:
     post:
       tags:
@@ -149,6 +157,8 @@ paths:
         "503":
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/tests/lm:
     post:
       tags:
@@ -169,6 +179,8 @@ paths:
         "503":
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/tests/daytona:
     post:
       tags:
@@ -189,6 +201,8 @@ paths:
         "503":
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/status:
     get:
       tags:
@@ -209,6 +223,8 @@ paths:
         "503":
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+        - HTTPBearer: []
   /api/v1/runtime/volume/tree:
     get:
       tags:
@@ -216,6 +232,8 @@ paths:
       summary: Get Volume Tree
       description: List the runtime volume tree for the active workspace and provider.
       operationId: get_volume_tree_api_v1_runtime_volume_tree_get
+      security:
+        - HTTPBearer: []
       parameters:
         - name: root_path
           in: query
@@ -284,6 +302,8 @@ paths:
       summary: Get Volume File Content
       description: Read a text preview for a single file from the runtime volume.
       operationId: get_volume_file_content_api_v1_runtime_volume_file_get
+      security:
+        - HTTPBearer: []
       parameters:
         - name: path
           in: query
@@ -387,6 +407,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - HTTPBearer: []
 components:
   schemas:
     AuthMeResponse:
@@ -1042,3 +1064,11 @@ components:
         - nodes
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      description: Bearer token used when HTTP authentication is enabled. When auth
+        is optional, requests without a token fall back to the configured default
+        server identity.
+      scheme: bearer
+      bearerFormat: JWT

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +11,7 @@ from fleet_rlm.integrations.observability import log_trace_feedback, resolve_tra
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..dependencies import HTTPIdentityDep
+from ..runtime_services.common import RUNTIME_TEST_TIMEOUT_SECONDS, run_blocking
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
 
 router = APIRouter(prefix="/traces", tags=["traces"])
@@ -99,10 +101,14 @@ async def create_trace_feedback(
         )
 
     try:
-        trace = resolve_trace(
-            trace_id=request.trace_id,
-            client_request_id=request.client_request_id,
-            config=config,
+        trace = await run_blocking(
+            partial(
+                resolve_trace,
+                trace_id=request.trace_id,
+                client_request_id=request.client_request_id,
+                config=config,
+            ),
+            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         raise HTTPException(
@@ -134,17 +140,21 @@ async def create_trace_feedback(
         )
 
     try:
-        outcome = log_trace_feedback(
-            trace_id=resolved_trace_id,
-            is_correct=request.is_correct,
-            source_id=identity.user_claim,
-            comment=request.comment,
-            expected_response=request.expected_response,
-            metadata={
-                "tenant_claim": identity.tenant_claim,
-                "email": identity.email or "",
-                "name": identity.name or "",
-            },
+        outcome = await run_blocking(
+            partial(
+                log_trace_feedback,
+                trace_id=resolved_trace_id,
+                is_correct=request.is_correct,
+                source_id=identity.user_claim,
+                comment=request.comment,
+                expected_response=request.expected_response,
+                metadata={
+                    "tenant_claim": identity.tenant_claim,
+                    "email": identity.email or "",
+                    "name": identity.name or "",
+                },
+            ),
+            timeout=None,
         )
     except Exception as exc:
         raise HTTPException(

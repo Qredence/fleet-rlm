@@ -25,6 +25,8 @@ def test_prepare_chat_message_turn_rejects_empty_content() -> None:
         session = _ChatSessionState(
             canonical_workspace_id="workspace",
             canonical_user_id="user",
+            owner_tenant_claim="workspace",
+            owner_user_claim="user",
             cancel_flag={"cancelled": False},
             last_loaded_docs_path="docs/last.md",
         )
@@ -71,6 +73,8 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         session = _ChatSessionState(
             canonical_workspace_id="workspace",
             canonical_user_id="user",
+            owner_tenant_claim="workspace",
+            owner_user_claim="user",
             cancel_flag={"cancelled": True},
             session_record={"id": "session-record"},
             last_loaded_docs_path="docs/last.md",

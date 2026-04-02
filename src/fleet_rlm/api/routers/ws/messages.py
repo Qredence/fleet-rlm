@@ -63,6 +63,18 @@ async def parse_ws_message_or_send_error(
                 ),
             )
             return None
+        if "unsupported_identity_fields" in error_types:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="unsupported_identity_fields",
+                    message=(
+                        "WebSocket identity is derived from auth. Remove "
+                        "workspace_id/user_id and use session_id only."
+                    ),
+                ),
+            )
+            return None
         message = "; ".join(
             error.get("msg", "Invalid websocket payload") for error in errors
         )

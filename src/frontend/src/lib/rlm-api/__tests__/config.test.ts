@@ -61,26 +61,13 @@ describe("rlmApiConfig — wsUrl derivation", () => {
   });
 
   // ── other config fields ──────────────────────────────────────────────────────
-  it("correctly reads workspace and user IDs from env", async () => {
+  it("does not expose client-controlled websocket identity config", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
     vi.stubEnv("VITE_FLEET_WS_URL", "");
-    vi.stubEnv("VITE_FLEET_WORKSPACE_ID", "my-workspace");
-    vi.stubEnv("VITE_FLEET_USER_ID", "my-user");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.workspaceId).toBe("my-workspace");
-    expect(rlmApiConfig.userId).toBe("my-user");
-  });
-
-  it("falls back to default workspace and user when env vars are absent", async () => {
-    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
-    vi.stubEnv("VITE_FLEET_WS_URL", "");
-    vi.stubEnv("VITE_FLEET_WORKSPACE_ID", "");
-    vi.stubEnv("VITE_FLEET_USER_ID", "");
-
-    const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.workspaceId).toBe("default");
-    expect(rlmApiConfig.userId).toBe("fleetwebapp-user");
+    expect(rlmApiConfig).not.toHaveProperty("workspaceId");
+    expect(rlmApiConfig).not.toHaveProperty("userId");
   });
 
   // ── mock mode ─────────────────────────────────────────────────────────────────

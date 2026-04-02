@@ -8,9 +8,7 @@ import {
 } from "@/components/ui/empty";
 
 import { useNavigationStore } from "@/stores/navigation-store";
-import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { cn } from "@/lib/utils";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
@@ -59,7 +57,6 @@ function navLabel(nav: string): string {
 
 export function ShellSidepanel() {
   const activeNav = useNavigationStore((state) => state.activeNav);
-  const isMobile = useIsMobile();
   const panelMeta = getShellPanelMeta(activeNav);
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
@@ -67,32 +64,9 @@ export function ShellSidepanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">
-      <div
-        className={cn(
-          "shrink-0 border-b border-border-subtle/80 bg-card/95 backdrop-blur-sm",
-          isMobile ? "px-4 py-3" : "px-4 py-3",
-        )}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/72">
-              {navLabel(activeNav)}
-            </div>
-            <div className="truncate text-sm font-semibold tracking-tight text-foreground">
-              {panelMeta.title}
-            </div>
-            <p className="max-w-[30ch] text-xs leading-5 text-muted-foreground">
-              {panelMeta.description}
-            </p>
-          </div>
-          <div
-            className={cn(
-              "shrink-0 rounded-full border border-border-subtle/80 bg-background/80 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground/72",
-              isMobile && "hidden",
-            )}
-          >
-            Panel
-          </div>
+      <div className="shrink-0 border-b border-border-subtle/80 px-4 py-3">
+        <div className="truncate text-sm font-semibold tracking-tight text-foreground">
+          {panelMeta.title}
         </div>
       </div>
 

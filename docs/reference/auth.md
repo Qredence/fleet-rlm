@@ -109,7 +109,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 #### 3. WebSocket Query Parameters
 
-When `ALLOW_QUERY_AUTH_TOKENS=true`, WebSocket connections can authenticate via query parameters:
+When `ALLOW_QUERY_AUTH_TOKENS=true`, WebSocket connections can bootstrap via query parameters when a bearer `Authorization` header is not available:
 
 **Debug auth (when `ALLOW_DEBUG_AUTH=true`):**
 
@@ -122,6 +122,8 @@ ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user
 ```text
 ws://localhost:8000/api/v1/ws/chat?access_token=<hs256-jwt>
 ```
+
+Prefer `Authorization: Bearer ...` on HTTP requests and on websocket clients that can forward headers. Use `access_token` query bootstrap only on websocket paths that explicitly support it.
 
 ### Fallback Behavior
 
@@ -329,7 +331,8 @@ The `/api/v1/auth/me` endpoint returns both external claims and internal IDs:
 Auth claims are the **canonical** source of tenant/user identity:
 
 - `tenant_claim` and `user_claim` from auth are authoritative
-- WebSocket payload fields like `workspace_id` and `user_id` are compatibility fields, not authoritative
+- `workspace_id` and `user_id` on websocket payloads and query strings are unsupported and should be rejected
+- `session_id` is the only authoritative client-controlled websocket selector
 - Internal `tenant_id` and `user_id` are resolved via database lookup during admission
 
 **Frontend SPA expectations:**

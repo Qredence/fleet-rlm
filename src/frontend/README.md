@@ -40,8 +40,6 @@ Create a local `.env` file from `.env.example`.
 Expected values:
 
 - `VITE_FLEET_API_URL=http://localhost:8000`
-- `VITE_FLEET_WORKSPACE_ID=default`
-- `VITE_FLEET_USER_ID=fleetwebapp-user`
 - `VITE_FLEET_TRACE=true`
 
 Optional overrides:
@@ -52,7 +50,7 @@ Optional overrides:
 - `VITE_PUBLIC_POSTHOG_API_KEY`
 - `VITE_PUBLIC_POSTHOG_HOST`
 
-If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
+If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`. WebSocket identity is auth-derived; `session_id` is the only client-controlled selector.
 
 ### Backend Startup
 

@@ -8,8 +8,6 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
-from fastapi.responses import JSONResponse
-
 RUNTIME_TEST_TIMEOUT_SECONDS = 20
 VOLUME_OPERATION_TIMEOUT_SECONDS = 30
 
@@ -18,15 +16,6 @@ _BlockingResultT = TypeVar("_BlockingResultT")
 
 def utc_now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
-
-
-def json_model_response(payload: Any) -> JSONResponse:
-    """Serialize runtime API payloads eagerly before returning to FastAPI."""
-    if hasattr(payload, "model_dump"):
-        content = payload.model_dump(mode="json")
-    else:
-        content = payload
-    return JSONResponse(content=content)
 
 
 def sanitize_error(exc: Exception) -> str:
@@ -65,6 +54,9 @@ def coerce_output_text(value: Any) -> str:
 async def run_blocking(
     fn: Callable[..., _BlockingResultT],
     *args: Any,
-    timeout: int,
+    timeout: int | None,
 ) -> _BlockingResultT:
-    return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
+    task = asyncio.to_thread(fn, *args)
+    if timeout is None:
+        return await task
+    return await asyncio.wait_for(task, timeout=timeout)

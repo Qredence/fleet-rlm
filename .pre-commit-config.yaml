@@ -31,7 +31,7 @@ repos:
     hooks:
       - id: ty-check
         name: Type-check backend sources with ty
-        entry: uv run ty check src --exclude "src/fleet_rlm/_scaffold/**"
+        entry: ./scripts/run_ty_check.zsh
         language: system
         pass_filenames: false
         stages: [pre-commit]

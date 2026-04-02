@@ -424,7 +424,7 @@ Primary streaming chat interface for RLM conversations. Supports message streami
 ws://localhost:8000/api/v1/ws/chat
 ```
 
-**Authentication:** Bearer token in subprotocol header when `AUTH_REQUIRED=true`.
+**Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
 
 ---
 
@@ -447,8 +447,6 @@ Send a user message to initiate or continue a conversation.
   "trace_mode": "compact",
   "execution_mode": "auto",
   "runtime_mode": "modal_chat",
-  "workspace_id": "default",
-  "user_id": "anonymous",
   "session_id": "session-uuid"
 }
 ```
@@ -468,9 +466,7 @@ Send a user message to initiate or continue a conversation.
 | `repo_ref` | string | no | `null` | Daytona branch or commit; requires `repo_url` |
 | `context_paths` | string[] | no | `null` | Daytona-only staged local host paths |
 | `batch_concurrency` | integer | no | `null` | Daytona-only recursive batch concurrency |
-| `workspace_id` | string | no | `"default"` | Workspace identifier |
-| `user_id` | string | no | `"anonymous"` | User identifier |
-| `session_id` | string | no | auto-generated | Session identifier |
+| `session_id` | string | no | auto-generated | Authoritative client-controlled session selector |
 
 **Execution Modes:**
 
@@ -527,8 +523,6 @@ Dispatch a command to the agent for direct execution (outside of chat flow).
     "path": "/output/result.txt",
     "content": "Hello, world!"
   },
-  "workspace_id": "default",
-  "user_id": "anonymous",
   "session_id": "session-uuid"
 }
 ```
@@ -540,9 +534,7 @@ Dispatch a command to the agent for direct execution (outside of chat flow).
 | `type` | `"command"` | yes | Frame type identifier |
 | `command` | string | yes | Command name to execute |
 | `args` | object | yes | Command arguments (must be JSON object) |
-| `workspace_id` | string | no | Workspace identifier |
-| `user_id` | string | no | User identifier |
-| `session_id` | string | no | Session identifier |
+| `session_id` | string | no | Authoritative client-controlled session selector |
 
 **Available Commands:**
 
@@ -712,11 +704,11 @@ ws://localhost:8000/api/v1/ws/execution?session_id=session-uuid
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `workspace_id` | string | no | Compatibility query parameter; authenticated workspace identity is canonical |
-| `user_id` | string | no | Compatibility query parameter; authenticated user identity is canonical |
-| `session_id` | string | yes | Session to subscribe to |
+| `session_id` | string | yes | Authoritative client-controlled session selector |
 
-**Authentication:** Bearer token in subprotocol header when `AUTH_REQUIRED=true`.
+**Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
+
+The backend resolves workspace and user identity from auth claims or server defaults. Client-provided `workspace_id` and `user_id` are rejected; `session_id` is the only authoritative selector for stream binding.
 
 ---
 
@@ -746,6 +738,8 @@ Emitted when a new chat turn begins processing.
 ##### `execution_step` — Step Completed
 
 Emitted for each LLM call, tool execution, REPL block, or output.
+
+Step timestamps are numeric Unix epoch seconds produced by the backend; clients may normalize them for display.
 
 **Payload:**
 
@@ -832,9 +826,9 @@ All execution events share this structure:
 |-------|------|-------------|
 | `type` | `"execution_started"` \| `"execution_step"` \| `"execution_completed"` | Event type |
 | `run_id` | string | Unique run identifier |
-| `workspace_id` | string | Workspace identifier |
-| `user_id` | string | User identifier |
-| `session_id` | string | Session identifier |
+| `workspace_id` | string | Compatibility field only; canonical workspace identity comes from auth or server defaults |
+| `user_id` | string | Compatibility field only; canonical user identity comes from auth or server defaults |
+| `session_id` | string | Authoritative client-controlled session selector |
 | `step` | object \| null | Step payload (null for `execution_started`) |
 
 ---

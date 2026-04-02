@@ -2,12 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
-import {
-  sendCommandOverWs,
-  rlmApiConfig,
-  subscribeToExecutionStream,
-  type WsServerMessage,
-} from "@/lib/rlm-api";
+import { sendCommandOverWs, subscribeToExecutionStream, type WsServerMessage } from "@/lib/rlm-api";
 import { useArtifactStore } from "@/lib/workspace/artifact-store";
 import { applyWsFrameToArtifacts } from "@/lib/workspace/backend-artifact-event-adapter";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
@@ -298,8 +293,6 @@ export function useWorkspace(): ChatRuntime {
               message_id: msgId,
               action_label: label,
             },
-            workspace_id: rlmApiConfig.workspaceId,
-            user_id: rlmApiConfig.userId,
             session_id: sessionId,
           },
           {

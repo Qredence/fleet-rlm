@@ -241,9 +241,9 @@ describe("useChatStore — streamMessage", () => {
       execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
-      workspace_id: "test-workspace",
-      user_id: "test-user",
     });
+    expect(payload).not.toHaveProperty("workspace_id");
+    expect(payload).not.toHaveProperty("user_id");
   });
 
   it("passes execution mode overrides to the websocket payload", async () => {

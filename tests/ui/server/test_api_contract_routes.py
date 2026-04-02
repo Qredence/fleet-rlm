@@ -8,6 +8,9 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
+from fleet_rlm.api.dependencies import session_key
+from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
+
 
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
@@ -141,9 +144,152 @@ def test_sessions_state_endpoint_exists_and_returns_expected_shape(
     assert isinstance(payload["sessions"], list)
 
 
-def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
+def test_sessions_state_endpoint_is_scoped_to_resolved_identity(
     default_client: TestClient,
     auth_headers: dict[str, str],
+) -> None:
+    state = default_client.app.state.server_state
+    session_a_key = session_key("tenant-a", "user-a", "session-a")
+    session_b_key = session_key("tenant-b", "user-b", "session-b")
+    state.sessions.update(
+        {
+            session_a_key: {
+                "workspace_id": "tenant-a",
+                "user_id": "user-a",
+                "owner_tenant_claim": "tenant-a",
+                "owner_user_claim": "user-a",
+                "owner_fingerprint": owner_fingerprint("tenant-a", "user-a"),
+                "session_id": "session-a",
+                "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-a"}]},
+            },
+            session_b_key: {
+                "workspace_id": "tenant-b",
+                "user_id": "user-b",
+                "owner_tenant_claim": "tenant-b",
+                "owner_user_claim": "user-b",
+                "owner_fingerprint": owner_fingerprint("tenant-b", "user-b"),
+                "session_id": "session-b",
+                "session": {"state": {"history": [{"role": "user", "content": "bye"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-b"}]},
+            },
+        }
+    )
+
+    response = default_client.get("/api/v1/sessions/state", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["key"] for session in payload["sessions"]] == [session_a_key]
+    assert payload["sessions"][0]["workspace_id"] == "tenant-a"
+    assert payload["sessions"][0]["user_id"] == "user-a"
+    assert payload["sessions"][0]["session_id"] == "session-a"
+
+
+def test_sessions_state_endpoint_matches_sanitized_identity_claims(
+    default_client: TestClient,
+) -> None:
+    state = default_client.app.state.server_state
+    raw_workspace_id = "tenant/acme"
+    raw_user_id = "alice@example.com"
+    workspace_id = sanitize_id(raw_workspace_id, "default")
+    user_id = sanitize_id(raw_user_id, "anonymous")
+    legacy_key = f"{workspace_id}:{user_id}:session-a"
+    state.sessions[legacy_key] = {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "session_id": "session-a",
+        "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
+        "manifest": {"artifacts": [{"name": "artifact-a"}]},
+    }
+
+    response = default_client.get(
+        "/api/v1/sessions/state",
+        headers={
+            "X-Debug-Tenant-Id": raw_workspace_id,
+            "X-Debug-User-Id": raw_user_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["key"] for session in payload["sessions"]] == [legacy_key]
+    assert payload["sessions"][0]["workspace_id"] == workspace_id
+    assert payload["sessions"][0]["user_id"] == user_id
+
+
+def test_sessions_state_endpoint_separates_colliding_sanitized_identities(
+    default_client: TestClient,
+) -> None:
+    state = default_client.app.state.server_state
+    raw_workspace_id = "tenant/acme"
+    raw_user_id = "alice@example.com"
+    colliding_workspace_id = "tenant-acme"
+    colliding_user_id = "alice-example.com"
+    workspace_id = sanitize_id(raw_workspace_id, "default")
+    user_id = sanitize_id(raw_user_id, "anonymous")
+
+    assert workspace_id == sanitize_id(colliding_workspace_id, "default")
+    assert user_id == sanitize_id(colliding_user_id, "anonymous")
+
+    session_a_key = session_key(raw_workspace_id, raw_user_id, "session-a")
+    session_b_key = session_key(
+        colliding_workspace_id,
+        colliding_user_id,
+        "session-b",
+    )
+
+    assert owner_fingerprint(raw_workspace_id, raw_user_id) != owner_fingerprint(
+        colliding_workspace_id,
+        colliding_user_id,
+    )
+    assert session_a_key != session_b_key
+
+    state.sessions.update(
+        {
+            session_a_key: {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "owner_tenant_claim": raw_workspace_id,
+                "owner_user_claim": raw_user_id,
+                "owner_fingerprint": owner_fingerprint(raw_workspace_id, raw_user_id),
+                "session_id": "session-a",
+                "session": {"state": {"history": [{"role": "user", "content": "hi"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-a"}]},
+            },
+            session_b_key: {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "owner_tenant_claim": colliding_workspace_id,
+                "owner_user_claim": colliding_user_id,
+                "owner_fingerprint": owner_fingerprint(
+                    colliding_workspace_id,
+                    colliding_user_id,
+                ),
+                "session_id": "session-b",
+                "session": {"state": {"history": [{"role": "user", "content": "bye"}]}},
+                "manifest": {"artifacts": [{"name": "artifact-b"}]},
+            },
+        }
+    )
+
+    response = default_client.get(
+        "/api/v1/sessions/state",
+        headers={
+            "X-Debug-Tenant-Id": raw_workspace_id,
+            "X-Debug-User-Id": raw_user_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["key"] for session in payload["sessions"]] == [session_a_key]
+    assert payload["sessions"][0]["workspace_id"] == workspace_id
+    assert payload["sessions"][0]["user_id"] == user_id
+
+
+def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
+    default_client: TestClient,
 ) -> None:
     state = default_client.app.state.server_state
     state.sessions["broken"] = "stale-session-record"
@@ -155,23 +301,39 @@ def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
         "session": {"state": {"history": "invalid", "documents": []}},
     }
 
-    response = default_client.get("/api/v1/sessions/state", headers=auth_headers)
+    response = default_client.get("/api/v1/sessions/state")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert isinstance(payload["sessions"], list)
-    assert {session["key"] for session in payload["sessions"]} == {"broken", "partial"}
-    broken, partial = payload["sessions"]
-    assert broken["workspace_id"] == "default"
-    assert broken["user_id"] == "anonymous"
-    assert broken["session_id"] is None
-    assert partial["workspace_id"] == "default"
-    assert partial["user_id"] == "anonymous"
-    assert partial["session_id"] is None
-    assert partial["updated_at"] is None
-    assert partial["history_turns"] == 0
-    assert partial["document_count"] == 0
+    assert payload["sessions"] == []
+
+
+def test_openapi_publishes_http_bearer_security_for_protected_routes(
+    local_client: TestClient,
+) -> None:
+    schema = local_client.app.openapi()
+    security_schemes = schema.get("components", {}).get("securitySchemes", {})
+    assert any(
+        scheme.get("type") == "http" and scheme.get("scheme") == "bearer"
+        for scheme in security_schemes.values()
+    )
+
+    protected_operations = [
+        ("get", "/api/v1/auth/me"),
+        ("get", "/api/v1/runtime/settings"),
+        ("patch", "/api/v1/runtime/settings"),
+        ("post", "/api/v1/runtime/tests/modal"),
+        ("post", "/api/v1/runtime/tests/lm"),
+        ("get", "/api/v1/runtime/status"),
+        ("get", "/api/v1/sessions/state"),
+        ("post", "/api/v1/traces/feedback"),
+    ]
+    for method, path in protected_operations:
+        operation = schema["paths"][path][method]
+        assert operation.get("security"), (
+            f"expected OpenAPI security on {method} {path}"
+        )
 
 
 def test_runtime_contract_endpoints_remain_available(
@@ -575,3 +737,58 @@ def test_trace_feedback_returns_503_when_lookup_raises(
 
     assert response.status_code == 503
     assert "Failed to resolve MLflow trace" in response.json()["detail"]
+
+
+def test_trace_feedback_offloads_lookup_and_logging_with_run_blocking(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, int | None]] = []
+    fake_trace = _fake_trace_feedback_trace(
+        trace_id="trace-offloaded",
+        client_request_id="req-offloaded",
+    )
+
+    def fake_resolve_trace(**kwargs):
+        _ = kwargs
+        return fake_trace
+
+    def fake_log_trace_feedback(**kwargs):
+        _ = kwargs
+        return {"feedback_logged": True, "expectation_logged": False}
+
+    async def fake_run_blocking(fn, *args, timeout: int | None):
+        _ = args
+        target = getattr(fn, "func", fn)
+        calls.append((getattr(target, "__name__", repr(target)), timeout))
+        return fn()
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.traces.resolve_trace",
+        fake_resolve_trace,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.traces.log_trace_feedback",
+        fake_log_trace_feedback,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.traces.run_blocking",
+        fake_run_blocking,
+    )
+
+    response = default_client.post(
+        "/api/v1/traces/feedback",
+        headers=auth_headers,
+        json={
+            "trace_id": "trace-offloaded",
+            "is_correct": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == [
+        ("fake_resolve_trace", 20),
+        ("fake_log_trace_feedback", None),
+    ]

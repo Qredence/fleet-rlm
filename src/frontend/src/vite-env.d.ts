@@ -5,10 +5,6 @@ interface ImportMetaEnv {
   readonly VITE_FLEET_API_URL?: string;
   /** Explicit WebSocket URL for fleet-rlm (overrides derived URL). */
   readonly VITE_FLEET_WS_URL?: string;
-  /** Workspace identifier sent to fleet-rlm. */
-  readonly VITE_FLEET_WORKSPACE_ID?: string;
-  /** User identifier sent to fleet-rlm. */
-  readonly VITE_FLEET_USER_ID?: string;
   /** Enable trace-level logging ("true"/"false"). */
   readonly VITE_FLEET_TRACE?: string;
   /** Enable mock mode — bypass backend entirely ("true"/"false"). */

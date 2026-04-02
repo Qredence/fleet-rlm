@@ -88,7 +88,7 @@ Deprecated/planned surfaces removed from backend:
 - The SPA requests `api://<api-app-client-id>/access_as_user`.
 - The same acquired access token is reused for:
   - `Authorization: Bearer ...` on HTTP requests
-  - `access_token` bootstrap on `WS /api/v1/ws/chat` only when `ALLOW_QUERY_AUTH_TOKENS=true`; treat this as a compatibility bootstrap and disable it outside trusted environments when you can
+  - `access_token` bootstrap on websocket clients where the server supports query-token compatibility; prefer this only when a header cannot be forwarded
 - `GET /api/v1/auth/me` is the frontend’s canonical identity bootstrap endpoint.
 - In Entra mode, backend tenant admission is enforced against the Neon `tenants` table before runtime persistence starts.
 
@@ -101,6 +101,8 @@ Deprecated/planned surfaces removed from backend:
 - Canonical purpose: conversational turn streaming only. The transcript should stay focused on
   user/assistant exchange plus lightweight live trace.
 - Auth claims are canonical tenant/user authority.
+- `session_id` is the only authoritative client-controlled selector for websocket binding.
+- `workspace_id` and `user_id` are unsupported on websocket payloads and should be rejected immediately.
 - `runtime_mode` selects the top-level runtime:
   - `modal_chat` for the default product path
   - `daytona_pilot` for the Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
@@ -172,7 +174,8 @@ Trajectory payload handling:
 ### `/api/v1/ws/execution`
 
 - Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
-- Filters by subscription identity (`workspace_id`, `user_id`, `session_id`).
+- Filters by auth-derived identity plus `session_id`.
+- `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
 - Emits `execution_started`, `execution_step`, `execution_completed`.
 - `execution_completed.summary` is the canonical canvas/workbench summary for both runtimes.
   Frontend workbench state should hydrate from this summary rather than scraping Daytona-only
@@ -204,6 +207,7 @@ Trajectory payload handling:
   - `warnings`
 - `execution_step.step.type` remains runtime-agnostic with the current `llm | tool | repl | memory
   | output` lane model.
+- `execution_step.step.timestamp` is emitted as numeric Unix epoch seconds by the backend; the frontend may normalize it for display, but should not require ISO strings on the wire.
 
 ### Unified Workspace Canvas Contract
 
@@ -257,8 +261,6 @@ Frontend connectivity is typically driven by:
 
 - `VITE_FLEET_API_URL`
 - `VITE_FLEET_WS_URL`
-- `VITE_FLEET_WORKSPACE_ID`
-- `VITE_FLEET_USER_ID`
 - `VITE_FLEET_TRACE`
 
 Execution stream payload-size controls (backend):
