@@ -74,12 +74,59 @@ def _result_views() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Section 2: Budget and LM bootstrap types
+# Section 2: Budget, sandbox spec, and LM bootstrap types
 # ---------------------------------------------------------------------------
 
 
 class DaytonaRunCancelled(RuntimeError):
     """Raised when a live Daytona rollout is cancelled by the caller."""
+
+
+@dataclass(slots=True)
+class SandboxSpec:
+    """Declarative specification for Daytona sandbox creation.
+
+    Consolidates all sandbox creation parameters into a single object that
+    can be passed through the runtime layer. Maps directly to the SDK's
+    ``CreateSandboxFromSnapshotParams`` or ``CreateSandboxFromImageParams``.
+    """
+
+    language: str = "python"
+    volume_name: str | None = None
+    volume_mount_path: str | None = None
+    volume_subpath: str | None = None
+    env_vars: dict[str, str] | None = None
+    labels: dict[str, str] | None = None
+    ephemeral: bool = True
+    auto_stop_interval: int | None = 0
+    auto_archive_interval: int | None = None
+    snapshot: str | None = None
+    image: str | None = None
+
+    def to_create_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
+        """Build keyword arguments for the SDK create-params constructor."""
+        params: dict[str, Any] = {"language": self.language}
+        if self.env_vars:
+            params["env_vars"] = dict(self.env_vars)
+        if self.labels:
+            params["labels"] = dict(self.labels)
+        if self.ephemeral is not None:
+            params["ephemeral"] = self.ephemeral
+        if self.auto_stop_interval is not None:
+            params["auto_stop_interval"] = self.auto_stop_interval
+        if self.auto_archive_interval is not None:
+            params["auto_archive_interval"] = self.auto_archive_interval
+        if self.snapshot:
+            params["snapshot"] = self.snapshot
+        if volume_id and self.volume_mount_path:
+            mount_kwargs: dict[str, Any] = {
+                "volume_id": volume_id,
+                "mount_path": self.volume_mount_path,
+            }
+            if self.volume_subpath:
+                mount_kwargs["subpath"] = self.volume_subpath
+            params["volumes"] = [mount_kwargs]
+        return params
 
 
 @dataclass(slots=True)
@@ -828,8 +875,9 @@ __all__ = [
     "_coerce_positive_int",
     "_coerce_nonnegative_int",
     "_persisted_text_preview",
-    # Budget types
+    # Budget and sandbox spec types
     "DaytonaRunCancelled",
+    "SandboxSpec",
     "RolloutBudget",
     "SandboxLmRuntimeConfig",
     # Context types

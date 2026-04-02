@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
-from .types import ContextSource
+from .types import ContextSource, SandboxSpec
 from .runtime_helpers import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     _abuild_workspace_path,
@@ -150,9 +150,27 @@ class DaytonaSandboxSession:
     def delete(self) -> None:
         _run_async_compat(self.adelete)
 
+    async def aarchive(self) -> None:
+        """Archive the sandbox for later recovery (cheaper than keeping it running)."""
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.archive())
+
+    def archive(self) -> None:
+        _run_async_compat(self.aarchive)
+
+    async def arecover(self, *, timeout: float = 60.0) -> None:
+        """Recover an archived sandbox, restoring it to a running state."""
+        await _await_if_needed(self.sandbox.recover(timeout=timeout))
+
+    def recover(self, *, timeout: float = 60.0) -> None:
+        _run_async_compat(self.arecover, timeout=timeout)
+
 
 class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
+
+    # Default labels applied to all sandboxes created by this runtime
+    DEFAULT_LABELS: dict[str, str] = {"managed-by": "fleet-rlm"}
 
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
         resolved = config or resolve_daytona_config()
@@ -193,34 +211,72 @@ class DaytonaSandboxRuntime:
     def close(self) -> None:
         _run_async_compat(self.aclose)
 
-    async def _acreate_volume_mounted_sandbox(self, volume_name: str) -> Any:
+    def build_sandbox_spec(
+        self,
+        *,
+        volume_name: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> SandboxSpec:
+        """Build a ``SandboxSpec`` with runtime defaults applied."""
+        merged_labels = dict(self.DEFAULT_LABELS)
+        if labels:
+            merged_labels.update(labels)
+        return SandboxSpec(
+            language="python",
+            volume_name=volume_name,
+            volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            env_vars=env_vars or None,
+            labels=merged_labels,
+            ephemeral=True,
+            auto_stop_interval=0,
+        )
+
+    async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
+        """Create a sandbox using a declarative ``SandboxSpec``."""
         try:
-            from daytona import CreateSandboxFromSnapshotParams, VolumeMount
+            from daytona import (
+                CreateSandboxFromImageParams,
+                CreateSandboxFromSnapshotParams,
+                VolumeMount,
+            )
         except ImportError as exc:  # pragma: no cover - environment specific
             raise _daytona_import_error(exc) from exc
 
         client = await self._aget_client()
-        volume = await _await_if_needed(client.volume.get(volume_name, create=True))
-        return await _await_if_needed(
-            client.create(
-                CreateSandboxFromSnapshotParams(
-                    language="python",
-                    volumes=[
-                        VolumeMount(
-                            volume_id=volume.id,
-                            mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
-                        )
-                    ],
-                )
-            )
-        )
 
-    async def _acreate_sandbox(self, volume_name: str | None = None) -> Any:
+        # Resolve volume if requested
+        volume_id: str | None = None
+        if spec.volume_name:
+            volume = await _await_if_needed(
+                client.volume.get(spec.volume_name, create=True)
+            )
+            volume_id = volume.id
+
+        create_kwargs = spec.to_create_params(volume_id=volume_id)
+
+        # Reconstruct VolumeMount objects from the raw dicts
+        raw_volumes = create_kwargs.pop("volumes", None)
+        if raw_volumes:
+            create_kwargs["volumes"] = [VolumeMount(**v) for v in raw_volumes]
+
+        if spec.image:
+            params = CreateSandboxFromImageParams(image=spec.image, **create_kwargs)
+        else:
+            params = CreateSandboxFromSnapshotParams(**create_kwargs)
+
+        return await _await_if_needed(client.create(params))
+
+    async def _acreate_sandbox(
+        self,
+        volume_name: str | None = None,
+        *,
+        spec: SandboxSpec | None = None,
+    ) -> Any:
+        """Create a sandbox, optionally from a declarative spec."""
         try:
-            if volume_name:
-                return await self._acreate_volume_mounted_sandbox(volume_name)
-            client = await self._aget_client()
-            return await _await_if_needed(client.create())
+            resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
+            return await self._acreate_sandbox_from_spec(resolved_spec)
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox create failure: {exc}",
@@ -228,10 +284,18 @@ class DaytonaSandboxRuntime:
                 phase="sandbox_create",
             ) from exc
 
-    async def _aget_sandbox(self, sandbox_id: str) -> Any:
+    async def _aget_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
+        """Get an existing sandbox by ID, recovering from archive if needed."""
         try:
             client = await self._aget_client()
-            return await _await_if_needed(client.get(sandbox_id))
+            sandbox = await _await_if_needed(client.get(sandbox_id))
+            # Recover archived sandboxes automatically
+            if recover:
+                state = getattr(sandbox, "state", None)
+                state_value = getattr(state, "value", str(state or ""))
+                if str(state_value).lower() in ("archived", "stopped"):
+                    await _await_if_needed(sandbox.recover(timeout=60))
+            return sandbox
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox resume failure: {exc}",
@@ -271,16 +335,19 @@ class DaytonaSandboxRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: SandboxSpec | None = None,
     ) -> DaytonaSandboxSession:
         timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
         sandbox: Any | None = None
+        resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
         try:
             create_started = time.perf_counter()
-            sandbox = await self._acreate_sandbox(volume_name=volume_name)
+            sandbox = await self._acreate_sandbox(spec=resolved_spec)
             timings["sandbox_create"] = int(
                 (time.perf_counter() - create_started) * 1000
             )
-            if volume_name:
+            effective_volume = resolved_spec.volume_name or volume_name
+            if effective_volume:
                 await _aensure_daytona_volume_layout(
                     sandbox=sandbox,
                     mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
@@ -336,6 +403,7 @@ class DaytonaSandboxRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: SandboxSpec | None = None,
     ) -> DaytonaSandboxSession:
         return _run_async_compat(
             self.acreate_workspace_session,
@@ -343,6 +411,7 @@ class DaytonaSandboxRuntime:
             ref=ref,
             context_paths=context_paths,
             volume_name=volume_name,
+            spec=spec,
         )
 
     async def aresume_workspace_session(
@@ -457,4 +526,5 @@ __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
+    "SandboxSpec",
 ]

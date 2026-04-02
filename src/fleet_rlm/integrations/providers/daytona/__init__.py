@@ -28,6 +28,7 @@ from .types import (
     RecursiveTaskSpec,
     RolloutBudget,
     RolloutSummary,
+    SandboxSpec,
     TaskSourceProvenance,
 )
 
@@ -55,6 +56,7 @@ __all__ = [
     "ResolvedDaytonaConfig",
     "RolloutBudget",
     "RolloutSummary",
+    "SandboxSpec",
     "TaskSourceProvenance",
     "resolve_daytona_config",
     "run_daytona_smoke",
