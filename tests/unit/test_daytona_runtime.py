@@ -511,3 +511,29 @@ def test_session_resize_calls_sandbox_resize() -> None:
     assert getattr(r, "cpu") == 4
     assert getattr(r, "memory") == 8
     assert getattr(r, "disk") == 20
+
+
+def test_session_create_lsp_server_delegates_to_sandbox() -> None:
+    """``create_lsp_server`` calls through to the sandbox SDK method."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    lsp_calls: list[tuple[str, str]] = []
+
+    class _LspSandbox(_FakeSandbox):
+        def create_lsp_server(self, language_id: str, path_to_project: str):
+            lsp_calls.append((language_id, path_to_project))
+            return SimpleNamespace(language=language_id, path=path_to_project)
+
+    session = DaytonaSandboxSession(
+        sandbox=_LspSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/project",
+        context_sources=[],
+        context_id=None,
+    )
+    lsp = session.create_lsp_server()
+    assert len(lsp_calls) == 1
+    assert lsp_calls[0] == ("python", "/workspace/project")
+    assert lsp.language == "python"

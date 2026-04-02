@@ -204,6 +204,18 @@ class DaytonaSandboxSession:
     def resize(self, *, cpu: int, memory: int, disk: int) -> None:
         _run_async_compat(self.aresize, cpu=cpu, memory=memory, disk=disk)
 
+    def create_lsp_server(
+        self, *, language: str = "python", project_path: str | None = None
+    ) -> Any:
+        """Create a Daytona LSP server for code intelligence in the sandbox.
+
+        Returns the raw ``LspServer`` handle from the Daytona SDK.  The caller
+        must call ``await lsp.start()`` before using it and ``await lsp.stop()``
+        when finished.
+        """
+        path = project_path or self.workspace_path
+        return self.sandbox.create_lsp_server(language, path)
+
 
 class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
