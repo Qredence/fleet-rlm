@@ -102,7 +102,11 @@ async def _aget_daytona_session(
     interpreter = ctx.agent.interpreter
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
-    return await interpreter._aensure_session()
+    try:
+        return await interpreter._aensure_session()
+    except Exception:
+        logger.debug("Daytona session unavailable for workspace probe", exc_info=True)
+        return None
 
 
 def _get_daytona_session_sync(
@@ -118,7 +122,11 @@ def _get_daytona_session_sync(
     interpreter = getattr(ctx.agent, "interpreter", None)
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
-    return interpreter._ensure_session_sync()
+    try:
+        return interpreter._ensure_session_sync()
+    except Exception:
+        logger.debug("Daytona session unavailable for workspace probe", exc_info=True)
+        return None
 
 
 def _daytona_file_error(*, path: str, exc: Exception) -> dict[str, Any]:
