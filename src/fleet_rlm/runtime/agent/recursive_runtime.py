@@ -250,6 +250,7 @@ async def spawn_delegate_sub_agent_async(
         max_iterations=effective_max_iters,
         max_llm_calls=effective_max_llm_calls,
         verbose=bool(getattr(agent, "verbose", False)),
+        sub_lm=getattr(child_interpreter, "sub_lm", None),
     )
 
     lm_context = (

@@ -42,6 +42,7 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
         delegate_result_truncation_chars: int = 8000,
         interpreter_async_execute: bool = True,
         sandbox_spec: Any | None = None,
+        sub_lm: Any | None = None,
     ) -> None:
         _ = planner_lm
         self.runtime = runtime or DaytonaSandboxRuntime()
@@ -55,6 +56,7 @@ class DaytonaWorkbenchChatAgent(RLMReActChatAgent):
             max_llm_calls=rlm_max_llm_calls,
             async_execute=interpreter_async_execute,
             sandbox_spec=sandbox_spec,
+            sub_lm=sub_lm,
         )
 
         super().__init__(
