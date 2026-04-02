@@ -314,33 +314,25 @@ class RecursiveSubQuerySignature(dspy.Signature):
 
 
 class RLMVariableSignature(dspy.Signature):
-    """Process an arbitrarily long prompt stored as a REPL variable.
+    """Explore and answer questions about an arbitrarily long prompt.
 
-    The full prompt is available in the sandbox as the Python variable
-    ``prompt``.  You also have ``sub_rlm(text, context='')`` to recursively
-    invoke a child RLM on any slice, and ``llm_query(text)`` for simple
-    LLM calls.  Build your answer symbolically — write it into the
-    ``Final`` variable or call ``SUBMIT(answer=...)``.
+    The ``prompt`` field is stored as a REPL variable — use code to slice,
+    search, and aggregate it.  Call ``sub_rlm(text)`` for recursive semantic
+    processing of chunks, ``llm_query(text)`` for single LLM calls, and
+    ``SUBMIT(answer=...)`` to return the result.
 
-    Algorithm 1 from arXiv 2512.24601v2: the prompt lives in the REPL
-    environment, not in the LLM context window.
+    Per Algorithm 1 (arXiv 2512.24601v2): dspy.RLM stores input fields in
+    the REPL automatically — the LLM sees only metadata (type, length,
+    preview) and explores data through code execution.
     """
 
-    task: str = dspy.InputField(desc="The task or question to answer about the prompt")
-    prompt_length: int = dspy.InputField(
-        desc="Character length of the prompt variable in the REPL"
+    task: str = dspy.InputField(desc="The question or instruction to accomplish")
+    prompt: str = dspy.InputField(
+        desc="The full text to process (stored as REPL variable, not in LLM context)"
     )
-    prompt_preview: str = dspy.InputField(
-        desc="First 500 characters of the prompt (for orientation)"
+    answer: str = dspy.OutputField(
+        desc="Final answer (call SUBMIT(answer=...) in REPL)"
     )
-    available_functions: str = dspy.InputField(
-        desc=(
-            "Helper functions: sub_rlm(text, context), llm_query(text), "
-            "llm_query_batched(texts), peek(prompt, start, length), "
-            "grep(prompt, pattern), read_file(path), SUBMIT(**kwargs)"
-        ),
-    )
-    answer: str = dspy.OutputField(desc="Final answer built symbolically in the REPL")
 
 
 __all__ = [

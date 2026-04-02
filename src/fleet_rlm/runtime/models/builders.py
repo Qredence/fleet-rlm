@@ -83,41 +83,52 @@ def build_recursive_subquery_rlm(
 # ---------------------------------------------------------------------------
 # True-RLM variable-mode execution (Algorithm 1, arXiv 2512.24601v2)
 # ---------------------------------------------------------------------------
+# dspy.RLM natively:
+#   1. Stores all InputField values as REPL variables (_build_variables)
+#   2. Shows only metadata (type, length, preview) to the LLM
+#   3. Provides llm_query() and SUBMIT() built-in
+#   4. Accepts custom tools= for additional callables (sub_rlm, etc.)
+# See https://dspy.ai/api/modules/RLM/
+# ---------------------------------------------------------------------------
 
-_PROMPT_PREVIEW_LENGTH = 500
-_AVAILABLE_FUNCTIONS_DESC = (
-    "sub_rlm(text, context='') — recursively invoke child RLM on a slice; "
-    "sub_rlm_batched(texts, context='') — parallel batch; "
-    "llm_query(text) — single LLM call; "
-    "llm_query_batched(texts) — parallel LLM calls; "
-    "peek(prompt, start, length) — view a slice without copying; "
-    "grep(prompt, pattern) — regex search; "
-    "read_file(path), list_files(path), find_files(path, pattern); "
-    "SUBMIT(answer=...) — return final output"
-)
+# Threshold (chars) above which rlm_query auto-routes to variable mode
+VARIABLE_MODE_THRESHOLD = 32_000
 
 
 class RLMVariableExecutionModule(dspy.Module):
-    """True-RLM module: prompt stored as REPL variable, not in LLM context.
+    """True-RLM module that delegates to ``dspy.RLM`` with ``sub_rlm`` tools.
 
-    Implements the core loop from Algorithm 1 (arXiv 2512.24601v2):
-    1. Store the full prompt as a Python variable in the sandbox REPL.
-    2. Pass only metadata (length, preview) to the LLM.
-    3. The LLM writes code that slices, filters, and calls sub_rlm() in loops.
-    4. Output is built symbolically via SUBMIT(answer=...).
+    This thin wrapper:
+    1. Collects ``sub_rlm`` / ``sub_rlm_batched`` from the interpreter
+       and registers them as ``dspy.Tool`` instances on the inner RLM.
+    2. Forwards ``(task, prompt)`` — ``dspy.RLM._build_variables()``
+       stores ``prompt`` as a REPL variable automatically.  The LLM
+       sees only metadata and explores data through code.
+    3. Output is built symbolically via ``SUBMIT(answer=...)``.
+
+    All heavy lifting (REPL loop, metadata display, iteration budget,
+    llm_query) is handled by ``dspy.RLM`` itself.
     """
 
     def __init__(
         self,
         *,
         interpreter: Any,
-        max_iterations: int,
-        max_llm_calls: int,
+        max_iterations: int = 20,
+        max_llm_calls: int = 50,
         verbose: bool = False,
         max_output_chars: int | None = None,
         sub_lm: dspy.LM | None = None,
+        extra_tools: list[Any] | None = None,
     ) -> None:
         super().__init__()
+        # Gather sub_rlm tools from the interpreter (if it exposes them)
+        tools: list[Any] = list(extra_tools or [])
+        for attr_name in ("sub_rlm", "sub_rlm_batched"):
+            fn = getattr(interpreter, attr_name, None)
+            if callable(fn):
+                tools.append(fn)
+
         self._rlm = create_runtime_rlm(
             signature=RLMVariableSignature,
             interpreter=interpreter,
@@ -125,55 +136,36 @@ class RLMVariableExecutionModule(dspy.Module):
             max_llm_calls=max_llm_calls,
             max_output_chars=max_output_chars,
             verbose=verbose,
+            tools=tools or None,
             sub_lm=sub_lm,
         )
-        self._interpreter = interpreter
 
-    def forward(
-        self,
-        *,
-        task: str,
-        prompt: str,
-    ) -> dspy.Prediction:
+    def forward(self, *, task: str, prompt: str) -> dspy.Prediction:
         """Run a true-RLM loop over an arbitrarily long prompt.
 
-        Args:
-            task: The question or instruction to answer about *prompt*.
-            prompt: The full (possibly very long) text to process.
-                    Injected as a REPL variable — never enters the LLM context.
-
-        Returns:
-            A dspy.Prediction with an ``answer`` field.
+        ``dspy.RLM._build_variables()`` stores ``prompt`` as a REPL
+        variable.  The LLM writes code to explore it and calls
+        ``SUBMIT(answer=...)`` when done.
         """
-        # Inject the prompt as a sandbox variable so the LLM never sees it
-        # in its context window — only the metadata goes into the signature.
-        self._interpreter.execute(
-            "prompt = _injected_prompt",
-            variables={"_injected_prompt": prompt},
-        )
-
-        preview = prompt[:_PROMPT_PREVIEW_LENGTH]
-        if len(prompt) > _PROMPT_PREVIEW_LENGTH:
-            preview += "..."
-
-        return self._rlm(
-            task=task,
-            prompt_length=len(prompt),
-            prompt_preview=preview,
-            available_functions=_AVAILABLE_FUNCTIONS_DESC,
-        )
+        return self._rlm(task=task, prompt=prompt)
 
 
 def build_variable_mode_rlm(
     *,
     interpreter: Any,
-    max_iterations: int,
-    max_llm_calls: int,
+    max_iterations: int = 20,
+    max_llm_calls: int = 50,
     verbose: bool = False,
     max_output_chars: int | None = None,
     sub_lm: dspy.LM | None = None,
+    extra_tools: list[Any] | None = None,
 ) -> RLMVariableExecutionModule:
-    """Factory for the true-RLM variable-mode execution module."""
+    """Factory for the true-RLM variable-mode execution module.
+
+    Use for any task where the prompt exceeds ~32K chars.  The prompt is
+    stored as a REPL variable; the LLM sees only metadata and explores
+    through code + sub_rlm() recursion.
+    """
     return RLMVariableExecutionModule(
         interpreter=interpreter,
         max_iterations=max_iterations,
@@ -181,6 +173,7 @@ def build_variable_mode_rlm(
         verbose=verbose,
         max_output_chars=max_output_chars,
         sub_lm=sub_lm,
+        extra_tools=extra_tools,
     )
 
 

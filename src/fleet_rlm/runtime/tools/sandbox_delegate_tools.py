@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fleet_rlm.runtime.agent.recursive_runtime import spawn_delegate_sub_agent_async
 from fleet_rlm.runtime.agent.signatures import GroundedCitation
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.runtime.models.builders import VARIABLE_MODE_THRESHOLD
 
 from .llm_tools import coerce_int as _coerce_int
 from .llm_tools import coerce_str_list as _coerce_str_list
@@ -113,6 +114,74 @@ def _build_tool(registration: _ToolRegistration) -> Any:
         name=registration.name,
         desc=registration.desc,
     )
+
+
+# ---------------------------------------------------------------------------
+# Variable-mode RLM routing (Algorithm 1, arXiv 2512.24601v2)
+# ---------------------------------------------------------------------------
+
+_VARIABLE_MODE_THRESHOLD = VARIABLE_MODE_THRESHOLD
+
+
+def _has_interpreter(agent: RLMReActChatAgent) -> bool:
+    """Check whether the agent has a started interpreter for variable mode."""
+    interp = getattr(agent, "interpreter", None)
+    return interp is not None and getattr(interp, "_started", False)
+
+
+async def _variable_mode_rlm_query(
+    ctx: _DelegateToolContext, query: str, context: str
+) -> dict[str, Any]:
+    """Route a long prompt through true-RLM variable-mode execution.
+
+    Uses ``RLMVariableExecutionModule`` which passes the prompt as a REPL
+    variable.  The LLM sees only metadata (type, length, preview) and
+    writes code to explore, filter, and sub_rlm() over the data.
+    """
+    import logging
+
+    from fleet_rlm.runtime.models.builders import build_variable_mode_rlm
+
+    logger = logging.getLogger(__name__)
+    interp = ctx.agent.interpreter
+
+    task = query if not context else f"{query}\n\nContext:\n{context}"
+    prompt = context if context and len(context) > len(query) else query
+
+    try:
+        module = build_variable_mode_rlm(
+            interpreter=interp,
+            max_iterations=20,
+            max_llm_calls=50,
+            verbose=bool(getattr(ctx.agent, "verbose", False)),
+            sub_lm=getattr(interp, "sub_lm", None),
+        )
+        prediction = module(task=task, prompt=prompt)
+        answer = str(getattr(prediction, "answer", "") or "")
+        return {
+            "status": "ok",
+            "answer": answer,
+            "variable_mode": True,
+            "prompt_length": len(prompt),
+        }
+    except Exception as exc:
+        logger.warning("variable-mode RLM failed, falling back: %s", exc)
+        # Fall back to standard delegation
+        result = await spawn_delegate_sub_agent_async(
+            ctx.agent,
+            prompt=query,
+            context=context,
+            stream_event_callback=getattr(ctx.agent, "_live_event_callback", None),
+        )
+        if result.get("status") == "error":
+            return result
+        return {
+            "status": "ok",
+            "answer": result.get("answer") or result.get("assistant_response", ""),
+            "sub_agent_history": result.get("sub_agent_history", 0),
+            "depth": result.get("depth", getattr(ctx.agent, "_current_depth", 0) + 1),
+            **build_trajectory_payload(result, include_trajectory=True),
+        }
 
 
 def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
@@ -389,6 +458,13 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
         )
 
     async def rlm_query(query: str, context: str = "") -> dict[str, Any]:
+        # Auto-route long prompts through true-RLM variable mode
+        # (Algorithm 1, arXiv 2512.24601v2): prompt stored as REPL
+        # variable, LLM sees only metadata and explores via code.
+        combined_len = len(query) + len(context)
+        if combined_len > _VARIABLE_MODE_THRESHOLD and _has_interpreter(ctx.agent):
+            return await _variable_mode_rlm_query(ctx, query, context)
+
         result = await spawn_delegate_sub_agent_async(
             ctx.agent,
             prompt=query,

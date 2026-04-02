@@ -28,6 +28,7 @@ from fleet_rlm.runtime.models.builders import (
     MemoryActionPlanningModule,
     MemoryMigrationPlanningModule,
     MemoryStructureAuditPlanningModule,
+    RLMVariableExecutionModule,
     RuntimeModuleBuildConfig,
     _create_configured_runtime_rlm,
     build_runtime_module_config,
@@ -83,6 +84,11 @@ class RuntimeModuleDefinition:
     class_name: str
     doc: str
     module_class: type[dspy.Module] | None = None
+    variable_mode: bool = False
+    """When True, ``build_runtime_module`` wraps this entry in
+    ``RLMVariableExecutionModule`` instead of the generic
+    ``_RuntimeSignatureModule``.  Use for long-context signatures whose
+    primary input should be a REPL variable (Algorithm 1 pattern)."""
 
 
 RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
@@ -90,16 +96,19 @@ RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
         signature=AnalyzeLongDocument,
         class_name="AnalyzeLongDocumentModule",
         doc="Runtime wrapper for ``AnalyzeLongDocument`` RLM execution.",
+        variable_mode=True,
     ),
     "summarize_long_document": RuntimeModuleDefinition(
         signature=SummarizeLongDocument,
         class_name="SummarizeLongDocumentModule",
         doc="Runtime wrapper for ``SummarizeLongDocument`` RLM execution.",
+        variable_mode=True,
     ),
     "extract_from_logs": RuntimeModuleDefinition(
         signature=ExtractFromLogs,
         class_name="ExtractFromLogsModule",
         doc="Runtime wrapper for ``ExtractFromLogs`` RLM execution.",
+        variable_mode=True,
     ),
     "grounded_answer": RuntimeModuleDefinition(
         signature=GroundedAnswerWithCitations,
@@ -198,11 +207,24 @@ def build_runtime_module(
     max_llm_calls: int,
     verbose: bool,
 ) -> dspy.Module:
-    """Build a runtime module from the canonical registry."""
+    """Build a runtime module from the canonical registry.
+
+    When the definition has ``variable_mode=True``, returns an
+    ``RLMVariableExecutionModule`` that leverages ``dspy.RLM``'s native
+    REPL variable injection (Algorithm 1, arXiv 2512.24601v2).
+    """
 
     definition = RUNTIME_MODULE_REGISTRY.get(name)
     if definition is None:
         raise ValueError(f"Unknown runtime module: {name}")
+
+    if definition.variable_mode:
+        return RLMVariableExecutionModule(
+            interpreter=interpreter,
+            max_iterations=max_iterations,
+            max_llm_calls=max_llm_calls,
+            verbose=verbose,
+        )
 
     wrapper_class = cast(
         _RuntimeModuleFactory,
