@@ -116,6 +116,8 @@ class SandboxSpec:
     cpu: int | None = None
     memory: int | None = None
     disk: int | None = None
+    network_block_all: bool | None = None
+    network_allow_list: str | None = None
 
     @property
     def uses_declarative_image(self) -> bool:
@@ -149,6 +151,10 @@ class SandboxSpec:
                 ]
                 if v is not None
             }
+        if self.network_block_all is not None:
+            params["network_block_all"] = self.network_block_all
+        if self.network_allow_list is not None:
+            params["network_allow_list"] = self.network_allow_list
         if volume_id and self.volume_mount_path:
             mount_kwargs: dict[str, Any] = {
                 "volume_id": volume_id,

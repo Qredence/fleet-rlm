@@ -137,6 +137,22 @@ class TestSandboxSpecDefaults:
         params = spec.to_create_params()
         assert "auto_delete_interval" not in params
 
+    def test_to_create_params_with_network_block_all(self) -> None:
+        spec = SandboxSpec(network_block_all=True)
+        params = spec.to_create_params()
+        assert params["network_block_all"] is True
+
+    def test_to_create_params_with_network_allow_list(self) -> None:
+        spec = SandboxSpec(network_allow_list="10.0.0.0/8,172.16.0.0/12")
+        params = spec.to_create_params()
+        assert params["network_allow_list"] == "10.0.0.0/8,172.16.0.0/12"
+
+    def test_network_params_absent_by_default(self) -> None:
+        spec = SandboxSpec()
+        params = spec.to_create_params()
+        assert "network_block_all" not in params
+        assert "network_allow_list" not in params
+
 
 class TestSandboxSpecWithRealImage:
     """Tests using the actual ``daytona.Image`` declarative builder."""

@@ -243,6 +243,8 @@ class DaytonaSandboxRuntime:
         memory: int | None = None,
         disk: int | None = None,
         auto_delete_interval: int | None = None,
+        network_block_all: bool | None = None,
+        network_allow_list: str | None = None,
     ) -> SandboxSpec:
         """Build a ``SandboxSpec`` with runtime defaults applied.
 
@@ -266,6 +268,8 @@ class DaytonaSandboxRuntime:
             cpu=cpu,
             memory=memory,
             disk=disk,
+            network_block_all=network_block_all,
+            network_allow_list=network_allow_list,
         )
 
     async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
