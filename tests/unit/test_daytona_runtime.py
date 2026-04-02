@@ -54,7 +54,12 @@ class _FakeSandbox:
         self.id = "sbx-123"
         self.fs = _FakeFs()
         self.git = _FakeGit()
-        self.process = SimpleNamespace(exec_calls=[], exec=self._exec)
+        self.process = SimpleNamespace(
+            exec_calls=[],
+            exec=self._exec,
+            code_run_calls=[],
+            code_run=self._code_run,
+        )
 
     async def get_work_dir(self) -> str:
         return "/workspace"
@@ -62,8 +67,15 @@ class _FakeSandbox:
     def delete(self) -> None:
         return None
 
+    def stop(self, timeout: float = 60) -> None:
+        return None
+
     def _exec(self, command: str):
         self.process.exec_calls.append(command)
+        return _FakeProcessExecResult()
+
+    def _code_run(self, code: str):
+        self.process.code_run_calls.append(code)
         return _FakeProcessExecResult()
 
 
@@ -363,7 +375,7 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     assert session.context_sources[0].host_path == str(second_context.resolve())
     assert "workspace_reconcile" in session.phase_timings_ms
     assert "context_stage" in session.phase_timings_ms
-    assert len(fake_client.sandbox.process.exec_calls) == 2
+    assert len(fake_client.sandbox.process.code_run_calls) == 2
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes-b.md") for path in upload_paths)
 
@@ -417,10 +429,9 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
         text=True,
     )
 
-    def _exec(command: str):
+    def _code_run(code: str):
         completed = subprocess.run(
-            command,
-            shell=True,
+            ["python3", "-c", code],
             check=False,
             capture_output=True,
             text=True,
@@ -431,7 +442,7 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
             exit_code=completed.returncode,
         )
 
-    sandbox = SimpleNamespace(process=SimpleNamespace(exec=_exec))
+    sandbox = SimpleNamespace(process=SimpleNamespace(code_run=_code_run))
     asyncio.run(
         _areconcile_repo_checkout(
             sandbox=sandbox,

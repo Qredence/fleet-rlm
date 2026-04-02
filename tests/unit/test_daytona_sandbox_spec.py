@@ -111,6 +111,32 @@ class TestSandboxSpecDefaults:
         params["labels"]["z"] = "w"
         assert "z" not in original
 
+    def test_to_create_params_with_resources(self) -> None:
+        spec = SandboxSpec(cpu=2, memory=4, disk=8)
+        params = spec.to_create_params()
+        assert params["resources"] == {"cpu": 2, "memory": 4, "disk": 8}
+
+    def test_to_create_params_partial_resources(self) -> None:
+        spec = SandboxSpec(cpu=2)
+        params = spec.to_create_params()
+        assert params["resources"] == {"cpu": 2}
+        assert "memory" not in params["resources"]
+
+    def test_to_create_params_no_resources_by_default(self) -> None:
+        spec = SandboxSpec()
+        params = spec.to_create_params()
+        assert "resources" not in params
+
+    def test_to_create_params_with_auto_delete_interval(self) -> None:
+        spec = SandboxSpec(auto_delete_interval=60)
+        params = spec.to_create_params()
+        assert params["auto_delete_interval"] == 60
+
+    def test_auto_delete_interval_absent_by_default(self) -> None:
+        spec = SandboxSpec()
+        params = spec.to_create_params()
+        assert "auto_delete_interval" not in params
+
 
 class TestSandboxSpecWithRealImage:
     """Tests using the actual ``daytona.Image`` declarative builder."""

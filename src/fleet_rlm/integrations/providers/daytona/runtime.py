@@ -160,6 +160,9 @@ class DaytonaSandboxSession:
                     self.sandbox.code_interpreter.delete_context(context)
                 )
         self.context_id = None
+        # Graceful stop before delete to let processes flush/clean up
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.stop(timeout=10))
         with suppress(Exception):
             await _await_if_needed(self.sandbox.delete())
         self._driver_started = False
@@ -236,6 +239,10 @@ class DaytonaSandboxRuntime:
         snapshot: str | None = None,
         env_vars: dict[str, str] | None = None,
         labels: dict[str, str] | None = None,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk: int | None = None,
+        auto_delete_interval: int | None = None,
     ) -> SandboxSpec:
         """Build a ``SandboxSpec`` with runtime defaults applied.
 
@@ -255,6 +262,10 @@ class DaytonaSandboxRuntime:
             labels=merged_labels,
             ephemeral=True,
             auto_stop_interval=0,
+            auto_delete_interval=auto_delete_interval,
+            cpu=cpu,
+            memory=memory,
+            disk=disk,
         )
 
     async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
@@ -269,6 +280,7 @@ class DaytonaSandboxRuntime:
             from daytona import (
                 CreateSandboxFromImageParams,
                 CreateSandboxFromSnapshotParams,
+                Resources,
                 VolumeMount,
             )
         except ImportError as exc:  # pragma: no cover - environment specific
@@ -290,6 +302,11 @@ class DaytonaSandboxRuntime:
         raw_volumes = create_kwargs.pop("volumes", None)
         if raw_volumes:
             create_kwargs["volumes"] = [VolumeMount(**v) for v in raw_volumes]
+
+        # Reconstruct Resources from the raw dict
+        raw_resources = create_kwargs.pop("resources", None)
+        if raw_resources:
+            create_kwargs["resources"] = Resources(**raw_resources)
 
         if spec.uses_declarative_image:
             # Image object is already in create_kwargs via to_create_params

@@ -112,6 +112,10 @@ class SandboxSpec:
     ephemeral: bool = True
     auto_stop_interval: int | None = 0
     auto_archive_interval: int | None = None
+    auto_delete_interval: int | None = None
+    cpu: int | None = None
+    memory: int | None = None
+    disk: int | None = None
 
     @property
     def uses_declarative_image(self) -> bool:
@@ -131,8 +135,20 @@ class SandboxSpec:
             params["auto_stop_interval"] = self.auto_stop_interval
         if self.auto_archive_interval is not None:
             params["auto_archive_interval"] = self.auto_archive_interval
+        if self.auto_delete_interval is not None:
+            params["auto_delete_interval"] = self.auto_delete_interval
         if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
+        if self.cpu is not None or self.memory is not None or self.disk is not None:
+            params["resources"] = {
+                k: v
+                for k, v in [
+                    ("cpu", self.cpu),
+                    ("memory", self.memory),
+                    ("disk", self.disk),
+                ]
+                if v is not None
+            }
         if volume_id and self.volume_mount_path:
             mount_kwargs: dict[str, Any] = {
                 "volume_id": volume_id,
