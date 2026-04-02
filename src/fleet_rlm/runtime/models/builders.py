@@ -14,6 +14,7 @@ from fleet_rlm.runtime.agent.signatures import (
     MemoryActionIntentSignature,
     MemoryStructureAuditSignature,
     MemoryStructureMigrationPlanSignature,
+    RLMVariableSignature,
     RecursiveSubQuerySignature,
     VolumeFileTreeSignature,
 )
@@ -75,6 +76,110 @@ def build_recursive_subquery_rlm(
         max_llm_calls=max_llm_calls,
         max_output_chars=max_output_chars,
         verbose=verbose,
+        sub_lm=sub_lm,
+    )
+
+
+# ---------------------------------------------------------------------------
+# True-RLM variable-mode execution (Algorithm 1, arXiv 2512.24601v2)
+# ---------------------------------------------------------------------------
+
+_PROMPT_PREVIEW_LENGTH = 500
+_AVAILABLE_FUNCTIONS_DESC = (
+    "sub_rlm(text, context='') — recursively invoke child RLM on a slice; "
+    "sub_rlm_batched(texts, context='') — parallel batch; "
+    "llm_query(text) — single LLM call; "
+    "llm_query_batched(texts) — parallel LLM calls; "
+    "peek(prompt, start, length) — view a slice without copying; "
+    "grep(prompt, pattern) — regex search; "
+    "read_file(path), list_files(path), find_files(path, pattern); "
+    "SUBMIT(answer=...) — return final output"
+)
+
+
+class RLMVariableExecutionModule(dspy.Module):
+    """True-RLM module: prompt stored as REPL variable, not in LLM context.
+
+    Implements the core loop from Algorithm 1 (arXiv 2512.24601v2):
+    1. Store the full prompt as a Python variable in the sandbox REPL.
+    2. Pass only metadata (length, preview) to the LLM.
+    3. The LLM writes code that slices, filters, and calls sub_rlm() in loops.
+    4. Output is built symbolically via SUBMIT(answer=...).
+    """
+
+    def __init__(
+        self,
+        *,
+        interpreter: Any,
+        max_iterations: int,
+        max_llm_calls: int,
+        verbose: bool = False,
+        max_output_chars: int | None = None,
+        sub_lm: dspy.LM | None = None,
+    ) -> None:
+        super().__init__()
+        self._rlm = create_runtime_rlm(
+            signature=RLMVariableSignature,
+            interpreter=interpreter,
+            max_iterations=max_iterations,
+            max_llm_calls=max_llm_calls,
+            max_output_chars=max_output_chars,
+            verbose=verbose,
+            sub_lm=sub_lm,
+        )
+        self._interpreter = interpreter
+
+    def forward(
+        self,
+        *,
+        task: str,
+        prompt: str,
+    ) -> dspy.Prediction:
+        """Run a true-RLM loop over an arbitrarily long prompt.
+
+        Args:
+            task: The question or instruction to answer about *prompt*.
+            prompt: The full (possibly very long) text to process.
+                    Injected as a REPL variable — never enters the LLM context.
+
+        Returns:
+            A dspy.Prediction with an ``answer`` field.
+        """
+        # Inject the prompt as a sandbox variable so the LLM never sees it
+        # in its context window — only the metadata goes into the signature.
+        self._interpreter.execute(
+            "prompt = _injected_prompt",
+            variables={"_injected_prompt": prompt},
+        )
+
+        preview = prompt[:_PROMPT_PREVIEW_LENGTH]
+        if len(prompt) > _PROMPT_PREVIEW_LENGTH:
+            preview += "..."
+
+        return self._rlm(
+            task=task,
+            prompt_length=len(prompt),
+            prompt_preview=preview,
+            available_functions=_AVAILABLE_FUNCTIONS_DESC,
+        )
+
+
+def build_variable_mode_rlm(
+    *,
+    interpreter: Any,
+    max_iterations: int,
+    max_llm_calls: int,
+    verbose: bool = False,
+    max_output_chars: int | None = None,
+    sub_lm: dspy.LM | None = None,
+) -> RLMVariableExecutionModule:
+    """Factory for the true-RLM variable-mode execution module."""
+    return RLMVariableExecutionModule(
+        interpreter=interpreter,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=verbose,
+        max_output_chars=max_output_chars,
         sub_lm=sub_lm,
     )
 

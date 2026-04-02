@@ -313,6 +313,36 @@ class RecursiveSubQuerySignature(dspy.Signature):
     answer: str = dspy.OutputField(desc="Answer for the parent caller")
 
 
+class RLMVariableSignature(dspy.Signature):
+    """Process an arbitrarily long prompt stored as a REPL variable.
+
+    The full prompt is available in the sandbox as the Python variable
+    ``prompt``.  You also have ``sub_rlm(text, context='')`` to recursively
+    invoke a child RLM on any slice, and ``llm_query(text)`` for simple
+    LLM calls.  Build your answer symbolically — write it into the
+    ``Final`` variable or call ``SUBMIT(answer=...)``.
+
+    Algorithm 1 from arXiv 2512.24601v2: the prompt lives in the REPL
+    environment, not in the LLM context window.
+    """
+
+    task: str = dspy.InputField(desc="The task or question to answer about the prompt")
+    prompt_length: int = dspy.InputField(
+        desc="Character length of the prompt variable in the REPL"
+    )
+    prompt_preview: str = dspy.InputField(
+        desc="First 500 characters of the prompt (for orientation)"
+    )
+    available_functions: str = dspy.InputField(
+        desc=(
+            "Helper functions: sub_rlm(text, context), llm_query(text), "
+            "llm_query_batched(texts), peek(prompt, start, length), "
+            "grep(prompt, pattern), read_file(path), SUBMIT(**kwargs)"
+        ),
+    )
+    answer: str = dspy.OutputField(desc="Final answer built symbolically in the REPL")
+
+
 __all__ = [
     "AnalyzeLongDocument",
     "ClarificationQuestionSignature",
@@ -327,6 +357,7 @@ __all__ = [
     "MemoryStructureAuditSignature",
     "MemoryStructureMigrationPlanSignature",
     "RLMReActChatSignature",
+    "RLMVariableSignature",
     "RecursiveSubQuerySignature",
     "SummarizeLongDocument",
     "VolumeFileTreeSignature",
