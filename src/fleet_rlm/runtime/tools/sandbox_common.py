@@ -269,6 +269,7 @@ def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
     Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
     main tool list built by ``build_tool_list``.
     """
+    from .infra_tools import build_lsp_tools, build_snapshot_tools
     from .sandbox_delegate_tools import build_rlm_delegate_tools
     from .sandbox_memory_tools import build_memory_intelligence_tools
     from .sandbox_storage_tools import build_storage_tools
@@ -277,4 +278,6 @@ def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
     tools.extend(build_rlm_delegate_tools(agent))
     tools.extend(build_memory_intelligence_tools(agent))
     tools.extend(build_storage_tools(agent))
+    tools.extend(build_snapshot_tools(agent))
+    tools.extend(build_lsp_tools(agent))
     return tools
