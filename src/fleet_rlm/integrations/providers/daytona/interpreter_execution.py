@@ -48,26 +48,85 @@ def build_delegate_child(
     *,
     remaining_llm_budget: int,
 ) -> Any:
+    """Build a child interpreter for sub_rlm() calls.
+
+    Optimization: reuses the parent's sandbox session with a fresh
+    execution context instead of creating a new container (~30-60s saved).
+    Falls back to a new sandbox if the parent has no active session.
+
+    Uses Daytona's ``sandbox.code_interpreter.create_context()`` for
+    isolation — see https://www.daytona.io/docs/sdk-reference
+    """
     from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
 
-    runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
-    child = interpreter.__class__(
-        runtime=runtime,
-        owns_runtime=True,
-        timeout=interpreter.timeout,
-        execute_timeout=interpreter.execute_timeout,
-        volume_name=interpreter.volume_name,
-        repo_url=interpreter.repo_url,
-        repo_ref=interpreter.repo_ref,
-        context_paths=list(interpreter.context_paths),
-        sandbox_spec=getattr(interpreter, "sandbox_spec", None),
-        delete_session_on_shutdown=True,
-        sub_lm=interpreter.sub_lm,
-        max_llm_calls=remaining_llm_budget,
-        llm_call_timeout=interpreter.llm_call_timeout,
-        default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-        async_execute=interpreter.async_execute,
+    parent_session = getattr(interpreter, "_session", None)
+    can_reuse = (
+        parent_session is not None
+        and getattr(parent_session, "sandbox", None) is not None
     )
+
+    if can_reuse:
+        # Type narrowing for ty: parent_session is not None here
+        assert parent_session is not None
+        # Share parent's runtime + sandbox; child owns nothing
+        child = interpreter.__class__(
+            runtime=interpreter.runtime,
+            owns_runtime=False,
+            timeout=interpreter.timeout,
+            execute_timeout=interpreter.execute_timeout,
+            volume_name=interpreter.volume_name,
+            repo_url=interpreter.repo_url,
+            repo_ref=interpreter.repo_ref,
+            context_paths=list(interpreter.context_paths),
+            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+            delete_session_on_shutdown=False,
+            sub_lm=interpreter.sub_lm,
+            max_llm_calls=remaining_llm_budget,
+            llm_call_timeout=interpreter.llm_call_timeout,
+            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+            async_execute=interpreter.async_execute,
+        )
+        # Wire a shallow session clone so child creates a FRESH context
+        # on the same sandbox (no new container needed).
+        child._session = DaytonaSandboxSession(
+            sandbox=parent_session.sandbox,
+            repo_url=parent_session.repo_url,
+            ref=parent_session.ref,
+            volume_name=parent_session.volume_name,
+            workspace_path=parent_session.workspace_path,
+            context_sources=list(parent_session.context_sources),
+            volume_mount_path=parent_session.volume_mount_path,
+            context_id=None,  # Force create_context() on start
+        )
+        try:
+            child._session.bind_current_async_owner()
+        except RuntimeError:
+            # No running event loop (sync context); owner will be
+            # bound when the session is first used asynchronously.
+            pass
+        child._persisted_sandbox_id = parent_session.sandbox_id
+        child._persisted_workspace_path = parent_session.workspace_path
+    else:
+        # Fallback: create a new sandbox (original behavior)
+        runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
+        child = interpreter.__class__(
+            runtime=runtime,
+            owns_runtime=True,
+            timeout=interpreter.timeout,
+            execute_timeout=interpreter.execute_timeout,
+            volume_name=interpreter.volume_name,
+            repo_url=interpreter.repo_url,
+            repo_ref=interpreter.repo_ref,
+            context_paths=list(interpreter.context_paths),
+            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+            delete_session_on_shutdown=True,
+            sub_lm=interpreter.sub_lm,
+            max_llm_calls=remaining_llm_budget,
+            llm_call_timeout=interpreter.llm_call_timeout,
+            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+            async_execute=interpreter.async_execute,
+        )
+
     setattr(
         child,
         "_check_and_increment_llm_calls",

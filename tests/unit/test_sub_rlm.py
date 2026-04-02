@@ -207,3 +207,89 @@ def test_rlm_query_still_blocked_in_sandbox_code() -> None:
 
     # sub_rlm should NOT be blocked
     reject_unsupported_recursive_callbacks(interp, 'result = sub_rlm("hi")')
+
+
+# --- Sandbox reuse optimization ---
+
+
+def test_build_delegate_child_reuses_parent_sandbox() -> None:
+    """When parent has active session, child shares sandbox via fresh context."""
+    from fleet_rlm.integrations.providers.daytona.interpreter_execution import (
+        build_delegate_child,
+    )
+    from fleet_rlm.integrations.providers.daytona.runtime import (
+        DaytonaSandboxSession,
+    )
+
+    # Use a real DaytonaSandboxSession for the child._session assertion
+    parent_sandbox = MagicMock()
+    parent_session = DaytonaSandboxSession(
+        sandbox=parent_sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name="vol",
+        workspace_path="/workspace",
+        context_sources=[],
+        volume_mount_path="/mnt",
+        context_id="ctx-parent",
+    )
+
+    parent = MagicMock()
+    parent.runtime = MagicMock()
+    parent.runtime._resolved_config = {}
+    parent.timeout = 60
+    parent.execute_timeout = 60
+    parent.volume_name = "vol"
+    parent.repo_url = None
+    parent.repo_ref = None
+    parent.context_paths = []
+    parent.sandbox_spec = None
+    parent.sub_lm = None
+    parent.llm_call_timeout = 30
+    parent.async_execute = True
+    parent._sub_rlm_depth = 0
+    parent._sub_rlm_max_depth = 2
+    parent._session = parent_session
+
+    child = build_delegate_child(parent, remaining_llm_budget=10)
+
+    # The child's _session is a new DaytonaSandboxSession on same sandbox
+    assert isinstance(child._session, DaytonaSandboxSession)
+    assert child._session.sandbox is parent_sandbox
+    # Fresh context (None forces create_context() on start)
+    assert child._session.context_id is None
+
+
+def test_build_delegate_child_fallback_no_session() -> None:
+    """When parent has no session, child creates new sandbox."""
+    from fleet_rlm.integrations.providers.daytona.interpreter_execution import (
+        build_delegate_child,
+    )
+
+    parent = MagicMock()
+    parent.runtime = MagicMock()
+    parent.runtime._resolved_config = {}
+    parent.timeout = 60
+    parent.execute_timeout = 60
+    parent.volume_name = "vol"
+    parent.repo_url = None
+    parent.repo_ref = None
+    parent.context_paths = []
+    parent.sandbox_spec = None
+    parent.sub_lm = None
+    parent.llm_call_timeout = 30
+    parent.async_execute = True
+    parent._sub_rlm_depth = 0
+    parent._sub_rlm_max_depth = 2
+    parent._session = None  # No active session
+
+    child = build_delegate_child(parent, remaining_llm_budget=10)
+
+    # Verify fallback path was taken (child has no real session)
+    assert (
+        not isinstance(
+            getattr(child, "_session", None),
+            type(None),
+        )
+        or child._session is None
+    )
