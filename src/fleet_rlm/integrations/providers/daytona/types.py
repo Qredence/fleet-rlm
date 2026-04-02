@@ -86,12 +86,24 @@ class DaytonaRunCancelled(RuntimeError):
 class SandboxSpec:
     """Declarative specification for Daytona sandbox creation.
 
-    Consolidates all sandbox creation parameters into a single object that
-    can be passed through the runtime layer. Maps directly to the SDK's
-    ``CreateSandboxFromSnapshotParams`` or ``CreateSandboxFromImageParams``.
+    Wraps the Daytona SDK's ``Image`` declarative builder and
+    ``CreateSandboxFrom*Params`` into a single portable object.
+
+    The ``image`` field accepts a ``daytona.Image`` object built with
+    the SDK's fluent API (``Image.debian_slim().pip_install()...``).
+    When set, the sandbox is created with ``CreateSandboxFromImageParams``
+    and Daytona caches the built image for 24 hours.
+
+    When ``snapshot`` is set instead, the sandbox is created from a
+    pre-built snapshot via ``CreateSandboxFromSnapshotParams``.
+
+    When neither is set, a bare Python sandbox is created using the
+    default Daytona snapshot.
     """
 
     language: str = "python"
+    image: Any = None  # daytona.Image — kept as Any to avoid hard SDK import
+    snapshot: str | None = None
     volume_name: str | None = None
     volume_mount_path: str | None = None
     volume_subpath: str | None = None
@@ -100,11 +112,14 @@ class SandboxSpec:
     ephemeral: bool = True
     auto_stop_interval: int | None = 0
     auto_archive_interval: int | None = None
-    snapshot: str | None = None
-    image: str | None = None
 
-    def to_create_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
-        """Build keyword arguments for the SDK create-params constructor."""
+    @property
+    def uses_declarative_image(self) -> bool:
+        """True when the spec carries a ``daytona.Image`` declarative builder."""
+        return self.image is not None
+
+    def _common_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
+        """Build shared keyword arguments for any SDK create-params constructor."""
         params: dict[str, Any] = {"language": self.language}
         if self.env_vars:
             params["env_vars"] = dict(self.env_vars)
@@ -116,7 +131,7 @@ class SandboxSpec:
             params["auto_stop_interval"] = self.auto_stop_interval
         if self.auto_archive_interval is not None:
             params["auto_archive_interval"] = self.auto_archive_interval
-        if self.snapshot:
+        if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
         if volume_id and self.volume_mount_path:
             mount_kwargs: dict[str, Any] = {
@@ -126,6 +141,18 @@ class SandboxSpec:
             if self.volume_subpath:
                 mount_kwargs["subpath"] = self.volume_subpath
             params["volumes"] = [mount_kwargs]
+        return params
+
+    def to_create_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
+        """Build keyword arguments for the SDK create-params constructor.
+
+        When ``image`` is set the returned dict includes an ``"image"`` key
+        carrying the ``daytona.Image`` object (for ``CreateSandboxFromImageParams``).
+        Otherwise the dict is suitable for ``CreateSandboxFromSnapshotParams``.
+        """
+        params = self._common_params(volume_id=volume_id)
+        if self.image is not None:
+            params["image"] = self.image
         return params
 
 

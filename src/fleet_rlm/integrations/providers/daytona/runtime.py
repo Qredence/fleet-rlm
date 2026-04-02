@@ -215,15 +215,23 @@ class DaytonaSandboxRuntime:
         self,
         *,
         volume_name: str | None = None,
+        image: Any = None,
+        snapshot: str | None = None,
         env_vars: dict[str, str] | None = None,
         labels: dict[str, str] | None = None,
     ) -> SandboxSpec:
-        """Build a ``SandboxSpec`` with runtime defaults applied."""
+        """Build a ``SandboxSpec`` with runtime defaults applied.
+
+        The ``image`` parameter accepts a ``daytona.Image`` declarative
+        builder object (e.g. ``Image.debian_slim().pip_install(...)``).
+        """
         merged_labels = dict(self.DEFAULT_LABELS)
         if labels:
             merged_labels.update(labels)
         return SandboxSpec(
             language="python",
+            image=image,
+            snapshot=snapshot,
             volume_name=volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             env_vars=env_vars or None,
@@ -233,7 +241,13 @@ class DaytonaSandboxRuntime:
         )
 
     async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
-        """Create a sandbox using a declarative ``SandboxSpec``."""
+        """Create a sandbox using a declarative ``SandboxSpec``.
+
+        When the spec carries a ``daytona.Image`` declarative builder,
+        the sandbox is created via ``CreateSandboxFromImageParams`` and
+        Daytona caches the built image for 24 hours.  Otherwise a
+        snapshot-based sandbox is created.
+        """
         try:
             from daytona import (
                 CreateSandboxFromImageParams,
@@ -260,12 +274,15 @@ class DaytonaSandboxRuntime:
         if raw_volumes:
             create_kwargs["volumes"] = [VolumeMount(**v) for v in raw_volumes]
 
-        if spec.image:
-            params = CreateSandboxFromImageParams(image=spec.image, **create_kwargs)
+        if spec.uses_declarative_image:
+            # Image object is already in create_kwargs via to_create_params
+            params = CreateSandboxFromImageParams(**create_kwargs)
+            return await _await_if_needed(
+                client.create(params, timeout=0, on_snapshot_create_logs=lambda _: None)
+            )
         else:
             params = CreateSandboxFromSnapshotParams(**create_kwargs)
-
-        return await _await_if_needed(client.create(params))
+            return await _await_if_needed(client.create(params))
 
     async def _acreate_sandbox(
         self,
