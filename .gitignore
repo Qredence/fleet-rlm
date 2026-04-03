@@ -60,6 +60,7 @@ artifacts/
 .codex/environments/
 .npm-cache/
 .opencode/
+.air
 plans/
 @plan/
 src/fleet_rlm/_scaffold/agents/teams/fleet-rlm/inboxes/
