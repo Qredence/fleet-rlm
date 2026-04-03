@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -236,7 +237,11 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
 
     parent = MagicMock()
     parent.runtime = MagicMock()
-    parent.runtime._resolved_config = {}
+    parent.runtime._resolved_config = SimpleNamespace(
+        api_key="test-key",
+        api_url="https://daytona.invalid",
+        target=None,
+    )
     parent.timeout = 60
     parent.execute_timeout = 60
     parent.volume_name = "vol"
@@ -268,7 +273,11 @@ def test_build_delegate_child_fallback_no_session() -> None:
 
     parent = MagicMock()
     parent.runtime = MagicMock()
-    parent.runtime._resolved_config = {}
+    parent.runtime._resolved_config = SimpleNamespace(
+        api_key="test-key",
+        api_url="https://daytona.invalid",
+        target=None,
+    )
     parent.timeout = 60
     parent.execute_timeout = 60
     parent.volume_name = "vol"

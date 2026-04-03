@@ -92,7 +92,7 @@ async def acreate_snapshot(
 
     pkgs = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
 
-    image = DaytonaImage.debian_slim("3.12")
+    image = DaytonaImage.base(base_image)
     for pkg in pkgs:
         image = image.pip_install(pkg)
 

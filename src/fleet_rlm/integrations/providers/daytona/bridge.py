@@ -188,6 +188,9 @@ def {tool_name}({signature}):
         raise RuntimeError(f"Tool call failed: {{data['error']}}")
     result = data.get("result")
     if isinstance(result, str):
+        stripped_result = result.lstrip()
+        if not stripped_result.startswith(("{{", "[")):
+            return result
         try:
             return _json.loads(result)
         except (ValueError, _json.JSONDecodeError):

@@ -672,8 +672,16 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
                         stderr_tail = ""
                         try:
                             if self._stderr_iter is not None:
-                                stderr_tail = "".join(list(self._stderr_iter)[:50])
-                        except Exception:
+                                stderr_tail = "".join(
+                                    stderr_line
+                                    for _, stderr_line in zip(
+                                        range(50), self._stderr_iter
+                                    )
+                                )
+                        except Exception as exc:
+                            logger.debug(
+                                "Failed to read Modal sandbox stderr", exc_info=exc
+                            )
                             stderr_tail = ""
                         msg = "Modal sandbox process exited unexpectedly."
                         if stderr_tail:

@@ -329,7 +329,7 @@ def test_mlflow_request_context_finalizes_trace_state_on_success(
 ) -> None:
     calls: list[dict[str, object]] = []
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "trace-123",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-123",
@@ -351,7 +351,7 @@ def test_mlflow_request_context_finalizes_trace_state_on_error(
 ) -> None:
     calls: list[dict[str, object]] = []
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "trace-123",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-123",
@@ -360,12 +360,13 @@ def test_mlflow_request_context_finalizes_trace_state_on_error(
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError, match="boom") as exc_info:
         with mlflow_integration.mlflow_request_context(
             mlflow_integration.MlflowTraceRequestContext(client_request_id="req-error")
         ):
             raise RuntimeError("boom")
 
+    assert str(exc_info.value) == "boom"
     assert calls[-1] == {"state": "ERROR", "tags": None}
 
 
@@ -593,7 +594,7 @@ def test_on_lm_end_accumulates_tokens_on_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "trace-tok",
         update_current_trace=lambda **kwargs: None,
         get_last_active_trace_id=lambda thread_local=True: "trace-tok",
@@ -629,7 +630,7 @@ def test_finalize_trace_flushes_token_tags(
 ) -> None:
     calls: list[dict[str, object]] = []
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "trace-tok-fin",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-tok-fin",
@@ -676,7 +677,7 @@ def test_set_span_error_description_sets_otel_status(
         _span = FakeOtelSpan()
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: FakeSpan(),
+        get_current_active_span=FakeSpan,
     )
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
@@ -700,7 +701,7 @@ def test_on_module_end_propagates_exception_to_span(
         _span = FakeOtelSpan()
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: FakeSpan(),
+        get_current_active_span=FakeSpan,
         get_active_trace_id=lambda: "trace-err",
         update_current_trace=lambda **kwargs: None,
         get_last_active_trace_id=lambda thread_local=True: "trace-err",
@@ -730,7 +731,7 @@ def test_finalize_trace_works_without_request_context(
 
     calls: list[dict[str, object]] = []
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "trace-orphan",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-orphan",

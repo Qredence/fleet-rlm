@@ -41,10 +41,11 @@ SUBMIT(
     async def workspace_write(path: str, content: str) -> dict[str, Any]:
         """Write content to a file in the workspace directory."""
         code = f"""
-saved_path = workspace_write({path!r}, {content!r})
+content_value = {content!r}
+saved_path = workspace_write({path!r}, content_value)
 if str(saved_path).startswith("[error:"):
     SUBMIT(status="error", result=saved_path, error=saved_path, path={path!r})
-SUBMIT(status="ok", result=saved_path, path=saved_path, chars=len({content!r}))
+SUBMIT(status="ok", result=saved_path, path=saved_path, chars=len(content_value))
 """.strip()
         return await _aexecute_submit_ctx(ctx, code)
 

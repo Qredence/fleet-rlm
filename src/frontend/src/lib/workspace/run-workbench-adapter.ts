@@ -317,9 +317,10 @@ function dedupeCallbacks(callbacks: CallbackSummary[]): CallbackSummary[] {
       deduped.set(key, callback);
       continue;
     }
-    // Don't regress a terminal status (completed/error) back to running when
-    // a reused/replayed run re-emits tool_call events without matching tool_result.
-    const isTerminal = (s: string) => s === "completed" || s === "error";
+    // Don't regress a terminal status (completed/error/cancelled) back to
+    // running when a reused/replayed run re-emits tool_call events without
+    // matching tool_result.
+    const isTerminal = (s: string) => s === "completed" || s === "error" || s === "cancelled";
     const mergedStatus = isTerminal(current.status) ? current.status : callback.status;
     deduped.set(key, {
       ...current,
@@ -872,10 +873,11 @@ export function applyFrameToRunWorkbenchState(
   // When the run reaches a terminal state, finalize any orphaned "running"
   // callbacks that were never resolved (e.g. reused runs replaying tool_call
   // events without matching tool_result events).
+  const terminalCallbackStatus = nextStatus === "cancelled" ? "cancelled" : "completed";
   const finalCallbacks =
     nextStatus === "completed" || nextStatus === "error" || nextStatus === "cancelled"
       ? next.callbacks.map((cb) =>
-          cb.status === "running" ? { ...cb, status: "completed" as const } : cb,
+          cb.status === "running" ? { ...cb, status: terminalCallbackStatus } : cb,
         )
       : next.callbacks;
 

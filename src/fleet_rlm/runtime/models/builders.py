@@ -102,15 +102,15 @@ VARIABLE_MODE_MAX_OUTPUT_CHARS = 5_000
 
 
 class RLMVariableExecutionModule(dspy.Module):
-    """True-RLM module that delegates to ``dspy.RLM`` with ``sub_rlm`` tools.
+    """Variable-mode RLM wrapper that preserves the caller's signature.
 
     This thin wrapper:
     1. Collects ``sub_rlm`` / ``sub_rlm_batched`` from the interpreter
        and registers them as ``dspy.Tool`` instances on the inner RLM.
-    2. Forwards ``(task, prompt)`` — ``dspy.RLM._build_variables()``
-       stores ``prompt`` as a REPL variable automatically.  The LLM
-       sees only metadata and explores data through code.
-    3. Output is built symbolically via ``SUBMIT(answer=...)``.
+    2. Reuses the requested DSPy signature so cached runtime-module callers
+       keep their existing input/output field names.
+    3. Relies on ``dspy.RLM``'s native variable handling to store each input
+       field as a REPL variable while exposing only metadata/previews to the LM.
 
     All heavy lifting (REPL loop, metadata display, iteration budget,
     llm_query) is handled by ``dspy.RLM`` itself.
@@ -119,6 +119,7 @@ class RLMVariableExecutionModule(dspy.Module):
     def __init__(
         self,
         *,
+        signature: type[dspy.Signature] = RLMVariableSignature,
         interpreter: Any,
         max_iterations: int = 20,
         max_llm_calls: int = 50,
@@ -136,7 +137,7 @@ class RLMVariableExecutionModule(dspy.Module):
                 tools.append(fn)
 
         self._rlm = create_runtime_rlm(
-            signature=RLMVariableSignature,
+            signature=signature,
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
@@ -148,18 +149,19 @@ class RLMVariableExecutionModule(dspy.Module):
             sub_lm=sub_lm,
         )
 
-    def forward(self, *, task: str, prompt: str) -> dspy.Prediction:
-        """Run a true-RLM loop over an arbitrarily long prompt.
+    def forward(self, **kwargs: Any) -> dspy.Prediction:
+        """Run a true-RLM loop while preserving the caller's DSPy fields.
 
-        ``dspy.RLM._build_variables()`` stores ``prompt`` as a REPL
-        variable.  The LLM writes code to explore it and calls
-        ``SUBMIT(answer=...)`` when done.
+        ``dspy.RLM`` stores each input field as a REPL variable and the
+        model writes code to explore those variables before calling
+        ``SUBMIT(...)`` with the signature's declared outputs.
         """
-        return self._rlm(task=task, prompt=prompt)
+        return self._rlm(**kwargs)
 
 
 def build_variable_mode_rlm(
     *,
+    signature: type[dspy.Signature] = RLMVariableSignature,
     interpreter: Any,
     max_iterations: int = 20,
     max_llm_calls: int = 50,
@@ -170,11 +172,12 @@ def build_variable_mode_rlm(
 ) -> RLMVariableExecutionModule:
     """Factory for the true-RLM variable-mode execution module.
 
-    Use for any task where the prompt exceeds ~32K chars.  The prompt is
-    stored as a REPL variable; the LLM sees only metadata and explores
+    Use for any task where one or more large inputs should stay in the REPL
+    instead of the model context. The LLM sees only metadata and explores
     through code + sub_rlm() recursion.
     """
     return RLMVariableExecutionModule(
+        signature=signature,
         interpreter=interpreter,
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,

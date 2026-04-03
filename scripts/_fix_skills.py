@@ -2,8 +2,12 @@
 
 import pathlib
 
-SKILLS = pathlib.Path(
-    "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/src/fleet_rlm/scaffold/skills"
+SKILLS = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "src"
+    / "fleet_rlm"
+    / "scaffold"
+    / "skills"
 )
 
 # --- api-reference.md ---

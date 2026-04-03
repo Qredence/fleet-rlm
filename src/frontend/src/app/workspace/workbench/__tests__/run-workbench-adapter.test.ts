@@ -512,6 +512,64 @@ describe("runWorkbenchAdapter", () => {
     expect(withToolResult.callbacks[0]?.resultPreview).toContain("system topology");
   });
 
+  it("does not regress cancelled callbacks back to running on replayed tool calls", () => {
+    const state = {
+      ...createInitialRunWorkbenchState(),
+      status: "running" as const,
+      callbacks: [
+        {
+          id: "callback-1",
+          callbackName: "llm_query",
+          iteration: 1,
+          status: "cancelled",
+          task: "Summarize the overview section",
+        },
+      ],
+    };
+
+    const next = applyFrameToRunWorkbenchState(
+      state,
+      makeEvent("tool_call", "Running host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+          },
+        },
+      }),
+    );
+
+    expect(next.callbacks[0]?.status).toBe("cancelled");
+  });
+
+  it("marks orphaned callbacks as cancelled when the run is cancelled", () => {
+    const state = {
+      ...createInitialRunWorkbenchState(),
+      status: "running" as const,
+      callbacks: [
+        {
+          id: "callback-1",
+          callbackName: "llm_query",
+          iteration: 1,
+          status: "running",
+          task: "Summarize the overview section",
+        },
+      ],
+    };
+
+    const next = applyFrameToRunWorkbenchState(
+      state,
+      makeEvent("cancelled", "Run cancelled", {
+        runtime_mode: "daytona_pilot",
+      }),
+    );
+
+    expect(next.status).toBe("cancelled");
+    expect(next.callbacks[0]?.status).toBe("cancelled");
+  });
+
   it("keeps distinct callbacks when the task text repeats across sources", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze the repo",

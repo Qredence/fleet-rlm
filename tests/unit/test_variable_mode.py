@@ -55,6 +55,9 @@ def test_variable_execution_module_creates_rlm():
         )
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args[1]
+        from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
+
+        assert call_kwargs["signature"] is RLMVariableSignature
         assert call_kwargs["max_iterations"] == 10
         assert call_kwargs["max_llm_calls"] == 20
         assert call_kwargs["verbose"] is True
@@ -96,6 +99,33 @@ def test_variable_execution_module_forward_delegates():
     assert result.answer == "42"
 
 
+def test_variable_execution_module_preserves_custom_signature_kwargs():
+    """Variable-mode wrappers should preserve signature-specific fields."""
+    from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
+    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+
+    mock_interp = MagicMock(spec=[])
+    mock_rlm = MagicMock()
+    mock_rlm.return_value = dspy.Prediction(
+        summary="Summary",
+        key_points=["one"],
+        coverage_pct=80,
+    )
+
+    with patch(
+        "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+        return_value=mock_rlm,
+    ):
+        module = RLMVariableExecutionModule(
+            interpreter=mock_interp,
+            signature=SummarizeLongDocument,
+        )
+        result = module(document="doc body", focus="latency")
+
+    mock_rlm.assert_called_once_with(document="doc body", focus="latency")
+    assert result.summary == "Summary"
+
+
 # ── Factory ──────────────────────────────────────────────────────────
 
 
@@ -135,6 +165,7 @@ def test_registry_short_context_modules_no_variable_mode():
 
 def test_build_runtime_module_variable_mode_returns_variable_module():
     """build_runtime_module with variable_mode=True entry → RLMVariableExecutionModule."""
+    from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
     from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
     from fleet_rlm.runtime.models.registry import build_runtime_module
 
@@ -151,6 +182,7 @@ def test_build_runtime_module_variable_mode_returns_variable_module():
             verbose=False,
         )
         mock_cls.assert_called_once_with(
+            signature=SummarizeLongDocument,
             interpreter=mock_interp,
             max_iterations=10,
             max_llm_calls=30,

@@ -328,8 +328,9 @@ def _set_span_error_description(exception: Exception) -> None:
 
         description = f"{type(exception).__name__}: {exception}"
         set_status(StatusCode.ERROR, description=description)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Trace enrichment is best-effort and must never mask the original error.
+        logger.debug("Failed to update MLflow span status", exc_info=exc)
 
 
 class FleetMlflowTraceCallback(BaseCallback):
