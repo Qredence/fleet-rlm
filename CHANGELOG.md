@@ -4,15 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- The notes below summarize the current uncommitted worktree on top of `0.4.99`.
+- The notes below summarize the current branch delta on top of `0.4.99`.
 
 ### Highlights (User Impact)
 
-- Reworked settings into a reusable in-shell dialog/sheet that can open directly from the command palette, sidebar, and runtime warning CTAs without forcing a full route transition away from the active workspace.
-- Split the oversized settings screen into shared settings-content and event modules, so the routed `/settings` entrypoint and the shell overlay now share one implementation path.
-- Tightened shell presentation by simplifying the workspace empty state, reordering sidebar actions, removing redundant session-row chrome, and aligning switch/sidebar typography with the current UI token set.
-- Split durable volumes away from the live workspace flow, so the Volumes page now centers on provider-scoped mounted storage while the workbench stays focused on chat and execution context.
-- Refreshed the workspace shell, composer, sidebar, and workbench presentation to match the current UI direction more closely across desktop and mobile layouts.
+- Reworked settings into a reusable in-shell dialog/sheet with shared routed and overlay rendering, so operators can open runtime controls from the command palette, sidebar, and warning CTAs without leaving the active workspace.
+- Refreshed the workspace shell, composer, sidebar, workbench, and empty-state presentation across desktop and mobile layouts while keeping the Volumes surface focused on provider-scoped durable storage instead of live workspace files.
+- Expanded the Daytona-backed `dspy.RLM` runtime with prompt-as-variable execution, metadata-only long-context handling, and `sub_rlm()` symbolic recursion so larger prompts and recursive reasoning stay inside the sandbox instead of overloading the model context window.
+- Added Daytona sandbox lifecycle and code-intelligence controls, including snapshots, LSP-powered completions/symbols, resource sizing, hot resize, graceful stop/delete, idle keepalive refresh, and per-sandbox network policy controls.
+- Added MLflow token-usage tracking and configurable automatic assessment hooks, while also hardening trace finalization and Daytona session resume behavior across async ownership boundaries.
+
+### Breaking Changes
+
+- **Change:** Removed the dedicated `analyze_long_document` tool from the runtime, CLI, MCP, and websocket manifest surfaces now that long-document handling routes through variable-mode RLM execution and the remaining summary/extraction flows.
+  **Outcome:** Callers that still reference `analyze_long_document` must migrate to the supported variable-mode runtime modules and the remaining long-context tool entrypoints.
+- **Change:** Retired the scaffolded `modal-sandbox` skill and rewrote the bundled RLM skill guidance around Daytona-backed durable-volume and interpreter workflows.
+  **Outcome:** Contributors extending the built-in skill pack should target the Daytona runtime model rather than the old Modal-specific sandbox guidance.
 
 ### Added
 
@@ -22,6 +29,12 @@ All notable changes to this project are documented in this file.
   **Outcome:** The new in-shell settings flow has regression coverage around dialog handoff, focus-return plumbing, and the lighter shell presentation.
 - **Change:** Added provider-scoped durable-volume coverage and supporting browser behavior for the dedicated Volumes surface.
   **Outcome:** Operators can switch between Modal and Daytona durable storage explicitly without mixing long-lived files into the active workspace transcript/workbench flow.
+- **Change:** Added Daytona snapshot discovery/management helpers, LSP-backed completion and document-symbol tools, plus sandbox controls for resources, hot resize, graceful stop/delete, idle timeout refresh, auto-delete, and network firewall configuration.
+  **Outcome:** Daytona sandboxes are easier to tune, inspect, and secure during long-running RLM sessions without rebuilding environments for every adjustment.
+- **Change:** Added `sub_rlm()` symbolic recursion, prompt-as-variable runtime modules, and metadata-only variable-mode history handling on the shared `dspy.RLM` path.
+  **Outcome:** Large prompts and decomposed reasoning can stay in the REPL-backed runtime, with the model operating on metadata previews and recursive helper calls instead of raw prompt expansion.
+- **Change:** Added MLflow token-usage tracking and automatic assessment configuration for runtime traces.
+  **Outcome:** Operators can quantify model usage more precisely and opt into richer automated scoring when the trace data supports it.
 
 ### Changed
 
@@ -35,6 +48,15 @@ All notable changes to this project are documented in this file.
   **Outcome:** The primary workspace feels more cohesive and intentional, with fewer visual overlaps and clearer hierarchy between navigation, chat, and inspection surfaces.
 - **Change:** Updated the Volumes page copy and layout to describe mounted durable volumes explicitly instead of treating them as part of the live workspace runtime surface.
   **Outcome:** The storage model is easier to understand, especially when switching between Daytona and Modal-backed durable volume views.
+- **Change:** Reworked variable-mode execution to align with the native `dspy.RLM` API and reuse the parent Daytona sandbox for child `sub_rlm()` calls whenever possible.
+  **Outcome:** Recursive long-context execution now stays closer to DSPy’s built-in variable semantics while avoiding unnecessary 30-60 second sandbox spin-ups for each child call.
+- **Change:** Updated bundled skill/docs guidance to reflect Daytona-first sandbox usage and switched contributor-facing frontend setup references from `bun` to `pnpm`.
+  **Outcome:** The documented workflow now matches the repo’s actual runtime and package-manager choices, which reduces setup drift for contributors.
+
+### Fixed
+
+- **Change:** Finalized MLflow traces with explicit terminal states, gated retrieval groundedness scoring on complete retriever coverage, and reset Daytona interpreter contexts safely after loop-owner mismatches before session resume.
+  **Outcome:** Trace health is more trustworthy, automatic assessments avoid false assumptions, and resumed Daytona sessions are less likely to trip event-loop ownership errors during long-running work.
 
 ### Removed
 
