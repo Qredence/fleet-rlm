@@ -25,6 +25,8 @@ class MlflowTraceRequestContext:
     model_id: str | None = None
     resolved_trace_id: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 _CURRENT_REQUEST_CONTEXT: contextvars.ContextVar[MlflowTraceRequestContext | None] = (
@@ -181,8 +183,6 @@ def update_current_mlflow_trace(
 def finalize_current_mlflow_trace(*, state: str) -> str | None:
     """Mark the active MLflow trace as terminal when request processing ends."""
     context = current_request_context()
-    if context is None:
-        return None
 
     runtime = _runtime_module()
     mlflow = runtime._import_mlflow()
@@ -192,7 +192,16 @@ def finalize_current_mlflow_trace(*, state: str) -> str | None:
         return capture_last_active_trace_id()
 
     try:
-        mlflow.update_current_trace(state=state)
+        tags: dict[str, str] = {}
+        if context is not None:
+            if context.total_input_tokens > 0:
+                tags["mlflow.traceInputTokens"] = str(context.total_input_tokens)
+            if context.total_output_tokens > 0:
+                tags["mlflow.traceOutputTokens"] = str(context.total_output_tokens)
+            total = context.total_input_tokens + context.total_output_tokens
+            if total > 0:
+                tags["mlflow.traceTotalTokens"] = str(total)
+        mlflow.update_current_trace(state=state, tags=tags if tags else None)
     except Exception:
         runtime.logger.debug("MLflow trace finalization skipped.", exc_info=True)
 

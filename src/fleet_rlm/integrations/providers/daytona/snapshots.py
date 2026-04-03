@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .runtime_helpers import _await_if_needed, _build_daytona_client
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
+from .runtime_helpers import _await_if_needed, _build_daytona_client
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ async def aget_snapshot(
             "image_name": getattr(snap, "image_name", None),
         }
     except Exception:
+        logger.debug("snapshot_lookup_failed", extra={"name": name}, exc_info=True)
         return None
     finally:
         await _await_if_needed(client.close())

@@ -96,7 +96,7 @@ async def _aget_daytona_session(
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
         )
-    except Exception:
+    except ImportError:
         return None
 
     interpreter = ctx.agent.interpreter
@@ -116,7 +116,7 @@ def _get_daytona_session_sync(
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
         )
-    except Exception:
+    except ImportError:
         return None
 
     interpreter = getattr(ctx.agent, "interpreter", None)

@@ -98,6 +98,10 @@ def build_delegate_child(
             volume_mount_path=parent_session.volume_mount_path,
             context_id=None,  # Force create_context() on start
         )
+        # Give the child session a runtime back-reference so it can
+        # re-obtain a loop-correct sandbox handle if it is later called
+        # from a different asyncio loop (see aensure_context).
+        child._session._runtime_ref = interpreter.runtime
         try:
             child._session.bind_current_async_owner()
         except RuntimeError:

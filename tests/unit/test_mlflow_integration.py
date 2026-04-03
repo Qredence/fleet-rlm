@@ -343,7 +343,7 @@ def test_mlflow_request_context_finalizes_trace_state_on_success(
     ):
         pass
 
-    assert calls[-1] == {"state": "OK"}
+    assert calls[-1] == {"state": "OK", "tags": None}
 
 
 def test_mlflow_request_context_finalizes_trace_state_on_error(
@@ -366,7 +366,7 @@ def test_mlflow_request_context_finalizes_trace_state_on_error(
         ):
             raise RuntimeError("boom")
 
-    assert calls[-1] == {"state": "ERROR"}
+    assert calls[-1] == {"state": "ERROR", "tags": None}
 
 
 def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(
@@ -554,3 +554,216 @@ def test_trace_to_dataset_row_extracts_expectations_and_feedback():
     assert row["expectations"] == {"expected_response": "MLflow is an ML platform"}
     assert row["span_types"] == ["LLM", "RETRIEVER"]
     assert row["feedback"]["response_is_correct"]["value"] is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Token tracking --------------------------------------------------
+# ---------------------------------------------------------------------------
+
+
+def test_extract_token_usage_parses_standard_usage():
+    from fleet_rlm.integrations.observability.mlflow_runtime import _extract_token_usage
+
+    inp, out = _extract_token_usage(
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 20}}
+    )
+    assert inp == 10
+    assert out == 20
+
+
+def test_extract_token_usage_parses_alternative_key_names():
+    from fleet_rlm.integrations.observability.mlflow_runtime import _extract_token_usage
+
+    inp, out = _extract_token_usage(
+        {"token_usage": {"inputTokens": 5, "outputTokens": 8}}
+    )
+    assert inp == 5
+    assert out == 8
+
+
+def test_extract_token_usage_returns_none_for_missing_usage():
+    from fleet_rlm.integrations.observability.mlflow_runtime import _extract_token_usage
+
+    assert _extract_token_usage(None) == (None, None)
+    assert _extract_token_usage({}) == (None, None)
+    assert _extract_token_usage({"choices": []}) == (None, None)
+
+
+def test_on_lm_end_accumulates_tokens_on_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        get_active_trace_id=lambda: "trace-tok",
+        update_current_trace=lambda **kwargs: None,
+        get_last_active_trace_id=lambda thread_local=True: "trace-tok",
+    )
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    context = mlflow_integration.MlflowTraceRequestContext(
+        client_request_id="req-tokens"
+    )
+    with mlflow_integration.mlflow_request_context(context):
+        cb = mlflow_integration.FleetMlflowTraceCallback()
+        cb.on_lm_end(
+            "call-1",
+            {
+                "choices": [{"text": "hi"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            },
+        )
+        cb.on_lm_end(
+            "call-2",
+            {
+                "choices": [{"text": "bye"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 8},
+            },
+        )
+        assert context.total_input_tokens == 15
+        assert context.total_output_tokens == 28
+
+
+def test_finalize_trace_flushes_token_tags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        get_active_trace_id=lambda: "trace-tok-fin",
+        update_current_trace=lambda **kwargs: calls.append(kwargs),
+        get_last_active_trace_id=lambda thread_local=True: "trace-tok-fin",
+    )
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    context = mlflow_integration.MlflowTraceRequestContext(client_request_id="req-fin")
+    context.total_input_tokens = 100
+    context.total_output_tokens = 200
+
+    with mlflow_integration.mlflow_request_context(context):
+        pass
+
+    # The last update_current_trace call should be the finalization
+    final = calls[-1]
+    assert final["state"] == "OK"
+    assert final["tags"] == {
+        "mlflow.traceInputTokens": "100",
+        "mlflow.traceOutputTokens": "200",
+        "mlflow.traceTotalTokens": "300",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Error description propagation ------------------------------------
+# ---------------------------------------------------------------------------
+
+
+def test_set_span_error_description_sets_otel_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.observability.mlflow_runtime import (
+        _set_span_error_description,
+    )
+
+    recorded: list[tuple[object, str]] = []
+
+    class FakeOtelSpan:
+        def set_status(self, code, *, description=""):
+            recorded.append((code, description))
+
+    class FakeSpan:
+        _span = FakeOtelSpan()
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: FakeSpan(),
+    )
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    exc = ValueError("something broke")
+    _set_span_error_description(exc)
+
+    assert len(recorded) == 1
+    assert "ValueError: something broke" in recorded[0][1]
+
+
+def test_on_module_end_propagates_exception_to_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[str] = []
+
+    class FakeOtelSpan:
+        def set_status(self, code, *, description=""):
+            recorded.append(description)
+
+    class FakeSpan:
+        _span = FakeOtelSpan()
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: FakeSpan(),
+        get_active_trace_id=lambda: "trace-err",
+        update_current_trace=lambda **kwargs: None,
+        get_last_active_trace_id=lambda thread_local=True: "trace-err",
+    )
+    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+
+    with mlflow_integration.mlflow_request_context(
+        mlflow_integration.MlflowTraceRequestContext(client_request_id="req-err")
+    ):
+        cb = mlflow_integration.FleetMlflowTraceCallback()
+        cb.on_module_end("call-1", None, exception=RuntimeError("tool failed"))
+
+    assert any("RuntimeError: tool failed" in d for d in recorded)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Orphaned trace finalization --------------------------------------
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_trace_works_without_request_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safety net: finalize even if the request context var is None."""
+    import fleet_rlm.integrations.observability.mlflow_context as ctx_mod
+
+    calls: list[dict[str, object]] = []
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        get_active_trace_id=lambda: "trace-orphan",
+        update_current_trace=lambda **kwargs: calls.append(kwargs),
+        get_last_active_trace_id=lambda thread_local=True: "trace-orphan",
+    )
+    monkeypatch.setattr(
+        ctx_mod,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            logger=SimpleNamespace(debug=lambda *a, **kw: None),
+        ),
+    )
+
+    # No request context set — simulates orphaned trace scenario
+    result = ctx_mod.finalize_current_mlflow_trace(state="ERROR")
+
+    assert calls[-1] == {"state": "ERROR", "tags": None}
+    assert result == "trace-orphan"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Assessment pipeline config ---------------------------------------
+# ---------------------------------------------------------------------------
+
+
+def test_mlflow_config_enable_auto_assessment_default_false():
+    config = MlflowConfig.from_env()
+    assert config.enable_auto_assessment is False
+
+
+def test_mlflow_config_enable_auto_assessment_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT", "true")
+    config = MlflowConfig.from_env()
+    assert config.enable_auto_assessment is True

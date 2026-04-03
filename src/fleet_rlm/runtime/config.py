@@ -96,7 +96,7 @@ def configure_posthog_analytics_from_env() -> object | None:
 
     try:
         from fleet_rlm.integrations.observability import configure_analytics
-    except Exception:
+    except ImportError:
         return None
 
     try:
@@ -113,6 +113,7 @@ def configure_posthog_analytics_from_env() -> object | None:
             enabled=True,
         )
     except Exception:
+        logger.debug("posthog_analytics_configure_failed", exc_info=True)
         return None
 
 

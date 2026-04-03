@@ -70,6 +70,7 @@ class MlflowConfig(BaseModel):
     dspy_log_traces_from_eval: bool = Field(default=True)
     dspy_log_compiles: bool = Field(default=False)
     dspy_log_evals: bool = Field(default=False)
+    enable_auto_assessment: bool = Field(default=False)
 
     @classmethod
     def from_env(cls) -> MlflowConfig:
@@ -99,6 +100,10 @@ class MlflowConfig(BaseModel):
             ),
             dspy_log_evals=_env_bool(
                 os.getenv("MLFLOW_DSPY_LOG_EVALS"),
+                default=False,
+            ),
+            enable_auto_assessment=_env_bool(
+                os.getenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT"),
                 default=False,
             ),
         )

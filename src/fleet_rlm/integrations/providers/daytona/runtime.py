@@ -50,6 +50,12 @@ class DaytonaSandboxSession:
     owner_loop_id: int | None = None
     _context: Any | None = field(default=None, init=False, repr=False)
     _driver_started: bool = field(default=False, init=False, repr=False)
+    # Optional back-reference to the runtime that created this session's
+    # sandbox.  When set, aensure_context() uses it to re-obtain a fresh
+    # sandbox handle (bound to the current asyncio loop) if a cross-loop
+    # call is detected, preventing "Future attached to a different loop"
+    # errors in delegate-child interpreters.
+    _runtime_ref: Any | None = field(default=None, init=False, repr=False)
 
     @property
     def sandbox_id(self) -> str | None:
@@ -69,6 +75,20 @@ class DaytonaSandboxSession:
     async def aensure_context(self) -> Any:
         if self._context is not None:
             return self._context
+        # If this session's sandbox handle was created on a different asyncio
+        # event loop (e.g. the compat-runner's background loop), its internal
+        # aiohttp session will be bound to that old loop and any awaited SDK
+        # call will raise "Future attached to a different loop".  Re-obtain
+        # a fresh sandbox handle via the runtime (which rebuilds its own HTTP
+        # client when the loop changes) before calling create_context().
+        if not self.matches_current_async_owner() and self._runtime_ref is not None:
+            sandbox_id = self.sandbox_id
+            if sandbox_id:
+                with suppress(Exception):
+                    self.sandbox = await self._runtime_ref._aget_sandbox(
+                        sandbox_id, recover=False
+                    )
+                    self.bind_current_async_owner()
         if self.context_id:
             existing_contexts: list[Any] | None = None
             with suppress(Exception):

@@ -99,11 +99,13 @@ def _record_runtime_failure(
         return
     category = str(error.get("runtime_failure_category", "") or "").strip() or None
     phase = str(error.get("runtime_failure_phase", "") or "").strip() or None
-    if category is None and phase is None:
-        return
     recorder = getattr(ctx.agent.interpreter, "mark_runtime_degradation", None)
     if callable(recorder):
-        recorder(category=category, phase=phase, fallback_used=False)
+        recorder(
+            category=category or "module_execution_error",
+            phase=phase or "execution",
+            fallback_used=error.get("delegate_lm_fallback", False),
+        )
 
 
 def _build_tool(registration: _ToolRegistration) -> Any:
