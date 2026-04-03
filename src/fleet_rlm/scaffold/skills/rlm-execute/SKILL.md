@@ -1,47 +1,68 @@
 ---
 name: rlm-execute
-description: Execute Python code in Modal sandboxes with automatic volume persistence. Use when running code in a cloud sandbox, processing data with stateful execution, or persisting results across sessions.
+description: Execute Python code in Daytona sandboxes with durable volume persistence. Use when running code in a Daytona sandbox, processing data with stateful execution, or persisting results across sessions.
 ---
 
 # RLM Execute
 
-Execute Python code in Modal sandboxes with volume persistence.
+Execute Python code in Daytona sandboxes with volume persistence.
 
 ## Basic Execution
 
 ```python
-from fleet_rlm import ModalInterpreter
+from fleet_rlm.runtime.config import configure_planner_from_env
+from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
 
-with ModalInterpreter(timeout=600) as interp:
+configure_planner_from_env()
+
+interp = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    timeout=600,
+)
+interp.start()
+try:
     result = interp.execute('''
 import math
 SUBMIT(answer=math.factorial(15))
 ''')
     print(result.answer)  # 1307674368000
+finally:
+    interp.shutdown()
 ```
 
-## With Volume Persistence
+## With Durable Volume Persistence
+
+Data written to `/home/daytona/memory/` persists across sessions on the
+mounted Daytona volume.
 
 ```python
-with ModalInterpreter(timeout=600, volume_name="my-data") as interp:
+interp = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    volume_name="my-data",
+    timeout=600,
+)
+interp.start()
+try:
     # Write data
     interp.execute('''
-import json
+import json, os
+os.makedirs('/home/daytona/memory/artifacts', exist_ok=True)
 data = {"processed": True, "count": 42}
-with open('/data/results.json', 'w') as f:
+with open('/home/daytona/memory/artifacts/results.json', 'w') as f:
     json.dump(data, f)
 SUBMIT(status="saved")
 ''')
 
-# Later session - data persists
-with ModalInterpreter(timeout=600, volume_name="my-data") as interp:
+    # Read it back in the same session (or a later one)
     result = interp.execute('''
 import json
-with open('/data/results.json') as f:
+with open('/home/daytona/memory/artifacts/results.json') as f:
     data = json.load(f)
 SUBMIT(data=data)
 ''')
     print(result.data)  # {"processed": True, "count": 42}
+finally:
+    interp.shutdown()
 ```
 
 ## Execute a Local File
@@ -49,47 +70,57 @@ SUBMIT(data=data)
 ```python
 # Read local file, execute in sandbox
 code = open("scripts/analysis.py").read()
-with ModalInterpreter(timeout=600) as interp:
+interp.start()
+try:
     result = interp.execute(code)
+finally:
+    interp.shutdown()
 ```
-
-## Runtime Context
-
-`ModalInterpreter` is still the direct Python execution path for the default
-Modal backend. Daytona workbench execution uses a different interpreter backend
-inside the shared runtime, so load `daytona-runtime` when the task is about the
-Daytona path rather than raw Modal execution.
 
 ## Execution Patterns
 
 ### Data Processing Pipeline
 
 ```python
-with ModalInterpreter(timeout=600, volume_name="pipeline") as interp:
+interp = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    volume_name="pipeline",
+    timeout=600,
+)
+interp.start()
+try:
     # Step 1: Generate data
     interp.execute('''
-import json
+import json, os
+os.makedirs('/home/daytona/memory/buffers', exist_ok=True)
 data = [{"id": i, "value": i**2} for i in range(100)]
-with open('/data/raw.json', 'w') as f:
+with open('/home/daytona/memory/buffers/raw.json', 'w') as f:
     json.dump(data, f)
 SUBMIT(count=len(data))
 ''')
 
-    # Step 2: Process (same sandbox, same volume)
+    # Step 2: Process (same sandbox)
     result = interp.execute('''
 import json
-with open('/data/raw.json') as f:
+with open('/home/daytona/memory/buffers/raw.json') as f:
     data = json.load(f)
 filtered = [d for d in data if d["value"] > 50]
 SUBMIT(filtered_count=len(filtered))
 ''')
     print(result.filtered_count)
+finally:
+    interp.shutdown()
 ```
 
 ### Multi-Step with Buffers
 
+`add_buffer(name, value)` / `get_buffer(name)` are injected by the
+sandbox driver (`runtime/execution/sandbox_assets.py`) and persist
+named lists across `execute()` calls in the same sandbox session:
+
 ```python
-with ModalInterpreter(timeout=600) as interp:
+interp.start()
+try:
     # Buffers persist across execute() calls within same sandbox
     interp.execute('add_buffer("findings", "Step 1: setup complete")')
     interp.execute('add_buffer("findings", "Step 2: data loaded")')
@@ -98,16 +129,18 @@ items = get_buffer("findings")
 SUBMIT(log=items)
 ''')
     print(result.log)  # ["Step 1: setup complete", "Step 2: data loaded"]
+finally:
+    interp.shutdown()
 ```
 
 ## Key Points
 
 - Access results via `result.field_name` (dot notation), not `result["field"]`
-- Data in `/data/` persists across sessions when using `volume_name`
-- Buffers (`add_buffer`/`get_buffer`) persist within a single sandbox session
-- Always use `with` statement or call `interp.shutdown()` for cleanup
-- Set `timeout` appropriately for long-running tasks
+- Data in `/home/daytona/memory/` persists across sessions when using `volume_name`
+- Buffers (`add_buffer`/`get_buffer`) persist within a single sandbox session only
+- Always call `interp.shutdown()` in a `finally` block
+- Set `timeout` appropriately for long-running tasks; default is 900s
 
 ## Troubleshooting
 
-See `rlm-debug` for runtime failures. Use `fleet-rlm daytona-smoke` before assuming a Daytona execution problem is in the higher-level orchestration.
+See `rlm-debug` for runtime failures and `daytona-runtime` for Daytona-specific execution rules.

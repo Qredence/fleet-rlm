@@ -10,7 +10,7 @@ today.
 
 ## Key Invariants
 
-- `daytona_pilot` uses the same shared ReAct plus `dspy.RLM` runtime as `modal_chat`.
+- `daytona_pilot` is the primary runtime path, built on the shared ReAct plus `dspy.RLM` backbone.
 - Daytona is the interpreter backend, not a separate orchestration system.
 - The native validation entrypoint is:
 
@@ -42,6 +42,33 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 2. Treat `DAYTONA_TARGET` as SDK routing/config only, not as a workspace id or volume name.
 3. Keep Daytona-specific reasoning in the provider boundary under `integrations/providers/daytona/*`.
 4. When debugging durable Daytona persistence, inspect `/home/daytona/memory/{memory,artifacts,buffers,meta}`. Treat the live workspace as transient.
+
+## Canonical Provider Modules
+
+All Daytona-specific implementation lives under `src/fleet_rlm/integrations/providers/daytona/`:
+
+- `runtime.py` — `DaytonaSandboxRuntime` and `DaytonaSandboxSession` (canonical async contract)
+- `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter)
+- `interpreter_execution.py` — delegate child interpreter building
+- `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
+- `agent.py` — `DaytonaWorkbenchChatAgent` (Daytona-specific agent/session adapter)
+- `state.py` — chat/session normalization helpers
+- `volumes.py` — Daytona volume browsing
+- `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, `types_serialization.py` — focused type modules
+- `types.py` — compatibility facade over focused type modules
+- `config.py` — `ResolvedDaytonaConfig` resolution
+- `snapshots.py` — sandbox snapshot lookup
+- `runtime_helpers.py`, `interpreter_assets.py` — internal utilities
+
+## Session Manifest Path
+
+Durable session manifests live under:
+
+```
+meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json
+```
+
+Legacy path (`workspaces/...`) is still read as a migration fallback.
 
 ## Claude Code Delegation
 
