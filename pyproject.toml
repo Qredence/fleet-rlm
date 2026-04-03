@@ -46,7 +46,7 @@ dependencies = [
     "websockets>=15.0.0,<16.0.0",
     "uvicorn>=0.42.0,<1",
     "dspy-ai>=3.1.3",
-    "litellm>=1.82.0",
+    "litellm>=1.83.0",
     "pgvector>=0.4.2",
     "PyJWT>=2.12.1,<3",
     "mlflow>=3.10.0",
@@ -151,7 +151,13 @@ markers = [
 ]
 
 [tool.ty.src]
-exclude = ["tests/", "scripts/", "notebooks/", "test_modal_guard.py", "setup.py"]
+exclude = [
+    "tests/",
+    "scripts/",
+    "notebooks/",
+    "test_modal_guard.py",
+    "setup.py",
+]
 
 [tool.deptry]
 # Exclude test directories and node_modules from import scanning
