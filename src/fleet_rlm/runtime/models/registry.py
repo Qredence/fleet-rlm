@@ -72,8 +72,7 @@ class _RuntimeModuleFactory(Protocol):
         max_iterations: int,
         max_llm_calls: int,
         verbose: bool,
-    ) -> dspy.Module:
-        raise NotImplementedError
+    ) -> dspy.Module: ...
 
 
 @dataclass(frozen=True)
@@ -85,9 +84,10 @@ class RuntimeModuleDefinition:
     doc: str
     module_class: type[dspy.Module] | None = None
     variable_mode: bool = False
-    # When True, ``build_runtime_module`` routes the original signature through
-    # ``RLMVariableExecutionModule`` so the module keeps its input/output field
-    # names while dspy.RLM stores the inputs as REPL variables.
+    """When True, ``build_runtime_module`` wraps this entry in
+    ``RLMVariableExecutionModule`` instead of the generic
+    ``_RuntimeSignatureModule``.  Use for long-context signatures whose
+    primary input should be a REPL variable (Algorithm 1 pattern)."""
 
 
 RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
@@ -213,7 +213,6 @@ def build_runtime_module(
 
     if definition.variable_mode:
         return RLMVariableExecutionModule(
-            signature=definition.signature,
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
