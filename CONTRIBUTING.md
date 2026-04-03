@@ -34,7 +34,7 @@ This project adheres to a code of conduct that all contributors are expected to 
 
 - Python >= 3.10
 - `uv` package manager (see [UV Docs](https://docs.astral.sh/uv/))
-- `bun` runtime (for frontend development, see [Bun Docs](https://bun.sh/))
+- `pnpm` (for frontend development, see [pnpm Docs](https://pnpm.io/))
 - Git
 - A Modal account (for sandbox execution)
 
@@ -324,8 +324,8 @@ uv run python scripts/check_docs_quality.py
 ```bash
 # from repo root
 cd src/frontend
-bun install --frozen-lockfile
-bun run check
+pnpm install --frozen-lockfile
+pnpm run check
 cd ../..
 ```
 
