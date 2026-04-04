@@ -6,7 +6,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from fleet_rlm.runtime.tools.infra_tools import (
+from fleet_rlm.runtime.tools.sandbox_common import (
     build_lsp_tools,
     build_snapshot_tools,
 )

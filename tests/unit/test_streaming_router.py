@@ -1,14 +1,10 @@
-"""Direct tests for the chat streaming router."""
+"""Direct tests for the chat streaming router (inlined into chat_agent)."""
 
 from __future__ import annotations
 
 import pytest
 
 from fleet_rlm.runtime.agent import RLMReActChatAgent
-from fleet_rlm.runtime.agent.streaming_router import (
-    aiter_routed_chat_turn_stream,
-    iter_routed_chat_turn_stream,
-)
 from fleet_rlm.runtime.models.streaming import StreamEvent
 from tests.unit.fixtures_react import FakeInterpreter
 
@@ -27,13 +23,12 @@ def test_iter_routed_chat_turn_stream_rlm_only_emits_forced_events(
         return {"answer": "forced response", "trajectory": {}}
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.streaming_router.get_tool_by_name",
+        "fleet_rlm.runtime.agent.chat_agent.get_tool_by_name",
         lambda _agent, name: _fake_tool if name == "rlm_query" else None,
     )
 
     events = list(
-        iter_routed_chat_turn_stream(
-            agent,
+        agent.iter_chat_turn_stream(
             message="deep task",
             trace=False,
         )
@@ -81,8 +76,7 @@ async def test_aiter_routed_chat_turn_stream_rlm_only_uses_forced_stream(
 
     events = [
         event
-        async for event in aiter_routed_chat_turn_stream(
-            agent,
+        async for event in agent.aiter_chat_turn_stream(
             message="deep task",
             trace=False,
         )

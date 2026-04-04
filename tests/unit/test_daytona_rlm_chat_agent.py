@@ -7,7 +7,7 @@ import dspy
 from fleet_rlm.integrations.providers.daytona.agent import (
     DaytonaWorkbenchChatAgent,
 )
-from fleet_rlm.integrations.providers.daytona.state import render_final_text
+from fleet_rlm.integrations.providers.daytona.types import render_final_text
 
 
 def _build_agent() -> DaytonaWorkbenchChatAgent:

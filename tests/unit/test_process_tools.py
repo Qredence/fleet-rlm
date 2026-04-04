@@ -100,11 +100,11 @@ def test_build_sandbox_tools_skips_daytona_infra_tools_for_non_daytona(
         lambda agent: ["storage"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.infra_tools.build_snapshot_tools",
+        "fleet_rlm.runtime.tools.sandbox_common.build_snapshot_tools",
         lambda agent: ["snapshot"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.infra_tools.build_lsp_tools",
+        "fleet_rlm.runtime.tools.sandbox_common.build_lsp_tools",
         lambda agent: ["lsp"],
     )
 
