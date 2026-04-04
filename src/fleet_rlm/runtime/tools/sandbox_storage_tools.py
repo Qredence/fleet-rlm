@@ -1,8 +1,8 @@
 """Storage, editing, and memory-oriented sandbox tool builders.
 
-Buffer tools have been extracted to :mod:`.buffer_tools` and process/workspace
-tools to :mod:`.process_tools`.  This module keeps volume memory operations,
-file editing, and the aggregating ``build_storage_tools`` entry-point.
+Buffer tools and process/workspace tools now live in :mod:`.sandbox_common`.
+This module keeps volume memory operations, file editing, and the aggregating
+``build_storage_tools`` entry-point.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from .sandbox_common import (
 )
 
 # Backwards-compat re-exports so external code that imported from here still works.
-from .buffer_tools import build_buffer_tools as build_buffer_tools
-from .process_tools import build_process_tools as build_process_tools
+from .sandbox_common import build_buffer_tools as build_buffer_tools
+from .sandbox_common import build_process_tools as build_process_tools
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent

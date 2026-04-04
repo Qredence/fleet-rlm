@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleet_rlm.runtime.tools.process_tools import (
+from fleet_rlm.runtime.tools.sandbox_common import (
     _UNSUPPORTED_PROVIDER_ERROR,
     build_process_tools,
 )

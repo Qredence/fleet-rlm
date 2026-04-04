@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
+from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
 from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
 from fleet_rlm.runtime.execution.storage_paths import (
     RuntimeStorageRoots,
@@ -463,3 +464,396 @@ def build_lsp_tools(agent: RLMReActChatAgent) -> list[Any]:
             desc="List functions, classes, and variables in a file using sandbox LSP.",
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Buffer tools (formerly buffer_tools.py)
+# ---------------------------------------------------------------------------
+
+
+def build_buffer_tools(agent: RLMReActChatAgent) -> list[Any]:
+    """Build sandbox buffer and volume-load tools bound to *agent*."""
+    from dspy import Tool
+
+    ctx = _SandboxToolContext(agent=agent)
+    tools: list[Any] = []
+
+    async def read_buffer(name: str) -> dict[str, Any]:
+        """Read the full contents of a sandbox buffer."""
+        result = await _aexecute_submit_ctx(
+            ctx,
+            "SUBMIT(items=get_buffer(name))",
+            variables={"name": name},
+        )
+        items = result.get("items", [])
+        return {"status": "ok", "name": name, "items": items, "count": len(items)}
+
+    async def clear_buffer(name: str = "") -> dict[str, Any]:
+        """Clear one sandbox buffer (or all buffers when name is empty)."""
+        if name:
+            code = 'clear_buffer(name)\nSUBMIT(status="ok", scope="single", name=name)'
+            variables: dict[str, Any] = {"name": name}
+        else:
+            code = 'clear_buffer()\nSUBMIT(status="ok", scope="all")'
+            variables = {}
+        return await _aexecute_submit_ctx(ctx, code, variables=variables)
+
+    async def save_buffer_to_volume(name: str, path: str) -> dict[str, Any]:
+        """Persist a sandbox buffer to persistent storage as JSON."""
+        roots = _persistent_roots(ctx)
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root=roots.buffers_root,
+            allowed_root=roots.allowed_root,
+        )
+        if error is not None:
+            return error
+        assert resolved_path is not None
+
+        daytona_session = await _aget_daytona_session(ctx)
+        if daytona_session is not None:
+            result = await _aexecute_submit_ctx(
+                ctx,
+                "SUBMIT(items=get_buffer(name))",
+                variables={"name": name},
+            )
+            items = result.get("items", [])
+            payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
+            try:
+                saved_path = await _adaytona_write_text(
+                    daytona_session,
+                    resolved_path,
+                    payload,
+                )
+            except Exception as exc:
+                return _daytona_file_error(path=resolved_path, exc=exc)
+            return {"status": "ok", "saved_path": saved_path, "item_count": len(items)}
+
+        code = """
+import json
+items = get_buffer(name)
+payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
+saved_path = save_to_volume(path, payload)
+SUBMIT(status="ok", saved_path=saved_path, item_count=len(items))
+"""
+        result = await _aexecute_submit_ctx(
+            ctx,
+            code,
+            variables={"name": name, "path": resolved_path},
+        )
+        if result.get("status") == "ok":
+            _commit_volume_best_effort(ctx)
+        return result
+
+    async def load_text_from_volume(path: str, alias: str = "active") -> dict[str, Any]:
+        """Load text from persistent storage into host-side document memory."""
+        roots = _persistent_roots(ctx)
+        resolved_path, error = _resolve_path_or_error(
+            path=path,
+            default_root=roots.artifacts_root,
+            allowed_root=roots.allowed_root,
+        )
+        if error is not None:
+            return error
+        assert resolved_path is not None
+
+        daytona_session = await _aget_daytona_session(ctx)
+        if daytona_session is not None:
+            try:
+                text = await _adaytona_read_text(daytona_session, resolved_path)
+            except Exception as exc:
+                return _daytona_file_error(path=resolved_path, exc=exc)
+            return _document_load_result(
+                ctx,
+                alias=alias,
+                path=resolved_path,
+                text=text,
+            )
+
+        _reload_volume_best_effort(ctx)
+
+        result = await _aexecute_submit_ctx(
+            ctx,
+            'text = load_from_volume(path)\nSUBMIT(status="ok", text=text)',
+            variables={"path": resolved_path},
+        )
+        text = str(result.get("text", ""))
+        if text.startswith("[error:"):
+            return {"status": "error", "error": text, "path": resolved_path}
+        return _document_load_result(
+            ctx,
+            alias=alias,
+            path=resolved_path,
+            text=text,
+        )
+
+    async def process_document(path: str, alias: str = "active") -> dict[str, Any]:
+        """Load a durable volume-backed document and register it for analysis."""
+        loaded = await load_text_from_volume(path, alias=alias)
+        if loaded.get("status") != "ok":
+            return loaded
+        text = ctx.agent.documents.get(alias, "")
+        return {
+            "status": "ok",
+            "alias": alias,
+            "path": loaded.get("path", path),
+            "chars": len(text),
+            "lines": len(text.splitlines()),
+            "hint": "Preferred over workspace_read for durable document analysis. Use load_document for host, URL, or transient Daytona workspace files.",
+        }
+
+    tools.extend(
+        [
+            Tool(
+                _sync_compatible_tool_callable(read_buffer),
+                name="read_buffer",
+                desc="Read the full contents of a sandbox buffer",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(clear_buffer),
+                name="clear_buffer",
+                desc="Clear one sandbox buffer (or all buffers when name is empty)",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(save_buffer_to_volume),
+                name="save_buffer_to_volume",
+                desc="Persist a sandbox buffer to durable mounted-volume storage as JSON",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(load_text_from_volume),
+                name="load_text_from_volume",
+                desc="Load text from the durable mounted volume (artifacts by default) into host-side document memory",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(process_document),
+                name="process_document",
+                desc="Load a durable volume-backed document into agent memory and register it for downstream analysis",
+            ),
+        ]
+    )
+
+    return tools
+
+
+# ---------------------------------------------------------------------------
+# Process tools (formerly process_tools.py)
+# ---------------------------------------------------------------------------
+
+_UNSUPPORTED_PROVIDER_ERROR: dict[str, Any] = {
+    "status": "error",
+    "error": "This tool requires a Daytona sandbox session and is not available with the current provider.",
+}
+
+
+def build_process_tools(agent: RLMReActChatAgent) -> list[Any]:
+    """Build sandbox execution, workspace I/O, and background-process tools.
+
+    ``workspace_read`` and ``workspace_write`` are available for all sandbox
+    providers.  ``run``, ``extract_python_ast``, and the background-process
+    helpers (``start_background_process``, ``read_process_logs``,
+    ``kill_process``) rely on helpers that are only injected by the Daytona
+    interpreter; they are registered only when the active interpreter is a
+    :class:`~fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter`.
+    In all other cases, a stub that returns ``{status: "error"}`` is registered
+    so callers receive a stable payload shape rather than a ``NameError``.
+    """
+    from dspy import Tool
+
+    ctx = _SandboxToolContext(agent=agent)
+    is_daytona = _is_daytona_interpreter(ctx)
+    tools: list[Any] = []
+
+    # ------------------------------------------------------------------
+    # Universal tools – available for all sandbox providers
+    # ------------------------------------------------------------------
+
+    async def workspace_write(path: str, content: str) -> dict[str, Any]:
+        """Write content to a file in the workspace directory."""
+        code = f"""
+content_value = {content!r}
+saved_path = workspace_write({path!r}, content_value)
+if str(saved_path).startswith("[error:"):
+    SUBMIT(status="error", result=saved_path, error=saved_path, path={path!r})
+SUBMIT(status="ok", result=saved_path, path=saved_path, chars=len(content_value))
+""".strip()
+        return await _aexecute_submit_ctx(ctx, code)
+
+    async def workspace_read(path: str) -> dict[str, Any]:
+        """Read content from a file in the workspace directory."""
+        code = f"""
+content = workspace_read({path!r})
+if str(content).startswith("[error:"):
+    SUBMIT(status="error", result=content, error=content, path={path!r})
+SUBMIT(status="ok", result=content, path={path!r}, content=content, chars=len(content))
+""".strip()
+        return await _aexecute_submit_ctx(ctx, code)
+
+    tools.extend(
+        [
+            Tool(
+                _sync_compatible_tool_callable(workspace_write),
+                name="workspace_write",
+                desc="Write content to a file in the workspace directory",
+            ),
+            Tool(
+                _sync_compatible_tool_callable(workspace_read),
+                name="workspace_read",
+                desc="Read raw content from a transient file in the live workspace. Low-level helper; use load_document or process_document to ingest documents for analysis.",
+            ),
+        ]
+    )
+
+    # ------------------------------------------------------------------
+    # Daytona-only tools – only registered when backed by DaytonaInterpreter
+    # ------------------------------------------------------------------
+
+    if is_daytona:
+
+        async def run(command: str) -> dict[str, Any]:
+            """Execute a bash command in the sandbox environment."""
+            code = f"""
+result = run({command!r})
+status = "ok" if bool(result.get("ok")) else "error"
+SUBMIT(
+    status=status,
+    result=result,
+    exit_code=result.get("exit_code"),
+    stdout=result.get("stdout", ""),
+    stderr=result.get("stderr", ""),
+    ok=bool(result.get("ok")),
+)
+""".strip()
+            return await _aexecute_submit_ctx(ctx, code)
+
+        async def extract_python_ast(path: str) -> dict[str, Any]:
+            """Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file"""
+            code = f"""
+ast_json = extract_python_ast({path!r})
+is_error = str(ast_json).startswith("File not found.") or str(ast_json).startswith("AST Parse Error:")
+if is_error:
+    SUBMIT(status="error", result=ast_json, error=ast_json, path={path!r})
+SUBMIT(status="ok", result=ast_json, path={path!r}, ast=ast_json)
+""".strip()
+            return await _aexecute_submit_ctx(ctx, code)
+
+        async def start_background_process(
+            process_id: str, command: str
+        ) -> dict[str, Any]:
+            """Start a non-blocking background process (daemon) in the sandbox."""
+            code = f"""
+message = start_background_process({process_id!r}, {command!r})
+status = "error" if "already running" in str(message).lower() else "ok"
+SUBMIT(status=status, result=message, process_id={process_id!r}, message=message)
+""".strip()
+            return await _aexecute_submit_ctx(ctx, code)
+
+        async def read_process_logs(process_id: str, tail: int = 50) -> dict[str, Any]:
+            """Read the live stdout/stderr logs of an active background process."""
+            code = f"""
+logs = read_process_logs({process_id!r}, tail={tail})
+status = "error" if "is not running" in str(logs).lower() else "ok"
+SUBMIT(status=status, result=logs, process_id={process_id!r}, logs=logs)
+""".strip()
+            return await _aexecute_submit_ctx(ctx, code)
+
+        async def kill_process(process_id: str) -> dict[str, Any]:
+            """Terminate a running background process by its ID."""
+            code = f"""
+message = kill_process({process_id!r})
+status = "error" if "is not running" in str(message).lower() else "ok"
+SUBMIT(status=status, result=message, process_id={process_id!r}, message=message)
+""".strip()
+            return await _aexecute_submit_ctx(ctx, code)
+
+        tools.extend(
+            [
+                Tool(
+                    _sync_compatible_tool_callable(run),
+                    name="run",
+                    desc="Execute a bash command in the sandbox environment",
+                ),
+                Tool(
+                    _sync_compatible_tool_callable(extract_python_ast),
+                    name="extract_python_ast",
+                    desc="Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file",
+                ),
+                Tool(
+                    _sync_compatible_tool_callable(start_background_process),
+                    name="start_background_process",
+                    desc="Start a non-blocking background process (like a live webserver or watch compiler) by passing an arbitrary process ID and the shell command.",
+                ),
+                Tool(
+                    _sync_compatible_tool_callable(read_process_logs),
+                    name="read_process_logs",
+                    desc="Read the latest stdout/stderr logs of an active background process.",
+                ),
+                Tool(
+                    _sync_compatible_tool_callable(kill_process),
+                    name="kill_process",
+                    desc="Terminate a running background process.",
+                ),
+            ]
+        )
+    else:
+        # Register stubs that return a stable error payload so callers are never
+        # left with a raw NameError from the sandbox execution environment.
+
+        def _unsupported_run(command: str) -> dict[str, Any]:  # noqa: ARG001
+            """Execute a bash command in the sandbox environment (Daytona only)."""
+            return _UNSUPPORTED_PROVIDER_ERROR
+
+        def _unsupported_extract_python_ast(path: str) -> dict[str, Any]:  # noqa: ARG001
+            """Extract AST of a Python file (Daytona only)."""
+            return _UNSUPPORTED_PROVIDER_ERROR
+
+        def _unsupported_start_background_process(
+            process_id: str,
+            command: str,  # noqa: ARG001
+        ) -> dict[str, Any]:
+            """Start a background process (Daytona only)."""
+            return _UNSUPPORTED_PROVIDER_ERROR
+
+        def _unsupported_read_process_logs(
+            process_id: str,
+            tail: int = 50,  # noqa: ARG001
+        ) -> dict[str, Any]:
+            """Read background process logs (Daytona only)."""
+            return _UNSUPPORTED_PROVIDER_ERROR
+
+        def _unsupported_kill_process(
+            process_id: str,  # noqa: ARG001
+        ) -> dict[str, Any]:
+            """Terminate a background process (Daytona only)."""
+            return _UNSUPPORTED_PROVIDER_ERROR
+
+        tools.extend(
+            [
+                Tool(
+                    _unsupported_run,
+                    name="run",
+                    desc="Execute a bash command in the sandbox environment",
+                ),
+                Tool(
+                    _unsupported_extract_python_ast,
+                    name="extract_python_ast",
+                    desc="Extract structural AST JSON mapping (Classes, Methods, Functions, Docstrings) of a Python file",
+                ),
+                Tool(
+                    _unsupported_start_background_process,
+                    name="start_background_process",
+                    desc="Start a non-blocking background process (like a live webserver or watch compiler) by passing an arbitrary process ID and the shell command.",
+                ),
+                Tool(
+                    _unsupported_read_process_logs,
+                    name="read_process_logs",
+                    desc="Read the latest stdout/stderr logs of an active background process.",
+                ),
+                Tool(
+                    _unsupported_kill_process,
+                    name="kill_process",
+                    desc="Terminate a running background process.",
+                ),
+            ]
+        )
+
+    return tools
