@@ -28,6 +28,9 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
+from fleet_rlm.runtime.execution.interpreter_protocol import (
+    StatefulWorkspaceInterpreterProtocol,
+)
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
@@ -49,7 +52,10 @@ from .runtime_helpers import _run_async_compat
 from .types import dedupe_paths, normalized_context_sources
 
 
-class DaytonaInterpreter(LLMQueryMixin):
+class DaytonaInterpreter(
+    LLMQueryMixin,
+    StatefulWorkspaceInterpreterProtocol,
+):
     """Stateful Daytona interpreter that plugs into canonical ``dspy.RLM`` flows."""
 
     def __init__(
