@@ -46,7 +46,7 @@ from .runtime import (
     DaytonaSandboxSession,
 )
 from .runtime_helpers import _run_async_compat
-from .state import dedupe_paths, normalized_context_sources
+from .types import dedupe_paths, normalized_context_sources
 
 
 class DaytonaInterpreter(LLMQueryMixin):

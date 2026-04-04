@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from .agent import DaytonaWorkbenchChatAgent
 from .config import DaytonaConfigError, ResolvedDaytonaConfig, resolve_daytona_config
-from .diagnostics import DaytonaDiagnosticError
+from .diagnostics import DaytonaDiagnosticError, run_daytona_smoke
 from .interpreter import DaytonaInterpreter
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from .smoke import run_daytona_smoke
 from .types import (
     ContextSource,
     DaytonaRunCancelled,
