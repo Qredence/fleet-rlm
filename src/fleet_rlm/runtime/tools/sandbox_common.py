@@ -313,7 +313,7 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
         Args:
             limit: Maximum number of snapshots to return (default 20).
         """
-        from fleet_rlm.integrations.providers.daytona.snapshots import alist_snapshots
+        from fleet_rlm.integrations.providers.daytona.runtime import alist_snapshots
         from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
             _run_async_compat,
         )
@@ -333,7 +333,7 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
         Returns:
             The snapshot name if active, or an explanation if unavailable.
         """
-        from fleet_rlm.integrations.providers.daytona.snapshots import aresolve_snapshot
+        from fleet_rlm.integrations.providers.daytona.runtime import aresolve_snapshot
         from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
             _run_async_compat,
         )

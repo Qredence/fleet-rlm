@@ -66,7 +66,7 @@ def test_snapshot_list_serializes_success_path(monkeypatch) -> None:
         ]
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.snapshots.alist_snapshots",
+        "fleet_rlm.integrations.providers.daytona.runtime.alist_snapshots",
         _fake_list_snapshots,
     )
     monkeypatch.setattr(
