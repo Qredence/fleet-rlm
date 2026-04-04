@@ -360,13 +360,12 @@ def test_mlflow_request_context_finalizes_trace_state_on_error(
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
-    with pytest.raises(RuntimeError, match="boom") as exc_info:
+    with pytest.raises(RuntimeError, match="boom"):
         with mlflow_integration.mlflow_request_context(
             mlflow_integration.MlflowTraceRequestContext(client_request_id="req-error")
         ):
             raise RuntimeError("boom")
 
-    assert str(exc_info.value) == "boom"
     assert calls[-1] == {"state": "ERROR", "tags": None}
 
 

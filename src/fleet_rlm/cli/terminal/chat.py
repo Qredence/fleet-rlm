@@ -83,7 +83,6 @@ _COMMAND_SPECS: tuple[SlashCommandSpec, ...] = (
     SlashCommandSpec("/active", "Set active document alias", "documents"),
     SlashCommandSpec("/list", "List loaded documents", "documents"),
     SlashCommandSpec("/chunk", "Chunk active document", "documents"),
-    SlashCommandSpec("/analyze", "Analyze active document", "documents"),
     SlashCommandSpec("/summarize", "Summarize active document", "documents"),
     SlashCommandSpec("/extract", "Extract from logs", "documents"),
     SlashCommandSpec("/semantic", "Parallel semantic map (Modal only)", "documents"),
@@ -103,10 +102,9 @@ _COMMAND_SPECS: tuple[SlashCommandSpec, ...] = (
 _COMMAND_TEMPLATES: dict[str, str] = {
     "/docs": "path=README.md alias=active",
     "/chunk": "headers 200000",
-    "/analyze": "Extract architecture decisions",
     "/summarize": "key points",
     "/semantic": 'query="find auth flows" chunk_strategy=headers max_chunks=24',
-    "/run-long-context": 'docs/architecture.md "What are key decisions?" analyze',
+    "/run-long-context": 'docs/architecture.md "What are key decisions?" summarize',
     "/check-secret-key": "DSPY_LLM_API_KEY",
     "/trace": "compact",
 }

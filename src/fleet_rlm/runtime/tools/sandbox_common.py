@@ -129,6 +129,17 @@ def _get_daytona_session_sync(
         return None
 
 
+def _is_daytona_interpreter(ctx: _SandboxToolContext) -> bool:
+    try:
+        from fleet_rlm.integrations.providers.daytona.interpreter import (
+            DaytonaInterpreter,
+        )
+    except ImportError:
+        return False
+
+    return isinstance(getattr(ctx.agent, "interpreter", None), DaytonaInterpreter)
+
+
 def _daytona_file_error(*, path: str, exc: Exception) -> dict[str, Any]:
     return {
         "status": "error",
@@ -275,9 +286,11 @@ def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
     from .sandbox_storage_tools import build_storage_tools
 
     tools: list[Any] = []
+    ctx = _SandboxToolContext(agent=agent)
     tools.extend(build_rlm_delegate_tools(agent))
     tools.extend(build_memory_intelligence_tools(agent))
     tools.extend(build_storage_tools(agent))
-    tools.extend(build_snapshot_tools(agent))
-    tools.extend(build_lsp_tools(agent))
+    if _is_daytona_interpreter(ctx):
+        tools.extend(build_snapshot_tools(agent))
+        tools.extend(build_lsp_tools(agent))
     return tools

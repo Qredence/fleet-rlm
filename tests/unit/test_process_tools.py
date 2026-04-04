@@ -6,6 +6,7 @@ from fleet_rlm.runtime.tools.process_tools import (
     _UNSUPPORTED_PROVIDER_ERROR,
     build_process_tools,
 )
+from fleet_rlm.runtime.tools.sandbox_common import build_sandbox_tools
 
 
 class _StubInterpreter:
@@ -81,3 +82,32 @@ def test_daytona_only_stubs_return_stable_error_payload() -> None:
         assert result == _UNSUPPORTED_PROVIDER_ERROR
         assert result.get("status") == "error"
         assert isinstance(result.get("error"), str)
+
+
+def test_build_sandbox_tools_skips_daytona_infra_tools_for_non_daytona(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.sandbox_delegate_tools.build_rlm_delegate_tools",
+        lambda agent: ["delegate"],
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.sandbox_memory_tools.build_memory_intelligence_tools",
+        lambda agent: ["memory"],
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.sandbox_storage_tools.build_storage_tools",
+        lambda agent: ["storage"],
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.infra_tools.build_snapshot_tools",
+        lambda agent: ["snapshot"],
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.infra_tools.build_lsp_tools",
+        lambda agent: ["lsp"],
+    )
+
+    agent = _StubAgent()
+
+    assert build_sandbox_tools(agent) == ["delegate", "memory", "storage"]

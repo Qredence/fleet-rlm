@@ -134,9 +134,7 @@ SUBMIT(status=status, result=message, process_id={process_id!r}, message=message
 """.strip()
             return await _aexecute_submit_ctx(ctx, code)
 
-        async def read_process_logs(
-            process_id: str, tail: int = 50
-        ) -> dict[str, Any]:
+        async def read_process_logs(process_id: str, tail: int = 50) -> dict[str, Any]:
             """Read the live stdout/stderr logs of an active background process."""
             code = f"""
 logs = read_process_logs({process_id!r}, tail={tail})
@@ -196,13 +194,15 @@ SUBMIT(status=status, result=message, process_id={process_id!r}, message=message
             return _UNSUPPORTED_PROVIDER_ERROR
 
         def _unsupported_start_background_process(
-            process_id: str, command: str  # noqa: ARG001
+            process_id: str,
+            command: str,  # noqa: ARG001
         ) -> dict[str, Any]:
             """Start a background process (Daytona only)."""
             return _UNSUPPORTED_PROVIDER_ERROR
 
         def _unsupported_read_process_logs(
-            process_id: str, tail: int = 50  # noqa: ARG001
+            process_id: str,
+            tail: int = 50,  # noqa: ARG001
         ) -> dict[str, Any]:
             """Read background process logs (Daytona only)."""
             return _UNSUPPORTED_PROVIDER_ERROR
