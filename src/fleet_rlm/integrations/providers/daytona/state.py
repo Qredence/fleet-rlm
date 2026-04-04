@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .types import ContextSource, DaytonaRunResult
+from .types import ContextSource
 
 
 def render_final_text(value: Any) -> str:
@@ -27,14 +27,6 @@ def render_final_text(value: Any) -> str:
         return json.dumps(value, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(value)
-
-
-def render_cancelled_text(result: DaytonaRunResult) -> str:
-    warnings = list(result.summary.warnings or [])
-    base = result.summary.error or "Daytona run cancelled."
-    if warnings:
-        return f"{base}\n\nWarnings:\n- " + "\n- ".join(warnings)
-    return str(base)
 
 
 def dedupe_paths(paths: list[str]) -> list[str]:

@@ -2,11 +2,8 @@
 
 Sections (in dependency order):
 1. Serialization helpers
-2. Budget and sandbox-spec types
-3. Prompt and staged-context types
-
-Recursive-task and result types live in ``result_types.py`` and are
-re-exported here for backwards compatibility.
+2. Sandbox spec and LM bootstrap types
+3. Staged-context types
 """
 
 from __future__ import annotations
@@ -20,12 +17,6 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 _WHITESPACE_RE = re.compile(r"\s+")
-
-
-_PROMPT_PREVIEW_LIMIT = 240
-
-
-_PERSISTED_TEXT_LIMIT = 1_200
 
 
 def _normalize_optional_text(value: Any, *, limit: int | None = None) -> str | None:
@@ -60,21 +51,8 @@ def _coerce_nonnegative_int(value: Any) -> int | None:
     return parsed if parsed >= 0 else None
 
 
-def _persisted_text_preview(value: str, *, limit: int = _PERSISTED_TEXT_LIMIT) -> str:
-    if len(value) <= limit:
-        return value
-    return value[:limit].rstrip() + "\n\n[truncated persisted preview]"
-
-
-def _result_views() -> Any:
-    """Lazy accessor to break the types <-> result_views import cycle."""
-    from . import result_views  # noqa: PLC0415
-
-    return result_views
-
-
 # ---------------------------------------------------------------------------
-# Section 2: Budget, sandbox spec, and LM bootstrap types
+# Section 2: Sandbox spec and LM bootstrap types
 # ---------------------------------------------------------------------------
 
 
@@ -179,33 +157,6 @@ class SandboxSpec:
 
 
 @dataclass(slots=True)
-class RolloutBudget:
-    """Global budget for one Daytona RLM rollout."""
-
-    max_sandboxes: int = 50
-    max_depth: int = 2
-    max_iterations: int = 50
-    global_timeout: int = 3600
-    result_truncation_limit: int = 10_000
-    batch_concurrency: int = 4
-
-    @classmethod
-    def from_raw(cls, raw: Any) -> RolloutBudget:
-        if not isinstance(raw, dict):
-            return cls()
-        return cls(
-            max_sandboxes=_coerce_positive_int(raw.get("max_sandboxes")) or 50,
-            max_depth=_coerce_nonnegative_int(raw.get("max_depth")) or 2,
-            max_iterations=_coerce_positive_int(raw.get("max_iterations")) or 50,
-            global_timeout=_coerce_positive_int(raw.get("global_timeout")) or 3600,
-            result_truncation_limit=(
-                _coerce_positive_int(raw.get("result_truncation_limit")) or 10_000
-            ),
-            batch_concurrency=_coerce_positive_int(raw.get("batch_concurrency")) or 4,
-        )
-
-
-@dataclass(slots=True)
 class SandboxLmRuntimeConfig:
     """Serializable LM bootstrap config passed into sandbox-local runtimes."""
 
@@ -240,102 +191,8 @@ class SandboxLmRuntimeConfig:
 
 
 # ---------------------------------------------------------------------------
-# Section 3: Prompt and staged-context types
+# Section 3: Staged-context types
 # ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class PromptHandle:
-    """Metadata for one externalized prompt object stored in the sandbox."""
-
-    handle_id: str
-    kind: str
-    label: str | None = None
-    path: str = ""
-    char_count: int = 0
-    line_count: int = 0
-    preview: str | None = None
-
-    @classmethod
-    def from_raw(cls, raw: Any) -> PromptHandle:
-        if not isinstance(raw, dict):
-            raise ValueError("Prompt handle payload must be a dict.")
-        handle_id = _normalize_optional_text(raw.get("handle_id"))
-        if handle_id is None:
-            raise ValueError("Prompt handle is missing handle_id.")
-        kind = _normalize_optional_text(raw.get("kind")) or "manual"
-        return cls(
-            handle_id=handle_id,
-            kind=kind,
-            label=_normalize_optional_text(raw.get("label")),
-            path=str(raw.get("path", "") or ""),
-            char_count=_coerce_nonnegative_int(raw.get("char_count")) or 0,
-            line_count=_coerce_nonnegative_int(raw.get("line_count")) or 0,
-            preview=_normalize_optional_text(
-                raw.get("preview"), limit=_PROMPT_PREVIEW_LIMIT
-            ),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class PromptSliceRef:
-    """Metadata describing one bounded prompt slice read from the sandbox."""
-
-    handle_id: str
-    start_line: int | None = None
-    end_line: int | None = None
-    start_char: int | None = None
-    end_char: int | None = None
-    preview: str | None = None
-
-    @classmethod
-    def from_raw(cls, raw: Any) -> PromptSliceRef:
-        if not isinstance(raw, dict):
-            raise ValueError("Prompt slice payload must be a dict.")
-        handle_id = _normalize_optional_text(raw.get("handle_id"))
-        if handle_id is None:
-            raise ValueError("Prompt slice is missing handle_id.")
-        return cls(
-            handle_id=handle_id,
-            start_line=_coerce_positive_int(raw.get("start_line")),
-            end_line=_coerce_positive_int(raw.get("end_line")),
-            start_char=_coerce_nonnegative_int(raw.get("start_char")),
-            end_char=_coerce_nonnegative_int(raw.get("end_char")),
-            preview=_normalize_optional_text(
-                raw.get("preview"), limit=_PROMPT_PREVIEW_LIMIT
-            ),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class PromptManifest:
-    """Collection of prompt handles currently available in one sandbox."""
-
-    handles: list[PromptHandle] = field(default_factory=list)
-
-    @classmethod
-    def from_raw(cls, raw: Any) -> PromptManifest:
-        if not isinstance(raw, dict):
-            return cls()
-        handles_raw = raw.get("handles", [])
-        if not isinstance(handles_raw, list):
-            return cls()
-        handles: list[PromptHandle] = []
-        for item in handles_raw:
-            try:
-                handles.append(PromptHandle.from_raw(item))
-            except ValueError:
-                continue
-        return cls(handles=handles)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"handles": [handle.to_dict() for handle in self.handles]}
 
 
 @dataclass(slots=True)
@@ -389,53 +246,37 @@ class ContextSource:
         return asdict(self)
 
 
-# ---------------------------------------------------------------------------
-# Re-exports from result_types for backwards compatibility
-# ---------------------------------------------------------------------------
-from .result_types import (  # noqa: E402
-    AgentNode,
-    ChildLink,
-    ChildTaskResult,
-    DaytonaEvidenceRef,
-    DaytonaRunResult,
-    DaytonaSmokeResult,
-    ExecutionObservation,
-    FinalArtifact,
-    RecursiveTaskSpec,
-    RolloutSummary,
-    TaskSourceProvenance,
-)
+@dataclass(slots=True)
+class DaytonaSmokeResult:
+    """Result of a Daytona live/runtime smoke check."""
+
+    repo: str
+    ref: str | None
+    sandbox_id: str | None
+    workspace_path: str = ""
+    persisted_state_value: Any = None
+    driver_started: bool = False
+    finalization_mode: str = "unknown"
+    termination_phase: str = "config"
+    error_category: str | None = None
+    phase_timings_ms: dict[str, int] = field(default_factory=dict)
+    error_message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 __all__ = [
     # Serialization helpers
-    "_WHITESPACE_RE",
-    "_PROMPT_PREVIEW_LIMIT",
-    "_PERSISTED_TEXT_LIMIT",
     "_normalize_optional_text",
     "_coerce_positive_int",
     "_coerce_nonnegative_int",
-    "_persisted_text_preview",
-    # Budget and sandbox spec types
+    # Sandbox spec and LM types
     "DaytonaRunCancelled",
     "SandboxSpec",
-    "RolloutBudget",
     "SandboxLmRuntimeConfig",
     # Context types
-    "PromptHandle",
-    "PromptSliceRef",
-    "PromptManifest",
     "ContextSource",
-    # Recursive types (re-exported from result_types)
-    "TaskSourceProvenance",
-    "RecursiveTaskSpec",
-    "DaytonaEvidenceRef",
-    "ChildLink",
-    "ChildTaskResult",
-    # Result types (re-exported from result_types)
-    "FinalArtifact",
-    "ExecutionObservation",
-    "AgentNode",
-    "RolloutSummary",
-    "DaytonaRunResult",
+    # Smoke result
     "DaytonaSmokeResult",
 ]
