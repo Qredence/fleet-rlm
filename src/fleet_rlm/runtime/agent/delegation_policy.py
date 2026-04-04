@@ -35,7 +35,10 @@ class RuntimeModuleExecutionResult:
 
 
 def claim_delegate_slot_or_error(
-    agent: RLMReActChatAgent, *, depth_error_suffix: str
+    agent: RLMReActChatAgent,
+    *,
+    depth_error_suffix: str,
+    budget_kind: str = "runtime_module",
 ) -> dict[str, Any] | None:
     """Apply depth and per-turn delegate-call guards."""
     if agent._current_depth >= agent._max_depth:
@@ -48,12 +51,25 @@ def claim_delegate_slot_or_error(
         }
 
     state = getattr(agent, "_turn_delegation_state", None)
+    claim_method_name = (
+        "claim_recursive_delegate_slot"
+        if budget_kind == "recursive_delegate"
+        else "claim_runtime_module_slot"
+    )
+    agent_claim_method_name = (
+        "_claim_recursive_delegate_slot"
+        if budget_kind == "recursive_delegate"
+        else "_claim_runtime_module_slot"
+    )
     if isinstance(state, TurnDelegationState):
-        allowed, limit = state.claim_slot(
+        claim_slot = getattr(state, claim_method_name, None)
+        if not callable(claim_slot):
+            return None
+        allowed, limit = claim_slot(
             max_calls_per_turn=getattr(agent, "delegate_max_calls_per_turn", 1)
         )
     else:
-        claim_slot = getattr(agent, "_claim_delegate_slot", None)
+        claim_slot = getattr(agent, agent_claim_method_name, None)
         if not callable(claim_slot):
             return None
         claim_result = claim_slot()

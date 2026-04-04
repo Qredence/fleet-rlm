@@ -54,6 +54,9 @@ from .tool_delegation import get_tool_by_name
 from .trajectory_errors import count_tool_errors
 
 
+_DEFAULT_HISTORY_MAX_TURNS = 6
+
+
 class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     """Interactive ReAct agent that can orchestrate RLM workflows via tools.
 
@@ -83,13 +86,13 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         secret_name: str = "LITELLM",
         volume_name: str | None = None,
         verbose: bool = False,
-        history_max_turns: int | None = None,
+        history_max_turns: int | None = _DEFAULT_HISTORY_MAX_TURNS,
         extra_tools: list[Callable[..., Any]] | None = None,
         interpreter: Any | None = None,
         max_depth: int = 2,
         current_depth: int = 0,
         interpreter_async_execute: bool = True,
-        guardrail_mode: Literal["off", "warn", "strict"] = "off",
+        guardrail_mode: Literal["off", "warn", "strict"] = "warn",
         max_output_chars: int = 10000,
         min_substantive_chars: int = 20,
         delegate_lm: Any | None = None,
@@ -173,6 +176,22 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     @_delegate_calls_turn.setter
     def _delegate_calls_turn(self, value: int) -> None:
         self._turn_delegation_state.delegate_calls_turn = max(0, int(value))
+
+    @property
+    def _runtime_module_calls_turn(self) -> int:
+        return self._turn_delegation_state.runtime_module_calls_turn
+
+    @_runtime_module_calls_turn.setter
+    def _runtime_module_calls_turn(self, value: int) -> None:
+        self._turn_delegation_state.runtime_module_calls_turn = max(0, int(value))
+
+    @property
+    def _recursive_delegate_calls_turn(self) -> int:
+        return self._turn_delegation_state.recursive_delegate_calls_turn
+
+    @_recursive_delegate_calls_turn.setter
+    def _recursive_delegate_calls_turn(self, value: int) -> None:
+        self._turn_delegation_state.recursive_delegate_calls_turn = max(0, int(value))
 
     @property
     def _delegate_fallback_count_turn(self) -> int:
@@ -300,6 +319,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             prediction.guardrail_warnings = warnings
         prediction.effective_max_iters = self._current_effective_max_iters
         prediction.delegate_calls_turn = self._delegate_calls_turn
+        prediction.runtime_module_calls_turn = self._runtime_module_calls_turn
+        prediction.recursive_delegate_calls_turn = self._recursive_delegate_calls_turn
         prediction.delegate_fallback_count_turn = self._delegate_fallback_count_turn
         prediction.delegate_result_truncated_count_turn = (
             self._delegate_result_truncated_count_turn
@@ -577,8 +598,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     def _count_tool_errors(self, trajectory: Any) -> int:
         return count_tool_errors(trajectory)
 
-    def _claim_delegate_slot(self) -> tuple[bool, int]:
-        return chat_turns.claim_delegate_slot(self)
+    def _claim_runtime_module_slot(self) -> tuple[bool, int]:
+        return chat_turns.claim_runtime_module_slot(self)
+
+    def _claim_recursive_delegate_slot(self) -> tuple[bool, int]:
+        return chat_turns.claim_recursive_delegate_slot(self)
 
     def _record_delegate_fallback(self) -> None:
         chat_turns.record_delegate_fallback(self)

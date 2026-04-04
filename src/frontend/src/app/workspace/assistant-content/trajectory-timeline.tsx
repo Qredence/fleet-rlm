@@ -23,12 +23,22 @@ function CompactTrajectory({
   if (!content) return null;
 
   const hasBadges = runtimeBadges.length > 0;
+  const isDaytonaReasoning = runtimeBadges.includes("runtime daytona_pilot");
 
   return (
     <div className="flex flex-col gap-2" data-slot="trajectory-compact">
-      <Reasoning isStreaming={false} autoClose={false} defaultOpen className="w-full">
+      <Reasoning
+        isStreaming={false}
+        autoClose={false}
+        defaultOpen={!isDaytonaReasoning}
+        className="w-full"
+      >
         <ReasoningTrigger
-          getThinkingMessage={() => <span className="font-medium text-foreground">Planning</span>}
+          getThinkingMessage={() => (
+            <span className="font-medium text-foreground">
+              {isDaytonaReasoning ? "Advanced reasoning steps" : "Planning"}
+            </span>
+          )}
         />
         <ReasoningContent>{content}</ReasoningContent>
       </Reasoning>
@@ -51,10 +61,16 @@ export function TrajectoryTimeline({
     ...(trajectory.overview?.runtimeBadges ?? []),
     ...(trajectory.items.length === 1 ? (trajectory.items[0]?.runtimeBadges ?? []) : []),
   ];
+  const isDaytonaReasoning = [
+    ...(trajectory.overview?.runtimeBadges ?? []),
+    ...trajectory.items.flatMap((item) => item.runtimeBadges),
+  ].includes("runtime daytona_pilot");
+  const sectionTitle = isDaytonaReasoning ? "Advanced reasoning steps" : "Reasoning";
+  const chainTitle = isDaytonaReasoning ? "Advanced reasoning steps" : "Trajectory";
 
   return (
     <section className="flex flex-col gap-3" data-slot="assistant-trajectory">
-      <div className={inspectorStyles.heading.section}>Reasoning</div>
+      <div className={inspectorStyles.heading.section}>{sectionTitle}</div>
 
       {trajectory.displayMode === "compact" ? (
         <CompactTrajectory
@@ -69,14 +85,20 @@ export function TrajectoryTimeline({
               <Reasoning
                 isStreaming={trajectory.overview.isStreaming}
                 autoClose={false}
-                defaultOpen
+                defaultOpen={!isDaytonaReasoning}
                 duration={trajectory.overview.duration}
                 className="w-full"
               >
                 <ReasoningTrigger
                   getThinkingMessage={(isStreaming) => (
                     <span className="font-medium text-foreground">
-                      {isStreaming ? "Planning..." : "Planning"}
+                      {isDaytonaReasoning
+                        ? isStreaming
+                          ? "Advanced reasoning steps..."
+                          : "Advanced reasoning steps"
+                        : isStreaming
+                          ? "Planning..."
+                          : "Planning"}
                     </span>
                   )}
                 />
@@ -92,8 +114,8 @@ export function TrajectoryTimeline({
             </div>
           ) : null}
 
-          <ChainOfThought defaultOpen className="w-full">
-            <ChainOfThoughtHeader>Trajectory</ChainOfThoughtHeader>
+          <ChainOfThought defaultOpen={!isDaytonaReasoning} className="w-full">
+            <ChainOfThoughtHeader>{chainTitle}</ChainOfThoughtHeader>
             <ChainOfThoughtContent>
               <div className="divide-y divide-border-subtle">
                 {trajectory.items.map((item) => (

@@ -53,6 +53,7 @@ class DaytonaSandboxSession:
     context_id: str | None = None
     owner_thread_id: int | None = None
     owner_loop_id: int | None = None
+    execution_event_callback: Any | None = None
     _context: Any | None = field(default=None, init=False, repr=False)
     _driver_started: bool = field(default=False, init=False, repr=False)
     # Optional back-reference to the runtime that created this session's
@@ -172,10 +173,46 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.aread_file, path)
 
     async def awrite_file(self, path: str, content: str) -> str:
+        if not self.matches_current_async_owner() and self._runtime_ref is not None:
+            sandbox_id = self.sandbox_id
+            if sandbox_id:
+                with suppress(Exception):
+                    self.sandbox = await self._runtime_ref._aget_sandbox(
+                        sandbox_id, recover=False
+                    )
+                    self.bind_current_async_owner()
         resolved_path = self._resolve_sandbox_path(path)
-        await _await_if_needed(
-            self.sandbox.fs.upload_file(content.encode("utf-8"), resolved_path)
-        )
+        payload = content.encode("utf-8")
+        callback = getattr(self, "execution_event_callback", None)
+        if callable(callback):
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_started",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": 0,
+                }
+            )
+        await _await_if_needed(self.sandbox.fs.upload_file(payload, resolved_path))
+        if callable(callback):
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_completed",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": len(payload),
+                }
+            )
         return resolved_path
 
     def write_file(self, path: str, content: str) -> str:
@@ -511,6 +548,7 @@ class DaytonaSandboxRuntime:
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             context_id=context_id,
         )
+        session._runtime_ref = self
         session.phase_timings_ms.update(timings)
         session.bind_current_async_owner()
         return session

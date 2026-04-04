@@ -16,6 +16,8 @@ def test_turn_delegation_state_reset_and_payload() -> None:
     state = TurnDelegationState(
         effective_max_iters=3,
         delegate_calls_turn=2,
+        runtime_module_calls_turn=1,
+        recursive_delegate_calls_turn=1,
         delegate_fallback_count_turn=1,
         delegate_result_truncated_count_turn=1,
     )
@@ -26,6 +28,8 @@ def test_turn_delegation_state_reset_and_payload() -> None:
     assert state.as_payload() == {
         "effective_max_iters": 9,
         "delegate_calls_turn": 0,
+        "runtime_module_calls_turn": 0,
+        "recursive_delegate_calls_turn": 0,
         "delegate_fallback_count_turn": 0,
         "delegate_result_truncated_count_turn": 0,
     }
@@ -34,16 +38,21 @@ def test_turn_delegation_state_reset_and_payload() -> None:
 def test_turn_delegation_state_claims_slots_and_tracks_counters() -> None:
     state = TurnDelegationState(effective_max_iters=5)
 
-    assert state.claim_slot(max_calls_per_turn=2) == (True, 2)
-    assert state.claim_slot(max_calls_per_turn=2) == (True, 2)
-    assert state.claim_slot(max_calls_per_turn=2) == (False, 2)
+    assert state.claim_runtime_module_slot(max_calls_per_turn=2) == (True, 2)
+    assert state.claim_recursive_delegate_slot(max_calls_per_turn=2) == (True, 2)
+    assert state.claim_runtime_module_slot(max_calls_per_turn=2) == (True, 2)
+    assert state.claim_runtime_module_slot(max_calls_per_turn=2) == (False, 2)
+    assert state.claim_recursive_delegate_slot(max_calls_per_turn=2) == (True, 2)
+    assert state.claim_recursive_delegate_slot(max_calls_per_turn=2) == (False, 2)
 
     state.record_fallback()
     state.record_truncation()
 
     assert state.as_payload() == {
         "effective_max_iters": 5,
-        "delegate_calls_turn": 2,
+        "delegate_calls_turn": 4,
+        "runtime_module_calls_turn": 2,
+        "recursive_delegate_calls_turn": 2,
         "delegate_fallback_count_turn": 1,
         "delegate_result_truncated_count_turn": 1,
     }
@@ -68,6 +77,8 @@ def test_process_prediction_to_turn_result_updates_history_and_payload() -> None
         turn_metrics=TurnMetricsSnapshot(
             effective_max_iters=4,
             delegate_calls_turn=1,
+            runtime_module_calls_turn=1,
+            recursive_delegate_calls_turn=0,
             delegate_fallback_count_turn=0,
             delegate_result_truncated_count_turn=0,
         ),
@@ -103,6 +114,8 @@ def test_process_prediction_to_turn_result_finalizes_and_validates() -> None:
         turn_metrics=TurnMetricsSnapshot(
             effective_max_iters=6,
             delegate_calls_turn=2,
+            runtime_module_calls_turn=1,
+            recursive_delegate_calls_turn=1,
             delegate_fallback_count_turn=1,
             delegate_result_truncated_count_turn=0,
         ),
@@ -129,6 +142,8 @@ def test_build_turn_payload_merges_metrics_and_extra_payload() -> None:
         turn_metrics=TurnMetricsSnapshot(
             effective_max_iters=7,
             delegate_calls_turn=3,
+            runtime_module_calls_turn=2,
+            recursive_delegate_calls_turn=1,
             delegate_fallback_count_turn=1,
             delegate_result_truncated_count_turn=2,
         ),
@@ -141,7 +156,33 @@ def test_build_turn_payload_merges_metrics_and_extra_payload() -> None:
         "guardrail_warnings": ["warned"],
         "effective_max_iters": 7,
         "delegate_calls_turn": 3,
+        "runtime_module_calls_turn": 2,
+        "recursive_delegate_calls_turn": 1,
         "delegate_fallback_count_turn": 1,
         "delegate_result_truncated_count_turn": 2,
         "final_reasoning": "wrapped up",
     }
+
+
+def test_build_turn_payload_marks_tool_errors_as_runtime_degraded() -> None:
+    agent = SimpleNamespace(
+        history=dspy.History(messages=[]),
+        history_max_turns=None,
+    )
+
+    payload = build_turn_payload(
+        agent,
+        trajectory={"error_0": "SyntaxError: invalid syntax"},
+        guardrail_warnings=[],
+        turn_metrics=TurnMetricsSnapshot(
+            effective_max_iters=3,
+            delegate_calls_turn=0,
+            runtime_module_calls_turn=0,
+            recursive_delegate_calls_turn=0,
+            delegate_fallback_count_turn=0,
+            delegate_result_truncated_count_turn=0,
+        ),
+    )
+
+    assert payload["runtime_degraded"] is True
+    assert payload["runtime_failure_category"] == "tool_execution_error"

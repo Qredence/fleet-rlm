@@ -132,6 +132,19 @@ class DaytonaInterpreter(
         self._runtime_failure_phase: str | None = None
         self._runtime_fallback_used = False
 
+    @property
+    def execution_event_callback(self) -> Callable[[dict[str, Any]], None] | None:
+        return getattr(self, "_execution_event_callback", None)
+
+    @execution_event_callback.setter
+    def execution_event_callback(
+        self, value: Callable[[dict[str, Any]], None] | None
+    ) -> None:
+        self._execution_event_callback = value
+        session = getattr(self, "_session", None)
+        if session is not None:
+            setattr(session, "execution_event_callback", value)
+
     def __enter__(self) -> DaytonaInterpreter:
         return _sync_enter_impl(self)
 
@@ -478,6 +491,10 @@ class DaytonaInterpreter(
                     self._session = await self._areconcile_workspace_session(
                         self._session
                     )
+                    if self._session is not None:
+                        self._session.execution_event_callback = (
+                            self.execution_event_callback
+                        )
                 except Exception as exc:
                     self._mark_runtime_degradation_from_exception(exc)
                     should_report_recreated = True
@@ -508,6 +525,10 @@ class DaytonaInterpreter(
                     context_sources=self._persisted_context_sources,
                     context_id=self._persisted_context_id,
                 )
+                if self._session is not None:
+                    self._session.execution_event_callback = (
+                        self.execution_event_callback
+                    )
                 if (
                     persisted_source_key is not None
                     and persisted_source_key != source_key
@@ -515,6 +536,10 @@ class DaytonaInterpreter(
                     self._session = await self._areconcile_workspace_session(
                         self._session
                     )
+                    if self._session is not None:
+                        self._session.execution_event_callback = (
+                            self.execution_event_callback
+                        )
                     self._last_workspace_reconfigured = True
                 else:
                     self._last_workspace_reconfigured = False
@@ -535,6 +560,8 @@ class DaytonaInterpreter(
             volume_name=self.volume_name,
             spec=self.sandbox_spec,
         )
+        if self._session is not None:
+            self._session.execution_event_callback = self.execution_event_callback
         self._session_source_key = source_key
         await self._areset_execution_state()
         self._persist_session_snapshot()

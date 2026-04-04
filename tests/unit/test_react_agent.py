@@ -863,6 +863,54 @@ def test_clarification_questions_normalizes_lists_and_high_risk(monkeypatch):
     assert result["proceed_without_answer"] is False
 
 
+def test_grounded_answer_marks_retriever_span(monkeypatch):
+    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
+    agent.documents["test_doc"] = "line1\nline2"
+    agent.active_alias = "test_doc"
+
+    trace_calls: list[tuple[str | None, str | None]] = []
+
+    class _TraceSpan:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeMlflow:
+        @staticmethod
+        def start_span(*, name=None, span_type=None):
+            trace_calls.append((name, span_type))
+            return _TraceSpan()
+
+    def _fake_run_runtime_module(_agent, module_name: str, **kwargs):
+        assert module_name == "grounded_answer"
+        return (
+            SimpleNamespace(
+                answer="grounded",
+                citations=[],
+                confidence=82,
+                coverage_notes="ok",
+            ),
+            None,
+            False,
+        )
+
+    monkeypatch.setattr(
+        sandbox_delegate_tools,
+        "_run_runtime_module",
+        _fake_run_runtime_module,
+    )
+    monkeypatch.setattr(sandbox_delegate_tools, "mlflow", _FakeMlflow())
+
+    result = agent.grounded_answer("what happened?")
+
+    assert result["status"] == "ok"
+    assert trace_calls == [("grounded_answer", "RETRIEVER")]
+
+
 def test_grounded_answer_rejects_invalid_max_chunks(monkeypatch):
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["test_doc"] = "line1\nline2"

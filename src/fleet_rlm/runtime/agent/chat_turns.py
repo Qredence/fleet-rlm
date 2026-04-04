@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import dspy
 
+from .trajectory_errors import trajectory_has_tool_errors
 from .chat_session_state import append_history, history_turns
 
 if TYPE_CHECKING:
@@ -19,20 +20,35 @@ class TurnDelegationState:
 
     effective_max_iters: int = 1
     delegate_calls_turn: int = 0
+    runtime_module_calls_turn: int = 0
+    recursive_delegate_calls_turn: int = 0
     delegate_fallback_count_turn: int = 0
     delegate_result_truncated_count_turn: int = 0
 
     def reset(self, *, effective_max_iters: int) -> int:
         self.delegate_calls_turn = 0
+        self.runtime_module_calls_turn = 0
+        self.recursive_delegate_calls_turn = 0
         self.delegate_fallback_count_turn = 0
         self.delegate_result_truncated_count_turn = 0
         self.effective_max_iters = max(1, int(effective_max_iters))
         return self.effective_max_iters
 
-    def claim_slot(self, *, max_calls_per_turn: int) -> tuple[bool, int]:
+    def claim_runtime_module_slot(self, *, max_calls_per_turn: int) -> tuple[bool, int]:
         limit = max(1, int(max_calls_per_turn))
-        if self.delegate_calls_turn >= limit:
+        if self.runtime_module_calls_turn >= limit:
             return False, limit
+        self.runtime_module_calls_turn += 1
+        self.delegate_calls_turn += 1
+        return True, limit
+
+    def claim_recursive_delegate_slot(
+        self, *, max_calls_per_turn: int
+    ) -> tuple[bool, int]:
+        limit = max(1, int(max_calls_per_turn))
+        if self.recursive_delegate_calls_turn >= limit:
+            return False, limit
+        self.recursive_delegate_calls_turn += 1
         self.delegate_calls_turn += 1
         return True, limit
 
@@ -46,6 +62,8 @@ class TurnDelegationState:
         return {
             "effective_max_iters": int(self.effective_max_iters),
             "delegate_calls_turn": int(self.delegate_calls_turn),
+            "runtime_module_calls_turn": int(self.runtime_module_calls_turn),
+            "recursive_delegate_calls_turn": int(self.recursive_delegate_calls_turn),
             "delegate_fallback_count_turn": int(self.delegate_fallback_count_turn),
             "delegate_result_truncated_count_turn": int(
                 self.delegate_result_truncated_count_turn
@@ -59,6 +77,8 @@ class TurnMetricsSnapshot:
 
     effective_max_iters: int
     delegate_calls_turn: int
+    runtime_module_calls_turn: int
+    recursive_delegate_calls_turn: int
     delegate_fallback_count_turn: int
     delegate_result_truncated_count_turn: int
 
@@ -66,6 +86,8 @@ class TurnMetricsSnapshot:
         return {
             "effective_max_iters": int(self.effective_max_iters),
             "delegate_calls_turn": int(self.delegate_calls_turn),
+            "runtime_module_calls_turn": int(self.runtime_module_calls_turn),
+            "recursive_delegate_calls_turn": int(self.recursive_delegate_calls_turn),
             "delegate_fallback_count_turn": int(self.delegate_fallback_count_turn),
             "delegate_result_truncated_count_turn": int(
                 self.delegate_result_truncated_count_turn
@@ -79,6 +101,8 @@ def snapshot_turn_metrics(agent: RLMReActChatAgent) -> TurnMetricsSnapshot:
     return TurnMetricsSnapshot(
         effective_max_iters=int(state.effective_max_iters),
         delegate_calls_turn=int(state.delegate_calls_turn),
+        runtime_module_calls_turn=int(state.runtime_module_calls_turn),
+        recursive_delegate_calls_turn=int(state.recursive_delegate_calls_turn),
         delegate_fallback_count_turn=int(state.delegate_fallback_count_turn),
         delegate_result_truncated_count_turn=int(
             state.delegate_result_truncated_count_turn
@@ -96,6 +120,20 @@ def turn_metrics_from_prediction(
         ),
         delegate_calls_turn=int(
             getattr(prediction, "delegate_calls_turn", fallback.delegate_calls_turn)
+        ),
+        runtime_module_calls_turn=int(
+            getattr(
+                prediction,
+                "runtime_module_calls_turn",
+                fallback.runtime_module_calls_turn,
+            )
+        ),
+        recursive_delegate_calls_turn=int(
+            getattr(
+                prediction,
+                "recursive_delegate_calls_turn",
+                fallback.recursive_delegate_calls_turn,
+            )
         ),
         delegate_fallback_count_turn=int(
             getattr(
@@ -163,12 +201,24 @@ def build_turn_payload(
     extra_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the canonical shared payload used by turn and stream finals."""
+    degradation = runtime_degradation_payload(agent)
+    if trajectory_has_tool_errors(trajectory) and not degradation.get(
+        "runtime_degraded"
+    ):
+        degradation = {
+            **degradation,
+            "runtime_degraded": True,
+            "runtime_failure_category": str(
+                degradation.get("runtime_failure_category") or "tool_execution_error"
+            ),
+        }
+
     payload: dict[str, Any] = {
         "trajectory": trajectory,
         "history_turns": history_turns(agent),
         "guardrail_warnings": list(guardrail_warnings),
         **turn_metrics.as_payload(),
-        **runtime_degradation_payload(agent),
+        **degradation,
     }
     if extra_payload:
         payload.update(extra_payload)
@@ -234,9 +284,16 @@ def finalize_turn(agent: RLMReActChatAgent, trajectory: Any) -> None:
     agent._last_tool_error_count = agent._count_tool_errors(trajectory)
 
 
-def claim_delegate_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
-    """Claim one delegate slot from the per-turn budget."""
-    return _turn_delegation_state(agent).claim_slot(
+def claim_runtime_module_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
+    """Claim one runtime-module slot from the per-turn budget."""
+    return _turn_delegation_state(agent).claim_runtime_module_slot(
+        max_calls_per_turn=agent.delegate_max_calls_per_turn
+    )
+
+
+def claim_recursive_delegate_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
+    """Claim one recursive delegate slot from the per-turn budget."""
+    return _turn_delegation_state(agent).claim_recursive_delegate_slot(
         max_calls_per_turn=agent.delegate_max_calls_per_turn
     )
 

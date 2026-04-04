@@ -339,6 +339,13 @@ function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
   return copy;
 }
 
+function isDaytonaPayload(payload?: Record<string, unknown>): boolean {
+  const runtime = asRecord(payload?.runtime);
+  const runtimeMode =
+    asOptionalText(payload?.runtime_mode) ?? asOptionalText(runtime?.runtime_mode);
+  return runtimeMode === "daytona_pilot";
+}
+
 function upsertChainOfThought(
   messages: ChatMessage[],
   step: NormalizedTrajectoryStep,
@@ -347,6 +354,7 @@ function upsertChainOfThought(
     id: `trajectory-step-${step.index}`,
     index: step.index,
     label: step.label,
+    body: step.thought,
     status: "active",
     details: trajectoryStepDetails(step),
   };
@@ -399,7 +407,13 @@ function applyTrajectoryStep(
 ): ChatMessage[] {
   let next = messages;
   if (includePrimaryFallback && step.thought) {
-    next = appendReasoningEvent(next, step.thought, "trajectory");
+    next = appendReasoningEvent(
+      next,
+      step.thought,
+      "trajectory",
+      undefined,
+      `thought_${step.index}`,
+    );
   }
   next = upsertChainOfThought(next, step);
   return next;
@@ -413,7 +427,7 @@ function applyTrajectoryEvent(
   const steps = normalizeTrajectorySteps(text, payload);
   if (steps.length === 0) return messages;
 
-  const includePrimaryFallback = !hasLiveTraceInCurrentTurn(messages);
+  const includePrimaryFallback = !hasLiveTraceInCurrentTurn(messages) || isDaytonaPayload(payload);
   return steps.reduce<ChatMessage[]>(
     (acc, step) => applyTrajectoryStep(acc, step, includePrimaryFallback),
     messages,

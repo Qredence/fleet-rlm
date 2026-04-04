@@ -147,7 +147,9 @@ function trajectoryTitle(index: number, label?: string) {
   return label?.trim() ? `${prefix} · ${humanizeLabel(label)}` : prefix;
 }
 
-function trajectoryBody(details?: string[]) {
+function trajectoryBody(body?: string, details?: string[]) {
+  const normalizedBody = body?.trim();
+  if (normalizedBody) return normalizedBody;
   return details?.filter(Boolean).join("\n\n") ?? "";
 }
 
@@ -191,7 +193,7 @@ function buildTrajectoryItems(
         id: step.id,
         index: step.index,
         title: trajectoryTitle(step.index ?? order, step.label),
-        body: trajectoryBody(step.details),
+        body: trajectoryBody(step.body, step.details),
         details: step.details,
         status: mapTrajectoryStatus(step.status),
         runtimeBadges: getRuntimeBadgeStrings(part.runtimeContext),

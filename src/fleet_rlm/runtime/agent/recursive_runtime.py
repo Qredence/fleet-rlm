@@ -41,6 +41,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_MAX_NESTED_TRAJECTORY_STEPS = 5
+_MAX_NESTED_TRAJECTORY_TEXT = 512
+
+
+def _compact_nested_trajectory_value(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if len(text) <= _MAX_NESTED_TRAJECTORY_TEXT:
+            return text
+        return text[: _MAX_NESTED_TRAJECTORY_TEXT - 3].rstrip() + "..."
+    if isinstance(value, list):
+        return [_compact_nested_trajectory_value(item) for item in value[:3]]
+    if isinstance(value, dict):
+        compact: dict[str, Any] = {}
+        for idx, (key, item) in enumerate(value.items()):
+            if idx >= 5:
+                break
+            compact[str(key)] = _compact_nested_trajectory_value(item)
+        return compact
+    return value
+
+
+def _compact_nested_trajectory(
+    trajectory: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    steps = _normalize_trajectory(trajectory)
+    if not steps:
+        return trajectory, False
+    trimmed_steps = steps[-_MAX_NESTED_TRAJECTORY_STEPS:]
+    compact_steps = [
+        {key: _compact_nested_trajectory_value(value) for key, value in step.items()}
+        for step in trimmed_steps
+        if isinstance(step, dict)
+    ]
+    return {"steps": compact_steps}, len(compact_steps) < len(steps)
+
+
 def _prediction_payload(prediction: dspy.Prediction) -> dict[str, Any]:
     raw_trajectory = getattr(prediction, "trajectory", {})
     if isinstance(raw_trajectory, list):
@@ -50,11 +87,14 @@ def _prediction_payload(prediction: dspy.Prediction) -> dict[str, Any]:
     else:
         trajectory = {}
 
+    compact_trajectory, trajectory_truncated = _compact_nested_trajectory(trajectory)
+
     return {
         "status": "ok",
         "answer": str(getattr(prediction, "answer", "") or "").strip(),
         "assistant_response": str(getattr(prediction, "answer", "") or "").strip(),
-        "trajectory": trajectory,
+        "trajectory": compact_trajectory,
+        "trajectory_truncated": trajectory_truncated,
         "final_reasoning": str(
             getattr(prediction, "final_reasoning", "") or ""
         ).strip(),
@@ -211,6 +251,7 @@ async def spawn_delegate_sub_agent_async(
     budget_error = claim_delegate_slot_or_error(
         agent,
         depth_error_suffix="Cannot spawn delegate sub-agent.",
+        budget_kind="recursive_delegate",
     )
     if budget_error is not None:
         return budget_error

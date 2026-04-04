@@ -31,6 +31,13 @@ from fleet_rlm.runtime.tools.sandbox_common import (
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
 
+try:
+    import mlflow as _mlflow
+except ImportError:  # pragma: no cover - optional dependency
+    mlflow: Any | None = None
+else:
+    mlflow = _mlflow
+
 
 # ---------------------------------------------------------------------------
 # Tool factory
@@ -136,6 +143,10 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
         Returns:
             Same dictionary payload as ``load_document`` for URL-backed documents.
         """
+        tracer = getattr(mlflow, "start_span", None) if mlflow is not None else None
+        if callable(tracer):
+            with tracer(name="fetch_web_document", span_type="RETRIEVER"):
+                return _load_document_impl(url, alias=alias)
         return _load_document_impl(url, alias=alias)
 
     def set_active_document(alias: str) -> dict[str, Any]:

@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+try:
+    import mlflow as _mlflow
+except ImportError:  # pragma: no cover - optional dependency
+    mlflow: Any | None = None
+else:
+    mlflow = _mlflow
+
 from fleet_rlm.runtime.agent.recursive_runtime import spawn_delegate_sub_agent_async
 from fleet_rlm.runtime.agent.signatures import GroundedCitation
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
@@ -277,15 +284,28 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
             return {"status": "error", "error": "Invalid max_chunks value."}
 
         document = resolve_document(ctx.agent, alias)
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="grounded_answer",
-            document=document,
-            query=query,
-            chunk_strategy=chunk_strategy,
-            max_chunks=max_chunks_int,
-            response_style="concise",
-        )
+        tracer = getattr(mlflow, "start_span", None) if mlflow is not None else None
+        if callable(tracer):
+            with tracer(name="grounded_answer", span_type="RETRIEVER"):
+                prediction, error, fallback_used = _run_cached_runtime_module(
+                    ctx,
+                    module_name="grounded_answer",
+                    document=document,
+                    query=query,
+                    chunk_strategy=chunk_strategy,
+                    max_chunks=max_chunks_int,
+                    response_style="concise",
+                )
+        else:
+            prediction, error, fallback_used = _run_cached_runtime_module(
+                ctx,
+                module_name="grounded_answer",
+                document=document,
+                query=query,
+                chunk_strategy=chunk_strategy,
+                max_chunks=max_chunks_int,
+                response_style="concise",
+            )
         if error is not None:
             _record_runtime_failure(ctx, error)
             return error

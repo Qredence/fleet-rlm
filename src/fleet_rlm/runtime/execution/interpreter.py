@@ -248,6 +248,10 @@ class ModalInterpreter(
             stderr_preview=payload.get("stderr_preview"),
             error_type=payload.get("error_type"),
             error=payload.get("error"),
+            event_kind=payload.get("event_kind"),
+            path=payload.get("path"),
+            bytes_total=payload.get("bytes_total"),
+            bytes_written=payload.get("bytes_written"),
         )
         emit_execution_event(self, event)
 

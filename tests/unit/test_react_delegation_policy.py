@@ -55,6 +55,8 @@ def test_invoke_runtime_module_records_budget_and_fallback() -> None:
     assert result.prediction == {"answer": "ok"}
     assert result.fallback_used is True
     assert agent._delegate_calls_turn == 1
+    assert agent._runtime_module_calls_turn == 1
+    assert agent._recursive_delegate_calls_turn == 0
     assert agent._delegate_fallback_count_turn == 1
 
 

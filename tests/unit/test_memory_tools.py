@@ -181,6 +181,35 @@ def test_memory_write_generates_write_code_and_commits(monkeypatch):
     assert fake_interpreter.commit_calls == 1
 
 
+def test_memory_write_rejects_invalid_python_syntax(monkeypatch):
+    """memory_write should refuse to persist invalid Python content."""
+    fake_interpreter = FakeInterpreter(
+        execute_result_factory=lambda code, payload: (
+            {
+                "status": "error",
+                "error": "invalid syntax (line 1)",
+            }
+            if 'compile(content, path, "exec")' in code
+            else {
+                "status": "ok",
+                "path": payload.get("path", "unknown"),
+                "chars": len(payload.get("content", "")),
+            }
+        )
+    )
+    agent = RLMReActChatAgent(interpreter=fake_interpreter)
+
+    tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}
+    memory_write = tool_map["memory_write"]
+
+    result = memory_write.func(path="scripts/bad.py", content="def broken(:\n    pass")
+
+    assert result["status"] == "error"
+    assert "Python syntax validation failed" in result["error"]
+    assert len(fake_interpreter.execute_calls) == 1
+    assert fake_interpreter.commit_calls == 0
+
+
 def test_memory_write_uses_daytona_session(monkeypatch):
     """Daytona-backed memory_write should use native session file APIs."""
     fake_interpreter = FakeInterpreter()
@@ -206,10 +235,10 @@ def test_memory_write_uses_daytona_session(monkeypatch):
         "path": "/home/daytona/memory/memory/notes/daytona.txt",
         "chars": len("native write"),
     }
+    assert fake_interpreter.execute_calls == []
     assert session.write_calls == [
         ("/home/daytona/memory/memory/notes/daytona.txt", "native write")
     ]
-    assert fake_interpreter.execute_calls == []
     assert fake_interpreter.commit_calls == 0
 
 

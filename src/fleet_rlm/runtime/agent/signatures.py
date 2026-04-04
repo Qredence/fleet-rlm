@@ -42,6 +42,12 @@ class MemoryMigrationOperation(TypedDict):
 class RLMReActChatSignature(dspy.Signature):
     """Interactive ReAct chat signature with explicit conversation history.
     You have the ability to spin up long-running daemon servers (like 'npm run dev'). Use `start_background_process` and iteratively check `read_process_logs` to ensure a server boots successfully.
+
+    For large multi-part deliverables on Daytona (books, reports, multi-file analyses),
+    prefer a single interpreter-driven workflow that loops in Python and uses
+    `llm_query_batched()` for structurally parallel semantic subtasks instead of
+    repeating many top-level ReAct iterations for each section. Use the persistent
+    interpreter state to accumulate and merge results before responding.
     """
 
     user_request: str = dspy.InputField(desc="Current user request in the chat session")
