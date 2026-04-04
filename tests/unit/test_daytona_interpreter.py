@@ -618,3 +618,48 @@ def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     interpreter.shutdown()
 
     assert runtime.closed == 1
+
+
+def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> (
+    None
+):
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        delete_session_on_shutdown=False,
+        delete_context_on_shutdown=True,
+    )
+
+    delete_context_calls = 0
+    close_driver_calls = 0
+    delete_calls = 0
+
+    async def _adelete_context() -> None:
+        nonlocal delete_context_calls
+        delete_context_calls += 1
+
+    async def _aclose_driver() -> None:
+        nonlocal close_driver_calls
+        close_driver_calls += 1
+
+    async def _adelete() -> None:
+        nonlocal delete_calls
+        delete_calls += 1
+
+    fake_session = SimpleNamespace(
+        sandbox_id="sbx-child",
+        workspace_path="/workspace/repo",
+        context_sources=[],
+        context_id="ctx-child",
+        volume_name=None,
+        adelete_context=_adelete_context,
+        aclose_driver=_aclose_driver,
+        adelete=_adelete,
+    )
+    interpreter._session = fake_session  # type: ignore[assignment]
+
+    interpreter.shutdown()
+
+    assert delete_context_calls == 1
+    assert close_driver_calls == 0
+    assert delete_calls == 0

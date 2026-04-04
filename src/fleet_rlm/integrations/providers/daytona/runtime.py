@@ -124,6 +124,29 @@ class DaytonaSandboxSession:
     def close_driver(self) -> None:
         _run_async_compat(self.aclose_driver)
 
+    async def adelete_context(self) -> None:
+        context = self._context
+        self._context = None
+        if context is None and self.context_id:
+            with suppress(Exception):
+                existing_contexts = await _await_if_needed(
+                    self.sandbox.code_interpreter.list_contexts()
+                )
+                for existing in existing_contexts:
+                    if str(getattr(existing, "id", "") or "") == self.context_id:
+                        context = existing
+                        break
+        if context is not None:
+            with suppress(Exception):
+                await _await_if_needed(
+                    self.sandbox.code_interpreter.delete_context(context)
+                )
+        self.context_id = None
+        self._driver_started = False
+
+    def delete_context(self) -> None:
+        _run_async_compat(self.adelete_context)
+
     def _resolve_sandbox_path(self, path: str) -> str:
         candidate = PurePosixPath(str(path or "").strip() or ".")
         if candidate.is_absolute():
@@ -163,23 +186,7 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.alist_files, path)
 
     async def adelete(self) -> None:
-        context = self._context
-        self._context = None
-        if context is None and self.context_id:
-            with suppress(Exception):
-                existing_contexts = await _await_if_needed(
-                    self.sandbox.code_interpreter.list_contexts()
-                )
-                for existing in existing_contexts:
-                    if str(getattr(existing, "id", "") or "") == self.context_id:
-                        context = existing
-                        break
-        if context is not None:
-            with suppress(Exception):
-                await _await_if_needed(
-                    self.sandbox.code_interpreter.delete_context(context)
-                )
-        self.context_id = None
+        await self.adelete_context()
         # Graceful stop before delete to let processes flush/clean up
         with suppress(Exception):
             await _await_if_needed(self.sandbox.stop(timeout=10))

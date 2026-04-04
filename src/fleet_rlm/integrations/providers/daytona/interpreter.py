@@ -65,6 +65,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         context_paths: list[str] | None = None,
         sandbox_spec: Any | None = None,
         delete_session_on_shutdown: bool = True,
+        delete_context_on_shutdown: bool = False,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
         llm_call_timeout: int = 60,
@@ -85,6 +86,7 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.context_paths = dedupe_paths(list(context_paths or []))
         self.sandbox_spec = sandbox_spec  # SandboxSpec with optional Image builder
         self.delete_session_on_shutdown = delete_session_on_shutdown
+        self.delete_context_on_shutdown = delete_context_on_shutdown
         self.default_execution_profile = default_execution_profile
         self.async_execute = async_execute
 
@@ -583,6 +585,8 @@ class DaytonaInterpreter(LLMQueryMixin):
         try:
             if delete:
                 await active_session.adelete()
+            elif self.delete_context_on_shutdown:
+                await active_session.adelete_context()
             else:
                 await active_session.aclose_driver()
         finally:

@@ -80,6 +80,7 @@ def build_delegate_child(
             context_paths=list(interpreter.context_paths),
             sandbox_spec=getattr(interpreter, "sandbox_spec", None),
             delete_session_on_shutdown=False,
+            delete_context_on_shutdown=True,
             sub_lm=interpreter.sub_lm,
             max_llm_calls=remaining_llm_budget,
             llm_call_timeout=interpreter.llm_call_timeout,

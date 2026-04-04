@@ -261,6 +261,7 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
     # The child's _session is a new DaytonaSandboxSession on same sandbox
     assert isinstance(child._session, DaytonaSandboxSession)
     assert child._session.sandbox is parent_sandbox
+    assert child.delete_context_on_shutdown is True
     # Fresh context (None forces create_context() on start)
     assert child._session.context_id is None
 

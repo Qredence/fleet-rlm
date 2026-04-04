@@ -513,6 +513,63 @@ def test_session_resize_calls_sandbox_resize() -> None:
     assert getattr(r, "disk") == 20
 
 
+def test_session_delete_context_keeps_sandbox_alive() -> None:
+    """``adelete_context`` removes only the active interpreter context."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    delete_calls: list[str] = []
+    stop_calls = 0
+    sandbox_delete_calls = 0
+    contexts: list[object] = []
+
+    class _ContextCodeInterpreter:
+        def create_context(self, cwd: str | None = None) -> object:
+            context = SimpleNamespace(id=f"ctx-{len(contexts) + 1}", cwd=cwd)
+            contexts.append(context)
+            return context
+
+        def list_contexts(self) -> list[object]:
+            return list(contexts)
+
+        def delete_context(self, context: object) -> None:
+            delete_calls.append(str(getattr(context, "id", "")))
+            contexts.remove(context)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter()
+
+        def stop(self, timeout: float = 60) -> None:
+            nonlocal stop_calls
+            _ = timeout
+            stop_calls += 1
+
+        def delete(self) -> None:
+            nonlocal sandbox_delete_calls
+            sandbox_delete_calls += 1
+
+    sandbox = _ContextSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+
+    asyncio.run(session.aensure_context())
+    context_id = session.context_id
+
+    asyncio.run(session.adelete_context())
+
+    assert delete_calls == [context_id]
+    assert session.context_id is None
+    assert stop_calls == 0
+    assert sandbox_delete_calls == 0
+
+
 def test_session_create_lsp_server_delegates_to_sandbox() -> None:
     """``create_lsp_server`` calls through to the sandbox SDK method."""
     from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
