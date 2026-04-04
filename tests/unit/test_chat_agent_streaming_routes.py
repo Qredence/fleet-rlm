@@ -1,4 +1,4 @@
-"""Direct tests for the chat streaming router (inlined into chat_agent)."""
+"""Direct tests for chat-agent streaming route selection."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tests.unit.fixtures_react import FakeInterpreter
 pytestmark = pytest.mark.usefixtures("react_records")
 
 
-def test_iter_routed_chat_turn_stream_rlm_only_emits_forced_events(
+def test_iter_chat_turn_stream_rlm_only_emits_forced_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = RLMReActChatAgent(interpreter=FakeInterpreter(), execution_mode="rlm_only")
@@ -49,7 +49,7 @@ def test_iter_routed_chat_turn_stream_rlm_only_emits_forced_events(
 
 
 @pytest.mark.asyncio
-async def test_aiter_routed_chat_turn_stream_rlm_only_uses_forced_stream(
+async def test_aiter_chat_turn_stream_rlm_only_uses_forced_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = RLMReActChatAgent(interpreter=FakeInterpreter(), execution_mode="rlm_only")

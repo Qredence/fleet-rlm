@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.runtime.tools.process_tools`` provider-gating."""
+"""Tests for process-tool gating in ``fleet_rlm.runtime.tools.sandbox_common``."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def test_daytona_only_stubs_return_stable_error_payload() -> None:
         assert isinstance(result.get("error"), str)
 
 
-def test_build_sandbox_tools_skips_daytona_infra_tools_for_non_daytona(
+def test_build_sandbox_tools_skips_daytona_snapshot_and_lsp_tools_for_non_daytona(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(

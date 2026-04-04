@@ -7,6 +7,7 @@ Provides :func:`evaluate_program` for systematic program assessment using
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -19,7 +20,7 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
-from .workspace_metrics import workspace_feedback_metric
+from .workspace_metrics import workspace_score_metric
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,44 @@ __all__ = [
     "evaluate_program",
     "evaluate_program_from_dataset",
 ]
+
+
+def _metric_supports_trace(metric: Callable[..., Any]) -> bool:
+    """Return ``True`` when *metric* accepts a ``trace`` keyword."""
+    try:
+        params = inspect.signature(metric).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        param.kind is inspect.Parameter.VAR_KEYWORD or param.name == "trace"
+        for param in params
+    )
+
+
+def _coerce_metric_score(result: Any) -> float:
+    """Normalize DSPy metric outputs to a scalar float."""
+    if isinstance(result, tuple):
+        if not result:
+            raise ValueError("Metric returned an empty tuple.")
+        result = result[0]
+    score = getattr(result, "score", result)
+    return float(score)
+
+
+def _build_evaluate_metric(metric: Callable[..., Any]) -> Callable[..., float]:
+    """Wrap arbitrary metric outputs into the numeric contract Evaluate needs."""
+    supports_trace = _metric_supports_trace(metric)
+
+    def numeric_metric(gold: Any, pred: Any, trace: Any = None) -> float:
+        if supports_trace:
+            result = metric(gold, pred, trace=trace)
+        else:
+            result = metric(gold, pred)
+        return _coerce_metric_score(result)
+
+    metric_name = getattr(metric, "__name__", metric.__class__.__name__)
+    numeric_metric.__name__ = f"{metric_name}_score"
+    return numeric_metric
 
 
 def evaluate_program(
@@ -66,43 +105,31 @@ def evaluate_program(
     dict with ``score``, ``num_examples``, and optionally ``all_scores``
     and ``outputs``.
     """
-    resolved_metric = metric or workspace_feedback_metric
+    source_metric = metric or workspace_score_metric
+    evaluate_metric = _build_evaluate_metric(source_metric)
 
     evaluator = dspy.Evaluate(
         devset=devset,
-        metric=resolved_metric,
+        metric=evaluate_metric,
         num_threads=num_threads,
         display_progress=display_progress,
         display_table=display_table,
-        return_all_scores=return_all_scores,
-        return_outputs=return_outputs,
     )
 
-    raw_result = evaluator(program)
-
-    # dspy.Evaluate returns different shapes depending on flags
-    if return_all_scores and return_outputs:
-        overall_score, all_results, all_scores = raw_result
-    elif return_all_scores:
-        overall_score, all_scores = raw_result
-        all_results = None
-    elif return_outputs:
-        overall_score, all_results = raw_result
-        all_scores = None
-    else:
-        overall_score = raw_result
-        all_scores = None
-        all_results = None
+    evaluation_result = evaluator(program)
+    results = list(getattr(evaluation_result, "results", []) or [])
 
     result: dict[str, Any] = {
-        "score": float(overall_score),
+        "score": float(getattr(evaluation_result, "score", evaluation_result)),
         "num_examples": len(devset),
-        "metric": getattr(resolved_metric, "__name__", str(resolved_metric)),
+        "metric": getattr(source_metric, "__name__", str(source_metric)),
     }
-    if all_scores is not None:
-        result["all_scores"] = all_scores
-    if all_results is not None:
-        result["outputs"] = all_results
+    if return_all_scores:
+        result["all_scores"] = [
+            _coerce_metric_score(score) for _example, _prediction, score in results
+        ]
+    if return_outputs:
+        result["outputs"] = [prediction for _example, prediction, _score in results]
 
     logger.info(
         "DSPy evaluation complete: score=%.4f examples=%d",

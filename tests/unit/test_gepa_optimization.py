@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import dspy
+
 from fleet_rlm.integrations.observability.gepa_optimization import (
     build_gepa_feedback_metric,
 )
@@ -69,3 +71,29 @@ class TestBuildGepaFeedbackMetric:
         from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
         assert isinstance(result, (float, ScoreWithFeedback))
+
+    def test_respects_output_key_for_default_metric(self) -> None:
+        metric = build_gepa_feedback_metric(output_key="summary")
+        result = metric(
+            SimpleNamespace(summary="hello"),
+            SimpleNamespace(summary="hello"),
+        )
+        from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
+
+        assert isinstance(result, ScoreWithFeedback)
+        assert result.score == 1.0
+
+    def test_dspy_evaluate_accepts_gepa_feedback_metric(self) -> None:
+        class Echo(dspy.Module):
+            def forward(self, question: str):
+                return dspy.Prediction(assistant_response=question)
+
+        example = dspy.Example(
+            question="hello",
+            assistant_response="hello",
+        ).with_inputs("question")
+        result = dspy.Evaluate(
+            devset=[example],
+            metric=build_gepa_feedback_metric(),
+        )(Echo())
+        assert float(result) == 100.0

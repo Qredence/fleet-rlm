@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime
 import logging
 import time
 from contextlib import suppress
@@ -295,6 +297,7 @@ class DaytonaSandboxRuntime:
     def build_sandbox_spec(
         self,
         *,
+        name: str | None = None,
         volume_name: str | None = None,
         image: Any = None,
         snapshot: str | None = None,
@@ -303,6 +306,8 @@ class DaytonaSandboxRuntime:
         cpu: int | None = None,
         memory: int | None = None,
         disk: int | None = None,
+        auto_stop_interval: int | None = 1800,
+        auto_archive_interval: int | None = 3600,
         auto_delete_interval: int | None = None,
         network_block_all: bool | None = None,
         network_allow_list: str | None = None,
@@ -311,19 +316,47 @@ class DaytonaSandboxRuntime:
 
         The ``image`` parameter accepts a ``daytona.Image`` declarative
         builder object (e.g. ``Image.debian_slim().pip_install(...)``).
+
+        When neither ``image`` nor ``snapshot`` is provided, the spec
+        defaults to the ``fleet-rlm-base`` snapshot so that sandboxes
+        start with pre-installed core packages (dspy-ai, numpy, pandas,
+        httpx, pydantic).  If the snapshot has not been created yet, the
+        runtime falls back to a declarative image build at sandbox
+        creation time (see ``_acreate_sandbox``).
+
+        Cost-saving lifecycle defaults:
+
+        * ``auto_stop_interval`` — seconds of inactivity before the
+          sandbox is automatically stopped (default 1800 = 30 min).
+          ``refresh_activity()`` resets the timer.
+        * ``auto_archive_interval`` — seconds after stop before the
+          sandbox is archived to cold storage (default 3600 = 1 h).
+        * ``auto_delete_interval`` — seconds after archive before
+          permanent deletion (default ``None`` = never auto-delete).
+
+        A human-readable ``name`` is generated automatically when not
+        supplied, producing dashboard-friendly labels like
+        ``fleet-rlm-20260404-090700`` instead of random hex IDs.
         """
+        readable_name = name or (
+            f"fleet-rlm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d-%H%M%S}"
+        )
+        effective_snapshot = snapshot if (snapshot or image) else DEFAULT_SNAPSHOT_NAME
         merged_labels = dict(self.DEFAULT_LABELS)
         if labels:
             merged_labels.update(labels)
         return SandboxSpec(
+            name=readable_name,
             language="python",
             image=image,
-            snapshot=snapshot,
+            snapshot=effective_snapshot,
             volume_name=volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             env_vars=env_vars or None,
             labels=merged_labels,
             ephemeral=True,
+            auto_stop_interval=auto_stop_interval,
+            auto_archive_interval=auto_archive_interval,
             auto_delete_interval=auto_delete_interval,
             cpu=cpu,
             memory=memory,
@@ -388,9 +421,30 @@ class DaytonaSandboxRuntime:
         *,
         spec: SandboxSpec | None = None,
     ) -> Any:
-        """Create a sandbox, optionally from a declarative spec."""
+        """Create a sandbox, optionally from a declarative spec.
+
+        When the spec requests a named snapshot, the runtime first checks
+        whether that snapshot is ``ACTIVE``.  If it is not available, the
+        runtime transparently falls back to a declarative image build
+        using ``DEFAULT_SNAPSHOT_PACKAGES`` so the sandbox still starts
+        with the expected packages pre-installed.
+        """
         try:
             resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
+
+            # If a snapshot is requested but not yet created/active, fall
+            # back to a declarative image build with the same packages.
+            if resolved_spec.snapshot and not resolved_spec.uses_declarative_image:
+                active = await aresolve_snapshot(
+                    resolved_spec.snapshot, config=self._resolved_config
+                )
+                if active is None:
+                    logger.info(
+                        "Snapshot '%s' not active; falling back to declarative image",
+                        resolved_spec.snapshot,
+                    )
+                    resolved_spec = self._fallback_to_declarative_image(resolved_spec)
+
             return await self._acreate_sandbox_from_spec(resolved_spec)
         except Exception as exc:
             raise DaytonaDiagnosticError(
@@ -398,6 +452,23 @@ class DaytonaSandboxRuntime:
                 category="sandbox_create_clone_error",
                 phase="sandbox_create",
             ) from exc
+
+    @staticmethod
+    def _fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
+        """Replace a snapshot-based spec with a declarative image build."""
+        try:
+            from daytona import Image as DaytonaImage
+        except ImportError as exc:  # pragma: no cover
+            raise _daytona_import_error(exc) from exc
+
+        image = DaytonaImage.base("python:3.12-slim")
+        image = image.run_commands("pip install uv")
+        if DEFAULT_SNAPSHOT_PACKAGES:
+            image = image.run_commands(
+                f"uv pip install --system {' '.join(DEFAULT_SNAPSHOT_PACKAGES)}"
+            )
+
+        return dataclasses.replace(spec, image=image, snapshot=None)
 
     async def _aget_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
         """Get an existing sandbox by ID, recovering from archive if needed."""
@@ -720,8 +791,9 @@ async def acreate_snapshot(
     pkgs = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
 
     image = DaytonaImage.base(base_image)
-    for pkg in pkgs:
-        image = image.pip_install(pkg)
+    image = image.run_commands("pip install uv")
+    if pkgs:
+        image = image.run_commands(f"uv pip install --system {' '.join(pkgs)}")
 
     params = CreateSnapshotParams(name=name, image=image)
     cfg = config or resolve_daytona_config()

@@ -11,6 +11,7 @@ a prediction is wrong rather than just returning a scalar score.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
@@ -56,7 +57,32 @@ def build_gepa_feedback_metric(
     The returned callable conforms to the
     :class:`~dspy.teleprompt.gepa.gepa.GEPAFeedbackMetric` protocol.
     """
-    inner = score_fn or workspace_feedback_metric
+    inner = score_fn
+
+    def _call_feedback_metric(
+        gold: Example,
+        pred: Prediction,
+        *,
+        trace: Any = None,
+    ) -> float | tuple[float, str]:
+        if inner is None:
+            return workspace_feedback_metric(
+                gold,
+                pred,
+                trace=trace,
+                output_key=output_key,
+            )
+        try:
+            params = inspect.signature(inner).parameters.values()
+        except (TypeError, ValueError):
+            params = ()
+        supports_trace = any(
+            param.kind is inspect.Parameter.VAR_KEYWORD or param.name == "trace"
+            for param in params
+        )
+        if supports_trace:
+            return inner(gold, pred, trace=trace)
+        return inner(gold, pred)
 
     def metric(
         gold: Example,
@@ -65,7 +91,7 @@ def build_gepa_feedback_metric(
         pred_name: str | None = None,
         pred_trace: Any = None,
     ) -> float | ScoreWithFeedback:
-        result = inner(gold, pred, trace=trace)
+        result = _call_feedback_metric(gold, pred, trace=trace)
         if isinstance(result, tuple) and len(result) == 2:
             score, feedback = result
             return ScoreWithFeedback(score=float(score), feedback=str(feedback))
@@ -147,8 +173,9 @@ def optimize_program_with_gepa(
         validation_score = None
         if valset:
             evaluator = dspy.Evaluate(devset=valset, metric=feedback_metric)
-            validation_score = evaluator(optimized)
-            cast(Any, log_metric)("gepa_validation_score", float(validation_score))
+            validation_result = evaluator(optimized)
+            validation_score = float(validation_result)
+            cast(Any, log_metric)("gepa_validation_score", validation_score)
 
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)

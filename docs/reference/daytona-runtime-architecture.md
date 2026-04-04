@@ -60,12 +60,13 @@ The current implementation treats these Daytona docs as the normative baseline:
   that configures the shared runtime with Daytona workspace/session metadata.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:
-  - `runtime.py` owns workspace bootstrap and context staging
+  - `runtime.py` owns workspace bootstrap, context staging, and snapshot helpers
   - `interpreter.py` owns the `dspy.RLM` interpreter backend and result translation
   - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
-  - `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, and `types_serialization.py` own provider-local result, context, and recursion contracts
+  - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
+  - `types.py` owns provider-local configuration, staged-context, smoke-result, and chat/session normalization contracts
   - `volumes.py` owns provider-specific volume browsing helpers
-- `agent.py` and `state.py` remain the Daytona-specific agent/session adapters over the shared runtime.
+- `agent.py` remains the Daytona-specific agent/session adapter over the shared runtime.
 - Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The provider is now async-first internally:
   - `AsyncDaytona` drives sandbox/session lifecycle
@@ -200,3 +201,8 @@ interface:
 - sync helpers use `_ensure_session_sync()` only at the public sync boundary
 - helper code should not fall back to raw `sandbox.fs.*` access or mixed
   ad hoc session shapes
+
+## Intentional Clean-Break Imports
+
+- Deleted module paths such as `state.py`, `smoke.py`, and `snapshots.py` are intentionally unsupported.
+- The canonical import path for the smoke result type is `fleet_rlm.integrations.providers.daytona.types.DaytonaSmokeResult`.

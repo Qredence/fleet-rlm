@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import dspy
+import pytest
+
 from fleet_rlm.integrations.observability.workspace_metrics import (
     completeness_feedback_metric,
     exact_match_feedback_metric,
     workspace_feedback_metric,
+    workspace_score_metric,
 )
 
 
@@ -92,3 +96,39 @@ class TestWorkspaceFeedbackMetric:
         assert len(result) == 2
         assert isinstance(result[0], float)
         assert isinstance(result[1], str)
+
+
+class TestWorkspaceScoreMetric:
+    def test_returns_float(self) -> None:
+        result = workspace_score_metric(_gold("hello"), _pred("hello"))
+        assert result == 1.0
+
+    def test_dspy_evaluate_accepts_numeric_metric(self) -> None:
+        class Echo(dspy.Module):
+            def forward(self, question: str):
+                return dspy.Prediction(assistant_response=question)
+
+        example = dspy.Example(
+            question="hello",
+            assistant_response="hello",
+        ).with_inputs("question")
+        result = dspy.Evaluate(
+            devset=[example],
+            metric=workspace_score_metric,
+        )(Echo())
+        assert float(result) == 100.0
+
+    def test_feedback_metric_is_gepa_only_for_direct_evaluate(self) -> None:
+        class Echo(dspy.Module):
+            def forward(self, question: str):
+                return dspy.Prediction(assistant_response=question)
+
+        example = dspy.Example(
+            question="hello",
+            assistant_response="hello",
+        ).with_inputs("question")
+        with pytest.raises(TypeError):
+            dspy.Evaluate(
+                devset=[example],
+                metric=workspace_feedback_metric,
+            )(Echo())

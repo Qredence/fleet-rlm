@@ -107,7 +107,11 @@ Auth, persistence, and analytics constraints:
   - `runtime/execution/sandbox_assets.py` for bundled sandbox helper functions
   - `runtime/execution/output_utils.py` for stdout/stderr redaction and summarization
 - Keep Modal volume persistence and browsing in `runtime/tools/modal_volumes.py`; keep Daytona volume browsing in `integrations/providers/daytona/volumes.py`.
-- Keep the shared sandbox tool surface consolidated in `runtime/tools/sandbox.py`, including recursive RLM delegation, cached-runtime analysis tools, memory-intelligence tools, and persistent memory helpers.
+- Keep the shared sandbox tool surface consolidated under `runtime/tools/`, with:
+  - `runtime/tools/sandbox_common.py` for the aggregate sandbox tool entrypoint plus shared sandbox, snapshot, LSP, buffer, and process helpers
+  - `runtime/tools/sandbox_delegate_tools.py` for recursive RLM delegation tools
+  - `runtime/tools/sandbox_memory_tools.py` for memory-intelligence tools
+  - `runtime/tools/sandbox_storage_tools.py` for durable storage and editing helpers
 - Keep `src/fleet_rlm/api/routers/runtime.py` thin. Route orchestration for runtime settings, diagnostics/status assembly, and volume browsing now lives under:
   - `src/fleet_rlm/api/runtime_services/settings.py`
   - `src/fleet_rlm/api/runtime_services/diagnostics.py`
@@ -172,16 +176,15 @@ Auth, persistence, and analytics constraints:
   in-memory state.
 - Only force Daytona sandbox recreation on explicit reset, mounted-volume
   incompatibility, unrecoverable reconcile failure, or resume failure.
-- Keep canonical Daytona internals under `integrations/providers/daytona/` with the provider root modules as the real implementation surface:
-  - `runtime.py`
-  - `interpreter.py`
-  - `bridge.py`
-  - `types_budget.py`
-  - `types_context.py`
-  - `types_recursive.py`
-  - `types_result.py`
-  - `types_serialization.py`
-  - `volumes.py`
+- Keep canonical Daytona internals under `integrations/providers/daytona/` with these owner modules:
+  - `runtime.py` for workspace bootstrap, session helpers, and snapshot helpers
+  - `interpreter.py` for the `DaytonaInterpreter` runtime adapter
+  - `bridge.py` for host callback bridging
+  - `diagnostics.py` for structured diagnostic errors and smoke validation
+  - `types.py` for consolidated Daytona types plus chat/session normalization helpers
+  - `volumes.py` for provider-specific volume browsing
+  - `config.py` for Daytona configuration resolution
+  - `interpreter_execution.py`, `interpreter_assets.py`, and `runtime_helpers.py` as internal support modules
 - Persistent Daytona memory has two layers:
   - volatile code-interpreter context state inside the live sandbox-side Python process
   - durable mounted-volume storage rooted at `/home/daytona/memory`
@@ -197,7 +200,7 @@ Auth, persistence, and analytics constraints:
   - `workspace_read` is a low-level transient-workspace helper, not a durable storage API
 - Treat the live Daytona workspace as transient repo/execution state. `context_paths` are staged into the workspace for the current run only, and there is no automatic workspace-to-volume sync.
 - Sandbox/file helpers should target the `DaytonaSandboxSession` API (`aread_file`, `awrite_file`, `alist_files`) in async flows and use `_ensure_session_sync()` only at the public sync boundary. Do not fall back to raw `sandbox.fs.*` access from those helpers.
-- Keep Daytona chat/session normalization helpers in `integrations/providers/daytona/state.py` so `agent.py` stays a focused Daytona-specific agent/session adapter over the shared runtime.
+- Keep Daytona chat/session normalization helpers in `integrations/providers/daytona/types.py` so `agent.py` stays a focused Daytona-specific agent/session adapter over the shared runtime.
 - Keep terminal session actions in `cli/terminal/session_actions.py` and transcript/rendering helpers in `cli/terminal/session_view.py`.
 - Keep MLflow runtime bootstrap, callback registration, and request-context helpers in `integrations/observability/mlflow_runtime.py`; keep trace lookup, feedback logging, and dataset/export helpers in `integrations/observability/mlflow_traces.py`.
 - Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating new local variants.
@@ -233,6 +236,6 @@ Focused backend/runtime coverage:
 
 Daytona-focused backend coverage:
 
-- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_rlm_sandbox.py tests/unit/test_daytona_workbench_chat_agent.py`
+- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_runtime.py tests/unit/test_daytona_interpreter.py tests/unit/test_daytona_workbench_chat_agent.py`
 
 Keep command examples aligned with `Makefile`, `pyproject.toml`, and the live router/schema contract.

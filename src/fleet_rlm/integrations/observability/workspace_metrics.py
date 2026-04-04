@@ -12,6 +12,7 @@ from typing import Any
 
 __all__ = [
     "workspace_feedback_metric",
+    "workspace_score_metric",
     "exact_match_feedback_metric",
     "completeness_feedback_metric",
 ]
@@ -156,3 +157,24 @@ def workspace_feedback_metric(
     score = 0.6 * em_score + 0.4 * comp_score
     feedback = f"[exact_match={em_score:.2f}] {em_feedback} [completeness={comp_score:.2f}] {comp_feedback}"
     return score, feedback
+
+
+def workspace_score_metric(
+    gold: Any,
+    pred: Any,
+    *,
+    trace: Any = None,
+    output_key: str = "assistant_response",
+) -> float:
+    """Numeric-only companion to :func:`workspace_feedback_metric`.
+
+    This is the safe default for :class:`dspy.Evaluate`, which aggregates
+    numeric scores but does not accept ``(score, feedback)`` tuples.
+    """
+    score, _feedback = workspace_feedback_metric(
+        gold,
+        pred,
+        trace=trace,
+        output_key=output_key,
+    )
+    return float(score)

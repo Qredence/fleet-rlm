@@ -80,6 +80,7 @@ class SandboxSpec:
     default Daytona snapshot.
     """
 
+    name: str | None = None
     language: str = "python"
     image: Any = None  # daytona.Image — kept as Any to avoid hard SDK import
     snapshot: str | None = None
@@ -106,6 +107,8 @@ class SandboxSpec:
     def _common_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
         """Build shared keyword arguments for any SDK create-params constructor."""
         params: dict[str, Any] = {"language": self.language}
+        if self.name:
+            params["name"] = self.name
         if self.env_vars:
             params["env_vars"] = dict(self.env_vars)
         if self.labels:

@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.runtime.tools.infra_tools``."""
+"""Tests for sandbox infra helpers in ``fleet_rlm.runtime.tools.sandbox_common``."""
 
 from __future__ import annotations
 
