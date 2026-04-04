@@ -120,3 +120,5 @@ src/frontend/test-results/.last-run.json
 src/frontend/posthog-setup-report.md
 PLANS.md
 .output.txt
+
+.databricks
