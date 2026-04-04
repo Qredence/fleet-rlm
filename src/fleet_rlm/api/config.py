@@ -117,12 +117,19 @@ class ServerRuntimeConfig(BaseSettings):
     )
     @classmethod
     def _validate_model_identifier(cls, value: str | None) -> str | None:
-        if value is not None and "/" not in value:
+        if value is None:
+            return None
+
+        normalized = value.strip()
+        if not normalized:
+            return None
+
+        if "/" not in normalized:
             raise ValueError(
                 f"LiteLLM model identifiers must include a provider prefix "
                 f"(e.g. 'openai/gpt-4o' or 'anthropic/claude-3-5-sonnet'), got {value!r}"
             )
-        return value
+        return normalized
 
     @classmethod
     def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
