@@ -119,19 +119,33 @@ describe("RunWorkbench", () => {
   it("renders the analyst-oriented tabs and hides legacy tree framing", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);
 
-    expect(html).toContain("Workspace execution");
+    expect(html).toContain("Inspect tracing architecture");
     expect(html).toContain("Iterations");
-    expect(html).toContain("Evidence");
-    expect(html).toContain("Final Output");
+    expect(html).toContain("Context");
+    expect(html).toContain("Output");
     expect(html).not.toContain(">Callbacks<");
     expect(html).not.toContain(">Prompts<");
-    expect(html).toContain("Inspect tracing architecture");
     expect(html).toContain("1 iterations");
     expect(html).toContain("1 callbacks");
-    expect(html).toContain("1 prompt objects");
+    expect(html).toContain("1 prompts");
     expect(html).not.toContain("Timeline");
     expect(html).not.toContain("Node");
     expect(html).not.toContain("Run tree");
+  });
+
+  it("renders the full task text without truncating long prompts", () => {
+    const originalTask = mockedWorkbenchStore.task;
+    const longTask =
+      "Inspect the tracing architecture, explain how runtime events flow through the adapters, and call out any places where the workbench can lose provenance when a prompt spans multiple clauses or source references.";
+
+    mockedWorkbenchStore.task = longTask;
+
+    const html = renderToStaticMarkup(<RunWorkbench />);
+
+    expect(html).toContain(longTask);
+    expect(html).not.toContain(`${longTask.slice(0, 120).trimEnd()}…`);
+
+    mockedWorkbenchStore.task = originalTask;
   });
 
   it("renders extracted markdown text instead of raw artifact wrapper JSON", () => {

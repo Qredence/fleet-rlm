@@ -124,7 +124,7 @@ export function OptimizationForm() {
               {statusQuery.isLoading ? (
                 <Badge variant="secondary">Checking…</Badge>
               ) : available ? (
-                <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600">
+                <Badge variant="secondary" className="bg-success/15 text-success">
                   Available
                 </Badge>
               ) : (

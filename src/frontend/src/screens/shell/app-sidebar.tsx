@@ -160,7 +160,7 @@ export function AppSidebar() {
               sidebarState === "collapsed" ? "mx-auto" : "pointer-events-none opacity-0",
             )}
           >
-            <PanelLeftIcon className="size-4" />
+            <PanelLeftIcon />
           </Button>
         </div>
       </SidebarHeader>
@@ -193,6 +193,16 @@ export function AppSidebar() {
                 onClick={() => navigateTo("optimization")}
                 isActive={isOptimization}
               />
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Sign in"
+                  onClick={handleOpenLogin}
+                  className={sidebarActionButtonClassName}
+                >
+                  <LogIn />
+                  <span>Sign in</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -243,8 +253,8 @@ export function AppSidebar() {
       <SidebarFooter className="px-2 pb-3 pt-3">
         <div
           className={cn(
-            "rounded-[14px] border border-sidebar-border/75 bg-sidebar-accent/[0.34] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]",
-            sidebarState === "collapsed" && "border-transparent bg-transparent shadow-none",
+            "rounded-[14px] p-1",
+            sidebarState === "collapsed" && "hidden",
           )}
         >
           <SidebarMenu className="gap-0.5">
@@ -256,16 +266,6 @@ export function AppSidebar() {
               >
                 <Settings />
                 <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={handleOpenLogin}
-                tooltip="Sign in"
-                className={sidebarActionButtonClassName}
-              >
-                <LogIn />
-                <span>Sign in</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

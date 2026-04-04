@@ -48,11 +48,11 @@ uv add "fleet-rlm[mcp]"
 git clone https://github.com/qredence/fleet-rlm.git
 cd fleet-rlm
 
-# Install all dependencies (runtime + dev + all extras)
-uv sync --all-extras --dev
+# Install all dependencies (runtime + default dev group + all optional extras)
+uv sync --all-extras
 ```
 
-> **Note:** The `--all-extras` flag includes the `dev`, `mcp`, `server`, and `full` optional dependency groups.
+> **Note:** The `--all-extras` flag includes the `dev`, `mcp`, `server`, and `full` optional extras. `uv sync` also includes the default `dev` dependency group for this repo.
 
 ### 2. Set Up Environment Variables
 
@@ -185,7 +185,7 @@ The project includes a `Makefile` for common development tasks:
 
 | Target               | Command                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------- |
-| `make sync-all`      | Install all dependencies (`uv sync --all-extras --dev`)                             |
+| `make sync-all`      | Install all dependencies (`uv sync --all-extras`)                                    |
 | `make test-fast`     | Run tests excluding `live_llm` and `benchmark`                                      |
 | `make quality-gate`  | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate       |
 | `make release-check` | Run release-oriented validation: quality gate, security checks, UI build, packaging |

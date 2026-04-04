@@ -262,7 +262,7 @@ export function WorkspaceScreen() {
 
             {showRuntimeWarning ? (
               <Alert className="w-full border-accent/25 bg-accent/5 text-foreground">
-                <TriangleAlert className="size-4" />
+                <TriangleAlert />
                 <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
@@ -316,7 +316,7 @@ export function WorkspaceScreen() {
               <div className="flex flex-col gap-4">
                 {showRuntimeWarning ? (
                   <Alert className="border-accent/25 bg-accent/5 text-foreground">
-                    <TriangleAlert className="size-4" />
+                    <TriangleAlert />
                     <AlertTitle>{runtimeWarningTitle}</AlertTitle>
                     <AlertDescription>
                       <div className="flex flex-col gap-3">

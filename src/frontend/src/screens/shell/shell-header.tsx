@@ -40,31 +40,29 @@ export function ShellHeader() {
       {showCanvasToggle ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button
-                type="button"
-                size={isMobile ? "icon" : "sm"}
-                variant={isCanvasOpen ? "secondary" : "outline"}
-                aria-label={canvasActionLabel}
-                className={cn(
-                  isMobile
-                    ? "rounded-xl"
-                    : "h-11 min-w-[9.25rem] justify-start gap-3 rounded-2xl border-border-subtle/80 px-3.5 text-foreground/82 shadow-xs",
-                )}
-                onClick={toggleCanvas}
-              >
-                <PanelRight className="size-4" />
-                {!isMobile ? (
-                  <span className="text-xs font-medium text-foreground/90">
-                    {panelMeta.toggleLabel}
-                  </span>
-                ) : null}
-                <span className="sr-only">{canvasActionLabel}</span>
-              </Button>
-            </span>
+            <Button
+              type="button"
+              size={isMobile ? "icon" : "sm"}
+              variant={isCanvasOpen ? "secondary" : "outline"}
+              aria-label={canvasActionLabel}
+              className={cn(
+                isMobile
+                  ? "rounded-xl"
+                  : "h-11 flex-shrink justify-start gap-3 rounded-2xl border-border-subtle/80 px-3.5 text-foreground/82 shadow-xs",
+              )}
+              onClick={toggleCanvas}
+            >
+              <PanelRight />
+              {!isMobile ? (
+                <span className="text-xs font-medium text-foreground/90">
+                  {panelMeta.toggleLabel}
+                </span>
+              ) : null}
+              <span className="sr-only">{canvasActionLabel}</span>
+            </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <div className="space-y-1">
+            <div className="flex flex-col gap-1">
               <p className="text-xs font-medium">{canvasActionLabel}</p>
               <p className="max-w-[14rem] text-[11px] leading-5 text-muted-foreground">
                 {panelMeta.toggleDescription}

@@ -112,7 +112,7 @@ export function TrajectoryTimeline({
                       {item.body ? (
                         <Streamdown content={item.body} streaming={item.status === "running"} />
                       ) : null}
-                      {item.details?.length ? (
+                      {!item.body && item.details?.length ? (
                         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                           {item.details.map((detail, idx) => (
                             <div key={`${item.id}-detail-${idx}`}>{detail}</div>

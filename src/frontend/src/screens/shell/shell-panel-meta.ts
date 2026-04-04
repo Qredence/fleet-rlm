@@ -44,10 +44,10 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
       };
     default:
       return {
-        title: "Canvas",
+        title: "Inspector",
         description:
           "Inspect the selected turn or track run activity without losing the conversation.",
-        toggleLabel: "Canvas",
+        toggleLabel: "Inspector",
         toggleDescription: "Inspect turns and runs",
         emptyTitle: "Nothing selected yet",
         emptyDescription:

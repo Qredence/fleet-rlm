@@ -17,6 +17,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
@@ -145,10 +146,10 @@ function WorkspaceComposer({
                   <img
                     src={attachment.previewUrl}
                     alt={attachment.file.name}
-                    className="h-5 w-5 shrink-0 rounded-full object-cover"
+                    className="size-5 shrink-0 rounded-full object-cover"
                   />
                 ) : (
-                  <FileText className="prompt-composer-attachment-chip-icon h-4 w-4 shrink-0" />
+                  <FileText className="prompt-composer-attachment-chip-icon size-4 shrink-0" />
                 )}
 
                 <span className="truncate">{attachment.file.name}</span>
@@ -156,10 +157,10 @@ function WorkspaceComposer({
                 <button
                   type="button"
                   onClick={() => handleRemoveAttachment(attachment.id)}
-                  className="prompt-composer-attachment-chip-remove ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                  className="prompt-composer-attachment-chip-remove ml-auto flex size-5 shrink-0 items-center justify-center rounded-full"
                   aria-label={`Remove ${attachment.file.name}`}
                 >
-                  <X className="h-3 w-3" />
+                  <X className="size-3" />
                 </button>
               </div>
             );
@@ -189,7 +190,7 @@ function WorkspaceComposer({
         <PromptInputBody>
           <PromptInputTextarea
             aria-label="Message"
-            className="min-h-16 px-4 pb-2 pt-4"
+            className="min-h-16 px-4 py-3"
             disabled={isLoading}
             onChange={(event) => onChange(event.currentTarget.value)}
             placeholder={placeholder}
@@ -209,24 +210,25 @@ function WorkspaceComposer({
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (
-            <button
+            <Button
               type="button"
+              size="icon-sm"
               onClick={onStop}
               aria-label="Stop generating"
               className={cn(
-                "prompt-composer-submit-button flex aspect-square size-8 min-h-8 min-w-8 items-center justify-center rounded-full",
+                "prompt-composer-submit-button aspect-square size-8 rounded-full",
                 "transition-[background-color,color,box-shadow,opacity]",
                 "bg-foreground text-background hover:bg-foreground/80",
               )}
             >
               <Square className="size-3 fill-current" />
-            </button>
+            </Button>
           ) : (
             <PromptInputSubmit
               aria-label={isLoading ? "Sending message" : "Submit"}
               aria-busy={isReceiving}
               className={cn(
-                "prompt-composer-submit-button aspect-square size-8 min-h-8 min-w-8 rounded-full first:rounded-full last:rounded-full",
+                "prompt-composer-submit-button aspect-square size-8 rounded-full first:rounded-full last:rounded-full",
                 "transition-[background-color,color,box-shadow,opacity]",
               )}
               disabled={isLoading || !canSubmitMessage}

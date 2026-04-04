@@ -14,7 +14,7 @@ import { MessageInspectorPanel } from "@/app/workspace/inspector/message-inspect
 import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
 
 export function useWorkspaceCanvasTitle() {
-  return "Canvas";
+  return "Inspector";
 }
 
 export function WorkspaceCanvasPanel() {
@@ -50,8 +50,8 @@ export function WorkspaceCanvasPanel() {
     >
       <div className="border-b border-border-subtle/70 px-3 py-2">
         <TabsList variant="segmented" className="border border-border-subtle/70 bg-muted/40">
-          <TabsTrigger value="turn">Turn</TabsTrigger>
-          {hasRunContent ? <TabsTrigger value="run">Run</TabsTrigger> : null}
+          <TabsTrigger value="turn">Message</TabsTrigger>
+          {hasRunContent ? <TabsTrigger value="run">Workbench</TabsTrigger> : null}
         </TabsList>
       </div>
 

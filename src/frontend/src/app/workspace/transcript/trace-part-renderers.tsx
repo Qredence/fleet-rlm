@@ -628,7 +628,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
             </ConfirmationActions>
           </ConfirmationRequest>
           <ConfirmationAccepted>
-            <div className="mt-2 text-xs text-emerald-600">Approved</div>
+            <div className="mt-2 text-xs text-success">Approved</div>
           </ConfirmationAccepted>
           <ConfirmationRejected>
             <div className="mt-2 text-xs text-destructive">Rejected</div>

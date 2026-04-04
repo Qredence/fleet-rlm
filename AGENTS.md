@@ -106,7 +106,7 @@ Cross-stack source-of-truth boundaries:
 
 Repository setup and shared workflows:
 
-- `uv sync --all-extras --dev`
+- `uv sync --all-extras`
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
 - `uv run fleet-rlm serve-mcp --transport stdio`

@@ -211,7 +211,7 @@ Auth, persistence, and analytics constraints:
 
 Backend setup and runtime:
 
-- `uv sync --all-extras --dev`
+- `uv sync --all-extras`
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
 - `uv run fleet-rlm serve-mcp --transport stdio`

@@ -7,7 +7,7 @@ help:
 	@echo "Targets:"
 	@echo "  make sync              - Install runtime dependencies with uv"
 	@echo "  make sync-dev          - Install dev dependencies with uv"
-	@echo "  make sync-all          - Install all extras + dev dependencies with uv"
+	@echo "  make sync-all          - Install all optional extras with uv"
 	@echo "  make test              - Alias for test-fast"
 	@echo "  make test-fast         - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit         - Run unit tests (non-live/non-benchmark)"
@@ -42,7 +42,7 @@ sync-dev:
 	uv sync --extra dev
 
 sync-all:
-	uv sync --all-extras --dev
+	uv sync --all-extras
 
 test:
 	$(MAKE) test-fast

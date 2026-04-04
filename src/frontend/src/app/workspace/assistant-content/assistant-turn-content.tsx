@@ -100,7 +100,7 @@ export function AssistantTurnContent({
                 model.summary.show ? (
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
-                <div className="space-y-4">
+                <div className="flex flex-col gap-4">
                   {model.execution.hasChatHighlights ? (
                     <ExecutionHighlightsGroup
                       execution={model.execution}

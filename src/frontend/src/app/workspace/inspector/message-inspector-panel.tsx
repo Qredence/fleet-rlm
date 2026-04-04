@@ -132,7 +132,7 @@ export function MessageInspectorPanel() {
         ? ([{ id: "execution", label: "Execution" }] as TabOption[])
         : []),
       ...(model.evidence.hasContent
-        ? ([{ id: "evidence", label: "Evidence" }] as TabOption[])
+        ? ([{ id: "evidence", label: "Examples" }] as TabOption[])
         : []),
       ...(showGraph ? ([{ id: "graph", label: "Graph" }] as TabOption[]) : []),
     ];

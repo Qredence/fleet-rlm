@@ -316,7 +316,13 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return (
         <div className={inspectorStyles.stack.cards}>
           <DetailBlock
-            label="Status"
+            label={
+              section.part.tone === "error"
+                ? "Error"
+                : section.part.tone === "warning"
+                  ? "Warning"
+                  : "Note"
+            }
             value={section.part.text}
             tone={section.part.tone === "error" ? "error" : "default"}
           />

@@ -39,7 +39,7 @@ export function ExecutionHighlightsGroup({
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
                     <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                      {highlight.count}x
+                      ×{highlight.count}
                     </Badge>
                   ) : null}
                   <Badge variant={tone.variant} className={inspectorStyles.badge.status}>

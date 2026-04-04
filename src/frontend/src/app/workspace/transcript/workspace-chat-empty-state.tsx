@@ -52,7 +52,7 @@ export function WorkspaceChatEmptyState({
     <ConversationEmptyState
       icon={null}
       className={cn(
-        "h-auto w-full items-center justify-center gap-0 px-0 pb-2 text-center",
+        "h-full w-full items-center justify-center gap-0 px-0 pb-2 text-center",
         isMobile ? "pt-6" : "pt-0",
       )}
     >
