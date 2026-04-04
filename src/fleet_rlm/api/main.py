@@ -25,6 +25,7 @@ from .middleware import add_middlewares
 from .routers import (
     auth,
     health,
+    optimization,
     runtime,
     sessions,
     traces,
@@ -38,6 +39,7 @@ _CANONICAL_API_ROUTERS = (
     ws.router,
     sessions.router,
     runtime.router,
+    optimization.router,
     traces.router,
 )
 

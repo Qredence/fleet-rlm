@@ -15,6 +15,7 @@ export function ShellHeader() {
   const titleMap: Record<string, string> = {
     workspace: "Workbench",
     volumes: "Volumes",
+    optimization: "Optimization",
     settings: "Settings",
   };
   const title = titleMap[activeNav] || "Dashboard";
@@ -22,7 +23,7 @@ export function ShellHeader() {
   const canvasActionLabel = isCanvasOpen
     ? `Hide ${panelMeta.toggleLabel}`
     : `Show ${panelMeta.toggleLabel}`;
-  const showCanvasToggle = activeNav !== "settings";
+  const showCanvasToggle = activeNav !== "settings" && activeNav !== "optimization";
 
   return (
     <header

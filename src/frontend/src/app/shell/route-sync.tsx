@@ -39,7 +39,7 @@ function RouteSync() {
     // ── Sync skill deep-linking ──────────────────────────────────
     if (section === "volumes") {
       openCanvas();
-    } else if (section === "settings") {
+    } else if (section === "settings" || section === "optimization") {
       closeCanvas();
     } else if (prevSection === "volumes") {
       clearSelectedFile();

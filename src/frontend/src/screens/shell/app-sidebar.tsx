@@ -7,6 +7,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -87,6 +88,7 @@ export function AppSidebar() {
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
+  const isOptimization = location.pathname.startsWith("/app/optimization");
   const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
@@ -184,6 +186,12 @@ export function AppSidebar() {
                 icon={Database}
                 onClick={() => navigateTo("volumes")}
                 isActive={isVolumes}
+              />
+              <SidebarActionItem
+                label="Optimization"
+                icon={Sparkles}
+                onClick={() => navigateTo("optimization")}
+                isActive={isOptimization}
               />
             </SidebarMenu>
           </SidebarGroupContent>

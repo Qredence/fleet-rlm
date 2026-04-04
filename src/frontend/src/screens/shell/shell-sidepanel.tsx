@@ -48,6 +48,8 @@ function navLabel(nav: string): string {
   switch (nav) {
     case "volumes":
       return "Volumes";
+    case "optimization":
+      return "Optimization";
     case "settings":
       return "Settings";
     default:

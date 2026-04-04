@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, Bot, Cpu, Moon, Paintbrush, Sun } from "lucide-react";
+import { Bell, Bot, Cpu, Moon, Paintbrush, Sparkles, Sun } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { telemetryClient } from "@/lib/telemetry/client";
+import { OptimizationForm } from "@/screens/settings/optimization-form";
 import { RuntimeForm } from "@/screens/settings/runtime-form";
 import {
   computeLmRuntimeUpdates,
@@ -42,6 +43,7 @@ export const settingsSections = [
   { key: "telemetry", label: "Telemetry", icon: Bell },
   { key: "litellm", label: "LiteLLM Integration", icon: Bot },
   { key: "runtime", label: "Runtime", icon: Cpu },
+  { key: "optimization", label: "Optimization", icon: Sparkles },
 ] as const;
 
 export type SettingsSection = (typeof settingsSections)[number]["key"];
@@ -51,6 +53,7 @@ export const sectionDescriptions: Record<SettingsSection, string> = {
   telemetry: "Privacy and communication preferences.",
   litellm: "Set planner models, provider endpoint, and API key.",
   runtime: "Manage runtime credentials and connectivity checks.",
+  optimization: "Configure and run GEPA prompt optimization.",
 };
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
@@ -121,11 +124,9 @@ export function SettingsSectionContent({
   onToggleTheme,
   section,
 }: SettingsSectionContentProps) {
-  return section === "runtime" ? (
-    <RuntimeForm />
-  ) : (
-    <GroupedSettingsPane isDark={isDark} onToggleTheme={onToggleTheme} section={section} />
-  );
+  if (section === "runtime") return <RuntimeForm />;
+  if (section === "optimization") return <OptimizationForm />;
+  return <GroupedSettingsPane isDark={isDark} onToggleTheme={onToggleTheme} section={section} />;
 }
 
 interface GroupedSettingsPaneProps {
@@ -563,6 +564,8 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
       ) : null}
 
       {showSection("runtime") ? <RuntimeForm /> : null}
+
+      {showSection("optimization") ? <OptimizationForm /> : null}
     </div>
   );
 }

@@ -371,6 +371,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/status:
+    get:
+      tags:
+      - optimization
+      summary: Get Optimization Status
+      description: Return GEPA optimization availability and prerequisites.
+      operationId: get_optimization_status_api_v1_optimization_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GEPAStatusResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+      security:
+      - HTTPBearer: []
+  /api/v1/optimization/run:
+    post:
+      tags:
+      - optimization
+      summary: Run Optimization
+      description: Trigger a GEPA prompt optimization run.
+      operationId: run_optimization_api_v1_optimization_run_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GEPAOptimizationRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GEPAOptimizationResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '400':
+          description: Invalid optimization parameters.
+        '503':
+          description: GEPA optimization is unavailable in this environment.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/traces/feedback:
     post:
       tags:
@@ -453,6 +505,120 @@ components:
       - user_claim
       title: AuthMeResponse
       description: Resolved identity payload returned to authenticated clients.
+    GEPAOptimizationRequest:
+      properties:
+        dataset_path:
+          type: string
+          title: Dataset Path
+          description: Path to the exported MLflow trace dataset (JSON).
+        program_spec:
+          type: string
+          title: Program Spec
+          description: DSPy program specification string to optimize in module:attr
+            form.
+        output_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Path
+          description: Optional filesystem path to save the optimized program.
+        auto:
+          type: string
+          enum:
+          - light
+          - medium
+          - heavy
+          title: Auto
+          description: GEPA optimization intensity level.
+          default: light
+        train_ratio:
+          type: number
+          title: Train Ratio
+          description: Fraction of examples to use for training (remainder used for
+            validation).
+          default: 0.8
+      type: object
+      required:
+      - dataset_path
+      - program_spec
+      title: GEPAOptimizationRequest
+      description: Request body for triggering a GEPA prompt optimization run.
+    GEPAOptimizationResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the optimization run completed successfully.
+          default: true
+        optimizer:
+          type: string
+          title: Optimizer
+          description: Optimizer backend that was used.
+          default: GEPA
+        program_spec:
+          type: string
+          title: Program Spec
+          description: DSPy program specification that was optimized.
+        train_examples:
+          type: integer
+          title: Train Examples
+          description: Number of training examples used.
+        validation_examples:
+          type: integer
+          title: Validation Examples
+          description: Number of validation examples used.
+        validation_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Validation Score
+          description: Validation score from the optimized program, when available.
+        output_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Path
+          description: Filesystem path where the optimized program was saved.
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message when the optimization run failed.
+      type: object
+      required:
+      - program_spec
+      - train_examples
+      - validation_examples
+      title: GEPAOptimizationResponse
+      description: Result payload after a GEPA optimization run completes.
+    GEPAStatusResponse:
+      properties:
+        available:
+          type: boolean
+          title: Available
+          description: Whether GEPA optimization is available in this environment.
+        mlflow_enabled:
+          type: boolean
+          title: Mlflow Enabled
+          description: Whether MLflow is enabled and reachable.
+        gepa_installed:
+          type: boolean
+          title: Gepa Installed
+          description: Whether the GEPA teleprompt module is importable.
+        guidance:
+          items:
+            type: string
+          type: array
+          title: Guidance
+          description: Human-readable guidance when GEPA is not fully available.
+      type: object
+      required:
+      - available
+      - mlflow_enabled
+      - gepa_installed
+      title: GEPAStatusResponse
+      description: Status payload for GEPA optimization availability.
     HTTPValidationError:
       properties:
         detail:

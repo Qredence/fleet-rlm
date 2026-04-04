@@ -1,10 +1,10 @@
 /**
  * Command Palette — global keyboard-driven quick actions.
  *
- * Mirrors the current product shell: Workbench, Volumes, and Settings.
+ * Mirrors the current product shell: Workbench, Volumes, Optimization, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Zap, HardDrive, Plus, Moon, Sun, Settings } from "lucide-react";
+import { Zap, HardDrive, Plus, Moon, Sun, Settings, Sparkles } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -37,6 +37,7 @@ interface PageItem {
 const pages: PageItem[] = [
   { key: "workspace", label: "Workbench", icon: Zap },
   { key: "volumes", label: "Volumes", icon: HardDrive },
+  { key: "optimization", label: "Optimization", icon: Sparkles },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 

@@ -19,6 +19,7 @@ import {
   getSettingsSectionTitle,
   resolveSettingsSection,
   SettingsSectionContent,
+  settingsSections,
   SettingsSidebarNav,
   type SettingsSection,
 } from "@/screens/settings/settings-content";
@@ -54,18 +55,11 @@ function MobileSectionPicker({
         onSectionChange(nextValue as SettingsSection);
       }}
     >
-      <ToggleGroupItem value="appearance" aria-label="Appearance">
-        Appearance
-      </ToggleGroupItem>
-      <ToggleGroupItem value="telemetry" aria-label="Telemetry">
-        Telemetry
-      </ToggleGroupItem>
-      <ToggleGroupItem value="litellm" aria-label="LiteLLM Integration">
-        LiteLLM
-      </ToggleGroupItem>
-      <ToggleGroupItem value="runtime" aria-label="Runtime">
-        Runtime
-      </ToggleGroupItem>
+      {settingsSections.map(({ key, label }) => (
+        <ToggleGroupItem key={key} value={key} aria-label={label}>
+          {key === "litellm" ? "LiteLLM" : label}
+        </ToggleGroupItem>
+      ))}
     </ToggleGroup>
   );
 }

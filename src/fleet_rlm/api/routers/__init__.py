@@ -3,6 +3,7 @@
 from . import (
     auth,
     health,
+    optimization,
     runtime,
     sessions,
     traces,
@@ -15,5 +16,6 @@ __all__ = [
     "ws",
     "sessions",
     "runtime",
+    "optimization",
     "traces",
 ]

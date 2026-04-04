@@ -52,6 +52,7 @@ Supported app surfaces:
 
 - `Workbench`
 - `Volumes`
+- `Optimization`
 - `Settings`
 
 Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally unsupported in the live app surface and should fall through to `/404`. Do not reintroduce them as first-class product surfaces without updating the backend/frontend contract and docs.
@@ -73,6 +74,8 @@ Canonical shared endpoints:
 - `GET /api/v1/sessions/state`
 - `/api/v1/runtime/*`
 - `POST /api/v1/traces/feedback`
+- `GET /api/v1/optimization/status`
+- `POST /api/v1/optimization/run`
 - `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 

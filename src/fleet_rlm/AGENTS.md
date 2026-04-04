@@ -73,6 +73,8 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
 - `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/optimization/status`
+- `POST /api/v1/optimization/run`
 - `POST /api/v1/traces/feedback`
 - `/api/v1/ws/chat`
 - `/api/v1/ws/execution`

@@ -17,8 +17,8 @@ Frontend source-of-truth files:
 
 ## Agent Priorities
 
-- Preserve the supported app surfaces: `Workbench`, `Volumes`, and `Settings`.
-- Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
+- Preserve the supported app surfaces: `Workbench`, `Volumes`, `Optimization`, and `Settings`.
+- Keep the supported app surface limited to `workspace`, `volumes`, `optimization`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
 - Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
 - Always run `pnpm run format`, `pnpm run lint:robustness`, and `pnpm run type-check` before committing or opening a PR for frontend code changes. In this repo, `pnpm run format` uses Vite+'s `vp fmt`, backed by Oxc/Oxfmt; do not substitute a broad `prettier --write src/` sweep.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.

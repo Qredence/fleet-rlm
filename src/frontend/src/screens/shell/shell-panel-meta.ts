@@ -31,6 +31,17 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
         emptyDescription:
           "Use the settings dialog for appearance, telemetry, LiteLLM, and runtime controls. This side panel is reserved for supporting context as those workflows expand.",
       };
+    case "optimization":
+      return {
+        title: "Details",
+        description:
+          "Keep optimization guidance and future run context adjacent to the optimization workspace.",
+        toggleLabel: "Details",
+        toggleDescription: "Reference panel",
+        emptyTitle: "Optimization stays focused in the main surface",
+        emptyDescription:
+          "Use the optimization page to configure and run GEPA prompt optimization. This side panel is reserved for supporting context as that workflow expands.",
+      };
     default:
       return {
         title: "Canvas",
