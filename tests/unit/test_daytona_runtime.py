@@ -95,11 +95,24 @@ class _FakeClient:
     def __init__(self) -> None:
         self.volume = _FakeVolumeService()
         self.created_requests: list[object] = []
+        self.create_call_kwargs: list[dict[str, object]] = []
         self.sandbox = _FakeSandbox()
         self.close_calls = 0
 
-    def create(self, request=None):
+    def create(
+        self,
+        request=None,
+        *,
+        timeout: float = 60,
+        on_snapshot_create_logs=None,
+    ):
         self.created_requests.append(request)
+        self.create_call_kwargs.append(
+            {
+                "timeout": timeout,
+                "on_snapshot_create_logs": on_snapshot_create_logs,
+            }
+        )
         return self.sandbox
 
     def get(self, sandbox_id: str):
@@ -135,9 +148,19 @@ class _LoopBoundClient(_FakeClient):
         super().__init__()
         self.sandbox = _LoopBoundSandbox()
 
-    def create(self, request=None):
+    def create(
+        self,
+        request=None,
+        *,
+        timeout: float = 60,
+        on_snapshot_create_logs=None,
+    ):
         self.sandbox.owner_loop_id = id(asyncio.get_running_loop())
-        return super().create(request=request)
+        return super().create(
+            request=request,
+            timeout=timeout,
+            on_snapshot_create_logs=on_snapshot_create_logs,
+        )
 
 
 def test_create_workspace_session_stages_context_and_mounts_volume(
@@ -185,6 +208,9 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
             "branch": "main",
         }
     ]
+    assert len(fake_client.create_call_kwargs) == 1
+    assert fake_client.create_call_kwargs[0]["timeout"] == 0
+    assert callable(fake_client.create_call_kwargs[0]["on_snapshot_create_logs"])
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes.md") for path in upload_paths)
     assert any(path.endswith("manifest.json") for path in upload_paths)
