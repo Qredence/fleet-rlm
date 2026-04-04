@@ -122,3 +122,5 @@ PLANS.md
 .output.txt
 
 .databricks
+databricks.yml
+typings/
