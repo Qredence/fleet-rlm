@@ -8,23 +8,24 @@ from typing import Any, Callable
 import dspy
 from dspy.primitives import FinalOutput
 
-from fleet_rlm.runtime.execution.interpreter_common import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     async_enter as _async_enter_impl,
 )
-from fleet_rlm.runtime.execution.interpreter_common import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     async_exit as _async_exit_impl,
 )
-from fleet_rlm.runtime.execution.interpreter_common import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     execution_profile_context,
     get_registered_tools,
     initialize_llm_query_state,
+    initialize_sub_rlm_state,
     initialize_tool_runtime_state,
     set_registered_tools,
 )
-from fleet_rlm.runtime.execution.interpreter_common import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     sync_enter as _sync_enter_impl,
 )
-from fleet_rlm.runtime.execution.interpreter_common import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
@@ -62,7 +63,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         repo_url: str | None = None,
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
+        sandbox_spec: Any | None = None,
         delete_session_on_shutdown: bool = True,
+        delete_context_on_shutdown: bool = False,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
         llm_call_timeout: int = 60,
@@ -81,7 +84,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         self.repo_url = repo_url
         self.repo_ref = repo_ref
         self.context_paths = dedupe_paths(list(context_paths or []))
+        self.sandbox_spec = sandbox_spec  # SandboxSpec with optional Image builder
         self.delete_session_on_shutdown = delete_session_on_shutdown
+        self.delete_context_on_shutdown = delete_context_on_shutdown
         self.default_execution_profile = default_execution_profile
         self.async_execute = async_execute
 
@@ -91,6 +96,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             max_llm_calls=max_llm_calls,
             llm_call_timeout=llm_call_timeout,
         )
+        initialize_sub_rlm_state(self)
         self.output_fields: list[dict[str, Any]] | None
         self._tools: dict[str, Callable[..., Any]]
         self.execution_event_callback: Callable[[dict[str, Any]], None] | None
@@ -427,6 +433,14 @@ class DaytonaInterpreter(LLMQueryMixin):
     def _ensure_session_sync(self) -> DaytonaSandboxSession:
         return _run_async_compat(self._aensure_session_impl)
 
+    def _session_matches_current_async_owner(
+        self, session: DaytonaSandboxSession
+    ) -> bool:
+        matches_current_owner = getattr(session, "matches_current_async_owner", None)
+        if callable(matches_current_owner):
+            return bool(matches_current_owner())
+        return False
+
     async def _aensure_session_impl(self) -> DaytonaSandboxSession:
         self._ensure_runtime_available()
         source_key = (
@@ -437,7 +451,15 @@ class DaytonaInterpreter(LLMQueryMixin):
         )
         should_report_recreated = False
         if self._session is not None:
-            if self._session_needs_recreation(desired_volume=self.volume_name):
+            if not self._session_matches_current_async_owner(self._session):
+                await self._adetach_session(delete=False)
+                # Clear the persisted context_id so the resumed session
+                # creates a fresh interpreter context on the current loop
+                # instead of reusing one bound to the old loop.
+                # (Fixes "Future attached to a different loop" errors when
+                # child dspy.RLM modules run from worker threads.)
+                self._persisted_context_id = None
+            elif self._session_needs_recreation(desired_volume=self.volume_name):
                 should_report_recreated = True
                 await self._adetach_session(delete=True)
             elif self._session_source_key == source_key:
@@ -505,6 +527,7 @@ class DaytonaInterpreter(LLMQueryMixin):
             ref=self.repo_ref,
             context_paths=list(self.context_paths),
             volume_name=self.volume_name,
+            spec=self.sandbox_spec,
         )
         self._session_source_key = source_key
         await self._areset_execution_state()
@@ -516,7 +539,9 @@ class DaytonaInterpreter(LLMQueryMixin):
         return self._session
 
     async def _aensure_session(self) -> DaytonaSandboxSession:
-        return await self._aensure_session_impl()
+        session = await self._aensure_session_impl()
+        await session.arefresh_activity()
+        return session
 
     async def aget_session(self) -> DaytonaSandboxSession:
         """Public async accessor to ensure and return the active sandbox session."""
@@ -560,6 +585,8 @@ class DaytonaInterpreter(LLMQueryMixin):
         try:
             if delete:
                 await active_session.adelete()
+            elif self.delete_context_on_shutdown:
+                await active_session.adelete_context()
             else:
                 await active_session.aclose_driver()
         finally:

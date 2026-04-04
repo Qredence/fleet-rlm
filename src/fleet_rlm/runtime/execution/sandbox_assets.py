@@ -10,7 +10,7 @@ import subprocess
 from typing import Any
 
 try:
-    from fleet_rlm.runtime.tools.volume_helpers import resolve_realpath_within_root
+    from fleet_rlm.runtime.tools.modal_volumes import resolve_realpath_within_root
 except ModuleNotFoundError:
     # The Modal sandbox bootstraps from bundled source text, so package imports
     # are not available until the host explicitly installs this repo inside the

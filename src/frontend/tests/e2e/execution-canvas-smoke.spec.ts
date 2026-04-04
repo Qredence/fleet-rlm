@@ -51,7 +51,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
               actor_id: "research-sub-agent",
               lane_key: "sub_agent:research-sub-agent",
               output: {
-                tool_name: "analyze_long_document",
+                tool_name: "summarize_long_document",
                 tool_output: "Sub-agent extracted requirements.",
               },
             },
@@ -117,8 +117,8 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
                 renderParts: [
                   {
                     kind: "tool",
-                    title: "analyze_long_document",
-                    toolType: "analyze_long_document",
+                    title: "summarize_long_document",
+                    toolType: "summarize_long_document",
                     state: "output-available",
                     input: { path: "docs/spec.md" },
                     output: longOutputText,
@@ -190,7 +190,7 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
   await page.getByRole("tab", { name: "Execution", exact: true }).click();
   await page
     .getByRole("button", {
-      name: /tool:\s*analyze_long_document/i,
+      name: /tool:\s*summarize_long_document/i,
     })
     .click();
   await expect(

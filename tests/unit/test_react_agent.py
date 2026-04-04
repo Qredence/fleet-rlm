@@ -39,7 +39,6 @@ def test_react_agent_constructed_with_explicit_signature_and_tools(
     for expected in [
         "load_document",
         "parallel_semantic_map",
-        "analyze_long_document",
         "summarize_long_document",
     ]:
         assert expected in tool_names, f"Missing tool: {expected}"
@@ -584,7 +583,6 @@ def test_signature_output_types_are_generic():
     """All Signature output fields should use typed generics, not bare list/dict."""
     import typing
     from fleet_rlm.runtime.agent.signatures import (
-        AnalyzeLongDocument,
         CodeChangePlan,
         ClarificationQuestionSignature,
         CoreMemoryUpdateProposal,
@@ -602,7 +600,6 @@ def test_signature_output_types_are_generic():
     )
 
     checks = [
-        (AnalyzeLongDocument, "findings", list[str]),
         (SummarizeLongDocument, "key_points", list[str]),
         (ExtractFromLogs, "matches", list[str]),
         (ExtractFromLogs, "patterns", dict[str, str]),

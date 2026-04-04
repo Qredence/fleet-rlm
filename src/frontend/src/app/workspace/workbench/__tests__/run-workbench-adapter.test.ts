@@ -38,10 +38,7 @@ describe("runWorkbenchAdapter", () => {
         runtime: {
           runtime_mode: "daytona_pilot",
           run_id: "run-123",
-          daytona_mode: "host_loop_rlm",
-        },
-        final_artifact: {
-          kind: "markdown",
+          daytona_mode: "daytona_pilot",
           value: {
             summary: "Readable final summary of the Daytona run.",
             final_markdown: "## Final\nDone",
@@ -141,7 +138,7 @@ describe("runWorkbenchAdapter", () => {
 
     expect(next.status).toBe("completed");
     expect(next.runId).toBe("run-123");
-    expect(next.daytonaMode).toBe("host_loop_rlm");
+    expect(next.daytonaMode).toBe("daytona_pilot");
     expect(next.contextSources[0]?.hostPath).toBe("/Users/zocho/Documents/spec.pdf");
     expect(next.iterations).toEqual([]);
     expect(next.callbacks).toEqual([]);
@@ -319,7 +316,7 @@ describe("runWorkbenchAdapter", () => {
       makeEvent("final", "Daytona summary complete", {
         source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
-        daytona_mode: "host_loop_rlm",
+        daytona_mode: "daytona_pilot",
         run_summary: {
           run_id: "run-daytona-1",
           runtime_mode: "daytona_pilot",
@@ -394,7 +391,7 @@ describe("runWorkbenchAdapter", () => {
 
     expect(next.status).toBe("completed");
     expect(next.runId).toBe("run-daytona-1");
-    expect(next.daytonaMode).toBe("host_loop_rlm");
+    expect(next.daytonaMode).toBe("daytona_pilot");
     expect(next.contextSources[0]?.hostPath).toBe("/workspace/docs/overview.md");
     expect(next.promptHandles[0]?.handleId).toBe("prompt-daytona-1");
     expect(next.iterations[0]?.reasoningSummary).toContain("Daytona");
@@ -513,6 +510,64 @@ describe("runWorkbenchAdapter", () => {
     expect(withToolResult.callbacks[0]?.label).toBe("Overview");
     expect(withToolResult.callbacks[0]?.source?.path).toBe("docs/overview.md");
     expect(withToolResult.callbacks[0]?.resultPreview).toContain("system topology");
+  });
+
+  it("does not regress cancelled callbacks back to running on replayed tool calls", () => {
+    const state = {
+      ...createInitialRunWorkbenchState(),
+      status: "running" as const,
+      callbacks: [
+        {
+          id: "callback-1",
+          callbackName: "llm_query",
+          iteration: 1,
+          status: "cancelled",
+          task: "Summarize the overview section",
+        },
+      ],
+    };
+
+    const next = applyFrameToRunWorkbenchState(
+      state,
+      makeEvent("tool_call", "Running host callback `llm_query`.", {
+        runtime_mode: "daytona_pilot",
+        iteration: 1,
+        callback_name: "llm_query",
+        tool_input: {
+          task: {
+            task: "Summarize the overview section",
+          },
+        },
+      }),
+    );
+
+    expect(next.callbacks[0]?.status).toBe("cancelled");
+  });
+
+  it("marks orphaned callbacks as cancelled when the run is cancelled", () => {
+    const state = {
+      ...createInitialRunWorkbenchState(),
+      status: "running" as const,
+      callbacks: [
+        {
+          id: "callback-1",
+          callbackName: "llm_query",
+          iteration: 1,
+          status: "running",
+          task: "Summarize the overview section",
+        },
+      ],
+    };
+
+    const next = applyFrameToRunWorkbenchState(
+      state,
+      makeEvent("cancelled", "Run cancelled", {
+        runtime_mode: "daytona_pilot",
+      }),
+    );
+
+    expect(next.status).toBe("cancelled");
+    expect(next.callbacks[0]?.status).toBe("cancelled");
   });
 
   it("keeps distinct callbacks when the task text repeats across sources", () => {

@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .types_context import ContextSource
-from .types_result import DaytonaRunResult
+from .types import ContextSource, DaytonaRunResult
 
 
 def render_final_text(value: Any) -> str:

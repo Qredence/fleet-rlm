@@ -10,7 +10,7 @@ from typing import AbstractSet, Any, Callable
 
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
-from fleet_rlm.runtime.execution.interpreter_events import (
+from fleet_rlm.runtime.execution.interpreter_support import (
     complete_event_data,
     emit_execution_event,
     start_event_data,
@@ -48,28 +48,100 @@ def build_delegate_child(
     *,
     remaining_llm_budget: int,
 ) -> Any:
-    runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
-    child = interpreter.__class__(
-        runtime=runtime,
-        owns_runtime=True,
-        timeout=interpreter.timeout,
-        execute_timeout=interpreter.execute_timeout,
-        volume_name=interpreter.volume_name,
-        repo_url=interpreter.repo_url,
-        repo_ref=interpreter.repo_ref,
-        context_paths=list(interpreter.context_paths),
-        delete_session_on_shutdown=True,
-        sub_lm=interpreter.sub_lm,
-        max_llm_calls=remaining_llm_budget,
-        llm_call_timeout=interpreter.llm_call_timeout,
-        default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-        async_execute=interpreter.async_execute,
+    """Build a child interpreter for sub_rlm() calls.
+
+    Optimization: reuses the parent's sandbox session with a fresh
+    execution context instead of creating a new container (~30-60s saved).
+    Falls back to a new sandbox if the parent has no active session.
+
+    Uses Daytona's ``sandbox.code_interpreter.create_context()`` for
+    isolation — see https://www.daytona.io/docs/sdk-reference
+    """
+    from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
+
+    parent_session = getattr(interpreter, "_session", None)
+    can_reuse = (
+        parent_session is not None
+        and getattr(parent_session, "sandbox", None) is not None
     )
+
+    if can_reuse:
+        # Type narrowing for ty: parent_session is not None here
+        assert parent_session is not None
+        # Share parent's runtime + sandbox; child owns nothing
+        child = interpreter.__class__(
+            runtime=interpreter.runtime,
+            owns_runtime=False,
+            timeout=interpreter.timeout,
+            execute_timeout=interpreter.execute_timeout,
+            volume_name=interpreter.volume_name,
+            repo_url=interpreter.repo_url,
+            repo_ref=interpreter.repo_ref,
+            context_paths=list(interpreter.context_paths),
+            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+            delete_session_on_shutdown=False,
+            delete_context_on_shutdown=True,
+            sub_lm=interpreter.sub_lm,
+            max_llm_calls=remaining_llm_budget,
+            llm_call_timeout=interpreter.llm_call_timeout,
+            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+            async_execute=interpreter.async_execute,
+        )
+        # Wire a shallow session clone so child creates a FRESH context
+        # on the same sandbox (no new container needed).
+        child._session = DaytonaSandboxSession(
+            sandbox=parent_session.sandbox,
+            repo_url=parent_session.repo_url,
+            ref=parent_session.ref,
+            volume_name=parent_session.volume_name,
+            workspace_path=parent_session.workspace_path,
+            context_sources=list(parent_session.context_sources),
+            volume_mount_path=parent_session.volume_mount_path,
+            context_id=None,  # Force create_context() on start
+        )
+        # Give the child session a runtime back-reference so it can
+        # re-obtain a loop-correct sandbox handle if it is later called
+        # from a different asyncio loop (see aensure_context).
+        child._session._runtime_ref = interpreter.runtime
+        try:
+            child._session.bind_current_async_owner()
+        except RuntimeError:
+            # No running event loop (sync context); owner will be
+            # bound when the session is first used asynchronously.
+            pass
+        child._persisted_sandbox_id = parent_session.sandbox_id
+        child._persisted_workspace_path = parent_session.workspace_path
+    else:
+        # Fallback: create a new sandbox (original behavior)
+        runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
+        child = interpreter.__class__(
+            runtime=runtime,
+            owns_runtime=True,
+            timeout=interpreter.timeout,
+            execute_timeout=interpreter.execute_timeout,
+            volume_name=interpreter.volume_name,
+            repo_url=interpreter.repo_url,
+            repo_ref=interpreter.repo_ref,
+            context_paths=list(interpreter.context_paths),
+            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+            delete_session_on_shutdown=True,
+            sub_lm=interpreter.sub_lm,
+            max_llm_calls=remaining_llm_budget,
+            llm_call_timeout=interpreter.llm_call_timeout,
+            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+            async_execute=interpreter.async_execute,
+        )
+
     setattr(
         child,
         "_check_and_increment_llm_calls",
         interpreter._check_and_increment_llm_calls,
     )
+    # Propagate recursion depth so sub_rlm() inside child REPL code
+    # is depth-aware (Algorithm 1 from arXiv 2512.24601v2).
+    parent_depth = getattr(interpreter, "_sub_rlm_depth", 0)
+    parent_max = getattr(interpreter, "_sub_rlm_max_depth", 2)
+    initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
     return child
 
 
@@ -396,8 +468,18 @@ def bridge_tools(
         for name, tool in interpreter._tools.items()
         if name not in native_tool_names
     }
-    tools["llm_query"] = interpreter.llm_query
-    tools["llm_query_batched"] = interpreter.llm_query_batched
+    # Prefer dspy.RLM-injected llm_query (fresh per-forward counter + sub_lm);
+    # fall back to interpreter methods when running outside dspy.RLM.
+    if "llm_query" not in tools:
+        tools["llm_query"] = interpreter.llm_query
+    if "llm_query_batched" not in tools:
+        tools["llm_query_batched"] = interpreter.llm_query_batched
+    # True-RLM symbolic recursion primitives (Algorithm 1, arXiv 2512.24601v2).
+    # These allow sandbox code to call sub_rlm() inside loops.
+    if "sub_rlm" not in tools and hasattr(interpreter, "sub_rlm"):
+        tools["sub_rlm"] = interpreter.sub_rlm
+    if "sub_rlm_batched" not in tools and hasattr(interpreter, "sub_rlm_batched"):
+        tools["sub_rlm_batched"] = interpreter.sub_rlm_batched
     return tools
 
 
@@ -419,7 +501,11 @@ def invoke_tool(
     kwargs: dict[str, Any],
 ) -> Any:
     try:
-        if name == "llm_query":
+        # Prefer dspy.RLM-injected tools (fresh counter + sub_lm per forward());
+        # fall back to interpreter methods for standalone use.
+        if name in interpreter._tools:
+            value = interpreter._tools[name](*args, **kwargs)
+        elif name == "llm_query":
             prompt = args[0] if args else kwargs.get("prompt", "")
             value = interpreter.llm_query(str(prompt))
         elif name == "llm_query_batched":
@@ -427,8 +513,6 @@ def invoke_tool(
             if not isinstance(prompts, list):
                 prompts = []
             value = interpreter.llm_query_batched([str(item) for item in prompts])
-        elif name in interpreter._tools:
-            value = interpreter._tools[name](*args, **kwargs)
         else:
             raise RuntimeError(f"Unknown host callback: {name}")
         try:

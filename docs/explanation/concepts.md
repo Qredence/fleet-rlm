@@ -11,6 +11,7 @@ today, while Modal remains supported.
 `RLMReActChatAgent` is the interactive orchestrator.
 
 It:
+
 - receives user requests from CLI/API/WS
 - decides tool actions
 - streams intermediate/final events
@@ -21,7 +22,7 @@ It:
 For deep tasks, runners and tools use DSPy RLM signatures and iterative sandbox execution.
 
 Examples:
-- `AnalyzeLongDocument`
+
 - `SummarizeLongDocument`
 - `ExtractFromLogs`
 
@@ -30,11 +31,13 @@ Examples:
 Interpreter backends provide isolated remote execution.
 
 Benefits:
+
 - sandbox isolation from host environment
 - persistent storage integration when configured
 - controlled execution profiles for root/delegate behavior
 
 Current backend shape:
+
 - Daytona is the primary workspace/runtime backend
 - Modal remains available for compatible flows
 - both backends feed the same ReAct + recursive `dspy.RLM` runtime
@@ -50,15 +53,18 @@ All surfaces converge on shared orchestration/runtime modules.
 ## 5. Observability and State
 
 The system emits:
+
 - chat stream events (`/api/v1/ws/chat`)
 - execution graph events (`/api/v1/ws/execution`)
 
 Persistence model:
+
 - canonical multi-tenant state in Neon/Postgres
 
 ## 6. Auth and Environment Guardrails
 
 Runtime behavior is environment-sensitive via config:
+
 - `APP_ENV`
 - `AUTH_MODE`
 - `AUTH_REQUIRED`

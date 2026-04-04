@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.integrations.providers.daytona.types_result import DaytonaRunResult
+from fleet_rlm.integrations.providers.daytona.types import DaytonaRunResult
 
 
 def test_daytona_run_result_from_raw_and_public_sources() -> None:

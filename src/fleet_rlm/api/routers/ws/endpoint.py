@@ -98,6 +98,7 @@ async def execution_stream(
     except WebSocketDisconnect:
         await emitter.disconnect(websocket)
     except Exception:
+        logger.debug("execution_stream_receive_error", exc_info=True)
         await emitter.disconnect(websocket)
 
 

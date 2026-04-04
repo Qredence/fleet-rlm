@@ -8,7 +8,7 @@ import pytest
 
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from fleet_rlm.runtime.agent.delegation_policy import RuntimeModuleExecutionResult
-from fleet_rlm.runtime.tools.runtime_module_helpers import (
+from fleet_rlm.runtime.tools.llm_tools import (
     run_cached_runtime_module,
     runtime_metadata,
 )
@@ -34,7 +34,7 @@ def test_run_cached_runtime_module_uses_shared_delegation_policy(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.runtime_module_helpers.invoke_runtime_module",
+        "fleet_rlm.runtime.tools.llm_tools.invoke_runtime_module",
         _fake_invoke,
     )
 
@@ -147,7 +147,7 @@ def test_run_cached_runtime_module_returns_error_payloads(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.runtime_module_helpers.invoke_runtime_module",
+        "fleet_rlm.runtime.tools.llm_tools.invoke_runtime_module",
         _fake_invoke,
     )
 

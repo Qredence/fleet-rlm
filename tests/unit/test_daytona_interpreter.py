@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -186,6 +188,7 @@ class _FakeRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: object | None = None,
     ) -> DaytonaSandboxSession:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
@@ -193,6 +196,8 @@ class _FakeRuntime:
         self.session.repo_url = repo_url
         self.session.ref = ref
         self.session.volume_name = volume_name
+        self.session.owner_thread_id = threading.get_ident()
+        self.session.owner_loop_id = id(asyncio.get_running_loop())
         workspace_name = (
             str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
             or "repo"
@@ -221,6 +226,8 @@ class _FakeRuntime:
         self.session.ref = ref
         self.session.volume_name = volume_name
         self.session.workspace_path = workspace_path
+        self.session.owner_thread_id = threading.get_ident()
+        self.session.owner_loop_id = id(asyncio.get_running_loop())
         del context_sources
         return self.session
 
@@ -240,6 +247,8 @@ class _FakeRuntime:
         session.repo_url = repo_url
         session.ref = ref
         session.context_sources = []
+        session.owner_thread_id = threading.get_ident()
+        session.owner_loop_id = id(asyncio.get_running_loop())
         if repo_url:
             session.workspace_path = "/workspace/reconfigured"
         return session
@@ -421,6 +430,25 @@ def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -
     assert interpreter._last_workspace_reconfigured is True
 
 
+def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.start()
+
+    runtime.session.owner_thread_id = -1
+    runtime.session.owner_loop_id = -1
+
+    ensured = interpreter._ensure_session_sync()
+
+    assert ensured is runtime.session
+    # context_id is cleared on loop-owner mismatch so a fresh interpreter
+    # context is created on the current event loop (prevents "Future attached
+    # to a different loop" errors in child dspy.RLM modules).
+    assert runtime.resume_calls == [("sbx-123", None)]
+    assert interpreter._last_sandbox_transition == "resumed"
+    assert interpreter._last_workspace_reconfigured is False
+
+
 def test_daytona_interpreter_marks_reconcile_recreate_fallback_as_degraded() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(
@@ -538,6 +566,43 @@ def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code
         )
 
 
+def test_bridge_tools_prefers_dspy_rlm_injected_llm_query() -> None:
+    """When dspy.RLM injects llm_query into interpreter._tools, the bridge
+    should use that version (fresh counter per forward) rather than the
+    interpreter's own LLMQueryMixin method."""
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    # Simulate dspy.RLM injection via interpreter.tools.update(...)
+    calls: list[str] = []
+
+    def injected_llm_query(prompt: str) -> str:
+        calls.append(prompt)
+        return "injected"
+
+    interpreter.tools = {"llm_query": injected_llm_query}
+
+    bridge = interpreter._bridge_tools()
+    assert bridge["llm_query"] is injected_llm_query
+
+    # invoke_tool should also use the injected version
+    result = interpreter._invoke_tool("llm_query", ["hello"], {})
+    assert result == "injected"
+    assert calls == ["hello"]
+
+
+def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
+    """When no dspy.RLM injection has happened, bridge_tools falls back to
+    the interpreter's LLMQueryMixin.llm_query method."""
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    # No injection — _tools should be empty
+    bridge = interpreter._bridge_tools()
+    assert bridge["llm_query"] == interpreter.llm_query
+    assert bridge["llm_query_batched"] == interpreter.llm_query_batched
+
+
 def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     runtime = _FakeRuntime()
     runtime.closed = 0
@@ -553,3 +618,48 @@ def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     interpreter.shutdown()
 
     assert runtime.closed == 1
+
+
+def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> (
+    None
+):
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        delete_session_on_shutdown=False,
+        delete_context_on_shutdown=True,
+    )
+
+    delete_context_calls = 0
+    close_driver_calls = 0
+    delete_calls = 0
+
+    async def _adelete_context() -> None:
+        nonlocal delete_context_calls
+        delete_context_calls += 1
+
+    async def _aclose_driver() -> None:
+        nonlocal close_driver_calls
+        close_driver_calls += 1
+
+    async def _adelete() -> None:
+        nonlocal delete_calls
+        delete_calls += 1
+
+    fake_session = SimpleNamespace(
+        sandbox_id="sbx-child",
+        workspace_path="/workspace/repo",
+        context_sources=[],
+        context_id="ctx-child",
+        volume_name=None,
+        adelete_context=_adelete_context,
+        aclose_driver=_aclose_driver,
+        adelete=_adelete,
+    )
+    interpreter._session = fake_session  # type: ignore[assignment]
+
+    interpreter.shutdown()
+
+    assert delete_context_calls == 1
+    assert close_driver_calls == 0
+    assert delete_calls == 0

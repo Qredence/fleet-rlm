@@ -5,7 +5,7 @@ description: Run fleet-rlm through its current public entrypoints. Use when you 
 
 # RLM Runner
 
-Use this skill for current entrypoint selection, not legacy `run-*` demos.
+Use this skill for current entrypoint selection.
 
 ## Public Entry Points
 
@@ -30,11 +30,16 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 
 ```python
 import dspy
-from fleet_rlm import ModalInterpreter, configure_planner_from_env
+from fleet_rlm.runtime.config import configure_planner_from_env
+from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
 
 configure_planner_from_env()  # Load .env and configure the planner LM
 
-interpreter = ModalInterpreter(timeout=120, volume_name="my-project")
+interpreter = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    volume_name="my-project",
+    timeout=120,
+)
 rlm = dspy.RLM(
     signature="question -> answer, confidence",
     interpreter=interpreter,
@@ -43,57 +48,80 @@ rlm = dspy.RLM(
     verbose=True,  # Show trajectory
 )
 
-result = rlm(question="What are the first 10 Fibonacci numbers?")
-print(result.answer)       # Access via dot notation
-print(result.confidence)   # NOT result["confidence"]
+try:
+    result = rlm(question="What are the first 10 Fibonacci numbers?")
+    print(result.answer)       # Access via dot notation
+    print(result.confidence)   # NOT result["confidence"]
+finally:
+    interpreter.shutdown()
 ```
 
 ## Configuration Options
 
-| Parameter        | Description               | Default            |
-| ---------------- | ------------------------- | ------------------ |
-| `signature`      | Input/output fields       | `"task -> result"` |
-| `max_iterations` | Max RLM iterations        | 10                 |
-| `max_llm_calls`  | Max sub-LLM calls         | 20                 |
-| `timeout`        | Sandbox timeout (seconds) | 120                |
-| `verbose`        | Show full trajectory      | False              |
-| `volume_name`    | Volume for persistence    | None               |
+| Parameter        | Description                    | Default            |
+| ---------------- | ------------------------------ | ------------------ |
+| `signature`      | Input/output fields            | `"task -> result"` |
+| `max_iterations` | Max RLM iterations             | 10                 |
+| `max_llm_calls`  | Max sub-LLM calls              | 20                 |
+| `timeout`        | Sandbox timeout (seconds)      | 900                |
+| `verbose`        | Show full trajectory           | False              |
+| `volume_name`    | Daytona persistent volume name | None               |
+| `repo_url`       | Repo to stage into sandbox     | None               |
+| `repo_ref`       | Branch/commit for repo staging | None               |
+| `context_paths`  | Paths to stage from repo       | None               |
 
-## Runtime Reminder
+## Runtime
 
-- `modal_chat` is the default runtime path
-- `daytona_pilot` is the Daytona-backed variant of the same shared runtime
-- If the task is Daytona-specific, also load `daytona-runtime`
+- `daytona_pilot` is the primary runtime path
+- Daytona is the interpreter/sandbox backend on the shared ReAct + `dspy.RLM` backbone
+- Load `daytona-runtime` for Daytona-specific volume, session, and smoke-test guidance
 
 ## Execution Patterns
 
 ### Simple Task
 
 ```python
-rlm = dspy.RLM(
-    signature="question -> answer",
-    interpreter=ModalInterpreter(timeout=60),
-    max_iterations=5,
-)
-result = rlm(question="What is 15 factorial?")
-print(result.answer)
+from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+
+interp = DaytonaInterpreter(timeout=60)
+interp.start()
+try:
+    rlm = dspy.RLM(
+        signature="question -> answer",
+        interpreter=interp,
+        max_iterations=5,
+    )
+    result = rlm(question="What is 15 factorial?")
+    print(result.answer)
+finally:
+    interp.shutdown()
 ```
 
-### Document Analysis
+### Document Summarization
 
 ```python
-from fleet_rlm.runtime.agent.signatures import AnalyzeLongDocument
+from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
+from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
 
 doc = open("large_document.txt").read()
-rlm = dspy.RLM(
-    signature=AnalyzeLongDocument,
-    interpreter=ModalInterpreter(timeout=300, volume_name="analysis"),
-    max_iterations=20,
-    verbose=True,
+interp = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    volume_name="analysis",
+    timeout=300,
 )
-result = rlm(document=doc, query="Find key design decisions")
-print(result.findings)
-print(result.answer)
+interp.start()
+try:
+    rlm = dspy.RLM(
+        signature=SummarizeLongDocument,
+        interpreter=interp,
+        max_iterations=20,
+        verbose=True,
+    )
+    result = rlm(document=doc, focus="Find key design decisions")
+    print(result.key_points)
+    print(result.summary)
+finally:
+    interp.shutdown()
 ```
 
 ### Trajectory Inspection

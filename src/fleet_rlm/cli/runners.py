@@ -29,7 +29,6 @@ from typing import Any, Literal
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import (
-    AnalyzeLongDocument,
     SummarizeLongDocument,
 )
 from fleet_rlm.runtime.config import build_dspy_context
@@ -242,7 +241,7 @@ def run_long_context(
     *,
     docs_path: Path | str,
     query: str,
-    mode: str = "analyze",
+    mode: str = "summarize",
     max_iterations: int = 30,
     max_llm_calls: int = 50,
     verbose: bool = True,
@@ -252,7 +251,7 @@ def run_long_context(
     include_trajectory: bool = True,
     env_file: Path | None = None,
 ) -> dict[str, Any]:
-    """Run a long-context analysis or summarization task.
+    """Run a long-context summarization task.
 
     Loads a document into the sandbox and uses injected helpers
     (``peek``, ``grep``, ``chunk_by_size``, ``chunk_by_headers``,
@@ -261,8 +260,8 @@ def run_long_context(
 
     Args:
         docs_path: Path to the document file.
-        query: The analysis query or focus topic.
-        mode: ``"analyze"`` (default) or ``"summarize"``.
+        query: The focus topic or question to summarize against.
+        mode: ``"summarize"`` or the legacy compatibility alias ``"analyze"``.
         max_iterations: Maximum RLM iterations (default: 30).
         max_llm_calls: Maximum LLM calls (default: 50).
         verbose: Enable verbose output (default: True).
@@ -273,13 +272,16 @@ def run_long_context(
         env_file: Optional path to .env file.
 
     Returns:
-        Dictionary with results specific to the chosen mode.
+        Dictionary with summary results.
 
     Raises:
         ValueError: If *mode* is not ``"analyze"`` or ``"summarize"``.
     """
-    if mode not in ("analyze", "summarize"):
-        raise ValueError(f"mode must be 'analyze' or 'summarize', got {mode!r}")
+    normalized_mode = mode.strip().lower()
+    if normalized_mode == "analyze":
+        normalized_mode = "summarize"
+    if normalized_mode != "summarize":
+        raise ValueError(f"mode must be 'summarize', got {mode!r}")
 
     docs_path = Path(docs_path)
     if not docs_path.exists():
@@ -287,7 +289,7 @@ def run_long_context(
     docs = docs_path.read_text()
     _require_planner_ready(env_file)
 
-    sig = AnalyzeLongDocument if mode == "analyze" else SummarizeLongDocument
+    sig = SummarizeLongDocument
 
     with (
         ModalInterpreter(
@@ -298,7 +300,7 @@ def run_long_context(
                 entrypoint="run-long-context",
                 request_preview=query,
                 metadata={
-                    "fleet_rlm.mode": mode,
+                    "fleet_rlm.mode": normalized_mode,
                     "fleet_rlm.docs_path": str(docs_path),
                 },
             )
@@ -312,24 +314,14 @@ def run_long_context(
             verbose=verbose,
         )
 
-        if mode == "analyze":
-            result = rlm(document=docs, query=query)
-            response: dict[str, Any] = {
-                "findings": result.findings,
-                "answer": result.answer,
-                "sections_examined": result.sections_examined,
-                "doc_chars": len(docs),
-            }
-            response_preview = str(getattr(result, "answer", "") or "")
-        else:
-            result = rlm(document=docs, focus=query)
-            response = {
-                "summary": result.summary,
-                "key_points": result.key_points,
-                "coverage_pct": result.coverage_pct,
-                "doc_chars": len(docs),
-            }
-            response_preview = str(getattr(result, "summary", "") or "")
+        result = rlm(document=docs, focus=query)
+        response: dict[str, Any] = {
+            "summary": result.summary,
+            "key_points": result.key_points,
+            "coverage_pct": result.coverage_pct,
+            "doc_chars": len(docs),
+        }
+        response_preview = str(getattr(result, "summary", "") or "")
 
         response.update(
             _rlm_trajectory_payload(result, include_trajectory=include_trajectory)

@@ -1,11 +1,11 @@
 ---
 name: rlm-long-context
-description: (EXPERIMENTAL) Research implementation for RLM long-context processing using standalone Python scripts. For production use, prefer the rlm skill which uses the fleet-rlm package with Modal sandboxes. This skill is for experimentation, evaluation, and alternative implementation patterns.
+description: (EXPERIMENTAL) Research implementation for RLM long-context processing using standalone Python scripts. For production use, prefer the rlm skill which uses the fleet-rlm package with Daytona sandboxes. This skill is for experimentation, evaluation, and alternative implementation patterns.
 ---
 
 # RLM Long-Context Processing (Experimental)
 
-> **For production use**, prefer the **`rlm` skill** which uses the fleet-rlm package with Modal cloud sandboxes.
+> **For production use**, prefer the **`rlm` skill** which uses the fleet-rlm package with Daytona sandboxes.
 >
 > **Use this skill** for evaluating alternative RLM strategies, researching optimization techniques, or comparing approaches.
 
@@ -49,15 +49,15 @@ Main Agent (Orchestrator)
 
 ```bash
 # Rank chunks by query relevance (skip irrelevant ones)
-python3 .claude/skills/rlm-long-context/scripts/rank_chunks.py \
+python3 src/fleet_rlm/scaffold/skills/rlm-long-context/scripts/rank_chunks.py \
   --query "find all timeout errors" --top-k 10
 
 # Chunk by semantic boundaries (auto-detects content type)
-python3 .claude/skills/rlm-long-context/scripts/semantic_chunk.py \
+python3 src/fleet_rlm/scaffold/skills/rlm-long-context/scripts/semantic_chunk.py \
   --state .claude/rlm_state/state.pkl
 
 # For codebases: concatenate files first
-python3 .claude/skills/rlm-long-context/scripts/codebase_concat.py \
+python3 src/fleet_rlm/scaffold/skills/rlm-long-context/scripts/codebase_concat.py \
   --root ./src --output codebase.txt
 ```
 

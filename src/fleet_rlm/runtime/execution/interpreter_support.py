@@ -1,13 +1,127 @@
-"""Execution event helpers for :mod:`fleet_rlm.runtime.execution.interpreter`."""
+"""Shared helpers and event types for interpreter implementations.
+
+This module combines infrastructure used by both the Modal interpreter
+(``interpreter.py``) and the Daytona interpreter
+(``integrations/providers/daytona/interpreter.py``).  It intentionally
+stays separate from the protocol definitions in ``interpreter_protocol.py``
+which are consumed by the tools layer.
+"""
 
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
-from fleet_rlm.runtime.content.logs.execution_limits import execution_max_text_chars
+import dspy
+
+from fleet_rlm.runtime.content.execution_limits import execution_max_text_chars
+
+from .profiles import ExecutionProfile
+
+# ---------------------------------------------------------------------------
+# Common interpreter helpers (previously interpreter_common.py)
+# ---------------------------------------------------------------------------
+
+
+def initialize_llm_query_state(
+    target: Any,
+    *,
+    sub_lm: dspy.LM | None,
+    max_llm_calls: int,
+    llm_call_timeout: int,
+) -> None:
+    """Populate shared LLM-query state used by interpreter backends."""
+    target.sub_lm = sub_lm
+    target.max_llm_calls = max_llm_calls
+    target.llm_call_timeout = llm_call_timeout
+    target._llm_call_count = 0
+    target._llm_call_lock = threading.Lock()
+    target._sub_lm_executor = None
+    target._sub_lm_executor_lock = threading.Lock()
+
+
+def initialize_sub_rlm_state(
+    target: Any,
+    *,
+    depth: int = 0,
+    max_depth: int = 2,
+) -> None:
+    """Populate recursion-depth state for sub_rlm() calls."""
+    target._sub_rlm_depth = depth
+    target._sub_rlm_max_depth = max_depth
+
+
+def initialize_tool_runtime_state(target: Any) -> None:
+    """Populate shared tool and execution callback state."""
+    target.output_fields = None
+    target._tools = {}
+    target.execution_event_callback = None
+
+
+def get_registered_tools(target: Any) -> dict[str, Callable[..., Any]]:
+    """Return the registered tool map for an interpreter."""
+    return target._tools
+
+
+def set_registered_tools(
+    target: Any,
+    value: dict[str, Callable[..., Any]],
+) -> None:
+    """Replace the registered tool map for an interpreter."""
+    target._tools = value
+
+
+@contextmanager
+def execution_profile_context(
+    target: Any,
+    profile: ExecutionProfile,
+):
+    """Temporarily override the default execution profile."""
+    previous = target.default_execution_profile
+    target.default_execution_profile = profile
+    try:
+        yield target
+    finally:
+        target.default_execution_profile = previous
+
+
+def sync_enter(target: Any) -> Any:
+    """Start an interpreter for sync context manager usage."""
+    target.start()
+    return target
+
+
+def sync_exit(target: Any) -> bool:
+    """Shutdown an interpreter for sync context manager usage."""
+    target.shutdown()
+    return False
+
+
+async def async_enter(target: Any) -> Any:
+    """Start an interpreter for async context manager usage."""
+    if target.async_execute:
+        await target.astart()
+    else:
+        target.start()
+    return target
+
+
+async def async_exit(target: Any) -> bool:
+    """Shutdown an interpreter for async context manager usage."""
+    if target.async_execute:
+        await target.ashutdown()
+    else:
+        target.shutdown()
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Execution event types and helpers (previously interpreter_events.py)
+# ---------------------------------------------------------------------------
 
 
 class SupportsExecutionEventCallback(Protocol):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import asyncio
-import base64
 import inspect
 import json
 import os
@@ -14,12 +13,12 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 
-from fleet_rlm.runtime.content.document_ingestion.main import read_document_content
+from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
 
 from .config import ResolvedDaytonaConfig
 from .diagnostics import DaytonaDiagnosticError
-from .types_context import ContextSource
+from .types import ContextSource
 
 DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 
@@ -359,10 +358,8 @@ async def _arun_admin_code(
     error_prefix: str,
     category: str = "sandbox_create_clone_error",
 ) -> str:
-    encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
-    command = f"printf '%s' '{encoded}' | base64 -d | python3 -u -"
     try:
-        result = await _await_if_needed(sandbox.process.exec(command))
+        result = await _await_if_needed(sandbox.process.code_run(code))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"{error_prefix}: {exc}",

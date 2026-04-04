@@ -66,6 +66,25 @@ def test_default_config_uses_agent_model_env(monkeypatch: pytest.MonkeyPatch):
     assert cfg.agent_model == "openai/gpt-4.1-mini"
 
 
+def test_server_runtime_config_treats_blank_model_env_values_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DSPY_LM_MODEL", "   ")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_SMALL_MODEL", "\t")
+
+    cfg = ServerRuntimeConfig()
+
+    assert cfg.agent_model is None
+    assert cfg.agent_delegate_model is None
+    assert cfg.agent_delegate_small_model is None
+
+
+def test_server_runtime_config_rejects_model_without_provider_prefix() -> None:
+    with pytest.raises(ValidationError, match="provider prefix"):
+        ServerRuntimeConfig(agent_model="gpt-4.1-mini")
+
+
 def test_resolve_server_volume_name_defaults_to_persistent_volume() -> None:
     config = AppConfig()
     assert resolve_server_volume_name(config) == "rlm-volume-dspy"

@@ -62,27 +62,39 @@
 
 ## fleet-rlm Built-in Signatures
 
-From `src/fleet_rlm/react/signatures.py`:
+From `src/fleet_rlm/runtime/agent/signatures.py`:
 
 ```python
-# Architecture extraction
-"docs, query -> modules, optimizers, design_principles"
+# Interactive ReAct chat with conversation history
+"user_request, core_memory, history -> assistant_response"
 
-# API endpoint extraction
-"docs -> api_endpoints"
-
-# Error pattern analysis
-"docs -> error_categories, total_errors_found"
-
-# Custom tool extraction
-"docs -> headers, code_blocks, structure_summary"
-
-# Long document analysis
-"document, query -> findings, answer, sections_examined"
-
-# Long document summarization
+# Long document summarization with focus control
 "document, focus -> summary, key_points, coverage_pct"
 
-# Log extraction
+# Log pattern extraction
 "logs, query -> matches, patterns, time_range"
+
+# Evidence-grounded answer with citations
+"query, evidence_chunks, response_style -> answer, citations, confidence, coverage_notes"
+
+# Incident triage from logs
+"logs, service_context, query -> severity, probable_root_causes, impacted_components, recommended_actions, time_range"
+
+# Structured code change planning
+"task, repo_context, constraints -> plan_steps, files_to_touch, validation_commands, risks"
+
+# Core memory update proposal
+"turn_history, current_memory -> keep, update, remove, rationale"
+
+# Volume file-tree traversal
+"root_path, max_depth, include_hidden -> nodes, total_files, total_dirs, truncated"
+
+# Memory action intent classification
+"user_request, current_tree, policy_constraints -> action_type, target_paths, content_plan, risk_level, requires_confirmation, rationale"
+
+# Recursive sub-query (bounded delegation)
+"prompt, context -> answer"
+
+# Long-prompt variable exploration (Algorithm 1)
+"task, prompt -> answer"
 ```

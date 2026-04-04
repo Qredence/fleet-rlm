@@ -47,7 +47,11 @@ def get_default_judge_model() -> str:
     return os.environ.get("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
 
 
-def build_rlm_scorers(model: str | None = None) -> list[Any]:
+def build_rlm_scorers(
+    model: str | None = None,
+    *,
+    include_retrieval_groundedness: bool = True,
+) -> list[Any]:
     """
     Build the recommended MLflow GenAI scorers for evaluating the RLM agent.
 
@@ -67,9 +71,13 @@ def build_rlm_scorers(model: str | None = None) -> list[Any]:
         ToolCallCorrectness(model=judge_model),
         # Evaluates if the agent was efficient (no redundant/repeated tool calls)
         ToolCallEfficiency(model=judge_model),
-        # Evaluates if the agent's answer was grounded in the tool output (prevents hallucination)
-        RetrievalGroundedness(model=judge_model),
     ]
+    if include_retrieval_groundedness:
+        scorers.append(
+            # Evaluates if the agent's answer was grounded in the tool output
+            # (prevents hallucination when retrieval context exists).
+            RetrievalGroundedness(model=judge_model)
+        )
 
     # The reasoning-quality judge may expose trace inputs (including tool I/O, URLs,
     # or user data) to an external LLM. Require explicit opt-in to enable it.

@@ -452,6 +452,11 @@ function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
           };
         case "task":
           return part.status === "in_progress" ? { ...part, status: "completed" as const } : part;
+        case "tool":
+        case "sandbox":
+          return part.state === "running" || part.state === "input-streaming"
+            ? { ...part, state: "output-available" as const }
+            : part;
         default:
           return part;
       }

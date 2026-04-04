@@ -3,17 +3,87 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import mimetypes
+import os
+import posixpath
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
 import modal
 
-from .volume_helpers import entry_name, stable_tree_id
-
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Shared path and tree helpers (merged from volume_helpers.py)
+# ---------------------------------------------------------------------------
+
+
+def entry_name(entry_path: str) -> str:
+    raw = entry_path.rstrip("/")
+    return raw.rsplit("/", 1)[-1] if "/" in raw else raw
+
+
+def stable_tree_id(path: str) -> str:
+    return hashlib.sha256(path.encode()).hexdigest()[:12]
+
+
+def resolve_mounted_volume_path(
+    path: str,
+    *,
+    default_root: str = "/data/memory",
+    allowed_root: str = "/data",
+) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path cannot be empty.")
+
+    allowed = str(PurePosixPath(allowed_root))
+    default = str(PurePosixPath(default_root))
+    candidate = PurePosixPath(raw)
+
+    normalized = str(
+        candidate if candidate.is_absolute() else PurePosixPath(default) / candidate
+    )
+    normalized = posixpath.normpath(normalized)
+    normalized = str(PurePosixPath(normalized))
+
+    if normalized != allowed and not normalized.startswith(allowed + "/"):
+        raise ValueError(
+            f"Path must stay within mounted volume root '{allowed}'. Got: {path}"
+        )
+    return normalized
+
+
+def resolve_realpath_within_root(
+    path: str,
+    *,
+    root: str,
+    empty_error: str,
+    invalid_error_prefix: str,
+) -> tuple[str | None, str | None]:
+    root_real = os.path.realpath(root)
+    raw = str(path or "").strip()
+    if not raw:
+        return None, empty_error
+
+    joined = (
+        os.path.normpath(raw)
+        if os.path.isabs(raw)
+        else os.path.normpath(os.path.join(root, raw))
+    )
+    resolved = os.path.realpath(joined)
+    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+        return None, f"{invalid_error_prefix}{raw}]"
+    return resolved, None
+
+
+# ---------------------------------------------------------------------------
+# Modal-specific helpers
+# ---------------------------------------------------------------------------
 
 
 def _normalize_modal_volume_path(path: str, *, default_path: str = "/") -> str:

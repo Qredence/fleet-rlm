@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 from .diagnostics import DaytonaDiagnosticError
-from .types_budget import SandboxLmRuntimeConfig
+from .types import SandboxLmRuntimeConfig
 
 
 class DaytonaConfigError(DaytonaDiagnosticError):

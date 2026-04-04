@@ -21,10 +21,10 @@ from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 #   → chat_agent/recursive_runtime → rlm_runtime_modules
 from fleet_rlm.runtime.execution.streaming import (
     ReActStatusProvider,
+    StreamingContext,
+    _normalize_trajectory,
     _process_stream_value,
 )
-from fleet_rlm.runtime.execution.streaming_citations import _normalize_trajectory
-from fleet_rlm.runtime.execution.streaming_context import StreamingContext
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 from .delegation_policy import (
@@ -248,6 +248,7 @@ async def spawn_delegate_sub_agent_async(
         max_iterations=effective_max_iters,
         max_llm_calls=effective_max_llm_calls,
         verbose=bool(getattr(agent, "verbose", False)),
+        sub_lm=getattr(child_interpreter, "sub_lm", None),
     )
 
     lm_context = (

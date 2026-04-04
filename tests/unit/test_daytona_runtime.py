@@ -54,7 +54,12 @@ class _FakeSandbox:
         self.id = "sbx-123"
         self.fs = _FakeFs()
         self.git = _FakeGit()
-        self.process = SimpleNamespace(exec_calls=[], exec=self._exec)
+        self.process = SimpleNamespace(
+            exec_calls=[],
+            exec=self._exec,
+            code_run_calls=[],
+            code_run=self._code_run,
+        )
 
     async def get_work_dir(self) -> str:
         return "/workspace"
@@ -62,8 +67,18 @@ class _FakeSandbox:
     def delete(self) -> None:
         return None
 
+    def stop(self, timeout: float = 60) -> None:
+        return None
+
+    def refresh_activity(self) -> None:
+        return None
+
     def _exec(self, command: str):
         self.process.exec_calls.append(command)
+        return _FakeProcessExecResult()
+
+    def _code_run(self, code: str):
+        self.process.code_run_calls.append(code)
         return _FakeProcessExecResult()
 
 
@@ -363,7 +378,7 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     assert session.context_sources[0].host_path == str(second_context.resolve())
     assert "workspace_reconcile" in session.phase_timings_ms
     assert "context_stage" in session.phase_timings_ms
-    assert len(fake_client.sandbox.process.exec_calls) == 2
+    assert len(fake_client.sandbox.process.code_run_calls) == 2
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes-b.md") for path in upload_paths)
 
@@ -417,10 +432,9 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
         text=True,
     )
 
-    def _exec(command: str):
+    def _code_run(code: str):
         completed = subprocess.run(
-            command,
-            shell=True,
+            ["python3", "-c", code],
             check=False,
             capture_output=True,
             text=True,
@@ -431,7 +445,7 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
             exit_code=completed.returncode,
         )
 
-    sandbox = SimpleNamespace(process=SimpleNamespace(exec=_exec))
+    sandbox = SimpleNamespace(process=SimpleNamespace(code_run=_code_run))
     asyncio.run(
         _areconcile_repo_checkout(
             sandbox=sandbox,
@@ -449,3 +463,134 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
     ).stdout.strip()
     assert remote_url == str(repo_b)
     assert (workspace_path / "README.md").read_text(encoding="utf-8") == "repo B\n"
+
+
+def test_session_refresh_activity_is_silent_on_error() -> None:
+    """``arefresh_activity`` swallows exceptions so callers never break."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    class _ExplodingSandbox(_FakeSandbox):
+        def refresh_activity(self) -> None:
+            raise RuntimeError("boom")
+
+    session = DaytonaSandboxSession(
+        sandbox=_ExplodingSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id=None,
+    )
+    # Must not raise
+    asyncio.run(session.arefresh_activity())
+
+
+def test_session_resize_calls_sandbox_resize() -> None:
+    """``aresize`` delegates to the sandbox ``resize()`` method."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    resize_calls: list[object] = []
+
+    class _ResizableSandbox(_FakeSandbox):
+        def resize(self, resources: object, timeout: float | None = 60) -> None:
+            resize_calls.append(resources)
+
+    session = DaytonaSandboxSession(
+        sandbox=_ResizableSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id=None,
+    )
+    asyncio.run(session.aresize(cpu=4, memory=8, disk=20))
+    assert len(resize_calls) == 1
+    r = resize_calls[0]
+    assert getattr(r, "cpu") == 4
+    assert getattr(r, "memory") == 8
+    assert getattr(r, "disk") == 20
+
+
+def test_session_delete_context_keeps_sandbox_alive() -> None:
+    """``adelete_context`` removes only the active interpreter context."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    delete_calls: list[str] = []
+    stop_calls = 0
+    sandbox_delete_calls = 0
+    contexts: list[object] = []
+
+    class _ContextCodeInterpreter:
+        def create_context(self, cwd: str | None = None) -> object:
+            context = SimpleNamespace(id=f"ctx-{len(contexts) + 1}", cwd=cwd)
+            contexts.append(context)
+            return context
+
+        def list_contexts(self) -> list[object]:
+            return list(contexts)
+
+        def delete_context(self, context: object) -> None:
+            delete_calls.append(str(getattr(context, "id", "")))
+            contexts.remove(context)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter()
+
+        def stop(self, timeout: float = 60) -> None:
+            nonlocal stop_calls
+            _ = timeout
+            stop_calls += 1
+
+        def delete(self) -> None:
+            nonlocal sandbox_delete_calls
+            sandbox_delete_calls += 1
+
+    sandbox = _ContextSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+
+    asyncio.run(session.aensure_context())
+    context_id = session.context_id
+
+    asyncio.run(session.adelete_context())
+
+    assert delete_calls == [context_id]
+    assert session.context_id is None
+    assert stop_calls == 0
+    assert sandbox_delete_calls == 0
+
+
+def test_session_create_lsp_server_delegates_to_sandbox() -> None:
+    """``create_lsp_server`` calls through to the sandbox SDK method."""
+    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+
+    lsp_calls: list[tuple[str, str]] = []
+
+    class _LspSandbox(_FakeSandbox):
+        def create_lsp_server(self, language_id: str, path_to_project: str):
+            lsp_calls.append((language_id, path_to_project))
+            return SimpleNamespace(language=language_id, path=path_to_project)
+
+    session = DaytonaSandboxSession(
+        sandbox=_LspSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/project",
+        context_sources=[],
+        context_id=None,
+    )
+    lsp = session.create_lsp_server()
+    assert len(lsp_calls) == 1
+    assert lsp_calls[0] == ("python", "/workspace/project")
+    assert lsp.language == "python"

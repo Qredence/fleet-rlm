@@ -11,8 +11,8 @@ class _FakeAgent:
     def __init__(self):
         self.calls = []
 
-        def analyze_long_document(**kwargs):
-            self.calls.append(("analyze_long_document", kwargs))
+        def summarize_long_document(**kwargs):
+            self.calls.append(("summarize_long_document", kwargs))
             return {"status": "ok"}
 
         def write_to_file(**kwargs):
@@ -60,7 +60,7 @@ class _FakeAgent:
             return {"status": "ok"}
 
         self.react_tools = [
-            analyze_long_document,
+            summarize_long_document,
             write_to_file,
             edit_core_memory,
             grounded_answer,
@@ -76,18 +76,18 @@ class _FakeAgent:
 
 
 @pytest.mark.asyncio
-async def test_execute_command_passes_include_trajectory_to_analyze_document():
+async def test_execute_command_passes_include_trajectory_to_summarize_document():
     agent = _FakeAgent()
     result = await execute_command(
         agent,
-        "analyze_document",
-        {"query": "q", "include_trajectory": False},
+        "summarize_document",
+        {"focus": "q", "include_trajectory": False},
     )
 
     assert result["status"] == "ok"
     assert agent.calls
     _, kwargs = agent.calls[0]
-    assert kwargs["query"] == "q"
+    assert kwargs["focus"] == "q"
     assert kwargs["include_trajectory"] is False
 
 
@@ -251,8 +251,10 @@ def test_resolve_tool_supports_wrapped_tools():
     def wrapped_fn(**kwargs):
         return {"status": "ok", "kwargs": kwargs}
 
-    agent.react_tools = [SimpleNamespace(name="analyze_long_document", func=wrapped_fn)]
-    resolved = _resolve_tool(agent, "analyze_long_document")
+    agent.react_tools = [
+        SimpleNamespace(name="summarize_long_document", func=wrapped_fn)
+    ]
+    resolved = _resolve_tool(agent, "summarize_long_document")
     assert resolved is wrapped_fn
 
 

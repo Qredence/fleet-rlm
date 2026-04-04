@@ -189,12 +189,12 @@ def run_long_context(session: Any, arg_text: str) -> None:
         query = _prompt_value(key="query", default="", secret=False)
         mode = _prompt_choice(
             "Mode:",
-            ["analyze", "summarize"],
+            ["summarize"],
             allow_freeform=False,
         )
     else:
         docs_path = args[0]
-        mode = "analyze"
+        mode = "summarize"
         query_parts = args[1:]
         if query_parts and query_parts[-1] in {"analyze", "summarize"}:
             mode = query_parts[-1]
@@ -202,9 +202,7 @@ def run_long_context(session: Any, arg_text: str) -> None:
         query = " ".join(query_parts)
 
     if not docs_path or not query:
-        session._print_error(
-            "usage: /run-long-context <docs_path> <query> [analyze|summarize]"
-        )
+        session._print_error("usage: /run-long-context <docs_path> <query> [summarize]")
         return
 
     with session.console.status(

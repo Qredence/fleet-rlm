@@ -14,7 +14,7 @@ from fleet_rlm.runtime.execution.storage_paths import (
 )
 
 from .shared import aexecute_submit, execute_submit
-from .volume_helpers import resolve_mounted_volume_path
+from .modal_volumes import resolve_mounted_volume_path
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
@@ -96,13 +96,17 @@ async def _aget_daytona_session(
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
         )
-    except Exception:
+    except ImportError:
         return None
 
     interpreter = ctx.agent.interpreter
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
-    return await interpreter._aensure_session()
+    try:
+        return await interpreter._aensure_session()
+    except Exception:
+        logger.debug("Daytona session unavailable for workspace probe", exc_info=True)
+        return None
 
 
 def _get_daytona_session_sync(
@@ -112,13 +116,28 @@ def _get_daytona_session_sync(
         from fleet_rlm.integrations.providers.daytona.interpreter import (
             DaytonaInterpreter,
         )
-    except Exception:
+    except ImportError:
         return None
 
     interpreter = getattr(ctx.agent, "interpreter", None)
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
-    return interpreter._ensure_session_sync()
+    try:
+        return interpreter._ensure_session_sync()
+    except Exception:
+        logger.debug("Daytona session unavailable for workspace probe", exc_info=True)
+        return None
+
+
+def _is_daytona_interpreter(ctx: _SandboxToolContext) -> bool:
+    try:
+        from fleet_rlm.integrations.providers.daytona.interpreter import (
+            DaytonaInterpreter,
+        )
+    except ImportError:
+        return False
+
+    return isinstance(getattr(ctx.agent, "interpreter", None), DaytonaInterpreter)
 
 
 def _daytona_file_error(*, path: str, exc: Exception) -> dict[str, Any]:
@@ -248,3 +267,30 @@ def _load_daytona_workspace_text_sync(
             return None
         raise
     return resolved_path, text
+
+
+# ---------------------------------------------------------------------------
+# Aggregate sandbox tool builder (merged from sandbox.py)
+# ---------------------------------------------------------------------------
+
+
+def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
+    """Build sandbox / buffer / volume tools bound to *agent*.
+
+    Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
+    main tool list built by ``build_tool_list``.
+    """
+    from .infra_tools import build_lsp_tools, build_snapshot_tools
+    from .sandbox_delegate_tools import build_rlm_delegate_tools
+    from .sandbox_memory_tools import build_memory_intelligence_tools
+    from .sandbox_storage_tools import build_storage_tools
+
+    tools: list[Any] = []
+    ctx = _SandboxToolContext(agent=agent)
+    tools.extend(build_rlm_delegate_tools(agent))
+    tools.extend(build_memory_intelligence_tools(agent))
+    tools.extend(build_storage_tools(agent))
+    if _is_daytona_interpreter(ctx):
+        tools.extend(build_snapshot_tools(agent))
+        tools.extend(build_lsp_tools(agent))
+    return tools

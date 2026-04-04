@@ -47,11 +47,16 @@ For extensive examples by category, see [references/signature-examples.md](refer
 
 ```python
 import dspy
-from fleet_rlm import ModalInterpreter
+from fleet_rlm.runtime.config import configure_planner_from_env
+from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
 
+configure_planner_from_env()
 signature = "question -> answer, confidence"
 
-interpreter = ModalInterpreter(timeout=120)
+interpreter = DaytonaInterpreter(
+    repo_url="https://github.com/your-org/your-repo",
+    timeout=120,
+)
 rlm = dspy.RLM(
     signature=signature,
     interpreter=interpreter,
@@ -59,9 +64,12 @@ rlm = dspy.RLM(
     max_llm_calls=10,
 )
 
-result = rlm(question="What is the capital of France?")
-print(result.answer)       # Access via dot notation
-print(result.confidence)   # NOT result["confidence"]
+try:
+    result = rlm(question="What is the capital of France?")
+    print(result.answer)       # Access via dot notation
+    print(result.confidence)   # NOT result["confidence"]
+finally:
+    interpreter.shutdown()
 ```
 
 ## Common Field Types
@@ -110,12 +118,21 @@ print(result.confidence)   # NOT result["confidence"]
 
 ## fleet-rlm Built-in Signatures
 
-Defined in `src/fleet_rlm/react/signatures.py`:
+Defined in `src/fleet_rlm/runtime/agent/signatures.py`:
 
-- `ExtractArchitecture`: `docs, query -> modules, optimizers, design_principles`
-- `ExtractAPIEndpoints`: `docs -> api_endpoints`
-- `FindErrorPatterns`: `docs -> error_categories, total_errors_found`
-- `ExtractWithCustomTool`: `docs -> headers, code_blocks, structure_summary`
-- `AnalyzeLongDocument`: `document, query -> findings, answer, sections_examined`
-- `SummarizeLongDocument`: `document, focus -> summary, key_points, coverage_pct`
-- `ExtractFromLogs`: `logs, query -> matches, patterns, time_range`
+| Signature                               | Fields                                                                                                                                    | Purpose                                         |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `RLMReActChatSignature`                 | `user_request, core_memory, history -> assistant_response`                                                                                | Interactive ReAct chat with session history     |
+| `SummarizeLongDocument`                 | `document, focus -> summary, key_points, coverage_pct`                                                                                    | Chunked multi-part document summarization       |
+| `ExtractFromLogs`                       | `logs, query -> matches, patterns, time_range`                                                                                            | Log pattern extraction and categorization       |
+| `GroundedAnswerWithCitations`           | `query, evidence_chunks, response_style -> answer, citations, confidence, coverage_notes`                                                 | Evidence-grounded answers with citation records |
+| `IncidentTriageFromLogs`                | `logs, service_context, query -> severity, probable_root_causes, impacted_components, recommended_actions, time_range`                    | Incident diagnosis and triage                   |
+| `CodeChangePlan`                        | `task, repo_context, constraints -> plan_steps, files_to_touch, validation_commands, risks`                                               | Structured code change planning                 |
+| `CoreMemoryUpdateProposal`              | `turn_history, current_memory -> keep, update, remove, rationale`                                                                         | Safe core memory state updates                  |
+| `VolumeFileTreeSignature`               | `root_path, max_depth, include_hidden -> nodes, total_files, total_dirs, truncated`                                                       | Bounded volume file-tree traversal              |
+| `MemoryActionIntentSignature`           | `user_request, current_tree, policy_constraints -> action_type, target_paths, content_plan, risk_level, requires_confirmation, rationale` | Memory action intent classification             |
+| `MemoryStructureAuditSignature`         | `tree_snapshot, usage_goals -> issues, recommended_layout, naming_conventions, retention_rules, priority_fixes`                           | Memory layout audit                             |
+| `MemoryStructureMigrationPlanSignature` | `audit_findings, approved_constraints -> operations, rollback_steps, verification_checks, estimated_risk`                                 | Reversible memory migration planning            |
+| `ClarificationQuestionSignature`        | `ambiguous_request, available_context, operation_risk -> questions, blocking_unknowns, safe_default, proceed_without_answer`              | Ambiguous operation clarification               |
+| `RecursiveSubQuerySignature`            | `prompt, context -> answer`                                                                                                               | Bounded recursive sub-problem                   |
+| `RLMVariableSignature`                  | `task, prompt -> answer`                                                                                                                  | Long-prompt variable exploration (Algorithm 1)  |

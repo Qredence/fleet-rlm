@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.runtime.tools import sandbox_storage_tools
+from fleet_rlm.runtime.tools import buffer_tools, sandbox_storage_tools
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from tests.unit.fixtures_react import FakeInterpreter
 
@@ -326,7 +326,7 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
         return session
 
     monkeypatch.setattr(
-        sandbox_storage_tools, "_aget_daytona_session", _fake_get_daytona_session
+        buffer_tools, "_aget_daytona_session", _fake_get_daytona_session
     )
 
     tool_map = {getattr(t, "name", ""): t for t in agent.react_tools}

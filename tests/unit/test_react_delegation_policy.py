@@ -46,7 +46,7 @@ def test_invoke_runtime_module_records_budget_and_fallback() -> None:
     result = invoke_runtime_module(
         RuntimeModuleExecutionRequest(
             agent=agent,
-            module_name="analyze_long_document",
+            module_name="summarize_long_document",
             module_kwargs={"document": "doc", "query": "q"},
         )
     )

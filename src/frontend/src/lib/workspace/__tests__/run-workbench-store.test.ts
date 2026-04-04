@@ -71,7 +71,7 @@ describe("useRunWorkbenchStore", () => {
     useRunWorkbenchStore.setState({
       status: "running",
       runId: "run-123",
-      daytonaMode: "host_loop_rlm",
+      daytonaMode: "daytona_pilot",
       errorMessage: "Should disappear",
       selectedIterationId: "iteration-1",
       selectedCallbackId: "callback-1",

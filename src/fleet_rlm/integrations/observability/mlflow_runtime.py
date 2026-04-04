@@ -43,6 +43,7 @@ def _mlflow_identity(config: MlflowConfig) -> tuple[Any, ...]:
         config.dspy_log_traces_from_eval,
         config.dspy_log_compiles,
         config.dspy_log_evals,
+        config.enable_auto_assessment,
         *_mlflow_tracking_auth_identity(),
     )
 
@@ -247,7 +248,7 @@ def flush_mlflow_traces(*, terminate: bool = False) -> None:
     trace_exporter_getter: Callable[[], Any] | None = None
     try:
         from mlflow.tracing.provider import _get_trace_exporter
-    except Exception:
+    except ImportError:
         pass
     else:
         trace_exporter_getter = _get_trace_exporter
@@ -270,6 +271,68 @@ def shutdown_mlflow() -> None:
     flush_mlflow_traces(terminate=True)
 
 
+def _extract_token_usage(
+    outputs: dict[str, Any] | None,
+) -> tuple[int | None, int | None]:
+    """Extract (input_tokens, output_tokens) from LM call outputs."""
+    if not isinstance(outputs, dict):
+        return None, None
+    usage = outputs.get("usage")
+    if not isinstance(usage, dict):
+        usage = outputs.get("token_usage")
+    if not isinstance(usage, dict):
+        return None, None
+
+    def _int_or_none(value: Any) -> int | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        return None
+
+    input_tokens = _int_or_none(
+        usage.get("prompt_tokens")
+        or usage.get("input_tokens")
+        or usage.get("promptTokens")
+        or usage.get("inputTokens")
+    )
+    output_tokens = _int_or_none(
+        usage.get("completion_tokens")
+        or usage.get("output_tokens")
+        or usage.get("completionTokens")
+        or usage.get("outputTokens")
+    )
+    return input_tokens, output_tokens
+
+
+def _set_span_error_description(exception: Exception) -> None:
+    """Best-effort: propagate exception message to the active MLflow span."""
+    mlflow = _import_mlflow()
+    if mlflow is None:
+        return
+    try:
+        span = mlflow.get_current_active_span()
+        if span is None:
+            return
+        otel_span = getattr(span, "_span", None)
+        if otel_span is None:
+            return
+        set_status = getattr(otel_span, "set_status", None)
+        if not callable(set_status):
+            return
+        from opentelemetry.trace import StatusCode
+
+        description = f"{type(exception).__name__}: {exception}"
+        set_status(StatusCode.ERROR, description=description)
+    except Exception:
+        # Trace enrichment is best-effort and must never mask the original error.
+        logger.debug("Failed to update MLflow span status", exc_info=True)
+
+
 class FleetMlflowTraceCallback(BaseCallback):
     """DSPy callback that propagates per-request context into MLflow traces."""
 
@@ -285,7 +348,9 @@ class FleetMlflowTraceCallback(BaseCallback):
         outputs: Any | None,
         exception: Exception | None = None,
     ) -> None:
-        _ = (call_id, exception)
+        _ = call_id
+        if exception is not None:
+            _set_span_error_description(exception)
         preview = outputs if isinstance(outputs, str) else None
         update_current_mlflow_trace(response_preview=preview)
         capture_last_active_trace_id()
@@ -300,7 +365,9 @@ class FleetMlflowTraceCallback(BaseCallback):
         outputs: dict[str, Any] | None,
         exception: Exception | None = None,
     ) -> None:
-        _ = (call_id, exception)
+        _ = call_id
+        if exception is not None:
+            _set_span_error_description(exception)
         preview: str | None = None
         if isinstance(outputs, dict):
             choices = outputs.get("choices")
@@ -313,6 +380,14 @@ class FleetMlflowTraceCallback(BaseCallback):
                         or first.get("message", {}).get("content")
                         or ""
                     )
+        # Accumulate token usage on the per-request context.
+        input_tokens, output_tokens = _extract_token_usage(outputs)
+        ctx = current_request_context()
+        if ctx is not None:
+            if input_tokens is not None:
+                ctx.total_input_tokens += input_tokens
+            if output_tokens is not None:
+                ctx.total_output_tokens += output_tokens
         update_current_mlflow_trace(response_preview=preview)
         capture_last_active_trace_id()
 

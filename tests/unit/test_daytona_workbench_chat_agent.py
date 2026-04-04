@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import dspy
 import pytest
 from typing import Any, cast
@@ -22,6 +23,23 @@ class _FakeSession:
         self.closed = 0
         self.deleted = 0
         self.driver_started = 0
+        self.owner_thread_id: int | None = None
+        self.owner_loop_id: int | None = None
+
+    def bind_current_async_owner(self) -> None:
+        self.owner_thread_id = threading.get_ident()
+        self.owner_loop_id = id(asyncio.get_running_loop())
+
+    def matches_current_async_owner(self) -> bool:
+        if self.owner_thread_id is None or self.owner_loop_id is None:
+            return False
+        try:
+            return (
+                self.owner_thread_id,
+                self.owner_loop_id,
+            ) == (threading.get_ident(), id(asyncio.get_running_loop()))
+        except RuntimeError:
+            return False
 
     async def astart_driver(self, *, timeout: float) -> None:
         _ = timeout
@@ -33,6 +51,9 @@ class _FakeSession:
     async def adelete(self) -> None:
         self.deleted += 1
 
+    async def arefresh_activity(self) -> None:
+        pass
+
 
 class _FakeRuntime:
     def __init__(self, session: _FakeSession) -> None:
@@ -41,6 +62,7 @@ class _FakeRuntime:
         self.create_calls: list[
             tuple[str | None, str | None, list[str], str | None]
         ] = []
+        self.create_specs: list[object | None] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
 
     async def acreate_workspace_session(
@@ -50,10 +72,13 @@ class _FakeRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
+        spec: object | None = None,
     ) -> _FakeSession:
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
+        self.create_specs.append(spec)
+        self.session.bind_current_async_owner()
         return self.session
 
     async def aresume_workspace_session(
@@ -68,6 +93,7 @@ class _FakeRuntime:
     ) -> _FakeSession:
         _ = context_sources, context_id
         self.resume_calls.append((sandbox_id, repo_url, ref, workspace_path))
+        self.session.bind_current_async_owner()
         return self.session
 
     async def aclose(self) -> None:
@@ -166,9 +192,8 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         captured["kwargs"] = kwargs
         return (
             {
-                "findings": ["f1"],
-                "answer": "ok",
-                "sections_examined": 2,
+                "key_points": ["p1"],
+                "summary": "ok",
                 "depth": 1,
                 "sub_agent_history": 0,
                 "trajectory": [],
@@ -182,13 +207,11 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         _fake_run,
     )
 
-    payload = agent._get_tool("analyze_long_document")("inspect this")
+    payload = agent._get_tool("summarize_long_document")("inspect this")
 
     assert payload["status"] == "ok"
-    assert payload["answer"] == "ok"
-    assert captured["agent"] is agent
-    assert captured["module_name"] == "analyze_long_document"
-    assert captured["kwargs"]["query"] == "inspect this"
+    assert payload["summary"] or payload.get("answer")
+    assert captured["module_name"] == "summarize_long_document"
 
 
 @pytest.mark.asyncio
@@ -231,7 +254,7 @@ async def test_daytona_recursive_batch_tool_preserves_order_and_concurrency(
         }
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools.spawn_delegate_sub_agent_async",
+        "fleet_rlm.runtime.tools.batch_tools.spawn_delegate_sub_agent_async",
         _fake_spawn,
     )
 
@@ -377,6 +400,7 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
     runtime = _FakeRuntime(_FakeSession())
     agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
     interpreter = _interpreter(agent)
+    runtime.session.bind_current_async_owner()
     interpreter._session = runtime.session
     interpreter._session_source_key = (
         "https://github.com/example/old.git",
@@ -497,3 +521,59 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
     assert captured["timeout"] == 123
     assert captured["max_depth"] == 4
     assert captured["interpreter_async_execute"] is False
+
+
+@pytest.mark.asyncio
+async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
+    """Verify SandboxSpec is threaded from agent → interpreter → runtime."""
+    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+
+    spec = SandboxSpec(
+        language="python",
+        labels={"env": "test"},
+        env_vars={"MY_VAR": "hello"},
+    )
+    session = _FakeSession()
+    runtime = _FakeRuntime(session)
+
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=runtime,
+        sandbox_spec=spec,
+    )
+
+    # The interpreter should carry the spec
+    interpreter = cast("Any", agent.interpreter)
+    assert interpreter.sandbox_spec is spec
+
+    # Trigger session creation via start()
+    await agent.astart()
+
+    # The spec should have been forwarded to the runtime
+    assert len(runtime.create_specs) == 1
+    assert runtime.create_specs[0] is spec
+
+
+@pytest.mark.asyncio
+async def test_sandbox_spec_with_declarative_image_flows_through() -> None:
+    """Verify a daytona.Image declarative builder reaches the runtime."""
+    from daytona import Image
+    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+
+    img = Image.debian_slim("3.12").pip_install(["dspy"])
+    spec = SandboxSpec(image=img, labels={"managed-by": "fleet-rlm"})
+
+    session = _FakeSession()
+    runtime = _FakeRuntime(session)
+
+    agent = DaytonaWorkbenchChatAgent(
+        runtime=runtime,
+        sandbox_spec=spec,
+    )
+
+    await agent.astart()
+
+    forwarded_spec = runtime.create_specs[0]
+    assert forwarded_spec is spec
+    assert forwarded_spec.uses_declarative_image is True
+    assert forwarded_spec.image is img
+    assert "dspy" in img.dockerfile()

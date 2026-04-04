@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from dspy.primitives import FinalOutput
 
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-from fleet_rlm.runtime.execution.streaming_citations import _normalize_trajectory
+from fleet_rlm.runtime.execution.streaming import _normalize_trajectory
 from fleet_rlm.runtime.content.chunking import (
     chunk_by_headers,
     chunk_by_json_keys,
@@ -93,6 +93,15 @@ def execute_submit(
     execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
 ) -> dict[str, Any]:
     """Run *code* in the sandbox and return the SUBMIT() result."""
+    # Tool executions must always use generic SUBMIT (**kwargs).  dspy.RLM
+    # sets interpreter.output_fields before each forward() call, which
+    # installs a typed SUBMIT(field1, field2, ...) in the sandbox context.
+    # That typed SUBMIT rejects the extra keyword args used by sandbox tool
+    # code (e.g. SUBMIT(status=..., result=...)).  Clear output_fields here
+    # so aensure_setup restores the generic SUBMIT for this execution.
+    interp = agent.interpreter
+    if getattr(interp, "output_fields", None) is not None:
+        interp.output_fields = None
     agent.start()
     result = agent.interpreter.execute(
         code,
@@ -110,6 +119,15 @@ async def aexecute_submit(
     execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
 ) -> dict[str, Any]:
     """Async variant of :func:`execute_submit` for loop-safe sandbox execution."""
+    # Tool executions must always use generic SUBMIT (**kwargs).  dspy.RLM
+    # sets interpreter.output_fields before each forward() call, which
+    # installs a typed SUBMIT(field1, field2, ...) in the sandbox context.
+    # That typed SUBMIT rejects the extra keyword args used by sandbox tool
+    # code (e.g. SUBMIT(status=..., result=...)).  Clear output_fields here
+    # so aensure_setup restores the generic SUBMIT for this execution.
+    interp = agent.interpreter
+    if getattr(interp, "output_fields", None) is not None:
+        interp.output_fields = None
     await agent.astart()
     result = await _await_if_needed(
         agent.interpreter.aexecute(

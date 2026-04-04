@@ -39,7 +39,6 @@ _MEMORY_INTELLIGENCE_TOOL_NAMES: frozenset[str] = frozenset(
 _CACHED_RUNTIME_MODULE_TOOL_NAMES: frozenset[str] = (
     frozenset(
         {
-            "analyze_long_document",
             "summarize_long_document",
             "extract_from_logs",
             "grounded_answer",
@@ -85,7 +84,7 @@ def build_tool_list(
     from .chunking import build_chunking_tools
     from .document import build_document_tools
     from .filesystem import build_filesystem_tools
-    from .sandbox import build_sandbox_tools
+    from .sandbox_common import build_sandbox_tools
 
     tools: list[Tool] = []
 

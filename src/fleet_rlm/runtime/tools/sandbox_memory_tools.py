@@ -10,10 +10,10 @@ from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callab
 from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
 from fleet_rlm.runtime.execution.storage_paths import runtime_storage_roots
 
-from .runtime_module_helpers import coerce_int as _coerce_int
-from .runtime_module_helpers import prediction_value as _prediction_value
-from .runtime_module_helpers import run_cached_runtime_module as _run_runtime_module
-from .runtime_module_helpers import runtime_metadata as _runtime_metadata
+from .llm_tools import coerce_int as _coerce_int
+from .llm_tools import prediction_value as _prediction_value
+from .llm_tools import run_cached_runtime_module as _run_runtime_module
+from .llm_tools import runtime_metadata as _runtime_metadata
 from .sandbox_common import _resolve_path_or_error, _SandboxToolContext
 
 if TYPE_CHECKING:

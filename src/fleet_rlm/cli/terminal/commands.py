@@ -305,13 +305,6 @@ _ALIAS_COMMAND_SPECS: dict[str, _AliasCommandSpec] = {
             usage="usage: /chunk <size|headers|timestamps|json> [chunk_size]"
         ),
     ),
-    "/analyze": _AliasCommandSpec(
-        "analyze_long_document",
-        _make_required_text_payload_builder(
-            usage="usage: /analyze <query>",
-            key="query",
-        ),
-    ),
     "/summarize": _AliasCommandSpec(
         "summarize_long_document",
         _make_required_text_payload_builder(

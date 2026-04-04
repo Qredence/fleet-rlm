@@ -54,33 +54,6 @@ class RLMReActChatSignature(dspy.Signature):
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 
-class AnalyzeLongDocument(dspy.Signature):
-    """Analyze a long document by navigating, querying, and synthesizing.
-
-    The LLM should use sandbox helpers (``peek``, ``grep``,
-    ``chunk_by_size``, ``chunk_by_headers``, ``extract_python_ast``) to explore the document
-    programmatically, call ``llm_query`` on relevant sections, and
-    aggregate findings via ``SUBMIT``.
-    When analyzing large Python codebases, prefer using the `extract_python_ast` tool
-    to quickly map out structural architectures before dropping down into raw regex grepping.
-
-    Input Fields:
-        document: Full text of the document loaded into the sandbox
-        query: What to find or analyse
-
-    Output Fields:
-        findings: List of extracted facts / answers
-        answer: Synthesised prose answer
-        sections_examined: How many sections were inspected
-    """
-
-    document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
-    query: str = dspy.InputField(desc="Analysis query or question")
-    findings: list[str] = dspy.OutputField(desc="List of extracted facts / answers")
-    answer: str = dspy.OutputField(desc="Synthesised prose answer")
-    sections_examined: int = dspy.OutputField(desc="Number of sections inspected")
-
-
 class SummarizeLongDocument(dspy.Signature):
     """Summarize a long document with controllable focus.
 
@@ -313,8 +286,29 @@ class RecursiveSubQuerySignature(dspy.Signature):
     answer: str = dspy.OutputField(desc="Answer for the parent caller")
 
 
+class RLMVariableSignature(dspy.Signature):
+    """Explore and answer questions about an arbitrarily long prompt.
+
+    The ``prompt`` field is stored as a REPL variable — use code to slice,
+    search, and aggregate it.  Call ``sub_rlm(text)`` for recursive semantic
+    processing of chunks, ``llm_query(text)`` for single LLM calls, and
+    ``SUBMIT(answer=...)`` to return the result.
+
+    Per Algorithm 1 (arXiv 2512.24601v2): dspy.RLM stores input fields in
+    the REPL automatically — the LLM sees only metadata (type, length,
+    preview) and explores data through code execution.
+    """
+
+    task: str = dspy.InputField(desc="The question or instruction to accomplish")
+    prompt: str = dspy.InputField(
+        desc="The full text to process (stored as REPL variable, not in LLM context)"
+    )
+    answer: str = dspy.OutputField(
+        desc="Final answer (call SUBMIT(answer=...) in REPL)"
+    )
+
+
 __all__ = [
-    "AnalyzeLongDocument",
     "ClarificationQuestionSignature",
     "CodeChangePlan",
     "CoreMemoryUpdateProposal",
@@ -327,6 +321,7 @@ __all__ = [
     "MemoryStructureAuditSignature",
     "MemoryStructureMigrationPlanSignature",
     "RLMReActChatSignature",
+    "RLMVariableSignature",
     "RecursiveSubQuerySignature",
     "SummarizeLongDocument",
     "VolumeFileTreeSignature",
