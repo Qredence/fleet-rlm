@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 
 import { GroupedSettingsPane } from "@/screens/settings/settings-screen";
 
@@ -103,10 +105,19 @@ vi.mock("@/screens/settings/use-runtime-settings", () => ({
 }));
 
 describe("GroupedSettingsPane", () => {
-  it("renders the grouped settings surface by default", () => {
-    const html = renderToStaticMarkup(
-      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} />,
+  function renderGroupedSettingsPane(
+    props: ComponentProps<typeof GroupedSettingsPane>,
+  ) {
+    const queryClient = new QueryClient();
+    return renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <GroupedSettingsPane {...props} />
+      </QueryClientProvider>,
     );
+  }
+
+  it("renders the grouped settings surface by default", () => {
+    const html = renderGroupedSettingsPane({ isDark: false, onToggleTheme: vi.fn() });
 
     expect(html).toContain("Theme");
     expect(html).toContain("Anonymous telemetry");
@@ -128,9 +139,11 @@ describe("GroupedSettingsPane", () => {
   });
 
   it("renders telemetry-only content when section is telemetry", () => {
-    const html = renderToStaticMarkup(
-      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} section="telemetry" />,
-    );
+    const html = renderGroupedSettingsPane({
+      isDark: false,
+      onToggleTheme: vi.fn(),
+      section: "telemetry",
+    });
 
     expect(html).toContain("Anonymous telemetry");
     expect(html).toContain("Telemetry scope");
@@ -140,9 +153,11 @@ describe("GroupedSettingsPane", () => {
   });
 
   it("renders runtime-only content when section is runtime", () => {
-    const html = renderToStaticMarkup(
-      <GroupedSettingsPane isDark={false} onToggleTheme={vi.fn()} section="runtime" />,
-    );
+    const html = renderGroupedSettingsPane({
+      isDark: false,
+      onToggleTheme: vi.fn(),
+      section: "runtime",
+    });
 
     expect(html).toContain("Runtime Status");
     expect(html).toContain("Test Credentials + Connection");

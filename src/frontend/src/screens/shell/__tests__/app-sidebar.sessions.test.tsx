@@ -31,6 +31,7 @@ vi.mock("lucide-react", () => {
   return {
     Plus: Icon,
     Search: Icon,
+    Sparkles: Icon,
     Settings: Icon,
     Clock3: Icon,
     Trash2: Icon,
