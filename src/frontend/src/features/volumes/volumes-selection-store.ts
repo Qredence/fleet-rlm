@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { FsNode } from "@/screens/volumes/use-volumes";
+import type { FsNode } from "@/features/volumes/use-volumes";
 
 export interface VolumesSelectionState {
   selectedFileNode: FsNode | null;

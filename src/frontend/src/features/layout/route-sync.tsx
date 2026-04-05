@@ -13,7 +13,7 @@ import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
 
 import { pathToNav } from "@/hooks/use-app-navigate";
-import { useVolumesLayoutSelection } from "@/screens/volumes/volumes-layout-contract";
+import { useVolumesLayoutSelection } from "@/features/volumes/volumes-layout-contract";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 function RouteSync() {

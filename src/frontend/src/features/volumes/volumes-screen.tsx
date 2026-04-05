@@ -35,7 +35,7 @@ import {
   type VolumeProvider,
   useFilesystem,
   useVolumesSelectionStore,
-} from "@/screens/volumes/use-volumes";
+} from "@/features/volumes/use-volumes";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 export function VolumesScreen() {

@@ -1,4 +1,4 @@
-import { useVolumesSelectionStore } from "@/screens/volumes/volumes-selection-store";
+import { useVolumesSelectionStore } from "@/features/volumes/volumes-selection-store";
 
 function useVolumesLayoutSelection() {
   const selectedFileNode = useVolumesSelectionStore((state) => state.selectedFileNode);

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { VolumeFileDetail } from "@/screens/volumes/volumes-canvas-panel";
-import type { FsNode } from "@/screens/volumes/use-volumes";
+import { VolumeFileDetail } from "@/features/volumes/volumes-canvas-panel";
+import type { FsNode } from "@/features/volumes/use-volumes";
 
 let contentState: {
   content: string;
@@ -11,7 +11,7 @@ let contentState: {
 };
 let fileContentCalls: Array<{ path: string | null; provider: string }> = [];
 
-vi.mock("@/screens/volumes/use-volumes", () => ({
+vi.mock("@/features/volumes/use-volumes", () => ({
   useFileContent: (path: string | null, provider: string) => {
     fileContentCalls.push({ path, provider });
     return contentState;

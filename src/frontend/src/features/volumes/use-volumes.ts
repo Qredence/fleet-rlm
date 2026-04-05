@@ -11,7 +11,7 @@ import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
 import type { DataSource } from "@/lib/rlm-api/capabilities";
 
-export { useVolumesSelectionStore } from "@/screens/volumes/volumes-selection-store";
+export { useVolumesSelectionStore } from "@/features/volumes/volumes-selection-store";
 
 export type FsNodeType = "volume" | "directory" | "file";
 export type VolumeProvider = "modal" | "daytona";

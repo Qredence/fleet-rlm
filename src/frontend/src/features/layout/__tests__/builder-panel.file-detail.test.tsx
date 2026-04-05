@@ -34,7 +34,7 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/screens/volumes/volumes-canvas-panel", () => ({
+vi.mock("@/features/volumes/volumes-canvas-panel", () => ({
   VolumesCanvasPanel: () => <div>VolumeFileDetail:README.md</div>,
 }));
 

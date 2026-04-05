@@ -29,7 +29,7 @@ import {
   type FsNode,
   useFileContent,
   useVolumesSelectionStore,
-} from "@/screens/volumes/use-volumes";
+} from "@/features/volumes/use-volumes";
 
 export function VolumesCanvasPanel() {
   const selectedFileNode = useVolumesSelectionStore((state) => state.selectedFileNode);

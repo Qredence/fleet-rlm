@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { getMockFilesystem } from "@/screens/volumes/use-volumes";
+import { getMockFilesystem } from "@/features/volumes/use-volumes";
 
 describe("getMockFilesystem", () => {
   it("uses the canonical durable roots for modal", () => {

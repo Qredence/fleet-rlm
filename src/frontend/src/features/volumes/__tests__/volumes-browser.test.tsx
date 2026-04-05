@@ -3,17 +3,17 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { VolumesBrowser } from "@/screens/volumes/volumes-screen";
-import type { VolumeProvider } from "@/screens/volumes/use-volumes";
+import { VolumesBrowser } from "@/features/volumes/volumes-screen";
+import type { VolumeProvider } from "@/features/volumes/use-volumes";
 
 const useFilesystemMock = vi.fn();
 const clearSelectedFile = vi.fn();
 const selectFile = vi.fn();
 const openCanvas = vi.fn();
 
-vi.mock("@/screens/volumes/use-volumes", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/volumes/use-volumes")>(
-    "@/screens/volumes/use-volumes",
+vi.mock("@/features/volumes/use-volumes", async () => {
+  const actual = await vi.importActual<typeof import("@/features/volumes/use-volumes")>(
+    "@/features/volumes/use-volumes",
   );
   return {
     ...actual,
