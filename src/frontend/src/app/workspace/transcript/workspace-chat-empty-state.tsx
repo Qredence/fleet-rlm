@@ -84,7 +84,7 @@ export function WorkspaceChatEmptyState({
         <Suggestions wrap className="w-full" aria-live="polite" aria-label="Suggestion actions">
           {suggestions.map((suggestion, index) => (
             <AnimatedSuggestion
-              key={suggestion.label}
+              key={`${suggestion.label}-${index}`}
               suggestion={suggestion}
               index={index}
               prefersReduced={!!prefersReduced}

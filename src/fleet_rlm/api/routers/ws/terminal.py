@@ -20,6 +20,23 @@ from .types import LocalPersistFn
 logger = logging.getLogger(__name__)
 
 
+def _final_run_status(event: StreamEvent) -> RunStatus:
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    runtime_payload = payload.get("runtime")
+    runtime = runtime_payload if isinstance(runtime_payload, dict) else {}
+    runtime_degraded = bool(
+        payload.get("runtime_degraded", runtime.get("runtime_degraded", False))
+    )
+    runtime_failure_category = str(
+        payload.get("runtime_failure_category")
+        or runtime.get("runtime_failure_category")
+        or ""
+    ).strip()
+    if runtime_degraded and runtime_failure_category == "tool_execution_error":
+        return RunStatus.FAILED
+    return RunStatus.COMPLETED
+
+
 def build_stream_event_dict(
     *,
     event: StreamEvent,
@@ -59,7 +76,7 @@ async def handle_terminal_stream_event(
                 "Failed to persist session state before final event; continuing"
             )
         await lifecycle.complete_run(
-            RunStatus.COMPLETED,
+            _final_run_status(event),
             step=step,
             summary=build_execution_completion_summary(
                 event=event,

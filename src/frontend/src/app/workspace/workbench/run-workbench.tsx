@@ -265,8 +265,8 @@ function ContextSourceCard({ source }: { source: ContextSourceSummary }) {
         </div>
         {source.warnings?.length ? (
           <ul className="flex list-disc flex-col gap-1 pl-5">
-            {source.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+            {source.warnings.map((warning, index) => (
+              <li key={`${source.hostPath}-warning-${index}`}>{warning}</li>
             ))}
           </ul>
         ) : null}
@@ -321,8 +321,8 @@ export function RunWorkbench() {
           <AlertTitle>Analysis warnings</AlertTitle>
           <AlertDescription>
             <ul className="mt-2 list-disc pl-5">
-              {(summary?.warnings ?? []).map((warning) => (
-                <li key={warning}>{warning}</li>
+              {(summary?.warnings ?? []).map((warning, index) => (
+                <li key={`summary-warning-${index}`}>{warning}</li>
               ))}
             </ul>
           </AlertDescription>

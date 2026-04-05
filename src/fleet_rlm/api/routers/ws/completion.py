@@ -18,9 +18,21 @@ def _as_text(value: Any) -> str | None:
     return None
 
 
-def _canonical_run_status(kind: str) -> str:
+def _final_event_failed(payload: dict[str, Any]) -> bool:
+    runtime = _as_record(payload.get("runtime"))
+    runtime_degraded = bool(
+        payload.get("runtime_degraded", runtime.get("runtime_degraded", False))
+    )
+    category = _as_text(
+        payload.get("runtime_failure_category")
+        or runtime.get("runtime_failure_category")
+    )
+    return runtime_degraded and category == "tool_execution_error"
+
+
+def _canonical_run_status(kind: str, payload: dict[str, Any]) -> str:
     if kind == "final":
-        return "completed"
+        return "error" if _final_event_failed(payload) else "completed"
     if kind == "cancelled":
         return "cancelled"
     return "error"
@@ -73,7 +85,7 @@ def build_execution_completion_summary(
         or _as_text(run_result.get("runtime_mode"))
         or "modal_chat"
     )
-    terminal_status = _canonical_run_status(event.kind)
+    terminal_status = _canonical_run_status(event.kind, payload)
     warnings = list(
         summary_payload.get("warnings") or payload.get("guardrail_warnings") or []
     )

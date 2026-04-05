@@ -131,8 +131,8 @@ export function renderBadges(
   if (values.length === 0) return null;
   return (
     <div className={inspectorStyles.badge.row}>
-      {values.map((value) => (
-        <Badge key={value} variant={variant} className={inspectorStyles.badge.meta}>
+      {values.map((value, index) => (
+        <Badge key={`${value}-${index}`} variant={variant} className={inspectorStyles.badge.meta}>
           {value}
         </Badge>
       ))}

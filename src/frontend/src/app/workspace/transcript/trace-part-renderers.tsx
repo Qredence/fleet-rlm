@@ -614,9 +614,9 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
           <ConfirmationTitle>{part.question}</ConfirmationTitle>
           <ConfirmationRequest>
             <ConfirmationActions>
-              {part.actions?.map((action) => (
+              {part.actions?.map((action, index) => (
                 <ConfirmationAction
-                  key={action.label}
+                  key={`${partKey}-action-${index}`}
                   className={cn(
                     action.variant === "primary" &&
                       "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
