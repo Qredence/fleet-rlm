@@ -109,7 +109,7 @@ Routing ownership:
 Current surface ownership:
 
 - `src/features/layout/` owns canonical app-chrome public entrypoints, implementation, and compatibility exports
-- `src/screens/workspace/`, `src/screens/volumes/`, `src/screens/settings/`, and `src/screens/optimization/` are transitional only until their migrations complete
+- `src/features/workspace/`, `src/features/volumes/`, `src/features/settings/`, and `src/features/optimization/` own the canonical surface entrypoints after the migration away from `src/screens/*`
 - `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
 - `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
 - `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
