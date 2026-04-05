@@ -22,6 +22,7 @@ Frontend source-of-truth files:
 - `src/frontend/vite.config.ts` for lint/test/build configuration and import-boundary rules
 - `src/frontend/src/routes/*` for supported surfaces and not-found behavior
 - `src/frontend/src/features/layout/*` for canonical app-chrome public entrypoints
+- `src/frontend/src/features/workspace/*`, `src/frontend/src/features/volumes/*`, `src/frontend/src/features/settings/*`, and `src/frontend/src/features/optimization/*` for canonical surface ownership as each migration completes
 - `src/frontend/src/components/ui/*` for canonical shadcn/Base UI source components
 - `src/frontend/src/components/ai-elements/*` for canonical AI Elements source components
 - `src/frontend/src/components/patterns/*` for app-owned reusable composition built from registry layers
@@ -84,6 +85,7 @@ Registry-aligned component layers:
 - `src/components/ai-elements/*` for AI Elements registry components
 - `src/components/patterns/*` for app-owned reusable compositions built from `ui` and `ai-elements`
 - `src/features/layout/*` for canonical app-chrome entrypoints and implementation ownership
+- `src/features/workspace/*`, `src/features/volumes/*`, `src/features/settings/*`, and `src/features/optimization/*` for canonical product surface ownership
 - `src/components/` root for a very small set of global compatibility exports such as `brand-mark.tsx`
 
 Rules for those layers:
@@ -92,7 +94,8 @@ Rules for those layers:
 - Keep `components/ai-elements` composable and registry-aligned; do not collapse them into feature-specific monoliths
 - Use `components/patterns` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
 - Route app-chrome consumers through `features/layout/*`, which is the canonical owner of layout implementation
-- New shared layout/app-chrome naming should prefer `layout` over `shell` when creating new architecture surfaces
+- Route surface consumers through `features/<surface>/*` as each surface is migrated
+- For the remaining surfaces, do **not** keep `screens/<surface>/` wrappers after migration; delete those directories
 
 ## Frontend Map
 
@@ -101,14 +104,12 @@ Routing ownership:
 - `src/router.tsx` owns the router instance
 - `src/routeTree.gen.ts` is generated and should not be edited
 - File-based routes under `src/routes/` define product surfaces and catchall/not-found behavior
-- Route files should compose feature or screen entry modules instead of embedding feature logic
+- Route files should compose feature entry modules instead of screen-owned modules once migration completes
 
 Current surface ownership:
 
-- `src/screens/workspace/` is the current top-level workspace surface and owns public screen contracts such as `workspace-layout-contract.ts`
-- `src/screens/volumes/` owns the volume browser entrypoints and public screen contracts such as `volumes-layout-contract.ts`
-- `src/screens/settings/` owns settings entrypoints
 - `src/features/layout/` owns canonical app-chrome public entrypoints, implementation, and compatibility exports
+- `src/screens/workspace/`, `src/screens/volumes/`, `src/screens/settings/`, and `src/screens/optimization/` are transitional only until their migrations complete
 - `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
 - `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
 - `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
@@ -116,20 +117,19 @@ Current surface ownership:
 
 Important boundaries to preserve:
 
-- Keep `src/screens/*` thin; move reusable feature logic into `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
+- Keep `src/screens/*` thin while they still exist; move reusable feature logic into `src/features/*`, `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
 - Keep external layout/app-chrome imports pointed at `src/features/layout/*`
-- Layout implementation should consume workspace and volumes via `workspace-layout-contract.ts`, `volumes-layout-contract.ts`, or the explicitly allowed canvas panel entrypoints
-- `src/screens/workspace/use-workspace.ts` is the public workspace contract; implementation-heavy helpers belong under `src/lib/workspace/`
-- `src/screens/workspace/workspace-canvas-panel.tsx` stays the shell-facing canvas surface; canvas internals belong under `src/app/workspace/`
+- After migrating workspace and volumes, layout implementation should consume them through `src/features/workspace/*` and `src/features/volumes/*`, not `src/screens/*`
 - Assistant transcript/content modeling belongs under `src/app/workspace/assistant-content/model/`
 - Do not recreate a screen-layer `workspace-adapter.ts`; workspace adapter logic belongs in `src/lib/workspace/`
 - The Volumes provider switcher is page-scoped and must not become a global runtime setting
+- Settings should consume the shared optimization form from `features/optimization/optimization-form`
 
 Import-boundary rules enforced in `src/frontend/vite.config.ts`:
 
 - `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/patterns/*` must not import from `src/screens/*`
 - Workspace runtime/state modules in `src/lib/workspace/*` must not depend on workspace UI modules
-- `src/features/layout/*` must consume workspace and volumes through top-level screen contracts such as `workspace-layout-contract.ts` and `volumes-layout-contract.ts`
+- `src/features/layout/*` must consume workspace and volumes through their feature entrypoints or explicitly allowed public contracts
 - Keep `@/lib/utils` as the canonical `cn()` import path
 
 ## UI and Runtime Rules
@@ -158,7 +158,7 @@ Naming and file-layout rules:
 - Keep React component symbols in `PascalCase` and hooks in `useThing` form
 - Keep tests colocated with the owning module under `__tests__/` when practical
 - Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly, not via screen compatibility barrels
-- For new architecture naming, prefer `layout` for app chrome and structural composition instead of `shell`
+- Prefer `layout` / `workspace` / `volumes` / `settings` / `optimization` feature naming over legacy `screen` ownership when creating new architecture surfaces
 
 ## Environment and Contract Sync
 
