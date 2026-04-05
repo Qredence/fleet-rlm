@@ -37,7 +37,7 @@ export const inspectorStyles = {
   /** Text headings. */
   heading: {
     /** Section heading (e.g. "Citations", "Tool sessions", "Execution"). */
-    section: "text-[11px] uppercase tracking-[0.18em] text-muted-foreground",
+    section: "text-[11px] font-medium tracking-[0.04em] text-muted-foreground",
     /** Micro label inside detail blocks (e.g. "Input", "Output", "Code"). */
     detail: "text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
   },

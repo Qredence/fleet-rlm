@@ -52,13 +52,13 @@ All Daytona-specific implementation lives under `src/fleet_rlm/integrations/prov
 - `interpreter_execution.py` — delegate child interpreter building
 - `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
 - `agent.py` — `DaytonaWorkbenchChatAgent` (Daytona-specific agent/session adapter)
-- `state.py` — chat/session normalization helpers
+- `diagnostics.py` — structured runtime diagnostics and smoke validation
+- `types.py` — consolidated Daytona types plus chat/session normalization helpers
 - `volumes.py` — Daytona volume browsing
-- `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, `types_serialization.py` — focused type modules
-- `types.py` — compatibility facade over focused type modules
 - `config.py` — `ResolvedDaytonaConfig` resolution
-- `snapshots.py` — sandbox snapshot lookup
 - `runtime_helpers.py`, `interpreter_assets.py` — internal utilities
+
+Deleted module paths such as `state.py` and `snapshots.py` are intentionally unsupported; use the owner modules above.
 
 ## Session Manifest Path
 

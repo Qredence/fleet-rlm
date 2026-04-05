@@ -163,3 +163,39 @@ def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
             await task
 
     asyncio.run(scenario())
+
+
+def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        event = StreamEvent(
+            kind="final",
+            text="claimed success",
+            payload={
+                "runtime_degraded": True,
+                "runtime_failure_category": "tool_execution_error",
+            },
+            timestamp=ts(),
+        )
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            _ = include_volume_save
+
+        await handle_terminal_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            event=event,
+            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            step=None,
+            persist_session_state=cast(Any, persist_session_state),
+            request_message="hello",
+        )
+
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["status"].name == "FAILED"
+        assert lifecycle.completed_with["summary"]["status"] == "error"
+
+    asyncio.run(scenario())

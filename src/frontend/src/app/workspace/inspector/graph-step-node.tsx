@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { ArtifactActorKind, ArtifactStepType } from "@/screens/workspace/use-workspace";
+import type { ArtifactActorKind, ArtifactStepType } from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { NODE_WIDTH, STEP_TYPE_META } from "@/app/workspace/inspector/graph-step-node.constants";
 import {
@@ -179,8 +179,8 @@ const GraphStepNode = memo(function GraphStepNode({
       )}
 
       {!isExpanded && errorDetails && (
-        <div className="pointer-events-none absolute left-full top-16 z-50 ml-2 w-72 rounded-lg border border-red-500/30 bg-card/95 p-2 shadow-md opacity-0 translate-y-1 transition duration-150 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+        <div className="pointer-events-none absolute left-full top-16 z-50 ml-2 w-72 rounded-lg border border-destructive/30 bg-card/95 p-2 shadow-md opacity-0 translate-y-1 transition duration-150 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-destructive">
             Error details
           </p>
           <p className="text-[11px] leading-snug text-foreground whitespace-pre-wrap wrap-break-word">
@@ -256,8 +256,8 @@ const GraphStepNode = memo(function GraphStepNode({
           )}
 
           {errorDetails && (
-            <div className="mb-2 rounded-md border border-red-500/40 bg-red-500/5 p-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+            <div className="mb-2 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-destructive">
                 Error details
               </p>
               <p className="text-[11px] leading-relaxed text-foreground whitespace-pre-wrap wrap-break-word">

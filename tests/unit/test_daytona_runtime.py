@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from fleet_rlm.integrations.providers.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
+    DaytonaSandboxSession,
 )
 from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
     _areconcile_repo_checkout,
@@ -95,11 +96,24 @@ class _FakeClient:
     def __init__(self) -> None:
         self.volume = _FakeVolumeService()
         self.created_requests: list[object] = []
+        self.create_call_kwargs: list[dict[str, object]] = []
         self.sandbox = _FakeSandbox()
         self.close_calls = 0
 
-    def create(self, request=None):
+    def create(
+        self,
+        request=None,
+        *,
+        timeout: float = 60,
+        on_snapshot_create_logs=None,
+    ):
         self.created_requests.append(request)
+        self.create_call_kwargs.append(
+            {
+                "timeout": timeout,
+                "on_snapshot_create_logs": on_snapshot_create_logs,
+            }
+        )
         return self.sandbox
 
     def get(self, sandbox_id: str):
@@ -135,9 +149,19 @@ class _LoopBoundClient(_FakeClient):
         super().__init__()
         self.sandbox = _LoopBoundSandbox()
 
-    def create(self, request=None):
+    def create(
+        self,
+        request=None,
+        *,
+        timeout: float = 60,
+        on_snapshot_create_logs=None,
+    ):
         self.sandbox.owner_loop_id = id(asyncio.get_running_loop())
-        return super().create(request=request)
+        return super().create(
+            request=request,
+            timeout=timeout,
+            on_snapshot_create_logs=on_snapshot_create_logs,
+        )
 
 
 def test_create_workspace_session_stages_context_and_mounts_volume(
@@ -185,6 +209,9 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
             "branch": "main",
         }
     ]
+    assert len(fake_client.create_call_kwargs) == 1
+    assert fake_client.create_call_kwargs[0]["timeout"] == 0
+    assert callable(fake_client.create_call_kwargs[0]["on_snapshot_create_logs"])
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes.md") for path in upload_paths)
     assert any(path.endswith("manifest.json") for path in upload_paths)
@@ -594,3 +621,59 @@ def test_session_create_lsp_server_delegates_to_sandbox() -> None:
     assert len(lsp_calls) == 1
     assert lsp_calls[0] == ("python", "/workspace/project")
     assert lsp.language == "python"
+
+
+def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
+    replacement_sandbox = _FakeSandbox()
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def _aget_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return replacement_sandbox
+
+    runtime_ref = _RuntimeRef()
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+    session.owner_loop_id = -1
+
+    written = asyncio.run(session.awrite_file("notes.txt", "hello"))
+
+    assert written == "/workspace/repo/notes.txt"
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert sandbox.fs.uploads == {}
+    assert replacement_sandbox.fs.uploads == {"/workspace/repo/notes.txt": b"hello"}
+
+
+def test_daytona_session_write_file_emits_progress_events() -> None:
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    events: list[dict[str, object]] = []
+    session.execution_event_callback = events.append
+
+    written = session.write_file("notes.txt", "hello")
+
+    assert written == "/workspace/repo/notes.txt"
+    assert [event.get("event_kind") for event in events] == [
+        "durable_write_started",
+        "durable_write_completed",
+    ]
+    assert events[-1]["bytes_written"] == 5

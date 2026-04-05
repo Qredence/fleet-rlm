@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime
+import logging
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -28,6 +31,8 @@ from .runtime_helpers import (
     _run_async_compat,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _current_async_owner() -> tuple[int, int]:
     return (threading.get_ident(), id(asyncio.get_running_loop()))
@@ -48,6 +53,7 @@ class DaytonaSandboxSession:
     context_id: str | None = None
     owner_thread_id: int | None = None
     owner_loop_id: int | None = None
+    execution_event_callback: Any | None = None
     _context: Any | None = field(default=None, init=False, repr=False)
     _driver_started: bool = field(default=False, init=False, repr=False)
     # Optional back-reference to the runtime that created this session's
@@ -167,10 +173,46 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.aread_file, path)
 
     async def awrite_file(self, path: str, content: str) -> str:
+        if not self.matches_current_async_owner() and self._runtime_ref is not None:
+            sandbox_id = self.sandbox_id
+            if sandbox_id:
+                with suppress(Exception):
+                    self.sandbox = await self._runtime_ref._aget_sandbox(
+                        sandbox_id, recover=False
+                    )
+                    self.bind_current_async_owner()
         resolved_path = self._resolve_sandbox_path(path)
-        await _await_if_needed(
-            self.sandbox.fs.upload_file(content.encode("utf-8"), resolved_path)
-        )
+        payload = content.encode("utf-8")
+        callback = getattr(self, "execution_event_callback", None)
+        if callable(callback):
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_started",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": 0,
+                }
+            )
+        await _await_if_needed(self.sandbox.fs.upload_file(payload, resolved_path))
+        if callable(callback):
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_completed",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": len(payload),
+                }
+            )
         return resolved_path
 
     def write_file(self, path: str, content: str) -> str:
@@ -292,6 +334,7 @@ class DaytonaSandboxRuntime:
     def build_sandbox_spec(
         self,
         *,
+        name: str | None = None,
         volume_name: str | None = None,
         image: Any = None,
         snapshot: str | None = None,
@@ -300,6 +343,8 @@ class DaytonaSandboxRuntime:
         cpu: int | None = None,
         memory: int | None = None,
         disk: int | None = None,
+        auto_stop_interval: int | None = 1800,
+        auto_archive_interval: int | None = 3600,
         auto_delete_interval: int | None = None,
         network_block_all: bool | None = None,
         network_allow_list: str | None = None,
@@ -308,19 +353,47 @@ class DaytonaSandboxRuntime:
 
         The ``image`` parameter accepts a ``daytona.Image`` declarative
         builder object (e.g. ``Image.debian_slim().pip_install(...)``).
+
+        When neither ``image`` nor ``snapshot`` is provided, the spec
+        defaults to the ``fleet-rlm-base`` snapshot so that sandboxes
+        start with pre-installed core packages (dspy-ai, numpy, pandas,
+        httpx, pydantic).  If the snapshot has not been created yet, the
+        runtime falls back to a declarative image build at sandbox
+        creation time (see ``_acreate_sandbox``).
+
+        Cost-saving lifecycle defaults:
+
+        * ``auto_stop_interval`` — seconds of inactivity before the
+          sandbox is automatically stopped (default 1800 = 30 min).
+          ``refresh_activity()`` resets the timer.
+        * ``auto_archive_interval`` — seconds after stop before the
+          sandbox is archived to cold storage (default 3600 = 1 h).
+        * ``auto_delete_interval`` — seconds after archive before
+          permanent deletion (default ``None`` = never auto-delete).
+
+        A human-readable ``name`` is generated automatically when not
+        supplied, producing dashboard-friendly labels like
+        ``fleet-rlm-20260404-090700`` instead of random hex IDs.
         """
+        readable_name = name or (
+            f"fleet-rlm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d-%H%M%S}"
+        )
+        effective_snapshot = snapshot if (snapshot or image) else DEFAULT_SNAPSHOT_NAME
         merged_labels = dict(self.DEFAULT_LABELS)
         if labels:
             merged_labels.update(labels)
         return SandboxSpec(
+            name=readable_name,
             language="python",
             image=image,
-            snapshot=snapshot,
+            snapshot=effective_snapshot,
             volume_name=volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             env_vars=env_vars or None,
             labels=merged_labels,
             ephemeral=True,
+            auto_stop_interval=auto_stop_interval,
+            auto_archive_interval=auto_archive_interval,
             auto_delete_interval=auto_delete_interval,
             cpu=cpu,
             memory=memory,
@@ -385,9 +458,30 @@ class DaytonaSandboxRuntime:
         *,
         spec: SandboxSpec | None = None,
     ) -> Any:
-        """Create a sandbox, optionally from a declarative spec."""
+        """Create a sandbox, optionally from a declarative spec.
+
+        When the spec requests a named snapshot, the runtime first checks
+        whether that snapshot is ``ACTIVE``.  If it is not available, the
+        runtime transparently falls back to a declarative image build
+        using ``DEFAULT_SNAPSHOT_PACKAGES`` so the sandbox still starts
+        with the expected packages pre-installed.
+        """
         try:
             resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
+
+            # If a snapshot is requested but not yet created/active, fall
+            # back to a declarative image build with the same packages.
+            if resolved_spec.snapshot and not resolved_spec.uses_declarative_image:
+                active = await aresolve_snapshot(
+                    resolved_spec.snapshot, config=self._resolved_config
+                )
+                if active is None:
+                    logger.info(
+                        "Snapshot '%s' not active; falling back to declarative image",
+                        resolved_spec.snapshot,
+                    )
+                    resolved_spec = self._fallback_to_declarative_image(resolved_spec)
+
             return await self._acreate_sandbox_from_spec(resolved_spec)
         except Exception as exc:
             raise DaytonaDiagnosticError(
@@ -395,6 +489,23 @@ class DaytonaSandboxRuntime:
                 category="sandbox_create_clone_error",
                 phase="sandbox_create",
             ) from exc
+
+    @staticmethod
+    def _fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
+        """Replace a snapshot-based spec with a declarative image build."""
+        try:
+            from daytona import Image as DaytonaImage
+        except ImportError as exc:  # pragma: no cover
+            raise _daytona_import_error(exc) from exc
+
+        image = DaytonaImage.base("python:3.12-slim")
+        image = image.run_commands("pip install uv")
+        if DEFAULT_SNAPSHOT_PACKAGES:
+            image = image.run_commands(
+                f"uv pip install --system {' '.join(DEFAULT_SNAPSHOT_PACKAGES)}"
+            )
+
+        return dataclasses.replace(spec, image=image, snapshot=None)
 
     async def _aget_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
         """Get an existing sandbox by ID, recovering from archive if needed."""
@@ -437,6 +548,7 @@ class DaytonaSandboxRuntime:
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             context_id=context_id,
         )
+        session._runtime_ref = self
         session.phase_timings_ms.update(timings)
         session.bind_current_async_owner()
         return session
@@ -636,9 +748,130 @@ class DaytonaSandboxRuntime:
         )
 
 
+# ---------------------------------------------------------------------------
+# Snapshot management helpers (folded from snapshots.py)
+# ---------------------------------------------------------------------------
+
+# Default pip packages every fleet-rlm sandbox needs.
+DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
+    "dspy-ai",
+    "numpy",
+    "pandas",
+    "httpx",
+    "pydantic",
+]
+
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
+
+
+async def alist_snapshots(
+    config: ResolvedDaytonaConfig | None = None,
+) -> list[dict[str, Any]]:
+    """Return a lightweight list of available snapshots.
+
+    Each dict contains ``name``, ``id``, ``state``, and ``image_name``.
+    """
+    cfg = config or resolve_daytona_config()
+    client = _build_daytona_client(cfg)
+    try:
+        result = await _await_if_needed(client.snapshot.list())
+        return [
+            {
+                "name": s.name,
+                "id": s.id,
+                "state": str(getattr(s, "state", "unknown")),
+                "image_name": getattr(s, "image_name", None),
+            }
+            for s in (result.items if hasattr(result, "items") else result)
+        ]
+    finally:
+        await _await_if_needed(client.close())
+
+
+async def aget_snapshot(
+    name: str,
+    *,
+    config: ResolvedDaytonaConfig | None = None,
+) -> dict[str, Any] | None:
+    """Look up a snapshot by *name*, returning a summary dict or ``None``."""
+    cfg = config or resolve_daytona_config()
+    client = _build_daytona_client(cfg)
+    try:
+        snap = await _await_if_needed(client.snapshot.get(name))
+        return {
+            "name": snap.name,
+            "id": snap.id,
+            "state": str(getattr(snap, "state", "unknown")),
+            "image_name": getattr(snap, "image_name", None),
+        }
+    except Exception:
+        logger.debug("snapshot_lookup_failed", extra={"name": name}, exc_info=True)
+        return None
+    finally:
+        await _await_if_needed(client.close())
+
+
+async def acreate_snapshot(
+    name: str = DEFAULT_SNAPSHOT_NAME,
+    *,
+    base_image: str = "python:3.12-slim",
+    packages: list[str] | None = None,
+    config: ResolvedDaytonaConfig | None = None,
+    on_logs: Any | None = None,
+) -> dict[str, Any]:
+    """Create a new Daytona snapshot with pre-installed packages.
+
+    Returns a summary dict with the snapshot ``name``, ``id``, and ``state``.
+    """
+    from daytona import Image as DaytonaImage
+    from daytona.common.snapshot import CreateSnapshotParams
+
+    pkgs = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
+
+    image = DaytonaImage.base(base_image)
+    image = image.run_commands("pip install uv")
+    if pkgs:
+        image = image.run_commands(f"uv pip install --system {' '.join(pkgs)}")
+
+    params = CreateSnapshotParams(name=name, image=image)
+    cfg = config or resolve_daytona_config()
+    client = _build_daytona_client(cfg)
+    try:
+        snap = await _await_if_needed(
+            client.snapshot.create(params, on_logs=on_logs, timeout=0)
+        )
+        logger.info("Snapshot '%s' created (id=%s)", snap.name, snap.id)
+        return {
+            "name": snap.name,
+            "id": snap.id,
+            "state": str(getattr(snap, "state", "unknown")),
+            "image_name": getattr(snap, "image_name", None),
+        }
+    finally:
+        await _await_if_needed(client.close())
+
+
+async def aresolve_snapshot(
+    preferred_name: str = DEFAULT_SNAPSHOT_NAME,
+    *,
+    config: ResolvedDaytonaConfig | None = None,
+) -> str | None:
+    """Return the snapshot name if it exists and is ``ACTIVE``, else ``None``."""
+    info = await aget_snapshot(preferred_name, config=config)
+    if info and info.get("state", "").upper() in ("ACTIVE", "SnapshotState.ACTIVE"):
+        return info["name"]
+    return None
+
+
 __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
+    "DEFAULT_SNAPSHOT_NAME",
+    "DEFAULT_SNAPSHOT_PACKAGES",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
     "SandboxSpec",
+    "acreate_snapshot",
+    "aget_snapshot",
+    "alist_snapshots",
+    "aresolve_snapshot",
 ]

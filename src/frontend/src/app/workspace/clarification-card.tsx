@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { CircleCheck, MessageSquare, Pencil } from "lucide-react";
-import type { ChatMessage } from "@/screens/workspace/use-workspace";
+import type { ChatMessage } from "@/features/workspace/use-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";

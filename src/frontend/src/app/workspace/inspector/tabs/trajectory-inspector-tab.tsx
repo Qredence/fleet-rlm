@@ -56,7 +56,13 @@ export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
             items.map((item) => {
               const tone = statusTone(item.status);
               return (
-                <Card key={item.id} className={inspectorStyles.card.root}>
+                <Card
+                  key={item.id}
+                  className={cn(
+                    inspectorStyles.card.root,
+                    item.status === "failed" && "border-destructive/30 bg-destructive/5",
+                  )}
+                >
                   <CardHeader className={inspectorStyles.card.header}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>

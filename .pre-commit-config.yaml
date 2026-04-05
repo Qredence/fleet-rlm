@@ -38,7 +38,7 @@ repos:
 
       - id: backend-fast-tests
         name: Run backend fast test lane
-        entry: make test-fast
+        entry: ./scripts/run_backend_fast_tests.zsh
         language: system
         pass_filenames: false
         stages: [pre-push]

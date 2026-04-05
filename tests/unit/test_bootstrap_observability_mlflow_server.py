@@ -50,7 +50,7 @@ async def test_start_mlflow_server_uses_lightweight_local_command(
             "mlflow",
             "server",
             "--backend-store-uri",
-            "sqlite:///mlruns.db",
+            "sqlite:///.data/mlruns.db",
             "--host",
             "127.0.0.1",
             "--port",

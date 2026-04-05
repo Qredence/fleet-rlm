@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RuntimeContext } from "@/screens/workspace/use-workspace";
+import type { RuntimeContext } from "@/features/workspace/use-workspace";
 import type { ExecutionSection, ToolSessionItem } from "@/app/workspace/assistant-content/model";
 import { inspectorStyles, inspectorInsetClass } from "@/app/workspace/inspector/inspector-styles";
 import { statusTone } from "../utils/inspector-utils";
@@ -131,8 +131,8 @@ export function renderBadges(
   if (values.length === 0) return null;
   return (
     <div className={inspectorStyles.badge.row}>
-      {values.map((value) => (
-        <Badge key={value} variant={variant} className={inspectorStyles.badge.meta}>
+      {values.map((value, index) => (
+        <Badge key={`${value}-${index}`} variant={variant} className={inspectorStyles.badge.meta}>
           {value}
         </Badge>
       ))}
@@ -316,7 +316,13 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
       return (
         <div className={inspectorStyles.stack.cards}>
           <DetailBlock
-            label="Status"
+            label={
+              section.part.tone === "error"
+                ? "Error"
+                : section.part.tone === "warning"
+                  ? "Warning"
+                  : "Note"
+            }
             value={section.part.text}
             tone={section.part.tone === "error" ? "error" : "default"}
           />

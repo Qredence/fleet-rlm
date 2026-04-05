@@ -1,27 +1,21 @@
-import { FileQuestion, SearchSlash, TriangleAlert } from "lucide-react";
+import { SearchSlash, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { EmptyPanel } from "@/components/patterns/empty-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useRunWorkbenchStore } from "@/screens/workspace/use-workspace";
+import { useRunWorkbenchStore } from "@/features/workspace/use-workspace";
 import type {
   ArtifactSummary,
   ContextSourceSummary,
   IterationSummary,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 
 function stringifyValue(value: unknown): string {
   if (value == null) return "";
@@ -57,28 +51,6 @@ function preferredArtifactText(value: unknown): string | null {
   }
 
   return null;
-}
-
-function EmptyPanel({
-  title,
-  description,
-  icon: Icon = FileQuestion,
-}: {
-  title: string;
-  description: string;
-  icon?: typeof FileQuestion;
-}) {
-  return (
-    <Empty>
-      <EmptyMedia variant="icon">
-        <Icon />
-      </EmptyMedia>
-      <EmptyContent>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyContent>
-    </Empty>
-  );
 }
 
 function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
@@ -118,6 +90,13 @@ function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
       </CodeBlock>
     </div>
   );
+}
+
+function humanizeKind(kind: string): string {
+  return kind
+    .replace(/_/g, " ")
+    .replace(/\brlm\b/gi, "RLM")
+    .replace(/\brepl\b/gi, "REPL");
 }
 
 function statusBadgeVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
@@ -258,8 +237,8 @@ function ContextSourceCard({ source }: { source: ContextSourceSummary }) {
         </div>
         {source.warnings?.length ? (
           <ul className="flex list-disc flex-col gap-1 pl-5">
-            {source.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+            {source.warnings.map((warning, index) => (
+              <li key={`${source.hostPath}-warning-${index}`}>{warning}</li>
             ))}
           </ul>
         ) : null}
@@ -310,12 +289,12 @@ export function RunWorkbench() {
 
       {warningCount > 0 ? (
         <Alert className="shrink-0 border-accent/25 bg-accent/5 text-foreground">
-          <TriangleAlert className="size-4" />
+          <TriangleAlert />
           <AlertTitle>Analysis warnings</AlertTitle>
           <AlertDescription>
             <ul className="mt-2 list-disc pl-5">
-              {(summary?.warnings ?? []).map((warning) => (
-                <li key={warning}>{warning}</li>
+              {(summary?.warnings ?? []).map((warning, index) => (
+                <li key={`summary-warning-${index}`}>{warning}</li>
               ))}
             </ul>
           </AlertDescription>
@@ -325,7 +304,7 @@ export function RunWorkbench() {
       <div className="shrink-0 rounded-xl border border-border-subtle/80 bg-card/80 px-3 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-foreground">
+            <div className="text-sm font-medium text-foreground whitespace-pre-wrap break-words">
               {task ?? "Workspace execution"}
             </div>
             <div className="truncate text-xs text-muted-foreground">
@@ -334,7 +313,6 @@ export function RunWorkbench() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Workspace execution</Badge>
             <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
             {summary?.terminationReason ? (
               <Badge variant="secondary">{summary.terminationReason}</Badge>
@@ -342,10 +320,12 @@ export function RunWorkbench() {
           </div>
         </div>
         <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span>{iterations.length} iterations</span>
-          <span>{callbacks.length} callbacks</span>
-          <span>{promptHandles.length} prompt objects</span>
-          <span>{sources.length + attachments.length} evidence items</span>
+          {iterations.length > 0 ? <span>{iterations.length} iterations</span> : null}
+          {callbacks.length > 0 ? <span>{callbacks.length} callbacks</span> : null}
+          {promptHandles.length > 0 ? <span>{promptHandles.length} prompts</span> : null}
+          {sources.length + attachments.length > 0 ? (
+            <span>{sources.length + attachments.length} context items</span>
+          ) : null}
           {summary?.durationMs != null ? <span>{summary.durationMs}ms</span> : null}
         </div>
       </div>
@@ -359,9 +339,9 @@ export function RunWorkbench() {
           >
             <div className="shrink-0 overflow-x-auto border-b border-border-subtle/70 px-3 no-scrollbar">
               <TabsList variant="underline">
+                <TabsTrigger value="final">Output</TabsTrigger>
                 <TabsTrigger value="iterations">Iterations</TabsTrigger>
-                <TabsTrigger value="evidence">Evidence</TabsTrigger>
-                <TabsTrigger value="final">Final Output</TabsTrigger>
+                <TabsTrigger value="evidence">Context</TabsTrigger>
               </TabsList>
             </div>
 
@@ -388,7 +368,7 @@ export function RunWorkbench() {
                         <Card key={entry.id} className="border-border-subtle/80 bg-muted/15">
                           <CardContent className="flex flex-col gap-2 pt-4">
                             <div className="flex flex-wrap gap-2">
-                              <Badge variant="secondary">{entry.kind}</Badge>
+                              <Badge variant="secondary">{humanizeKind(entry.kind)}</Badge>
                               {entry.iteration != null ? (
                                 <Badge variant="secondary">iter {entry.iteration}</Badge>
                               ) : null}

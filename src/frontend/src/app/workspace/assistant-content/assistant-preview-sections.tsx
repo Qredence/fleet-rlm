@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { InspectorTab } from "@/screens/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import type { AssistantContentModel } from "@/app/workspace/assistant-content/model";
 import {
   inspectorStyles,

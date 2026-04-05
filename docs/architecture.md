@@ -58,7 +58,7 @@ graph TB
 
     subgraph TOOLS["Tools Layer (runtime/tools/)"]
         TOOL_DOCUMENT["document.py"]
-        TOOL_SANDBOX["sandbox.py<br/>(sandbox, RLM, memory)"]
+        TOOL_SANDBOX["sandbox_common.py<br/>(sandbox, snapshot, LSP, buffer, process)"]
         TOOL_CHUNKING["chunking.py"]
         TOOL_FILESYSTEM["filesystem.py"]
     end
@@ -193,7 +193,10 @@ Tools provide capabilities for the ReAct agent:
 | Module                   | Purpose                             |
 | ------------------------ | ----------------------------------- |
 | `document.py`            | Document loading and processing     |
-| `sandbox.py`             | Sandbox execution, cached-runtime delegation tools, memory-intelligence tools, and persistent memory helpers |
+| `sandbox_common.py`      | Shared sandbox tool entrypoint plus snapshot, LSP, buffer, and process helpers |
+| `sandbox_delegate_tools.py` | Recursive `dspy.RLM` delegation tools |
+| `sandbox_memory_tools.py` | Memory-intelligence tools |
+| `sandbox_storage_tools.py` | Durable storage, editing, buffer, and workspace helpers |
 | `chunking.py`            | Text chunking for long documents    |
 | `filesystem.py`          | File system operations in sandbox   |
 
@@ -217,14 +220,13 @@ The Daytona pilot is an experimental interpreter backend for the shared runtime 
 
 | Module                | Purpose                                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, `types_serialization.py` | Focused Daytona rollout, context, recursion, result, and serialization contracts |
+| `types.py`            | Consolidated Daytona types, staged-context metadata, smoke result, and chat/session normalization helpers |
 | `config.py`           | Explicit native Daytona env resolution and preflight validation                                                     |
-| `runtime.py`          | Direct-SDK sandbox bootstrap, repo clone orchestration, volume attach, and local context staging                    |
+| `runtime.py`          | Direct-SDK sandbox bootstrap, repo clone orchestration, volume attach, local context staging, and snapshot helpers |
 | `bridge.py`           | Minimal guide-style broker bridge for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`            |
-| `smoke.py`            | CLI-first Daytona smoke workflow validating persistent code-interpreter state                                        |
+| `diagnostics.py`      | Structured Daytona diagnostics plus CLI-first smoke validation                                                      |
 | `interpreter.py`      | Daytona interpreter backend compatible with the shared ReAct + `dspy.RLM` flow                                      |
 | `agent.py`            | Thin Daytona compatibility wrapper over the shared ReAct agent                                                      |
-| `state.py`            | Daytona chat/session normalization helpers                                                                           |
 | `volumes.py`          | Daytona volume browsing helpers                                                                                      |
 
 Important scope notes:

@@ -12,6 +12,7 @@ Tools included:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,13 @@ from fleet_rlm.runtime.tools.sandbox_common import (
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
+
+try:
+    import mlflow as _mlflow
+except ImportError:  # pragma: no cover - optional dependency
+    mlflow: Any | None = None
+else:
+    mlflow = _mlflow
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +144,14 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
         Returns:
             Same dictionary payload as ``load_document`` for URL-backed documents.
         """
-        return _load_document_impl(url, alias=alias)
+        tracer = getattr(mlflow, "start_span", None) if mlflow is not None else None
+        span_ctx = (
+            tracer(name="fetch_web_document", span_type="RETRIEVER")
+            if callable(tracer)
+            else nullcontext()
+        )
+        with span_ctx:
+            return _load_document_impl(url, alias=alias)
 
     def set_active_document(alias: str) -> dict[str, Any]:
         """Set which loaded document alias should be used by default tools.

@@ -199,6 +199,38 @@ describe("applyWsFrameToMessages", () => {
       expect(cot.steps[0]?.status).toBe("active");
       expect(cot.steps[0]?.details).toContain("Tool · read_file");
       expect(cot.steps[0]?.details).toContain("Observation · Found entrypoint");
+      expect(cot.steps[0]?.body).toBe("Read file");
+    }
+  });
+
+  it("promotes Daytona trajectory thoughts into live advanced reasoning steps", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("trajectory_step", "trace", {
+        runtime_mode: "daytona_pilot",
+        step_index: 0,
+        step_data: {
+          thought: "Inspect the repo first.",
+          tool_name: "list_files",
+          observation: "Found entrypoint",
+        },
+      }),
+    );
+
+    const liveReasoning = traceRows(
+      messages,
+      (part, message) => part.kind === "reasoning" && message.traceSource === "trajectory",
+    );
+    expect(liveReasoning).toHaveLength(1);
+    const reasoningPart = liveReasoning[0]?.part;
+    if (reasoningPart?.kind === "reasoning") {
+      expect(reasoningPart.label).toBe("thought_0");
+      expect(reasoningPart.parts[0]?.text).toBe("Inspect the repo first.");
+    }
+
+    const cot = findFirstPart(messages, (part) => part.kind === "chain_of_thought");
+    if (cot?.kind === "chain_of_thought") {
+      expect(cot.steps[0]?.body).toBe("Inspect the repo first.");
     }
   });
 

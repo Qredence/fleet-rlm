@@ -54,6 +54,14 @@ async def switch_session_if_needed(
             "manifest": manifest if isinstance(manifest, dict) else {},
             "session": {"state": {}, "session_id": sess_id},
         }
+        try:
+            from fleet_rlm.integrations.database.local_store import (
+                create_session as _db_create,
+            )
+
+            cached["db_session_id"] = _db_create(title=sess_id).id
+        except Exception:
+            pass
 
     cached["session_id"] = sess_id
     cached["workspace_id"] = workspace_id

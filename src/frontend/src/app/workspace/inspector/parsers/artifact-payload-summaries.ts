@@ -1,4 +1,4 @@
-import type { ExecutionStep } from "@/screens/workspace/use-workspace";
+import type { ExecutionStep } from "@/features/workspace/use-workspace";
 import {
   parseArtifactPayload,
   parseFinalOutputEnvelope,

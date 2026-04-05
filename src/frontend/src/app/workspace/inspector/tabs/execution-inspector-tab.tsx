@@ -47,9 +47,9 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
                         <Accordion
                           type="single"
                           collapsible
-                          defaultValue={section.defaultOpen ? "details" : undefined}
+                          defaultValue={section.defaultOpen ? `details-${section.id}` : undefined}
                         >
-                          <AccordionItem value="details" className="border-b-0">
+                          <AccordionItem value={`details-${section.id}`} className="border-b-0">
                             <AccordionTrigger className="py-0 hover:no-underline">
                               <div className="flex flex-1 flex-col gap-2 text-left">
                                 <div className="flex flex-wrap items-start justify-between gap-2">

@@ -169,7 +169,7 @@ export const PromptInputActionAddAttachments = ({
 
   return (
     <PromptInputActionMenuItem {...props} onSelect={handleSelect}>
-      <ImageIcon className="mr-2 size-4" /> {label}
+      <ImageIcon /> {label}
     </PromptInputActionMenuItem>
   );
 };

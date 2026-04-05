@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { InspectorTab } from "@/screens/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import type { AssistantContentModel } from "@/app/workspace/assistant-content/model";
 import {
   inspectorStyles,
@@ -39,7 +39,7 @@ export function ExecutionHighlightsGroup({
                 <div className="flex flex-wrap items-center justify-end gap-1.5">
                   {highlight.count && highlight.count > 1 ? (
                     <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                      {highlight.count}x
+                      ×{highlight.count}
                     </Badge>
                   ) : null}
                   <Badge variant={tone.variant} className={inspectorStyles.badge.status}>

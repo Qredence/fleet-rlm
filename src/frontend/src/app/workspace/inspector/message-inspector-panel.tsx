@@ -8,10 +8,10 @@ import {
   buildAssistantContentModel,
   type AssistantContentModel,
 } from "@/app/workspace/assistant-content/model";
-import type { ExecutionStep } from "@/screens/workspace/use-workspace";
-import { useChatStore } from "@/screens/workspace/use-workspace";
-import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
-import type { InspectorTab } from "@/screens/workspace/use-workspace";
+import type { ExecutionStep } from "@/features/workspace/use-workspace";
+import { useChatStore } from "@/features/workspace/use-workspace";
+import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import { inspectorStyles } from "@/app/workspace/inspector/inspector-styles";
 import { executionSectionState, renderBadges, statusTone } from "./ui/inspector-ui";
 
@@ -132,7 +132,7 @@ export function MessageInspectorPanel() {
         ? ([{ id: "execution", label: "Execution" }] as TabOption[])
         : []),
       ...(model.evidence.hasContent
-        ? ([{ id: "evidence", label: "Evidence" }] as TabOption[])
+        ? ([{ id: "evidence", label: "Examples" }] as TabOption[])
         : []),
       ...(showGraph ? ([{ id: "graph", label: "Graph" }] as TabOption[]) : []),
     ];

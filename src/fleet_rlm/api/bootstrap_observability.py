@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from fleet_rlm import __version__
@@ -143,6 +144,7 @@ async def start_mlflow_server(
 
     logger.info("Starting MLflow tracking server on port %d...", port)
     try:
+        Path(".data").mkdir(exist_ok=True)
         proc = subprocess.Popen(
             [
                 sys.executable,
@@ -150,7 +152,7 @@ async def start_mlflow_server(
                 "mlflow",
                 "server",
                 "--backend-store-uri",
-                "sqlite:///mlruns.db",
+                "sqlite:///.data/mlruns.db",
                 "--host",
                 "127.0.0.1",
                 "--port",

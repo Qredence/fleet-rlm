@@ -268,3 +268,34 @@ def test_execution_step_builder_links_repl_start_and_complete():
     assert repl_start.type == "repl"
     assert repl_done.type == "repl"
     assert repl_done.parent_id == repl_start.id
+
+
+def test_execution_step_builder_keeps_repl_progress_under_parent():
+    builder = ExecutionStepBuilder(run_id="run-3")
+    repl_start = builder.from_interpreter_hook(
+        {
+            "phase": "start",
+            "timestamp": 20.0,
+            "execution_profile": "RLM_DELEGATE",
+            "code_hash": "durable-write",
+            "code_preview": "sandbox.fs.upload_file",
+        }
+    )
+    progress = builder.from_interpreter_hook(
+        {
+            "phase": "progress",
+            "timestamp": 20.5,
+            "execution_profile": "durable_write",
+            "code_hash": "durable-write",
+            "code_preview": "sandbox.fs.upload_file",
+            "event_kind": "durable_write_completed",
+            "path": "/workspace/out.txt",
+            "bytes_total": 12,
+            "bytes_written": 12,
+        }
+    )
+
+    assert repl_start is not None
+    assert progress is not None
+    assert progress.parent_id == repl_start.id
+    assert progress.label == "durable_write_completed: /workspace/out.txt"

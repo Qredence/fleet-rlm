@@ -29,7 +29,7 @@ class _ReActAgentOptions:
     history_max_turns: int | None = None
     extra_tools: list | None = None
     interpreter_async_execute: bool = True
-    guardrail_mode: Literal["off", "warn", "strict"] = "off"
+    guardrail_mode: Literal["off", "warn", "strict"] = "warn"
     max_output_chars: int = 10000
     min_substantive_chars: int = 20
     delegate_lm: Any | None = None
@@ -155,7 +155,7 @@ def _build_runtime_mode_options(
     verbose: bool = False,
     history_max_turns: int | None = None,
     interpreter_async_execute: bool = True,
-    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    guardrail_mode: Literal["off", "warn", "strict"] = "warn",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,
@@ -204,7 +204,7 @@ def build_react_chat_agent(
     env_file: Path | None = None,
     planner_lm: Any | None = None,
     interpreter_async_execute: bool = True,
-    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    guardrail_mode: Literal["off", "warn", "strict"] = "warn",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,
@@ -288,7 +288,7 @@ def build_chat_agent_for_runtime_mode(
     history_max_turns: int | None = None,
     planner_lm: Any | None = None,
     interpreter_async_execute: bool = True,
-    guardrail_mode: Literal["off", "warn", "strict"] = "off",
+    guardrail_mode: Literal["off", "warn", "strict"] = "warn",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,

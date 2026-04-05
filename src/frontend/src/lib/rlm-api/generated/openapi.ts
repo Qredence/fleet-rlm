@@ -86,6 +86,20 @@ export interface paths {
      */
     get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
   };
+  "/api/v1/optimization/status": {
+    /**
+     * Get Optimization Status
+     * @description Return GEPA optimization availability and prerequisites.
+     */
+    get: operations["get_optimization_status_api_v1_optimization_status_get"];
+  };
+  "/api/v1/optimization/run": {
+    /**
+     * Run Optimization
+     * @description Trigger a GEPA prompt optimization run.
+     */
+    post: operations["run_optimization_api_v1_optimization_run_post"];
+  };
   "/api/v1/traces/feedback": {
     /**
      * Create Trace Feedback
@@ -134,6 +148,114 @@ export interface components {
        * @description Persisted control-plane user identifier for admitted Entra users.
        */
       user_id?: string | null;
+    };
+    /**
+     * GEPAOptimizationRequest
+     * @description Request body for triggering a GEPA prompt optimization run.
+     */
+    GEPAOptimizationRequest: {
+      /**
+       * Dataset Path
+       * @description Path to the exported MLflow trace dataset (JSON).
+       */
+      dataset_path: string;
+      /**
+       * Program Spec
+       * @description DSPy program specification string to optimize in module:attr form.
+       */
+      program_spec: string;
+      /**
+       * Output Path
+       * @description Optional filesystem path to save the optimized program.
+       */
+      output_path?: string | null;
+      /**
+       * Auto
+       * @description GEPA optimization intensity level.
+       * @default light
+       * @enum {string}
+       */
+      auto?: "light" | "medium" | "heavy";
+      /**
+       * Train Ratio
+       * @description Fraction of examples to use for training (remainder used for validation).
+       * @default 0.8
+       */
+      train_ratio?: number;
+    };
+    /**
+     * GEPAOptimizationResponse
+     * @description Result payload after a GEPA optimization run completes.
+     */
+    GEPAOptimizationResponse: {
+      /**
+       * Ok
+       * @description Whether the optimization run completed successfully.
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Optimizer
+       * @description Optimizer backend that was used.
+       * @default GEPA
+       */
+      optimizer?: string;
+      /**
+       * Program Spec
+       * @description DSPy program specification that was optimized.
+       */
+      program_spec: string;
+      /**
+       * Train Examples
+       * @description Number of training examples used.
+       */
+      train_examples: number;
+      /**
+       * Validation Examples
+       * @description Number of validation examples used.
+       */
+      validation_examples: number;
+      /**
+       * Validation Score
+       * @description Validation score from the optimized program, when available.
+       */
+      validation_score?: number | null;
+      /**
+       * Output Path
+       * @description Filesystem path where the optimized program was saved.
+       */
+      output_path?: string | null;
+      /**
+       * Error
+       * @description Error message when the optimization run failed.
+       */
+      error?: string | null;
+    };
+    /**
+     * GEPAStatusResponse
+     * @description Status payload for GEPA optimization availability.
+     */
+    GEPAStatusResponse: {
+      /**
+       * Available
+       * @description Whether GEPA optimization is available in this environment.
+       */
+      available: boolean;
+      /**
+       * Mlflow Enabled
+       * @description Whether MLflow is enabled and reachable.
+       */
+      mlflow_enabled: boolean;
+      /**
+       * Gepa Installed
+       * @description Whether the GEPA teleprompt module is importable.
+       */
+      gepa_installed: boolean;
+      /**
+       * Guidance
+       * @description Human-readable guidance when GEPA is not fully available.
+       */
+      guidance?: string[];
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -1057,6 +1179,61 @@ export interface operations {
       };
       /** @description Volume file reading timed out before the backend returned a result. */
       504: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Optimization Status
+   * @description Return GEPA optimization availability and prerequisites.
+   */
+  get_optimization_status_api_v1_optimization_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GEPAStatusResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Run Optimization
+   * @description Trigger a GEPA prompt optimization run.
+   */
+  run_optimization_api_v1_optimization_run_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GEPAOptimizationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GEPAOptimizationResponse"];
+        };
+      };
+      /** @description Invalid optimization parameters. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description GEPA optimization is unavailable in this environment. */
+      503: {
         content: never;
       };
     };

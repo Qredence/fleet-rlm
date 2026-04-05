@@ -21,6 +21,15 @@ from typing_extensions import Self
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.streaming import (
+    StreamingContext,
+)
+from fleet_rlm.runtime.execution.streaming import (
+    aiter_chat_turn_stream as _aiter_stream,
+)
+from fleet_rlm.runtime.execution.streaming import (
+    iter_chat_turn_stream as _iter_stream,
+)
 from fleet_rlm.runtime.execution.validation import (
     ValidationConfig,
     validate_assistant_response,
@@ -29,7 +38,18 @@ from fleet_rlm.runtime.models.streaming import StreamEvent
 from fleet_rlm.runtime.tools import ExecutionMode
 
 from . import chat_runtime_helpers, chat_session_state, chat_turns
+from .chat_session_state import append_history, forced_delegate_context
+from .chat_turns import (
+    prediction_guardrail_warnings,
+    prediction_response_and_trajectory,
+)
 from .commands import execute_command as _execute_command
+from .forced_routing import (
+    ForcedFinalPayloadInput,
+    aiter_forced_rlm_turn_stream,
+    forced_stream_final_payload,
+    prediction_from_forced_rlm_result,
+)
 from .forced_routing import (
     arun_forced_rlm_turn as _arun_forced_rlm_turn_impl,
 )
@@ -38,13 +58,10 @@ from .forced_routing import (
 )
 from .memory import CoreMemoryMixin
 from .signatures import RLMReActChatSignature
-from .streaming_router import (
-    aiter_routed_chat_turn_stream as _aiter_routed_chat_turn_stream_impl,
-)
-from .streaming_router import (
-    iter_routed_chat_turn_stream as _iter_routed_chat_turn_stream_impl,
-)
+from .tool_delegation import get_tool_by_name
 from .trajectory_errors import count_tool_errors
+
+_DEFAULT_HISTORY_MAX_TURNS = 6
 
 
 class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
@@ -76,13 +93,13 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         secret_name: str = "LITELLM",
         volume_name: str | None = None,
         verbose: bool = False,
-        history_max_turns: int | None = None,
+        history_max_turns: int | None = _DEFAULT_HISTORY_MAX_TURNS,
         extra_tools: list[Callable[..., Any]] | None = None,
         interpreter: Any | None = None,
         max_depth: int = 2,
         current_depth: int = 0,
         interpreter_async_execute: bool = True,
-        guardrail_mode: Literal["off", "warn", "strict"] = "off",
+        guardrail_mode: Literal["off", "warn", "strict"] = "warn",
         max_output_chars: int = 10000,
         min_substantive_chars: int = 20,
         delegate_lm: Any | None = None,
@@ -166,6 +183,22 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     @_delegate_calls_turn.setter
     def _delegate_calls_turn(self, value: int) -> None:
         self._turn_delegation_state.delegate_calls_turn = max(0, int(value))
+
+    @property
+    def _runtime_module_calls_turn(self) -> int:
+        return self._turn_delegation_state.runtime_module_calls_turn
+
+    @_runtime_module_calls_turn.setter
+    def _runtime_module_calls_turn(self, value: int) -> None:
+        self._turn_delegation_state.runtime_module_calls_turn = max(0, int(value))
+
+    @property
+    def _recursive_delegate_calls_turn(self) -> int:
+        return self._turn_delegation_state.recursive_delegate_calls_turn
+
+    @_recursive_delegate_calls_turn.setter
+    def _recursive_delegate_calls_turn(self, value: int) -> None:
+        self._turn_delegation_state.recursive_delegate_calls_turn = max(0, int(value))
 
     @property
     def _delegate_fallback_count_turn(self) -> int:
@@ -293,6 +326,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             prediction.guardrail_warnings = warnings
         prediction.effective_max_iters = self._current_effective_max_iters
         prediction.delegate_calls_turn = self._delegate_calls_turn
+        prediction.runtime_module_calls_turn = self._runtime_module_calls_turn
+        prediction.recursive_delegate_calls_turn = self._recursive_delegate_calls_turn
         prediction.delegate_fallback_count_turn = self._delegate_fallback_count_turn
         prediction.delegate_result_truncated_count_turn = (
             self._delegate_result_truncated_count_turn
@@ -330,17 +365,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         *,
         docs_path: str | None = None,
     ) -> Iterable[StreamEvent]:
-        """Yield typed streaming events for one chat turn (sync).
-
-        Delegates to :mod:`fleet_rlm.runtime.agent.streaming_router`.
-        """
+        """Yield typed streaming events for one chat turn (sync)."""
         _ = docs_path
-        yield from _iter_routed_chat_turn_stream_impl(
-            self,
-            message=message,
-            trace=trace,
-            cancel_check=cancel_check,
-        )
+        if self.execution_mode == "rlm_only":
+            yield from _iter_forced_rlm_stream(
+                self,
+                message=message,
+                cancel_check=cancel_check,
+            )
+            return
+        yield from _iter_stream(self, message, trace, cancel_check)
 
     def chat_turn_stream(self, *, message: str, trace: bool = False) -> dict[str, Any]:
         """Compatibility stream collector for existing CLI/tests."""
@@ -397,17 +431,17 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         *,
         docs_path: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Yield typed streaming events for one chat turn (async).
-
-        Delegates to :mod:`fleet_rlm.runtime.agent.streaming_router`.
-        """
+        """Yield typed streaming events for one chat turn (async)."""
         _ = docs_path
-        async for event in _aiter_routed_chat_turn_stream_impl(
-            self,
-            message=message,
-            trace=trace,
-            cancel_check=cancel_check,
-        ):
+        if self.execution_mode == "rlm_only":
+            async for event in aiter_forced_rlm_turn_stream(
+                self,
+                message=message,
+                cancel_check=cancel_check,
+            ):
+                yield event
+            return
+        async for event in _aiter_stream(self, message, trace, cancel_check):
             yield event
 
     # -----------------------------------------------------------------
@@ -571,8 +605,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     def _count_tool_errors(self, trajectory: Any) -> int:
         return count_tool_errors(trajectory)
 
-    def _claim_delegate_slot(self) -> tuple[bool, int]:
-        return chat_turns.claim_delegate_slot(self)
+    def _claim_runtime_module_slot(self) -> tuple[bool, int]:
+        return chat_turns.claim_runtime_module_slot(self)
+
+    def _claim_recursive_delegate_slot(self) -> tuple[bool, int]:
+        return chat_turns.claim_recursive_delegate_slot(self)
 
     def _record_delegate_fallback(self) -> None:
         chat_turns.record_delegate_fallback(self)
@@ -598,3 +635,58 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             trajectory=trajectory,
             config=self._validation_config,
         )
+
+
+def _iter_forced_rlm_stream(
+    agent: RLMReActChatAgent,
+    *,
+    message: str,
+    cancel_check: Callable[[], bool] | None = None,
+) -> Iterable[StreamEvent]:
+    """Yield the explicit sync ReAct→RLM streaming contract."""
+    _ = cancel_check
+    if not message or not message.strip():
+        raise ValueError("message cannot be empty")
+
+    agent.start()
+    effective_max_iters = agent.prepare_routed_turn()
+    ctx = StreamingContext.from_agent(agent, effective_max_iters=effective_max_iters)
+    yield StreamEvent(
+        kind="status",
+        text="Execution mode: RLM only",
+        payload=ctx.enrich({"forced": True}),
+    )
+    yield StreamEvent(
+        kind="rlm_executing",
+        text="tool call: rlm_query",
+        payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+    )
+
+    forced_result = get_tool_by_name(agent, "rlm_query")(
+        query=message,
+        context=forced_delegate_context(agent),
+    )
+    prediction = prediction_from_forced_rlm_result(agent, forced_result)
+    assistant_response, trajectory = prediction_response_and_trajectory(prediction)
+    guardrail_warnings = prediction_guardrail_warnings(prediction)
+    append_history(agent, message, assistant_response)
+
+    yield StreamEvent(
+        kind="tool_result",
+        text="tool result: rlm_query completed",
+        payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
+    )
+    yield StreamEvent(
+        kind="final",
+        flush_tokens=True,
+        text=assistant_response,
+        payload=forced_stream_final_payload(
+            agent,
+            payload_input=ForcedFinalPayloadInput(
+                trajectory=trajectory,
+                guardrail_warnings=guardrail_warnings,
+                final_reasoning=str(getattr(prediction, "final_reasoning", "") or ""),
+            ),
+            ctx=ctx,
+        ),
+    )

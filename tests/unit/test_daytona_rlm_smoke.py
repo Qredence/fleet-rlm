@@ -4,7 +4,7 @@ from dspy.primitives import FinalOutput
 
 from fleet_rlm.integrations.providers.daytona.config import DaytonaConfigError
 from fleet_rlm.integrations.providers.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.providers.daytona.smoke import run_daytona_smoke
+from fleet_rlm.integrations.providers.daytona.diagnostics import run_daytona_smoke
 
 
 class _FakeSession:
@@ -84,7 +84,7 @@ class _FakeInterpreter:
 def test_run_daytona_smoke_validates_context_persistence(monkeypatch) -> None:
     runtime = _FakeRuntime()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaInterpreter",
+        "fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter",
         _FakeInterpreter,
     )
 
@@ -113,7 +113,7 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch) -> None:
         raise DaytonaConfigError("Missing DAYTONA_API_URL.")
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaSandboxRuntime",
+        "fleet_rlm.integrations.providers.daytona.runtime.DaytonaSandboxRuntime",
         _broken_runtime,
     )
 
@@ -142,7 +142,7 @@ def test_run_daytona_smoke_reports_clone_failures(monkeypatch) -> None:
             )
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaInterpreter",
+        "fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter",
         _FakeInterpreter,
     )
     result = run_daytona_smoke(
@@ -165,7 +165,7 @@ def test_run_daytona_smoke_reports_execution_failures_and_cleans_up(
 
     runtime = _FakeRuntime()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaInterpreter",
+        "fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter",
         _BrokenInterpreter,
     )
     result = run_daytona_smoke(
@@ -192,11 +192,11 @@ def test_run_daytona_smoke_closes_owned_runtime_after_startup_failure(
 
     runtime = _FakeRuntime()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaSandboxRuntime",
+        "fleet_rlm.integrations.providers.daytona.runtime.DaytonaSandboxRuntime",
         lambda: runtime,
     )
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.smoke.DaytonaInterpreter",
+        "fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter",
         _BrokenInterpreter,
     )
 

@@ -10,6 +10,55 @@ if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
 
 
+_HISTORY_SUMMARY_USER_REQUEST = "[summary of earlier conversation]"
+_HISTORY_SNIPPET_LIMIT = 240
+
+
+def _trim_history_text(value: Any, *, limit: int = _HISTORY_SNIPPET_LIMIT) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _summary_message(messages: list[Any]) -> dict[str, str] | None:
+    lines: list[str] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        user_request = _trim_history_text(item.get("user_request"))
+        assistant_response = _trim_history_text(item.get("assistant_response"))
+        if user_request:
+            lines.append(f"User: {user_request}")
+        if assistant_response:
+            lines.append(f"Assistant: {assistant_response}")
+    if not lines:
+        return None
+    return {
+        "user_request": _HISTORY_SUMMARY_USER_REQUEST,
+        "assistant_response": "Earlier conversation summary:\n" + "\n".join(lines),
+    }
+
+
+def _enforce_history_cap(
+    messages: list[Any], history_max_turns: int | None
+) -> list[Any]:
+    if history_max_turns is None or history_max_turns <= 0:
+        return messages
+    if len(messages) <= history_max_turns:
+        return messages
+    if history_max_turns == 1:
+        return messages[-1:]
+
+    preserved_tail = max(1, history_max_turns - 1)
+    head = messages[:-preserved_tail]
+    tail = messages[-preserved_tail:]
+    summary = _summary_message(head)
+    if summary is None:
+        return tail[-history_max_turns:]
+    return [summary, *tail][-history_max_turns:]
+
+
 def history_messages(agent: RLMReActChatAgent) -> list[Any]:
     """Return chat history messages as a defensive list copy."""
     messages = getattr(agent.history, "messages", None)
@@ -37,8 +86,7 @@ def append_history(
             "assistant_response": assistant_response,
         }
     )
-    if agent.history_max_turns is not None and agent.history_max_turns > 0:
-        messages = messages[-agent.history_max_turns :]
+    messages = _enforce_history_cap(messages, agent.history_max_turns)
     agent.history = dspy.History(messages=messages)
 
 
@@ -95,7 +143,9 @@ def _restore_agent_state(agent: RLMReActChatAgent, state: dict[str, Any]) -> lis
     history = state.get("history", [])
     if not isinstance(history, list):
         history = []
-    agent.history = dspy.History(messages=history)
+    agent.history = dspy.History(
+        messages=_enforce_history_cap(history, agent.history_max_turns)
+    )
 
     agent.restore_document_cache_state(state)
 

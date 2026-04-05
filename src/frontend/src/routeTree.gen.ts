@@ -21,6 +21,7 @@ import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppWorkspaceRouteImport } from './routes/app/workspace'
 import { Route as AppVolumesRouteImport } from './routes/app/volumes'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
+import { Route as AppOptimizationRouteImport } from './routes/app/optimization'
 import { Route as AppSplatRouteImport } from './routes/app/$'
 
 const SignupRoute = SignupRouteImport.update({
@@ -83,6 +84,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOptimizationRoute = AppOptimizationRouteImport.update({
+  id: '/optimization',
+  path: '/optimization',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSplatRoute = AppSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
+  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -113,6 +120,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
+  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -129,6 +137,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
+  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -146,6 +155,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
+    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
+    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
+    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -278,6 +290,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/optimization': {
+      id: '/app/optimization'
+      path: '/optimization'
+      fullPath: '/app/optimization'
+      preLoaderRoute: typeof AppOptimizationRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/$': {
       id: '/app/$'
       path: '/$'
@@ -290,6 +309,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppSplatRoute: typeof AppSplatRoute
+  AppOptimizationRoute: typeof AppOptimizationRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppVolumesRoute: typeof AppVolumesRoute
   AppWorkspaceRoute: typeof AppWorkspaceRoute
@@ -298,6 +318,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppSplatRoute: AppSplatRoute,
+  AppOptimizationRoute: AppOptimizationRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppVolumesRoute: AppVolumesRoute,
   AppWorkspaceRoute: AppWorkspaceRoute,

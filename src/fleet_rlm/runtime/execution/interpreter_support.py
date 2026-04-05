@@ -145,6 +145,10 @@ class InterpreterExecutionEventData:
     stderr_preview: str | None = None
     error_type: str | None = None
     error: str | None = None
+    event_kind: str | None = None
+    path: str | None = None
+    bytes_total: int | None = None
+    bytes_written: int | None = None
 
     def as_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -163,6 +167,10 @@ class InterpreterExecutionEventData:
             "stderr_preview": self.stderr_preview,
             "error_type": self.error_type,
             "error": self.error,
+            "event_kind": self.event_kind,
+            "path": self.path,
+            "bytes_total": self.bytes_total,
+            "bytes_written": self.bytes_written,
         }
         payload.update(
             {key: value for key, value in optional_fields.items() if value is not None}
@@ -237,4 +245,28 @@ def complete_event_data(
         stderr_preview=stderr_preview,
         error_type=error_type,
         error=error,
+    )
+
+
+def progress_event_data(
+    *,
+    execution_profile: str,
+    code_hash: str,
+    code_preview: str,
+    event_kind: str,
+    path: str | None = None,
+    bytes_total: int | None = None,
+    bytes_written: int | None = None,
+) -> InterpreterExecutionEventData:
+    """Build an execution-progress payload for durable-write updates."""
+    return InterpreterExecutionEventData(
+        phase="progress",
+        timestamp=time.time(),
+        execution_profile=execution_profile,
+        code_hash=code_hash,
+        code_preview=code_preview,
+        event_kind=event_kind,
+        path=path,
+        bytes_total=bytes_total,
+        bytes_written=bytes_written,
     )
