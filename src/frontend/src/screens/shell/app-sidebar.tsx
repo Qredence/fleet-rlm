@@ -251,12 +251,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-3 pt-3">
-        <div
-          className={cn(
-            "rounded-[14px] p-1",
-            sidebarState === "collapsed" && "hidden",
-          )}
-        >
+        <div className={cn("rounded-[14px] p-1", sidebarState === "collapsed" && "hidden")}>
           <SidebarMenu className="gap-0.5">
             <SidebarMenuItem>
               <SidebarMenuButton

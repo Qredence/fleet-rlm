@@ -105,9 +105,7 @@ vi.mock("@/screens/settings/use-runtime-settings", () => ({
 }));
 
 describe("GroupedSettingsPane", () => {
-  function renderGroupedSettingsPane(
-    props: ComponentProps<typeof GroupedSettingsPane>,
-  ) {
+  function renderGroupedSettingsPane(props: ComponentProps<typeof GroupedSettingsPane>) {
     const queryClient = new QueryClient();
     return renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
