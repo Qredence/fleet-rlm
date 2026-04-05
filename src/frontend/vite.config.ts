@@ -119,7 +119,7 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/components/ui/**/*.{ts,tsx}", "src/components/ai-elements/**/*.{ts,tsx}"],
+        files: ["src/components/ui/**/*.{ts,tsx}", "src/components/ai-elements/**/*.{ts,tsx}", "src/components/patterns/**/*.{ts,tsx}"],
         rules: {
           "no-restricted-imports": [
             "error",
@@ -159,7 +159,7 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/screens/shell/**/*.{ts,tsx}"],
+        files: ["src/features/layout/**/*.{ts,tsx}"],
         rules: {
           "no-restricted-imports": [
             "error",
@@ -217,7 +217,7 @@ export default defineConfig({
     warmup: {
       clientFiles: [
         "src/app/app.tsx",
-        "src/screens/shell/app-shell-screen.tsx",
+        "src/features/layout/root-layout.tsx",
         "src/screens/workspace/workspace-screen.tsx",
         "src/app/workspace/transcript/workspace-message-list.tsx",
         "src/app/workspace/workspace-composer.tsx",

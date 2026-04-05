@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { ShellHeader } from "@/screens/shell/shell-header";
+import { ShellHeader } from "@/features/layout/header";
 
 (
   globalThis as typeof globalThis & {

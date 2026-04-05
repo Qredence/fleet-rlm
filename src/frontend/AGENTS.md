@@ -11,7 +11,7 @@ Consult [src/fleet_rlm/AGENTS.md](../fleet_rlm/AGENTS.md) when frontend work cha
 Before editing frontend code:
 
 - Read `src/frontend/package.json` for canonical scripts.
-- Inspect the owning route, screen, app, and lib modules before adding files.
+- Inspect the owning route, feature, component, and lib modules before adding files.
 - Preserve the supported app surfaces: `workspace`, `volumes`, `optimization`, and `settings`.
 - Keep route wrappers thin; put feature behavior in the owning module tree.
 - Do not hand-edit generated files.
@@ -21,6 +21,10 @@ Frontend source-of-truth files:
 - `src/frontend/package.json` for scripts and validation
 - `src/frontend/vite.config.ts` for lint/test/build configuration and import-boundary rules
 - `src/frontend/src/routes/*` for supported surfaces and not-found behavior
+- `src/frontend/src/features/layout/*` for canonical app-chrome public entrypoints
+- `src/frontend/src/components/ui/*` for canonical shadcn/Base UI source components
+- `src/frontend/src/components/ai-elements/*` for canonical AI Elements source components
+- `src/frontend/src/components/patterns/*` for app-owned reusable composition built from registry layers
 - `src/frontend/src/lib/rlm-api/*` for REST and websocket integration
 - `src/frontend/src/styles/globals.css` for the Tailwind v4 theme baseline and tokens
 - `src/frontend/components.json` for the shadcn registry/style baseline
@@ -42,6 +46,7 @@ Generated or synced artifacts to avoid hand-editing:
 - Hydrate workbench state from `execution_completed.summary`, not Daytona-only chat-final payload scraping.
 - Render Daytona `sandbox_output` status frames as sandbox/debug trace cards while keeping `trajectory_step` and `reasoning_step` as the main live trace surfaces.
 - Prefer the shadcn/Base UI baseline over one-off wrappers, parallel token layers, or custom mini-design-systems.
+- Keep the registry-owned layers recognizable and diff-friendly: `src/components/ui/*` and `src/components/ai-elements/*` stay canonical.
 
 ## Tooling and Framework
 
@@ -71,6 +76,24 @@ Targeted execution:
 - Unit test: `pnpm run test:unit src/path/to/file.test.ts`
 - E2E test: `pnpm run test:e2e tests/e2e/file.spec.ts`
 
+## Frontend Layers
+
+Registry-aligned component layers:
+
+- `src/components/ui/*` for shadcn/Base UI primitives and thin local extensions
+- `src/components/ai-elements/*` for AI Elements registry components
+- `src/components/patterns/*` for app-owned reusable compositions built from `ui` and `ai-elements`
+- `src/features/layout/*` for canonical app-chrome entrypoints that compose the current shell implementation
+- `src/components/` root for a very small set of global compatibility exports such as `brand-mark.tsx`
+
+Rules for those layers:
+
+- Keep `components/ui` thin, semantic, and free of feature/runtime imports
+- Keep `components/ai-elements` composable and registry-aligned; do not collapse them into feature-specific monoliths
+- Use `components/patterns` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
+- Route app-chrome consumers through `features/layout/*` before reaching transitional `app/shell/*` or `screens/shell/*` modules
+- New shared layout/app-chrome naming should prefer `layout` over `shell` when creating new architecture surfaces
+
 ## Frontend Map
 
 Routing ownership:
@@ -78,39 +101,34 @@ Routing ownership:
 - `src/router.tsx` owns the router instance
 - `src/routeTree.gen.ts` is generated and should not be edited
 - File-based routes under `src/routes/` define product surfaces and catchall/not-found behavior
-- Route files should compose screen modules instead of embedding feature logic
+- Route files should compose feature or screen entry modules instead of embedding feature logic
 
-Screen and feature ownership:
+Current surface ownership:
 
-- `src/screens/workspace/` is the top-level product slice for workspace entrypoints and public screen contracts
+- `src/screens/workspace/` is the current top-level workspace surface and public screen contract
 - `src/screens/volumes/` owns the volume browser entrypoints and public screen contracts
 - `src/screens/settings/` owns settings entrypoints
-- `src/screens/shell/` owns shell entrypoints and top-level shell contracts
+- `src/features/layout/` owns canonical app-chrome public entrypoints and compatibility exports
+- `src/screens/shell/` owns the current app-frame implementation beneath `features/layout/`; new architectural naming should prefer `layout`
 - `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
-- `src/app/shell/` owns shell-private composed surfaces such as command-palette-style UI
+- `src/app/shell/` owns current app-frame composed surfaces such as command palette and route sync; treat it as a transitional implementation layer behind `features/layout/`
 - `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
 - `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
-- `src/stores/` owns cross-app shell and navigation state
+- `src/stores/` owns cross-app shell/layout and navigation state
 
 Important boundaries to preserve:
 
-- Keep `src/screens/*` thin; move reusable feature logic into `src/app/*` or `src/lib/*`
+- Keep `src/screens/*` thin; move reusable feature logic into `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
+- Keep external layout/app-chrome imports pointed at `src/features/layout/*`; only reach into `src/screens/shell/*` or `src/app/shell/*` while refactoring that layer itself
 - `src/screens/workspace/use-workspace.ts` is the public workspace contract; implementation-heavy helpers belong under `src/lib/workspace/`
 - `src/screens/workspace/workspace-canvas-panel.tsx` stays the shell-facing canvas surface; canvas internals belong under `src/app/workspace/`
 - Assistant transcript/content modeling belongs under `src/app/workspace/assistant-content/model/`
 - Do not recreate a screen-layer `workspace-adapter.ts`; workspace adapter logic belongs in `src/lib/workspace/`
 - The Volumes provider switcher is page-scoped and must not become a global runtime setting
 
-Component ownership:
-
-- `src/components/ui/` for shared shadcn/Base UI primitives and thin local extensions
-- `src/components/ai-elements/` for shared AI/chat primitives
-- `src/components/` for a very small set of truly global handwritten components
-- Workspace- or shell-specific compounds belong under `src/app/...`, not `src/components/ui/`
-
 Import-boundary rules enforced in `src/frontend/vite.config.ts`:
 
-- `src/components/ui/*` and `src/components/ai-elements/*` must not import from `src/screens/*`
+- `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/patterns/*` must not import from `src/screens/*`
 - Workspace runtime/state modules in `src/lib/workspace/*` must not depend on workspace UI modules
 - `src/screens/shell/*` must consume workspace and volumes through top-level screen contracts only
 - Keep `@/lib/utils` as the canonical `cn()` import path
@@ -123,7 +141,8 @@ Design and styling rules:
 - Keep the Tailwind v4 baseline canonical: `tailwindcss`, `tw-animate-css`, and `@theme inline`
 - Use semantic tokens and shared variants instead of arbitrary colors or local token layers
 - Keep typography, spacing, and layering aligned with the shared shadcn/Base UI baseline
-- Preserve the shell root stacking context so portaled overlays layer correctly
+- Preserve the shell/layout root stacking context so portaled overlays layer correctly
+- Shared visual recipes should become `components/patterns/*`, not duplicated feature-local wrappers
 
 React/runtime rules:
 
@@ -140,6 +159,7 @@ Naming and file-layout rules:
 - Keep React component symbols in `PascalCase` and hooks in `useThing` form
 - Keep tests colocated with the owning module under `__tests__/` when practical
 - Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly, not via screen compatibility barrels
+- For new architecture naming, prefer `layout` for app chrome and structural composition instead of `shell`
 
 ## Environment and Contract Sync
 

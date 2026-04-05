@@ -2,12 +2,6 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { GroupImperativeHandle } from "react-resizable-panels";
 
 import { AppProviders } from "@/app/providers";
-import { CommandPalette } from "@/app/shell/command-palette";
-import { LoginDialog } from "@/app/shell/login-dialog";
-import { SettingsDialog } from "@/app/shell/settings-dialog";
-import { MobileTabBar } from "@/app/shell/mobile-tab-bar";
-import { RouteSync } from "@/app/shell/route-sync";
-import { ShellRouteOutlet } from "@/app/shell/shell-route-outlet";
 import { Toaster } from "@/components/ui/sonner";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import {
@@ -25,11 +19,18 @@ import {
   type OpenSettingsEventDetail,
 } from "@/screens/settings/settings-events";
 import type { SettingsSection } from "@/screens/settings/settings-screen";
-import { AppSidebar } from "@/screens/shell/app-sidebar";
-import { ShellHeader } from "@/screens/shell/shell-header";
-import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
-import { ShellSidepanel } from "@/screens/shell/shell-sidepanel";
 import { useNavigationStore } from "@/stores/navigation-store";
+
+import { LayoutSidebar } from "./app-sidebar";
+import { CommandPalette } from "./command-palette";
+import { LayoutHeader } from "./header";
+import { LoginDialog } from "./login-dialog";
+import { MobileTabBar } from "./mobile-tab-bar";
+import { getLayoutPanelMeta } from "./panel-meta";
+import { RouteSync } from "./route-sync";
+import { LayoutRouteOutlet } from "./route-outlet";
+import { SettingsDialog } from "./settings-dialog";
+import { LayoutSidepanel } from "./sidepanel";
 
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 const OPEN_LAYOUT = { content: 68, canvas: 32 };
@@ -39,7 +40,7 @@ type OpenLoginEventDetail = {
   returnFocusTarget?: HTMLElement | null;
 };
 
-function ShellLayout() {
+function AppLayout() {
   const isMobile = useIsMobile();
   const [cmdOpen, setCmdOpen] = useState(false);
   const { registerCommandPaletteHandlers } = useNavigationStore();
@@ -51,7 +52,7 @@ function ShellLayout() {
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
   const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
-  const panelMeta = getShellPanelMeta(activeNav);
+  const panelMeta = getLayoutPanelMeta(activeNav);
 
   useEffect(() => {
     registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
@@ -153,15 +154,15 @@ function ShellLayout() {
         }
       >
         <div className="flex h-dvh w-full overflow-hidden bg-background">
-          <AppSidebar />
+          <LayoutSidebar />
           <SidebarInset className="min-w-0 border-0 bg-background">
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
-              <ShellHeader />
+              <LayoutHeader />
 
               {isMobile ? (
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1">
-                    <ShellRouteOutlet />
+                    <LayoutRouteOutlet />
                   </div>
                   <MobileTabBar />
                 </div>
@@ -173,7 +174,7 @@ function ShellLayout() {
                   className="min-h-0 flex-1"
                 >
                   <ResizablePanel id="content" minSize="40%" style={panelStyle}>
-                    <ShellRouteOutlet />
+                    <LayoutRouteOutlet />
                   </ResizablePanel>
 
                   <ResizableHandle
@@ -199,7 +200,7 @@ function ShellLayout() {
                         isCanvasOpen ? "opacity-100" : "opacity-0",
                       )}
                     >
-                      <ShellSidepanel />
+                      <LayoutSidepanel />
                     </div>
                   </ResizablePanel>
                 </ResizablePanelGroup>
@@ -225,7 +226,7 @@ function ShellLayout() {
                 <div className="h-1.5 w-10 rounded-full bg-border" aria-hidden="true" />
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <ShellSidepanel />
+                <LayoutSidepanel />
               </div>
             </div>
           </SheetContent>
@@ -253,7 +254,7 @@ function ShellLayout() {
 export function RootLayout() {
   return (
     <AppProviders>
-      <ShellLayout />
+      <AppLayout />
     </AppProviders>
   );
 }

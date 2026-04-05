@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PanelRight } from "lucide-react";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { EmptyPanel } from "@/components/patterns/empty-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { RunWorkbench } from "@/app/workspace/workbench/run-workbench";
@@ -70,17 +63,10 @@ export function WorkspaceCanvasPanel() {
 
 export function WorkspaceCanvasUnavailablePanel() {
   return (
-    <Empty className="h-full rounded-none border-0 bg-transparent">
-      <EmptyMedia variant="icon">
-        <PanelRight />
-      </EmptyMedia>
-      <EmptyContent>
-        <EmptyTitle>Workbench unavailable</EmptyTitle>
-        <EmptyDescription>
-          The Workbench requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to the
-          backend.
-        </EmptyDescription>
-      </EmptyContent>
-    </Empty>
+    <EmptyPanel
+      title="Workbench unavailable"
+      description="The Workbench requires a live FastAPI runtime. Disable VITE_MOCK_MODE to connect to the backend."
+      className="h-full rounded-none border-0 bg-transparent"
+    />
   );
 }

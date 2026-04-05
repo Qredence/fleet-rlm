@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { ShellSidepanel } from "@/screens/shell/shell-sidepanel";
+import { ShellSidepanel } from "@/features/layout/sidepanel";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 vi.mock("@/hooks/use-app-navigate", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/components/error-boundary", () => ({
+vi.mock("@/components/patterns/error-boundary", () => ({
   ErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 

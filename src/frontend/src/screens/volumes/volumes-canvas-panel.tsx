@@ -12,7 +12,6 @@ import {
   FileText,
   HardDrive,
   Loader2,
-  PanelRight,
   Weight,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,13 +19,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { EmptyPanel } from "@/components/patterns/empty-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -43,15 +36,11 @@ export function VolumesCanvasPanel() {
 
   if (!selectedFileNode) {
     return (
-      <Empty className="h-full rounded-none border-0 bg-transparent">
-        <EmptyMedia variant="icon">
-          <PanelRight />
-        </EmptyMedia>
-        <EmptyContent>
-          <EmptyTitle>No file selected</EmptyTitle>
-          <EmptyDescription>Open a file in Volumes to preview its contents here.</EmptyDescription>
-        </EmptyContent>
-      </Empty>
+      <EmptyPanel
+        title="No file selected"
+        description="Open a file in Volumes to preview its contents here."
+        className="h-full rounded-none border-0 bg-transparent"
+      />
     );
   }
 

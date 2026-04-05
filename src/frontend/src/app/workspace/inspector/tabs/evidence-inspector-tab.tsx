@@ -47,7 +47,9 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                   {citation.quote ? (
                     <CardContent className={inspectorStyles.card.content}>
                       <Accordion type="single" collapsible>
-                        <AccordionItem value={`quote-${citation.anchorId ?? citation.sourceId ?? index}`}>
+                        <AccordionItem
+                          value={`quote-${citation.anchorId ?? citation.sourceId ?? index}`}
+                        >
                           <AccordionTrigger>Show excerpt</AccordionTrigger>
                           <AccordionContent>
                             <div className={cn(inspectorInsetClass(), "text-sm")}>

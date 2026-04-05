@@ -2,42 +2,42 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { RootLayout } from "@/screens/shell/app-shell-screen";
+import { RootLayout } from "@/features/layout";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => true,
 }));
 
-vi.mock("@/screens/shell/shell-header", () => ({
-  ShellHeader: () => <div>ShellHeader</div>,
+vi.mock("@/features/layout/header", () => ({
+  LayoutHeader: () => <div>LayoutHeader</div>,
 }));
 
-vi.mock("@/screens/shell/app-sidebar", () => ({
-  AppSidebar: () => <div>AppSidebar</div>,
+vi.mock("@/features/layout/app-sidebar", () => ({
+  LayoutSidebar: () => <div>LayoutSidebar</div>,
 }));
 
-vi.mock("@/app/shell/route-sync", () => ({
+vi.mock("@/features/layout/route-sync", () => ({
   RouteSync: () => null,
 }));
 
-vi.mock("@/app/shell/shell-route-outlet", () => ({
-  ShellRouteOutlet: () => <div>ShellRouteOutlet</div>,
+vi.mock("@/features/layout/route-outlet", () => ({
+  LayoutRouteOutlet: () => <div>LayoutRouteOutlet</div>,
 }));
 
-vi.mock("@/screens/shell/shell-sidepanel", () => ({
-  ShellSidepanel: () => <div>ShellSidepanel</div>,
+vi.mock("@/features/layout/sidepanel", () => ({
+  LayoutSidepanel: () => <div>LayoutSidepanel</div>,
 }));
 
-vi.mock("@/app/shell/mobile-tab-bar", () => ({
+vi.mock("@/features/layout/mobile-tab-bar", () => ({
   MobileTabBar: () => <div>MobileTabBar</div>,
 }));
 
-vi.mock("@/app/shell/command-palette", () => ({
+vi.mock("@/features/layout/command-palette", () => ({
   CommandPalette: () => null,
 }));
 
-vi.mock("@/app/shell/login-dialog", () => ({
+vi.mock("@/features/layout/login-dialog", () => ({
   LoginDialog: () => null,
 }));
 

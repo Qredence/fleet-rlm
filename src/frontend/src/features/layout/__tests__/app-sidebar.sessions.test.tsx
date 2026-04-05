@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { AppSidebar } from "@/screens/shell/app-sidebar";
+import { AppSidebar } from "@/features/layout/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import type { Conversation } from "@/screens/workspace/workspace-shell-contract";
 

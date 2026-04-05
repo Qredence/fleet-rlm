@@ -1,16 +1,10 @@
-import { FileQuestion, SearchSlash, TriangleAlert } from "lucide-react";
+import { SearchSlash, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Reasoning, ReasoningTrigger, ReasoningContent } from "@/components/ai-elements/reasoning";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { EmptyPanel } from "@/components/patterns/empty-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,28 +51,6 @@ function preferredArtifactText(value: unknown): string | null {
   }
 
   return null;
-}
-
-function EmptyPanel({
-  title,
-  description,
-  icon: Icon = FileQuestion,
-}: {
-  title: string;
-  description: string;
-  icon?: typeof FileQuestion;
-}) {
-  return (
-    <Empty>
-      <EmptyMedia variant="icon">
-        <Icon />
-      </EmptyMedia>
-      <EmptyContent>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyContent>
-    </Empty>
-  );
 }
 
 function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
