@@ -25,7 +25,7 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 
 const workspaceCanvas = vi.fn(() => <div>MessageInspectorPanel</div>);
-vi.mock("@/screens/workspace/workspace-canvas-panel", () => ({
+vi.mock("@/features/workspace/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => workspaceCanvas(),
   useWorkspaceCanvasTitle: () => "Inspector",
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { AppSidebar } from "@/features/layout/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import type { Conversation } from "@/screens/workspace/workspace-layout-contract";
+import type { Conversation } from "@/features/workspace/workspace-layout-contract";
 
 (
   globalThis as typeof globalThis & {
@@ -68,7 +68,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => isMobile,
 }));
 
-vi.mock("@/screens/workspace/workspace-layout-contract", () => ({
+vi.mock("@/features/workspace/workspace-layout-contract", () => ({
   useWorkspaceLayoutHistory: () => workspaceShellState.conversations,
   useWorkspaceLayoutActions: () => ({
     newSession: workspaceShellState.newSession,

@@ -16,7 +16,7 @@ import {
   useChatStore,
   useWorkspace,
   useWorkspaceUiStore,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";

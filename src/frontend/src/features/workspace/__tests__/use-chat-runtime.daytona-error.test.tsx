@@ -9,7 +9,7 @@ import {
   useRunWorkbenchStore,
   useWorkspace,
   useWorkspaceUiStore,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

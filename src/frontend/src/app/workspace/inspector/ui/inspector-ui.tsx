@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RuntimeContext } from "@/screens/workspace/use-workspace";
+import type { RuntimeContext } from "@/features/workspace/use-workspace";
 import type { ExecutionSection, ToolSessionItem } from "@/app/workspace/assistant-content/model";
 import { inspectorStyles, inspectorInsetClass } from "@/app/workspace/inspector/inspector-styles";
 import { statusTone } from "../utils/inspector-utils";

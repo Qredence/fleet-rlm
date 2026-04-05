@@ -89,7 +89,7 @@ import type {
   ChatRenderPart,
   ChatRenderToolState,
   RuntimeContext,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/app/workspace/assistant-content/model";

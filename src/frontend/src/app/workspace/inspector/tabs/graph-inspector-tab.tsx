@@ -7,7 +7,7 @@ import { GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArtifactGraph } from "@/app/workspace/inspector/artifact-graph";
 import { summarizeArtifactStep } from "@/app/workspace/inspector/parsers/artifact-payload-summaries";
-import type { ExecutionStep } from "@/screens/workspace/use-workspace";
+import type { ExecutionStep } from "@/features/workspace/use-workspace";
 import { inspectorStyles } from "@/app/workspace/inspector/inspector-styles";
 import { DetailBlock, stringifyValue } from "../ui/inspector-ui";
 

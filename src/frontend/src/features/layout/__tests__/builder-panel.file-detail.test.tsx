@@ -38,7 +38,7 @@ vi.mock("@/screens/volumes/volumes-canvas-panel", () => ({
   VolumesCanvasPanel: () => <div>VolumeFileDetail:README.md</div>,
 }));
 
-vi.mock("@/screens/workspace/workspace-canvas-panel", () => ({
+vi.mock("@/features/workspace/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => <div>MessageInspectorPanel</div>,
   useWorkspaceCanvasTitle: () => "Canvas",
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,

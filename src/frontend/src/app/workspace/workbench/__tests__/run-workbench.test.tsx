@@ -111,7 +111,7 @@ const mockedWorkbenchStore: MockedRunWorkbenchStore = {
   lastCompatBackfill: null,
 };
 
-vi.mock("@/screens/workspace/use-workspace", () => ({
+vi.mock("@/features/workspace/use-workspace", () => ({
   useRunWorkbenchStore: () => mockedWorkbenchStore,
 }));
 

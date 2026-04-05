@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { InspectorTab } from "@/screens/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import type { AssistantContentModel } from "@/app/workspace/assistant-content/model";
 
 type SummaryPill = {

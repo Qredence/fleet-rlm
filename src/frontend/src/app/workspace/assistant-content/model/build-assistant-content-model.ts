@@ -1,4 +1,4 @@
-import type { ChatRenderPart, ChatRenderToolState } from "@/screens/workspace/use-workspace";
+import type { ChatRenderPart, ChatRenderToolState } from "@/features/workspace/use-workspace";
 import type { AssistantTurnDisplayItem, ToolSessionItem } from "@/lib/workspace/chat-display-items";
 import { buildAssistantTrajectoryModel } from "./build-assistant-trajectory-model";
 import { humanizeLabel, uniqueStrings } from "./model-utils";

@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { RunWorkbench } from "@/app/workspace/workbench/run-workbench";
 import { MessageInspectorPanel } from "@/app/workspace/inspector/message-inspector-panel";
-import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
+import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 
 export function useWorkspaceCanvasTitle() {
   return "Inspector";

@@ -3,11 +3,11 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
-import type { Conversation } from "@/screens/workspace/use-workspace";
-import { useChatHistoryStore } from "@/screens/workspace/use-workspace";
-import { useChatStore } from "@/screens/workspace/use-workspace";
-import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
+import { WorkspaceScreen } from "@/features/workspace/workspace-screen";
+import type { Conversation } from "@/features/workspace/use-workspace";
+import { useChatHistoryStore } from "@/features/workspace/use-workspace";
+import { useChatStore } from "@/features/workspace/use-workspace";
+import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 (
@@ -33,9 +33,9 @@ const backendRuntimeState = {
   loadConversation: vi.fn(),
 };
 
-vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
-    "@/screens/workspace/use-workspace",
+vi.mock("@/features/workspace/use-workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/features/workspace/use-workspace")>(
+    "@/features/workspace/use-workspace",
   );
 
   return {

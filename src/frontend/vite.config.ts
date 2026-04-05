@@ -136,7 +136,7 @@ export default defineConfig({
       },
       {
         files: [
-          "src/screens/workspace/{use-workspace.ts,workspace-adapter.ts,workspace-layout-contract.ts}",
+          "src/features/workspace/{use-workspace.ts,workspace-layout-contract.ts}",
           "src/lib/workspace/**/*.{ts,tsx}",
         ],
         rules: {
@@ -147,8 +147,8 @@ export default defineConfig({
                 {
                   group: [
                     "@/app/workspace/**",
-                    "@/screens/workspace/workspace-canvas-panel",
-                    "@/screens/workspace/workspace-screen",
+                    "@/features/workspace/workspace-canvas-panel",
+                    "@/features/workspace/workspace-screen",
                   ],
                   message:
                     "Workspace runtime/state modules must not depend on workspace UI modules.",
@@ -167,10 +167,10 @@ export default defineConfig({
               patterns: [
                 {
                   group: [
-                    "@/screens/workspace/**",
+                    "@/features/workspace/**",
                     "@/screens/volumes/**",
-                    "!@/screens/workspace/workspace-canvas-panel",
-                    "!@/screens/workspace/workspace-layout-contract",
+                    "!@/features/workspace/workspace-canvas-panel",
+                    "!@/features/workspace/workspace-layout-contract",
                     "!@/screens/volumes/volumes-canvas-panel",
                     "!@/screens/volumes/volumes-layout-contract",
                   ],
@@ -218,7 +218,7 @@ export default defineConfig({
       clientFiles: [
         "src/app/app.tsx",
         "src/features/layout/root-layout.tsx",
-        "src/screens/workspace/workspace-screen.tsx",
+        "src/features/workspace/workspace-screen.tsx",
         "src/app/workspace/transcript/workspace-message-list.tsx",
         "src/app/workspace/workspace-composer.tsx",
         "src/screens/settings/settings-screen.tsx",

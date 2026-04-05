@@ -10,12 +10,12 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useRunWorkbenchStore } from "@/screens/workspace/use-workspace";
+import { useRunWorkbenchStore } from "@/features/workspace/use-workspace";
 import type {
   ArtifactSummary,
   ContextSourceSummary,
   IterationSummary,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 
 function stringifyValue(value: unknown): string {
   if (value == null) return "";

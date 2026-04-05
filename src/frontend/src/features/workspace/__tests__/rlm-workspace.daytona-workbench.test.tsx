@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
+import { WorkspaceScreen } from "@/features/workspace/workspace-screen";
 
 const chatStoreState = {
   runtimeMode: "daytona_pilot" as const,
@@ -24,9 +24,9 @@ const backendRuntimeState = {
 
 let capturedOnSend: ((attachments: never[]) => void) | null = null;
 
-vi.mock("@/screens/workspace/use-workspace", async () => {
-  const actual = await vi.importActual<typeof import("@/screens/workspace/use-workspace")>(
-    "@/screens/workspace/use-workspace",
+vi.mock("@/features/workspace/use-workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/features/workspace/use-workspace")>(
+    "@/features/workspace/use-workspace",
   );
 
   return {

@@ -6,7 +6,7 @@ import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
-} from "@/screens/workspace/workspace-canvas-panel";
+} from "@/features/workspace/workspace-canvas-panel";
 import { getLayoutPanelMeta } from "./panel-meta";
 
 function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
