@@ -119,7 +119,11 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/components/ui/**/*.{ts,tsx}", "src/components/ai-elements/**/*.{ts,tsx}", "src/components/patterns/**/*.{ts,tsx}"],
+        files: [
+          "src/components/ui/**/*.{ts,tsx}",
+          "src/components/ai-elements/**/*.{ts,tsx}",
+          "src/components/patterns/**/*.{ts,tsx}",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",

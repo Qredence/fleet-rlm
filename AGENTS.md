@@ -36,7 +36,7 @@ Generated or synced artifacts to treat carefully:
 - `openapi.yaml` is generated from backend route/schema metadata via `uv run python scripts/openapi_tools.py generate`
 - `src/frontend/src/lib/rlm-api/generated/openapi.ts` is generated; do not hand-edit it
 - `src/frontend/openapi/fleet-rlm.openapi.yaml` is a synced frontend snapshot; keep it aligned through `pnpm run api:sync` / `pnpm run api:check`
-- `src/frontend/dist/` and `src/fleet_rlm/ui/dist/` are build artifacts, not handwritten source
+- Frontend dist outputs and bundled UI dist outputs are generated build artifacts, not handwritten source; fresh source checkouts may not contain them until a build or packaging step runs
 
 ## Tooling Defaults
 
@@ -121,7 +121,7 @@ Cross-stack source-of-truth boundaries:
 - Do not hand-edit generated files or build output unless the task is specifically about generated artifacts.
 - If backend request/response shapes or OpenAPI-facing metadata change, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update frontend API artifacts, and verify drift with `pnpm run api:check`.
 - `fleet web` is the main local app entrypoint and delegates into `fleet-rlm serve-api`.
-- Source checkouts prefer `src/frontend/dist` for UI serving; packaged installs fall back to `src/fleet_rlm/ui/dist`.
+- Source checkouts prefer a locally built frontend dist output for UI serving; packaged installs fall back to the bundled backend UI dist output.
 - Record durable workflow conventions in the appropriate `AGENTS.md` file when you confirm them from code.
 
 Common mistakes to avoid:

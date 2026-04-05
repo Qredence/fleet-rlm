@@ -28,7 +28,7 @@ Backend source-of-truth files:
 
 Artifacts and areas to treat carefully:
 
-- `src/fleet_rlm/ui/dist/` is synced build output from the frontend, not handwritten backend source
+- The bundled UI dist output is generated from the frontend build, not handwritten backend source, and may be absent in a fresh source checkout until packaging/build steps run
 - `src/fleet_rlm/scaffold/` is curated packaged guidance; update it directly rather than auto-syncing from `.claude/`
 - `migrations/` and database-facing schema changes should stay aligned with persistence behavior
 - `openapi.yaml` is generated from backend route/schema metadata and should be regenerated, not manually patched
