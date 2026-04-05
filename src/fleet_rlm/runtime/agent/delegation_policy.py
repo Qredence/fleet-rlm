@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import dspy
 
@@ -38,7 +38,7 @@ def claim_delegate_slot_or_error(
     agent: RLMReActChatAgent,
     *,
     depth_error_suffix: str,
-    budget_kind: str = "runtime_module",
+    budget_kind: Literal["runtime_module", "recursive_delegate"] = "runtime_module",
 ) -> dict[str, Any] | None:
     """Apply depth and per-turn delegate-call guards."""
     if agent._current_depth >= agent._max_depth:

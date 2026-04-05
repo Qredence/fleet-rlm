@@ -21,14 +21,18 @@ from typing_extensions import Self
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.streaming import (
+    StreamingContext,
+)
+from fleet_rlm.runtime.execution.streaming import (
+    aiter_chat_turn_stream as _aiter_stream,
+)
+from fleet_rlm.runtime.execution.streaming import (
+    iter_chat_turn_stream as _iter_stream,
+)
 from fleet_rlm.runtime.execution.validation import (
     ValidationConfig,
     validate_assistant_response,
-)
-from fleet_rlm.runtime.execution.streaming import (
-    StreamingContext,
-    aiter_chat_turn_stream as _aiter_stream,
-    iter_chat_turn_stream as _iter_stream,
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent
 from fleet_rlm.runtime.tools import ExecutionMode
@@ -43,16 +47,19 @@ from .commands import execute_command as _execute_command
 from .forced_routing import (
     ForcedFinalPayloadInput,
     aiter_forced_rlm_turn_stream,
-    arun_forced_rlm_turn as _arun_forced_rlm_turn_impl,
     forced_stream_final_payload,
     prediction_from_forced_rlm_result,
+)
+from .forced_routing import (
+    arun_forced_rlm_turn as _arun_forced_rlm_turn_impl,
+)
+from .forced_routing import (
     run_forced_rlm_turn as _run_forced_rlm_turn_impl,
 )
 from .memory import CoreMemoryMixin
 from .signatures import RLMReActChatSignature
 from .tool_delegation import get_tool_by_name
 from .trajectory_errors import count_tool_errors
-
 
 _DEFAULT_HISTORY_MAX_TURNS = 6
 
@@ -628,11 +635,6 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             trajectory=trajectory,
             config=self._validation_config,
         )
-
-
-# ---------------------------------------------------------------------------
-# Module-level routing helpers (inlined from streaming_router.py)
-# ---------------------------------------------------------------------------
 
 
 def _iter_forced_rlm_stream(

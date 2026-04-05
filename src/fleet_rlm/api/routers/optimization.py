@@ -187,6 +187,20 @@ async def run_optimization(
         output = _validate_path(request.output_path, OPTIMIZATION_DATA_ROOT)
         output_str = str(output)
 
+    db_run_id = None
+    try:
+        from fleet_rlm.integrations.database.local_store import (
+            create_optimization_run as _db_create_run,
+        )
+
+        db_run_id = _db_create_run(
+            program_spec=request.program_spec,
+            auto=request.auto,
+            train_ratio=request.train_ratio,
+        ).id
+    except Exception:
+        pass
+
     try:
         result = await run_blocking(
             partial(
@@ -201,6 +215,15 @@ async def run_optimization(
         )
     except Exception as exc:
         logger.exception("GEPA optimization failed")
+        if db_run_id is not None:
+            try:
+                from fleet_rlm.integrations.database.local_store import (
+                    fail_optimization_run,
+                )
+
+                fail_optimization_run(db_run_id, error=str(exc))
+            except Exception:
+                pass
         return GEPAOptimizationResponse(
             ok=False,
             program_spec=request.program_spec,
@@ -208,6 +231,22 @@ async def run_optimization(
             validation_examples=0,
             error=str(exc),
         )
+
+    if db_run_id is not None:
+        try:
+            from fleet_rlm.integrations.database.local_store import (
+                complete_optimization_run,
+            )
+
+            complete_optimization_run(
+                db_run_id,
+                train_examples=result.get("train_examples", 0),
+                validation_examples=result.get("validation_examples", 0),
+                validation_score=result.get("validation_score"),
+                output_path=result.get("output_path"),
+            )
+        except Exception:
+            pass
 
     return GEPAOptimizationResponse(
         ok=True,

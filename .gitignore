@@ -107,6 +107,7 @@ docs/plans/
 
 docs/artifacts/
 # Local runtime artifacts
+.data/
 fleet_rlm.db
 server.log
 src/frontend/test-results/

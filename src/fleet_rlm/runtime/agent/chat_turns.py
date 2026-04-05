@@ -367,6 +367,14 @@ def process_prediction_to_turn_result(
         guardrail_warnings = prediction_guardrail_warnings(prediction)
 
     append_history(agent, message, assistant_response)
+    try:
+        _db_sid = getattr(agent, "_db_session_id", None)
+        if _db_sid is not None:
+            from fleet_rlm.integrations.database.local_store import add_turn
+
+            add_turn(_db_sid, history_turns(agent) - 1, message, assistant_response)
+    except Exception:
+        pass
     resolved_turn_metrics = (
         turn_metrics
         if isinstance(turn_metrics, TurnMetricsSnapshot)

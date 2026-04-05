@@ -11,7 +11,6 @@ a prediction is wrong rather than just returning a scalar score.
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +22,7 @@ from dspy.teleprompt import GEPA
 from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from .config import MlflowConfig
+from .dspy_evaluation import _metric_supports_trace
 from .mlflow_evaluation import load_trace_rows
 from .mlflow_optimization import (
     build_program,
@@ -59,6 +59,7 @@ def build_gepa_feedback_metric(
     :class:`~dspy.teleprompt.gepa.gepa.GEPAFeedbackMetric` protocol.
     """
     inner = score_fn
+    inner_supports_trace = _metric_supports_trace(inner) if inner is not None else False
 
     def _call_feedback_metric(
         gold: Example,
@@ -73,15 +74,7 @@ def build_gepa_feedback_metric(
                 trace=trace,
                 output_key=output_key,
             )
-        try:
-            params = inspect.signature(inner).parameters.values()
-        except (TypeError, ValueError):
-            params = ()
-        supports_trace = any(
-            param.kind is inspect.Parameter.VAR_KEYWORD or param.name == "trace"
-            for param in params
-        )
-        if supports_trace:
+        if inner_supports_trace:
             return inner(gold, pred, trace=trace)
         return inner(gold, pred)
 

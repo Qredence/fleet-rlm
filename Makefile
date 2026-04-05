@@ -104,7 +104,7 @@ quality-gate: lint format-check typecheck test-fast metadata-check docs-check fr
 check: quality-gate
 
 mlflow-server:
-	uv run mlflow server --backend-store-uri sqlite:///mlruns.db --port 5001
+	uv run mlflow server --backend-store-uri sqlite:///.data/mlruns.db --port 5001
 
 sync-scaffold:
 	@echo "src/fleet_rlm/scaffold is a curated Claude Code translation layer for fleet-rlm."

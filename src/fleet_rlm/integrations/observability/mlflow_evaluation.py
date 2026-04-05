@@ -21,6 +21,14 @@ def export_annotated_trace_rows(
     rows = search_annotated_trace_rows(config=config, max_results=max_results)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    try:
+        from fleet_rlm.integrations.database.local_store import register_dataset
+
+        register_dataset(
+            name=output_path.stem, uri=str(output_path), row_count=len(rows)
+        )
+    except Exception:
+        pass
     return rows
 
 

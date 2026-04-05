@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -285,18 +286,12 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
 
         document = resolve_document(ctx.agent, alias)
         tracer = getattr(mlflow, "start_span", None) if mlflow is not None else None
-        if callable(tracer):
-            with tracer(name="grounded_answer", span_type="RETRIEVER"):
-                prediction, error, fallback_used = _run_cached_runtime_module(
-                    ctx,
-                    module_name="grounded_answer",
-                    document=document,
-                    query=query,
-                    chunk_strategy=chunk_strategy,
-                    max_chunks=max_chunks_int,
-                    response_style="concise",
-                )
-        else:
+        span_ctx = (
+            tracer(name="grounded_answer", span_type="RETRIEVER")
+            if callable(tracer)
+            else nullcontext()
+        )
+        with span_ctx:
             prediction, error, fallback_used = _run_cached_runtime_module(
                 ctx,
                 module_name="grounded_answer",

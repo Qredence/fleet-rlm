@@ -12,6 +12,7 @@ Tools included:
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -144,10 +145,13 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
             Same dictionary payload as ``load_document`` for URL-backed documents.
         """
         tracer = getattr(mlflow, "start_span", None) if mlflow is not None else None
-        if callable(tracer):
-            with tracer(name="fetch_web_document", span_type="RETRIEVER"):
-                return _load_document_impl(url, alias=alias)
-        return _load_document_impl(url, alias=alias)
+        span_ctx = (
+            tracer(name="fetch_web_document", span_type="RETRIEVER")
+            if callable(tracer)
+            else nullcontext()
+        )
+        with span_ctx:
+            return _load_document_impl(url, alias=alias)
 
     def set_active_document(alias: str) -> dict[str, Any]:
         """Set which loaded document alias should be used by default tools.

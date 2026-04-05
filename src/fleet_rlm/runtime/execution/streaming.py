@@ -111,6 +111,14 @@ def build_cancelled_stream_event(
     partial = "".join(assistant_chunks).strip()
     marked_partial = f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
     agent._append_history(message, marked_partial)
+    try:
+        _db_sid = getattr(agent, "_db_session_id", None)
+        if _db_sid is not None:
+            from fleet_rlm.integrations.database.local_store import add_turn
+
+            add_turn(_db_sid, 0, message, marked_partial)
+    except Exception:
+        pass
     return StreamEvent(
         kind="cancelled",
         text=marked_partial,
@@ -171,6 +179,14 @@ def build_final_stream_event(
         trajectory=trajectory,
     )
     agent._append_history(message, assistant_response)
+    try:
+        _db_sid = getattr(agent, "_db_session_id", None)
+        if _db_sid is not None:
+            from fleet_rlm.integrations.database.local_store import add_turn
+
+            add_turn(_db_sid, 0, message, assistant_response)
+    except Exception:
+        pass
     return StreamEvent(
         kind="final",
         flush_tokens=True,
