@@ -7,7 +7,7 @@ import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
-import { getShellPanelMeta } from "@/features/layout/panel-meta";
+import { getLayoutPanelMeta } from "./panel-meta";
 
 function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
   return (
@@ -42,9 +42,9 @@ function navLabel(nav: string): string {
   }
 }
 
-export function ShellSidepanel() {
+export function LayoutSidepanel() {
   const activeNav = useNavigationStore((state) => state.activeNav);
-  const panelMeta = getShellPanelMeta(activeNav);
+  const panelMeta = getLayoutPanelMeta(activeNav);
 
   const isUnsupportedNav = !isSectionSupported(activeNav);
   const coreReady = isRlmCoreEnabled();
@@ -84,3 +84,5 @@ export function ShellSidepanel() {
     </div>
   );
 }
+
+export { LayoutSidepanel as ShellSidepanel };

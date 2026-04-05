@@ -5,10 +5,10 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
-import { getShellPanelMeta } from "@/features/layout/panel-meta";
+import { getLayoutPanelMeta } from "./panel-meta";
 import { useNavigationStore } from "@/stores/navigation-store";
 
-export function ShellHeader() {
+export function LayoutHeader() {
   const { activeNav, isCanvasOpen, toggleCanvas } = useNavigationStore();
   const isMobile = useIsMobile();
 
@@ -19,7 +19,7 @@ export function ShellHeader() {
     settings: "Settings",
   };
   const title = titleMap[activeNav] || "Dashboard";
-  const panelMeta = getShellPanelMeta(activeNav);
+  const panelMeta = getLayoutPanelMeta(activeNav);
   const canvasActionLabel = isCanvasOpen
     ? `Hide ${panelMeta.toggleLabel}`
     : `Show ${panelMeta.toggleLabel}`;
@@ -74,3 +74,5 @@ export function ShellHeader() {
     </header>
   );
 }
+
+export { LayoutHeader as ShellHeader };

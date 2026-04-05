@@ -269,3 +269,5 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+
+export { AppSidebar as LayoutSidebar };
