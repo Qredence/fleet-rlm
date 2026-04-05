@@ -5,7 +5,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
-import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
+import { getShellPanelMeta } from "@/features/layout/panel-meta";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 export function ShellHeader() {

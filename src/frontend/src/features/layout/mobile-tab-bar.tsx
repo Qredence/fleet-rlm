@@ -1,9 +1,10 @@
-import { MessageCircle, HardDrive } from "lucide-react";
-import type { NavItem } from "@/stores/navigation-types";
-import { useNavigationStore } from "@/stores/navigation-store";
+import { HardDrive, MessageCircle } from "lucide-react";
+
 import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { isSectionSupported } from "@/lib/rlm-api";
 import { cn } from "@/lib/utils";
+import { useNavigationStore } from "@/stores/navigation-store";
+import type { NavItem } from "@/stores/navigation-types";
 
 const tabs: { key: NavItem; label: string; icon: typeof MessageCircle }[] = [
   { key: "workspace", label: "Workspace", icon: MessageCircle },
@@ -26,7 +27,6 @@ export function MobileTabBar() {
         role="tablist"
         aria-label="Main navigation"
       >
-        {/* Glass highlight — top edge specular rim */}
         <div
           className="surface-glass-tab-highlight pointer-events-none absolute inset-x-0 top-0 h-px"
           aria-hidden="true"

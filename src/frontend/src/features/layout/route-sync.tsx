@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
+
 import { pathToNav } from "@/hooks/use-app-navigate";
 import { useVolumesShellSelection } from "@/screens/volumes/volumes-shell-contract";
 import { useNavigationStore } from "@/stores/navigation-store";
@@ -21,7 +22,6 @@ function RouteSync() {
   const { setActiveNav, openCanvas, closeCanvas, activeNav } = useNavigationStore();
   const { clearSelectedFile } = useVolumesShellSelection();
 
-  // Track previous section to avoid redundant updates
   const prevSectionRef = useRef("");
 
   useEffect(() => {
@@ -30,13 +30,11 @@ function RouteSync() {
     const prevSection = prevSectionRef.current;
     prevSectionRef.current = section;
 
-    // ── Sync activeNav ───────────────────────────────────────────
     const nav = pathToNav(location.pathname);
     if (nav && nav !== activeNav) {
       setActiveNav(nav);
     }
 
-    // ── Sync skill deep-linking ──────────────────────────────────
     if (section === "volumes") {
       openCanvas();
     } else if (section === "settings" || section === "optimization") {
@@ -45,8 +43,6 @@ function RouteSync() {
       clearSelectedFile();
     }
   }, [location.pathname]); // oxlint-disable-line react-hooks/exhaustive-deps
-  // ↑ Intentionally omit context deps — we only want to run on URL change,
-  //   not when context values change (which would create update loops).
 
   return null;
 }

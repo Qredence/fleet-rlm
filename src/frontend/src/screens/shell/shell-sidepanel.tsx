@@ -1,47 +1,32 @@
-import { PanelRight } from "lucide-react";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-
+import { EmptyPanel } from "@/components/patterns/empty-panel";
+import { ErrorBoundary } from "@/components/patterns/error-boundary";
+import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
 import { useNavigationStore } from "@/stores/navigation-store";
-import { ErrorBoundary } from "@/components/error-boundary";
 import { VolumesCanvasPanel } from "@/screens/volumes/volumes-canvas-panel";
 import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/screens/workspace/workspace-canvas-panel";
-import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
-import { getShellPanelMeta } from "@/screens/shell/shell-panel-meta";
-
-function EmptyPanel({ title, description }: { title: string; description: string }) {
-  return (
-    <Empty className="h-full rounded-none border-0 bg-transparent">
-      <EmptyMedia variant="icon">
-        <PanelRight />
-      </EmptyMedia>
-      <EmptyContent>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
-      </EmptyContent>
-    </Empty>
-  );
-}
+import { getShellPanelMeta } from "@/features/layout/panel-meta";
 
 function UnsupportedPanel({ sectionLabel, reason }: { sectionLabel: string; reason?: string }) {
   return (
     <EmptyPanel
       title={`${sectionLabel} unavailable`}
       description={reason || "This functionality is currently disabled or unsupported."}
+      className="h-full rounded-none border-0 bg-transparent"
     />
   );
 }
 
 function EmptyCanvas({ title, description }: { title: string; description: string }) {
-  return <EmptyPanel title={title} description={description} />;
+  return (
+    <EmptyPanel
+      title={title}
+      description={description}
+      className="h-full rounded-none border-0 bg-transparent"
+    />
+  );
 }
 
 function navLabel(nav: string): string {

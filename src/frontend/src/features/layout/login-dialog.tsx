@@ -7,15 +7,14 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { isEntraAuthConfigured } from "@/lib/auth/entra";
-import { useAuth } from "@/lib/auth/auth-context";
-import { useIsMobile } from "@/hooks/use-is-mobile";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { BrandMark } from "@/components/brand-mark";
 
-// ── Shared form body ────────────────────────────────────────────────
+import { BrandMark } from "@/components/brand-mark";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useAuth } from "@/lib/auth/auth-context";
+import { isEntraAuthConfigured } from "@/lib/auth/entra";
 
 function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const { login } = useAuth();
@@ -45,7 +44,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-      {/* Logo + Title */}
       <div className="flex flex-col items-center gap-3 pb-2">
         <BrandMark className="w-8 h-3.75 text-foreground" />
         <div className="text-center">
@@ -56,7 +54,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
       </div>
 
-      {/* Submit */}
       <Button type="submit" className="w-full" disabled={loading || !authConfigured}>
         {loading ? (
           <>
@@ -76,8 +73,6 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
     </form>
   );
 }
-
-// ── Main component ──────────────────────────────────────────────────
 
 interface LoginDialogProps {
   open: boolean;

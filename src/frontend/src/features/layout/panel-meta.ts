@@ -55,3 +55,5 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
       };
   }
 }
+
+export { getShellPanelMeta as getLayoutPanelMeta };
