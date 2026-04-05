@@ -4,12 +4,12 @@ import {
   OPEN_SETTINGS_EVENT,
   requestSettingsDialogOpen,
   type OpenSettingsEventDetail,
-} from "@/screens/settings/settings-events";
+} from "@/features/settings/settings-events";
 import {
   getSettingsSectionDescription,
   getSettingsSectionTitle,
   resolveSettingsSection,
-} from "@/screens/settings/settings-screen";
+} from "@/features/settings/settings-screen";
 
 describe("settings section helpers", () => {
   it("resolves supported sections and ignores unknown values", () => {

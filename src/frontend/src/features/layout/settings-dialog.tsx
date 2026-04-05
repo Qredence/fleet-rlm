@@ -22,7 +22,7 @@ import {
   settingsSections,
   SettingsSidebarNav,
   type SettingsSection,
-} from "@/screens/settings/settings-content";
+} from "@/features/settings/settings-content";
 import { useThemeStore } from "@/stores/theme-store";
 
 interface SettingsDialogProps {

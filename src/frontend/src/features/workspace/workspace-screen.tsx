@@ -23,7 +23,7 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
+import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
 
 /**
  * WorkspaceScreen — chat-first DSPy.RLM runtime surface.

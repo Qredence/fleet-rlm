@@ -31,12 +31,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { telemetryClient } from "@/lib/telemetry/client";
-import { OptimizationForm } from "@/screens/settings/optimization-form";
-import { RuntimeForm } from "@/screens/settings/runtime-form";
-import {
-  computeLmRuntimeUpdates,
-  useRuntimeSettings,
-} from "@/screens/settings/use-runtime-settings";
+import { OptimizationForm } from "@/features/optimization/optimization-form";
+import { RuntimeForm } from "./runtime-form";
+import { computeLmRuntimeUpdates, useRuntimeSettings } from "./use-runtime-settings";
 
 export const settingsSections = [
   { key: "appearance", label: "Appearance", icon: Paintbrush },

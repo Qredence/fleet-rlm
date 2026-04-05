@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils";
 import {
   OPEN_SETTINGS_EVENT,
   type OpenSettingsEventDetail,
-} from "@/screens/settings/settings-events";
-import type { SettingsSection } from "@/screens/settings/settings-screen";
+} from "@/features/settings/settings-events";
+import type { SettingsSection } from "@/features/settings/settings-screen";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 import { LayoutSidebar } from "./app-sidebar";

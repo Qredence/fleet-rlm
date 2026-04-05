@@ -1,4 +1,4 @@
-import type { SettingsSection } from "@/screens/settings/settings-screen";
+import type { SettingsSection } from "./settings-screen";
 
 export const OPEN_SETTINGS_EVENT = "open-settings";
 

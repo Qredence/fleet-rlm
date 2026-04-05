@@ -33,7 +33,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
-import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
+import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
 import {
   type Conversation,
   useWorkspaceLayoutActions,

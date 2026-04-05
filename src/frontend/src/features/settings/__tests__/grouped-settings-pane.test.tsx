@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 
-import { GroupedSettingsPane } from "@/screens/settings/settings-screen";
+import { GroupedSettingsPane } from "@/features/settings/settings-screen";
 
-vi.mock("@/screens/settings/use-runtime-settings", () => ({
+vi.mock("@/features/settings/use-runtime-settings", () => ({
   computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of [

@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import type { NavItem } from "@/stores/navigation-types";
-import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
+import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
 import { useWorkspaceLayoutActions } from "@/features/workspace/workspace-layout-contract";
 import { useThemeStore } from "@/stores/theme-store";
 import { useAppNavigate } from "@/hooks/use-app-navigate";

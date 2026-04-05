@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { RuntimeForm, shouldHydrateRuntimeForm } from "@/screens/settings/runtime-form";
+import { RuntimeForm, shouldHydrateRuntimeForm } from "@/features/settings/runtime-form";
 
-vi.mock("@/screens/settings/use-runtime-settings", () => ({
+vi.mock("@/features/settings/use-runtime-settings", () => ({
   useRuntimeSettings: () => ({
     settingsQuery: {
       data: {

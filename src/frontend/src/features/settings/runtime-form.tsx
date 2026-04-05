@@ -32,7 +32,7 @@ import {
   useRuntimeSettings,
   type RuntimeEditableKey,
   type RuntimeSecretEditableKey,
-} from "@/screens/settings/use-runtime-settings";
+} from "./use-runtime-settings";
 import type { RuntimeConnectivityTestResponse, RuntimeStatusResponse } from "@/lib/rlm-api";
 
 type RuntimeField = {

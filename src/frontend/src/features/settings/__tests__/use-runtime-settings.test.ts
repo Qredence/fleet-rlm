@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   computeLmRuntimeUpdates,
   computeRuntimeUpdates,
-} from "@/screens/settings/use-runtime-settings";
+} from "@/features/settings/use-runtime-settings";
 
 describe("computeRuntimeUpdates", () => {
   it("returns an empty update payload when values are unchanged", () => {

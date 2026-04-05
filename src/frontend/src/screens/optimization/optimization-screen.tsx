@@ -1,6 +1,6 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { OptimizationForm } from "@/screens/settings/optimization-form";
+import { OptimizationForm } from "@/features/optimization/optimization-form";
 import { cn } from "@/lib/utils";
 
 export function OptimizationScreen() {

@@ -1,6 +1,6 @@
 import { useSearch, useRouter } from "@tanstack/react-router";
 import { SettingsDialog } from "@/features/layout/settings-dialog";
-import { resolveSettingsSection } from "@/screens/settings/settings-content";
+import { resolveSettingsSection } from "./settings-content";
 
 export {
   GroupedSettingsPane,
@@ -11,8 +11,8 @@ export {
   settingsSections,
   SettingsSectionContent,
   SettingsSidebarNav,
-} from "@/screens/settings/settings-content";
-export type { SettingsSection } from "@/screens/settings/settings-content";
+} from "./settings-content";
+export type { SettingsSection } from "./settings-content";
 
 export function SettingsScreen() {
   const router = useRouter();
