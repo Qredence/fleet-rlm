@@ -2,11 +2,11 @@ import { useChatHistoryStore, useConversations } from "@/lib/workspace/chat-hist
 import type { Conversation } from "@/lib/workspace/workspace-types";
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 
-function useWorkspaceShellHistory(): Conversation[] {
+function useWorkspaceLayoutHistory(): Conversation[] {
   return useConversations();
 }
 
-function useWorkspaceShellActions() {
+function useWorkspaceLayoutActions() {
   const newSession = useWorkspaceUiStore((state) => state.newSession);
   const requestConversationLoad = useWorkspaceUiStore((state) => state.requestConversationLoad);
   const deleteConversation = useChatHistoryStore((state) => state.deleteConversation);
@@ -20,5 +20,13 @@ function useWorkspaceShellActions() {
   };
 }
 
-export { useWorkspaceShellActions, useWorkspaceShellHistory };
+const useWorkspaceShellHistory = useWorkspaceLayoutHistory;
+const useWorkspaceShellActions = useWorkspaceLayoutActions;
+
+export {
+  useWorkspaceLayoutActions,
+  useWorkspaceLayoutHistory,
+  useWorkspaceShellActions,
+  useWorkspaceShellHistory,
+};
 export type { Conversation };

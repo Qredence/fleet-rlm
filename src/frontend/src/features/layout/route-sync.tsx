@@ -13,14 +13,14 @@ import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
 
 import { pathToNav } from "@/hooks/use-app-navigate";
-import { useVolumesShellSelection } from "@/screens/volumes/volumes-shell-contract";
+import { useVolumesLayoutSelection } from "@/screens/volumes/volumes-layout-contract";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 function RouteSync() {
   const routerState = useRouterState();
   const location = routerState.location;
   const { setActiveNav, openCanvas, closeCanvas, activeNav } = useNavigationStore();
-  const { clearSelectedFile } = useVolumesShellSelection();
+  const { clearSelectedFile } = useVolumesLayoutSelection();
 
   const prevSectionRef = useRef("");
 

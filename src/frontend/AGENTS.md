@@ -83,7 +83,7 @@ Registry-aligned component layers:
 - `src/components/ui/*` for shadcn/Base UI primitives and thin local extensions
 - `src/components/ai-elements/*` for AI Elements registry components
 - `src/components/patterns/*` for app-owned reusable compositions built from `ui` and `ai-elements`
-- `src/features/layout/*` for canonical app-chrome entrypoints that compose the current shell implementation
+- `src/features/layout/*` for canonical app-chrome entrypoints and implementation ownership
 - `src/components/` root for a very small set of global compatibility exports such as `brand-mark.tsx`
 
 Rules for those layers:
@@ -91,7 +91,7 @@ Rules for those layers:
 - Keep `components/ui` thin, semantic, and free of feature/runtime imports
 - Keep `components/ai-elements` composable and registry-aligned; do not collapse them into feature-specific monoliths
 - Use `components/patterns` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
-- Route app-chrome consumers through `features/layout/*` before reaching transitional `app/shell/*` or `screens/shell/*` modules
+- Route app-chrome consumers through `features/layout/*`, which is the canonical owner of layout implementation
 - New shared layout/app-chrome naming should prefer `layout` over `shell` when creating new architecture surfaces
 
 ## Frontend Map
@@ -105,13 +105,11 @@ Routing ownership:
 
 Current surface ownership:
 
-- `src/screens/workspace/` is the current top-level workspace surface and public screen contract
-- `src/screens/volumes/` owns the volume browser entrypoints and public screen contracts
+- `src/screens/workspace/` is the current top-level workspace surface and owns public screen contracts such as `workspace-layout-contract.ts`
+- `src/screens/volumes/` owns the volume browser entrypoints and public screen contracts such as `volumes-layout-contract.ts`
 - `src/screens/settings/` owns settings entrypoints
-- `src/features/layout/` owns canonical app-chrome public entrypoints and compatibility exports
-- `src/screens/shell/` owns the current app-frame implementation beneath `features/layout/`; new architectural naming should prefer `layout`
+- `src/features/layout/` owns canonical app-chrome public entrypoints, implementation, and compatibility exports
 - `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
-- `src/app/shell/` owns current app-frame composed surfaces such as command palette and route sync; treat it as a transitional implementation layer behind `features/layout/`
 - `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
 - `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
 - `src/stores/` owns cross-app shell/layout and navigation state
@@ -119,7 +117,8 @@ Current surface ownership:
 Important boundaries to preserve:
 
 - Keep `src/screens/*` thin; move reusable feature logic into `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
-- Keep external layout/app-chrome imports pointed at `src/features/layout/*`; only reach into `src/screens/shell/*` or `src/app/shell/*` while refactoring that layer itself
+- Keep external layout/app-chrome imports pointed at `src/features/layout/*`
+- Layout implementation should consume workspace and volumes via `workspace-layout-contract.ts`, `volumes-layout-contract.ts`, or the explicitly allowed canvas panel entrypoints
 - `src/screens/workspace/use-workspace.ts` is the public workspace contract; implementation-heavy helpers belong under `src/lib/workspace/`
 - `src/screens/workspace/workspace-canvas-panel.tsx` stays the shell-facing canvas surface; canvas internals belong under `src/app/workspace/`
 - Assistant transcript/content modeling belongs under `src/app/workspace/assistant-content/model/`
@@ -130,7 +129,7 @@ Import-boundary rules enforced in `src/frontend/vite.config.ts`:
 
 - `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/patterns/*` must not import from `src/screens/*`
 - Workspace runtime/state modules in `src/lib/workspace/*` must not depend on workspace UI modules
-- `src/screens/shell/*` must consume workspace and volumes through top-level screen contracts only
+- `src/features/layout/*` must consume workspace and volumes through top-level screen contracts such as `workspace-layout-contract.ts` and `volumes-layout-contract.ts`
 - Keep `@/lib/utils` as the canonical `cn()` import path
 
 ## UI and Runtime Rules

@@ -1,6 +1,6 @@
 import { useVolumesSelectionStore } from "@/screens/volumes/volumes-selection-store";
 
-function useVolumesShellSelection() {
+function useVolumesLayoutSelection() {
   const selectedFileNode = useVolumesSelectionStore((state) => state.selectedFileNode);
   const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
 
@@ -10,4 +10,6 @@ function useVolumesShellSelection() {
   };
 }
 
-export { useVolumesShellSelection };
+const useVolumesShellSelection = useVolumesLayoutSelection;
+
+export { useVolumesLayoutSelection, useVolumesShellSelection };

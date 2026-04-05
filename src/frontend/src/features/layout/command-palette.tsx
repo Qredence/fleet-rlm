@@ -23,7 +23,7 @@ import {
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import type { NavItem } from "@/stores/navigation-types";
 import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
-import { useWorkspaceShellActions } from "@/screens/workspace/workspace-shell-contract";
+import { useWorkspaceLayoutActions } from "@/screens/workspace/workspace-layout-contract";
 import { useThemeStore } from "@/stores/theme-store";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { cn } from "@/lib/utils";
@@ -47,7 +47,7 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const { newSession } = useWorkspaceShellActions();
+  const { newSession } = useWorkspaceLayoutActions();
   const { isDark, toggle: toggleTheme } = useThemeStore();
   const { navigateTo } = useAppNavigate();
   const telemetry = useTelemetry();

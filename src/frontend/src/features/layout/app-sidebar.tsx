@@ -36,9 +36,9 @@ import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { requestSettingsDialogOpen } from "@/screens/settings/settings-events";
 import {
   type Conversation,
-  useWorkspaceShellActions,
-  useWorkspaceShellHistory,
-} from "@/screens/workspace/workspace-shell-contract";
+  useWorkspaceLayoutActions,
+  useWorkspaceLayoutHistory,
+} from "@/screens/workspace/workspace-layout-contract";
 
 const sidebarActionButtonClassName =
   "h-9 rounded-[10px] px-2.5 text-[14px] font-normal tracking-[-0.18px] text-sidebar-foreground/72 transition-[background-color,color,box-shadow] hover:bg-sidebar-accent/75 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent/95 data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--sidebar-border)_78%,transparent)] group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0! [&>span]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-foreground/72 data-[active=true]:[&>svg]:text-sidebar-foreground";
@@ -79,9 +79,9 @@ function SidebarActionItem({
 }
 
 export function AppSidebar() {
-  const conversations = useWorkspaceShellHistory();
+  const conversations = useWorkspaceLayoutHistory();
   const { toggleSidebar, state: sidebarState } = useSidebar();
-  const { newSession, requestConversationLoad, deleteConversation } = useWorkspaceShellActions();
+  const { newSession, requestConversationLoad, deleteConversation } = useWorkspaceLayoutActions();
   const navigate = useNavigate();
   const { navigateTo } = useAppNavigate();
   const { openCommandPalette } = useNavigationStore();

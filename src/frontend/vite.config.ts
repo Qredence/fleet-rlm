@@ -136,7 +136,7 @@ export default defineConfig({
       },
       {
         files: [
-          "src/screens/workspace/{use-workspace.ts,workspace-adapter.ts,workspace-shell-contract.ts}",
+          "src/screens/workspace/{use-workspace.ts,workspace-adapter.ts,workspace-layout-contract.ts}",
           "src/lib/workspace/**/*.{ts,tsx}",
         ],
         rules: {
@@ -170,12 +170,12 @@ export default defineConfig({
                     "@/screens/workspace/**",
                     "@/screens/volumes/**",
                     "!@/screens/workspace/workspace-canvas-panel",
-                    "!@/screens/workspace/workspace-shell-contract",
+                    "!@/screens/workspace/workspace-layout-contract",
                     "!@/screens/volumes/volumes-canvas-panel",
-                    "!@/screens/volumes/volumes-shell-contract",
+                    "!@/screens/volumes/volumes-layout-contract",
                   ],
                   message:
-                    "Shell modules must import screen-owned panels through top-level screen contracts only.",
+                    "Layout modules must import screen-owned panels through top-level screen contracts only.",
                 },
               ],
             },
