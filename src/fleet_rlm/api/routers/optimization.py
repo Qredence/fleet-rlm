@@ -129,9 +129,9 @@ async def get_optimization_status(
 
 def _run_gepa_optimization(
     *,
-    dataset_path: str,
+    dataset_path: Path,
     program_spec: str,
-    output_path: str | None,
+    output_path: Path | None,
     auto: str,
     train_ratio: float,
 ) -> dict:
@@ -210,9 +210,9 @@ async def run_optimization(
         result = await run_blocking(
             partial(
                 _run_gepa_optimization,
-                dataset_path=str(dataset),
+                dataset_path=dataset,
                 program_spec=request.program_spec,
-                output_path=str(output_path) if output_path else None,
+                output_path=output_path,
                 auto=request.auto,
                 train_ratio=request.train_ratio,
             ),
