@@ -6,6 +6,8 @@ and fallback-to-non-streaming error resilience.
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import dspy
 import pytest
 from dspy.streaming.messages import StatusMessage, StreamResponse
@@ -312,61 +314,69 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
     assert agent.history.messages[0]["assistant_response"].endswith("[cancelled]")
 
 
-def test_build_cancelled_stream_event_logs_local_store_failure(
-    monkeypatch, caplog: pytest.LogCaptureFixture
-):
+def test_build_cancelled_stream_event_logs_local_store_failure(monkeypatch):
     from fleet_rlm.integrations.database import local_store
+    from fleet_rlm.runtime.execution import streaming as streaming_module
 
     def _boom(*args, **kwargs):
         raise RuntimeError("db offline")
 
+    log_exception = Mock()
     monkeypatch.setattr(local_store, "add_turn", _boom)
+    monkeypatch.setattr(streaming_module.logger, "exception", log_exception)
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     prepared = prepare_streaming_turn(agent, message="please", trace=False)
     agent._db_session_id = 123
 
-    with caplog.at_level("ERROR"):
-        event = build_cancelled_stream_event(
-            agent=agent,
-            message="please",
-            assistant_chunks=["partial"],
-            ctx=prepared.ctx,
-        )
+    event = build_cancelled_stream_event(
+        agent=agent,
+        message="please",
+        assistant_chunks=["partial"],
+        ctx=prepared.ctx,
+    )
 
     assert event.kind == "cancelled"
-    assert "Failed to persist cancelled streaming turn to local_store" in caplog.text
+    log_exception.assert_called_once()
+    assert (
+        "Failed to persist cancelled streaming turn to local_store"
+        in log_exception.call_args.args[0]
+    )
 
 
-def test_build_final_stream_event_logs_local_store_failure(
-    monkeypatch, caplog: pytest.LogCaptureFixture
-):
+def test_build_final_stream_event_logs_local_store_failure(monkeypatch):
     from fleet_rlm.integrations.database import local_store
+    from fleet_rlm.runtime.execution import streaming as streaming_module
 
     def _boom(*args, **kwargs):
         raise RuntimeError("db offline")
 
+    log_exception = Mock()
     monkeypatch.setattr(local_store, "add_turn", _boom)
+    monkeypatch.setattr(streaming_module.logger, "exception", log_exception)
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     prepared = prepare_streaming_turn(agent, message="hello", trace=False)
     agent._db_session_id = 123
 
-    with caplog.at_level("ERROR"):
-        event = build_final_stream_event(
-            agent=agent,
-            message="hello",
-            final_prediction=dspy.Prediction(
-                assistant_response="world",
-                trajectory={"tool_name_0": "finish"},
-            ),
-            assistant_chunks=["world"],
-            ctx=prepared.ctx,
-        )
+    event = build_final_stream_event(
+        agent=agent,
+        message="hello",
+        final_prediction=dspy.Prediction(
+            assistant_response="world",
+            trajectory={"tool_name_0": "finish"},
+        ),
+        assistant_chunks=["world"],
+        ctx=prepared.ctx,
+    )
 
     assert event.kind == "final"
     assert event.text == "world"
-    assert "Failed to persist final streaming turn to local_store" in caplog.text
+    log_exception.assert_called_once()
+    assert (
+        "Failed to persist final streaming turn to local_store"
+        in log_exception.call_args.args[0]
+    )
 
 
 def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
