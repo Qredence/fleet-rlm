@@ -21,19 +21,20 @@ Use this skill for features that:
 
 ## Work Procedure
 
-1. Read the failing validator or worker handoff, then read `mission.md`, mission `AGENTS.md`, and the `.factory/library/*` files referenced there.
-2. Reproduce the exact failing assertion with the smallest focused command first. Record the pre-fix failure mode in the handoff.
-3. Preserve the unrelated working-tree change in `src/fleet_rlm/api/bootstrap_observability.py` unless the repair explicitly requires touching it.
-4. Add a targeted regression test before implementation whenever feasible.
-5. Implement the smallest repair that restores the validated behavior. Do not add new compatibility layers unless the feature explicitly requires one.
-6. Re-run the exact failing check first, then the nearest broader contract lane.
-7. Run baseline validators for touched Python code:
+1. Confirm that `mission-worker-base` already ran `.factory/init.sh` and the baseline `commands.test` command from `.factory/services.yaml` for this session. If either step did not run or failed, run it before repair work and record the result; if it still fails, return to the orchestrator without editing code.
+2. Read the failing validator or worker handoff, then read `mission.md`, mission `AGENTS.md`, and the `.factory/library/*` files referenced there.
+3. Reproduce the exact failing assertion with the smallest focused command first. Record the pre-fix failure mode in the handoff.
+4. Preserve the unrelated working-tree change in `src/fleet_rlm/api/bootstrap_observability.py` unless the repair explicitly requires touching it.
+5. Add a targeted regression test before implementation whenever feasible.
+6. Implement the smallest repair that restores the validated behavior. Do not add new compatibility layers unless the feature explicitly requires one.
+7. Re-run the exact failing check first, then the nearest broader contract lane.
+8. Run baseline validators for touched Python code:
    - `make format`
    - `make lint`
    - `make typecheck`
-8. If the regression touched shared contracts, run the relevant command from `.factory/services.yaml` (`api_contract`, `websocket_contract`, `daytona_contract`, `cli_contract`, or `quality_gate`).
-9. If the regression touched browser-serving or app navigation, invoke `agent-browser` against `127.0.0.1:8100` to verify the repaired flow manually.
-10. In the handoff, clearly distinguish reproduced failure evidence, repair evidence, and any remaining external blockers.
+9. If the regression touched shared contracts, run the relevant command from `.factory/services.yaml` (`api_contract`, `websocket_contract`, `daytona_contract`, `cli_contract`, or `quality_gate`).
+10. If the regression touched browser-serving or app navigation, invoke `agent-browser` against `127.0.0.1:8100` to verify the repaired flow manually.
+11. In the handoff, clearly distinguish reproduced failure evidence, repair evidence, and any remaining external blockers.
 
 ## Example Handoff
 
