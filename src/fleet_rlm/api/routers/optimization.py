@@ -204,8 +204,8 @@ async def run_optimization(
             auto=request.auto,
             train_ratio=request.train_ratio,
         ).id
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("Failed to create optimization run in local database", exc_info=exc)
 
     try:
         result = await run_blocking(
