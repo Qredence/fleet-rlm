@@ -53,17 +53,7 @@ def _validate_path(user_path: str, base: Path) -> Path:
             detail="Absolute paths are not allowed. Use a relative path.",
         )
     resolved = (base / candidate).resolve()
-    try:
-        # Python 3.9+: prefer Path.is_relative_to when available.
-        is_relative = resolved.is_relative_to(base)  # type: ignore[attr-defined]
-    except AttributeError:
-        # Fallback for older Python versions: use relative_to in a try/except.
-        try:
-            resolved.relative_to(base)
-            is_relative = True
-        except ValueError:
-            is_relative = False
-    if not is_relative:
+    if not resolved.is_relative_to(base):
         raise HTTPException(
             status_code=400,
             detail="Path escapes the allowed data directory.",

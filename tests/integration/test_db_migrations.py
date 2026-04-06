@@ -17,6 +17,12 @@ pytestmark = [
 
 @pytest.mark.asyncio
 async def test_migrations_apply_and_core_tables_exist(require_database_url: str):
+    """Verify that all Alembic migrations apply cleanly and expected tables exist.
+
+    This test requires a *dedicated* test database: it drops and recreates the
+    ``public`` schema before running migrations so that Alembic starts from a
+    completely empty state.  Do not run it against a shared or production database.
+    """
     repo_root = Path(__file__).resolve().parents[2]
 
     cfg = Config(str(repo_root / "alembic.ini"))
