@@ -228,8 +228,11 @@ async def run_optimization(
                 )
 
                 fail_optimization_run(db_run_id, error=str(exc))
-            except Exception:
-                pass
+            except Exception as db_exc:
+                logger.exception(
+                    "Failed to mark GEPA optimization run %s as failed in database",
+                    db_run_id,
+                )
         return GEPAOptimizationResponse(
             ok=False,
             program_spec=request.program_spec,
