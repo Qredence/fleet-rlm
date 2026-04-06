@@ -29,7 +29,6 @@ from fleet_rlm.runtime.execution.streaming_context import (
 )
 from fleet_rlm.runtime.execution.streaming_events import (
     ReActStatusProvider as ReActStatusProvider,
-    STREAM_EVENT_SCHEMA_VERSION as STREAM_EVENT_SCHEMA_VERSION,
     ToolEventKind as ToolEventKind,
     _build_final_payload,
     _normalize_trajectory as _normalize_trajectory,
