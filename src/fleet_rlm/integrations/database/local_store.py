@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import enum
 import os
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import Column, Integer
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 # ---------------------------------------------------------------------------
@@ -22,22 +24,36 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 # ---------------------------------------------------------------------------
 
 _DEFAULT_DB_DIR = Path(".data")
-_engine = None
+_engines: dict[str, Any] = {}
+
+
+def _iter_cached_engines() -> Iterator[Any]:
+    """Yield cached engines for tests and maintenance."""
+    return iter(_engines.values())
+
+
+def _resolve_db_url(db_path: str | None = None) -> str:
+    """Resolve the effective database URL for the requested local store."""
+    env_url = os.environ.get("FLEET_RLM_LOCAL_DB_URL")
+    if env_url:
+        return env_url
+
+    path = (Path(db_path) if db_path else _DEFAULT_DB_DIR / "local.db").expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{path.resolve()}"
 
 
 def get_engine(db_path: str | None = None):
     """Return a cached SQLite engine, creating the DB file + tables on first call."""
-    global _engine
-    if _engine is not None:
-        return _engine
+    url = _resolve_db_url(db_path)
+    engine = _engines.get(url)
+    if engine is not None:
+        return engine
 
-    path = Path(db_path) if db_path else _DEFAULT_DB_DIR / "local.db"
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    url = os.environ.get("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{path}")
-    _engine = create_engine(url, echo=False)
-    SQLModel.metadata.create_all(_engine)
-    return _engine
+    engine = create_engine(url, echo=False)
+    SQLModel.metadata.create_all(engine)
+    _engines[url] = engine
+    return engine
 
 
 def get_session(db_path: str | None = None) -> Session:
@@ -82,7 +98,10 @@ class ChatSession(SQLModel, table=True):
     title: str = Field(default="New Session", max_length=255)
     status: SessionStatus = Field(default=SessionStatus.ACTIVE)
     model_name: str | None = Field(default=None, max_length=255)
-    _monotonic_turn_counter: int = Field(default=0)
+    monotonic_turn_counter: int = Field(
+        default=0,
+        sa_column=Column("_monotonic_turn_counter", Integer, default=0, nullable=False),
+    )
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
@@ -160,7 +179,7 @@ def add_turn(
         session_row = db.get(ChatSession, session_id)
         if session_row is None:
             raise ValueError(f"ChatSession with id {session_id} not found")
-        monotonic_index = session_row._monotonic_turn_counter
+        monotonic_index = session_row.monotonic_turn_counter
         row = ChatTurn(
             session_id=session_id,
             turn_index=monotonic_index,
@@ -169,7 +188,7 @@ def add_turn(
             **kwargs,
         )
         db.add(row)
-        session_row._monotonic_turn_counter = monotonic_index + 1
+        session_row.monotonic_turn_counter = monotonic_index + 1
         session_row.updated_at = _utc_now()
         db.add(session_row)
         db.commit()

@@ -14,6 +14,9 @@ from fleet_rlm.runtime.agent import RLMReActChatAgent
 from fleet_rlm.runtime.execution.streaming import (
     _build_final_payload,
     _normalize_trajectory,
+    build_cancelled_stream_event,
+    build_final_stream_event,
+    prepare_streaming_turn,
 )
 from tests.unit.fixtures_react import FakeInterpreter
 
@@ -307,6 +310,63 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
     assert "cancelled" in kinds
     assert len(agent.history.messages) == 1
     assert agent.history.messages[0]["assistant_response"].endswith("[cancelled]")
+
+
+def test_build_cancelled_stream_event_logs_local_store_failure(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+):
+    from fleet_rlm.integrations.database import local_store
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("db offline")
+
+    monkeypatch.setattr(local_store, "add_turn", _boom)
+
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
+    agent._db_session_id = 123
+    prepared = prepare_streaming_turn(agent, message="please", trace=False)
+
+    with caplog.at_level("ERROR"):
+        event = build_cancelled_stream_event(
+            agent=agent,
+            message="please",
+            assistant_chunks=["partial"],
+            ctx=prepared.ctx,
+        )
+
+    assert event.kind == "cancelled"
+    assert "Failed to persist cancelled streaming turn to local_store" in caplog.text
+
+
+def test_build_final_stream_event_logs_local_store_failure(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+):
+    from fleet_rlm.integrations.database import local_store
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("db offline")
+
+    monkeypatch.setattr(local_store, "add_turn", _boom)
+
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
+    agent._db_session_id = 123
+    prepared = prepare_streaming_turn(agent, message="hello", trace=False)
+
+    with caplog.at_level("ERROR"):
+        event = build_final_stream_event(
+            agent=agent,
+            message="hello",
+            final_prediction=dspy.Prediction(
+                assistant_response="world",
+                trajectory={"tool_name_0": "finish"},
+            ),
+            assistant_chunks=["world"],
+            ctx=prepared.ctx,
+        )
+
+    assert event.kind == "final"
+    assert event.text == "world"
+    assert "Failed to persist final streaming turn to local_store" in caplog.text
 
 
 def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):

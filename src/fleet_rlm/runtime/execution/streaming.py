@@ -29,7 +29,6 @@ from fleet_rlm.runtime.execution.streaming_context import (
 )
 from fleet_rlm.runtime.execution.streaming_events import (
     ReActStatusProvider as ReActStatusProvider,
-    ToolEventKind as ToolEventKind,
     _build_final_payload,
     _normalize_trajectory as _normalize_trajectory,
     classify_tool_event_kind as classify_tool_event_kind,
@@ -117,7 +116,13 @@ def build_cancelled_stream_event(
 
             add_turn(_db_sid, 0, message, marked_partial)
     except Exception:
-        pass
+        # Best-effort persistence should never block a cancelled stream response.
+        logger.exception(
+            "Failed to persist cancelled streaming turn to local_store "
+            "(session_id=%r, marked_partial=%r)",
+            _db_sid,
+            marked_partial,
+        )
     return StreamEvent(
         kind="cancelled",
         text=marked_partial,
@@ -185,7 +190,11 @@ def build_final_stream_event(
 
             add_turn(_db_sid, 0, message, assistant_response)
     except Exception:
-        pass
+        # Best-effort persistence should never block a completed stream response.
+        logger.exception(
+            "Failed to persist final streaming turn to local_store (session_id=%r)",
+            _db_sid,
+        )
     return StreamEvent(
         kind="final",
         flush_tokens=True,

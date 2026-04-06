@@ -260,7 +260,6 @@ async def run_optimization(
             logger.exception(
                 "Failed to mark GEPA optimization run %s as complete", db_run_id
             )
-            pass
 
     return GEPAOptimizationResponse(
         ok=True,
