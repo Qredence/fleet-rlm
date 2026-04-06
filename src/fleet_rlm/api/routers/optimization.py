@@ -205,7 +205,9 @@ async def run_optimization(
             train_ratio=request.train_ratio,
         ).id
     except Exception as exc:
-        logger.exception("Failed to create optimization run in local database", exc_info=exc)
+        logger.exception(
+            "Failed to create optimization run in local database", exc_info=exc
+        )
 
     try:
         result = await run_blocking(
@@ -228,7 +230,7 @@ async def run_optimization(
                 )
 
                 fail_optimization_run(db_run_id, error=str(exc))
-            except Exception as db_exc:
+            except Exception:
                 logger.exception(
                     "Failed to mark GEPA optimization run %s as failed in database",
                     db_run_id,
@@ -254,7 +256,7 @@ async def run_optimization(
                 validation_score=result.get("validation_score"),
                 output_path=result.get("output_path"),
             )
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "Failed to mark GEPA optimization run %s as complete", db_run_id
             )
