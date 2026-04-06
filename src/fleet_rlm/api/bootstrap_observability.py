@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -40,11 +42,24 @@ def set_optional_service_status(
 
 
 def terminate_process(proc: subprocess.Popen) -> None:
-    """Terminate a subprocess, escalating to kill() if needed, then reap it."""
+    """Terminate a subprocess tree, escalating to SIGKILL if needed, then reap it."""
+
+    uses_dedicated_process_group = False
+    target_pgid: int | None = None
+
     try:
-        if proc.poll() is not None:
-            return
-        proc.terminate()
+        if hasattr(os, "killpg"):
+            with contextlib.suppress(ProcessLookupError):
+                candidate_pgid = os.getpgid(proc.pid)
+                if candidate_pgid != os.getpgrp():
+                    target_pgid = candidate_pgid
+                    uses_dedicated_process_group = True
+
+        if uses_dedicated_process_group and target_pgid is not None:
+            os.killpg(target_pgid, signal.SIGTERM)
+        elif proc.poll() is None:
+            proc.terminate()
+
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -52,7 +67,10 @@ def terminate_process(proc: subprocess.Popen) -> None:
                 "Process (pid=%d) did not exit after terminate(); sending kill()",
                 proc.pid,
             )
-            proc.kill()
+            if uses_dedicated_process_group and target_pgid is not None:
+                os.killpg(target_pgid, signal.SIGKILL)
+            else:
+                proc.kill()
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:

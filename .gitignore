@@ -17,7 +17,7 @@ archive/
 venv/
 .test_venv/
 .venv-release-smoke/
-
+.factory/
 # Environment and secrets
 .env
 .env.*
