@@ -254,7 +254,10 @@ async def run_optimization(
                 validation_score=result.get("validation_score"),
                 output_path=result.get("output_path"),
             )
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "Failed to mark GEPA optimization run %s as complete", db_run_id
+            )
             pass
 
     return GEPAOptimizationResponse(
