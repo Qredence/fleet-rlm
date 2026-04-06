@@ -3,7 +3,7 @@ import type {
   ChatInlineCitation,
   ChatRenderPart,
   ChatSourceItem,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 import type {
   AssistantTurnDisplayItem,
   AssistantTurnTracePartItem,

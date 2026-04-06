@@ -141,7 +141,7 @@ The canonical schema lives in [`openapi.yaml`](openapi.yaml).
 From the repo root:
 
 ```bash
-uv sync --all-extras --dev
+uv sync --all-extras
 uv run fleet web
 ```
 

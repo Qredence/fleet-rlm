@@ -118,6 +118,43 @@ def test_build_document_tools_includes_expected_names():
         assert expected in names, f"Missing tool: {expected}"
 
 
+def test_fetch_web_document_marks_retriever_span(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """fetch_web_document should annotate retrieval work with a retriever span."""
+    from fleet_rlm.runtime.tools.document import build_document_tools
+
+    agent = _make_fake_agent(tmp_path)
+    tools = build_document_tools(agent)
+    fetch_fn = next(t.func for t in tools if t.name == "fetch_web_document")
+
+    trace_calls: list[tuple[str | None, str | None]] = []
+
+    class _TraceSpan:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeMlflow:
+        @staticmethod
+        def start_span(*, name=None, span_type=None):
+            trace_calls.append((name, span_type))
+            return _TraceSpan()
+
+    monkeypatch.setattr("fleet_rlm.runtime.tools.document.mlflow", _FakeMlflow())
+
+    with patch(
+        "fleet_rlm.runtime.tools.document.fetch_url_document_content",
+        return_value=("hello", {"source_type": "text"}),
+    ):
+        result = fetch_fn("https://example.com/doc.txt", alias="web")
+
+    assert result["status"] == "ok"
+    assert trace_calls == [("fetch_web_document", "RETRIEVER")]
+
+
 # ---------------------------------------------------------------------------
 # load_document — local file
 # ---------------------------------------------------------------------------

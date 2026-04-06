@@ -4,32 +4,55 @@
 
 This file is written for AI coding agents modifying the frontend app in `src/frontend/`.
 Read the root [AGENTS.md](../../AGENTS.md) first for shared repo rules.
-Consult [src/fleet_rlm/AGENTS.md](../fleet_rlm/AGENTS.md) when your frontend change touches backend routes, websocket payloads, runtime modes, or auth behavior.
+Consult [src/fleet_rlm/AGENTS.md](../fleet_rlm/AGENTS.md) when frontend work changes backend routes, websocket payloads, runtime modes, auth behavior, or OpenAPI-facing schemas.
+
+## Frontend Quickstart
+
+Before editing frontend code:
+
+- Read `src/frontend/package.json` for canonical scripts.
+- Inspect the owning route, feature, component, and lib modules before adding files.
+- Preserve the supported app surfaces: `workspace`, `volumes`, `optimization`, and `settings`.
+- Keep route wrappers thin; put feature behavior in the owning module tree.
+- Do not hand-edit generated files.
 
 Frontend source-of-truth files:
 
 - `src/frontend/package.json` for scripts and validation
-- `src/frontend/src/routes/*` for supported app surfaces and not-found behavior
+- `src/frontend/vite.config.ts` for lint/test/build configuration and import-boundary rules
+- `src/frontend/src/routes/*` for supported surfaces and not-found behavior
+- `src/frontend/src/features/layout/*` for canonical app-chrome public entrypoints
+- `src/frontend/src/features/workspace/*`, `src/frontend/src/features/volumes/*`, `src/frontend/src/features/settings/*`, and `src/frontend/src/features/optimization/*` for canonical surface ownership as each migration completes
+- `src/frontend/src/components/ui/*` for canonical shadcn/Base UI source components
+- `src/frontend/src/components/ai-elements/*` for canonical AI Elements source components
+- `src/frontend/src/components/patterns/*` for app-owned reusable composition built from registry layers
 - `src/frontend/src/lib/rlm-api/*` for REST and websocket integration
-- `src/frontend/src/styles/globals.css` for the Tailwind v4 theme baseline and global tokens
-- `src/frontend/components.json` for shadcn registry/style/base configuration
+- `src/frontend/src/styles/globals.css` for the Tailwind v4 theme baseline and tokens
+- `src/frontend/components.json` for the shadcn registry/style baseline
 - `openapi.yaml` and `src/frontend/src/lib/rlm-api/generated/openapi.ts` for API contract alignment
+
+Generated or synced artifacts to avoid hand-editing:
+
+- `src/routeTree.gen.ts`
+- `src/lib/rlm-api/generated/openapi.ts`
+- `openapi/fleet-rlm.openapi.yaml`
+- `dist/`
 
 ## Agent Priorities
 
-- Preserve the supported app surfaces: `Workbench`, `Volumes`, and `Settings`.
-- Keep the supported app surface limited to `workspace`, `volumes`, and `settings`; retired `taxonomy`, `skills`, `memory`, and `analytics` paths should continue to fall through to `/404`.
-- Do not hand-edit generated files like `src/routeTree.gen.ts` or `src/lib/rlm-api/generated/openapi.ts`.
-- Always run `pnpm run format`, `pnpm run lint:robustness`, and `pnpm run type-check` before committing or opening a PR for frontend code changes. In this repo, `pnpm run format` uses Vite+'s `vp fmt`, backed by Oxc/Oxfmt; do not substitute a broad `prettier --write src/` sweep.
+- Preserve the supported app surfaces: `Workbench`, `Volumes`, `Optimization`, and `Settings`.
+- Keep retired `taxonomy`, `skills`, `memory`, and `analytics` paths falling through to `/404`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
-- Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical canvas/workbench stream. Frontend workbench state should hydrate from `execution_completed.summary`, not Daytona-only chat-final payloads.
-- Daytona `sandbox_output` status frames should render as sandbox/debug trace cards in the transcript, while `trajectory_step` and `reasoning_step` remain the primary live trace surfaces.
-- Prefer the shadcn/Base UI baseline over introducing one-off wrapper components or parallel token layers.
+- Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical execution/workbench stream.
+- Hydrate workbench state from `execution_completed.summary`, not Daytona-only chat-final payload scraping.
+- Render Daytona `sandbox_output` status frames as sandbox/debug trace cards while keeping `trajectory_step` and `reasoning_step` as the main live trace surfaces.
+- Prefer the shadcn/Base UI baseline over one-off wrappers, parallel token layers, or custom mini-design-systems.
+- Keep the registry-owned layers recognizable and diff-friendly: `src/components/ui/*` and `src/components/ai-elements/*` stay canonical.
 
 ## Tooling and Framework
 
 - Package manager: `pnpm` with `pnpm install --frozen-lockfile`
-- Build toolchain: Vite+ (`vp`) surfaced through `pnpm run ...`
+- Build/lint/format runtime: Vite+ (`vp`) via `pnpm run ...`
 - Framework stack: React 19 + TanStack Router + TanStack Query + Zustand
 
 Canonical commands:
@@ -40,6 +63,7 @@ Canonical commands:
 - `pnpm run type-check`
 - `pnpm run lint`
 - `pnpm run lint:robustness`
+- `pnpm run format`
 - `pnpm run test:unit`
 - `pnpm run test:watch`
 - `pnpm run test:coverage`
@@ -48,80 +72,93 @@ Canonical commands:
 - `pnpm run api:check`
 - `pnpm run check`
 
-Single-test execution:
+Targeted execution:
 
-- Unit: `pnpm run test:unit src/path/to/__tests__/file.test.ts`
-- E2E: `pnpm run test:e2e tests/e2e/file.spec.ts`
+- Unit test: `pnpm run test:unit src/path/to/file.test.ts`
+- E2E test: `pnpm run test:e2e tests/e2e/file.spec.ts`
+
+## Frontend Layers
+
+Registry-aligned component layers:
+
+- `src/components/ui/*` for shadcn/Base UI primitives and thin local extensions
+- `src/components/ai-elements/*` for AI Elements registry components
+- `src/components/patterns/*` for app-owned reusable compositions built from `ui` and `ai-elements`
+- `src/features/layout/*` for canonical app-chrome entrypoints and implementation ownership
+- `src/features/workspace/*`, `src/features/volumes/*`, `src/features/settings/*`, and `src/features/optimization/*` for canonical product surface ownership
+- `src/components/` root for a very small set of global compatibility exports such as `brand-mark.tsx`
+
+Rules for those layers:
+
+- Keep `components/ui` thin, semantic, and free of feature/runtime imports
+- Keep `components/ai-elements` composable and registry-aligned; do not collapse them into feature-specific monoliths
+- Use `components/patterns` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
+- Route app-chrome consumers through `features/layout/*`, which is the canonical owner of layout implementation
+- Route surface consumers through `features/<surface>/*` as each surface is migrated
+- For the remaining surfaces, do **not** keep `screens/<surface>/` wrappers after migration; delete those directories
 
 ## Frontend Map
 
-Routing:
+Routing ownership:
 
 - `src/router.tsx` owns the router instance
 - `src/routeTree.gen.ts` is generated and should not be edited
-- file-based routes under `src/routes/` define app surfaces and catchall/not-found behavior
+- File-based routes under `src/routes/` define product surfaces and catchall/not-found behavior
+- Route files should compose feature entry modules instead of screen-owned modules once migration completes
 
-State management:
+Current surface ownership:
 
-- TanStack Query for backend-backed state
-- Zustand for ephemeral client state, with cross-app shell state in `src/stores/`
-- `src/screens/workspace/use-workspace.ts` is the public workspace state/runtime contract; the implementation-heavy stores, types, and runtime helpers live under `src/lib/workspace/`
-- `src/screens/workspace/workspace-canvas-panel.tsx` stays the shell-facing canvas surface; canvas internals live under `src/app/workspace/`
-- Volumes file-selection state lives in `src/screens/volumes/use-volumes.ts`
-- Assistant transcript/content modeling lives under `src/app/workspace/assistant-content/model/`; keep screen entry files thin and route model-building through that module tree instead of recreating screen-local model helpers.
-- `src/lib/workspace/` owns the backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping. Do not reintroduce a screen-layer `workspace-adapter.ts`.
-- The Volumes page has a local provider switcher for `modal` vs `daytona`; keep that selector page-scoped and do not route it through global runtime settings.
-- `src/stores/navigation-types.ts` owns the shared `NavItem` type used by shell navigation and route helpers
+- `src/features/layout/` owns canonical app-chrome public entrypoints, implementation, and compatibility exports
+- `src/features/workspace/`, `src/features/volumes/`, `src/features/settings/`, and `src/features/optimization/` own the canonical surface entrypoints after the migration away from `src/screens/*`
+- `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
+- `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
+- `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
+- `src/stores/` owns cross-app shell/layout and navigation state
 
-Backend integration:
+Important boundaries to preserve:
 
-- `src/lib/rlm-api/client.ts` for REST calls
-- `src/lib/rlm-api/ws-client.ts` and related websocket helpers for streaming
-- `src/lib/rlm-api/generated/openapi.ts` for generated API types
+- Keep `src/screens/*` thin while they still exist; move reusable feature logic into `src/features/*`, `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
+- Keep external layout/app-chrome imports pointed at `src/features/layout/*`
+- After migrating workspace and volumes, layout implementation should consume them through `src/features/workspace/*` and `src/features/volumes/*`, not `src/screens/*`
+- Assistant transcript/content modeling belongs under `src/app/workspace/assistant-content/model/`
+- Do not recreate a screen-layer `workspace-adapter.ts`; workspace adapter logic belongs in `src/lib/workspace/`
+- The Volumes provider switcher is page-scoped and must not become a global runtime setting
+- Settings should consume the shared optimization form from `features/optimization/optimization-form`
 
-Feature layout:
+Import-boundary rules enforced in `src/frontend/vite.config.ts`:
 
-- `src/screens/workspace/` is the dominant product slice for chat, runtime, inspector, workbench, and workspace artifacts
-- `src/screens/shell/` owns the route shell and shell chrome; shell-private helpers now live under `src/app/shell/` and route-only auth/error pages live under `src/routes/`
-- `src/screens/volumes/` owns the volume browser, file preview, and file-selection helpers
-- `src/screens/settings/` owns runtime and app settings
-- Thin route wrappers under `src/routes/` should render screen modules rather than page-layer wrappers
-- Shell code should consume workspace/volumes through top-level screen contracts like `workspace-shell-contract.ts`, `workspace-canvas-panel.tsx`, `volumes-shell-contract.ts`, and `volumes-canvas-panel.tsx` instead of reaching into deep workspace/volumes subdirectories
-- `src/screens/workspace/`, `src/screens/volumes/`, `src/screens/settings/`, and `src/screens/shell/` should keep only the top-level screen entry files plus `__tests__/`; move shell-private helpers to `src/app/shell/`, workspace UI internals to `src/app/workspace/`, and workspace adapter logic to `src/lib/workspace/`
-- Keep `__tests__/` colocated with the module owner. Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly instead of reaching back through `src/screens/workspace/use-workspace` compatibility barrels.
-
-Component layout:
-
-- `src/components/ui/` for shared shadcn/Base UI primitives and thin local extensions
-- Keep `src/components/ui/` strict: if a compound is specific to workspace, shell, transcript, or composer behavior, it belongs under `src/app/...`, not here
-- `src/components/ai-elements/` for shared AI chat primitives such as conversation, message, source, task, tool, prompt-input, reasoning, inline-citation, and suggestion
-- `src/components/` for a very small set of handwritten global components such as `brand-mark.tsx`, `error-boundary.tsx`, and `page-skeleton.tsx`
-- `src/app/workspace/` for behavior-bearing workspace UI internals (transcript/composer/inspector/workbench and related helpers)
-- Keep transcript/chat primitives in `src/components/ai-elements/`; workspace-specific transcript orchestration belongs under `src/app/workspace/transcript/`, while queue helpers stay under `src/app/workspace/queue/`
-- Shell-specific composed surfaces such as the command palette should live under `src/app/shell/` while consuming `src/components/ui/` primitives instead of re-implementing them
-- `src/lib/workspace/` for workspace-only adapter and frame-normalization helpers
-- Frontend filenames should use `kebab-case` by default. Keep React component symbols in `PascalCase` and hooks in `useThing` form; only generated files and TanStack route magic files (for example `routeTree.gen.ts`, `__root.tsx`, and `$.tsx`) are exceptions.
-- Prefer shadcn field composition (`FieldGroup`, `Field`, `FieldContent`, `FieldLabel`, `FieldDescription`, `FieldTitle`, `Switch`, `ToggleGroup`) over bespoke settings row wrappers when building forms
-- Prefer behavior-bearing screen subcomponents over micro-wrappers; tiny layout-only wrappers should usually be inlined back into the screen component
+- `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/patterns/*` must not import from `src/screens/*`
+- Workspace runtime/state modules in `src/lib/workspace/*` must not depend on workspace UI modules
+- `src/features/layout/*` must consume workspace and volumes through their feature entrypoints or explicitly allowed public contracts
+- Keep `@/lib/utils` as the canonical `cn()` import path
 
 ## UI and Runtime Rules
 
-Design/token rules:
+Design and styling rules:
 
 - Theme primitives live in `src/styles/globals.css`
-- Keep the Tailwind v4 baseline canonical: `tailwindcss`, `tw-animate-css`, `@theme inline`, and only small app-specific adjustments
-- Use semantic tokens and shared shadcn variants instead of arbitrary color values or local mini-design-systems
-- Keep typography, icon sizing, spacing, and layering aligned with the shared shadcn/Base UI baseline
-- The shell root should preserve an isolated stacking context so portaled overlays layer correctly
+- Keep the Tailwind v4 baseline canonical: `tailwindcss`, `tw-animate-css`, and `@theme inline`
+- Use semantic tokens and shared variants instead of arbitrary colors or local token layers
+- Keep typography, spacing, and layering aligned with the shared shadcn/Base UI baseline
+- Preserve the shell/layout root stacking context so portaled overlays layer correctly
+- Shared visual recipes should become `components/patterns/*`, not duplicated feature-local wrappers
 
 React/runtime rules:
 
-- React 19 refs should use direct ref passing instead of introducing `forwardRef` by default
+- Prefer React 19 direct ref passing over introducing `forwardRef` by default
 - `modal_chat` is the default runtime path and sends `execution_mode`
-- `daytona_pilot` is the experimental workbench path and sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
+- `daytona_pilot` sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 - Runtime labels shown to users are `"Modal chat"` and `"Daytona pilot"`
-- Shared runtime status queries belong in `src/hooks/use-runtime-status.ts`; settings should compose that hook rather than own the query contract
-- The Volumes surface represents mounted durable storage, not the transient live workspace. Keep provider copy and mock data aligned with the canonical durable roots: `memory`, `artifacts`, `buffers`, and `meta`.
+- Shared runtime status queries belong in `src/hooks/use-runtime-status.ts`
+- The Volumes surface represents mounted durable storage, not the transient live workspace
+
+Naming and file-layout rules:
+
+- Prefer `kebab-case` for new handwritten feature files, while preserving existing local conventions and required framework exceptions such as `App.tsx`, `__root.tsx`, and `$.tsx`
+- Keep React component symbols in `PascalCase` and hooks in `useThing` form
+- Keep tests colocated with the owning module under `__tests__/` when practical
+- Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly, not via screen compatibility barrels
+- Prefer `layout` / `workspace` / `volumes` / `settings` / `optimization` feature naming over legacy `screen` ownership when creating new architecture surfaces
 
 ## Environment and Contract Sync
 
@@ -132,8 +169,8 @@ Expected frontend environment:
 
 Optional frontend environment:
 
-- `VITE_FLEET_WS_URL` (optional explicit override; when unset, websocket URLs are derived from `VITE_FLEET_API_URL`)
-- `VITE_AGENTATION_ENDPOINT` (optional Agentation MCP HTTP URL for dev toolbar sync; defaults to `http://127.0.0.1:4747` in development)
+- `VITE_FLEET_WS_URL`
+- `VITE_AGENTATION_ENDPOINT`
 - `VITE_ENTRA_CLIENT_ID`
 - `VITE_ENTRA_SCOPES`
 - `VITE_PUBLIC_POSTHOG_API_KEY`
@@ -143,27 +180,20 @@ Backend startup for frontend work:
 
 - `uv run fleet-rlm serve-api --port 8000`
 
-OpenAPI sync:
+OpenAPI sync workflow:
 
-- If backend route/schema contract metadata changed, regenerate the root spec first with `uv run python scripts/openapi_tools.py generate`
+- If backend route/schema metadata changed, regenerate the root spec first with `uv run python scripts/openapi_tools.py generate`
 - `pnpm run api:sync` copies the root spec and regenerates frontend types
-- `pnpm run api:check` reruns sync and fails only if that sync changes the frontend OpenAPI snapshot or generated types
-- If `api:check` produces formatting-only diffs in `openapi/fleet-rlm.openapi.yaml` or `src/lib/rlm-api/generated/openapi.ts`, keep those sync artifacts in the same change rather than hand-editing generated output
-
-Lint and boundary enforcement:
-
-- Frontend lint rules are configured in `src/frontend/vite.config.ts` via Vite+ (`vp`) overrides, not a standalone ESLint config
-- `src/components/ui/*` and `src/components/ai-elements/*` must not import from `src/screens/*`
-- `src/screens/shell/*` must import workspace and volumes behavior through top-level screen contracts only
-- Keep `@/lib/utils` as the canonical `cn()` import path; do not recreate `@/lib/utils/cn`
+- `pnpm run api:check` reruns sync and fails if the synced snapshot or generated types drift
+- Keep sync artifacts in the same change instead of hand-editing generated output
 
 ## Validation by Change Type
 
 Fast frontend confidence:
 
-- `pnpm run format` (Vite+ `vp fmt`, backed by Oxc/Oxfmt)
 - `pnpm install --frozen-lockfile`
 - `pnpm run api:check`
+- `pnpm run format`
 - `pnpm run type-check`
 - `pnpm run lint:robustness`
 - `pnpm run test:unit`
@@ -173,11 +203,11 @@ Full frontend validation:
 
 - `pnpm run check`
 
-Use the backend AGENTS file or the root AGENTS file when you need wider validation for shared API or websocket contract changes.
+Use the backend or root `AGENTS.md` lane when frontend work changes shared API or websocket contracts.
 
 ## Agent Notes
 
-- `components.json` defines the `@/*` alias, shadcn registry configuration, and the Base UI-backed style baseline (`base=base`).
-- The dev server proxies `/api/v1` and `/health` to `localhost:8000`.
-- PostHog initializes in `main.tsx` when `VITE_PUBLIC_POSTHOG_API_KEY` is set.
-- Keep runtime labels, not-found behavior, and endpoint expectations aligned with the backend contract.
+- `components.json` defines the `@/*` alias and the shadcn/Base UI style baseline.
+- The dev server proxies `/api/v1`, `/health`, and `/ready` to `localhost:8000`.
+- PostHog initializes in `src/main.tsx` when `VITE_PUBLIC_POSTHOG_API_KEY` is set.
+- Keep runtime labels, route behavior, and endpoint expectations aligned with the backend contract.

@@ -2,7 +2,12 @@ import type { NavItem } from "@/stores/navigation-types";
 
 // ── Nav section support ─────────────────────────────────────────────
 
-export const SUPPORTED_SECTIONS = new Set<NavItem>(["workspace", "settings", "volumes"]);
+export const SUPPORTED_SECTIONS = new Set<NavItem>([
+  "workspace",
+  "settings",
+  "volumes",
+  "optimization",
+]);
 
 export const UNSUPPORTED_SECTION_REASON =
   "This surface is not part of the current Workbench product contract.";

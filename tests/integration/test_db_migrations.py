@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import psycopg
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
@@ -16,10 +17,21 @@ pytestmark = [
 
 @pytest.mark.asyncio
 async def test_migrations_apply_and_core_tables_exist(require_database_url: str):
+    """Verify that all Alembic migrations apply cleanly and expected tables exist.
+
+    This test requires a *dedicated* test database: it drops and recreates the
+    ``public`` schema before running migrations so that Alembic starts from a
+    completely empty state.  Do not run it against a shared or production database.
+    """
     repo_root = Path(__file__).resolve().parents[2]
 
     cfg = Config(str(repo_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(repo_root / "migrations"))
+    with psycopg.connect(require_database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("DROP SCHEMA public CASCADE")
+            cur.execute("CREATE SCHEMA public")
+        conn.commit()
     command.upgrade(cfg, "head")
 
     db = DatabaseManager(require_database_url)

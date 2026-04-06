@@ -26,7 +26,7 @@ venv/
 @plan/
 # Jupyter
 .ipynb_checkpoints/
-
+.air/
 # OS/editor
 .DS_Store
 .vscode/
@@ -107,6 +107,7 @@ docs/plans/
 
 docs/artifacts/
 # Local runtime artifacts
+.data/
 fleet_rlm.db
 server.log
 src/frontend/test-results/
@@ -119,3 +120,8 @@ src/frontend/test-results/.last-run.json
 .posthog-events.json
 src/frontend/posthog-setup-report.md
 PLANS.md
+.output.txt
+
+.databricks
+databricks.yml
+typings/

@@ -20,10 +20,10 @@ import {
   ChatMessageLoadingState,
   WorkspaceToolSessionMessage,
 } from "@/app/workspace/transcript/trace-part-renderers";
-import type { ChatMessage, InspectorTab } from "@/screens/workspace/use-workspace";
+import type { ChatMessage, InspectorTab } from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { useIsCanvasOpen } from "@/stores/navigation-store";
-import { useWorkspaceUiStore } from "@/screens/workspace/use-workspace";
+import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 
 interface WorkspaceMessageListProps {
   messages: ChatMessage[];

@@ -52,7 +52,7 @@ export function WorkspaceChatEmptyState({
     <ConversationEmptyState
       icon={null}
       className={cn(
-        "h-auto w-full items-center justify-center gap-0 px-0 pb-2 text-center",
+        "h-full w-full items-center justify-center gap-0 px-0 pb-2 text-center",
         isMobile ? "pt-6" : "pt-0",
       )}
     >
@@ -84,7 +84,7 @@ export function WorkspaceChatEmptyState({
         <Suggestions wrap className="w-full" aria-live="polite" aria-label="Suggestion actions">
           {suggestions.map((suggestion, index) => (
             <AnimatedSuggestion
-              key={suggestion.label}
+              key={`${suggestion.label}-${index}`}
               suggestion={suggestion}
               index={index}
               prefersReduced={!!prefersReduced}

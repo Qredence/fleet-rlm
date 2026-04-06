@@ -7,7 +7,7 @@ import { TrajectoryTimeline } from "@/app/workspace/assistant-content/trajectory
 import { ExecutionHighlightsGroup } from "@/app/workspace/assistant-content/execution-highlights-group";
 import { EvidencePreview } from "@/app/workspace/assistant-content/assistant-preview-sections";
 import type { AssistantContentModel } from "@/app/workspace/assistant-content/model";
-import type { InspectorTab } from "@/screens/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 
 function visibleSections(model: AssistantContentModel) {
@@ -100,7 +100,7 @@ export function AssistantTurnContent({
                 model.summary.show ? (
                   <Separator className="bg-border-subtle/70" />
                 ) : null}
-                <div className="space-y-4">
+                <div className="flex flex-col gap-4">
                   {model.execution.hasChatHighlights ? (
                     <ExecutionHighlightsGroup
                       execution={model.execution}

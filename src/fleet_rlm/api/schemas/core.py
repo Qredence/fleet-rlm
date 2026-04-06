@@ -465,6 +465,81 @@ class VolumeFileContentResponse(BaseModel):
     )
 
 
+class GEPAOptimizationRequest(BaseModel):
+    """Request body for triggering a GEPA prompt optimization run."""
+
+    dataset_path: str = Field(
+        description="Path to the exported MLflow trace dataset (JSON)."
+    )
+    program_spec: str = Field(
+        description="DSPy program specification string to optimize in module:attr form.",
+    )
+    output_path: str | None = Field(
+        default=None,
+        description="Optional filesystem path to save the optimized program.",
+    )
+    auto: Literal["light", "medium", "heavy"] = Field(
+        default="light",
+        description="GEPA optimization intensity level.",
+    )
+    train_ratio: float = Field(
+        default=0.8,
+        description="Fraction of examples to use for training (remainder used for validation).",
+    )
+
+
+class GEPAOptimizationResponse(BaseModel):
+    """Result payload after a GEPA optimization run completes."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the optimization run completed successfully.",
+    )
+    optimizer: str = Field(
+        default="GEPA",
+        description="Optimizer backend that was used.",
+    )
+    program_spec: str = Field(
+        description="DSPy program specification that was optimized.",
+    )
+    train_examples: int = Field(
+        description="Number of training examples used.",
+    )
+    validation_examples: int = Field(
+        description="Number of validation examples used.",
+    )
+    validation_score: float | None = Field(
+        default=None,
+        description="Validation score from the optimized program, when available.",
+    )
+    output_path: str | None = Field(
+        default=None,
+        description="Filesystem path where the optimized program was saved.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Error message when the optimization run failed.",
+    )
+
+
+class GEPAStatusResponse(BaseModel):
+    """Status payload for GEPA optimization availability."""
+
+    available: bool = Field(
+        description="Whether GEPA optimization is available in this environment.",
+    )
+    mlflow_enabled: bool = Field(
+        description="Whether MLflow is enabled and reachable.",
+    )
+    gepa_installed: bool = Field(
+        description="Whether the GEPA teleprompt module is importable.",
+    )
+    guidance: list[str] = Field(
+        default_factory=list,
+        description="Human-readable guidance when GEPA is not fully available.",
+    )
+
+
 class TraceFeedbackRequest(BaseModel):
     """Feedback payload for annotating an MLflow trace."""
 

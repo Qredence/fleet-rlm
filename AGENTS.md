@@ -3,67 +3,90 @@
 ## Scope and Reading Order
 
 This file is written for AI coding agents working in `fleet-rlm-dspy`.
-Use it for repo-wide operating rules, cross-stack contracts, and top-level validation.
+Use it for repo-wide operating rules, shared contracts, and top-level validation.
 
-Start here, then load the more specific guide for the area you are modifying:
+Read in this order before editing code:
 
-- Backend: [src/fleet_rlm/AGENTS.md](src/fleet_rlm/AGENTS.md)
-- Frontend: [src/frontend/AGENTS.md](src/frontend/AGENTS.md)
+1. This root file for repo-wide workflow and contract rules
+2. [src/fleet_rlm/AGENTS.md](src/fleet_rlm/AGENTS.md) for backend/runtime work
+3. [src/frontend/AGENTS.md](src/frontend/AGENTS.md) for frontend/UI work
+
+When instructions conflict, the closest `AGENTS.md` to the files you are editing wins.
+
+## Agent Quickstart
+
+Before making changes:
+
+- Inspect the source-of-truth files for the area you are touching.
+- Match existing structure and ownership boundaries before introducing new files.
+- Assume the working tree may already contain user changes; do not revert or overwrite unrelated edits.
+- Prefer the smallest change that preserves the shared backend/frontend contract.
+- Run the matching validation lane after edits; do not stop at static inspection.
 
 Source-of-truth files for shared workflow:
 
 - `Makefile` for canonical validation and release targets
 - `pyproject.toml` for Python tooling, dependencies, and published CLI entrypoints
 - `src/frontend/package.json` for frontend scripts and validation
-- `openapi.yaml` for the HTTP contract shared by backend and frontend
+- `openapi.yaml` for the shared HTTP contract
+- `scripts/check_agents_md_freshness.py` for AGENTS consistency checks
 
-## Agent Priorities
+Generated or synced artifacts to treat carefully:
 
-- Read the root file before making shared workflow or cross-stack changes.
-- Defer to subsystem AGENTS files once work becomes backend- or frontend-specific.
-- Treat `Makefile`, `pyproject.toml`, `src/frontend/package.json`, and `openapi.yaml` as source of truth when docs drift from code.
-- For any code change, always run the relevant format, lint, and typecheck commands before committing or opening a PR. Tests and wider gates are additive, not substitutes for that baseline.
-- Prefer the smallest validation lane that matches the change, but escalate to `make quality-gate` for shared-contract work.
-- Update AGENTS/docs when you discover a stable workflow or when your change alters repo conventions.
+- `openapi.yaml` is generated from backend route/schema metadata via `uv run python scripts/openapi_tools.py generate`
+- `src/frontend/src/lib/rlm-api/generated/openapi.ts` is generated; do not hand-edit it
+- `src/frontend/openapi/fleet-rlm.openapi.yaml` is a synced frontend snapshot; keep it aligned through `pnpm run api:sync` / `pnpm run api:check`
+- Frontend dist outputs and bundled UI dist outputs are generated build artifacts, not handwritten source; fresh source checkouts may not contain them until a build or packaging step runs
 
 ## Tooling Defaults
 
 - Python and package management: `uv`
-- Frontend package management in this repo: `pnpm`
-- Frontend build runtime: Vite+ (`vp`) surfaced through `pnpm run ...`
+- Frontend package management: `pnpm`
+- Frontend build/lint/format runtime: Vite+ (`vp`) via `pnpm run ...`
 
-This repo explicitly overrides the global `bun` default for frontend work.
-When operating inside `src/frontend`, use `pnpm install --frozen-lockfile` and `pnpm run ...`.
+This repo explicitly does not use the global `bun` default for frontend work.
+Inside `src/frontend`, use `pnpm install --frozen-lockfile` and `pnpm run ...`.
 
-## Repo Map
+## Repo Map and Ownership
 
-- `src/fleet_rlm/`: backend package, CLI, FastAPI server, runtime logic, providers
-- `src/frontend/`: React app, route tree, websocket client, workspace UI
+Top-level areas:
+
+- `src/fleet_rlm/`: backend package, CLI, runtime logic, integrations, packaged UI assets
+- `src/frontend/`: React app, routes, shell, workspace UI, websocket/API client
 - `tests/unit/`, `tests/ui/`, `tests/integration/`, `tests/e2e/`: automated test suites
-- `scripts/`: release, docs, and repository validation utilities
+- `scripts/`: release, metadata, OpenAPI, and docs/AGENTS validation utilities
 - `migrations/`: Alembic migrations
-- `docs/`: architecture, reference docs, runbooks, how-to guides, and durable planning/architecture review documents
-- `.claude/`: local agent, hook, MCP, and skill overlays used in this checkout
-- `.mcp.json`: workspace MCP configuration
+- `docs/`: architecture notes, runbooks, and reference material
+- `plans/`: durable repo planning and architecture notes
+- `.claude/`: local overlays for this checkout only
+
+Ownership expectations:
+
+- Keep backend transport/API concerns in `src/fleet_rlm/api/`
+- Keep backend runtime/business logic in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/`
+- Keep packaged scaffold assets in `src/fleet_rlm/scaffold/` curated directly; do not auto-sync them from `.claude/`
+- Keep frontend route ownership in `src/frontend/src/routes/`
+- Keep frontend screen entrypoints thin and push feature internals into `src/frontend/src/app/` and `src/frontend/src/lib/`
 
 ## Shared Product Contract
 
-Supported app surfaces:
+Supported product surfaces:
 
 - `Workbench`
 - `Volumes`
+- `Optimization`
 - `Settings`
 
-Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally unsupported in the live app surface and should fall through to `/404`. Do not reintroduce them as first-class product surfaces without updating the backend/frontend contract and docs.
+Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally unsupported and should continue to fall through to `/404`.
 
 Shared runtime contract:
 
 - `runtime_mode=modal_chat`: default product path
-- `runtime_mode=daytona_pilot`: Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
+- `runtime_mode=daytona_pilot`: Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime
 - `execution_mode`: Modal-only request option
 - Daytona-only request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
-- Durable mounted-volume storage is distinct from the live sandbox workspace. The canonical durable roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`.
-- Session manifests stored on durable volumes live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`.
+- Durable mounted-volume roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`
+- Session manifests on durable storage live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`
 
 Canonical shared endpoints:
 
@@ -73,6 +96,8 @@ Canonical shared endpoints:
 - `GET /api/v1/sessions/state`
 - `/api/v1/runtime/*`
 - `POST /api/v1/traces/feedback`
+- `GET /api/v1/optimization/status`
+- `POST /api/v1/optimization/run`
 - `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 
@@ -80,7 +105,7 @@ Cross-stack source-of-truth boundaries:
 
 - Backend route mounting, auth/runtime behavior, and UI asset resolution live under `src/fleet_rlm/api/*` and `src/fleet_rlm/api/main.py`
 - Frontend route/runtime UX and redirect behavior live under `src/frontend/src/routes/*`
-- Live chat and streaming event shaping are a shared contract across:
+- Live chat and streaming event shaping are shared across:
   - `src/fleet_rlm/api/routers/ws/*`
   - `src/fleet_rlm/runtime/execution/streaming_context.py`
   - `src/frontend/src/lib/rlm-api/*`
@@ -89,21 +114,29 @@ Cross-stack source-of-truth boundaries:
 
 ## Agent Operating Rules
 
-- Keep Modal and Daytona responsibilities distinct, but keep them on the same conversational runtime architecture. `daytona_pilot` should stay on the shared ReAct + `dspy.RLM` backbone, with Daytona acting as the interpreter/sandbox backend.
-- For Daytona, keep the public heavy-work surface limited to named `dspy.RLM` capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona surface; `llm_query*` stay internal sandbox callbacks.
-- Do not reintroduce Daytona-specific chat/runtime orchestration when the shared `RLMReActChatAgent` path can express the behavior. Daytona-specific logic belongs in the interpreter/provider layer.
-- Treat the Volumes surface as a browser for mounted durable storage only. Live workspace files remain transient execution state and should not be documented as automatically synchronized into the durable volume roots.
-- Treat `openapi.yaml` as the canonical API contract. If you change backend request/response shapes, route metadata, or OpenAPI-facing schema descriptions, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update generated frontend API artifacts, and verify drift with `pnpm run api:check`.
-- `fleet web` is the main local app entrypoint. It delegates into `fleet-rlm serve-api`.
-- Source checkouts prefer `src/frontend/dist` for UI serving. Packaged installs fall back to `src/fleet_rlm/ui/dist`.
-- Keep docs in sync when tooling, routes, runtime contracts, or agent workflow change. If you learn a stable repo convention, record it here or in the subsystem AGENTS file instead of leaving it only in chat.
-- Prefer `plans/` for durable repo-level planning and architecture notes.
+- Search for existing ownership boundaries before adding new modules.
+- Prefer extending existing service/helper modules over introducing parallel abstractions.
+- Keep Modal and Daytona on the same conversational/runtime architecture; Daytona-specific logic belongs in the provider/interpreter layer.
+- Treat the Volumes surface as a browser for mounted durable storage only; the live workspace is transient execution state.
+- Do not hand-edit generated files or build output unless the task is specifically about generated artifacts.
+- If backend request/response shapes or OpenAPI-facing metadata change, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update frontend API artifacts, and verify drift with `pnpm run api:check`.
+- `fleet web` is the main local app entrypoint and delegates into `fleet-rlm serve-api`.
+- Source checkouts prefer a locally built frontend dist output for UI serving; packaged installs fall back to the bundled backend UI dist output.
+- Record durable workflow conventions in the appropriate `AGENTS.md` file when you confirm them from code.
+
+Common mistakes to avoid:
+
+- Reintroducing retired routes as first-class surfaces
+- Hand-editing generated OpenAPI or route tree files
+- Using `bun` or ad-hoc frontend tooling instead of `pnpm` + Vite+
+- Moving shared contract logic into screen-only or transport-only layers
+- Treating `/ready` or Volumes semantics differently from the implemented runtime contract
 
 ## Canonical Commands
 
 Repository setup and shared workflows:
 
-- `uv sync --all-extras --dev`
+- `uv sync --all-extras`
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
 - `uv run fleet-rlm serve-mcp --transport stdio`
@@ -115,7 +148,7 @@ Repository setup and shared workflows:
 - `make release-artifacts`
 - `make release-check`
 
-Frontend-only agent loop:
+Frontend-only loop:
 
 - `cd src/frontend && pnpm install --frozen-lockfile`
 - `pnpm run dev`
@@ -124,21 +157,18 @@ Frontend-only agent loop:
 
 Useful maintenance commands:
 
-- `make clean`
 - `make metadata-check`
-- `uv run python scripts/openapi_tools.py generate`
-- `uv run python scripts/openapi_tools.py validate`
+- `uv run python scripts/check_docs_quality.py`
 - `uv run python scripts/check_agents_md_freshness.py`
 
 ## Validation by Change Type
 
-Choose the smallest lane that gives confidence for the files you touched.
-Use subsystem-specific AGENTS files for narrower backend/frontend test lists and command recommendations.
+Choose the smallest lane that matches the files you changed, then escalate if the change crosses contracts.
 
-Mandatory baseline for code changes before commit or PR:
+Mandatory baseline before commit or PR:
 
 - Backend or shared Python edits: `make format`, `make lint`, `make typecheck`
-- Frontend edits: `cd src/frontend && pnpm run format` (Vite+ `vp fmt`, backed by Oxc/Oxfmt), `pnpm run lint:robustness`, `pnpm run type-check`
+- Frontend edits: `cd src/frontend && pnpm run format`, `pnpm run lint:robustness`, `pnpm run type-check`
 
 Docs-only changes:
 
@@ -166,9 +196,9 @@ Release-oriented confidence:
 
 ## Maintenance Checklist
 
-When updating this repository, make sure the following stay aligned:
+When updating this repository, keep these aligned:
 
-- `AGENTS.md`, subsystem AGENTS files, and `docs/` guidance
+- `AGENTS.md`, subsystem AGENTS files, and relevant durable docs in `docs/`
 - `Makefile`, `pyproject.toml`, and `src/frontend/package.json`
-- `openapi.yaml` and generated frontend API types
-- Runtime-mode docs and the actual websocket/router implementation
+- `openapi.yaml` and generated frontend API artifacts
+- Supported route surfaces and runtime-mode behavior across backend and frontend

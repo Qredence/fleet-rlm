@@ -1,4 +1,4 @@
-import type { ExecutionStep } from "@/screens/workspace/use-workspace";
+import type { ExecutionStep } from "@/features/workspace/use-workspace";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

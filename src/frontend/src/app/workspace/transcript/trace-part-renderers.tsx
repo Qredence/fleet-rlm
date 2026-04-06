@@ -89,7 +89,7 @@ import type {
   ChatRenderPart,
   ChatRenderToolState,
   RuntimeContext,
-} from "@/screens/workspace/use-workspace";
+} from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/app/workspace/assistant-content/model";
@@ -614,9 +614,9 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
           <ConfirmationTitle>{part.question}</ConfirmationTitle>
           <ConfirmationRequest>
             <ConfirmationActions>
-              {part.actions?.map((action) => (
+              {part.actions?.map((action, index) => (
                 <ConfirmationAction
-                  key={action.label}
+                  key={`${partKey}-action-${index}`}
                   className={cn(
                     action.variant === "primary" &&
                       "border-primary bg-primary text-primary-foreground hover:bg-primary/90",
@@ -628,7 +628,7 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
             </ConfirmationActions>
           </ConfirmationRequest>
           <ConfirmationAccepted>
-            <div className="mt-2 text-xs text-emerald-600">Approved</div>
+            <div className="mt-2 text-xs text-success">Approved</div>
           </ConfirmationAccepted>
           <ConfirmationRejected>
             <div className="mt-2 text-xs text-destructive">Rejected</div>

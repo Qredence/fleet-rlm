@@ -1,11 +1,13 @@
 """Storage, editing, and memory-oriented sandbox tool builders.
 
-Buffer tools have been extracted to :mod:`.buffer_tools` and process/workspace
-tools to :mod:`.process_tools`.  This module keeps volume memory operations,
-file editing, and the aggregating ``build_storage_tools`` entry-point.
+Buffer tools and process/workspace tools now live in :mod:`.sandbox_common`.
+This module keeps volume memory operations, file editing, and the aggregating
+``build_storage_tools`` entry-point.
 """
 
 from __future__ import annotations
+
+from pathlib import PurePosixPath
 
 from typing import TYPE_CHECKING, Any
 
@@ -26,11 +28,62 @@ from .sandbox_common import (
 )
 
 # Backwards-compat re-exports so external code that imported from here still works.
-from .buffer_tools import build_buffer_tools as build_buffer_tools
-from .process_tools import build_process_tools as build_process_tools
+from .sandbox_common import build_buffer_tools as build_buffer_tools
+from .sandbox_common import build_process_tools as build_process_tools
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
+
+
+def _looks_like_python_code(path: str, content: str) -> bool:
+    candidate_path = PurePosixPath(str(path or "").strip())
+    if candidate_path.suffix == ".py":
+        return True
+
+    stripped = str(content or "").lstrip()
+    return stripped.startswith(
+        (
+            "import ",
+            "from ",
+            "def ",
+            "class ",
+            "async def ",
+            "@",
+        )
+    )
+
+
+def _python_syntax_error(message: str) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error": f"Python syntax validation failed: {message}",
+    }
+
+
+async def _validate_python_content(
+    ctx: _SandboxToolContext,
+    *,
+    path: str,
+    content: str,
+) -> dict[str, Any] | None:
+    if not _looks_like_python_code(path, content):
+        return None
+
+    validation_code = """
+try:
+    compile(content, path, \"exec\")
+    SUBMIT(status=\"ok\")
+except SyntaxError as exc:
+    SUBMIT(status=\"error\", error=f\"{exc.msg} (line {exc.lineno})\")
+"""
+    result = await _aexecute_submit_ctx(
+        ctx,
+        validation_code,
+        variables={"path": path, "content": content},
+    )
+    if result.get("status") == "ok":
+        return None
+    return _python_syntax_error(str(result.get("error", "invalid syntax")))
 
 
 def build_storage_tools(agent: RLMReActChatAgent) -> list[Any]:
@@ -139,6 +192,14 @@ except Exception as e:
         if error is not None:
             return error
         assert resolved_path is not None
+
+        validation_error = await _validate_python_content(
+            ctx,
+            path=resolved_path,
+            content=content,
+        )
+        if validation_error is not None:
+            return validation_error
 
         daytona_session = await _aget_daytona_session(ctx)
         if daytona_session is not None:

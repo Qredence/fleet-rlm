@@ -315,6 +315,30 @@ class ExecutionStepBuilder:
                 self._repl_parent_by_hash[code_hash] = step.id
             return step
 
+        if phase == "progress":
+            parent_id = self._repl_parent_by_hash.get(code_hash, self.root_id)
+            event_kind = str(payload.get("event_kind", "")).strip() or "progress"
+            path = str(payload.get("path", "")).strip()
+            bytes_written = payload.get("bytes_written")
+            bytes_total = payload.get("bytes_total")
+            label = event_kind
+            if path:
+                label = f"{event_kind}: {path}"
+            return self._build_step(
+                step_type="repl",
+                label=label,
+                input_payload={"event_kind": event_kind, "code_hash": code_hash},
+                output_payload={
+                    "path": path or None,
+                    "bytes_written": bytes_written,
+                    "bytes_total": bytes_total,
+                    "payload": payload,
+                },
+                timestamp=timestamp,
+                parent_id=parent_id,
+                raw_payload=payload,
+            )
+
         if phase == "complete":
             parent_id = self._repl_parent_by_hash.pop(code_hash, None) or self.root_id
             return self._build_step(

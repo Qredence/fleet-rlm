@@ -28,6 +28,9 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
+from fleet_rlm.runtime.execution.interpreter_protocol import (
+    StatefulWorkspaceInterpreterProtocol,
+)
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
@@ -46,10 +49,13 @@ from .runtime import (
     DaytonaSandboxSession,
 )
 from .runtime_helpers import _run_async_compat
-from .state import dedupe_paths, normalized_context_sources
+from .types import dedupe_paths, normalized_context_sources
 
 
-class DaytonaInterpreter(LLMQueryMixin):
+class DaytonaInterpreter(
+    LLMQueryMixin,
+    StatefulWorkspaceInterpreterProtocol,
+):
     """Stateful Daytona interpreter that plugs into canonical ``dspy.RLM`` flows."""
 
     def __init__(
@@ -125,6 +131,19 @@ class DaytonaInterpreter(LLMQueryMixin):
         self._runtime_failure_category: str | None = None
         self._runtime_failure_phase: str | None = None
         self._runtime_fallback_used = False
+
+    @property
+    def execution_event_callback(self) -> Callable[[dict[str, Any]], None] | None:
+        return getattr(self, "_execution_event_callback", None)
+
+    @execution_event_callback.setter
+    def execution_event_callback(
+        self, value: Callable[[dict[str, Any]], None] | None
+    ) -> None:
+        self._execution_event_callback = value
+        session = getattr(self, "_session", None)
+        if session is not None:
+            setattr(session, "execution_event_callback", value)
 
     def __enter__(self) -> DaytonaInterpreter:
         return _sync_enter_impl(self)
@@ -472,6 +491,10 @@ class DaytonaInterpreter(LLMQueryMixin):
                     self._session = await self._areconcile_workspace_session(
                         self._session
                     )
+                    if self._session is not None:
+                        self._session.execution_event_callback = (
+                            self.execution_event_callback
+                        )
                 except Exception as exc:
                     self._mark_runtime_degradation_from_exception(exc)
                     should_report_recreated = True
@@ -502,6 +525,10 @@ class DaytonaInterpreter(LLMQueryMixin):
                     context_sources=self._persisted_context_sources,
                     context_id=self._persisted_context_id,
                 )
+                if self._session is not None:
+                    self._session.execution_event_callback = (
+                        self.execution_event_callback
+                    )
                 if (
                     persisted_source_key is not None
                     and persisted_source_key != source_key
@@ -509,6 +536,10 @@ class DaytonaInterpreter(LLMQueryMixin):
                     self._session = await self._areconcile_workspace_session(
                         self._session
                     )
+                    if self._session is not None:
+                        self._session.execution_event_callback = (
+                            self.execution_event_callback
+                        )
                     self._last_workspace_reconfigured = True
                 else:
                     self._last_workspace_reconfigured = False
@@ -529,6 +560,8 @@ class DaytonaInterpreter(LLMQueryMixin):
             volume_name=self.volume_name,
             spec=self.sandbox_spec,
         )
+        if self._session is not None:
+            self._session.execution_event_callback = self.execution_event_callback
         self._session_source_key = source_key
         await self._areset_execution_state()
         self._persist_session_snapshot()

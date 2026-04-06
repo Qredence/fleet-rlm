@@ -515,6 +515,11 @@ async def _chat_message_loop(
                 last_loaded_docs_path=session.last_loaded_docs_path,
                 local_persist=local_persist,
             )
+            setattr(
+                agent,
+                "_db_session_id",
+                (session.session_record or {}).get("db_session_id"),
+            )
 
             if msg.type == "command":
                 await handle_command_with_persist(

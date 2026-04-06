@@ -1,4 +1,4 @@
-import type { RuntimeContext } from "@/screens/workspace/use-workspace";
+import type { RuntimeContext } from "@/features/workspace/use-workspace";
 
 function formatExecutionProfileBadge(executionProfile: RuntimeContext["executionProfile"]) {
   if (executionProfile === "ROOT_INTERLOCUTOR") return undefined;

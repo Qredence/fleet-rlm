@@ -14,6 +14,8 @@ from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
 
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
+    "/api/v1/optimization/run",
+    "/api/v1/optimization/status",
     "/api/v1/runtime/settings",
     "/api/v1/runtime/tests/modal",
     "/api/v1/runtime/tests/lm",
@@ -142,6 +144,29 @@ def test_sessions_state_endpoint_exists_and_returns_expected_shape(
     payload = response.json()
     assert payload["ok"] is True
     assert isinstance(payload["sessions"], list)
+
+
+def test_optimization_status_reports_unavailable_mlflow(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api.routers import optimization
+
+    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, False))
+
+    response = default_client.get(
+        "/api/v1/optimization/status",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["mlflow_enabled"] is False
+    assert payload["gepa_installed"] is True
+    assert any("configured but unavailable" in item for item in payload["guidance"])
 
 
 def test_sessions_state_endpoint_is_scoped_to_resolved_identity(

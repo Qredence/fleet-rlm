@@ -26,7 +26,7 @@ class ValidationConfig:
         min_substantive_chars: Minimum chars for substantive response
     """
 
-    guardrail_mode: Literal["off", "warn", "strict"] = "off"
+    guardrail_mode: Literal["off", "warn", "strict"] = "warn"
     max_output_chars: int = 10000
     min_substantive_chars: int = 20
 

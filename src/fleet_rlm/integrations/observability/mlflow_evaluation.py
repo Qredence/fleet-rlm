@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, cast
 
 from .config import MlflowConfig
 from .mlflow_runtime import get_mlflow_config, initialize_mlflow
 from .mlflow_traces import search_annotated_trace_rows
+
+logger = logging.getLogger(__name__)
 
 
 def export_annotated_trace_rows(
@@ -21,6 +24,18 @@ def export_annotated_trace_rows(
     rows = search_annotated_trace_rows(config=config, max_results=max_results)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    try:
+        from fleet_rlm.integrations.database.local_store import register_dataset
+
+        register_dataset(
+            name=output_path.stem, uri=str(output_path), row_count=len(rows)
+        )
+    except Exception:
+        logger.warning(
+            "Local dataset registration failed for %s; export succeeded",
+            output_path,
+            exc_info=True,
+        )
     return rows
 
 

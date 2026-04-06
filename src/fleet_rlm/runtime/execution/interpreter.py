@@ -31,6 +31,7 @@ import modal
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
 from fleet_rlm.runtime.execution.core_driver import sandbox_driver
+from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile  # noqa: F811
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 from fleet_rlm.runtime.tools.modal_volumes import VolumeOpsMixin
@@ -74,7 +75,11 @@ def _build_default_image(
     )
 
 
-class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
+class ModalInterpreter(
+    LLMQueryMixin,
+    VolumeOpsMixin,
+    RLMInterpreterProtocol,
+):
     """DSPy CodeInterpreter implementation backed by a Modal sandbox process.
 
     This interpreter executes Python code in an isolated Modal sandbox,
@@ -243,6 +248,10 @@ class ModalInterpreter(LLMQueryMixin, VolumeOpsMixin):
             stderr_preview=payload.get("stderr_preview"),
             error_type=payload.get("error_type"),
             error=payload.get("error"),
+            event_kind=payload.get("event_kind"),
+            path=payload.get("path"),
+            bytes_total=payload.get("bytes_total"),
+            bytes_written=payload.get("bytes_written"),
         )
         emit_execution_event(self, event)
 

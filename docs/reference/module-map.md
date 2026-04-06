@@ -128,8 +128,8 @@ graph LR
 | `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
 | `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
 | `integrations/mcp/` | FastMCP server surface | `server.py` |
-| `integrations/observability/` | Telemetry and evaluation | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
-| `integrations/providers/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `smoke.py`, `state.py`, `types_budget.py`, `types_context.py`, `types_recursive.py`, `types_result.py`, `types_serialization.py` |
+| `integrations/observability/` | Telemetry and evaluation | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py`, `dspy_evaluation.py`, `gepa_optimization.py`, `workspace_metrics.py` |
+| `integrations/providers/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
 | `integrations/providers/modal/` | Modal provider helpers | provider-specific helpers only |
 
 ## Verification

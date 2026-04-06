@@ -1,7 +1,0 @@
-{
-  "dev": [
-    "uv run fleet web",
-    "cd src/frontend && vp dev"
-  ],
-  "install": "uv venv && source .venv/bin/activate && uv pip install -e . && cd src/frontend && vp i"
-}

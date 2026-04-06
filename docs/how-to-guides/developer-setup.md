@@ -87,7 +87,7 @@ git remote add upstream https://github.com/qredence/fleet-rlm.git
 Install all dependencies including development tools and optional extras:
 
 ```bash
-uv sync --all-extras --dev
+uv sync --all-extras
 ```
 
 This command:
@@ -389,7 +389,7 @@ require('lspconfig').pyright.setup {
 
 ```bash
 uv cache clean
-uv sync --all-extras --dev
+uv sync --all-extras
 ```
 
 ### Modal authentication fails

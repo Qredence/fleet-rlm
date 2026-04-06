@@ -103,3 +103,25 @@ def test_build_execution_completion_summary_builds_error_summary() -> None:
     assert summary["final_artifact"] is None
     assert summary["summary"]["duration_ms"] == 55
     assert summary["summary"]["error"] == "boom"
+
+
+def test_build_execution_completion_summary_marks_tool_error_final_as_error() -> None:
+    event = StreamEvent(
+        kind="final",
+        text="claimed success",
+        payload={
+            "runtime_degraded": True,
+            "runtime_failure_category": "tool_execution_error",
+        },
+        timestamp=ts(),
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="please run",
+        run_id="run-tool-error",
+    )
+
+    assert summary["status"] == "error"
+    assert summary["termination_reason"] == "final"
+    assert summary["final_artifact"]["value"]["summary"] == "claimed success"

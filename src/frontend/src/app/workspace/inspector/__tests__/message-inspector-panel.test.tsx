@@ -293,7 +293,7 @@ describe("MessageInspectorPanel", () => {
     const tabList = container.querySelector('[role="tablist"]');
     const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
-    expect(tabs).toEqual(["Trajectory", "Execution", "Evidence", "Graph"]);
+    expect(tabs).toEqual(["Trajectory", "Execution", "Examples", "Graph"]);
     expect(tabsRoot?.classList.contains("flex")).toBe(true);
     expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");

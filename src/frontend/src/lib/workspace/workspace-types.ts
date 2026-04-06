@@ -58,6 +58,7 @@ export interface ChatTraceStep {
   id: string;
   index?: number;
   label: string;
+  body?: string;
   status: "pending" | "active" | "complete" | "error";
   details?: string[];
 }

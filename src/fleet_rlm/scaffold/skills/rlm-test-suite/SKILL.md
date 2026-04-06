@@ -51,6 +51,9 @@ uv run pytest -q \
 
 ```bash
 uv run pytest -q \
+  tests/unit/test_dspy_evaluation.py \
+  tests/unit/test_gepa_optimization.py \
+  tests/unit/test_workspace_metrics.py \
   tests/unit/test_mlflow_integration.py \
   tests/unit/test_mlflow_evaluation.py \
   tests/unit/test_bootstrap_observability.py \
@@ -74,7 +77,7 @@ uv run pytest -q \
 | `test_sub_rlm.py`                                    | Recursive child dspy.RLM runtime                             |
 | `test_react_delegation_policy.py`                    | Tool delegation policy logic                                 |
 | `test_forced_routing.py`                             | Forced routing overrides                                     |
-| `test_streaming_router.py`                           | Streaming event router                                       |
+| `test_chat_agent_streaming_routes.py`               | Chat-agent streaming route selection                         |
 | `test_react_streaming.py`                            | ReAct streaming callbacks                                    |
 | `test_react_commands.py`                             | Chat command dispatch                                        |
 | `test_variable_mode.py`                              | RLMVariable/prompt-variable mode                             |
@@ -83,8 +86,12 @@ uv run pytest -q \
 | `test_runtime_module_helpers.py`                     | Runtime module helper utilities                              |
 | `test_core_tools_document.py`                        | Document tool surface                                        |
 | `test_document_sources_new.py`                       | Document source resolution                                   |
-| `test_infra_tools.py`                                | Infrastructure and process tools                             |
+| `test_sandbox_common_infra_tools.py`                 | Snapshot and LSP helpers in `sandbox_common.py`              |
+| `test_sandbox_common_process_tools.py`               | Process-tool gating in `sandbox_common.py`                   |
 | `test_memory_tools.py`                               | Sandbox persistent memory and buffer tools                   |
+| `test_dspy_evaluation.py`                            | DSPy evaluation wrapper over `dspy.Evaluate`                 |
+| `test_gepa_optimization.py`                          | GEPA feedback metric adapter and validation shape            |
+| `test_workspace_metrics.py`                          | GEPA feedback metrics and numeric evaluation metric          |
 | `test_execution_events.py`                           | Execution event data helpers                                 |
 | `test_stream_event_model.py`                         | Stream event model shapes                                    |
 | `test_runtime_settings.py`                           | Runtime settings read/write                                  |
@@ -112,9 +119,8 @@ uv run pytest -q \
 | `test_daytona_bridge.py`                             | Daytona bridge callbacks                                     |
 | `test_daytona_async_tools.py`                        | Daytona async sandbox tool execution                         |
 | `test_daytona_volume_ops.py`                         | Daytona volume browsing ops                                  |
-| `test_daytona_types_result.py`                       | Daytona result type serialization                            |
 | `test_daytona_sandbox_spec.py`                       | Daytona sandbox spec construction                            |
-| `test_daytona_snapshots.py`                          | Daytona snapshot lookup                                      |
+| `test_daytona_runtime_snapshots.py`                  | Daytona snapshot helpers in `runtime.py`                     |
 | `test_rewards.py`                                    | RLM reward/grading helpers                                   |
 | `test_ws_chat_helpers.py`                            | WS chat utility helpers                                      |
 | `test_ws_messages.py`                                | WS payload parsing and session identity                      |

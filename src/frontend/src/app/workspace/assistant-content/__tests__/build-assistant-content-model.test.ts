@@ -59,6 +59,7 @@ function makeTrajectoryPart(
     index?: number;
     label: string;
     status: "pending" | "active" | "complete" | "error";
+    body?: string;
     details?: string[];
   }>,
 ): Extract<ChatRenderPart, { kind: "chain_of_thought" }> {
@@ -145,6 +146,7 @@ describe("buildAssistantContentModel", () => {
               index: 1,
               label: "Tool: grep_repo",
               status: "complete",
+              body: "Use grep after listing files.",
               details: ["Observation · Found usage"],
             },
             {
@@ -152,6 +154,7 @@ describe("buildAssistantContentModel", () => {
               index: 0,
               label: "Tool: list_files",
               status: "complete",
+              body: "List the files first.",
               details: ["Observation · Found entrypoint"],
             },
           ]),
@@ -175,6 +178,8 @@ describe("buildAssistantContentModel", () => {
       "cot",
       "final_reasoning",
     ]);
+    expect(model.trajectory.items[0]?.body).toBe("List the files first.");
+    expect(model.trajectory.items[1]?.body).toBe("Use grep after listing files.");
     expect(model.trajectory.items.at(-1)?.body).toBe("All set");
     expect(model.summary.runtimeBadges).toContain("depth 1/3");
     expect(model.summary.runtimeBadges).toContain("sandbox");

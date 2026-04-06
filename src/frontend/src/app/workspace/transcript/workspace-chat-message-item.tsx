@@ -106,9 +106,9 @@ export function WorkspaceChatMessageItem({
             <div className="mt-2 text-sm text-muted-foreground">{message.hitlData.question}</div>
             <ConfirmationRequest>
               <ConfirmationActions>
-                {message.hitlData.actions.map((action) => (
+                {message.hitlData.actions.map((action, index) => (
                   <ConfirmationAction
-                    key={action.label}
+                    key={`${message.id}-action-${index}`}
                     onClick={() => onResolveHitl(message.id, action.label)}
                     className={cn(
                       action.variant === "primary" &&
