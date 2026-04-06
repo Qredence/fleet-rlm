@@ -323,8 +323,8 @@ def test_build_cancelled_stream_event_logs_local_store_failure(
     monkeypatch.setattr(local_store, "add_turn", _boom)
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
-    agent._db_session_id = 123
     prepared = prepare_streaming_turn(agent, message="please", trace=False)
+    agent._db_session_id = 123
 
     with caplog.at_level("ERROR"):
         event = build_cancelled_stream_event(
@@ -349,8 +349,8 @@ def test_build_final_stream_event_logs_local_store_failure(
     monkeypatch.setattr(local_store, "add_turn", _boom)
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
-    agent._db_session_id = 123
     prepared = prepare_streaming_turn(agent, message="hello", trace=False)
+    agent._db_session_id = 123
 
     with caplog.at_level("ERROR"):
         event = build_final_stream_event(
