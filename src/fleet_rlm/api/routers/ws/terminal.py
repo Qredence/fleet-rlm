@@ -12,7 +12,7 @@ from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
 from ...execution import ExecutionStep
-from .completion import _final_event_failed, build_execution_completion_summary
+from .completion import final_event_failed, build_execution_completion_summary
 from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager
 from .types import LocalPersistFn
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _final_run_status(event: StreamEvent) -> RunStatus:
     payload = event.payload if isinstance(event.payload, dict) else {}
-    return RunStatus.FAILED if _final_event_failed(payload) else RunStatus.COMPLETED
+    return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
 
 
 def build_stream_event_dict(

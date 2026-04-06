@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, cast
 
 from .config import MlflowConfig
 from .mlflow_runtime import get_mlflow_config, initialize_mlflow
 from .mlflow_traces import search_annotated_trace_rows
+
+logger = logging.getLogger(__name__)
 
 
 def export_annotated_trace_rows(
@@ -28,7 +31,11 @@ def export_annotated_trace_rows(
             name=output_path.stem, uri=str(output_path), row_count=len(rows)
         )
     except Exception:
-        pass
+        logger.warning(
+            "Local dataset registration failed for %s; export succeeded",
+            output_path,
+            exc_info=True,
+        )
     return rows
 
 

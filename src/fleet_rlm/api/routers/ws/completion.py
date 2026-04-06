@@ -18,7 +18,7 @@ def _as_text(value: Any) -> str | None:
     return None
 
 
-def _final_event_failed(payload: dict[str, Any]) -> bool:
+def final_event_failed(payload: dict[str, Any]) -> bool:
     runtime = _as_record(payload.get("runtime"))
     runtime_degraded = bool(
         payload.get("runtime_degraded", runtime.get("runtime_degraded", False))
@@ -32,7 +32,7 @@ def _final_event_failed(payload: dict[str, Any]) -> bool:
 
 def _canonical_run_status(kind: str, payload: dict[str, Any]) -> str:
     if kind == "final":
-        return "error" if _final_event_failed(payload) else "completed"
+        return "error" if final_event_failed(payload) else "completed"
     if kind == "cancelled":
         return "cancelled"
     return "error"

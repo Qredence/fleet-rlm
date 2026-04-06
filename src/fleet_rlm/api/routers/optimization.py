@@ -40,6 +40,12 @@ OPTIMIZATION_DATA_ROOT = Path(
 
 def _validate_path(user_path: str, base: Path) -> Path:
     """Resolve *user_path* relative to *base* and reject traversals."""
+    # Reject paths that contain traversal sequences before any Path processing.
+    if ".." in Path(user_path).parts:
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal sequences ('..') are not allowed.",
+        )
     candidate = Path(user_path)
     if candidate.is_absolute():
         raise HTTPException(
@@ -216,7 +222,7 @@ async def run_optimization(
                 _run_gepa_optimization,
                 dataset_path=str(dataset),
                 program_spec=request.program_spec,
-                output_path=output_str,
+                output_path=str(output_path) if output_path else None,
                 auto=request.auto,
                 train_ratio=request.train_ratio,
             ),

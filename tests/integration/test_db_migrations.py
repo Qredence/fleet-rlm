@@ -6,7 +6,6 @@ import pytest
 import psycopg
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from fleet_rlm.integrations.database import DatabaseManager
@@ -22,21 +21,10 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
 
     cfg = Config(str(repo_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(repo_root / "migrations"))
-    head_revision = ScriptDirectory.from_config(cfg).get_current_head()
     with psycopg.connect(require_database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS alembic_version (
-                    version_num VARCHAR(128) NOT NULL
-                )
-                """
-            )
-            cur.execute("DELETE FROM alembic_version")
-            cur.execute(
-                "INSERT INTO alembic_version (version_num) VALUES (%s)",
-                (head_revision,),
-            )
+            cur.execute("DROP SCHEMA public CASCADE")
+            cur.execute("CREATE SCHEMA public")
         conn.commit()
     command.upgrade(cfg, "head")
 
