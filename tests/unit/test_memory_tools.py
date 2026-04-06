@@ -11,8 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.runtime.tools import sandbox_common, sandbox_storage_tools
 from fleet_rlm.runtime.agent import RLMReActChatAgent
+from fleet_rlm.runtime.tools.sandbox import common as sandbox_common
+from fleet_rlm.runtime.tools.sandbox import storage as sandbox_storage_tools
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")

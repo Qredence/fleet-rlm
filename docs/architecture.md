@@ -2,20 +2,16 @@
 
 This document describes the maintained architecture for `fleet-rlm`.
 The primary product path is now the shared DSPy ReAct + recursive `dspy.RLM`
-runtime with Daytona as the default interpreter backend. Modal remains a
-supported backend for the same runtime architecture.
+runtime with Daytona as the maintained interpreter backend.
 
 ## Current Runtime Status
 
 - The primary product runtime is the shared `RLMReActChatAgent` plus recursive
   `dspy.RLM` stack described below.
-- Daytona is the default interpreter backend for that shared runtime in the
+- Daytona is the maintained interpreter backend for that shared runtime in the
   workspace product.
-- Modal remains supported for compatibility, terminal flows, and backend parity
-  where the Daytona interpreter is still the selected execution backend.
-- The Web UI still uses the same `/api/v1/ws/execution` surface; `runtime_mode`
-  selects interpreter/backend details rather than swapping in a separate chat
-  orchestrator.
+- The Web UI uses the single `/api/v1/ws/execution` surface without a public
+  runtime selector.
 - The only supported Daytona CLI surface is `fleet-rlm daytona-smoke --repo ... [--ref ...]` for native Daytona validation.
 - `fleet-rlm daytona-smoke` is the required first-step validation path and now emits phase-aware diagnostics for config, sandbox bootstrap, driver startup, execution, and cleanup.
 - The Daytona pilot now splits cleanly into an async Daytona interpreter core and a thin product adapter. The interpreter owns persistent sandbox execution, prompt-object storage, typed `SUBMIT`, and workspace-native helpers while the shared ReAct/RLM runtime owns chat orchestration and recursion.
@@ -57,9 +53,9 @@ graph TB
     end
 
     subgraph TOOLS["Tools Layer (runtime/tools/)"]
-        TOOL_DOCUMENT["document.py"]
-        TOOL_SANDBOX["sandbox_common.py<br/>(sandbox, snapshot, LSP, buffer, process)"]
-        TOOL_CHUNKING["chunking.py"]
+        TOOL_DOCUMENT["content/document.py"]
+        TOOL_SANDBOX["sandbox/common.py<br/>(sandbox, snapshot, LSP, buffer, process)"]
+        TOOL_CHUNKING["content/chunking.py"]
         TOOL_FILESYSTEM["filesystem.py"]
     end
 
@@ -192,12 +188,12 @@ Tools provide capabilities for the ReAct agent:
 
 | Module                   | Purpose                             |
 | ------------------------ | ----------------------------------- |
-| `document.py`            | Document loading and processing     |
-| `sandbox_common.py`      | Shared sandbox tool entrypoint plus snapshot, LSP, buffer, and process helpers |
-| `sandbox_delegate_tools.py` | Recursive `dspy.RLM` delegation tools |
-| `sandbox_memory_tools.py` | Memory-intelligence tools |
-| `sandbox_storage_tools.py` | Durable storage, editing, buffer, and workspace helpers |
-| `chunking.py`            | Text chunking for long documents    |
+| `content/document.py`    | Document loading and processing     |
+| `sandbox/common.py`      | Shared sandbox tool entrypoint plus snapshot, LSP, buffer, and process helpers |
+| `sandbox/delegate.py`    | Recursive `dspy.RLM` delegation tools |
+| `sandbox/memory.py`      | Memory-intelligence tools |
+| `sandbox/storage.py`     | Durable storage, editing, buffer, and workspace helpers |
+| `content/chunking.py`    | Text chunking for long documents    |
 | `filesystem.py`          | File system operations in sandbox   |
 
 ### 4. Execution Layer (`runtime/`)
@@ -243,7 +239,7 @@ The Daytona runtime now has a dedicated DSPy-native websocket chat agent plus a 
 
 | Module                                                              | Purpose                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `integrations/daytona/agent.py`                                    | `DaytonaWorkbenchChatAgent` - focused Daytona-specific agent layer over the shared ReAct runtime |
+| `runtime/agent/chat_agent.py`                                       | `RLMReActChatAgent` - canonical shared DSPy chat agent with Daytona workspace/session integration |
 | `api/schemas/core.py`                                               | Defines Daytona websocket request controls (`repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus runtime readiness metadata |
 | `api/routers/ws/endpoint.py` / `api/routers/ws/session.py`          | Select the top-level websocket chat agent from the first message and bootstrap runtime/session state                                                                                                                             |
 | `api/routers/ws/stream.py` / `api/routers/ws/commands.py`           | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch                                                                                                          |
@@ -254,10 +250,10 @@ The Daytona runtime now has a dedicated DSPy-native websocket chat agent plus a 
 
 Important scope notes:
 
-- The UI toggle is explicit: `Modal chat` vs `Daytona pilot`.
-- `execution_mode` still applies only to the default Modal chat path.
+- The public workbench runtime is Daytona-backed.
+- `execution_mode` remains a per-turn hint within the Daytona-backed runtime.
 - Daytona UI requests are Daytona-interpreter-oriented: the backend runs the shared ReAct + `dspy.RLM` flow against a Daytona-backed persistent REPL/runtime and renders workbench state from structured run events plus interpreter output.
-- Daytona websocket chat now shares the same session/export/import lifecycle as Modal chat, so Daytona history persists by `session_id` and restores through the existing websocket session store.
+- Daytona websocket chat shares the same session/export/import lifecycle as the rest of the workbench stream, so history persists by `session_id` and restores through the existing websocket session store.
 - The workbench is now general-purpose Daytona-backed recursive reasoning rather than repo-analysis-only and currently shows:
   - task-aware runtime/task controls and status,
   - optional repo plus staged local document/directory sources or `No external sources`,
@@ -271,8 +267,8 @@ Important scope notes:
 flowchart LR
     User["User prompt"] --> Workspace["Workbench chat + workbench"]
     Workspace --> WS["/api/v1/ws/execution"]
-    WS --> Agent["DaytonaWorkbenchChatAgent"]
-    Agent --> Shared["RLMReActChatAgent / dspy.RLM"]
+    WS --> Agent["RLMReActChatAgent"]
+    Agent --> Shared["dspy.ReAct / dspy.RLM"]
     Shared --> Session["DaytonaSandboxSession"]
     Shared --> Planner["Planner LM"]
     Shared -. semantic callbacks .-> Delegate["llm_query / llm_query_batched"]
@@ -289,13 +285,13 @@ sequenceDiagram
     participant User as User
     participant Store as chatStore
     participant WS as WebSocket
-    participant Agent as DaytonaWorkbenchChatAgent
-    participant Shared as RLMReActChatAgent
+    participant Agent as RLMReActChatAgent
+    participant Shared as DSPy runtime
     participant Adapter as runWorkbenchAdapter
     participant UI as RunWorkbench
 
     User->>Store: submit message + optional corpus inputs
-    Store->>WS: WSMessage(runtime_mode="daytona_pilot")
+    Store->>WS: WSMessage(message, repo/context hints)
     WS->>Agent: aiter_chat_turn_stream(...)
     Agent->>Shared: aiter_chat_turn_stream(...)
     Shared-->>WS: status/tool_call/tool_result/final frames
@@ -343,7 +339,7 @@ sequenceDiagram
     participant User as User
     participant WS as WebSocket<br/>(ws/endpoint.py)
     participant MsgLoop as session.py + stream.py
-    participant Runtime as session.py
+    participant Runtime as runtime_services/<br/>chat_runtime.py + chat_persistence.py
     participant Agent as RLMReActChatAgent<br/>(runtime/agent/chat_agent.py)
     participant StreamCtx as StreamingContext<br/>(runtime/execution/streaming_context.py)
     participant Stream as runtime/execution/streaming.py
@@ -368,8 +364,8 @@ sequenceDiagram
         Agent->>Agent: think → act → observe
         Agent->>Tools: Execute tool call
         Tools->>Interpreter: interpreter.execute(code)
-        Interpreter->>Modal: Run code in sandbox
-        Modal-->>Interpreter: Execution result
+    Interpreter->>Daytona: Run code in sandbox
+    Daytona-->>Interpreter: Execution result
         Interpreter-->>Tools: Return result
         Tools-->>Agent: Tool result
         Agent->>Stream: Emit StreamEvent
@@ -387,8 +383,9 @@ sequenceDiagram
 
 | Component                        | Source File                           | Role                                                      |
 | -------------------------------- | ------------------------------------- | --------------------------------------------------------- |
-| `parse_ws_message_or_send_error` | `ws/session.py`                       | Parse incoming WebSocket JSON into `WSMessage`            |
-| `_prepare_chat_runtime`          | `ws/session.py`                       | Initialize agent with planner LM, delegate LM, repository |
+| `parse_ws_message_or_send_error` | `ws/messages.py`                      | Parse incoming WebSocket JSON into `WSMessage`            |
+| `_prepare_chat_runtime`          | `runtime_services/chat_runtime.py`    | Initialize planner/delegate/runtime context               |
+| `persist_session_state`          | `runtime_services/chat_persistence.py` | Persist manifest + durable memory/session state           |
 | `StreamingContext`               | `runtime/execution/streaming_context.py` | Immutable snapshot of agent state for event enrichment |
 | `aiter_chat_turn_stream`         | `runtime/execution/streaming.py`      | Async iterator yielding `StreamEvent` objects             |
 

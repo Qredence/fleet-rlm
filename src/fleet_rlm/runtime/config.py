@@ -1,7 +1,8 @@
-"""Configuration utilities for DSPy RLM with Modal.
+"""Configuration utilities for the shared DSPy + Daytona runtime.
 
-This module handles environment configuration, including loading .env files,
-finding project roots, and guarding against module shadowing issues with Modal.
+This module handles environment configuration, including loading `.env` files,
+finding project roots, and keeping DSPy adapter/model setup lightweight at
+import time.
 """
 
 from __future__ import annotations

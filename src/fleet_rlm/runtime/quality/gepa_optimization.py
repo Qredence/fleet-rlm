@@ -21,7 +21,7 @@ from dspy import Example, Prediction
 from dspy.teleprompt import GEPA
 from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
-from .config import MlflowConfig
+from fleet_rlm.integrations.observability.config import MlflowConfig
 from .dspy_evaluation import _metric_supports_trace
 from .mlflow_evaluation import load_trace_rows
 from .mlflow_optimization import (
@@ -29,7 +29,7 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
-from .mlflow_runtime import initialize_mlflow
+from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
 from .workspace_metrics import workspace_feedback_metric
 
 logger = logging.getLogger(__name__)

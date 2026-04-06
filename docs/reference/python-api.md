@@ -39,11 +39,11 @@ Key behaviors:
 
 Current maintained runner surface:
 
-- `build_react_chat_agent(...)`
+- `build_chat_agent(...)`
 - `run_react_chat_once(...)`
 - `arun_react_chat_once(...)`
 - `run_long_context(...)`
-### `build_react_chat_agent(...)`
+### `build_chat_agent(...)`
 
 Constructs an `RLMReActChatAgent` with runtime controls such as:
 

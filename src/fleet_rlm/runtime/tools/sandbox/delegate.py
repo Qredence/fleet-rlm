@@ -18,18 +18,18 @@ from fleet_rlm.runtime.agent.signatures import GroundedCitation
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
 from fleet_rlm.runtime.models.builders import VARIABLE_MODE_THRESHOLD
 
-from .llm_tools import coerce_int as _coerce_int
-from .llm_tools import coerce_str_list as _coerce_str_list
-from .llm_tools import prediction_value as _prediction_value
-from .llm_tools import run_cached_runtime_module as _run_runtime_module
-from .llm_tools import runtime_metadata as _runtime_metadata
-from .shared import (
+from ..llm_tools import coerce_int as _coerce_int
+from ..llm_tools import coerce_str_list as _coerce_str_list
+from ..llm_tools import prediction_value as _prediction_value
+from ..llm_tools import run_cached_runtime_module as _run_runtime_module
+from ..llm_tools import runtime_metadata as _runtime_metadata
+from ..shared import (
     build_trajectory_payload,
     resolve_document,
 )
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ...agent.chat_agent import RLMReActChatAgent
 
 
 @dataclass(slots=True)
@@ -505,7 +505,7 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
     tools: list[Any] = [_build_tool(registration) for registration in registrations]
 
     # Batch tools (parallel_semantic_map, rlm_query_batched) from batch_tools
-    from .batch_tools import build_batch_tools
+    from ..batch_tools import build_batch_tools
 
     batch_prepend, batch_append = build_batch_tools(agent)
     tools = batch_prepend + tools + batch_append

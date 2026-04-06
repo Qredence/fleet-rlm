@@ -406,7 +406,21 @@ async def _areconcile_repo_checkout(
         sandbox=sandbox,
         phase="repo_clone",
         error_prefix="Daytona repo reconcile failure",
-        code=f"""
+        code=_build_repo_reconcile_script(
+            repo_url=repo_url,
+            ref=ref,
+            workspace_path=workspace_path,
+        ),
+    )
+
+
+def _build_repo_reconcile_script(
+    *,
+    repo_url: str,
+    ref: str | None,
+    workspace_path: str,
+) -> str:
+    return f"""
 import json as _json
 import pathlib as _pathlib
 import shutil as _shutil
@@ -519,8 +533,7 @@ print(
         ensure_ascii=False,
     )
 )
-""".strip(),
-    )
+""".strip()
 
 
 async def _aclear_staged_context_paths(

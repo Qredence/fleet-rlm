@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import dspy
+from fleet_rlm.integrations.daytona.types import dedupe_paths, normalize_history_turn
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
@@ -92,8 +93,15 @@ def append_history(
 
 def export_session_state(agent: RLMReActChatAgent) -> dict[str, Any]:
     """Export serializable session state for persistence."""
+    history: list[dict[str, str]] = []
+    for item in history_messages(agent):
+        if not isinstance(item, dict):
+            continue
+        turn = normalize_history_turn(item)
+        if turn is not None:
+            history.append(turn)
     payload = {
-        "history": history_messages(agent),
+        "history": history,
         **agent.get_document_cache_state(),
         "core_memory": agent._core_memory,
     }
@@ -103,6 +111,14 @@ def export_session_state(agent: RLMReActChatAgent) -> dict[str, Any]:
         extra = export_state()
         if isinstance(extra, dict):
             payload.update(extra)
+    daytona_payload: dict[str, Any]
+    existing_daytona_payload = payload.get("daytona")
+    if isinstance(existing_daytona_payload, dict):
+        daytona_payload = dict(existing_daytona_payload)
+    else:
+        daytona_payload = {}
+    daytona_payload["loaded_document_paths"] = list(agent.loaded_document_paths)
+    payload["daytona"] = daytona_payload
     return payload
 
 
@@ -143,15 +159,32 @@ def _restore_agent_state(agent: RLMReActChatAgent, state: dict[str, Any]) -> lis
     history = state.get("history", [])
     if not isinstance(history, list):
         history = []
+    normalized_history = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        turn = normalize_history_turn(item)
+        if turn is not None:
+            normalized_history.append(turn)
     agent.history = dspy.History(
-        messages=_enforce_history_cap(history, agent.history_max_turns)
+        messages=_enforce_history_cap(normalized_history, agent.history_max_turns)
     )
 
     agent.restore_document_cache_state(state)
+    daytona_state = state.get("daytona", {})
+    if not isinstance(daytona_state, dict):
+        daytona_state = {}
+    agent.loaded_document_paths = dedupe_paths(
+        [
+            str(item)
+            for item in daytona_state.get("loaded_document_paths", []) or []
+            if str(item or "").strip()
+        ]
+    )
 
     core_memory = state.get("core_memory")
     agent.set_core_memory(core_memory)
-    return history
+    return normalized_history
 
 
 def _import_result(agent: RLMReActChatAgent, history: list[Any]) -> dict[str, Any]:

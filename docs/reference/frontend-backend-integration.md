@@ -123,7 +123,6 @@ Deprecated/planned surfaces removed from backend:
   - terminal: `final`, `cancelled`, `error`
 - Every chat event payload should carry normalized runtime metadata under `payload.runtime` when
   runtime state is known. The stable keys are:
-  - `runtime_mode`
   - `execution_mode`
   - `depth`
   - `max_depth`
@@ -169,22 +168,21 @@ Trajectory payload handling:
 ### `/api/v1/ws/execution`
 
 - Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
+- The same route is also the canonical conversational websocket stream when no `session_id` query
+  param is provided.
 - Filters by auth-derived identity plus `session_id`.
 - `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
 - Emits `execution_started`, `execution_step`, `execution_completed`.
-- `execution_completed.summary` is the canonical canvas/workbench summary for both runtimes.
-  Frontend workbench state should hydrate from this summary rather than scraping Daytona-only
-  fields from `/ws/chat final`.
+- `execution_completed.summary` is the canonical canvas/workbench summary for the Daytona-backed
+  runtime. Frontend workbench state should hydrate from this summary rather than scraping data from
+  transcript-final payloads.
 - `execution_step.step` now carries additive actor metadata:
   - `depth` (optional)
   - `actor_kind` (`root_rlm | sub_agent | delegate | unknown`, optional)
   - `actor_id` (optional)
   - `lane_key` (optional)
-- `execution_completed.summary` should be shaped so both Modal/ReAct and Daytona/RLM can hydrate
-  the same frontend canvas shell.
-- Minimum required top-level fields across both runtime modes:
+- Minimum required top-level fields:
   - `run_id`
-  - `runtime_mode`
   - `task`
   - `final_artifact`
   - `summary`

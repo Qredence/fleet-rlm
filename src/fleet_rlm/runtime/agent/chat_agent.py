@@ -18,6 +18,7 @@ from typing import Any, Literal
 import dspy
 from typing_extensions import Self
 
+from fleet_rlm.integrations.daytona.types import dedupe_paths
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
@@ -92,6 +93,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         timeout: int = 900,
         secret_name: str = "LITELLM",
         volume_name: str | None = None,
+        runtime: Any | None = None,
         verbose: bool = False,
         history_max_turns: int | None = _DEFAULT_HISTORY_MAX_TURNS,
         extra_tools: list[Callable[..., Any]] | None = None,
@@ -99,6 +101,9 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         max_depth: int = 2,
         current_depth: int = 0,
         interpreter_async_execute: bool = True,
+        delete_session_on_shutdown: bool = True,
+        sandbox_spec: Any | None = None,
+        sub_lm: Any | None = None,
         guardrail_mode: Literal["off", "warn", "strict"] = "warn",
         max_output_chars: int = 10000,
         min_substantive_chars: int = 20,
@@ -123,6 +128,10 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             256, int(delegate_result_truncation_chars)
         )
         self.execution_mode: ExecutionMode = execution_mode
+        self.secret_name = secret_name
+        self.default_volume_name = volume_name
+        self.loaded_document_paths: list[str] = []
+        self.batch_concurrency: int | None = None
         self._last_tool_error_count = 0
         self._turn_delegation_state = chat_turns.TurnDelegationState(
             effective_max_iters=react_max_iters
@@ -141,10 +150,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.min_substantive_chars = min_substantive_chars
 
         self.interpreter = interpreter or DaytonaInterpreter(
+            runtime=runtime,
             timeout=timeout,
             volume_name=volume_name,
+            delete_session_on_shutdown=delete_session_on_shutdown,
             max_llm_calls=rlm_max_llm_calls,
             async_execute=interpreter_async_execute,
+            sandbox_spec=sandbox_spec,
+            sub_lm=sub_lm,
         )
 
         self.history = dspy.History(messages=[])
@@ -425,13 +438,74 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     async def aiter_chat_turn_stream(
         self,
         message: str,
-        trace: bool,
+        trace: bool = True,
         cancel_check: Callable[[], bool] | None = None,
         *,
         docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Yield typed streaming events for one chat turn (async)."""
-        _ = docs_path
+        interpreter = self.interpreter
+        effective_repo_url = repo_url
+        effective_repo_ref = repo_ref
+        effective_context_inputs = list(context_paths or [])
+        effective_volume_name = volume_name
+        if interpreter is not None:
+            effective_repo_url = (
+                repo_url
+                if repo_url is not None
+                else getattr(interpreter, "repo_url", None)
+            )
+            effective_repo_ref = (
+                repo_ref
+                if repo_ref is not None
+                else getattr(interpreter, "repo_ref", None)
+            )
+            effective_context_inputs = (
+                list(context_paths)
+                if context_paths is not None
+                else list(getattr(interpreter, "context_paths", []) or [])
+            )
+            effective_volume_name = (
+                volume_name
+                if volume_name is not None
+                else getattr(interpreter, "volume_name", None)
+            )
+
+        self.batch_concurrency = (
+            max(1, int(batch_concurrency))
+            if isinstance(batch_concurrency, int) and batch_concurrency > 0
+            else None
+        )
+
+        effective_context_paths = self._effective_context_paths(
+            docs_path=docs_path,
+            context_paths=effective_context_inputs,
+        )
+        await self._aconfigure_workspace(
+            docs_path=docs_path,
+            repo_url=effective_repo_url,
+            repo_ref=effective_repo_ref,
+            context_paths=effective_context_inputs,
+            volume_name=effective_volume_name,
+        )
+        await self._aensure_workspace_session()
+        if (
+            effective_repo_url is not None
+            or effective_repo_ref is not None
+            or effective_context_paths
+            or effective_volume_name is not None
+        ):
+            yield self._bootstrap_status_event(
+                repo_url=effective_repo_url,
+                repo_ref=effective_repo_ref,
+                context_paths=effective_context_paths,
+                volume_name=effective_volume_name,
+            )
         if self.execution_mode == "rlm_only":
             async for event in aiter_forced_rlm_turn_stream(
                 self,
@@ -441,7 +515,10 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
                 yield event
             return
         async for event in _aiter_stream(self, message, trace, cancel_check):
-            yield event
+            yield self._enrich_runtime_event_payload(
+                event,
+                volume_name=effective_volume_name,
+            )
 
     # -----------------------------------------------------------------
     # Command dispatch
@@ -519,6 +596,9 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             self,
             signature=RLMReActChatSignature,
         )
+
+    def _build_task_prompt(self, message: str) -> str:
+        return str(message or "").strip()
 
     def get_runtime_module(self, name: str) -> dspy.Module:
         """Return a cached long-context runtime module by name.
@@ -633,6 +713,117 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             assistant_response=assistant_response,
             trajectory=trajectory,
             config=self._validation_config,
+        )
+
+    def _effective_context_paths(
+        self, *, docs_path: str | None, context_paths: list[str] | None
+    ) -> list[str]:
+        docs_paths = [str(docs_path)] if docs_path is not None else []
+        return dedupe_paths(
+            [
+                *self.loaded_document_paths,
+                *(context_paths or []),
+                *docs_paths,
+            ]
+        )
+
+    async def _aconfigure_workspace(
+        self,
+        *,
+        docs_path: str | None,
+        repo_url: str | None,
+        repo_ref: str | None,
+        context_paths: list[str] | None,
+        volume_name: str | None,
+    ) -> None:
+        interpreter = getattr(self, "interpreter", None)
+        configure_workspace = getattr(interpreter, "aconfigure_workspace", None)
+        if not callable(configure_workspace):
+            return
+        await configure_workspace(
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+            context_paths=self._effective_context_paths(
+                docs_path=docs_path,
+                context_paths=context_paths,
+            ),
+            volume_name=volume_name,
+        )
+
+    async def _aensure_workspace_session(self) -> None:
+        interpreter = getattr(self, "interpreter", None)
+        if interpreter is None:
+            return
+        if (
+            getattr(interpreter, "_session", None) is None
+            and getattr(interpreter, "_persisted_sandbox_id", None) is None
+        ):
+            return
+        get_session = getattr(interpreter, "aget_session", None)
+        if callable(get_session):
+            await get_session()
+
+    def _bootstrap_status_event(
+        self,
+        *,
+        repo_url: str | None,
+        repo_ref: str | None,
+        context_paths: list[str],
+        volume_name: str | None,
+    ) -> StreamEvent:
+        interpreter = getattr(self, "interpreter", None)
+        runtime_payload = {
+            "runtime_mode": "daytona_pilot",
+            "execution_mode": self.execution_mode,
+            "depth": self.current_depth,
+            "max_depth": self._max_depth,
+            "execution_profile": str(
+                getattr(
+                    getattr(interpreter, "default_execution_profile", None),
+                    "value",
+                    getattr(interpreter, "default_execution_profile", None),
+                )
+            ),
+            "sandbox_active": False,
+            "sandbox_id": None,
+            "effective_max_iters": max(self.react_max_iters, self.rlm_max_iterations),
+            "volume_name": volume_name,
+        }
+        return StreamEvent(
+            kind="status",
+            text="Bootstrapping Daytona RLM session",
+            payload={
+                "runtime_mode": "daytona_pilot",
+                "repo_url": repo_url,
+                "repo_ref": repo_ref,
+                "context_paths": context_paths,
+                "runtime": runtime_payload,
+            },
+        )
+
+    def _enrich_runtime_event_payload(
+        self,
+        event: StreamEvent,
+        *,
+        volume_name: str | None,
+    ) -> StreamEvent:
+        payload = dict(event.payload or {})
+        runtime_payload = dict(payload.get("runtime", {}) or {})
+        runtime_payload.setdefault("runtime_mode", "daytona_pilot")
+        runtime_payload.setdefault(
+            "volume_name",
+            volume_name
+            if volume_name is not None
+            else getattr(self.interpreter, "volume_name", None),
+        )
+        payload["runtime"] = runtime_payload
+        payload.setdefault("runtime_mode", "daytona_pilot")
+        return StreamEvent(
+            kind=event.kind,
+            text=event.text,
+            payload=payload,
+            timestamp=event.timestamp,
+            flush_tokens=event.flush_tokens,
         )
 
 

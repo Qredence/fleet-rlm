@@ -1,8 +1,7 @@
-"""Public Daytona provider surface."""
+"""Public Daytona integration surface."""
 
 from __future__ import annotations
 
-from .agent import DaytonaWorkbenchChatAgent
 from .config import DaytonaConfigError, ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError, run_daytona_smoke
 from .interpreter import DaytonaInterpreter
@@ -27,7 +26,6 @@ __all__ = [
     "DaytonaRunCancelled",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
-    "DaytonaWorkbenchChatAgent",
     "ResolvedDaytonaConfig",
     "SandboxLmRuntimeConfig",
     "SandboxSpec",

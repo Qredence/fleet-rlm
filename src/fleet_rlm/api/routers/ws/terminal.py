@@ -11,7 +11,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
-from ...execution import ExecutionStep
+from ...events import ExecutionStep
 from .completion import final_event_failed, build_execution_completion_summary
 from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager

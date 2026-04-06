@@ -997,7 +997,7 @@ def test_websocket_reports_agent_startup_daytona_error(
             return False
 
     monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_react_chat_agent",
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
         lambda **kwargs: _FailingAgent(),
     )
 

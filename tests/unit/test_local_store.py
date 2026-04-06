@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fleet_rlm.integrations.database import local_store
+from fleet_rlm.integrations import local_store
 
 
 def test_get_engine_caches_by_resolved_db_path(monkeypatch, tmp_path):

@@ -23,14 +23,15 @@ from fleet_rlm.runtime.execution.document_sources import (
 from fleet_rlm.runtime.content.ingestion import (
     read_document_content as _read_document_content,
 )
-from fleet_rlm.runtime.tools.sandbox_common import (
+from fleet_rlm.integrations.daytona.types import dedupe_paths
+from fleet_rlm.runtime.tools.sandbox.common import (
     _SandboxToolContext,
     _document_load_result,
     _load_daytona_workspace_text_sync,
 )
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ...agent.chat_agent import RLMReActChatAgent
 
 try:
     import mlflow as _mlflow
@@ -129,7 +130,17 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
             Dictionary with status, path, character count, and line count for files.
             For directories, returns file listing with total count.
         """
-        return _load_document_impl(path, alias=alias)
+        result = _load_document_impl(path, alias=alias)
+        if result.get("status") != "directory":
+            normalized = str(path or "").strip()
+            if normalized:
+                existing_paths = getattr(agent, "loaded_document_paths", [])
+                if not isinstance(existing_paths, list):
+                    existing_paths = []
+                agent.loaded_document_paths = dedupe_paths(
+                    [*existing_paths, normalized]
+                )
+        return result
 
     def fetch_web_document(url: str, alias: str = "active") -> dict[str, Any]:
         """Fetch and load a document from a public HTTP(S) URL into agent memory.

@@ -7,9 +7,14 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-from .config import MlflowConfig
-from .mlflow_runtime import get_mlflow_config, initialize_mlflow
-from .mlflow_traces import search_annotated_trace_rows
+from fleet_rlm.integrations.observability.config import MlflowConfig
+from fleet_rlm.integrations.observability.mlflow_runtime import (
+    get_mlflow_config,
+    initialize_mlflow,
+)
+from fleet_rlm.integrations.observability.mlflow_traces import (
+    search_annotated_trace_rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,7 @@ def export_annotated_trace_rows(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     try:
-        from fleet_rlm.integrations.database.local_store import register_dataset
+        from fleet_rlm.integrations.local_store import register_dataset
 
         register_dataset(
             name=output_path.stem, uri=str(output_path), row_count=len(rows)

@@ -159,7 +159,7 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
                 "volume_name": "workspace",
             }
         ]
-        assert getattr(agent, "daytona_batch_concurrency") == 4
+        assert getattr(agent, "batch_concurrency") == 4
         assert prepared.mlflow_trace_context is not None
         assert prepared.mlflow_trace_context.session_id == "workspace:user:session"
         assert init_calls and init_calls[0]["sandbox_provider"] == "daytona"

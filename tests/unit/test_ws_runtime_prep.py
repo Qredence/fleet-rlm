@@ -156,7 +156,10 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         calls.append(kwargs)
         return daytona_agent
 
-    monkeypatch.setattr("fleet_rlm.cli.runners.build_react_chat_agent", _fake_builder)
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
+        _fake_builder,
+    )
 
     runtime = _PreparedChatRuntime(
         cfg=_runtime_cfg(),

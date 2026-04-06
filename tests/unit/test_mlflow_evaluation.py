@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import fleet_rlm.integrations.observability.mlflow_evaluation as mlflow_evaluation
-import fleet_rlm.integrations.observability.scorers as scorer_module
+import fleet_rlm.runtime.quality.mlflow_evaluation as mlflow_evaluation
+import fleet_rlm.runtime.quality.scorers as scorer_module
 
 
 def test_dataset_supports_retrieval_groundedness_requires_retrievers_for_all_rows() -> (

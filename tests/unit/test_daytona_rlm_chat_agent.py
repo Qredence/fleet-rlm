@@ -4,14 +4,12 @@ from typing import Any, cast
 
 import dspy
 
-from fleet_rlm.integrations.daytona.agent import (
-    DaytonaWorkbenchChatAgent,
-)
+from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.integrations.daytona.types import render_final_text
 
 
-def _build_agent() -> DaytonaWorkbenchChatAgent:
-    return DaytonaWorkbenchChatAgent(runtime=cast(Any, object()))
+def _build_agent() -> RLMReActChatAgent:
+    return RLMReActChatAgent(runtime=cast(Any, object()))
 
 
 def test_render_final_text_prefers_nested_summary_fields() -> None:

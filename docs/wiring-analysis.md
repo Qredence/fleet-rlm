@@ -79,14 +79,14 @@ REST calls use the standard `fetch` API with the base URL from
 | `/api/v1/ws/execution` | `chat_streaming()` in `routers/ws/endpoint.py` | Bidirectional chat streaming |
 | `/api/v1/ws/execution` | `execution_stream()` in `routers/ws/endpoint.py` | Read-only artifact/execution event stream |
 
-### Backend flow (`/ws/chat`)
+### Backend flow (`/ws/execution`, chat mode)
 
 1. Authenticate the WebSocket connection (`_authenticate_websocket`).
-2. Accept the socket and prepare the chat runtime (`_prepare_chat_runtime`).
+2. Accept the socket and prepare the chat runtime (`runtime_services/chat_runtime.py`).
 3. Enter a message loop: receive JSON → parse into `WsChatMessage` →
    dispatch to `_chat_message_loop` → stream response frames back.
-4. The first message's `runtime_mode` selects the agent context
-   (`_build_chat_agent_context`).
+4. Build the canonical Daytona-backed agent context
+   (`runtime_services/chat_runtime.py`).
 
 ### Backend flow (`/ws/execution`)
 
@@ -116,41 +116,34 @@ REST calls use the standard `fetch` API with the base URL from
 
 ---
 
-## 4. Runtime Mode Alignment
+## 4. Runtime Alignment
 
-### The two modes
+### The maintained runtime
 
-| `runtime_mode` value | Product path | Agent backend |
-|----------------------|--------------|---------------|
-| `daytona_pilot` (default) | Standard Workbench chat | DSPy-based Modal chat agent |
-| `daytona_pilot` | Experimental Daytona workbench | Shared ReAct + `dspy.RLM` agent with Daytona interpreter backend |
+The public workbench runtime is Daytona-only. There is no runtime selector in
+the websocket contract anymore; the backend always builds the shared DSPy
+ReAct + `dspy.RLM` agent with the Daytona interpreter/backend.
 
 ### Frontend → Backend flow
 
-1. **Composer UI** — `RuntimeModeDropdown` (in `components/chat/input/`) lets
-   the user toggle between modes. The selection is stored in
-   `chatStore.runtimeMode`.
-2. **Submit** — `useBackendChatRuntime.handleSubmit()` reads
-   `options?.runtimeMode ?? runtimeMode` and passes it into
-   `streamMessage()`.
-3. **WebSocket payload** — `streamMessage` (in `chatStore.ts`) builds a
-   `WsMessageRequest` that includes `runtime_mode` and sends it as the first
-   JSON frame over the `/ws/chat` socket.
-4. **Backend dispatch** — In `routers/ws/endpoint.py`, the first received message's
-   `runtime_mode` is passed to `_build_chat_agent_context()` (in
-   `routers/ws/runtime.py`), which branches:
-   - `"daytona_pilot"` → standard `ChatAgentProtocol` implementation.
-   - `"daytona_pilot"` → Daytona-configured shared agent cast to `ChatAgentProtocol`.
-5. **Daytona-specific options** — `routers/ws/types.py` normalizes `repo_url`,
-   `repo_ref`, `context_paths`, and `batch_concurrency` from the message only
-   when `runtime_mode == "daytona_pilot"`.
+1. **Composer submit** — the frontend opens `/api/v1/ws/execution`.
+2. **First message frame** — `chatStore.ts` sends a `WsMessageRequest`
+   containing the user content plus any Daytona workspace controls:
+   `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
+3. **Backend runtime prep** — `routers/ws/endpoint.py` authenticates the
+   socket, prepares planner/delegate models, and builds the canonical chat
+   agent through the shared runtime factory path.
+4. **Turn prep** — `routers/ws/types.py` and `routers/ws/turn_setup.py`
+   normalize Daytona workspace options and apply them through the interpreter's
+   native workspace/session API.
+5. **Execution stream** — the same `/api/v1/ws/execution` socket carries live
+   chat events and workbench execution summaries.
 
-### Mode-specific UI behavior
+### UI behavior
 
-When `runtimeMode === "daytona_pilot"`, the frontend:
-- Shows the Run Workbench panel (`BuilderPanel.tsx`).
-- Calls `useRunWorkbenchStore.beginRun()` on submit.
-- Routes execution frames through `runWorkbenchAdapter.ts`.
+- The workbench UI assumes the Daytona-backed runtime by default.
+- Run/workspace panels should react to execution metadata and session state,
+  not to a user-facing runtime toggle.
 
 ---
 
@@ -259,9 +252,7 @@ openapi.yaml  ──(api:sync-spec)──►  openapi/fleet-rlm.openapi.yaml
 The `getActiveWsUrl(path)` function resolves WebSocket URLs with this
 priority:
 
-1. **`VITE_FLEET_WS_URL` is set** — use it directly for `/ws/chat`; for
-   `/ws/execution`, replace the trailing `/chat` with `/execution` (or
-   rewrite the pathname).
+1. **`VITE_FLEET_WS_URL` is set** — use it directly for `/ws/execution`.
 2. **`VITE_FLEET_API_URL` is set** — derive by swapping the protocol
    (`http:` → `ws:`, `https:` → `wss:`) and setting the pathname to the
    target path.

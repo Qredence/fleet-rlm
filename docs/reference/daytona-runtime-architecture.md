@@ -54,8 +54,8 @@ The current implementation treats these Daytona docs as the normative baseline:
   `dspy.RLM` runtime architecture.
 - The maintained interpreter implementation is `DaytonaInterpreter`.
 - Websocket session switching must use the async agent/session reset path (`agent.areset(...)`) when clearing Daytona sandbox buffers for a fresh or restored session without saved state.
-- `DaytonaWorkbenchChatAgent` remains the focused Daytona-specific agent layer
-  that configures the shared runtime with Daytona workspace/session metadata.
+- `RLMReActChatAgent` is the canonical shared DSPy agent and carries the
+  Daytona workspace/session metadata needed by the workbench runtime.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:
   - `runtime.py` owns workspace bootstrap, context staging, and snapshot helpers
@@ -64,7 +64,6 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
   - `types.py` owns provider-local configuration, staged-context, smoke-result, and chat/session normalization contracts
   - `volumes.py` owns provider-specific volume browsing helpers
-- `agent.py` remains the Daytona-specific agent/session adapter over the shared runtime.
 - Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The provider is now async-first internally:
   - `AsyncDaytona` drives sandbox/session lifecycle

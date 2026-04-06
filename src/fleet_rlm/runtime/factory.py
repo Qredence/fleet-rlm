@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import dspy
 
-from fleet_rlm.integrations.daytona.agent import DaytonaWorkbenchChatAgent
+from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.config import configure_planner_from_env
 
 
@@ -25,10 +26,14 @@ class _ReActAgentOptions:
     timeout: int = 900
     secret_name: str = "LITELLM"
     volume_name: str | None = None
+    runtime: Any | None = None
     verbose: bool = False
     history_max_turns: int | None = None
-    extra_tools: list | None = None
+    extra_tools: list[Callable[..., Any]] | None = None
     interpreter_async_execute: bool = True
+    delete_session_on_shutdown: bool = False
+    sandbox_spec: Any | None = None
+    sub_lm: Any | None = None
     guardrail_mode: Literal["off", "warn", "strict"] = "warn"
     max_output_chars: int = 10000
     min_substantive_chars: int = 20
@@ -52,12 +57,12 @@ def _build_react_agent_from_options(
     docs_path: Path | str | None = None,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
-) -> DaytonaWorkbenchChatAgent:
+) -> RLMReActChatAgent:
     """Build the canonical Daytona-backed chat agent."""
     if planner_lm is None:
         _require_planner_ready(env_file)
 
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         react_max_iters=options.react_max_iters,
         deep_react_max_iters=options.deep_react_max_iters,
         enable_adaptive_iters=options.enable_adaptive_iters,
@@ -65,17 +70,22 @@ def _build_react_agent_from_options(
         rlm_max_llm_calls=options.rlm_max_llm_calls,
         max_depth=options.max_depth,
         timeout=options.timeout,
+        secret_name=options.secret_name,
+        volume_name=options.volume_name,
+        runtime=options.runtime,
         verbose=options.verbose,
         history_max_turns=options.history_max_turns,
-        planner_lm=planner_lm,
+        extra_tools=options.extra_tools,
         delegate_lm=options.delegate_lm,
-        delete_session_on_shutdown=False,
+        delete_session_on_shutdown=options.delete_session_on_shutdown,
         guardrail_mode=options.guardrail_mode,
         max_output_chars=options.max_output_chars,
         min_substantive_chars=options.min_substantive_chars,
         delegate_max_calls_per_turn=options.delegate_max_calls_per_turn,
         delegate_result_truncation_chars=options.delegate_result_truncation_chars,
         interpreter_async_execute=options.interpreter_async_execute,
+        sandbox_spec=options.sandbox_spec,
+        sub_lm=options.sub_lm,
     )
 
     if docs_path is not None:
@@ -96,19 +106,23 @@ def build_chat_agent(
     timeout: int = 900,
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
+    runtime: Any | None = None,
     verbose: bool = False,
     history_max_turns: int | None = None,
-    extra_tools: list | None = None,
+    extra_tools: list[Callable[..., Any]] | None = None,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
     interpreter_async_execute: bool = True,
+    delete_session_on_shutdown: bool = False,
+    sandbox_spec: Any | None = None,
+    sub_lm: Any | None = None,
     guardrail_mode: Literal["off", "warn", "strict"] = "warn",
     max_output_chars: int = 10000,
     min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,
     delegate_max_calls_per_turn: int = 8,
     delegate_result_truncation_chars: int = 8000,
-) -> DaytonaWorkbenchChatAgent:
+) -> RLMReActChatAgent:
     """Build the canonical Daytona-backed DSPy chat agent."""
     options = _ReActAgentOptions(
         react_max_iters=react_max_iters,
@@ -120,10 +134,14 @@ def build_chat_agent(
         timeout=timeout,
         secret_name=secret_name,
         volume_name=volume_name,
+        runtime=runtime,
         verbose=verbose,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
         interpreter_async_execute=interpreter_async_execute,
+        delete_session_on_shutdown=delete_session_on_shutdown,
+        sandbox_spec=sandbox_spec,
+        sub_lm=sub_lm,
         guardrail_mode=guardrail_mode,
         max_output_chars=max_output_chars,
         min_substantive_chars=min_substantive_chars,
@@ -139,36 +157,9 @@ def build_chat_agent(
     )
 
 
-def build_react_chat_agent(**kwargs: Any) -> DaytonaWorkbenchChatAgent:
-    """Compatibility alias for the canonical Daytona-backed agent builder."""
-    return build_chat_agent(**kwargs)
-
-
-def build_daytona_workbench_chat_agent(**kwargs: Any) -> DaytonaWorkbenchChatAgent:
-    """Explicit Daytona builder alias for callers that prefer provider naming."""
-    return build_chat_agent(**kwargs)
-
-
-def build_chat_agent_for_runtime_mode(
-    *,
-    runtime_mode: str = "daytona_pilot",
-    **kwargs: Any,
-) -> DaytonaWorkbenchChatAgent:
-    """Build the canonical chat agent, rejecting legacy Modal runtime modes."""
-    normalized = str(runtime_mode or "daytona").strip().lower()
-    if normalized not in {"daytona", "daytona_pilot"}:
-        raise ValueError(
-            "Only the Daytona runtime is supported. Remove runtime_mode selection and use the canonical execution runtime."
-        )
-    return build_chat_agent(**kwargs)
-
-
 __all__ = [
     "_ReActAgentOptions",
     "_build_react_agent_from_options",
     "_require_planner_ready",
     "build_chat_agent",
-    "build_chat_agent_for_runtime_mode",
-    "build_daytona_workbench_chat_agent",
-    "build_react_chat_agent",
 ]

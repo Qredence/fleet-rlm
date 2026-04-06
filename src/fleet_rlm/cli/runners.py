@@ -7,7 +7,7 @@ cleanup.
 
 Runner categories:
     - Long-context analysis/summarization: run_long_context
-    - Interactive ReAct chat: build_react_chat_agent, run_react_chat_once
+    - Interactive ReAct chat: build_chat_agent, run_react_chat_once
 
 All runners automatically:
     1. Configure the DSPy planner from environment
@@ -37,17 +37,15 @@ from fleet_rlm.integrations.observability.mlflow_runtime import (
     mlflow_request_context,
     new_client_request_id,
 )
-from .runtime_factory import (
+from fleet_rlm.runtime.factory import (
     _build_react_agent_from_options,
     _ReActAgentOptions,
     _require_planner_ready,
-    build_chat_agent_for_runtime_mode,
-    build_react_chat_agent,
+    build_chat_agent,
 )
 
 __all__ = [
-    "build_chat_agent_for_runtime_mode",
-    "build_react_chat_agent",
+    "build_chat_agent",
     "run_long_context",
     "run_react_chat_once",
     "arun_react_chat_once",

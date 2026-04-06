@@ -1,6 +1,6 @@
 """Storage, editing, and memory-oriented sandbox tool builders.
 
-Buffer tools and process/workspace tools now live in :mod:`.sandbox_common`.
+Buffer tools and process/workspace tools now live in :mod:`.common`.
 This module keeps volume memory operations, file editing, and the aggregating
 ``build_storage_tools`` entry-point.
 """
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
 
-from .sandbox_common import (
+from .common import (
     _adaytona_list_items,
     _adaytona_read_text,
     _adaytona_write_text,
@@ -28,11 +28,11 @@ from .sandbox_common import (
 )
 
 # Backwards-compat re-exports so external code that imported from here still works.
-from .sandbox_common import build_buffer_tools as build_buffer_tools
-from .sandbox_common import build_process_tools as build_process_tools
+from .common import build_buffer_tools as build_buffer_tools
+from .common import build_process_tools as build_process_tools
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ...agent.chat_agent import RLMReActChatAgent
 
 
 def _looks_like_python_code(path: str, content: str) -> bool:

@@ -315,7 +315,7 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
 
 
 def test_build_cancelled_stream_event_logs_local_store_failure(monkeypatch):
-    from fleet_rlm.integrations.database import local_store
+    from fleet_rlm.integrations import local_store
     from fleet_rlm.runtime.execution import streaming as streaming_module
 
     def _boom(*args, **kwargs):
@@ -345,7 +345,7 @@ def test_build_cancelled_stream_event_logs_local_store_failure(monkeypatch):
 
 
 def test_build_final_stream_event_logs_local_store_failure(monkeypatch):
-    from fleet_rlm.integrations.database import local_store
+    from fleet_rlm.integrations import local_store
     from fleet_rlm.runtime.execution import streaming as streaming_module
 
     def _boom(*args, **kwargs):

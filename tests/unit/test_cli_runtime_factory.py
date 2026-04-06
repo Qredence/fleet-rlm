@@ -1,59 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
-from fleet_rlm.cli import runtime_factory
-import pytest
 from fleet_rlm.integrations.config.env import AppConfig
 from fleet_rlm.integrations.mcp.server import MCPRuntimeConfig
-
-
-def test_build_chat_agent_for_runtime_mode_rejects_non_daytona_modes(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.factory.build_chat_agent",
-        lambda **kwargs: kwargs,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="Only the Daytona runtime is supported",
-    ):
-        runtime_factory.build_chat_agent_for_runtime_mode(
-            runtime_mode="unexpected-mode"
-        )
-
-
-def test_build_chat_agent_for_runtime_mode_routes_daytona_to_canonical_builder(
-    monkeypatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def _fake_builder(**kwargs: Any) -> str:
-        captured.update(kwargs)
-        return "daytona-agent"
-
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.factory.build_chat_agent",
-        _fake_builder,
-    )
-
-    agent = runtime_factory.build_chat_agent_for_runtime_mode(
-        runtime_mode="daytona_pilot",
-        react_max_iters=6,
-        timeout=45,
-        secret_name="daytona-secret",
-        volume_name="daytona-volume",
-        planner_lm="planner-lm",
-    )
-
-    assert agent == "daytona-agent"
-    assert captured["react_max_iters"] == 6
-    assert captured["timeout"] == 45
-    assert captured["secret_name"] == "daytona-secret"
-    assert captured["volume_name"] == "daytona-volume"
-    assert captured["planner_lm"] == "planner-lm"
 
 
 def test_mcp_runtime_config_from_app_config_maps_shared_settings() -> None:

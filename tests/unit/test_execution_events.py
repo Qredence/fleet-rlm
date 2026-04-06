@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from fleet_rlm.api.execution.events import (
+from fleet_rlm.api.events.events import (
     ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionStepBuilder,

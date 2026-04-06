@@ -325,12 +325,10 @@ def build_ws_test_app(monkeypatch, fake_agent: FakeChatAgent):
         _ = kwargs
         return fake_agent
 
+    monkeypatch.setattr("fleet_rlm.cli.runners.build_chat_agent", _fake_build_agent)
     monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_chat_agent_for_runtime_mode",
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
         _fake_build_agent,
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_react_chat_agent", _fake_build_agent
     )
     return create_app(
         config=ServerRuntimeConfig(

@@ -51,7 +51,7 @@ All Daytona-specific implementation lives under `src/fleet_rlm/integrations/dayt
 - `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter)
 - `interpreter_execution.py` — delegate child interpreter building
 - `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
-- `agent.py` — `DaytonaWorkbenchChatAgent` (Daytona-specific agent/session adapter)
+- `runtime/agent/chat_agent.py` — `RLMReActChatAgent` (canonical shared DSPy chat agent with Daytona workspace/session handling)
 - `diagnostics.py` — structured runtime diagnostics and smoke validation
 - `types.py` — consolidated Daytona types plus chat/session normalization helpers
 - `volumes.py` — Daytona volume browsing

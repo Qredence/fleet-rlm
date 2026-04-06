@@ -24,7 +24,7 @@ Backend source-of-truth files:
 - `src/fleet_rlm/api/bootstrap.py` for runtime bootstrap, optional startup, LM loading, analytics startup, and persistence initialization
 - `src/fleet_rlm/cli/fleet_cli.py` and `src/fleet_rlm/cli/main.py` for CLI behavior
 - `src/fleet_rlm/runtime/factory.py` for canonical runtime construction
-- `src/fleet_rlm/cli/runtime_factory.py` as a compatibility re-export only
+- `src/fleet_rlm/cli/runtime_factory.py` as a compatibility re-export only; new internal code should import `src/fleet_rlm/runtime/factory.py` directly
 - `src/fleet_rlm/cli/runners.py` for top-level runner helpers
 
 Artifacts and areas to treat carefully:
@@ -47,7 +47,7 @@ Artifacts and areas to treat carefully:
 
 Active top-level areas under `src/fleet_rlm/`:
 
-- `api/`: FastAPI app, auth, routers, schemas, execution helpers, and server utilities
+- `api/`: FastAPI app, auth, routers, schemas, event shaping, and server utilities
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, observability, MCP, and external-system integrations
@@ -127,13 +127,19 @@ Runtime ownership:
 - Keep runtime modules/orchestration under `runtime/agent/*` and `runtime/models/rlm_runtime_modules.py`
 - Keep shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
-- Keep shared sandbox tools consolidated under `runtime/tools/*`
+- Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
+- Keep grouped tool helpers under:
+  - `runtime/tools/content/*`
+  - `runtime/tools/sandbox/*`
+  - root `runtime/tools/*` only for shared/filesystem/batch/llm entrypoints
 
 API ownership:
 
 - Keep `src/fleet_rlm/api/main.py` limited to app factory, lifespan orchestration, route registration, and SPA mounting
 - Keep runtime startup/shutdown in `src/fleet_rlm/api/bootstrap.py`
 - Keep `src/fleet_rlm/api/routers/runtime.py` thin; runtime service orchestration belongs in `src/fleet_rlm/api/runtime_services/*`
+- Keep websocket runtime preparation in `src/fleet_rlm/api/runtime_services/chat_runtime.py`
+- Keep websocket run/session persistence orchestration in `src/fleet_rlm/api/runtime_services/chat_persistence.py`
 - Keep websocket event shaping and session lifecycle inside `src/fleet_rlm/api/routers/ws/*`
 
 Websocket/runtime contract rules:
@@ -147,6 +153,8 @@ Websocket/runtime contract rules:
 Daytona-specific boundaries:
 
 - Keep Daytona-specific behavior under `integrations/daytona/*`
+- Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
+- Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
 - Keep Daytona volume browsing in `integrations/daytona/volumes.py`
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`

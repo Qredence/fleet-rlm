@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.integrations.observability.workspace_metrics``."""
+"""Tests for ``fleet_rlm.runtime.quality.workspace_metrics``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import dspy
 import pytest
 
-from fleet_rlm.integrations.observability.workspace_metrics import (
+from fleet_rlm.runtime.quality.workspace_metrics import (
     completeness_feedback_metric,
     exact_match_feedback_metric,
     workspace_feedback_metric,

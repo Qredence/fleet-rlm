@@ -16,10 +16,10 @@ from fleet_rlm.runtime.execution.storage_paths import (
 )
 from fleet_rlm.utils.volume_tree import resolve_mounted_volume_path
 
-from .shared import aexecute_submit, execute_submit
+from ..shared import aexecute_submit, execute_submit
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ...agent.chat_agent import RLMReActChatAgent
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
 
@@ -290,9 +290,9 @@ def build_sandbox_tools(agent: RLMReActChatAgent) -> list[Any]:
     Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
     main tool list built by ``build_tool_list``.
     """
-    from .sandbox_delegate_tools import build_rlm_delegate_tools
-    from .sandbox_memory_tools import build_memory_intelligence_tools
-    from .sandbox_storage_tools import build_storage_tools
+    from .delegate import build_rlm_delegate_tools
+    from .memory import build_memory_intelligence_tools
+    from .storage import build_storage_tools
 
     tools: list[Any] = []
     ctx = _SandboxToolContext(agent=agent)

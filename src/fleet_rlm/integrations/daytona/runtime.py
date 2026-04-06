@@ -331,6 +331,24 @@ class DaytonaSandboxRuntime:
     def close(self) -> None:
         _run_async_compat(self.aclose)
 
+    @staticmethod
+    def _default_sandbox_name() -> str:
+        return f"fleet-rlm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d-%H%M%S}"
+
+    @staticmethod
+    def _resolve_default_snapshot(*, image: Any, snapshot: str | None) -> str | None:
+        if snapshot or image:
+            return snapshot
+        return DEFAULT_SNAPSHOT_NAME
+
+    def _merge_sandbox_labels(
+        self, labels: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        merged_labels = dict(self.DEFAULT_LABELS)
+        if labels:
+            merged_labels.update(labels)
+        return merged_labels
+
     def build_sandbox_spec(
         self,
         *,
@@ -375,22 +393,15 @@ class DaytonaSandboxRuntime:
         supplied, producing dashboard-friendly labels like
         ``fleet-rlm-20260404-090700`` instead of random hex IDs.
         """
-        readable_name = name or (
-            f"fleet-rlm-{datetime.datetime.now(datetime.timezone.utc):%Y%m%d-%H%M%S}"
-        )
-        effective_snapshot = snapshot if (snapshot or image) else DEFAULT_SNAPSHOT_NAME
-        merged_labels = dict(self.DEFAULT_LABELS)
-        if labels:
-            merged_labels.update(labels)
         return SandboxSpec(
-            name=readable_name,
+            name=name or self._default_sandbox_name(),
             language="python",
             image=image,
-            snapshot=effective_snapshot,
+            snapshot=self._resolve_default_snapshot(image=image, snapshot=snapshot),
             volume_name=volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             env_vars=env_vars or None,
-            labels=merged_labels,
+            labels=self._merge_sandbox_labels(labels),
             ephemeral=True,
             auto_stop_interval=auto_stop_interval,
             auto_archive_interval=auto_archive_interval,

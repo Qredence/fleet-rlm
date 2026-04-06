@@ -1,4 +1,4 @@
-"""Tests for sandbox infra helpers in ``fleet_rlm.runtime.tools.sandbox_common``."""
+"""Tests for sandbox infra helpers in ``fleet_rlm.runtime.tools.sandbox.common``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from fleet_rlm.runtime.tools.sandbox_common import (
+from fleet_rlm.runtime.tools.sandbox.common import (
     build_lsp_tools,
     build_snapshot_tools,
 )

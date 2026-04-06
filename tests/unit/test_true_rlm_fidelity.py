@@ -196,14 +196,14 @@ class TestAutoRouting:
     """Verify long prompts auto-route to variable-mode RLM."""
 
     def test_has_interpreter_true(self):
-        from fleet_rlm.runtime.tools.sandbox_delegate_tools import _has_interpreter
+        from fleet_rlm.runtime.tools.sandbox.delegate import _has_interpreter
 
         agent = MagicMock()
         agent.interpreter._started = True
         assert _has_interpreter(agent) is True
 
     def test_has_interpreter_false_no_interpreter(self):
-        from fleet_rlm.runtime.tools.sandbox_delegate_tools import _has_interpreter
+        from fleet_rlm.runtime.tools.sandbox.delegate import _has_interpreter
 
         agent = MagicMock()
         agent.interpreter = None

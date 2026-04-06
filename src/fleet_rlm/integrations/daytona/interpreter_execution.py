@@ -43,6 +43,92 @@ class _DaytonaExecutionResponse:
     callback_count: int = 0
 
 
+@dataclass(slots=True)
+class _ExecutionCallbacks:
+    bridge_tools: Callable[[], dict[str, Callable[..., Any]]]
+    reject_recursive_callbacks: Callable[[str], None]
+    requires_bridge: Callable[[str, dict[str, Callable[..., Any]]], bool]
+    ensure_bridge: Callable[..., Any]
+    execute_direct: Callable[..., Any]
+    response_from_execution: Callable[
+        [DaytonaBridgeExecution], _DaytonaExecutionResponse
+    ]
+
+
+def _parent_session_for_child(interpreter: Any) -> DaytonaSandboxSession | None:
+    parent_session = getattr(interpreter, "_session", None)
+    if parent_session is None or getattr(parent_session, "sandbox", None) is None:
+        return None
+    return parent_session
+
+
+def _build_child_interpreter(
+    interpreter: Any,
+    *,
+    runtime: DaytonaSandboxRuntime,
+    owns_runtime: bool,
+    delete_session_on_shutdown: bool,
+    delete_context_on_shutdown: bool = False,
+    remaining_llm_budget: int,
+) -> Any:
+    return interpreter.__class__(
+        runtime=runtime,
+        owns_runtime=owns_runtime,
+        timeout=interpreter.timeout,
+        execute_timeout=interpreter.execute_timeout,
+        volume_name=interpreter.volume_name,
+        repo_url=interpreter.repo_url,
+        repo_ref=interpreter.repo_ref,
+        context_paths=list(interpreter.context_paths),
+        sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+        delete_session_on_shutdown=delete_session_on_shutdown,
+        delete_context_on_shutdown=delete_context_on_shutdown,
+        sub_lm=interpreter.sub_lm,
+        max_llm_calls=remaining_llm_budget,
+        llm_call_timeout=interpreter.llm_call_timeout,
+        default_execution_profile=ExecutionProfile.RLM_DELEGATE,
+        async_execute=interpreter.async_execute,
+    )
+
+
+def _attach_shared_parent_session(
+    child: Any,
+    *,
+    parent_session: DaytonaSandboxSession,
+    runtime: DaytonaSandboxRuntime,
+) -> None:
+    child._session = DaytonaSandboxSession(
+        sandbox=parent_session.sandbox,
+        repo_url=parent_session.repo_url,
+        ref=parent_session.ref,
+        volume_name=parent_session.volume_name,
+        workspace_path=parent_session.workspace_path,
+        context_sources=list(parent_session.context_sources),
+        volume_mount_path=parent_session.volume_mount_path,
+        context_id=None,
+    )
+    child._session._runtime_ref = runtime
+    try:
+        child._session.bind_current_async_owner()
+    except RuntimeError:
+        pass
+    child._persisted_sandbox_id = parent_session.sandbox_id
+    child._persisted_workspace_path = parent_session.workspace_path
+
+
+def _propagate_parent_recursion_state(child: Any, parent: Any) -> None:
+    from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
+
+    setattr(
+        child,
+        "_check_and_increment_llm_calls",
+        parent._check_and_increment_llm_calls,
+    )
+    parent_depth = getattr(parent, "_sub_rlm_depth", 0)
+    parent_max = getattr(parent, "_sub_rlm_max_depth", 2)
+    initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
+
+
 def build_delegate_child(
     interpreter: Any,
     *,
@@ -57,91 +143,32 @@ def build_delegate_child(
     Uses Daytona's ``sandbox.code_interpreter.create_context()`` for
     isolation — see https://www.daytona.io/docs/sdk-reference
     """
-    from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
-
-    parent_session = getattr(interpreter, "_session", None)
-    can_reuse = (
-        parent_session is not None
-        and getattr(parent_session, "sandbox", None) is not None
-    )
-
-    if can_reuse:
-        # Type narrowing for ty: parent_session is not None here
-        assert parent_session is not None
-        # Share parent's runtime + sandbox; child owns nothing
-        child = interpreter.__class__(
+    parent_session = _parent_session_for_child(interpreter)
+    if parent_session is not None:
+        child = _build_child_interpreter(
+            interpreter,
             runtime=interpreter.runtime,
             owns_runtime=False,
-            timeout=interpreter.timeout,
-            execute_timeout=interpreter.execute_timeout,
-            volume_name=interpreter.volume_name,
-            repo_url=interpreter.repo_url,
-            repo_ref=interpreter.repo_ref,
-            context_paths=list(interpreter.context_paths),
-            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
             delete_session_on_shutdown=False,
             delete_context_on_shutdown=True,
-            sub_lm=interpreter.sub_lm,
-            max_llm_calls=remaining_llm_budget,
-            llm_call_timeout=interpreter.llm_call_timeout,
-            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-            async_execute=interpreter.async_execute,
+            remaining_llm_budget=remaining_llm_budget,
         )
-        # Wire a shallow session clone so child creates a FRESH context
-        # on the same sandbox (no new container needed).
-        child._session = DaytonaSandboxSession(
-            sandbox=parent_session.sandbox,
-            repo_url=parent_session.repo_url,
-            ref=parent_session.ref,
-            volume_name=parent_session.volume_name,
-            workspace_path=parent_session.workspace_path,
-            context_sources=list(parent_session.context_sources),
-            volume_mount_path=parent_session.volume_mount_path,
-            context_id=None,  # Force create_context() on start
+        _attach_shared_parent_session(
+            child,
+            parent_session=parent_session,
+            runtime=interpreter.runtime,
         )
-        # Give the child session a runtime back-reference so it can
-        # re-obtain a loop-correct sandbox handle if it is later called
-        # from a different asyncio loop (see aensure_context).
-        child._session._runtime_ref = interpreter.runtime
-        try:
-            child._session.bind_current_async_owner()
-        except RuntimeError:
-            # No running event loop (sync context); owner will be
-            # bound when the session is first used asynchronously.
-            pass
-        child._persisted_sandbox_id = parent_session.sandbox_id
-        child._persisted_workspace_path = parent_session.workspace_path
     else:
-        # Fallback: create a new sandbox (original behavior)
         runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
-        child = interpreter.__class__(
+        child = _build_child_interpreter(
+            interpreter,
             runtime=runtime,
             owns_runtime=True,
-            timeout=interpreter.timeout,
-            execute_timeout=interpreter.execute_timeout,
-            volume_name=interpreter.volume_name,
-            repo_url=interpreter.repo_url,
-            repo_ref=interpreter.repo_ref,
-            context_paths=list(interpreter.context_paths),
-            sandbox_spec=getattr(interpreter, "sandbox_spec", None),
             delete_session_on_shutdown=True,
-            sub_lm=interpreter.sub_lm,
-            max_llm_calls=remaining_llm_budget,
-            llm_call_timeout=interpreter.llm_call_timeout,
-            default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-            async_execute=interpreter.async_execute,
+            remaining_llm_budget=remaining_llm_budget,
         )
 
-    setattr(
-        child,
-        "_check_and_increment_llm_calls",
-        interpreter._check_and_increment_llm_calls,
-    )
-    # Propagate recursion depth so sub_rlm() inside child REPL code
-    # is depth-aware (Algorithm 1 from arXiv 2512.24601v2).
-    parent_depth = getattr(interpreter, "_sub_rlm_depth", 0)
-    parent_max = getattr(interpreter, "_sub_rlm_max_depth", 2)
-    initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
+    _propagate_parent_recursion_state(child, interpreter)
     return child
 
 
@@ -350,48 +377,108 @@ async def aexecute_in_session(
     ]
     | None = None,
 ) -> _DaytonaExecutionResponse:
-    bridge_tools_call = bridge_tools_fn or (lambda: bridge_tools(interpreter))
-    reject_recursive_callbacks = reject_unsupported_recursive_callbacks_fn or (
-        lambda code: reject_unsupported_recursive_callbacks(interpreter, code)
-    )
-    requires_bridge_call = requires_bridge_fn or (
-        lambda code, tools: requires_bridge(interpreter, code, tools)
-    )
-    ensure_bridge_call = aensure_bridge_fn or (
-        lambda *, session, context, tools: aensure_bridge(
-            interpreter,
-            session=session,
-            context=context,
-            tools=tools,
-        )
-    )
-    execute_direct_call = aexecute_direct_fn or (
-        lambda *, session, context, code: aexecute_direct(
-            interpreter,
-            session=session,
-            context=context,
-            code=code,
-        )
-    )
-    response_from_execution_call = response_from_execution_fn or (
-        lambda execution: response_from_execution(interpreter, execution)
+    callbacks = _resolve_execution_callbacks(
+        interpreter,
+        bridge_tools_fn=bridge_tools_fn,
+        reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+        requires_bridge_fn=requires_bridge_fn,
+        aensure_bridge_fn=aensure_bridge_fn,
+        aexecute_direct_fn=aexecute_direct_fn,
+        response_from_execution_fn=response_from_execution_fn,
     )
     context = await aensure_setup(
         interpreter,
         session,
         submit_signature_fn=interpreter._submit_signature,
     )
+    prepared_code = _prepare_execution_code(
+        interpreter,
+        code=code,
+        variables=variables,
+        reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
+    )
+    execution = await _arun_prepared_execution(
+        interpreter,
+        session=session,
+        context=context,
+        code=prepared_code,
+        callbacks=callbacks,
+    )
+    return callbacks.response_from_execution(execution)
+
+
+def _resolve_execution_callbacks(
+    interpreter: Any,
+    *,
+    bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
+    reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
+    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
+    | None = None,
+    aensure_bridge_fn: Callable[..., Any] | None = None,
+    aexecute_direct_fn: Callable[..., Any] | None = None,
+    response_from_execution_fn: Callable[
+        [DaytonaBridgeExecution], _DaytonaExecutionResponse
+    ]
+    | None = None,
+) -> _ExecutionCallbacks:
+    return _ExecutionCallbacks(
+        bridge_tools=bridge_tools_fn or (lambda: bridge_tools(interpreter)),
+        reject_recursive_callbacks=reject_unsupported_recursive_callbacks_fn
+        or (lambda code: reject_unsupported_recursive_callbacks(interpreter, code)),
+        requires_bridge=requires_bridge_fn
+        or (lambda code, tools: requires_bridge(interpreter, code, tools)),
+        ensure_bridge=aensure_bridge_fn
+        or (
+            lambda *, session, context, tools: aensure_bridge(
+                interpreter,
+                session=session,
+                context=context,
+                tools=tools,
+            )
+        ),
+        execute_direct=aexecute_direct_fn
+        or (
+            lambda *, session, context, code: aexecute_direct(
+                interpreter,
+                session=session,
+                context=context,
+                code=code,
+            )
+        ),
+        response_from_execution=response_from_execution_fn
+        or (lambda execution: response_from_execution(interpreter, execution)),
+    )
+
+
+def _prepare_execution_code(
+    interpreter: Any,
+    *,
+    code: str,
+    variables: dict[str, Any],
+    reject_recursive_callbacks: Callable[[str], None],
+) -> str:
     prepared_code = inject_variables(interpreter, code, variables)
     reject_recursive_callbacks(prepared_code)
-    tools = bridge_tools_call()
-    if requires_bridge_call(prepared_code, tools):
-        bridge = await ensure_bridge_call(
+    return prepared_code
+
+
+async def _arun_prepared_execution(
+    interpreter: Any,
+    *,
+    session: DaytonaSandboxSession,
+    context: Any,
+    code: str,
+    callbacks: _ExecutionCallbacks,
+) -> DaytonaBridgeExecution:
+    tools = callbacks.bridge_tools()
+    if callbacks.requires_bridge(code, tools):
+        bridge = await callbacks.ensure_bridge(
             session=session,
             context=context,
             tools=tools,
         )
-        execution = await bridge.aexecute(
-            code=prepared_code,
+        return await bridge.aexecute(
+            code=code,
             timeout=int(interpreter.execute_timeout),
             tool_executor=lambda name, args, kwargs: invoke_tool(
                 interpreter,
@@ -400,13 +487,11 @@ async def aexecute_in_session(
                 kwargs,
             ),
         )
-    else:
-        execution = await execute_direct_call(
-            session=session,
-            context=context,
-            code=prepared_code,
-        )
-    return response_from_execution_call(execution)
+    return await callbacks.execute_direct(
+        session=session,
+        context=context,
+        code=code,
+    )
 
 
 async def aexecute_direct(

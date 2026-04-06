@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -18,10 +17,10 @@ from fleet_rlm.api.routers.ws.helpers import (
     _close_websocket_safely,
     _try_send_json,
 )
+from fleet_rlm.api.routers.ws.endpoint import _build_local_persist_fn
 from fleet_rlm.api.routers.ws.session import (
     switch_session_if_needed,
 )
-from fleet_rlm.api.routers import ws as ws_router
 from fleet_rlm.api.schemas import WSMessage
 from tests.ui.fixtures_ui import FakeChatAgent, ts
 
@@ -220,14 +219,59 @@ def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
     asyncio.run(scenario())
 
 
-def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper() -> None:
-    source = inspect.getsource(ws_router.execution_stream)
-    start = source.index("async def local_persist(")
-    end = source.index("await _chat_message_loop(", start)
-    local_persist_block = source[start:end]
+def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
 
-    assert "await persist_session_state(" in local_persist_block
-    assert "await local_persist(" not in local_persist_block
+    async def _fake_persist_session_state(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_persistence.persist_session_state",
+        _fake_persist_session_state,
+    )
+
+    state = SimpleNamespace()
+    runtime = SimpleNamespace(
+        repository="repo",
+        identity_rows="identity",
+        persistence_required=True,
+    )
+    session = SimpleNamespace(
+        session_record={"id": "session"},
+        active_manifest_path="/tmp/manifest.json",
+        active_run_db_id="run-123",
+    )
+
+    local_persist = _build_local_persist_fn(
+        state=state,
+        runtime=runtime,
+        agent="agent",
+        interpreter="interpreter",
+        session=session,
+    )
+
+    asyncio.run(
+        local_persist(
+            include_volume_save=False,
+            latest_user_message="hello",
+        )
+    )
+
+    assert captured == {
+        "state": state,
+        "agent": "agent",
+        "session_record": {"id": "session"},
+        "active_manifest_path": "/tmp/manifest.json",
+        "active_run_db_id": "run-123",
+        "interpreter": "interpreter",
+        "repository": "repo",
+        "identity_rows": "identity",
+        "persistence_required": True,
+        "include_volume_save": False,
+        "latest_user_message": "hello",
+    }
 
 
 def test_ws_message_accepts_execution_mode() -> None:

@@ -9,9 +9,6 @@ from typing import Any, cast
 from fleet_rlm.cli import runtime_factory
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
-from fleet_rlm.integrations.daytona.agent import (
-    DaytonaWorkbenchChatAgent,
-)
 
 
 class _FakeSession:
@@ -100,7 +97,7 @@ class _FakeRuntime:
         return None
 
 
-def _interpreter(agent: DaytonaWorkbenchChatAgent) -> Any:
+def _interpreter(agent: RLMReActChatAgent) -> Any:
     return cast(Any, agent.interpreter)
 
 
@@ -109,22 +106,30 @@ async def test_daytona_workbench_chat_agent_uses_shared_react_stream_with_dayton
     monkeypatch,
 ) -> None:
     runtime = _FakeRuntime(_FakeSession())
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, runtime),
     )
     assert isinstance(agent, RLMReActChatAgent)
     interpreter = _interpreter(agent)
     forwarded_calls: list[dict[str, object]] = []
 
-    async def _fake_stream(self, *args, **kwargs):
-        forwarded_calls.append(kwargs)
+    async def _fake_stream(self, message, trace, cancel_check):
+        forwarded_calls.append(
+            {
+                "message": message,
+                "trace": trace,
+                "cancel_check": cancel_check,
+            }
+        )
         yield StreamEvent(
             kind="final",
             text="Daytona done",
             payload={"history_turns": 1},
         )
 
-    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.chat_agent._aiter_stream", _fake_stream
+    )
 
     events = [
         event
@@ -151,18 +156,17 @@ async def test_daytona_workbench_chat_agent_uses_shared_react_stream_with_dayton
             "message": "inspect recursive reasoning",
             "trace": True,
             "cancel_check": None,
-            "docs_path": None,
         }
     ]
     assert interpreter.repo_url == "https://github.com/example/repo.git"
     assert interpreter.repo_ref == "main"
     assert interpreter.context_paths == ["docs/spec.md"]
     assert interpreter.volume_name == "tenant-a"
-    assert agent.daytona_batch_concurrency == 6
+    assert agent.batch_concurrency == 6
 
 
 def test_daytona_workbench_chat_agent_registers_recursive_batch_tool() -> None:
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, _FakeRuntime(_FakeSession())),
     )
 
@@ -178,7 +182,7 @@ def test_daytona_workbench_chat_agent_registers_recursive_batch_tool() -> None:
 def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
     monkeypatch,
 ) -> None:
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, _FakeRuntime(_FakeSession())),
     )
     agent._set_document("active", "# Header\nOne\nTwo")
@@ -203,7 +207,7 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
         )
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools._run_runtime_module",
+        "fleet_rlm.runtime.tools.sandbox.delegate._run_runtime_module",
         _fake_run,
     )
 
@@ -216,7 +220,7 @@ def test_daytona_named_heavy_tool_uses_cached_runtime_module_path(
 
 @pytest.mark.asyncio
 async def test_daytona_parallel_semantic_map_command_is_unavailable() -> None:
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, _FakeRuntime(_FakeSession())),
     )
 
@@ -228,11 +232,11 @@ async def test_daytona_parallel_semantic_map_command_is_unavailable() -> None:
 async def test_daytona_recursive_batch_tool_preserves_order_and_concurrency(
     monkeypatch,
 ) -> None:
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, _FakeRuntime(_FakeSession())),
         delegate_max_calls_per_turn=8,
     )
-    agent.daytona_batch_concurrency = 2
+    agent.batch_concurrency = 2
 
     active_calls = 0
     max_active_calls = 0
@@ -291,7 +295,7 @@ async def test_daytona_recursive_batch_tool_preserves_order_and_concurrency(
 def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:
     session = _FakeSession()
     runtime = _FakeRuntime(session)
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, runtime),
         delete_session_on_shutdown=False,
     )
@@ -321,7 +325,7 @@ def test_exported_daytona_session_state_can_resume_existing_sandbox() -> None:
 
     exported = agent.export_session_state()
 
-    restored = DaytonaWorkbenchChatAgent(
+    restored = RLMReActChatAgent(
         runtime=cast(Any, runtime),
         delete_session_on_shutdown=False,
     )
@@ -345,7 +349,7 @@ async def test_async_imported_daytona_session_state_can_resume_existing_sandbox(
 ):
     session = _FakeSession()
     runtime = _FakeRuntime(session)
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, runtime),
         delete_session_on_shutdown=False,
     )
@@ -375,7 +379,7 @@ async def test_async_imported_daytona_session_state_can_resume_existing_sandbox(
 
     exported = agent.export_session_state()
 
-    restored = DaytonaWorkbenchChatAgent(
+    restored = RLMReActChatAgent(
         runtime=cast(Any, runtime),
         delete_session_on_shutdown=False,
     )
@@ -398,7 +402,7 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _FakeRuntime(_FakeSession())
-    agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
+    agent = RLMReActChatAgent(runtime=cast(Any, runtime))
     interpreter = _interpreter(agent)
     runtime.session.bind_current_async_owner()
     interpreter._session = runtime.session
@@ -409,10 +413,12 @@ async def test_daytona_workbench_chat_agent_async_stream_reconfigures_workspace_
         None,
     )
 
-    async def _fake_stream(self, *args, **kwargs):
+    async def _fake_stream(self, message, trace, cancel_check):
         yield StreamEvent(kind="final", text="done", payload={})
 
-    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.chat_agent._aiter_stream", _fake_stream
+    )
 
     events = [
         event
@@ -433,7 +439,7 @@ async def test_daytona_workbench_chat_agent_preserves_existing_workspace_when_st
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = _FakeRuntime(_FakeSession())
-    agent = DaytonaWorkbenchChatAgent(runtime=cast(Any, runtime))
+    agent = RLMReActChatAgent(runtime=cast(Any, runtime))
     interpreter = _interpreter(agent)
     interpreter.configure_workspace(
         repo_url="https://github.com/example/repo.git",
@@ -443,11 +449,19 @@ async def test_daytona_workbench_chat_agent_preserves_existing_workspace_when_st
     )
     forwarded_calls: list[dict[str, object]] = []
 
-    async def _fake_stream(self, *args, **kwargs):
-        forwarded_calls.append(kwargs)
+    async def _fake_stream(self, message, trace, cancel_check):
+        forwarded_calls.append(
+            {
+                "message": message,
+                "trace": trace,
+                "cancel_check": cancel_check,
+            }
+        )
         yield StreamEvent(kind="final", text="done", payload={})
 
-    monkeypatch.setattr(RLMReActChatAgent, "aiter_chat_turn_stream", _fake_stream)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.chat_agent._aiter_stream", _fake_stream
+    )
 
     events = [
         event
@@ -464,7 +478,6 @@ async def test_daytona_workbench_chat_agent_preserves_existing_workspace_when_st
             "message": "inspect recursive reasoning",
             "trace": True,
             "cancel_check": None,
-            "docs_path": None,
         }
     ]
     assert interpreter.repo_url == "https://github.com/example/repo.git"
@@ -476,7 +489,7 @@ async def test_daytona_workbench_chat_agent_preserves_existing_workspace_when_st
 def test_shutdown_preserves_remote_session_when_configured() -> None:
     session = _FakeSession()
     runtime = _FakeRuntime(session)
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, runtime),
         delete_session_on_shutdown=False,
     )
@@ -489,7 +502,7 @@ def test_shutdown_preserves_remote_session_when_configured() -> None:
 
 
 def test_daytona_workbench_chat_agent_threads_interpreter_async_execute() -> None:
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=cast(Any, _FakeRuntime(_FakeSession())),
         interpreter_async_execute=False,
     )
@@ -497,29 +510,38 @@ def test_daytona_workbench_chat_agent_threads_interpreter_async_execute() -> Non
     assert _interpreter(agent).async_execute is False
 
 
-def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
+def test_build_chat_agent_threads_interpreter_async_execute(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeDaytonaWorkbenchChatAgent:
+    def _extra_tool() -> None:
+        return None
+
+    class _FakeRLMReActChatAgent:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.factory.DaytonaWorkbenchChatAgent",
-        _FakeDaytonaWorkbenchChatAgent,
+        "fleet_rlm.runtime.factory.RLMReActChatAgent",
+        _FakeRLMReActChatAgent,
     )
 
-    agent = runtime_factory.build_daytona_workbench_chat_agent(
+    agent = runtime_factory.build_chat_agent(
         timeout=123,
         max_depth=4,
+        secret_name="SECRET",
+        volume_name="tenant-a",
+        extra_tools=[_extra_tool],
         interpreter_async_execute=False,
     )
 
-    assert isinstance(agent, _FakeDaytonaWorkbenchChatAgent)
+    assert isinstance(agent, _FakeRLMReActChatAgent)
     assert captured["timeout"] == 123
     assert captured["max_depth"] == 4
+    assert captured["secret_name"] == "SECRET"
+    assert captured["volume_name"] == "tenant-a"
+    assert captured["extra_tools"] == [_extra_tool]
     assert captured["interpreter_async_execute"] is False
 
 
@@ -536,7 +558,7 @@ async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
     session = _FakeSession()
     runtime = _FakeRuntime(session)
 
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=runtime,
         sandbox_spec=spec,
     )
@@ -565,7 +587,7 @@ async def test_sandbox_spec_with_declarative_image_flows_through() -> None:
     session = _FakeSession()
     runtime = _FakeRuntime(session)
 
-    agent = DaytonaWorkbenchChatAgent(
+    agent = RLMReActChatAgent(
         runtime=runtime,
         sandbox_spec=spec,
     )

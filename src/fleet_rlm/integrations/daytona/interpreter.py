@@ -460,116 +460,181 @@ class DaytonaInterpreter(
             return bool(matches_current_owner())
         return False
 
-    async def _aensure_session_impl(self) -> DaytonaSandboxSession:
-        self._ensure_runtime_available()
-        source_key = (
+    def _current_session_source_key(
+        self,
+    ) -> tuple[str | None, str | None, tuple[str, ...], str | None]:
+        return (
             self.repo_url,
             self.repo_ref,
             tuple(self.context_paths),
             self.volume_name,
         )
-        should_report_recreated = False
-        if self._session is not None:
-            if not self._session_matches_current_async_owner(self._session):
-                await self._adetach_session(delete=False)
-                # Clear the persisted context_id so the resumed session
-                # creates a fresh interpreter context on the current loop
-                # instead of reusing one bound to the old loop.
-                # (Fixes "Future attached to a different loop" errors when
-                # child dspy.RLM modules run from worker threads.)
-                self._persisted_context_id = None
-            elif self._session_needs_recreation(desired_volume=self.volume_name):
-                should_report_recreated = True
-                await self._adetach_session(delete=True)
-            elif self._session_source_key == source_key:
-                self._last_sandbox_transition = "reused"
-                self._last_workspace_reconfigured = False
-                self._persist_session_snapshot()
-                return self._session
-            else:
-                try:
-                    self._session = await self._areconcile_workspace_session(
-                        self._session
-                    )
-                    if self._session is not None:
-                        self._session.execution_event_callback = (
-                            self.execution_event_callback
-                        )
-                except Exception as exc:
-                    self._mark_runtime_degradation_from_exception(exc)
-                    should_report_recreated = True
-                    await self._adetach_session(delete=True)
-                else:
-                    self._session_source_key = source_key
-                    await self._areset_execution_state()
-                    self._persist_session_snapshot()
-                    self._last_sandbox_transition = "reused"
-                    self._last_workspace_reconfigured = True
-                    return self._session
 
-        if (
-            self._persisted_sandbox_id is not None
-            and self._persisted_volume_name != self.volume_name
-        ):
-            should_report_recreated = True
+    def _attach_execution_callback(
+        self, session: DaytonaSandboxSession | None
+    ) -> DaytonaSandboxSession | None:
+        if session is not None:
+            session.execution_event_callback = self.execution_event_callback
+        return session
+
+    async def _afinalize_session(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
+        transition: str,
+        workspace_reconfigured: bool,
+    ) -> DaytonaSandboxSession:
+        self._session = self._attach_execution_callback(session)
+        self._session_source_key = source_key
+        await self._areset_execution_state()
+        self._persist_session_snapshot()
+        self._last_sandbox_transition = transition
+        self._last_workspace_reconfigured = workspace_reconfigured
+        return session
+
+    async def _arelease_loop_mismatched_session(self) -> None:
+        await self._adetach_session(delete=False)
+        self._persisted_context_id = None
+
+    async def _aresolve_active_session(
+        self,
+        *,
+        source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
+    ) -> tuple[DaytonaSandboxSession | None, bool]:
+        active_session = self._session
+        if active_session is None:
+            return None, False
+
+        if not self._session_matches_current_async_owner(active_session):
+            await self._arelease_loop_mismatched_session()
+            return None, False
+
+        if self._session_needs_recreation(desired_volume=self.volume_name):
+            await self._adetach_session(delete=True)
+            return None, True
+
+        if self._session_source_key == source_key:
+            session = await self._afinalize_session(
+                active_session,
+                source_key=source_key,
+                transition="reused",
+                workspace_reconfigured=False,
+            )
+            return session, False
+
+        try:
+            reconciled = await self._areconcile_workspace_session(active_session)
+        except Exception as exc:
+            self._mark_runtime_degradation_from_exception(exc)
+            await self._adetach_session(delete=True)
+            return None, True
+
+        session = await self._afinalize_session(
+            reconciled,
+            source_key=source_key,
+            transition="reused",
+            workspace_reconfigured=True,
+        )
+        return session, False
+
+    def _clear_persisted_session_for_volume_change(self) -> bool:
+        if self._persisted_sandbox_id is None:
+            return False
+        if self._persisted_volume_name == self.volume_name:
+            return False
+        self._clear_persisted_session()
+        return True
+
+    @staticmethod
+    def _should_reconcile_resumed_session(
+        persisted_source_key: tuple[str | None, str | None, tuple[str, ...], str | None]
+        | None,
+        source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
+    ) -> bool:
+        return persisted_source_key is not None and persisted_source_key != source_key
+
+    async def _aresolve_persisted_session(
+        self,
+        *,
+        source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
+    ) -> tuple[DaytonaSandboxSession | None, bool]:
+        if not (self._persisted_sandbox_id and self._persisted_workspace_path):
+            return None, False
+
+        try:
+            persisted_source_key = self._session_source_key
+            resumed = await self._aresume_workspace_session(
+                sandbox_id=self._persisted_sandbox_id,
+                repo_url=self.repo_url,
+                ref=self.repo_ref,
+                workspace_path=self._persisted_workspace_path,
+                context_sources=self._persisted_context_sources,
+                context_id=self._persisted_context_id,
+            )
+            workspace_reconfigured = False
+            if self._should_reconcile_resumed_session(persisted_source_key, source_key):
+                resumed = await self._areconcile_workspace_session(resumed)
+                workspace_reconfigured = True
+
+            session = await self._afinalize_session(
+                resumed,
+                source_key=source_key,
+                transition="resumed",
+                workspace_reconfigured=workspace_reconfigured,
+            )
+            return session, False
+        except Exception as exc:
+            self._mark_runtime_degradation_from_exception(exc)
             self._clear_persisted_session()
+            return None, True
 
-        if self._persisted_sandbox_id and self._persisted_workspace_path:
-            try:
-                persisted_source_key = self._session_source_key
-                self._session = await self._aresume_workspace_session(
-                    sandbox_id=self._persisted_sandbox_id,
-                    repo_url=self.repo_url,
-                    ref=self.repo_ref,
-                    workspace_path=self._persisted_workspace_path,
-                    context_sources=self._persisted_context_sources,
-                    context_id=self._persisted_context_id,
-                )
-                if self._session is not None:
-                    self._session.execution_event_callback = (
-                        self.execution_event_callback
-                    )
-                if (
-                    persisted_source_key is not None
-                    and persisted_source_key != source_key
-                ):
-                    self._session = await self._areconcile_workspace_session(
-                        self._session
-                    )
-                    if self._session is not None:
-                        self._session.execution_event_callback = (
-                            self.execution_event_callback
-                        )
-                    self._last_workspace_reconfigured = True
-                else:
-                    self._last_workspace_reconfigured = False
-                self._session_source_key = source_key
-                await self._areset_execution_state()
-                self._persist_session_snapshot()
-                self._last_sandbox_transition = "resumed"
-                return self._session
-            except Exception as exc:
-                self._mark_runtime_degradation_from_exception(exc)
-                self._clear_persisted_session()
-                should_report_recreated = True
-
-        self._session = await self.runtime.acreate_workspace_session(
+    async def _acreate_session_from_runtime(
+        self,
+        *,
+        source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
+        should_report_recreated: bool,
+    ) -> DaytonaSandboxSession:
+        session = await self.runtime.acreate_workspace_session(
             repo_url=self.repo_url,
             ref=self.repo_ref,
             context_paths=list(self.context_paths),
             volume_name=self.volume_name,
             spec=self.sandbox_spec,
         )
-        if self._session is not None:
-            self._session.execution_event_callback = self.execution_event_callback
-        self._session_source_key = source_key
-        await self._areset_execution_state()
-        self._persist_session_snapshot()
-        self._last_sandbox_transition = (
-            "recreated" if should_report_recreated else "created"
+        return await self._afinalize_session(
+            session,
+            source_key=source_key,
+            transition="recreated" if should_report_recreated else "created",
+            workspace_reconfigured=False,
         )
-        self._last_workspace_reconfigured = False
-        return self._session
+
+    async def _aensure_session_impl(self) -> DaytonaSandboxSession:
+        self._ensure_runtime_available()
+        source_key = self._current_session_source_key()
+        should_report_recreated = False
+
+        active_session, active_recreated = await self._aresolve_active_session(
+            source_key=source_key
+        )
+        if active_session is not None:
+            return active_session
+        should_report_recreated = should_report_recreated or active_recreated
+
+        if self._clear_persisted_session_for_volume_change():
+            should_report_recreated = True
+
+        persisted_session, persisted_recreated = await self._aresolve_persisted_session(
+            source_key=source_key
+        )
+        if persisted_session is not None:
+            return persisted_session
+        should_report_recreated = should_report_recreated or persisted_recreated
+
+        return await self._acreate_session_from_runtime(
+            source_key=source_key,
+            should_report_recreated=should_report_recreated,
+        )
 
     async def _aensure_session(self) -> DaytonaSandboxSession:
         session = await self._aensure_session_impl()

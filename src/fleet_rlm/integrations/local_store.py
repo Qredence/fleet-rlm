@@ -1,10 +1,9 @@
-"""Lightweight SQLite-backed local store for sessions, history, and optimization.
+"""Lightweight SQLite-backed local state for sessions, history, and optimization.
 
-Usage::
-
-    from fleet_rlm.integrations.database.local_store import get_engine, ChatSession
-
-    engine = get_engine()  # creates ~/.fleet_rlm/local.db on first call
+This module is intentionally separate from ``integrations.database``.
+``integrations.database`` owns the async Neon/Postgres repository layer, while this
+module owns the local SQLite sidecar used for developer workflows and lightweight
+best-effort persistence.
 """
 
 from __future__ import annotations
@@ -18,10 +17,6 @@ from typing import Any
 
 from sqlalchemy import Column, Integer
 from sqlmodel import Field, Session, SQLModel, create_engine, select
-
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
 
 _DEFAULT_DB_DIR = Path(".data")
 _engines: dict[str, Any] = {}
@@ -57,17 +52,12 @@ def get_engine(db_path: str | None = None):
 
 
 def get_session(db_path: str | None = None) -> Session:
-    """Convenience: return a new SQLModel Session bound to the local engine."""
+    """Return a new SQLModel session bound to the local SQLite engine."""
     return Session(get_engine(db_path))
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
 
 
 class SessionStatus(str, enum.Enum):
@@ -84,11 +74,6 @@ class RunStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
 
 
 class ChatSession(SQLModel, table=True):
@@ -125,9 +110,9 @@ class Dataset(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(max_length=255, index=True)
-    uri: str  # path to the exported MLflow trace JSON
+    uri: str
     row_count: int | None = None
-    input_keys: str | None = None  # comma-separated, e.g. "question,context"
+    input_keys: str | None = None
     output_key: str = Field(default="assistant_response", max_length=128)
     created_at: datetime = Field(default_factory=_utc_now)
 
@@ -139,8 +124,8 @@ class OptimizationRun(SQLModel, table=True):
     dataset_id: int | None = Field(default=None, foreign_key="datasets.id")
     optimizer: OptimizerType
     status: RunStatus = Field(default=RunStatus.RUNNING)
-    program_spec: str = Field(max_length=255)  # "module:attr"
-    output_path: str | None = None  # path to saved optimized program
+    program_spec: str = Field(max_length=255)
+    output_path: str | None = None
     auto: str | None = Field(default="light", max_length=16)
     train_ratio: float = Field(default=0.8)
     train_examples: int | None = None
@@ -150,11 +135,6 @@ class OptimizationRun(SQLModel, table=True):
     started_at: datetime = Field(default_factory=_utc_now)
     completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utc_now)
-
-
-# ---------------------------------------------------------------------------
-# Helpers — thin wrappers so callers don't need to learn SQLModel
-# ---------------------------------------------------------------------------
 
 
 def create_session(

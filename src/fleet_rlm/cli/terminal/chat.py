@@ -16,13 +16,13 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
-from fleet_rlm.cli import runners
 from fleet_rlm.runtime.agent.commands import COMMAND_DISPATCH
 from fleet_rlm.runtime.config import (
     build_dspy_context,
     get_delegate_lm_from_env,
     get_planner_lm_from_env,
 )
+from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.runtime.models import TraceMode
 from fleet_rlm.integrations.config.env import AppConfig
 
@@ -169,7 +169,7 @@ class _TerminalChatSession:
                 "[bold]/status[/] before sending chat prompts."
             )
 
-        agent_context = runners.build_react_chat_agent(
+        agent_context = build_chat_agent(
             docs_path=self.options.docs_path,
             react_max_iters=self.config.rlm_settings.max_iters,
             deep_react_max_iters=self.config.rlm_settings.deep_max_iters,

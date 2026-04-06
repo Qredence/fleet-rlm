@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
 
-from .shared import (
+from ..shared import (
     aexecute_submit,
     chunk_text,
     normalize_strategy,
@@ -23,7 +23,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ...agent.chat_agent import RLMReActChatAgent
 
 
 # ---------------------------------------------------------------------------

@@ -86,8 +86,8 @@ uv run pytest -q \
 | `test_runtime_module_helpers.py`                     | Runtime module helper utilities                              |
 | `test_core_tools_document.py`                        | Document tool surface                                        |
 | `test_document_sources_new.py`                       | Document source resolution                                   |
-| `test_sandbox_common_infra_tools.py`                 | Snapshot and LSP helpers in `sandbox_common.py`              |
-| `test_sandbox_common_process_tools.py`               | Process-tool gating in `sandbox_common.py`                   |
+| `test_sandbox_common_infra_tools.py`                 | Snapshot and LSP helpers in `runtime/tools/sandbox/common.py` |
+| `test_sandbox_common_process_tools.py`               | Process-tool gating in `runtime/tools/sandbox/common.py`      |
 | `test_memory_tools.py`                               | Sandbox persistent memory and buffer tools                   |
 | `test_dspy_evaluation.py`                            | DSPy evaluation wrapper over `dspy.Evaluate`                 |
 | `test_gepa_optimization.py`                          | GEPA feedback metric adapter and validation shape            |
@@ -113,7 +113,7 @@ uv run pytest -q \
 | `test_daytona_rlm_smoke.py`                          | Daytona smoke validation contract                            |
 | `test_daytona_runtime.py`                            | DaytonaSandboxRuntime / DaytonaSandboxSession                |
 | `test_daytona_interpreter.py`                        | DaytonaInterpreter lifecycle                                 |
-| `test_daytona_rlm_chat_agent.py`                     | DaytonaWorkbenchChatAgent setup                              |
+| `test_daytona_rlm_chat_agent.py`                     | Shared `RLMReActChatAgent` session/export behavior   |
 | `test_daytona_workbench_chat_agent.py`               | Daytona-specific agent/session flow                          |
 | `test_daytona_runtime_helpers.py`                    | Daytona runtime helper utilities                             |
 | `test_daytona_bridge.py`                             | Daytona bridge callbacks                                     |

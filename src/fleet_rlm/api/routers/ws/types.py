@@ -69,6 +69,11 @@ class ChatAgentProtocol(Protocol):
         cancel_check: Callable[[], bool] | None = None,
         *,
         docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
     ) -> AsyncIterator[StreamEvent]: ...
 
 
@@ -150,7 +155,7 @@ async def prepare_daytona_workspace_for_turn(
         if isinstance(request.batch_concurrency, int) and request.batch_concurrency > 0
         else None
     )
-    setattr(agent, "daytona_batch_concurrency", normalized_batch_concurrency)
+    setattr(agent, "batch_concurrency", normalized_batch_concurrency)
 
     await configure_workspace(
         repo_url=request.repo_url,

@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.integrations.observability.gepa_optimization``."""
+"""Tests for ``fleet_rlm.runtime.quality.gepa_optimization``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import dspy
 
-from fleet_rlm.integrations.observability.gepa_optimization import (
+from fleet_rlm.runtime.quality.gepa_optimization import (
     build_gepa_feedback_metric,
 )
 

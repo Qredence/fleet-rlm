@@ -1,4 +1,4 @@
-"""Database package for fleet-rlm Neon persistence."""
+"""Async Neon/Postgres persistence package for fleet-rlm."""
 
 from .engine import DatabaseManager, to_async_database_url, to_sync_database_url
 from .models_base import Base

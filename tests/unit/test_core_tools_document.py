@@ -1,6 +1,6 @@
 """Unit tests for document tool wrappers at their new location.
 
-Covers fleet_rlm.runtime.tools.document.build_document_tools factory —
+Covers fleet_rlm.runtime.tools.content.document.build_document_tools factory —
 the closure-based DSPy tool builder that binds document ops to an agent.
 """
 
@@ -90,7 +90,7 @@ class _FakeDaytonaInterpreter:
 
 def test_build_document_tools_returns_dspy_tools():
     """build_document_tools should return a non-empty list of dspy.Tool objects."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(Path("/tmp"))
     tools = build_document_tools(agent)
@@ -103,7 +103,7 @@ def test_build_document_tools_returns_dspy_tools():
 
 def test_build_document_tools_includes_expected_names():
     """The factory should expose load_document, fetch_web_document, set_active_document, list_documents."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(Path("/tmp"))
     tools = build_document_tools(agent)
@@ -122,7 +122,7 @@ def test_fetch_web_document_marks_retriever_span(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """fetch_web_document should annotate retrieval work with a retriever span."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)
@@ -143,10 +143,12 @@ def test_fetch_web_document_marks_retriever_span(
             trace_calls.append((name, span_type))
             return _TraceSpan()
 
-    monkeypatch.setattr("fleet_rlm.runtime.tools.document.mlflow", _FakeMlflow())
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.content.document.mlflow", _FakeMlflow()
+    )
 
     with patch(
-        "fleet_rlm.runtime.tools.document.fetch_url_document_content",
+        "fleet_rlm.runtime.tools.content.document.fetch_url_document_content",
         return_value=("hello", {"source_type": "text"}),
     ):
         result = fetch_fn("https://example.com/doc.txt", alias="web")
@@ -162,7 +164,7 @@ def test_fetch_web_document_marks_retriever_span(
 
 def test_load_document_local_file(tmp_path: Path):
     """load_document with a local file path should populate agent._document_cache."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     readme = tmp_path / "readme.md"
     readme.write_text("# Hello\nThis is the readme.")
@@ -173,7 +175,7 @@ def test_load_document_local_file(tmp_path: Path):
 
     # Patch the read_document_content dependency to avoid real parser
     with patch(
-        "fleet_rlm.runtime.tools.document._read_document_content",
+        "fleet_rlm.runtime.tools.content.document._read_document_content",
         return_value=("# Hello\nThis is the readme.", {"source_type": "text"}),
     ):
         result = load_fn(str(readme))
@@ -185,7 +187,7 @@ def test_load_document_local_file(tmp_path: Path):
 
 def test_load_document_missing_file_raises(tmp_path: Path):
     """load_document with a non-existent path should raise FileNotFoundError."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)
@@ -197,7 +199,7 @@ def test_load_document_missing_file_raises(tmp_path: Path):
 
 def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
     """Daytona workspace files should load when absent on the host filesystem."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     session = _FakeDaytonaSession()
@@ -207,7 +209,7 @@ def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
     with patch(
-        "fleet_rlm.runtime.tools.sandbox_common._get_daytona_session_sync",
+        "fleet_rlm.runtime.tools.sandbox.common._get_daytona_session_sync",
         return_value=session,
     ):
         result = load_fn("paper.txt", alias="paper")
@@ -227,7 +229,7 @@ def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
 
 def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: Path):
     """Daytona workspace files should win over colliding host-relative paths."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     readme = tmp_path / "README.md"
     readme.write_text("host readme")
@@ -240,7 +242,7 @@ def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
     with patch(
-        "fleet_rlm.runtime.tools.sandbox_common._get_daytona_session_sync",
+        "fleet_rlm.runtime.tools.sandbox.common._get_daytona_session_sync",
         return_value=session,
     ):
         result = load_fn("README.md", alias="readme")
@@ -259,7 +261,7 @@ def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: 
 
 def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
     """Missing Daytona workspace files should still fail cleanly."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     agent.interpreter = _FakeDaytonaInterpreter(_FakeDaytonaSession())
@@ -274,7 +276,7 @@ def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
 def test_load_daytona_workspace_text_sync_rejects_parent_traversal(
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.runtime.tools.sandbox_common import (
+    from fleet_rlm.runtime.tools.sandbox.common import (
         _SandboxToolContext,
         _load_daytona_workspace_text_sync,
     )
@@ -295,7 +297,7 @@ def test_load_daytona_workspace_text_sync_rejects_parent_traversal(
 
 def test_load_document_directory_returns_listing(tmp_path: Path):
     """load_document with a directory returns a file listing, not content."""
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     (tmp_path / "a.txt").write_text("A")
     (tmp_path / "b.txt").write_text("B")
@@ -317,7 +319,7 @@ def test_load_document_directory_returns_listing(tmp_path: Path):
 
 
 def test_list_documents_empty_cache(tmp_path: Path):
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)
@@ -330,7 +332,7 @@ def test_list_documents_empty_cache(tmp_path: Path):
 
 
 def test_list_documents_populated_cache(tmp_path: Path):
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     agent._document_cache["doc1"] = "content one"
@@ -353,7 +355,7 @@ def test_list_documents_populated_cache(tmp_path: Path):
 
 
 def test_set_active_document_valid_alias(tmp_path: Path):
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     agent._document_cache["myfile"] = "some content"
@@ -368,7 +370,7 @@ def test_set_active_document_valid_alias(tmp_path: Path):
 
 
 def test_set_active_document_invalid_alias_raises(tmp_path: Path):
-    from fleet_rlm.runtime.tools.document import build_document_tools
+    from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
     tools = build_document_tools(agent)

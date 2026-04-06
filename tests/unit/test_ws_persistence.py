@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fleet_rlm.api.routers.ws import persistence as ws_persistence
+from fleet_rlm.api.runtime_services import chat_persistence as persistence_service
 from tests.ui.fixtures_ui import FakeChatAgent
 
 
@@ -23,7 +24,7 @@ def test_ensure_manifest_shape_initializes_expected_collections() -> None:
 def test_update_manifest_from_exported_state_increments_revision_and_metadata(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(ws_persistence, "now_iso", lambda: "2026-03-21T00:00:00Z")
+    monkeypatch.setattr(persistence_service, "now_iso", lambda: "2026-03-21T00:00:00Z")
     manifest: dict[str, Any] = {"rev": "2", "artifacts": [{"id": "a1"}]}
     exported_state = {
         "history": [{"user_request": "hello", "assistant_response": "hi"}],
@@ -78,11 +79,17 @@ def test_persist_session_state_updates_cache_and_saves_manifest(monkeypatch) -> 
         memory_calls.append(kwargs)
 
     monkeypatch.setattr(
-        ws_persistence, "load_manifest_from_volume", _fake_load_manifest
+        persistence_service,
+        "load_manifest_from_volume",
+        _fake_load_manifest,
     )
-    monkeypatch.setattr(ws_persistence, "save_manifest_to_volume", _fake_save_manifest)
     monkeypatch.setattr(
-        ws_persistence,
+        persistence_service,
+        "save_manifest_to_volume",
+        _fake_save_manifest,
+    )
+    monkeypatch.setattr(
+        persistence_service,
         "persist_memory_item_if_needed",
         _fake_persist_memory_item_if_needed,
     )

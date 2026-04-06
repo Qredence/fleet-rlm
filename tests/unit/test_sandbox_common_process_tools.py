@@ -1,12 +1,12 @@
-"""Tests for process-tool gating in ``fleet_rlm.runtime.tools.sandbox_common``."""
+"""Tests for process-tool gating in ``fleet_rlm.runtime.tools.sandbox.common``."""
 
 from __future__ import annotations
 
-from fleet_rlm.runtime.tools.sandbox_common import (
+from fleet_rlm.runtime.tools.sandbox.common import (
     _UNSUPPORTED_PROVIDER_ERROR,
     build_process_tools,
 )
-from fleet_rlm.runtime.tools.sandbox_common import build_sandbox_tools
+from fleet_rlm.runtime.tools.sandbox.common import build_sandbox_tools
 
 
 class _StubInterpreter:
@@ -88,23 +88,23 @@ def test_build_sandbox_tools_skips_daytona_snapshot_and_lsp_tools_for_non_dayton
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_delegate_tools.build_rlm_delegate_tools",
+        "fleet_rlm.runtime.tools.sandbox.delegate.build_rlm_delegate_tools",
         lambda agent: ["delegate"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_memory_tools.build_memory_intelligence_tools",
+        "fleet_rlm.runtime.tools.sandbox.memory.build_memory_intelligence_tools",
         lambda agent: ["memory"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_storage_tools.build_storage_tools",
+        "fleet_rlm.runtime.tools.sandbox.storage.build_storage_tools",
         lambda agent: ["storage"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_common.build_snapshot_tools",
+        "fleet_rlm.runtime.tools.sandbox.common.build_snapshot_tools",
         lambda agent: ["snapshot"],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.tools.sandbox_common.build_lsp_tools",
+        "fleet_rlm.runtime.tools.sandbox.common.build_lsp_tools",
         lambda agent: ["lsp"],
     )
 

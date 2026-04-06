@@ -632,7 +632,7 @@ def test_signature_output_types_are_generic():
 
 
 def test_grounded_answer_normalizes_citation_shape(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+    import fleet_rlm.runtime.tools.sandbox.delegate as sandbox_delegate_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["test_doc"] = "line1\nline2"
@@ -681,7 +681,7 @@ def test_grounded_answer_normalizes_citation_shape(monkeypatch):
 
 
 def test_memory_tree_normalizes_node_shape(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_memory_tools as sandbox_memory_tools
+    import fleet_rlm.runtime.tools.sandbox.memory as sandbox_memory_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
@@ -740,7 +740,7 @@ def test_memory_tree_normalizes_node_shape(monkeypatch):
 
 
 def test_memory_structure_migration_plan_normalizes_operation_shape(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_memory_tools as sandbox_memory_tools
+    import fleet_rlm.runtime.tools.sandbox.memory as sandbox_memory_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
@@ -794,7 +794,7 @@ def test_memory_structure_migration_plan_normalizes_operation_shape(monkeypatch)
 
 
 def test_memory_action_intent_normalizes_action_and_lists(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_memory_tools as sandbox_memory_tools
+    import fleet_rlm.runtime.tools.sandbox.memory as sandbox_memory_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
@@ -831,7 +831,7 @@ def test_memory_action_intent_normalizes_action_and_lists(monkeypatch):
 
 
 def test_clarification_questions_normalizes_lists_and_high_risk(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_memory_tools as sandbox_memory_tools
+    import fleet_rlm.runtime.tools.sandbox.memory as sandbox_memory_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
@@ -864,7 +864,7 @@ def test_clarification_questions_normalizes_lists_and_high_risk(monkeypatch):
 
 
 def test_grounded_answer_marks_retriever_span(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+    import fleet_rlm.runtime.tools.sandbox.delegate as sandbox_delegate_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["test_doc"] = "line1\nline2"
@@ -922,7 +922,7 @@ def test_grounded_answer_rejects_invalid_max_chunks(monkeypatch):
 
 
 def test_triage_incident_logs_normalizes_shape_and_metadata(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+    import fleet_rlm.runtime.tools.sandbox.delegate as sandbox_delegate_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     agent.documents["test_log"] = "ERROR something bad happened"
@@ -963,7 +963,7 @@ def test_triage_incident_logs_normalizes_shape_and_metadata(monkeypatch):
 
 
 def test_plan_code_change_normalizes_lists_and_metadata(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+    import fleet_rlm.runtime.tools.sandbox.delegate as sandbox_delegate_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
@@ -1000,7 +1000,7 @@ def test_plan_code_change_normalizes_lists_and_metadata(monkeypatch):
 
 
 def test_propose_core_memory_update_normalizes_lists_and_metadata(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_delegate_tools as sandbox_delegate_tools
+    import fleet_rlm.runtime.tools.sandbox.delegate as sandbox_delegate_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     monkeypatch.setattr(agent, "history_messages", lambda: ["Turn A", "Turn B"])
@@ -1039,7 +1039,7 @@ def test_propose_core_memory_update_normalizes_lists_and_metadata(monkeypatch):
 
 
 def test_memory_structure_audit_normalizes_lists_and_metadata(monkeypatch):
-    import fleet_rlm.runtime.tools.sandbox_memory_tools as sandbox_memory_tools
+    import fleet_rlm.runtime.tools.sandbox.memory as sandbox_memory_tools
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
 
