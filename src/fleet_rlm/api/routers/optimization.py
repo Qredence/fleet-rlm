@@ -38,23 +38,6 @@ OPTIMIZATION_DATA_ROOT = Path(
 ).resolve()
 
 
-def _validate_path(user_path: str, base: Path) -> str:
-    """Resolve *user_path* relative to *base* and reject traversals."""
-    if os.path.isabs(user_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Absolute paths are not allowed. Use a relative path.",
-        )
-    base_root = os.path.realpath(os.fspath(base))
-    resolved = os.path.realpath(os.path.join(base_root, user_path))
-    if resolved != base_root and not resolved.startswith(f"{base_root}{os.sep}"):
-        raise HTTPException(
-            status_code=400,
-            detail="Path escapes the allowed data directory.",
-        )
-    return resolved
-
-
 def _check_gepa_available() -> bool:
     """Return True if the GEPA teleprompt module is importable."""
     try:
@@ -175,16 +158,41 @@ async def run_optimization(
             detail=detail,
         )
 
-    dataset = _validate_path(request.dataset_path, OPTIMIZATION_DATA_ROOT)
+    base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
+
+    if os.path.isabs(request.dataset_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Absolute paths are not allowed. Use a relative path.",
+        )
+    dataset = os.path.realpath(os.path.join(base_root, request.dataset_path))
+    if dataset != base_root and not dataset.startswith(f"{base_root}{os.sep}"):
+        raise HTTPException(
+            status_code=400,
+            detail="Path escapes the allowed data directory.",
+        )
     if not os.path.exists(dataset):
         raise HTTPException(
             status_code=400,
             detail=f"Dataset file not found: {request.dataset_path}",
         )
 
-    output_path: str | None = None
+    output_path: Path | None = None
     if request.output_path:
-        output_path = _validate_path(request.output_path, OPTIMIZATION_DATA_ROOT)
+        if os.path.isabs(request.output_path):
+            raise HTTPException(
+                status_code=400,
+                detail="Absolute paths are not allowed. Use a relative path.",
+            )
+        resolved_output = os.path.realpath(os.path.join(base_root, request.output_path))
+        if resolved_output != base_root and not resolved_output.startswith(
+            f"{base_root}{os.sep}"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Path escapes the allowed data directory.",
+            )
+        output_path = Path(resolved_output)
 
     db_run_id = None
     try:
@@ -206,7 +214,7 @@ async def run_optimization(
                 _run_gepa_optimization,
                 dataset_path=Path(dataset),
                 program_spec=request.program_spec,
-                output_path=Path(output_path) if output_path else None,
+                output_path=output_path,
                 auto=request.auto,
                 train_ratio=request.train_ratio,
             ),
