@@ -51,7 +51,7 @@ async def execution_stream(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> None:
-    """Dedicated execution stream for Artifact Canvas consumers."""
+    """Canonical websocket endpoint for both execution streaming and subscriptions."""
     if workspace_id is not None or user_id is not None:
         await websocket.accept()
         if await _try_send_json(
@@ -70,6 +70,75 @@ async def execution_stream(
     state = get_server_state_from_websocket(websocket)
     identity = await _authenticate_websocket(websocket, state)
     if identity is None:
+        return
+
+    if not session_id:
+        await websocket.accept()
+        runtime = await _prepare_chat_runtime(
+            websocket=websocket,
+            state=state,
+            identity=identity,
+        )
+        if runtime is None:
+            return
+
+        analytics_distinct_id = (identity.user_claim or "").strip() or None
+        try:
+            with (
+                runtime_distinct_id_context(analytics_distinct_id),
+                build_dspy_context(lm=runtime.planner_lm),
+            ):
+                initial_msg = None
+                while initial_msg is None:
+                    raw_payload = await websocket.receive_json()
+                    initial_msg = await parse_ws_message_or_send_error(
+                        websocket=websocket,
+                        raw_payload=raw_payload,
+                    )
+
+                agent_context = _build_chat_agent_context(runtime)
+                async with agent_context as agent:
+                    interpreter = getattr(agent, "interpreter", None)
+                    _set_interpreter_default_profile(interpreter, runtime.cfg)
+                    session = _new_chat_session_state(runtime, identity)
+
+                    async def local_persist(
+                        *,
+                        include_volume_save: bool = True,
+                        latest_user_message: str = "",
+                    ) -> None:
+                        await persist_session_state(
+                            state=state,
+                            agent=agent,
+                            session_record=session.session_record,
+                            active_manifest_path=session.active_manifest_path,
+                            active_run_db_id=session.active_run_db_id,
+                            interpreter=interpreter,
+                            repository=runtime.repository,
+                            identity_rows=runtime.identity_rows,
+                            persistence_required=runtime.persistence_required,
+                            include_volume_save=include_volume_save,
+                            latest_user_message=latest_user_message,
+                        )
+
+                    await _chat_message_loop(
+                        websocket=websocket,
+                        state=state,
+                        runtime=runtime,
+                        agent=agent,
+                        interpreter=interpreter,
+                        session=session,
+                        local_persist=local_persist,
+                        initial_message=initial_msg,
+                    )
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            logger.exception(
+                "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
+            )
+            if await _try_send_json(websocket, chat_startup_error_payload(exc)):
+                await _close_websocket_safely(websocket, code=1011)
         return
 
     subscription = ExecutionSubscription(
@@ -100,78 +169,3 @@ async def execution_stream(
     except Exception:
         logger.debug("execution_stream_receive_error", exc_info=True)
         await emitter.disconnect(websocket)
-
-
-@router.websocket("/ws/chat")
-async def chat_streaming(websocket: WebSocket) -> None:
-    """Streaming WebSocket endpoint with native DSPy async streaming."""
-    state = get_server_state_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, state)
-    if identity is None:
-        return
-
-    await websocket.accept()
-    runtime = await _prepare_chat_runtime(
-        websocket=websocket,
-        state=state,
-        identity=identity,
-    )
-    if runtime is None:
-        return
-
-    analytics_distinct_id = (identity.user_claim or "").strip() or None
-    try:
-        with (
-            runtime_distinct_id_context(analytics_distinct_id),
-            build_dspy_context(lm=runtime.planner_lm),
-        ):
-            initial_msg = None
-            while initial_msg is None:
-                raw_payload = await websocket.receive_json()
-                initial_msg = await parse_ws_message_or_send_error(
-                    websocket=websocket,
-                    raw_payload=raw_payload,
-                )
-
-            agent_context = _build_chat_agent_context(
-                runtime,
-                runtime_mode=getattr(initial_msg, "runtime_mode", "modal_chat"),
-            )
-            async with agent_context as agent:
-                interpreter = getattr(agent, "interpreter", None)
-                _set_interpreter_default_profile(interpreter, runtime.cfg)
-                session = _new_chat_session_state(runtime, identity)
-
-                async def local_persist(
-                    *, include_volume_save: bool = True, latest_user_message: str = ""
-                ) -> None:
-                    await persist_session_state(
-                        state=state,
-                        agent=agent,
-                        session_record=session.session_record,
-                        active_manifest_path=session.active_manifest_path,
-                        active_run_db_id=session.active_run_db_id,
-                        interpreter=interpreter,
-                        repository=runtime.repository,
-                        identity_rows=runtime.identity_rows,
-                        persistence_required=runtime.persistence_required,
-                        include_volume_save=include_volume_save,
-                        latest_user_message=latest_user_message,
-                    )
-
-                await _chat_message_loop(
-                    websocket=websocket,
-                    state=state,
-                    runtime=runtime,
-                    agent=agent,
-                    interpreter=interpreter,
-                    session=session,
-                    local_persist=local_persist,
-                    initial_message=initial_msg,
-                )
-    except WebSocketDisconnect:
-        return
-    except Exception as exc:
-        logger.exception("WebSocket chat startup failed: %s", _sanitize_for_log(exc))
-        if await _try_send_json(websocket, chat_startup_error_payload(exc)):
-            await _close_websocket_safely(websocket, code=1011)

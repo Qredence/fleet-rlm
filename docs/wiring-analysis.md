@@ -44,7 +44,7 @@ app
 ├── health.router          →  /health, /ready
 └── APIRouter(prefix="/api/v1")
     ├── auth.router        →  /api/v1/auth/me          (GET)
-    ├── ws.router          →  /api/v1/ws/chat          (WebSocket)
+    ├── ws.router          →  /api/v1/ws/execution          (WebSocket)
     │                         /api/v1/ws/execution      (WebSocket)
     ├── sessions.router    →  /api/v1/sessions/state    (GET)
     ├── runtime.router     →  /api/v1/runtime/*         (GET/POST)
@@ -62,7 +62,7 @@ canonical `openapi.yaml` (see §6). The hand-written adapter layer lives in
 |-----------------|---------------------|
 | `auth.ts` | `GET /api/v1/auth/me` |
 | `runtime.ts` | `GET/POST /api/v1/runtime/*` |
-| `wsClient.ts` | `WS /api/v1/ws/chat`, `WS /api/v1/ws/execution` |
+| `wsClient.ts` | `WS /api/v1/ws/execution`, `WS /api/v1/ws/execution` |
 | `config.ts` | URL derivation for all of the above |
 
 REST calls use the standard `fetch` API with the base URL from
@@ -76,7 +76,7 @@ REST calls use the standard `fetch` API with the base URL from
 
 | Path | Backend handler | Purpose |
 |------|-----------------|---------|
-| `/api/v1/ws/chat` | `chat_streaming()` in `routers/ws/endpoint.py` | Bidirectional chat streaming |
+| `/api/v1/ws/execution` | `chat_streaming()` in `routers/ws/endpoint.py` | Bidirectional chat streaming |
 | `/api/v1/ws/execution` | `execution_stream()` in `routers/ws/endpoint.py` | Read-only artifact/execution event stream |
 
 ### Backend flow (`/ws/chat`)
@@ -98,7 +98,7 @@ REST calls use the standard `fetch` API with the base URL from
 
 - **`stores/chatStore.ts`** — Zustand store that owns `streamMessage()`. It
   calls `streamChatOverWs()` from `wsClient.ts`, which opens a reconnecting
-  WebSocket to `rlmApiConfig.wsUrl` (`/api/v1/ws/chat`).
+  WebSocket to `rlmApiConfig.wsUrl` (`/api/v1/ws/execution`).
 - **`features/rlm-workspace/useBackendChatRuntime.ts`** — React hook that
   orchestrates submit → `streamMessage` → frame callbacks → UI state
   transitions (phase, typing indicator, artifact steps).
@@ -122,7 +122,7 @@ REST calls use the standard `fetch` API with the base URL from
 
 | `runtime_mode` value | Product path | Agent backend |
 |----------------------|--------------|---------------|
-| `modal_chat` (default) | Standard Workbench chat | DSPy-based Modal chat agent |
+| `daytona_pilot` (default) | Standard Workbench chat | DSPy-based Modal chat agent |
 | `daytona_pilot` | Experimental Daytona workbench | Shared ReAct + `dspy.RLM` agent with Daytona interpreter backend |
 
 ### Frontend → Backend flow
@@ -139,7 +139,7 @@ REST calls use the standard `fetch` API with the base URL from
 4. **Backend dispatch** — In `routers/ws/endpoint.py`, the first received message's
    `runtime_mode` is passed to `_build_chat_agent_context()` (in
    `routers/ws/runtime.py`), which branches:
-   - `"modal_chat"` → standard `ChatAgentProtocol` implementation.
+   - `"daytona_pilot"` → standard `ChatAgentProtocol` implementation.
    - `"daytona_pilot"` → Daytona-configured shared agent cast to `ChatAgentProtocol`.
 5. **Daytona-specific options** — `routers/ws/types.py` normalizes `repo_url`,
    `repo_ref`, `context_paths`, and `batch_concurrency` from the message only

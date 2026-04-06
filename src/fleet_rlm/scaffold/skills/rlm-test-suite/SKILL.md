@@ -169,7 +169,7 @@ def test_feature(monkeypatch):
     # Patch provider-level imports to avoid cloud dependency
     mock_daytona = MagicMock()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.interpreter.AsyncDaytona",
+        "fleet_rlm.integrations.daytona.interpreter.AsyncDaytona",
         mock_daytona,
     )
 

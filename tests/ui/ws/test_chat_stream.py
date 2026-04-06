@@ -31,7 +31,7 @@ def test_websocket_basic_message_flow(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "test message"})
 
@@ -78,7 +78,7 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
     )
 
     url = (
-        "/api/v1/ws/chat?debug_tenant_id=tenant-query&debug_user_id=user-query"
+        "/api/v1/ws/execution?debug_tenant_id=tenant-query&debug_user_id=user-query"
         "&debug_email=query%40example.com&debug_name=Query%20User"
     )
     with ws_client.websocket_connect(url) as websocket:
@@ -125,7 +125,7 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -217,7 +217,7 @@ def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -257,7 +257,7 @@ def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -302,7 +302,7 @@ def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_ag
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -351,7 +351,7 @@ def test_websocket_accepts_daytona_reasoning_only_requests(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -378,7 +378,7 @@ def test_websocket_rejects_daytona_repo_ref_without_repo_url(
     ws_client, websocket_auth_headers
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -398,7 +398,7 @@ def test_websocket_rejects_removed_daytona_max_depth_field(
     ws_client, websocket_auth_headers
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -415,17 +415,29 @@ def test_websocket_rejects_removed_daytona_max_depth_field(
     assert error["code"] == "daytona_max_depth_removed"
 
 
-def test_execution_websocket_requires_session_id_query_param(
-    ws_client, websocket_auth_headers
+def test_execution_websocket_without_session_id_accepts_chat_messages(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="final",
+                text="ok",
+                payload={"history_turns": 1},
+                timestamp=ts(1.0),
+            ),
+        ]
+    )
+
     with ws_client.websocket_connect(
         "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
-        error = websocket.receive_json()
+        websocket.send_json({"type": "message", "content": "hello from execution"})
+        event = websocket.receive_json()
 
-    assert error["type"] == "error"
-    assert error["code"] == "missing_session_id"
-    assert "session_id" in error["message"]
+    assert event["type"] == "event"
+    assert event["data"]["kind"] == "final"
+    assert event["data"]["text"] == "ok"
 
 
 def test_execution_websocket_rejects_legacy_identity_query_params(
@@ -515,7 +527,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
         headers=websocket_auth_headers,
     ) as execution_ws:
         with ws_client.websocket_connect(
-            "/api/v1/ws/chat", headers=websocket_auth_headers
+            "/api/v1/ws/execution", headers=websocket_auth_headers
         ) as chat_ws:
             chat_ws.send_json(
                 {
@@ -560,7 +572,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     assert any(step["step"]["type"] == "output" for step in step_events)
     assert execution_events[-1]["type"] == "execution_completed"
     assert execution_events[-1]["summary"]["run_id"].endswith(":1")
-    assert execution_events[-1]["summary"]["runtime_mode"] == "modal_chat"
+    assert execution_events[-1]["summary"]["runtime_mode"] == "daytona_pilot"
     assert execution_events[-1]["summary"]["task"] == "test execution events"
     assert execution_events[-1]["summary"]["status"] == "completed"
     assert execution_events[-1]["summary"]["summary"]["warnings"] == [
@@ -596,7 +608,7 @@ def test_websocket_final_event_waits_for_run_completion(
 
     ws_client.app.state.server_state.repository = delayed_repo
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "hello"})
         started = time.perf_counter()
@@ -635,7 +647,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "hello"})
         data = websocket.receive_json()
@@ -689,7 +701,7 @@ def test_websocket_final_event_forwards_runtime_degradation_metadata_to_mlflow(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "hello"})
         data = websocket.receive_json()
@@ -722,7 +734,7 @@ def test_websocket_multiple_messages_sequential(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "message 1"})
         data1 = websocket.receive_json()
@@ -748,7 +760,7 @@ def test_websocket_session_state_isolated_by_session_id(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {"type": "message", "content": "message A", "session_id": "session-a"}
@@ -778,7 +790,7 @@ def test_websocket_session_state_isolated_by_session_id(
 
 def test_websocket_rejects_legacy_identity_fields(ws_client, websocket_auth_headers):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -803,7 +815,7 @@ def test_websocket_rejects_null_legacy_identity_fields(
     ws_client, websocket_auth_headers
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -838,7 +850,7 @@ def test_websocket_with_docs_path(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -866,7 +878,7 @@ def test_websocket_validation_errors(
     ws_client, websocket_auth_headers, payload: dict[str, str], expected_substring: str
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(payload)
         data = websocket.receive_json()
@@ -893,7 +905,7 @@ def test_websocket_with_trace_flag(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "test", "trace": True})
 
@@ -930,7 +942,7 @@ def test_websocket_tool_events(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "run code"})
 
@@ -963,7 +975,7 @@ def test_websocket_error_event(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "trigger error"})
 
@@ -973,31 +985,31 @@ def test_websocket_error_event(
         assert "Something went wrong" in data["data"]["text"]
 
 
-def test_websocket_reports_agent_startup_modal_auth_error(
+def test_websocket_reports_agent_startup_daytona_error(
     ws_client, websocket_auth_headers, monkeypatch
 ):
     class _FailingAgent:
         async def __aenter__(self):
-            raise RuntimeError("modal.exception.AuthError: Token ID is malformed")
+            raise RuntimeError("daytona.AuthError: API key is malformed")
 
         async def __aexit__(self, exc_type, exc_val, exc_tb):
             _ = (exc_type, exc_val, exc_tb)
             return False
 
     monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_chat_agent_for_runtime_mode",
+        "fleet_rlm.cli.runners.build_react_chat_agent",
         lambda **kwargs: _FailingAgent(),
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "hello"})
         data = websocket.receive_json()
 
     assert data["type"] == "error"
     assert data["code"] == "sandbox_unavailable"
-    assert "Modal authentication failed" in data["message"]
+    assert "daytona.AuthError: API key is malformed" in data["message"]
     assert data["details"]["error_type"] == "RuntimeError"
 
 
@@ -1015,7 +1027,7 @@ def test_websocket_cancel_message(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "long task"})
 
@@ -1047,7 +1059,7 @@ def test_websocket_cancel_message_mid_stream(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json({"type": "message", "content": "cancel me"})
 
@@ -1077,7 +1089,7 @@ def test_websocket_resolve_hitl_command_flow(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {

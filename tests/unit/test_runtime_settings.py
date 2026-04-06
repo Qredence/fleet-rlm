@@ -22,17 +22,17 @@ def test_get_settings_snapshot_masks_secrets(
     monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-super-secret-key")
-    clear_env(monkeypatch, "SECRET_NAME")
+    clear_env(monkeypatch, "DAYTONA_TARGET")
 
     snapshot = get_settings_snapshot(
-        keys=["DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "SECRET_NAME"],
-        extra_values={"SECRET_NAME": "LITELLM"},
+        keys=["DSPY_LM_MODEL", "DSPY_LLM_API_KEY", "DAYTONA_TARGET"],
+        extra_values={"DAYTONA_TARGET": "local"},
     )
 
     assert snapshot["values"]["DSPY_LM_MODEL"] == "openai/gpt-4o-mini"
     assert snapshot["values"]["DSPY_LLM_API_KEY"] != "sk-super-secret-key"
     assert "..." in snapshot["values"]["DSPY_LLM_API_KEY"]
-    assert snapshot["values"]["SECRET_NAME"] == "LITELLM"
+    assert snapshot["values"]["DAYTONA_TARGET"] == "local"
 
 
 def test_get_settings_snapshot_prefers_configured_env_file_values(
@@ -71,22 +71,22 @@ def test_apply_env_updates_writes_dotenv_and_process_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env_path = tmp_path / ".env"
-    clear_env(monkeypatch, "DSPY_LM_MODEL", "SECRET_NAME")
+    clear_env(monkeypatch, "DSPY_LM_MODEL", "DAYTONA_TARGET")
 
     result = apply_env_updates(
         updates={
             "DSPY_LM_MODEL": "openai/gpt-4o-mini",
-            "SECRET_NAME": "ALT_SECRET",
+            "DAYTONA_TARGET": "local",
         },
         env_path=env_path,
     )
 
     text = env_path.read_text()
     assert "DSPY_LM_MODEL='openai/gpt-4o-mini'" in text
-    assert "SECRET_NAME='ALT_SECRET'" in text
-    assert result["updated"] == ["DSPY_LM_MODEL", "SECRET_NAME"]
+    assert "DAYTONA_TARGET='local'" in text
+    assert result["updated"] == ["DAYTONA_TARGET", "DSPY_LM_MODEL"]
     assert os.environ["DSPY_LM_MODEL"] == "openai/gpt-4o-mini"
-    assert os.environ["SECRET_NAME"] == "ALT_SECRET"
+    assert os.environ["DAYTONA_TARGET"] == "local"
 
 
 def test_apply_env_updates_ignores_masked_secret_round_trip_values(
@@ -97,23 +97,17 @@ def test_apply_env_updates_ignores_masked_secret_round_trip_values(
         tmp_path,
         lines=[
             f"DSPY_LLM_API_KEY={MASKED_SECRET_VALUES['DSPY_LLM_API_KEY']}",
-            f"MODAL_TOKEN_ID={MASKED_SECRET_VALUES['MODAL_TOKEN_ID']}",
-            f"MODAL_TOKEN_SECRET={MASKED_SECRET_VALUES['MODAL_TOKEN_SECRET']}",
+            f"DAYTONA_API_KEY={MASKED_SECRET_VALUES['DAYTONA_API_KEY']}",
             "DSPY_LM_MODEL=openai/gpt-4o-mini",
         ],
     )
     monkeypatch.setenv("DSPY_LLM_API_KEY", MASKED_SECRET_VALUES["DSPY_LLM_API_KEY"])
-    monkeypatch.setenv("MODAL_TOKEN_ID", MASKED_SECRET_VALUES["MODAL_TOKEN_ID"])
-    monkeypatch.setenv(
-        "MODAL_TOKEN_SECRET",
-        MASKED_SECRET_VALUES["MODAL_TOKEN_SECRET"],
-    )
+    monkeypatch.setenv("DAYTONA_API_KEY", MASKED_SECRET_VALUES["DAYTONA_API_KEY"])
 
     result = apply_env_updates(
         updates={
             "DSPY_LLM_API_KEY": "sup...66",
-            "MODAL_TOKEN_ID": "mod...N2",
-            "MODAL_TOKEN_SECRET": "mod...g4",
+            "DAYTONA_API_KEY": "day...99",
             "DSPY_LM_MODEL": "openai/gpt-4.1-mini",
         },
         env_path=env_path,
@@ -121,7 +115,6 @@ def test_apply_env_updates_ignores_masked_secret_round_trip_values(
 
     text = env_path.read_text(encoding="utf-8")
     assert "DSPY_LLM_API_KEY=supersecret66" in text
-    assert "MODAL_TOKEN_ID=modaltokenN2" in text
-    assert "MODAL_TOKEN_SECRET=modalsecretg4" in text
+    assert "DAYTONA_API_KEY=daytonasecret99" in text
     assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in text
     assert result["updated"] == ["DSPY_LM_MODEL"]

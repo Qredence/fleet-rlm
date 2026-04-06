@@ -45,37 +45,17 @@ RUNTIME_MODEL_RELOAD_KEYS = frozenset(
 
 
 class RuntimeConfigSnapshot(TypedDict):
-    secret_name: str
-    volume_name: str | None
     agent_model: str | None
     agent_delegate_model: str | None
     agent_delegate_small_model: str | None
     agent_delegate_max_tokens: int
-    sandbox_provider: str
     planner_lm: object | None
     delegate_lm: object | None
-
-
-def runtime_setting_overrides(
-    *, secret_name: str, volume_name: str | None
-) -> dict[str, str]:
-    return {
-        "SECRET_NAME": secret_name,
-        "VOLUME_NAME": volume_name or "",
-    }
 
 
 def apply_runtime_settings_to_config(
     *, config: ServerRuntimeConfig, normalized: dict[str, str]
 ) -> None:
-    if "SECRET_NAME" in normalized:
-        resolved_secret_name = normalized["SECRET_NAME"].strip()
-        config.secret_name = resolved_secret_name or "LITELLM"
-
-    if "VOLUME_NAME" in normalized:
-        resolved_volume_name = normalized["VOLUME_NAME"].strip()
-        config.volume_name = resolved_volume_name or None
-
     if "DSPY_LM_MODEL" in normalized:
         resolved_planner_model = normalized["DSPY_LM_MODEL"].strip()
         config.agent_model = resolved_planner_model or None
@@ -96,22 +76,14 @@ def apply_runtime_settings_to_config(
             1,
         )
 
-    if "SANDBOX_PROVIDER" in normalized:
-        resolved_sandbox_provider = normalized["SANDBOX_PROVIDER"].strip().lower()
-        if resolved_sandbox_provider in {"modal", "daytona"}:
-            config.sandbox_provider = resolved_sandbox_provider
-
 
 def _capture_runtime_config_snapshot(*, state: ServerState) -> RuntimeConfigSnapshot:
     config = state.config
     return {
-        "secret_name": config.secret_name,
-        "volume_name": config.volume_name,
         "agent_model": config.agent_model,
         "agent_delegate_model": config.agent_delegate_model,
         "agent_delegate_small_model": config.agent_delegate_small_model,
         "agent_delegate_max_tokens": config.agent_delegate_max_tokens,
-        "sandbox_provider": config.sandbox_provider,
         "planner_lm": state.planner_lm,
         "delegate_lm": state.delegate_lm,
     }
@@ -123,13 +95,10 @@ def _restore_runtime_config_snapshot(
     snapshot: RuntimeConfigSnapshot,
 ) -> None:
     config = state.config
-    config.secret_name = str(snapshot["secret_name"])
-    config.volume_name = snapshot["volume_name"]
     config.agent_model = snapshot["agent_model"]
     config.agent_delegate_model = snapshot["agent_delegate_model"]
     config.agent_delegate_small_model = snapshot["agent_delegate_small_model"]
     config.agent_delegate_max_tokens = snapshot["agent_delegate_max_tokens"]
-    config.sandbox_provider = str(snapshot["sandbox_provider"])
     state.planner_lm = snapshot["planner_lm"]
     state.delegate_lm = snapshot["delegate_lm"]
 
@@ -156,10 +125,6 @@ def _restore_runtime_settings_env(
 def build_runtime_settings_snapshot(*, state: ServerState) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
-        extra_values=runtime_setting_overrides(
-            secret_name=state.config.secret_name,
-            volume_name=state.config.volume_name,
-        ),
         env_path=state.config.env_path,
     )
     return RuntimeSettingsSnapshot(**snapshot)

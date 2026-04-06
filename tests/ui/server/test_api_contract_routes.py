@@ -17,7 +17,7 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/optimization/run",
     "/api/v1/optimization/status",
     "/api/v1/runtime/settings",
-    "/api/v1/runtime/tests/modal",
+    "/api/v1/runtime/tests/daytona",
     "/api/v1/runtime/tests/lm",
     "/api/v1/runtime/status",
     "/api/v1/sessions/state",
@@ -25,7 +25,6 @@ _REQUIRED_HTTP_PATHS = {
 }
 
 _REQUIRED_WS_PATHS = {
-    "/api/v1/ws/chat",
     "/api/v1/ws/execution",
 }
 
@@ -102,7 +101,7 @@ def test_ws_router_split_modules_import() -> None:
     import fleet_rlm.api.routers.ws.types as ws_types
 
     assert ws.router is not None
-    assert ws_endpoint.chat_streaming is not None
+    assert ws_endpoint.execution_stream is not None
     assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
     assert ws_completion.build_execution_completion_summary is not None
@@ -131,7 +130,6 @@ def test_ws_router_registers_expected_websocket_routes() -> None:
     websocket_paths = {
         route.path for route in ws.router.routes if getattr(route, "path", None)
     }
-    assert "/ws/chat" in websocket_paths
     assert "/ws/execution" in websocket_paths
 
 
@@ -348,7 +346,7 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
         ("get", "/api/v1/auth/me"),
         ("get", "/api/v1/runtime/settings"),
         ("patch", "/api/v1/runtime/settings"),
-        ("post", "/api/v1/runtime/tests/modal"),
+        ("post", "/api/v1/runtime/tests/daytona"),
         ("post", "/api/v1/runtime/tests/lm"),
         ("get", "/api/v1/runtime/status"),
         ("get", "/api/v1/sessions/state"),
@@ -365,23 +363,23 @@ def test_runtime_contract_endpoints_remain_available(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Keep this contract test offline/deterministic and avoid touching live Modal
+    # Keep this contract test offline/deterministic and avoid touching live Daytona
     # config files or credentials while checking route availability.
-    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
-    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_TARGET", raising=False)
     monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
     monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
     monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
-    monkeypatch.setattr("fleet_rlm.api.routers.runtime.load_modal_config", lambda: {})
 
     settings = local_client.get("/api/v1/runtime/settings")
     status = local_client.get("/api/v1/runtime/status")
-    modal = local_client.post("/api/v1/runtime/tests/modal")
+    daytona = local_client.post("/api/v1/runtime/tests/daytona")
     lm = local_client.post("/api/v1/runtime/tests/lm")
 
     assert settings.status_code == 200
     assert status.status_code == 200
-    assert modal.status_code == 200
+    assert daytona.status_code == 200
     assert lm.status_code == 200
 
 

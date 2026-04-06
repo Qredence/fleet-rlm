@@ -32,11 +32,6 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
     RuntimeSettingDefinition("DAYTONA_API_KEY", secret=True),
     RuntimeSettingDefinition("DAYTONA_API_URL"),
     RuntimeSettingDefinition("DAYTONA_TARGET"),
-    RuntimeSettingDefinition("MODAL_TOKEN_ID", secret=True),
-    RuntimeSettingDefinition("MODAL_TOKEN_SECRET", secret=True),
-    RuntimeSettingDefinition("SECRET_NAME", include_in_default_snapshot=False),
-    RuntimeSettingDefinition("VOLUME_NAME", include_in_default_snapshot=False),
-    RuntimeSettingDefinition("SANDBOX_PROVIDER"),
 )
 
 _RUNTIME_SETTING_INDEX: dict[str, RuntimeSettingDefinition] = {

@@ -23,7 +23,7 @@ from .models_identity import Membership, Tenant, User
 from .models_jobs import Job, TenantSubscription
 from .models_memory import MemoryItem
 from .models_runs import Artifact, RLMProgram, RLMTrace, Run, RunStep
-from .models_sandbox import ModalVolume, SandboxSession
+from .models_sandbox import SandboxSession
 from .repository import FleetRepository
 
 __all__ = [
@@ -42,7 +42,6 @@ __all__ = [
     "MemoryKind",
     "MemoryScope",
     "MemorySource",
-    "ModalVolume",
     "RLMProgram",
     "RLMTrace",
     "Run",

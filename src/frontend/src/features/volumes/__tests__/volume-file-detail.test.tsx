@@ -63,7 +63,7 @@ describe("VolumeFileDetail markdown rendering", () => {
     expect(html).not.toContain("<pre");
     expect(fileContentCalls[0]).toEqual({
       path: "/docs/release-notes.md",
-      provider: "modal",
+      provider: "daytona",
     });
   });
 

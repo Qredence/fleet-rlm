@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.integrations.providers.daytona import run_daytona_smoke
+from fleet_rlm.integrations.daytona import run_daytona_smoke
 
 pytestmark = [pytest.mark.integration, pytest.mark.live_daytona]
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from fleet_rlm.runtime.tools.modal_volumes import entry_name, stable_tree_id
+from fleet_rlm.utils.volume_tree import entry_name, stable_tree_id
 
 from .config import resolve_daytona_config
 from .runtime import (

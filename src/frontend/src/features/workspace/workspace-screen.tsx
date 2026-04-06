@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { useRuntimeStatus, runtimeStatusQueryKey } from "@/hooks/use-runtime-status";
+import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
@@ -20,8 +19,7 @@ import {
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
-import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
+import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
 
@@ -61,41 +59,19 @@ export function WorkspaceScreen() {
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
-  const queryClient = useQueryClient();
 
-  // ── Initialise runtimeMode from backend setting on first load ────────────
   const didInitRuntimeMode = useRef(false);
   useEffect(() => {
     if (didInitRuntimeMode.current) return;
-    const provider = runtimeStatus.data?.sandbox_provider;
-    if (!provider) return;
     didInitRuntimeMode.current = true;
-    const mapped: WsRuntimeMode = provider === "daytona" ? "daytona_pilot" : "modal_chat";
-    setRuntimeMode(mapped);
-  }, [runtimeStatus.data?.sandbox_provider, setRuntimeMode]);
-
-  // ── Keep backend SANDBOX_PROVIDER in sync when user switches dropdown ────
-  const handleRuntimeModeChange = useCallback(
-    (mode: WsRuntimeMode) => {
-      setRuntimeMode(mode);
-      const sandboxProvider = mode === "daytona_pilot" ? "daytona" : "modal";
-      runtimeEndpoints
-        .patchSettings({ updates: { SANDBOX_PROVIDER: sandboxProvider } })
-        .then(() => queryClient.invalidateQueries({ queryKey: runtimeStatusQueryKey }))
-        .catch(() => {
-          // silent — settings PATCH failures don't block the chat
-        });
-    },
-    [setRuntimeMode, queryClient],
-  );
+    setRuntimeMode("daytona_pilot");
+  }, [setRuntimeMode]);
 
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
     (attachments: AttachedFile[]) => {
-      const inferredRepoContext =
-        runtimeMode === "daytona_pilot" ? detectRepoContext(inputValue) : null;
-      const inferredContextPaths =
-        runtimeMode === "daytona_pilot" ? detectContextPaths(inputValue) : [];
+      const inferredRepoContext = detectRepoContext(inputValue);
+      const inferredContextPaths = detectContextPaths(inputValue);
 
       if (phase === "idle" && messages.length === 0 && inputValue.trim()) {
         telemetry.capture("chat_session_started", {
@@ -103,17 +79,11 @@ export function WorkspaceScreen() {
         });
       }
       originalHandleSubmit({
-        executionMode: runtimeMode === "modal_chat" ? executionMode : undefined,
+        executionMode,
         runtimeMode,
-        repoUrl: runtimeMode === "daytona_pilot" ? inferredRepoContext?.repoUrl : undefined,
-        repoRef:
-          runtimeMode === "daytona_pilot"
-            ? (inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef)
-            : undefined,
-        contextPaths:
-          runtimeMode === "daytona_pilot" && inferredContextPaths.length > 0
-            ? inferredContextPaths
-            : undefined,
+        repoUrl: inferredRepoContext?.repoUrl,
+        repoRef: inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef,
+        contextPaths: inferredContextPaths.length > 0 ? inferredContextPaths : undefined,
         attachments: attachments.map((attachment) => ({
           id: attachment.id,
           name: attachment.file.name,
@@ -212,15 +182,13 @@ export function WorkspaceScreen() {
       }
     | undefined;
   const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
-  const warningGuidance = runtimeMode === "daytona_pilot" ? daytonaGuidance : runtimeGuidance;
+  const warningGuidance = daytonaGuidance.length > 0 ? daytonaGuidance : runtimeGuidance;
   const showRuntimeWarning =
     backendEnabled &&
     runtimeStatus.data != null &&
-    (runtimeMode === "daytona_pilot"
-      ? daytonaStatus?.configured === false && daytonaGuidance.length > 0
-      : runtimeStatus.data.ready === false && runtimeGuidance.length > 0);
-  const runtimeWarningTitle =
-    runtimeMode === "daytona_pilot" ? "Daytona setup required" : "Runtime warning";
+    daytonaStatus?.configured === false &&
+    warningGuidance.length > 0;
+  const runtimeWarningTitle = "Daytona setup required";
   const hasMessages = messages.length > 0;
   const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
   const composerDisabled = isTyping || !backendEnabled;
@@ -242,8 +210,6 @@ export function WorkspaceScreen() {
       }
       isLoading={composerDisabled}
       isReceiving={isReceivingResponse}
-      runtimeMode={runtimeMode}
-      onRuntimeModeChange={handleRuntimeModeChange}
       executionMode={executionMode}
       onExecutionModeChange={setExecutionMode}
       className="w-full"

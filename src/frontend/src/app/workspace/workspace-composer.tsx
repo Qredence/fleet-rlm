@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import {
   ExecutionModeSelect,
   PromptComposerAttachmentMenu,
-  RuntimeModeSelect,
 } from "@/app/workspace/composer/composer-controls";
 import {
   PromptInput,
@@ -20,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
+import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
 
 interface AttachedFile {
   id: string;
@@ -36,8 +35,6 @@ interface WorkspaceComposerProps {
   isLoading?: boolean;
   isReceiving?: boolean;
   attachmentsEnabled?: boolean;
-  runtimeMode: WsRuntimeMode;
-  onRuntimeModeChange: (mode: WsRuntimeMode) => void;
   executionMode: WsExecutionMode;
   onExecutionModeChange: (mode: WsExecutionMode) => void;
   canSubmit?: boolean;
@@ -66,8 +63,6 @@ function WorkspaceComposer({
   isLoading = false,
   isReceiving = false,
   attachmentsEnabled = true,
-  runtimeMode,
-  onRuntimeModeChange,
   executionMode,
   onExecutionModeChange,
   canSubmit = true,
@@ -206,7 +201,6 @@ function WorkspaceComposer({
               onUnsupportedSelect={handleUnsupportedAttachmentSelect}
             />
             <ExecutionModeSelect value={executionMode} onChange={onExecutionModeChange} />
-            <RuntimeModeSelect value={runtimeMode} onChange={onRuntimeModeChange} />
           </PromptInputTools>
 
           {isStreamingActive && onStop ? (

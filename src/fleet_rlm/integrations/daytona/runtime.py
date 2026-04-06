@@ -343,8 +343,8 @@ class DaytonaSandboxRuntime:
         cpu: int | None = None,
         memory: int | None = None,
         disk: int | None = None,
-        auto_stop_interval: int | None = 1800,
-        auto_archive_interval: int | None = 3600,
+        auto_stop_interval: int | None = 30,
+        auto_archive_interval: int | None = 60,
         auto_delete_interval: int | None = None,
         network_block_all: bool | None = None,
         network_allow_list: str | None = None,
@@ -363,12 +363,12 @@ class DaytonaSandboxRuntime:
 
         Cost-saving lifecycle defaults:
 
-        * ``auto_stop_interval`` — seconds of inactivity before the
-          sandbox is automatically stopped (default 1800 = 30 min).
+        * ``auto_stop_interval`` — minutes of inactivity before the
+          sandbox is automatically stopped (default 30).
           ``refresh_activity()`` resets the timer.
-        * ``auto_archive_interval`` — seconds after stop before the
-          sandbox is archived to cold storage (default 3600 = 1 h).
-        * ``auto_delete_interval`` — seconds after archive before
+        * ``auto_archive_interval`` — minutes after stop before the
+          sandbox is archived to cold storage (default 60).
+        * ``auto_delete_interval`` — minutes after archive before
           permanent deletion (default ``None`` = never auto-delete).
 
         A human-readable ``name`` is generated automatically when not

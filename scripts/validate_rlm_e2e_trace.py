@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """QRE-301 live end-to-end tracing validation harness.
 
-This script runs a live websocket chat turn against fleet-rlm, captures chat and
-execution-stream payloads, and verifies persistence in session state + Postgres.
+This script runs a live websocket turn against fleet-rlm, captures conversational
+and execution-stream payloads from the unified execution endpoint, and verifies
+persistence in session state + Postgres.
 """
 
 from __future__ import annotations
@@ -341,7 +342,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
     async with httpx.AsyncClient(base_url=args.server_url, timeout=30.0) as client:
         await _assert_ready_and_runtime_status(client, output_dir)
 
-        chat_ws_url = _make_ws_url(args.server_url, "/api/v1/ws/chat")
+        chat_ws_url = _make_ws_url(args.server_url, "/api/v1/ws/execution")
         execution_ws_url = _make_ws_url(
             args.server_url,
             "/api/v1/ws/execution",

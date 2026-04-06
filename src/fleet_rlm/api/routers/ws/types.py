@@ -1,4 +1,4 @@
-"""Typed contracts and runtime-specific request normalization for websocket chat."""
+"""Typed contracts and Daytona request normalization for websocket execution."""
 
 from __future__ import annotations
 
@@ -87,10 +87,7 @@ def normalize_daytona_chat_request(
     msg: WSMessage,
     workspace_id: str,
 ) -> DaytonaChatRequestOptions | None:
-    """Return a typed Daytona request payload when the turn targets Daytona."""
-
-    if msg.runtime_mode != "daytona_pilot":
-        return None
+    """Return a typed Daytona request payload for the canonical runtime."""
 
     repo_url = str(msg.repo_url or "").strip() or None
     repo_ref = str(msg.repo_ref or "").strip() or None

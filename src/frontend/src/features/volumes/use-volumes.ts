@@ -14,7 +14,7 @@ import type { DataSource } from "@/lib/rlm-api/capabilities";
 export { useVolumesSelectionStore } from "@/features/volumes/volumes-selection-store";
 
 export type FsNodeType = "volume" | "directory" | "file";
-export type VolumeProvider = "modal" | "daytona";
+export type VolumeProvider = "daytona";
 
 export interface FsNode {
   id: string;
@@ -132,7 +132,7 @@ function createMockVolume(
 }
 
 export function getMockFilesystem(provider: VolumeProvider): FsNode[] {
-  const mountedRoot = provider === "daytona" ? "/home/daytona/memory" : "/data";
+  const mountedRoot = "/home/daytona/memory";
   const modifiedAt = "2026-03-26T08:00:00Z";
 
   const withProvider = (node: FsNode): FsNode => ({

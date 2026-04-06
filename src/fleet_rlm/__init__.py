@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 __version__ = "0.4.99"
 
 __all__ = [
-    "ModalInterpreter",
+    "DaytonaInterpreter",
     "__version__",
     "configure_planner_from_env",
     "get_planner_lm_from_env",
@@ -16,7 +16,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .runtime import (
-        ModalInterpreter,
+        DaytonaInterpreter,
         configure_planner_from_env,
         get_planner_lm_from_env,
     )
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "configure_planner_from_env": ("fleet_rlm.runtime", "configure_planner_from_env"),
     "get_planner_lm_from_env": ("fleet_rlm.runtime", "get_planner_lm_from_env"),
-    "ModalInterpreter": ("fleet_rlm.runtime", "ModalInterpreter"),
+    "DaytonaInterpreter": ("fleet_rlm.runtime", "DaytonaInterpreter"),
 }
 
 

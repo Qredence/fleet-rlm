@@ -1,11 +1,11 @@
-"""Tests for snapshot helpers in ``fleet_rlm.integrations.providers.daytona.runtime``."""
+"""Tests for snapshot helpers in ``fleet_rlm.integrations.daytona.runtime``."""
 
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from fleet_rlm.integrations.providers.daytona.runtime import (
+from fleet_rlm.integrations.daytona.runtime import (
     alist_snapshots,
     aget_snapshot,
     aresolve_snapshot,
@@ -47,7 +47,7 @@ def test_alist_snapshots_returns_summaries(monkeypatch) -> None:
     snaps = [_make_snapshot("base"), _make_snapshot("extra", snap_id="snap-2")]
     fake_client = _FakeClient(snaps)
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     result = asyncio.run(
@@ -61,7 +61,7 @@ def test_alist_snapshots_returns_summaries(monkeypatch) -> None:
 def test_aget_snapshot_found(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     result = asyncio.run(
@@ -77,7 +77,7 @@ def test_aget_snapshot_found(monkeypatch) -> None:
 def test_aget_snapshot_missing(monkeypatch) -> None:
     fake_client = _FakeClient([])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     result = asyncio.run(
@@ -91,7 +91,7 @@ def test_aget_snapshot_missing(monkeypatch) -> None:
 def test_aresolve_snapshot_active(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base", state="ACTIVE")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     result = asyncio.run(
@@ -103,7 +103,7 @@ def test_aresolve_snapshot_active(monkeypatch) -> None:
 def test_aresolve_snapshot_inactive(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base", state="BUILDING")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     result = asyncio.run(

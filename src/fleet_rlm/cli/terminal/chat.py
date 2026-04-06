@@ -29,8 +29,6 @@ from fleet_rlm.integrations.config.env import AppConfig
 from .commands import _normalize_trace_mode, handle_slash_command
 from .session_actions import (
     authorize_command as _authorize_command_impl,
-    check_secret_action as _check_secret_impl,
-    check_secret_key_action as _check_secret_key_impl,
     print_command_palette_action as _print_command_palette_impl,
     print_permissions as _print_permissions_impl,
     print_status as _print_status_impl,
@@ -38,7 +36,6 @@ from .session_actions import (
     run_long_context_action as _run_long_context_impl,
     run_settings_action as _run_settings_impl,
     settings_llm_action as _settings_llm_impl,
-    settings_modal_action as _settings_modal_impl,
     show_shortcuts as _show_shortcuts_impl,
 )
 from .session_view import (
@@ -59,6 +56,7 @@ class TerminalChatOptions:
 
     docs_path: Path | None = None
     trace_mode: TraceMode = "compact"
+    volume_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +89,6 @@ _COMMAND_SPECS: tuple[SlashCommandSpec, ...] = (
     SlashCommandSpec("/save-buffer", "Persist buffer to volume", "buffers"),
     SlashCommandSpec("/load-volume", "Load volume text as document", "buffers"),
     SlashCommandSpec("/run-long-context", "Runner wrapper", "runners"),
-    SlashCommandSpec("/check-secret", "Runner wrapper", "runners"),
-    SlashCommandSpec("/check-secret-key", "Runner wrapper", "runners"),
     SlashCommandSpec("/permissions", "Show permission policy state", "security"),
     SlashCommandSpec("/permissions-reset", "Reset permission policy state", "security"),
     SlashCommandSpec("/model", "Shortcut for /settings model", "settings"),
@@ -105,7 +101,6 @@ _COMMAND_TEMPLATES: dict[str, str] = {
     "/summarize": "key points",
     "/semantic": 'query="find auth flows" chunk_strategy=headers max_chunks=24',
     "/run-long-context": 'docs/architecture.md "What are key decisions?" summarize',
-    "/check-secret-key": "DSPY_LLM_API_KEY",
     "/trace": "compact",
 }
 
@@ -136,7 +131,9 @@ class _TerminalChatSession:
         self.secret_name = (
             config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM"
         )
-        self.volume_name = config.interpreter.volume_name or "rlm-volume-dspy"
+        self.volume_name = (
+            options.volume_name or config.interpreter.volume_name or "rlm-volume-dspy"
+        )
         self.console = Console()
         self.last_status = "ready"
         self.is_processing = False
@@ -337,21 +334,9 @@ class _TerminalChatSession:
         """Configure LLM settings."""
         _settings_llm_impl(self, model_only=model_only)
 
-    def _settings_modal(self) -> None:
-        """Configure Modal credentials."""
-        _settings_modal_impl(self)
-
     def _run_long_context(self, arg_text: str) -> None:
         """Run long-context task."""
         _run_long_context_impl(self, arg_text)
-
-    def _check_secret(self) -> None:
-        """Check Modal secret."""
-        _check_secret_impl(self)
-
-    def _check_secret_key(self, *, key: str) -> None:
-        """Check Modal secret key."""
-        _check_secret_key_impl(self, key=key)
 
     def _print_status(self, agent: Any) -> None:
         """Print the current session and agent status."""

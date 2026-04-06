@@ -67,14 +67,12 @@ Frontend source lives under `src/frontend/src/`.
 
 ## Runtime and API Contract Rules
 
-- `/api/v1/ws/chat` is transcript-first.
 - `/api/v1/ws/execution` is the canonical workbench stream.
 - Frontend workbench state should hydrate from
-  `execution_completed.summary`, not from Daytona-only `/ws/chat final`
+  `execution_completed.summary`, not from legacy chat-final
   payloads.
-- `modal_chat` is the default runtime mode.
-- `daytona_pilot` uses the same workspace shell but sends `repo_url`,
-  `repo_ref`, `context_paths`, and `batch_concurrency`.
+- `daytona_pilot` is the public runtime mode and sends `execution_mode`,
+  `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
 
 ## Environment
 
@@ -91,8 +89,8 @@ Optional overrides:
 - `VITE_PUBLIC_POSTHOG_API_KEY`
 - `VITE_PUBLIC_POSTHOG_HOST`
 
-If `VITE_FLEET_WS_URL` is unset, the frontend derives websocket URLs for
-`/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
+If `VITE_FLEET_WS_URL` is unset, the frontend derives the websocket URL for
+`/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
 
 ## OpenAPI Sync Workflow
 

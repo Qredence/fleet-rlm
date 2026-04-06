@@ -11,10 +11,10 @@ import pytest
 from dspy.primitives import FinalOutput
 from dspy.primitives.code_interpreter import CodeInterpreterError
 
-from fleet_rlm.integrations.providers.daytona.bridge import DaytonaBridgeExecution
-from fleet_rlm.integrations.providers.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
-from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution
+from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
@@ -328,7 +328,7 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
             captured["closed"] = True
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.interpreter.DaytonaToolBridge",
+        "fleet_rlm.integrations.daytona.interpreter.DaytonaToolBridge",
         _FakeBridge,
     )
 

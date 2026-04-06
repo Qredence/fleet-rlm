@@ -120,7 +120,6 @@ describe("buildAssistantContentModel", () => {
         volumeName: "rlm-volume-dspy",
       }),
     ).toEqual([
-      "runtime daytona_pilot",
       "mode rlm",
       "sandbox",
       "sandbox sb-1234567",

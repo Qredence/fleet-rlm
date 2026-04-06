@@ -27,19 +27,6 @@ const mockMode = parseBool(import.meta.env.VITE_MOCK_MODE, false);
 
 function getActiveWsUrl(path: string) {
   if (explicitWsUrl) {
-    if (path === "/api/v1/ws/execution") {
-      if (explicitWsUrl.endsWith("/chat")) {
-        return explicitWsUrl.replace(/\/chat$/, "/execution");
-      }
-      // Explicit URL doesn't end in /chat — derive execution URL from its origin
-      try {
-        const parsed = new URL(explicitWsUrl);
-        parsed.pathname = "/api/v1/ws/execution";
-        return parsed.toString().replace(/\/$/, "");
-      } catch {
-        // Malformed URL; fall through to use explicitWsUrl as-is
-      }
-    }
     return explicitWsUrl;
   }
   if (baseUrl) return deriveWsUrl(baseUrl, path);
@@ -54,7 +41,7 @@ function getActiveWsUrl(path: string) {
 
 export const rlmApiConfig = {
   baseUrl,
-  wsUrl: getActiveWsUrl("/api/v1/ws/chat"),
+  wsUrl: getActiveWsUrl("/api/v1/ws/execution"),
   wsExecutionUrl: getActiveWsUrl("/api/v1/ws/execution"),
   e2eMode: parseBool(import.meta.env.VITE_E2E, false),
   mockMode,

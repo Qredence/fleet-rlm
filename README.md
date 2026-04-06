@@ -7,15 +7,15 @@
 
 ![thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a Web UI-first recursive language model runtime for long-context code and document work. It ships a Modal-backed default runtime, an integrated FastAPI + WebSocket surface, packaged frontend assets, and an experimental Daytona workbench path that plugs into the same workspace instead of living as a separate product.
+`fleet-rlm` is a Web UI-first recursive language model runtime for long-context code and document work. It ships a Daytona-backed runtime, an integrated FastAPI + WebSocket surface, packaged frontend assets, and a shared workspace for chat, execution, and run inspection.
 
 [Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
 ## Why This Repo Exists
 
 - Use a single workspace for long-context reasoning, chat turns, run inspection, and runtime diagnostics.
-- Keep the default product path Modal-backed and chat-oriented.
-- Expose an experimental Daytona pilot without forking the frontend or transport contract.
+- Keep the product path Daytona-backed and workbench-oriented.
+- Expose one shared frontend and websocket contract instead of parallel runtime modes.
 - Ship both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
 
 The supported app surfaces are `Workbench`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
@@ -76,18 +76,13 @@ uv add "fleet-rlm[mcp]"
 uv run fleet-rlm serve-mcp --transport stdio
 ```
 
-## Runtime Modes
+## Runtime Contract
 
-`fleet-rlm` currently has two top-level runtime modes:
+`fleet-rlm` now exposes a Daytona-only runtime contract:
 
-- `modal_chat`: the default product path
-- `daytona_pilot`: the experimental workbench path
-
-In the shared runtime contract:
-
-- Modal requests can include `execution_mode`.
-- Daytona requests can include `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
-- Daytona still uses the same websocket workspace and run-workbench flow, but it intentionally remains experimental.
+- `execution_mode` remains a per-turn execution hint.
+- Requests may include `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
+- Durable mounted roots remain `memory/`, `artifacts/`, `buffers/`, and `meta/`.
 
 ## CLI Surfaces
 
@@ -129,7 +124,6 @@ The current frontend/backend contract centers on:
 - `GET /api/v1/sessions/state`
 - `/api/v1/runtime/*`
 - `POST /api/v1/traces/feedback`
-- `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 
 When `AUTH_MODE=entra`, HTTP and WebSocket access use real Entra bearer-token validation plus Neon-backed tenant admission. Runtime settings writes are intentionally limited to `APP_ENV=local`.
@@ -201,7 +195,7 @@ uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 ```
 
-## Experimental Daytona Notes
+## Daytona Notes
 
 Use this order for Daytona work:
 

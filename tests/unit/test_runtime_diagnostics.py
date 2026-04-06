@@ -76,7 +76,7 @@ async def test_run_daytona_connection_test_caches_success(
     )
     monkeypatch.setitem(sys.modules, "daytona", fake_daytona_module)
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.resolve_daytona_config",
+        "fleet_rlm.integrations.daytona.resolve_daytona_config",
         lambda: SimpleNamespace(
             api_key="daytona-key",
             api_url="https://daytona.example.com/",

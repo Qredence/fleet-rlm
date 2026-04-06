@@ -91,8 +91,8 @@ describe("runtimeEndpoints", () => {
         write_enabled: true,
         ready: false,
         llm: {},
-        modal: {},
-        tests: { modal: null, lm: null },
+        daytona: {},
+        tests: { daytona: null, lm: null },
         guidance: [],
       }),
     );

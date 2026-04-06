@@ -5,12 +5,12 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
-from fleet_rlm.integrations.providers.daytona.runtime import (
+from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+from fleet_rlm.integrations.daytona.runtime_helpers import (
     _areconcile_repo_checkout,
 )
 
@@ -170,7 +170,7 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
 ) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
 
@@ -220,7 +220,7 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
 def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
 
@@ -255,7 +255,7 @@ def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
         return client
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         _build_client,
     )
 
@@ -283,7 +283,7 @@ def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
 def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
 
@@ -303,7 +303,7 @@ def test_create_workspace_session_and_context_share_async_owner_loop(
 ) -> None:
     fake_client = _LoopBoundClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
 
@@ -333,7 +333,7 @@ def test_create_workspace_session_ignores_local_daytona_builder_files(
 ) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
     monkeypatch.chdir(tmp_path)
@@ -368,7 +368,7 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
 ) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
 
@@ -494,7 +494,7 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
 
 def test_session_refresh_activity_is_silent_on_error() -> None:
     """``arefresh_activity`` swallows exceptions so callers never break."""
-    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     class _ExplodingSandbox(_FakeSandbox):
         def refresh_activity(self) -> None:
@@ -515,7 +515,7 @@ def test_session_refresh_activity_is_silent_on_error() -> None:
 
 def test_session_resize_calls_sandbox_resize() -> None:
     """``aresize`` delegates to the sandbox ``resize()`` method."""
-    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     resize_calls: list[object] = []
 
@@ -542,7 +542,7 @@ def test_session_resize_calls_sandbox_resize() -> None:
 
 def test_session_delete_context_keeps_sandbox_alive() -> None:
     """``adelete_context`` removes only the active interpreter context."""
-    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     delete_calls: list[str] = []
     stop_calls = 0
@@ -599,7 +599,7 @@ def test_session_delete_context_keeps_sandbox_alive() -> None:
 
 def test_session_create_lsp_server_delegates_to_sandbox() -> None:
     """``create_lsp_server`` calls through to the sandbox SDK method."""
-    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     lsp_calls: list[tuple[str, str]] = []
 

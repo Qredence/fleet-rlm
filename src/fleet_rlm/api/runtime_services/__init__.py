@@ -4,7 +4,6 @@ from .diagnostics import (
     build_runtime_status_response,
     run_daytona_connection_test,
     run_lm_connection_test,
-    run_modal_connection_test,
 )
 from .settings import (
     apply_runtime_settings_patch,
@@ -25,5 +24,4 @@ __all__ = [
     "resolve_daytona_volume_name",
     "run_daytona_connection_test",
     "run_lm_connection_test",
-    "run_modal_connection_test",
 ]

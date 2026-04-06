@@ -43,7 +43,7 @@ Generated or synced artifacts to avoid hand-editing:
 - Preserve the supported app surfaces: `Workbench`, `Volumes`, `Optimization`, and `Settings`.
 - Keep retired `taxonomy`, `skills`, `memory`, and `analytics` paths falling through to `/404`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
-- Treat `/api/v1/ws/chat` as transcript-first and `/api/v1/ws/execution` as the canonical execution/workbench stream.
+- Treat `/api/v1/ws/execution` as the canonical conversational and execution/workbench stream.
 - Hydrate workbench state from `execution_completed.summary`, not Daytona-only chat-final payload scraping.
 - Render Daytona `sandbox_output` status frames as sandbox/debug trace cards while keeping `trajectory_step` and `reasoning_step` as the main live trace surfaces.
 - Prefer the shadcn/Base UI baseline over one-off wrappers, parallel token layers, or custom mini-design-systems.
@@ -146,9 +146,8 @@ Design and styling rules:
 React/runtime rules:
 
 - Prefer React 19 direct ref passing over introducing `forwardRef` by default
-- `modal_chat` is the default runtime path and sends `execution_mode`
-- `daytona_pilot` sends `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
-- Runtime labels shown to users are `"Modal chat"` and `"Daytona pilot"`
+- `daytona_pilot` is the public runtime label and sends `execution_mode`, `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
+- Runtime labels shown to users should describe the Daytona-backed workbench path only
 - Shared runtime status queries belong in `src/hooks/use-runtime-status.ts`
 - The Volumes surface represents mounted durable storage, not the transient live workspace
 

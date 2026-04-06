@@ -58,7 +58,6 @@ async def prepare_chat_message_turn(
         )
         return None
 
-    runtime_mode = msg.runtime_mode
     execution_mode = msg.execution_mode
     agent.set_execution_mode(execution_mode)
     daytona_request = normalize_daytona_chat_request(msg, workspace_id=workspace_id)
@@ -110,7 +109,7 @@ async def prepare_chat_message_turn(
         metadata={
             "fleet_rlm.workspace_id": workspace_id,
             "fleet_rlm.turn_index": str(turn_index),
-            "fleet_rlm.runtime_mode": runtime_mode,
+            "fleet_rlm.runtime_mode": "daytona_pilot",
             "fleet_rlm.execution_mode": execution_mode,
         },
     )

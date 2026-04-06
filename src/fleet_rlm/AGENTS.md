@@ -23,7 +23,8 @@ Backend source-of-truth files:
 - `src/fleet_rlm/api/main.py` for app factory, lifespan orchestration, route mounting, and SPA asset resolution
 - `src/fleet_rlm/api/bootstrap.py` for runtime bootstrap, optional startup, LM loading, analytics startup, and persistence initialization
 - `src/fleet_rlm/cli/fleet_cli.py` and `src/fleet_rlm/cli/main.py` for CLI behavior
-- `src/fleet_rlm/cli/runtime_factory.py` for shared runtime construction
+- `src/fleet_rlm/runtime/factory.py` for canonical runtime construction
+- `src/fleet_rlm/cli/runtime_factory.py` as a compatibility re-export only
 - `src/fleet_rlm/cli/runners.py` for top-level runner helpers
 
 Artifacts and areas to treat carefully:
@@ -49,7 +50,7 @@ Active top-level areas under `src/fleet_rlm/`:
 - `api/`: FastAPI app, auth, routers, schemas, execution helpers, and server utilities
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
-- `integrations/`: config, database, observability, MCP, and provider-specific integrations
+- `integrations/`: config, database, observability, MCP, and external-system integrations
 - `scaffold/`: packaged Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
@@ -60,7 +61,6 @@ Published CLI entrypoints from `pyproject.toml`:
 
 - `fleet`
 - `fleet-rlm`
-- `rlm-modal`
 
 Preserve these command surfaces:
 
@@ -84,7 +84,7 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/auth/me`
 - `GET /api/v1/sessions/state`
 - `GET/PATCH /api/v1/runtime/settings`
-- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
@@ -92,17 +92,17 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
 - `POST /api/v1/traces/feedback`
-- `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 - Optional `/scalar` docs when `scalar_fastapi` is installed
 
 Runtime-mode boundaries:
 
-- `modal_chat` builds the shared `RLMReActChatAgent`
-- `daytona_pilot` uses the same ReAct + `dspy.RLM` backbone with a Daytona-backed interpreter layer
-- `execution_mode` is Modal-only
+- The public backend/frontend runtime contract is Daytona-only.
+- The canonical chat runtime is the Daytona-backed DSPy ReAct + `dspy.RLM` workbench agent.
+- Request-side `runtime_mode` selection is not part of the public websocket contract.
+- `execution_mode` remains a per-turn execution hint for the Daytona-backed runtime
 - Daytona request controls are `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
-- Runtime volume routes accept an optional `provider=modal|daytona` override for the Volumes page
+- Runtime volume routes are Daytona-only on the public surface
 
 Auth, persistence, and observability constraints:
 
@@ -138,7 +138,7 @@ API ownership:
 
 Websocket/runtime contract rules:
 
-- Treat `/api/v1/ws/chat` as the conversational stream and `/api/v1/ws/execution` as the canonical execution/workbench stream
+- Treat `/api/v1/ws/execution` as the canonical conversational and execution/workbench websocket stream
 - Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping
 - Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution
 - When Daytona falls back after a controlled failure, preserve the answer but mark the turn as degraded in final payloads and MLflow metadata
@@ -146,17 +146,20 @@ Websocket/runtime contract rules:
 
 Daytona-specific boundaries:
 
-- Keep Daytona-specific behavior under `integrations/providers/daytona/*`, not in a parallel runtime architecture
+- Keep Daytona-specific behavior under `integrations/daytona/*`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
-- Keep Daytona volume browsing in `integrations/providers/daytona/volumes.py`
+- Keep Daytona volume browsing in `integrations/daytona/volumes.py`
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
 - Keep `rlm_query` as the shared agent-level recursive entrypoint; `rlm_query_batched` remains Daytona-only
+- Daytona idle lifecycle is timer-driven:
+  - `auto_stop_interval=30`
+  - `auto_archive_interval=60`
+  - treat these values as provider minutes, not seconds
 
-Modal/tooling boundaries:
+Tooling boundaries:
 
-- Keep Modal sandbox assets under `runtime/execution/*`
-- Keep Modal volume persistence and browsing in `runtime/tools/modal_volumes.py`
+- The shared backend/frontend product contract is Daytona-only; do not reintroduce Modal provider surfaces.
 - Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating local variants
 
 Common mistakes to avoid:

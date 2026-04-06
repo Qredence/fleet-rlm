@@ -28,9 +28,13 @@ async def _reload_memory_volume_best_effort(
     *,
     reason: str,
 ) -> None:
-    if ctx.agent.interpreter._volume:
+    interpreter = getattr(ctx.agent, "interpreter", None)
+    if not getattr(interpreter, "_volume", None):
+        return
+    reload_fn = getattr(interpreter, "reload", None)
+    if callable(reload_fn):
         try:
-            ctx.agent.interpreter.reload()
+            reload_fn()
         except Exception:
             logger.warning(
                 "Best-effort volume reload failed during %s",

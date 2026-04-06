@@ -10,8 +10,7 @@ from pydantic_core import PydanticCustomError
 from fleet_rlm import __version__
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
-RuntimeMode = Literal["modal_chat", "daytona_pilot"]
-VolumeProvider = Literal["modal", "daytona"]
+VolumeProvider = Literal["daytona"]
 
 
 class HealthResponse(BaseModel):
@@ -96,11 +95,7 @@ class WSMessage(BaseModel):
     )
     execution_mode: ExecutionMode = Field(
         default="auto",
-        description="Modal-only execution mode hint for websocket message frames.",
-    )
-    runtime_mode: RuntimeMode = Field(
-        default="modal_chat",
-        description="Top-level runtime mode selected for the websocket turn.",
+        description="Per-turn execution mode hint for the Daytona-backed websocket runtime.",
     )
     repo_url: str | None = Field(
         default=None,
@@ -144,15 +139,7 @@ class WSMessage(BaseModel):
             )
 
         message_type = str(raw.get("type", "message") or "message").strip()
-        runtime_mode = str(
-            raw.get("runtime_mode", "modal_chat") or "modal_chat"
-        ).strip()
-
-        if (
-            message_type == "message"
-            and runtime_mode == "daytona_pilot"
-            and raw.get("max_depth") is not None
-        ):
+        if message_type == "message" and raw.get("max_depth") is not None:
             raise PydanticCustomError(
                 "daytona_max_depth_removed",
                 "Daytona websocket requests no longer accept max_depth; use the "
@@ -161,7 +148,6 @@ class WSMessage(BaseModel):
 
         if (
             message_type == "message"
-            and runtime_mode == "daytona_pilot"
             and str(raw.get("repo_ref", "") or "").strip()
             and not str(raw.get("repo_url", "") or "").strip()
         ):
@@ -283,7 +269,7 @@ class RuntimeSettingsUpdateResponse(BaseModel):
 class RuntimeConnectivityTestResponse(BaseModel):
     """Result payload for runtime connectivity and preflight diagnostics."""
 
-    kind: Literal["modal", "lm", "daytona"] = Field(
+    kind: Literal["lm", "daytona"] = Field(
         description="Runtime subsystem that was tested."
     )
     ok: bool = Field(
@@ -318,10 +304,6 @@ class RuntimeConnectivityTestResponse(BaseModel):
 class RuntimeTestCache(BaseModel):
     """Cached runtime test results included in the runtime status payload."""
 
-    modal: RuntimeConnectivityTestResponse | None = Field(
-        default=None,
-        description="Most recent Modal connectivity test result, if one has been run.",
-    )
     lm: RuntimeConnectivityTestResponse | None = Field(
         default=None,
         description="Most recent language-model connectivity test result, if one has been run.",
@@ -363,7 +345,7 @@ class RuntimeStatusResponse(BaseModel):
         description="Resolved planner and delegate model identities."
     )
     sandbox_provider: VolumeProvider = Field(
-        default="modal",
+        default="daytona",
         description="Active sandbox backend selected for runtime execution and volume browsing.",
     )
     llm: dict[str, Any] = Field(
@@ -373,10 +355,6 @@ class RuntimeStatusResponse(BaseModel):
     mlflow: dict[str, Any] = Field(
         default_factory=dict,
         description="MLflow enablement and startup diagnostics.",
-    )
-    modal: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Modal configuration and readiness diagnostics.",
     )
     daytona: dict[str, Any] = Field(
         default_factory=dict,

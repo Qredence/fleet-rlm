@@ -38,7 +38,6 @@ When symptoms involve the workspace UI, focus on these seams:
 
 - `openapi.yaml`
 - `/api/v1/runtime/*`
-- `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 
 The riskiest backend files are:

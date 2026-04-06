@@ -83,7 +83,7 @@ def build_execution_completion_summary(
         _as_text(payload.get("runtime_mode"))
         or _as_text(runtime.get("runtime_mode"))
         or _as_text(run_result.get("runtime_mode"))
-        or "modal_chat"
+        or "daytona_pilot"
     )
     terminal_status = _canonical_run_status(event.kind, payload)
     warnings = list(

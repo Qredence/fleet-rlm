@@ -4,10 +4,10 @@ from typing import Any, cast
 
 import dspy
 
-from fleet_rlm.integrations.providers.daytona.agent import (
+from fleet_rlm.integrations.daytona.agent import (
     DaytonaWorkbenchChatAgent,
 )
-from fleet_rlm.integrations.providers.daytona.types import render_final_text
+from fleet_rlm.integrations.daytona.types import render_final_text
 
 
 def _build_agent() -> DaytonaWorkbenchChatAgent:

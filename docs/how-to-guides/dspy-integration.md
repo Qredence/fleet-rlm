@@ -4,7 +4,7 @@ This guide explains how to use DSPy primitives (Signatures, Modules, RLM) within
 
 ## Overview
 
-Fleet-rlm extends DSPy with `dspy.RLM`, a recursive language model runtime that executes LLM calls inside a Modal sandbox. This enables:
+Fleet-rlm extends DSPy with `dspy.RLM`, a recursive language model runtime that executes LLM calls inside a Daytona sandbox. This enables:
 
 - **Long-context reasoning**: The sandbox can load and process documents that exceed typical context limits
 - **Code execution**: Run Python code to explore data, manipulate files, and call APIs
@@ -214,10 +214,10 @@ Use `create_runtime_rlm()` for canonical RLM construction:
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
 
-# Set up the Modal interpreter
-interpreter = ModalInterpreter(
+# Set up the Daytona interpreter
+interpreter = DaytonaInterpreter(
     timeout=600,           # Sandbox timeout in seconds
     secret_name="LITELLM", # Modal secret containing API keys
     volume_name="my-vol",  # Optional: persistent Modal volume
@@ -248,9 +248,9 @@ For production use, prefer registry-based module construction:
 
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
 
-interpreter = ModalInterpreter(timeout=600, secret_name="LITELLM")
+interpreter = DaytonaInterpreter(timeout=600, secret_name="LITELLM")
 
 # Build by name (strings are validated against RUNTIME_MODULE_NAMES)
 rlm = build_runtime_module(
@@ -284,9 +284,9 @@ For delegated sub-problems, use the recursive query pattern:
 
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import build_recursive_subquery_rlm
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
 
-interpreter = ModalInterpreter(timeout=300, secret_name="LITELLM")
+interpreter = DaytonaInterpreter(timeout=300, secret_name="LITELLM")
 
 rlm = build_recursive_subquery_rlm(
     interpreter=interpreter,
@@ -305,7 +305,7 @@ print(result.answer)
 
 ## dspy.RLM Runtime Configuration
 
-The `dspy.RLM` class extends DSPy with Modal sandbox execution. Configure it through `ModalInterpreter`.
+The `dspy.RLM` class extends DSPy with Daytona sandbox execution. Configure it through `DaytonaInterpreter`.
 
 ### Adapter Overrides
 
@@ -321,13 +321,13 @@ The native function-calling flags are experimental and remain off by default. Th
  opt-in adapter prototypes and should not be enabled as the product default until streaming and
  trajectory compatibility are proven.
 
-### ModalInterpreter Options
+### DaytonaInterpreter Options
 
 ```python
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
-interpreter = ModalInterpreter(
+interpreter = DaytonaInterpreter(
     # Core settings
     timeout=900,                    # Total sandbox lifetime (seconds)
     secret_name="LITELLM",          # Modal secret for API keys
@@ -364,11 +364,11 @@ Fleet-rlm uses execution profiles to categorize sandbox behavior:
 Set the profile explicitly:
 
 ```python
-from fleet_rlm import ModalInterpreter
+from fleet_rlm import DaytonaInterpreter
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 # During interpreter creation
-interpreter = ModalInterpreter(
+interpreter = DaytonaInterpreter(
     ...,
     default_execution_profile=ExecutionProfile.RLM_DELEGATE,
 )
@@ -510,7 +510,7 @@ If execution times out:
 
 ```python
 # Increase timeout
-interpreter = ModalInterpreter(timeout=1800)  # 30 minutes
+interpreter = DaytonaInterpreter(timeout=1800)  # 30 minutes
 
 # Or reduce iterations
 rlm = create_runtime_rlm(
@@ -519,13 +519,12 @@ rlm = create_runtime_rlm(
 )
 ```
 
-### Modal Sandbox Connection Issues
+### Daytona Sandbox Connection Issues
 
-Verify Modal credentials:
+Verify Daytona configuration:
 
 ```bash
-modal token new  # Set up authentication
-modal profile current  # Check active profile
+uv run python scripts/validate_env.py daytona
 ```
 
 ### Memory Budget Exhausted
@@ -534,7 +533,7 @@ If LLM call budget is exhausted:
 
 ```python
 # Increase budget
-interpreter = ModalInterpreter(max_llm_calls=200)
+interpreter = DaytonaInterpreter(max_llm_calls=200)
 
 # Or check current usage
 used = interpreter._llm_call_count
@@ -555,5 +554,5 @@ agent = RLMReActChatAgent(max_depth=4)
 ## Related Documentation
 
 - [mlflow-workflows.md](mlflow-workflows.md) - MLflow tracing and optimization
-- [configuring-modal.md](configuring-modal.md) - Modal interpreter configuration
+- [../reference/daytona-runtime-architecture.md](../reference/daytona-runtime-architecture.md) - Daytona runtime configuration
 - [runtime-settings.md](runtime-settings.md) - Server runtime settings

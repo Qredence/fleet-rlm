@@ -69,7 +69,7 @@ class ServerRuntimeConfig(BaseSettings):
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
-    sandbox_provider: str = "modal"
+    sandbox_provider: Literal["daytona"] = "daytona"
 
     # Model fields read from DSPY_* env vars
     agent_model: str | None = Field(default=None, alias="DSPY_LM_MODEL")
@@ -98,16 +98,6 @@ class ServerRuntimeConfig(BaseSettings):
     entra_jwks_url: str | None = None
     entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
-
-    @field_validator("sandbox_provider", mode="after")
-    @classmethod
-    def _validate_sandbox_provider(cls, value: str) -> str:
-        _allowed = {"modal", "daytona", "aca_jobs", "local"}
-        if value.lower() not in _allowed:
-            raise ValueError(
-                f"SANDBOX_PROVIDER must be one of {sorted(_allowed)!r}, got {value!r}"
-            )
-        return value.lower()
 
     @field_validator(
         "agent_model",
@@ -179,6 +169,8 @@ class ServerRuntimeConfig(BaseSettings):
     @classmethod
     def _apply_env_aware_defaults(cls, values: dict) -> dict:
         """Apply cross-field defaults that depend on app_env and auth_mode."""
+        values.pop("sandbox_provider", None)
+        values.pop("SANDBOX_PROVIDER", None)
         app_env = (
             str(
                 values.get("app_env")

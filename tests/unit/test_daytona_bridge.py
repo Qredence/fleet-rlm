@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.integrations.providers.daytona.bridge import DaytonaToolBridge
+from fleet_rlm.integrations.daytona.bridge import DaytonaToolBridge
 
 
 class _FakeFs:

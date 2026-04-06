@@ -47,12 +47,6 @@ class _FakeSession:
     def _run_long_context(self, value: str) -> None:
         self.events.append(("long_context", value))
 
-    def _check_secret(self) -> None:
-        self.events.append(("secret", None))
-
-    def _check_secret_key(self, *, key: str) -> None:
-        self.events.append(("secret_key", key))
-
     def _append_transcript(self, kind: str, message: str) -> None:
         self.events.append(("transcript", kind))
         self.events.append(("transcript_message", message))
@@ -100,13 +94,6 @@ def test_handle_slash_command_routes_session_registry_commands(monkeypatch):
     assert (
         commands.handle_slash_command(session, agent, "/run-long-context docs") is False
     )
-    assert commands.handle_slash_command(session, agent, "/check-secret") is False
-    assert commands.handle_slash_command(session, agent, "/check-secret-key") is False
-    assert (
-        commands.handle_slash_command(session, agent, "/check-secret-key CUSTOM_KEY")
-        is False
-    )
-
     assert len(palette_calls) == 3
     assert ("transcript", "status") in session.events
     assert ("render", None) in session.events
@@ -122,9 +109,6 @@ def test_handle_slash_command_routes_session_registry_commands(monkeypatch):
     assert ("permissions", None) in session.events
     assert ("warning", "Permission policy reset.") in session.events
     assert ("long_context", "docs") in session.events
-    assert ("secret", None) in session.events
-    assert ("secret_key", "DSPY_LLM_API_KEY") in session.events
-    assert ("secret_key", "CUSTOM_KEY") in session.events
 
 
 def test_handle_slash_command_clear_buffer_prompts_before_clearing_all(monkeypatch):

@@ -12,8 +12,8 @@ supported backend for the same runtime architecture.
 - Daytona is the default interpreter backend for that shared runtime in the
   workspace product.
 - Modal remains supported for compatibility, terminal flows, and backend parity
-  where the Modal interpreter is still the selected execution backend.
-- The Web UI still uses the same `/api/v1/ws/chat` surface; `runtime_mode`
+  where the Daytona interpreter is still the selected execution backend.
+- The Web UI still uses the same `/api/v1/ws/execution` surface; `runtime_mode`
   selects interpreter/backend details rather than swapping in a separate chat
   orchestrator.
 - The only supported Daytona CLI surface is `fleet-rlm daytona-smoke --repo ... [--ref ...]` for native Daytona validation.
@@ -64,16 +64,16 @@ graph TB
     end
 
     subgraph EXECUTION["Execution Layer (runtime/)"]
-        INTERPRETER["Interpreter Backends<br/>(runtime/execution/interpreter.py + integrations/providers/daytona/)"]
+        INTERPRETER["Interpreter Backend<br/>(integrations/daytona/interpreter.py)"]
         DRIVER["Sandbox Driver<br/>(core_driver.py)"]
         LLM_TOOLS["LLM Tools<br/>(llm_tools.py)"]
-        VOLUME_OPS["Volume Operations<br/>(modal_volumes.py)"]
+        VOLUME_OPS["Volume Operations<br/>(integrations/daytona/volumes.py)"]
         DRIVER_ASSETS["Driver Assets<br/>(sandbox_assets.py, output_utils.py)"]
     end
 
-    subgraph MODAL["Modal Cloud"]
-        SANDBOX["Modal Sandbox"]
-        VOLUME["Modal Volume"]
+    subgraph DAYTONA["Daytona Cloud"]
+        SANDBOX["Daytona Sandbox"]
+        VOLUME["Daytona Volume"]
     end
 
     subgraph PERSISTENCE["Persistence Layer"]
@@ -202,21 +202,21 @@ Tools provide capabilities for the ReAct agent:
 
 ### 4. Execution Layer (`runtime/`)
 
-The execution layer owns the shared interpreter/runtime infrastructure used by both Modal and Daytona:
+The execution layer owns the Daytona-backed interpreter/runtime infrastructure:
 
 | Module                | Purpose                                              |
 | --------------------- | ---------------------------------------------------- |
-| `interpreter.py`      | `ModalInterpreter` - manages Modal sandbox lifecycle |
-| `core_driver.py`     | `sandbox_driver` - executes Python code in sandbox   |
-| `driver_factories.py` | Factory functions for driver configuration           |
-| `llm_tools.py`        | LLM-backed tools for the sandbox                     |
-| `modal_volumes.py`    | Canonical Modal volume persistence and browsing helpers |
+| `interpreter.py`      | `DaytonaInterpreter` - manages Daytona sandbox lifecycle |
+| `core_driver.py`      | `sandbox_driver` - executes Python code in sandbox |
+| `driver_factories.py` | Factory functions for driver configuration |
+| `llm_tools.py`        | LLM-backed tools for the sandbox |
+| `volumes.py`          | Daytona volume persistence and browsing helpers |
 | `sandbox_assets.py`   | Bundled helper assets injected into the sandbox driver |
-| `output_utils.py`     | Output redaction and stdout summarization helpers    |
+| `output_utils.py`     | Output redaction and stdout summarization helpers |
 
-### 4a. Experimental Daytona Pilot (`integrations/providers/daytona/`)
+### 4a. Daytona Runtime (`integrations/daytona/`)
 
-The Daytona pilot is an experimental interpreter backend for the shared runtime and is not a separate orchestration stack.
+The Daytona package is the canonical interpreter/runtime backend for the shared execution stack.
 
 | Module                | Purpose                                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -231,26 +231,25 @@ The Daytona pilot is an experimental interpreter backend for the shared runtime 
 
 Important scope notes:
 
-- The pilot is workspace-centric: `--repo` is optional, `--context-path` is repeatable, and `--ref` is only valid when a repo is configured.
+- The runtime is workspace-centric: `--repo` is optional, `--context-path` is repeatable, and `--ref` is only valid when a repo is configured.
 - Each root Daytona session uses one sandbox workspace plus one persistent Daytona code-interpreter context.
 - Repo and workspace-analysis helpers are sandbox-native helper functions injected into that persistent context and survive across iterations.
 - `llm_query` / `llm_query_batched` are host-side semantic callbacks bridged into the sandbox through the minimal Daytona broker process. `rlm_query` remains the shared agent-level recursive child-RLM helper, while `rlm_query_batched` is Daytona-only and agent-level for now.
-- The pilot still does not replace `ModalInterpreter` or the default `modal_chat` product path, but it now has its own first-class websocket runtime mode while sharing the same ReAct + `dspy.RLM` orchestration core.
-- Contributors should run Daytona in this order: set `DAYTONA_API_KEY` + `DAYTONA_API_URL`, then run `fleet-rlm daytona-smoke --repo <url>` before using `daytona_pilot` in the web workspace.
+- Contributors should set `DAYTONA_API_KEY` plus any optional `DAYTONA_API_URL` / `DAYTONA_TARGET` overrides, then run `fleet-rlm daytona-smoke --repo <url>` before using the web workspace.
 
-### 4b. Experimental Daytona Workbench
+### 4b. Daytona Workbench
 
-The Daytona pilot now has a dedicated DSPy-native websocket chat agent plus a workbench inspector inside `Workbench`.
+The Daytona runtime now has a dedicated DSPy-native websocket chat agent plus a workbench inspector inside `Workbench`.
 
 | Module                                                              | Purpose                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `integrations/providers/daytona/agent.py`                          | `DaytonaWorkbenchChatAgent` - focused Daytona-specific agent layer over the shared ReAct runtime                                                                                                                                |
-| `api/schemas/core.py`                                               | Adds Daytona websocket source controls (`runtime_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus Daytona runtime readiness metadata; request-side `max_depth` is explicitly rejected for Daytona chat |
+| `integrations/daytona/agent.py`                                    | `DaytonaWorkbenchChatAgent` - focused Daytona-specific agent layer over the shared ReAct runtime |
+| `api/schemas/core.py`                                               | Defines Daytona websocket request controls (`repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`) plus runtime readiness metadata |
 | `api/routers/ws/endpoint.py` / `api/routers/ws/session.py`          | Select the top-level websocket chat agent from the first message and bootstrap runtime/session state                                                                                                                             |
 | `api/routers/ws/stream.py` / `api/routers/ws/commands.py`           | Route Daytona turns through the shared websocket session/streaming lifecycle instead of a one-shot Daytona-only branch                                                                                                          |
-| `frontend/src/screens/workspace/model/chat-store.ts`                | Persists runtime selection, session identity, and runtime-specific request options in UI state                                                                                                                                 |
-| `frontend/src/screens/workspace/components/workspace-composer.tsx`  | Renders runtime selection and keeps execution-mode controls Modal-only                                                                                                                                                           |
-| `frontend/src/screens/workspace/workspace-screen.tsx`               | Keeps the shared chat surface visible, switches warnings by runtime, and relies on the workbench instead of a mandatory Daytona setup card                                                                                     |
+| `frontend/src/screens/workspace/model/chat-store.ts`                | Persists session identity and Daytona request options in UI state |
+| `frontend/src/screens/workspace/components/workspace-composer.tsx`  | Renders the shared composer and Daytona execution controls |
+| `frontend/src/screens/workspace/workspace-screen.tsx`               | Keeps the shared chat surface visible, surfaces Daytona readiness warnings, and relies on the workbench inspector |
 | `frontend/src/screens/workspace/model/run-workbench-*`              | Dedicated analyst workbench state/UI for iterations, evidence, callbacks, prompt objects, and final output                                                                                                                      |
 
 Important scope notes:
@@ -271,7 +270,7 @@ Important scope notes:
 ```mermaid
 flowchart LR
     User["User prompt"] --> Workspace["Workbench chat + workbench"]
-    Workspace --> WS["/api/v1/ws/chat"]
+    Workspace --> WS["/api/v1/ws/execution"]
     WS --> Agent["DaytonaWorkbenchChatAgent"]
     Agent --> Shared["RLMReActChatAgent / dspy.RLM"]
     Shared --> Session["DaytonaSandboxSession"]
@@ -349,8 +348,8 @@ sequenceDiagram
     participant StreamCtx as StreamingContext<br/>(runtime/execution/streaming_context.py)
     participant Stream as runtime/execution/streaming.py
     participant Tools as Tools<br/>(runtime/tools/)
-    participant Interpreter as ModalInterpreter<br/>(interpreter.py)
-    participant Modal as Modal Sandbox
+    participant Interpreter as DaytonaInterpreter<br/>(interpreter.py)
+    participant Daytona as Daytona Sandbox
     participant DB as Neon Postgres<br/>(integrations/database/repository.py)
 
     User->>WS: WSMessage {type: "message"}
@@ -421,7 +420,7 @@ sequenceDiagram
     alt Parent has live sandbox
         Note over ChildCtx: Reuse parent interpreter
     else No live sandbox
-        Note over ChildCtx: Create new ModalInterpreter
+        Note over ChildCtx: Create new DaytonaInterpreter
         ChildCtx->>ChildCtx: Share LLM budget with parent
     end
 
@@ -452,7 +451,7 @@ sequenceDiagram
 | -------------------------------- | ------------------------------------ | ------------------------------------------------- |
 | `spawn_delegate_sub_agent_async` | `runtime/agent/recursive_runtime.py` | Main entry point for delegation                   |
 | `claim_delegate_slot_or_error`   | `runtime/agent/delegation_policy.py` | Enforce `delegate_max_calls_per_turn` limit       |
-| `build_child_interpreter`        | `runtime/agent/delegation_policy.py` | Create or reuse ModalInterpreter for child        |
+| `build_child_interpreter`        | `runtime/agent/delegation_policy.py` | Create or reuse DaytonaInterpreter for child        |
 | `build_recursive_subquery_rlm`   | `runtime/models/rlm_runtime_modules.py` | Construct `dspy.RLM` module with sandbox tools |
 | `_delegate_streaming_context`    | `runtime/agent/recursive_runtime.py` | Build `StreamingContext` for child depth tracking |
 
@@ -464,24 +463,24 @@ sequenceDiagram
 
 ### Sandbox Execution Flow
 
-This diagram shows how code execution flows from tool calls through the ModalInterpreter to the sandbox driver, based on `src/fleet_rlm/runtime/execution/interpreter.py` and `core_driver.py`.
+This diagram shows how code execution flows from tool calls through the DaytonaInterpreter to the sandbox driver, based on `src/fleet_rlm/integrations/daytona/interpreter.py` and `core_driver.py`.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Tool as Tool<br/>(runtime/tools/)
-    participant Interp as ModalInterpreter<br/>(interpreter.py)
-    participant VolOps as VolumeOpsMixin<br/>(modal_volumes.py)
+    participant Interp as DaytonaInterpreter<br/>(interpreter.py)
+    participant VolOps as Daytona volume helpers<br/>(integrations/daytona/volumes.py)
     participant Driver as sandbox_driver<br/>(driver.py)
-    participant Sandbox as Modal.Sandbox
-    participant Volume as Modal.Volume
+    participant Sandbox as Daytona sandbox
+    participant Volume as Daytona volume
 
     Tool->>Interp: interpreter.execute(code, variables, tool_names)
     Interp->>Interp: _ensure_started()
 
     alt Sandbox not running
-        Interp->>Sandbox: modal.Sandbox.create(image, secrets, timeout)
-        Sandbox-->>Interp: Sandbox instance
+        Interp->>Sandbox: client.create(...)
+        Sandbox-->>Interp: sandbox instance
         Interp->>Interp: Start driver process
         Interp->>Driver: stdin: JSON command
     end
@@ -558,16 +557,16 @@ The driver communicates via JSON over stdin/stdout:
 
 | Component                | Source File                     | Role                                                             |
 | ------------------------ | ------------------------------- | ---------------------------------------------------------------- |
-| `ModalInterpreter`       | `runtime/execution/interpreter.py` | Main interpreter class, manages sandbox lifecycle             |
-| `sandbox_driver`         | `runtime/execution/core_driver.py` | Long-lived JSON protocol driver inside sandbox                |
-| `VolumeOpsMixin`         | `runtime/tools/modal_volumes.py`   | Volume persistence operations (upload, commit, reload)        |
-| `ExecutionProfile`       | `runtime/execution/profiles.py`    | Enum controlling sandbox helper/tool exposure                 |
+| `DaytonaInterpreter`     | `integrations/daytona/interpreter.py` | Main interpreter class, manages sandbox lifecycle |
+| `sandbox_driver`         | `runtime/execution/core_driver.py` | Long-lived JSON protocol driver inside sandbox |
+| `Daytona volume helpers` | `integrations/daytona/volumes.py` | Volume browsing and persistence helpers |
+| `ExecutionProfile`       | `runtime/execution/profiles.py` | Enum controlling sandbox helper/tool exposure |
 | `inject_sandbox_helpers` | `runtime/execution/driver_factories.py` | Inject `SUBMIT`, `Final`, `llm_query`, etc. into sandbox globals |
 
 ## API and Streaming Surfaces
 
 - **REST contract source**: `openapi.yaml`
-- **WebSocket chat stream**: `/api/v1/ws/chat`
+- **WebSocket chat stream**: `/api/v1/ws/execution`
 - **WebSocket execution stream**: `/api/v1/ws/execution`
 
 Execution stream events are additive observability and do not replace chat envelopes.
@@ -581,6 +580,6 @@ Configuration is managed via Hydra with YAML files in `src/fleet_rlm/integration
 
 Key configuration areas:
 
-- `interpreter`: Modal interpreter settings (volume, secrets, timeout)
+- `interpreter`: Daytona interpreter settings (volume, secrets, timeout)
 - `agent`: ReAct agent settings (max iterations, delegate LM)
 - `server`: FastAPI server settings (host, port, auth mode)

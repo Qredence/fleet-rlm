@@ -70,13 +70,11 @@ The main frontend slices are:
 
 Runtime expectations:
 
-- `/api/v1/ws/chat` is transcript-first.
 - `/api/v1/ws/execution` is the canonical execution/workbench stream.
-- `modal_chat` is the default runtime path and sends `execution_mode`.
-- `daytona_pilot` is the Daytona-backed variant and sends `repo_url`, `repo_ref`,
+- `daytona_pilot` is the public runtime path and sends `execution_mode`, `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 - Frontend workbench state should hydrate from `execution_completed.summary`, not
-  from Daytona-only chat-final scraping.
+  from legacy chat-final scraping.
 
 ## Backend Integration
 

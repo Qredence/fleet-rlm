@@ -114,13 +114,13 @@ When `ALLOW_QUERY_AUTH_TOKENS=true`, WebSocket connections can bootstrap via que
 **Debug auth (when `ALLOW_DEBUG_AUTH=true`):**
 
 ```text
-ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user-456
+ws://localhost:8000/api/v1/ws/execution?debug_tenant_id=tenant-123&debug_user_id=user-456
 ```
 
 **Token auth:**
 
 ```text
-ws://localhost:8000/api/v1/ws/chat?access_token=<hs256-jwt>
+ws://localhost:8000/api/v1/ws/execution?access_token=<hs256-jwt>
 ```
 
 Prefer `Authorization: Bearer ...` on HTTP requests and on websocket clients that can forward headers. Use `access_token` query bootstrap only on websocket paths that explicitly support it.
@@ -208,7 +208,7 @@ Entra tokens map to normalized identity:
 For WebSocket connections, include the access token in the query string:
 
 ```text
-wss://your-api.com/api/v1/ws/chat?access_token=<entra-access-token>
+   wss://your-api.com/api/v1/ws/execution?access_token=<entra-access-token>
 ```
 
 **Note:** Query tokens are enabled by default for Entra mode (`ALLOW_QUERY_AUTH_TOKENS=true`).
@@ -321,7 +321,7 @@ The `/api/v1/auth/me` endpoint returns both external claims and internal IDs:
 
 ### WebSocket Routes
 
-- `WS /api/v1/ws/chat` — Auth required when `AUTH_REQUIRED=true`
+- `WS /api/v1/ws/execution` — Auth required when `AUTH_REQUIRED=true`
 - `WS /api/v1/ws/execution` — Auth required when `AUTH_REQUIRED=true`
 
 ---

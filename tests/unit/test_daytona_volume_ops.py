@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.integrations.providers.daytona.volumes import (
+from fleet_rlm.integrations.daytona.volumes import (
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
 )
@@ -80,7 +80,7 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -138,7 +138,7 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -177,7 +177,7 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.volumes._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volumes._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 

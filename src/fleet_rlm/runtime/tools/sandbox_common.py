@@ -14,13 +14,13 @@ from fleet_rlm.runtime.execution.storage_paths import (
     RuntimeStorageRoots,
     runtime_storage_roots,
 )
+from fleet_rlm.utils.volume_tree import resolve_mounted_volume_path
 
 from .shared import aexecute_submit, execute_submit
-from .modal_volumes import resolve_mounted_volume_path
 
 if TYPE_CHECKING:
     from ..agent.chat_agent import RLMReActChatAgent
-    from fleet_rlm.integrations.providers.daytona.runtime import DaytonaSandboxSession
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
 
 logger = logging.getLogger(__name__)
@@ -76,17 +76,25 @@ def _persistent_roots(ctx: _SandboxToolContext) -> RuntimeStorageRoots:
 
 
 def _reload_volume_best_effort(ctx: _SandboxToolContext) -> None:
-    if ctx.agent.interpreter._volume:
+    interpreter = getattr(ctx.agent, "interpreter", None)
+    if not getattr(interpreter, "_volume", None):
+        return
+    reload_fn = getattr(interpreter, "reload", None)
+    if callable(reload_fn):
         try:
-            ctx.agent.interpreter.reload()
+            reload_fn()
         except Exception:
             logger.warning("Best-effort volume reload failed", exc_info=True)
 
 
 def _commit_volume_best_effort(ctx: _SandboxToolContext) -> None:
-    if ctx.agent.interpreter._volume:
+    interpreter = getattr(ctx.agent, "interpreter", None)
+    if not getattr(interpreter, "_volume", None):
+        return
+    commit_fn = getattr(interpreter, "commit", None)
+    if callable(commit_fn):
         try:
-            ctx.agent.interpreter.commit()
+            commit_fn()
         except Exception as exc:
             logger.exception("Best-effort volume commit failed: %s", exc)
 
@@ -95,7 +103,7 @@ async def _aget_daytona_session(
     ctx: _SandboxToolContext,
 ) -> DaytonaSandboxSession | None:
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except ImportError:
@@ -115,7 +123,7 @@ def _get_daytona_session_sync(
     ctx: _SandboxToolContext,
 ) -> DaytonaSandboxSession | None:
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except ImportError:
@@ -133,7 +141,7 @@ def _get_daytona_session_sync(
 
 def _is_daytona_interpreter(ctx: _SandboxToolContext) -> bool:
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except ImportError:
@@ -314,8 +322,8 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
         Args:
             limit: Maximum number of snapshots to return (default 20).
         """
-        from fleet_rlm.integrations.providers.daytona.runtime import alist_snapshots
-        from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+        from fleet_rlm.integrations.daytona.runtime import alist_snapshots
+        from fleet_rlm.integrations.daytona.runtime_helpers import (
             _run_async_compat,
         )
 
@@ -334,8 +342,8 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
         Returns:
             The snapshot name if active, or an explanation if unavailable.
         """
-        from fleet_rlm.integrations.providers.daytona.runtime import aresolve_snapshot
-        from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+        from fleet_rlm.integrations.daytona.runtime import aresolve_snapshot
+        from fleet_rlm.integrations.daytona.runtime_helpers import (
             _run_async_compat,
         )
 
@@ -380,7 +388,7 @@ def build_lsp_tools(agent: RLMReActChatAgent) -> list[Any]:
             line: Zero-based line number.
             character: Zero-based character offset.
         """
-        from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+        from fleet_rlm.integrations.daytona.runtime_helpers import (
             _run_async_compat,
         )
 
@@ -420,7 +428,7 @@ def build_lsp_tools(agent: RLMReActChatAgent) -> list[Any]:
         Args:
             file_path: Path to the file in the sandbox workspace.
         """
-        from fleet_rlm.integrations.providers.daytona.runtime_helpers import (
+        from fleet_rlm.integrations.daytona.runtime_helpers import (
             _run_async_compat,
         )
 
@@ -653,7 +661,7 @@ def build_process_tools(agent: RLMReActChatAgent) -> list[Any]:
     helpers (``start_background_process``, ``read_process_logs``,
     ``kill_process``) rely on helpers that are only injected by the Daytona
     interpreter; they are registered only when the active interpreter is a
-    :class:`~fleet_rlm.integrations.providers.daytona.interpreter.DaytonaInterpreter`.
+    :class:`~fleet_rlm.integrations.daytona.interpreter.DaytonaInterpreter`.
     In all other cases, a stub that returns ``{status: "error"}`` is registered
     so callers receive a stable payload shape rather than a ``NameError``.
     """

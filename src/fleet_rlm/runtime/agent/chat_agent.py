@@ -20,7 +20,7 @@ from typing_extensions import Self
 
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 from fleet_rlm.runtime.execution.streaming import (
     StreamingContext,
 )
@@ -140,9 +140,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.max_output_chars = max_output_chars
         self.min_substantive_chars = min_substantive_chars
 
-        self.interpreter = interpreter or ModalInterpreter(
+        self.interpreter = interpreter or DaytonaInterpreter(
             timeout=timeout,
-            secret_name=secret_name,
             volume_name=volume_name,
             max_llm_calls=rlm_max_llm_calls,
             async_execute=interpreter_async_execute,
@@ -236,7 +235,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         return False
 
     def start(self) -> None:
-        """Start the underlying Modal interpreter session if needed."""
+        """Start the underlying interpreter session if needed."""
         chat_runtime_helpers.start_agent_session(self)
 
     def shutdown(self) -> None:
@@ -244,7 +243,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         chat_runtime_helpers.shutdown_agent_session(self)
 
     async def astart(self) -> None:
-        """Start the underlying Modal interpreter session if needed (async)."""
+        """Start the underlying interpreter session if needed (async)."""
         await chat_runtime_helpers.astart_agent_session(self)
 
     async def ashutdown(self) -> None:

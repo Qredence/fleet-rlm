@@ -9,7 +9,7 @@ from typing import Any, cast
 from fleet_rlm.cli import runtime_factory
 from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
 from fleet_rlm.runtime.models import StreamEvent
-from fleet_rlm.integrations.providers.daytona.agent import (
+from fleet_rlm.integrations.daytona.agent import (
     DaytonaWorkbenchChatAgent,
 )
 
@@ -507,7 +507,7 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.agent.DaytonaWorkbenchChatAgent",
+        "fleet_rlm.runtime.factory.DaytonaWorkbenchChatAgent",
         _FakeDaytonaWorkbenchChatAgent,
     )
 
@@ -526,7 +526,7 @@ def test_build_daytona_workbench_chat_agent_threads_interpreter_async_execute(
 @pytest.mark.asyncio
 async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
     """Verify SandboxSpec is threaded from agent → interpreter → runtime."""
-    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+    from fleet_rlm.integrations.daytona.types import SandboxSpec
 
     spec = SandboxSpec(
         language="python",
@@ -557,7 +557,7 @@ async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
 async def test_sandbox_spec_with_declarative_image_flows_through() -> None:
     """Verify a daytona.Image declarative builder reaches the runtime."""
     from daytona import Image
-    from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+    from fleet_rlm.integrations.daytona.types import SandboxSpec
 
     img = Image.debian_slim("3.12").pip_install(["dspy"])
     spec = SandboxSpec(image=img, labels={"managed-by": "fleet-rlm"})

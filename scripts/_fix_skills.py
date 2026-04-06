@@ -150,11 +150,11 @@ with open('/home/daytona/memory/artifacts/result.json', 'w') as f:
 """
 )
 
-# --- rlm-test-suite: fix Modal references ---
+# --- rlm-test-suite: fix legacy interpreter references ---
 p = SKILLS / "rlm-test-suite" / "SKILL.md"
 c = p.read_text()
 c = c.replace(
-    "| `test_context_manager.py` | `__enter__`/`__exit__` protocol for ModalInterpreter |",
+    "| `test_context_manager.py` | `__enter__`/`__exit__` protocol for interpreter lifecycle |",
     "| `test_context_manager.py` | `__enter__`/`__exit__` protocol for interpreter lifecycle |",
 )
 c = c.replace(
@@ -162,8 +162,7 @@ c = c.replace(
     "| `test_volume_ops.py` | Volume mount/persistence config |",
 )
 c = c.replace(
-    '    monkeypatch.setattr("fleet_rlm.runtime.execution.interpreter.modal", mock_modal)\n\n    interp = ModalInterpreter(timeout=60)\n    interp.start()\n    try:\n        result = interp.execute("x = 42\\nSUBMIT(answer=x)")\n        assert result.answer == 42\n    finally:\n        interp.shutdown()',
-    '    mock_daytona = MagicMock()\n    monkeypatch.setattr(\n        "fleet_rlm.integrations.providers.daytona.interpreter.AsyncDaytona",\n        mock_daytona,\n    )\n\n    interp = DaytonaInterpreter(timeout=60)\n    interp.start()\n    try:\n        result = interp.execute("x = 42\\nSUBMIT(answer=x)")\n        assert result.answer == 42\n    finally:\n        interp.shutdown()',
+    '    monkeypatch.setattr(\n        "fleet_rlm.integrations.daytona.interpreter._execution",\n        MagicMock(),\n    )\n\n    interp = DaytonaInterpreter(timeout=60)\n    interp.start()\n    try:\n        result = interp.execute("x = 42\\nSUBMIT(answer=x)")\n        assert result.answer == 42\n    finally:\n        interp.shutdown()',
 )
 c = c.replace(
     "- Use `monkeypatch` to mock Modal/DSPy/Daytona for offline tests",
@@ -171,7 +170,7 @@ c = c.replace(
 )
 p.write_text(c)
 
-# --- rlm-debug: fix remaining Modal references ---
+# --- rlm-debug: fix remaining runtime guidance ---
 p = SKILLS / "rlm-debug" / "SKILL.md"
 c = p.read_text()
 c = c.replace(
@@ -179,16 +178,16 @@ c = c.replace(
     "- Mismatch between requested `runtime_mode` and backend readiness state\n- Fix by tracing `runtime_mode` through the initial websocket request and store state",
 )
 c = c.replace(
-    "- Use `modal-interpreter-agent` when the issue is Modal-only",
+    "- Use `daytona-runtime` for Daytona-specific volume and execution debugging",
     "- Use `daytona-runtime` for Daytona-specific volume and execution debugging",
 )
 p.write_text(c)
 
-# --- daytona-runtime: fix modal_chat reference ---
+# --- daytona-runtime: fix legacy runtime wording ---
 p = SKILLS / "daytona-runtime" / "SKILL.md"
 c = p.read_text()
 c = c.replace(
-    "- `daytona_pilot` uses the same shared ReAct plus `dspy.RLM` runtime as `modal_chat`.",
+    "- `daytona_pilot` uses the shared ReAct plus `dspy.RLM` runtime backbone.",
     "- `daytona_pilot` is the primary runtime path, built on the shared ReAct plus `dspy.RLM` backbone.",
 )
 p.write_text(c)

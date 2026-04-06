@@ -20,7 +20,6 @@ Each ADR follows this structure:
 | ADR | Title | Status |
 |-----|-------|--------|
 | [001](./001-rlm-runtime-architecture.md) | RLM Runtime Architecture | Accepted |
-| [002](./002-modal-sandbox-execution.md) | Modal Sandbox Execution Model | Accepted |
 | [003](./003-neon-postgres-rls-persistence.md) | Neon/Postgres with RLS for Persistence | Accepted |
 | [004](./004-dual-auth-modes.md) | Dual Authentication Modes (Dev/Entra) | Accepted |
 

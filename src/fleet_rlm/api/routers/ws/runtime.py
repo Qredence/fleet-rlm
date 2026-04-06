@@ -155,15 +155,12 @@ async def _prepare_chat_runtime(
 
 def _build_chat_agent_context(
     runtime: _PreparedChatRuntime,
-    *,
-    runtime_mode: str = "modal_chat",
 ) -> ChatAgentProtocol:
     from fleet_rlm.cli import runners
 
     return cast(
         ChatAgentProtocol,
-        runners.build_chat_agent_for_runtime_mode(
-            runtime_mode=runtime_mode,
+        runners.build_react_chat_agent(
             react_max_iters=runtime.cfg.react_max_iters,
             deep_react_max_iters=runtime.cfg.deep_react_max_iters,
             enable_adaptive_iters=runtime.cfg.enable_adaptive_iters,

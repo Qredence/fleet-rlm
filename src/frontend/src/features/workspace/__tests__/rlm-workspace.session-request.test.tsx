@@ -109,7 +109,7 @@ describe("WorkspaceScreen requested conversation loading", () => {
       sessionRevision: 0,
       requestedConversationId: null,
     });
-    useChatStore.setState({ runtimeMode: "modal_chat" });
+    useChatStore.setState({ runtimeMode: "daytona_pilot" });
   });
 
   afterEach(() => {

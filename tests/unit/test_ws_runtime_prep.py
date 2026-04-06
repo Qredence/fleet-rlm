@@ -148,19 +148,15 @@ def test_prepare_chat_runtime_reports_planner_initialization_failure(
     ]
 
 
-def test_build_chat_agent_context_uses_runtime_mode_builder(monkeypatch) -> None:
-    react_agent = object()
+def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
     daytona_agent = object()
     calls: list[dict[str, Any]] = []
 
     def _fake_builder(**kwargs: Any) -> object:
         calls.append(kwargs)
-        return react_agent if kwargs["runtime_mode"] == "modal_chat" else daytona_agent
+        return daytona_agent
 
-    monkeypatch.setattr(
-        "fleet_rlm.cli.runners.build_chat_agent_for_runtime_mode",
-        _fake_builder,
-    )
+    monkeypatch.setattr("fleet_rlm.cli.runners.build_react_chat_agent", _fake_builder)
 
     runtime = _PreparedChatRuntime(
         cfg=_runtime_cfg(),
@@ -171,22 +167,28 @@ def test_build_chat_agent_context_uses_runtime_mode_builder(monkeypatch) -> None
         identity_rows=None,
     )
 
-    assert _build_chat_agent_context(runtime, runtime_mode="modal_chat") is react_agent
-    assert (
-        _build_chat_agent_context(runtime, runtime_mode="daytona_pilot")
-        is daytona_agent
-    )
-    assert [call["runtime_mode"] for call in calls] == [
-        "modal_chat",
-        "daytona_pilot",
+    assert _build_chat_agent_context(runtime) is daytona_agent
+    assert calls == [
+        {
+            "react_max_iters": 5,
+            "deep_react_max_iters": 9,
+            "enable_adaptive_iters": True,
+            "rlm_max_iterations": 11,
+            "rlm_max_llm_calls": 17,
+            "max_depth": 4,
+            "timeout": 123,
+            "secret_name": "secret",
+            "volume_name": "volume",
+            "interpreter_async_execute": True,
+            "guardrail_mode": "warn",
+            "max_output_chars": 1200,
+            "min_substantive_chars": 40,
+            "planner_lm": "planner-lm",
+            "delegate_lm": "delegate-lm",
+            "delegate_max_calls_per_turn": 3,
+            "delegate_result_truncation_chars": 500,
+        }
     ]
-    assert all(call["timeout"] == 123 for call in calls)
-    assert all(call["max_depth"] == 4 for call in calls)
-    assert all(call["secret_name"] == "secret" for call in calls)
-    assert all(call["volume_name"] == "volume" for call in calls)
-    assert all(call["guardrail_mode"] == "warn" for call in calls)
-    assert all(call["planner_lm"] == "planner-lm" for call in calls)
-    assert all(call["delegate_lm"] == "delegate-lm" for call in calls)
 
 
 def test_new_chat_session_state_uses_identity_or_defaults() -> None:

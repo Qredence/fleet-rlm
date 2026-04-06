@@ -39,7 +39,7 @@ def test_build_execution_completion_summary_builds_fallback_final_artifact() -> 
     event = StreamEvent(
         kind="final",
         text="answer text",
-        payload={"runtime_mode": "modal_chat", "sources": [{"id": "src-1"}]},
+        payload={"runtime_mode": "daytona_pilot", "sources": [{"id": "src-1"}]},
         timestamp=ts(),
     )
 
@@ -63,7 +63,7 @@ def test_build_execution_completion_summary_prefers_top_level_final_artifact_whe
         kind="final",
         text="raw fallback text",
         payload={
-            "runtime_mode": "modal_chat",
+            "runtime_mode": "daytona_pilot",
             "final_artifact": {
                 "kind": "markdown",
                 "value": {"summary": "Structured final summary"},
@@ -79,7 +79,7 @@ def test_build_execution_completion_summary_prefers_top_level_final_artifact_whe
         run_id="run-top-level-artifact",
     )
 
-    assert summary["runtime_mode"] == "modal_chat"
+    assert summary["runtime_mode"] == "daytona_pilot"
     assert summary["final_artifact"]["finalization_mode"] == "SUBMIT"
     assert summary["final_artifact"]["value"]["summary"] == "Structured final summary"
 

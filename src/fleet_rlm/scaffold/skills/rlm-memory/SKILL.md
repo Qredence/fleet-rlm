@@ -35,7 +35,7 @@ The Daytona mounted volume is rooted at `/home/daytona/memory/` inside the sandb
 ## Store and Recall
 
 ```python
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 interp = DaytonaInterpreter(
     repo_url="https://github.com/your-org/your-repo",

@@ -13,14 +13,13 @@ const fallbackValues: Record<string, string> = {
   DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gemini-3-flash-preview",
   DSPY_LM_API_BASE: "",
   DSPY_LM_MAX_TOKENS: "64000",
-  SECRET_NAME: "LITELLM",
-  VOLUME_NAME: "rlm-volume-dspy",
+  DAYTONA_API_URL: "http://127.0.0.1:3000",
+  DAYTONA_TARGET: "local",
 };
 
 const fallbackMaskedValues: Record<string, string> = {
   DSPY_LLM_API_KEY: "sk-...demo",
-  MODAL_TOKEN_ID: "tok-...demo",
-  MODAL_TOKEN_SECRET: "***",
+  DAYTONA_API_KEY: "dyt-...demo",
   ...fallbackValues,
 };
 
@@ -29,7 +28,7 @@ function clone<T>(value: T): T {
 }
 
 function buildConnectivityTest(
-  kind: "modal" | "lm" | "daytona",
+  kind: "lm" | "daytona",
   overrides?: Partial<RuntimeConnectivityTestResponse>,
 ): RuntimeConnectivityTestResponse {
   return {
@@ -42,7 +41,7 @@ function buildConnectivityTest(
       provider_reachable: true,
     },
     guidance: [],
-    latency_ms: kind === "modal" ? 82 : 126,
+    latency_ms: kind === "daytona" ? 82 : 126,
     output_preview: kind === "lm" ? "Mock runtime ready." : null,
     error: null,
     ...overrides,
@@ -68,19 +67,22 @@ export function getMockRuntimeStatus(): RuntimeStatusResponse {
       delegate: fallbackValues.DSPY_DELEGATE_LM_MODEL,
       delegate_small: fallbackValues.DSPY_DELEGATE_LM_SMALL_MODEL,
     },
+    sandbox_provider: "daytona",
     llm: {
       model_set: true,
       api_key_set: true,
       planner_configured: true,
     },
-    modal: {
-      credentials_available: true,
-      secret_name_set: true,
-      volume_name_set: true,
+    daytona: {
+      api_key_set: true,
+      api_url_set: true,
+      target_set: true,
+      configured: true,
+      sandbox_provider_set: true,
     },
     tests: {
-      modal: buildConnectivityTest("modal"),
       lm: buildConnectivityTest("lm"),
+      daytona: buildConnectivityTest("daytona"),
     },
     guidance: [
       "Frontend dev mode is using built-in runtime fallback data because no backend runtime is configured.",
@@ -99,22 +101,17 @@ export function applyMockRuntimeUpdates(
     }
 
     fallbackValues[key] = value;
-    fallbackMaskedValues[key] =
-      key.endsWith("API_KEY") || key.endsWith("TOKEN_ID") || key.endsWith("TOKEN_SECRET")
-        ? value.length > 8
-          ? `${value.slice(0, 2)}...${value.slice(-4)}`
-          : "***"
-        : value;
+    fallbackMaskedValues[key] = key.endsWith("API_KEY")
+      ? value.length > 8
+        ? `${value.slice(0, 2)}...${value.slice(-4)}`
+        : "***"
+      : value;
   }
 
   return {
     updated: Object.keys(updates),
     env_path: FALLBACK_ENV_PATH,
   };
-}
-
-export function getMockModalTest(): RuntimeConnectivityTestResponse {
-  return buildConnectivityTest("modal");
 }
 
 export function getMockLmTest(): RuntimeConnectivityTestResponse {

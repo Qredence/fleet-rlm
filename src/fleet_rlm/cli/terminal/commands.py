@@ -164,13 +164,6 @@ def _run_session_action(
     if action == "run-long-context":
         session._run_long_context(arg_text)
         return False
-    if action == "check-secret":
-        session._check_secret()
-        return False
-    if action == "check-secret-key":
-        key = arg_text.strip() or "DSPY_LLM_API_KEY"
-        session._check_secret_key(key=key)
-        return False
     raise ValueError(f"Unknown session action: {action}")
 
 
@@ -277,8 +270,6 @@ _SESSION_COMMAND_ACTIONS: dict[str, str] = {
     "/permissions": "permissions",
     "/permissions-reset": "permissions-reset",
     "/run-long-context": "run-long-context",
-    "/check-secret": "check-secret",
-    "/check-secret-key": "check-secret-key",
 }
 
 

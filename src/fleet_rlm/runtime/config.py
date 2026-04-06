@@ -118,56 +118,17 @@ def configure_posthog_analytics_from_env() -> object | None:
 
 
 def _prepare_env(*, env_file: Path | None = None) -> None:
-    """Load env defaults and shared runtime guards for LM configuration helpers."""
+    """Load env defaults for LM configuration helpers."""
     dotenv_path = env_file
     if dotenv_path is None:
         dotenv_path = resolve_env_path(start_paths=[Path.cwd()])
 
     app_env = (os.getenv("APP_ENV") or "local").strip().lower()
     load_dotenv(dotenv_path, override=app_env == "local")
-    _guard_modal_shadowing()
 
 
 def _import_dspy() -> Any:
     return dspy
-
-
-def _guard_modal_shadowing() -> None:
-    """Guard against module shadowing that can break Modal imports.
-
-    Checks for and handles shadowing issues:
-    - A local 'modal.py' file that shadows the modal package
-    - Compiled bytecode files (__pycache__/modal.*.pyc) from previous shadowing
-
-    Raises:
-        RuntimeError: If a modal.py shadow file exists (user must rename/delete),
-            or if bytecode files exist but cannot be removed.
-    """
-    shadow_py = Path.cwd() / "modal.py"
-    shadow_pyc_dir = Path.cwd() / "__pycache__"
-    shadow_pycs = (
-        list(shadow_pyc_dir.glob("modal.*.pyc")) if shadow_pyc_dir.exists() else []
-    )
-
-    if shadow_py.exists():
-        raise RuntimeError(
-            f"Found {shadow_py} which shadows the 'modal' package. "
-            "Rename/delete it and restart your shell or kernel."
-        )
-
-    failed: list[str] = []
-    for pyc in shadow_pycs:
-        try:
-            pyc.unlink()
-        except OSError:
-            failed.append(str(pyc))
-
-    if failed:
-        raise RuntimeError(
-            "Found shadowing bytecode files but could not remove them:\n"
-            + "\n".join(failed)
-            + "\nDelete them manually and retry."
-        )
 
 
 def _normalize_adapter_name(value: str | None) -> str | None:
@@ -358,8 +319,6 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     Optional environment variables:
         - DSPY_LM_API_BASE: Custom API base URL
         - DSPY_LM_MAX_TOKENS: Maximum tokens for generation (default: 16000)
-
-    Also guards against modal module shadowing issues.
 
     Args:
         env_file: Optional path to a specific .env file. If not provided,

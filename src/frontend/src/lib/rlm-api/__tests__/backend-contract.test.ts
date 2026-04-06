@@ -19,17 +19,17 @@ describe("backend contract lock", () => {
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
+    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
     expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
   });
 
-  it("maps explicit /chat ws URL to /execution for execution stream", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+  it("keeps explicit execution ws URLs unchanged", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { config } = await loadModules();
 
-    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/chat");
+    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
     expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
   });
 
@@ -48,7 +48,7 @@ describe("backend contract lock", () => {
 
     await runtime.runtimeEndpoints.settings();
     await runtime.runtimeEndpoints.patchSettings({ updates: {} });
-    await runtime.runtimeEndpoints.testModal();
+    await runtime.runtimeEndpoints.testDaytona();
     await runtime.runtimeEndpoints.testLm();
     await runtime.runtimeEndpoints.status();
 
@@ -56,7 +56,7 @@ describe("backend contract lock", () => {
     expect(calledUrls).toEqual([
       "http://localhost:8000/api/v1/runtime/settings",
       "http://localhost:8000/api/v1/runtime/settings",
-      "http://localhost:8000/api/v1/runtime/tests/modal",
+      "http://localhost:8000/api/v1/runtime/tests/daytona",
       "http://localhost:8000/api/v1/runtime/tests/lm",
       "http://localhost:8000/api/v1/runtime/status",
     ]);

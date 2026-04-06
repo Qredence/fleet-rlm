@@ -115,11 +115,11 @@ graph LR
 | `api/routers/ws/lifecycle.py`, `turn_setup.py`, `turn_lifecycle.py` | `integrations/database/*`, `api/execution/*` | Run/turn lifecycle orchestration |
 | `api/routers/ws/persistence.py`, `manifest.py`, `artifacts.py` | `integrations/database/*` | Durable state, manifest, and artifact persistence |
 | `api/routers/ws/errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `terminal.py`, `completion.py` | `runtime/models/*`, `api/execution/*` | Failure handling, cancellation, terminal event shaping, and final summaries |
-| `api/routers/ws/types.py` | `integrations/providers/daytona/*` | Daytona-specific request normalization |
+| `api/routers/ws/types.py` | `integrations/daytona/*` | Daytona-specific request normalization |
 | `api/execution/*` | `runtime/models/*` | Trace/event shaping |
 | `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
-| `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/providers/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
-| `api/runtime_services/volumes.py` | `runtime/tools/modal_volumes.py`, `integrations/providers/daytona/volumes.py` | Volume browsing |
+| `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
+| `api/runtime_services/volumes.py` | `integrations/daytona/volumes.py` | Volume browsing |
 
 ## Integration Packages
 
@@ -129,8 +129,7 @@ graph LR
 | `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
 | `integrations/mcp/` | FastMCP server surface | `server.py` |
 | `integrations/observability/` | Telemetry and evaluation | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py`, `dspy_evaluation.py`, `gepa_optimization.py`, `workspace_metrics.py` |
-| `integrations/providers/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
-| `integrations/providers/modal/` | Modal provider helpers | provider-specific helpers only |
+| `integrations/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
 
 ## Verification
 

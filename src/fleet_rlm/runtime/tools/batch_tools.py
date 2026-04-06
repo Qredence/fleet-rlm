@@ -38,7 +38,7 @@ def build_batch_tools(
     sandbox_ctx = _SandboxToolContext(agent=agent)
 
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except Exception:  # pragma: no cover - defensive import guard

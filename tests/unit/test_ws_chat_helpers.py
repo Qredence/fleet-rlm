@@ -221,7 +221,7 @@ def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
 
 
 def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper() -> None:
-    source = inspect.getsource(ws_router.chat_streaming)
+    source = inspect.getsource(ws_router.execution_stream)
     start = source.index("async def local_persist(")
     end = source.index("await _chat_message_loop(", start)
     local_persist_block = source[start:end]
@@ -236,17 +236,15 @@ def test_ws_message_accepts_execution_mode() -> None:
     assert message.execution_mode == "tools_only"
 
 
-def test_ws_message_accepts_daytona_runtime_fields() -> None:
+def test_ws_message_accepts_daytona_request_fields() -> None:
     message = WSMessage(
         type="message",
         content="hello",
-        runtime_mode="daytona_pilot",
         repo_url="https://github.com/qredence/fleet-rlm.git",
         repo_ref="main",
         batch_concurrency=6,
     )
 
-    assert message.runtime_mode == "daytona_pilot"
     assert message.repo_url == "https://github.com/qredence/fleet-rlm.git"
     assert message.repo_ref == "main"
     assert message.batch_concurrency == 6

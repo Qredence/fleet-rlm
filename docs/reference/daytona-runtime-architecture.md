@@ -50,11 +50,9 @@ The current implementation treats these Daytona docs as the normative baseline:
 
 ## Current Runtime Shape
 
-- `modal_chat` and `daytona_pilot` now share the same ReAct + `dspy.RLM`
-  runtime architecture.
-- The backend difference is the interpreter implementation:
-  - Modal uses `ModalInterpreter`
-  - Daytona uses `DaytonaInterpreter`
+- `daytona_pilot` is the public runtime path built on the shared ReAct +
+  `dspy.RLM` runtime architecture.
+- The maintained interpreter implementation is `DaytonaInterpreter`.
 - Websocket session switching must use the async agent/session reset path (`agent.areset(...)`) when clearing Daytona sandbox buffers for a fresh or restored session without saved state.
 - `DaytonaWorkbenchChatAgent` remains the focused Daytona-specific agent layer
   that configures the shared runtime with Daytona workspace/session metadata.
@@ -205,4 +203,4 @@ interface:
 ## Intentional Clean-Break Imports
 
 - Deleted module paths such as `state.py`, `smoke.py`, and `snapshots.py` are intentionally unsupported.
-- The canonical import path for the smoke result type is `fleet_rlm.integrations.providers.daytona.types.DaytonaSmokeResult`.
+- The canonical import path for the smoke result type is `fleet_rlm.integrations.daytona.types.DaytonaSmokeResult`.

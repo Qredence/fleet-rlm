@@ -4,17 +4,17 @@ This page documents the current, maintained Python interfaces for building on `f
 
 ## Core Runtime Classes
 
-### `fleet_rlm.ModalInterpreter`
+### `fleet_rlm.DaytonaInterpreter`
 
 Primary sandbox execution runtime. The maintained implementation lives in
-`fleet_rlm.runtime.execution.interpreter`.
+`fleet_rlm.integrations.daytona.interpreter`.
 
 Typical usage:
 
 ```python
-from fleet_rlm import ModalInterpreter
+from fleet_rlm import DaytonaInterpreter
 
-with ModalInterpreter(timeout=600, secret_name="LITELLM", volume_name="rlm-volume-dspy") as interp:
+with DaytonaInterpreter(timeout=600, volume_name="rlm-volume-dspy") as interp:
     result = interp.execute("print('hello')")
 ```
 
@@ -43,16 +43,13 @@ Current maintained runner surface:
 - `run_react_chat_once(...)`
 - `arun_react_chat_once(...)`
 - `run_long_context(...)`
-- `check_secret_presence(...)`
-- `check_secret_key(...)`
-
 ### `build_react_chat_agent(...)`
 
 Constructs an `RLMReActChatAgent` with runtime controls such as:
 
 - ReAct/RLM iteration budgets
 - recursion depth
-- Modal timeout/secret/volume
+- Daytona timeout/volume
 - guardrail settings
 - delegate LM settings
 
@@ -73,13 +70,6 @@ Long-document analysis/summarization helper backed by DSPy RLM signatures.
 Modes:
 
 - `summarize` → `SummarizeLongDocument`
-
-### Secret Diagnostics
-
-- `check_secret_presence(secret_name="LITELLM")`
-- `check_secret_key(secret_name="LITELLM", key="DSPY_LLM_API_KEY")`
-
-These execute Modal-side checks for required environment keys.
 
 ## Signatures (`fleet_rlm.runtime.agent.signatures`)
 

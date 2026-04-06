@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from fleet_rlm.integrations.providers.daytona.types import SandboxSpec
+from fleet_rlm.integrations.daytona.types import SandboxSpec
 
 
 class _FakeImage:
@@ -19,7 +19,7 @@ class TestSandboxSpecDefaults:
         assert spec.language == "python"
         assert spec.volume_name is None
         assert spec.ephemeral is True
-        assert spec.auto_stop_interval == 1800
+        assert spec.auto_stop_interval == 30
         assert spec.env_vars is None
         assert spec.labels is None
         assert spec.snapshot is None
@@ -31,7 +31,7 @@ class TestSandboxSpecDefaults:
         params = spec.to_create_params()
         assert params["language"] == "python"
         assert params["ephemeral"] is True
-        assert params["auto_stop_interval"] == 1800
+        assert params["auto_stop_interval"] == 30
         assert "volumes" not in params
         assert "env_vars" not in params
         assert "image" not in params
