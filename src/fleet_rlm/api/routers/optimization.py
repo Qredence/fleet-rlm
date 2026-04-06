@@ -47,7 +47,17 @@ def _validate_path(user_path: str, base: Path) -> Path:
             detail="Absolute paths are not allowed. Use a relative path.",
         )
     resolved = (base / candidate).resolve()
-    if not resolved.is_relative_to(base):
+    try:
+        # Python 3.9+: prefer Path.is_relative_to when available.
+        is_relative = resolved.is_relative_to(base)  # type: ignore[attr-defined]
+    except AttributeError:
+        # Fallback for older Python versions: use relative_to in a try/except.
+        try:
+            resolved.relative_to(base)
+            is_relative = True
+        except ValueError:
+            is_relative = False
+    if not is_relative:
         raise HTTPException(
             status_code=400,
             detail="Path escapes the allowed data directory.",
@@ -135,9 +145,9 @@ def _run_gepa_optimization(
     )
 
     return optimize_program_with_gepa(
-        dataset_path=Path(dataset_path),
+        dataset_path=dataset_path,
         program_spec=program_spec,
-        output_path=Path(output_path) if output_path else None,
+        output_path=output_path,
         auto=auto,  # type: ignore[arg-type]
         train_ratio=train_ratio,
     )
@@ -182,10 +192,9 @@ async def run_optimization(
             detail=f"Dataset file not found: {request.dataset_path}",
         )
 
-    output_str: str | None = None
+    output_path: Path | None = None
     if request.output_path:
-        output = _validate_path(request.output_path, OPTIMIZATION_DATA_ROOT)
-        output_str = str(output)
+        output_path = _validate_path(request.output_path, OPTIMIZATION_DATA_ROOT)
 
     db_run_id = None
     try:
