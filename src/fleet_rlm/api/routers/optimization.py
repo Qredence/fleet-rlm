@@ -159,14 +159,15 @@ async def run_optimization(
         )
 
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
+    safe_root = os.path.join(base_root, "")
 
     if os.path.isabs(request.dataset_path):
         raise HTTPException(
             status_code=400,
             detail="Absolute paths are not allowed. Use a relative path.",
         )
-    dataset = os.path.realpath(os.path.join(base_root, request.dataset_path))
-    if dataset != base_root and not dataset.startswith(f"{base_root}{os.sep}"):
+    dataset = os.path.realpath(os.path.join(safe_root, request.dataset_path))
+    if not dataset.startswith(safe_root):
         raise HTTPException(
             status_code=400,
             detail="Path escapes the allowed data directory.",
@@ -184,10 +185,8 @@ async def run_optimization(
                 status_code=400,
                 detail="Absolute paths are not allowed. Use a relative path.",
             )
-        resolved_output = os.path.realpath(os.path.join(base_root, request.output_path))
-        if resolved_output != base_root and not resolved_output.startswith(
-            f"{base_root}{os.sep}"
-        ):
+        resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
+        if not resolved_output.startswith(safe_root):
             raise HTTPException(
                 status_code=400,
                 detail="Path escapes the allowed data directory.",
