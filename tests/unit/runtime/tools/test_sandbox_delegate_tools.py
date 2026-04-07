@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import inspect
 from types import SimpleNamespace
 from typing import Any
