@@ -124,8 +124,8 @@ Layering rules:
 Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
-- Keep runtime modules/orchestration under `runtime/agent/*` and `runtime/models/rlm_runtime_modules.py`
-- Keep shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
+- Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
+- Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
 - Keep grouped tool helpers under:
@@ -207,11 +207,11 @@ Fast backend confidence:
 
 Focused backend/runtime coverage:
 
-- `uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/test_ws_chat_helpers.py`
+- `uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/api/ws/test_execution_helpers.py`
 
 Daytona-focused backend coverage:
 
-- `uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_rlm_smoke.py tests/unit/test_daytona_runtime.py tests/unit/test_daytona_interpreter.py tests/unit/test_daytona_workbench_chat_agent.py`
+- `uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_smoke.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_chat_agent_runtime.py`
 
 Shared-contract or release-sensitive work:
 

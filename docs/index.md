@@ -1,11 +1,14 @@
 # Fleet-RLM Documentation
 
-Welcome to the `fleet-rlm` documentation. The docs are organized roughly around the [Diataxis framework](https://diataxis.fr/) and focus on the current product/runtime split: a default Modal-backed Web UI path plus an experimental Daytona workbench path that shares the same frontend workspace and websocket contract.
+Welcome to the `fleet-rlm` documentation. The docs are organized roughly around
+the [Diataxis framework](https://diataxis.fr/) and describe the maintained
+product: an adaptive DSPy + Daytona workspace for recursive task execution.
 
 ## Quick Links
 
 | Category | Description |
 |----------|-------------|
+| [Adaptive RLM Product Spec](explanation/product-spec.md) | User-facing product definition and capability model |
 | [Architecture](architecture.md) | System architecture diagrams and data flows |
 | [Tutorials](tutorials/index.md) | Learning-oriented guides for getting started |
 | [How-to Guides](how-to-guides/index.md) | Task-oriented guides for specific goals |
@@ -27,6 +30,7 @@ Then open `http://localhost:8000`.
 ### Use the Product
 
 - [Installation Guide](how-to-guides/installation.md)
+- [Adaptive RLM Product Spec](explanation/product-spec.md)
 - [Runtime Settings](how-to-guides/runtime-settings.md)
 - [Troubleshooting](how-to-guides/troubleshooting.md)
 

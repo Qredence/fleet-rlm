@@ -52,22 +52,6 @@ from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 class SummarizeLongDocument(dspy.Signature):
     """Summarize a long document with controllable focus.
 
-    The LLM should use sandbox helpers (peek, grep, chunk_by_size,
-    chunk_by_headers) to explore the document programmatically, call
-    llm_query on relevant sections, and aggregate findings via SUBMIT.
-    """
-    document: str = dspy.InputField(desc="Full document text (loaded in sandbox)")
-    focus: str = dspy.InputField(desc="Summarization focus or topic")
-    key_points: list[str] = dspy.OutputField(desc="List of key points extracted")
-    summary: str = dspy.OutputField(desc="Synthesised prose summary")
-```
-
-```python
-from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-
-class SummarizeLongDocument(dspy.Signature):
-    """Summarize a long document with controllable focus.
-
     The LLM should chunk the document, query each chunk with the given
     focus topic, and merge the per-chunk summaries into a coherent whole.
     """
@@ -212,15 +196,20 @@ Modules wrap signatures with execution logic. Fleet-rlm provides factory functio
 Use `create_runtime_rlm()` for canonical RLM construction:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
+from fleet_rlm.runtime.models import create_runtime_rlm
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 from fleet_rlm import DaytonaInterpreter
 
 # Set up the Daytona interpreter
 interpreter = DaytonaInterpreter(
-    timeout=600,           # Sandbox timeout in seconds
-    volume_name="my-vol",  # Optional: persistent Daytona volume
-    max_llm_calls=50,      # Limit LLM calls per session
+    timeout=600,                       # Sandbox timeout in seconds
+    volume_name="my-vol",             # Optional persistent Daytona volume
+    repo_url="https://github.com/example/repo.git",
+    repo_ref="main",
+    context_paths=["docs/architecture.md"],
+    max_llm_calls=50,                  # Limit LLM calls per session
+    llm_call_timeout=120,
+    execute_timeout=300,
 )
 
 # Create the RLM module
@@ -246,7 +235,7 @@ print(result.key_points)
 For production use, prefer registry-based module construction:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
+from fleet_rlm.runtime.models import build_runtime_module
 from fleet_rlm import DaytonaInterpreter
 
 interpreter = DaytonaInterpreter(timeout=600)
@@ -263,26 +252,26 @@ rlm = build_runtime_module(
 
 Available module names:
 
-| Name                              | Signature                               | Purpose                                |
-| --------------------------------- | --------------------------------------- | -------------------------------------- |
-| `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                  |
-| `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs           |
-| `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations  |
-| `triage_incident_logs`            | `IncidentTriageFromLogs`                | Incident diagnostics                   |
-| `plan_code_change`                | `CodeChangePlan`                        | Implementation planning                |
-| `propose_core_memory_update`      | `CoreMemoryUpdateProposal`              | Memory state updates                   |
-| `memory_tree`                     | `VolumeFileTreeSignature`               | File tree traversal                    |
-| `memory_action_intent`            | `MemoryActionIntentSignature`           | Action classification                  |
-| `memory_structure_audit`          | `MemoryStructureAuditSignature`         | Structure auditing                     |
-| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning                     |
-| `clarification_questions`         | `ClarificationQuestionSignature`        | Ambiguity resolution                   |
+| Name                              | Signature                               | Purpose                               |
+| --------------------------------- | --------------------------------------- | ------------------------------------- |
+| `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                 |
+| `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs          |
+| `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations |
+| `triage_incident_logs`            | `IncidentTriageFromLogs`                | Incident diagnostics                  |
+| `plan_code_change`                | `CodeChangePlan`                        | Implementation planning               |
+| `propose_core_memory_update`      | `CoreMemoryUpdateProposal`              | Memory state updates                  |
+| `memory_tree`                     | `VolumeFileTreeSignature`               | File tree traversal                   |
+| `memory_action_intent`            | `MemoryActionIntentSignature`           | Action classification                 |
+| `memory_structure_audit`          | `MemoryStructureAuditSignature`         | Structure auditing                    |
+| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning                    |
+| `clarification_questions`         | `ClarificationQuestionSignature`        | Ambiguity resolution                  |
 
 ### Recursive Sub-Query RLM
 
 For delegated sub-problems, use the recursive query pattern:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import build_recursive_subquery_rlm
+from fleet_rlm.runtime.models import build_recursive_subquery_rlm
 from fleet_rlm import DaytonaInterpreter
 
 interpreter = DaytonaInterpreter(timeout=300)
@@ -309,7 +298,7 @@ The `dspy.RLM` class extends DSPy with Daytona sandbox execution. Configure it t
 ### Adapter Overrides
 
 Structured runtime modules default to `JSONAdapter`, while non-runtime-module DSPy contexts use
- the optional `DSPY_ADAPTER` override when configured.
+the optional `DSPY_ADAPTER` override when configured.
 
 - `DSPY_STRUCTURED_OUTPUT_ADAPTER=chat|json|none`
 - `DSPY_ADAPTER=chat|json|none`
@@ -317,8 +306,8 @@ Structured runtime modules default to `JSONAdapter`, while non-runtime-module DS
 - `DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING=true|false`
 
 The native function-calling flags are experimental and remain off by default. They exist only as
- opt-in adapter prototypes and should not be enabled as the product default until streaming and
- trajectory compatibility are proven.
+opt-in adapter prototypes and should not be enabled as the product default until streaming and
+trajectory compatibility are proven.
 
 ### DaytonaInterpreter Options
 

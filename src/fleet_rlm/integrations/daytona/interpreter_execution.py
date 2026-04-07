@@ -7,6 +7,7 @@ import math
 import time
 from dataclasses import dataclass
 from typing import AbstractSet, Any, Callable
+import logging
 
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
@@ -110,8 +111,15 @@ def _attach_shared_parent_session(
     child._session._runtime_ref = runtime
     try:
         child._session.bind_current_async_owner()
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        # Best-effort: binding the current async owner can fail in some contexts
+        # (for example, when there is no active event loop). This is non-fatal,
+        # so we proceed without changing ownership but log for diagnostics.
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            "Failed to bind Daytona sandbox session to current async owner: %s",
+            exc,
+        )
     child._persisted_sandbox_id = parent_session.sandbox_id
     child._persisted_workspace_path = parent_session.workspace_path
 

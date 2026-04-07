@@ -47,6 +47,7 @@ export function VolumesBrowser() {
   const isMobile = useIsMobile();
   const prefersReduced = useReducedMotion();
   const activeProvider: VolumeProvider = "daytona";
+  const providerLabel = "Daytona";
   const {
     volumes: filesystem,
     dataSource: filesystemDataSource,
@@ -100,7 +101,6 @@ export function VolumesBrowser() {
   );
 
   const isDegraded = filesystemDataSource === "fallback";
-  const providerLabel = "Daytona";
 
   const headerChildren = (
     <div className={cn(isMobile && "px-4")}>

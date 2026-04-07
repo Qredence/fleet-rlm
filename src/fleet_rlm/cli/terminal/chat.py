@@ -83,7 +83,7 @@ _COMMAND_SPECS: tuple[SlashCommandSpec, ...] = (
     SlashCommandSpec("/chunk", "Chunk active document", "documents"),
     SlashCommandSpec("/summarize", "Summarize active document", "documents"),
     SlashCommandSpec("/extract", "Extract from logs", "documents"),
-    SlashCommandSpec("/semantic", "Parallel semantic map (Modal only)", "documents"),
+    SlashCommandSpec("/semantic", "Parallel semantic map", "documents"),
     SlashCommandSpec("/buffer", "Read sandbox buffer", "buffers"),
     SlashCommandSpec("/clear-buffer", "Clear one/all buffers", "buffers"),
     SlashCommandSpec("/save-buffer", "Persist buffer to volume", "buffers"),

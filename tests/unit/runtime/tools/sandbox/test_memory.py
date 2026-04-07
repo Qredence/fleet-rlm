@@ -14,31 +14,10 @@ import pytest
 from fleet_rlm.runtime.agent import RLMReActChatAgent
 from fleet_rlm.runtime.tools.sandbox import common as sandbox_common
 from fleet_rlm.runtime.tools.sandbox import storage as sandbox_storage_tools
+from tests.unit.fixtures_daytona import FakeDaytonaStorageSession
 from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
-
-
-class _FakeDaytonaSession:
-    def __init__(self) -> None:
-        self.read_calls: list[str] = []
-        self.write_calls: list[tuple[str, str]] = []
-        self.list_calls: list[str] = []
-        self.file_contents: dict[str, str] = {}
-        self.list_entries: dict[str, list[object]] = {}
-
-    async def aread_file(self, path: str) -> str:
-        self.read_calls.append(path)
-        return self.file_contents[path]
-
-    async def awrite_file(self, path: str, content: str) -> str:
-        self.write_calls.append((path, content))
-        self.file_contents[path] = content
-        return path
-
-    async def alist_files(self, path: str) -> list[object]:
-        self.list_calls.append(path)
-        return self.list_entries.get(path, [])
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +51,7 @@ def test_memory_read_uses_daytona_session(monkeypatch):
     fake_interpreter = FakeInterpreter()
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/memory/notes/native.txt"] = (
         "hello from daytona"
     )
@@ -125,7 +104,7 @@ def test_memory_list_uses_daytona_session(monkeypatch):
     fake_interpreter = FakeInterpreter()
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.list_entries["/home/daytona/memory/memory/docs"] = [
         SimpleNamespace(name="guides", is_dir=True),
         SimpleNamespace(name="readme.txt", is_dir=False),
@@ -216,7 +195,7 @@ def test_memory_write_uses_daytona_session(monkeypatch):
     fake_interpreter = FakeInterpreter()
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
 
     async def _fake_get_daytona_session(ctx):
         _ = ctx
@@ -311,7 +290,7 @@ def test_write_to_file_append_uses_daytona_session(monkeypatch):
     fake_interpreter = FakeInterpreter()
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/memory/logs/session.txt"] = "line0\n"
 
     async def _fake_get_daytona_session(ctx):
@@ -346,7 +325,7 @@ def test_load_text_from_volume_uses_daytona_session(monkeypatch):
     fake_interpreter = FakeInterpreter()
     fake_interpreter.volume_mount_path = "/home/daytona/memory"
     agent = RLMReActChatAgent(interpreter=fake_interpreter)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/artifacts/docs/spec.md"] = (
         "# Spec\nHello"
     )

@@ -26,7 +26,7 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
   });
 
-  it("normalizes legacy explicit chat websocket URLs to execution", async () => {
+  it("rewrites the legacy explicit chat websocket URL to execution", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://custom-host:9000/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
@@ -34,12 +34,20 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
   });
 
-  it("normalizes legacy explicit chat websocket URLs even when URL parsing fails", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "localhost:9000/api/v1/ws/chat");
+  it("rewrites a legacy explicit chat websocket suffix even when the URL is malformed", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("localhost:9000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/execution");
+  });
+
+  it("leaves a malformed explicit websocket URL unchanged when it is not legacy chat", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/socket");
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+
+    const { rlmApiConfig } = await loadRlmApiConfigModule();
+    expect(rlmApiConfig.wsUrl).toBe("custom-host/socket");
   });
 
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────

@@ -7,7 +7,7 @@ workflows, incident triage, and memory intelligence helpers.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import dspy
 
@@ -40,15 +40,7 @@ class MemoryMigrationOperation(TypedDict):
 
 
 class RLMReActChatSignature(dspy.Signature):
-    """Interactive ReAct chat signature with explicit conversation history.
-    You have the ability to spin up long-running daemon servers (like 'npm run dev'). Use `start_background_process` and iteratively check `read_process_logs` to ensure a server boots successfully.
-
-    For large multi-part deliverables on Daytona (books, reports, multi-file analyses),
-    prefer a single interpreter-driven workflow that loops in Python and uses
-    `llm_query_batched()` for structurally parallel semantic subtasks instead of
-    repeating many top-level ReAct iterations for each section. Use the persistent
-    interpreter state to accumulate and merge results before responding.
-    """
+    """Interactive ReAct chat signature with explicit conversation history."""
 
     user_request: str = dspy.InputField(desc="Current user request in the chat session")
     core_memory: str = dspy.InputField(
@@ -66,15 +58,6 @@ class SummarizeLongDocument(dspy.Signature):
     The LLM should chunk the document, query each chunk with the given
     focus topic, and merge the per-chunk summaries into a coherent
     whole.
-
-    Input Fields:
-        document: Full text of the document
-        focus: Topic or aspect to focus the summary on
-
-    Output Fields:
-        summary: Coherent summary text
-        key_points: Bullet-point list of key takeaways
-        coverage_pct: Estimated percentage of the document covered
     """
 
     document: str = dspy.InputField(desc="Full document text")
@@ -92,15 +75,6 @@ class ExtractFromLogs(dspy.Signature):
     The LLM should use ``grep`` and ``chunk_by_headers`` helpers to
     search for the query pattern, categorise matches, and identify any
     time-range information.
-
-    Input Fields:
-        logs: Full log text (loaded in sandbox)
-        query: What to search for
-
-    Output Fields:
-        matches: List of matching log entries
-        patterns: Dict mapping pattern category to example entries
-        time_range: Observed time range of matching entries
     """
 
     logs: str = dspy.InputField(desc="Full log text")
@@ -144,7 +118,7 @@ class IncidentTriageFromLogs(dspy.Signature):
         desc="Service/environment context to guide triage"
     )
     query: str = dspy.InputField(desc="Primary investigation question")
-    severity: str = dspy.OutputField(
+    severity: Literal["low", "medium", "high", "critical"] = dspy.OutputField(
         desc="Incident severity: low, medium, high, or critical"
     )
     probable_root_causes: list[str] = dspy.OutputField(
@@ -160,10 +134,7 @@ class IncidentTriageFromLogs(dspy.Signature):
 
 
 class CodeChangePlan(dspy.Signature):
-    """Generate a structured implementation plan for a code change.
-    When analyzing large Python codebases, prefer using the `extract_python_ast` tool to quickly map out structural architectures before dropping down into raw regex grepping.
-    You have the ability to spin up long-running development servers or background processes. Use `start_background_process` and iteratively check `read_process_logs` to ensure a server compiles successfully before declaring a coding task finished.
-    """
+    """Generate a structured implementation plan for a code change."""
 
     task: str = dspy.InputField(desc="Requested coding task")
     repo_context: str = dspy.InputField(
@@ -215,14 +186,27 @@ class MemoryActionIntentSignature(dspy.Signature):
         desc="Current memory tree snapshot"
     )
     policy_constraints: str = dspy.InputField(desc="Policy and safety constraints")
-    action_type: str = dspy.OutputField(
+    action_type: Literal[
+        "read",
+        "write",
+        "append",
+        "move",
+        "delete",
+        "mkdir",
+        "tree",
+        "audit",
+        "migrate",
+        "noop",
+    ] = dspy.OutputField(
         desc="Action type: read, write, append, move, delete, mkdir, tree, audit, migrate, noop"
     )
     target_paths: list[str] = dspy.OutputField(desc="Paths involved in the action")
     content_plan: list[str] = dspy.OutputField(
         desc="Planned content operations if applicable"
     )
-    risk_level: str = dspy.OutputField(desc="Risk level: low, medium, high")
+    risk_level: Literal["low", "medium", "high"] = dspy.OutputField(
+        desc="Risk level: low, medium, high"
+    )
     requires_confirmation: bool = dspy.OutputField(
         desc="Whether explicit confirmation should be required"
     )

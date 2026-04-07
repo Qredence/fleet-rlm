@@ -7,18 +7,19 @@
 
 ![thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a Web UI-first recursive language model runtime for long-context code and document work. It ships a Daytona-backed runtime, an integrated FastAPI + WebSocket surface, packaged frontend assets, and a shared workspace for chat, execution, and run inspection.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace. It ships a Daytona-backed execution runtime, a FastAPI + WebSocket backend, packaged frontend assets, and one shared workspace for task execution, reasoning, persistence, and inspection.
 
 [Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
 ## Why This Repo Exists
 
-- Use a single workspace for long-context reasoning, chat turns, run inspection, and runtime diagnostics.
-- Keep the product path Daytona-backed and workbench-oriented.
+- Use a single workspace for adaptive task execution, chat turns, run inspection, and runtime diagnostics.
+- Let users start from a goal first, with repos, documents, URLs, and files as optional context.
+- Keep the product path Daytona-backed and DSPy-native.
 - Expose one shared frontend and websocket contract instead of parallel runtime modes.
 - Ship both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
 
-The supported app surfaces are `Workbench`, `Volumes`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
+The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
 
 ## Quick Start
 
@@ -51,8 +52,9 @@ uv run fleet web
 
 This starts the main product surface with:
 
-- `Workbench` for chat and runtime execution
+- `Workbench` for adaptive chat and runtime execution
 - `Volumes` for runtime-backed file browsing
+- `Optimization` for DSPy evaluation and optimization workflows
 - `Settings` for runtime configuration and diagnostics
 
 ### Use terminal chat
@@ -83,6 +85,10 @@ uv run fleet-rlm serve-mcp --transport stdio
 - `execution_mode` remains a per-turn execution hint.
 - Requests may include `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`.
 - Durable mounted roots remain `memory/`, `artifacts/`, `buffers/`, and `meta/`.
+
+The product is goal-first rather than repo-first. Repositories are one possible
+source of context, alongside local files, staged documents, pasted content, and
+URLs.
 
 ## CLI Surfaces
 
@@ -184,7 +190,7 @@ make release-artifacts
 make release-check
 
 # Focused backend/runtime regression lane
-uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_runtime.py tests/unit/test_daytona_interpreter.py tests/unit/test_daytona_workbench_chat_agent.py -m "not live_llm and not live_daytona and not benchmark"
+uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_chat_agent_runtime.py -m "not live_llm and not live_daytona and not benchmark"
 ```
 
 Focused docs validation:
@@ -209,6 +215,7 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 ## Documentation Map
 
 - [Documentation index](docs/index.md)
+- [Adaptive RLM product spec](docs/explanation/product-spec.md)
 - [Installation guide](docs/how-to-guides/installation.md)
 - [Developer setup](docs/how-to-guides/developer-setup.md)
 - [CLI reference](docs/reference/cli.md)

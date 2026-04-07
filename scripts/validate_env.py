@@ -106,7 +106,7 @@ def _validate_agent(path: Path) -> list[str]:
 
 def _print_masked(key: str, value: str | None) -> None:
     if value:
-        print(f"  {key}: ✓ (hidden)")
+        print(f"  {key}: ✓ (redacted)")
     else:
         print(f"  {key}: ✗ missing")
 

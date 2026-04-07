@@ -180,55 +180,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
     def current_depth(self) -> int:
         return self._current_depth
 
-    @property
-    def _current_effective_max_iters(self) -> int:
-        return self._turn_delegation_state.effective_max_iters
-
-    @_current_effective_max_iters.setter
-    def _current_effective_max_iters(self, value: int) -> None:
-        self._turn_delegation_state.effective_max_iters = max(1, int(value))
-
-    @property
-    def _delegate_calls_turn(self) -> int:
-        return self._turn_delegation_state.delegate_calls_turn
-
-    @_delegate_calls_turn.setter
-    def _delegate_calls_turn(self, value: int) -> None:
-        self._turn_delegation_state.delegate_calls_turn = max(0, int(value))
-
-    @property
-    def _runtime_module_calls_turn(self) -> int:
-        return self._turn_delegation_state.runtime_module_calls_turn
-
-    @_runtime_module_calls_turn.setter
-    def _runtime_module_calls_turn(self, value: int) -> None:
-        self._turn_delegation_state.runtime_module_calls_turn = max(0, int(value))
-
-    @property
-    def _recursive_delegate_calls_turn(self) -> int:
-        return self._turn_delegation_state.recursive_delegate_calls_turn
-
-    @_recursive_delegate_calls_turn.setter
-    def _recursive_delegate_calls_turn(self, value: int) -> None:
-        self._turn_delegation_state.recursive_delegate_calls_turn = max(0, int(value))
-
-    @property
-    def _delegate_fallback_count_turn(self) -> int:
-        return self._turn_delegation_state.delegate_fallback_count_turn
-
-    @_delegate_fallback_count_turn.setter
-    def _delegate_fallback_count_turn(self, value: int) -> None:
-        self._turn_delegation_state.delegate_fallback_count_turn = max(0, int(value))
-
-    @property
-    def _delegate_result_truncated_count_turn(self) -> int:
-        return self._turn_delegation_state.delegate_result_truncated_count_turn
-
-    @_delegate_result_truncated_count_turn.setter
-    def _delegate_result_truncated_count_turn(self, value: int) -> None:
-        self._turn_delegation_state.delegate_result_truncated_count_turn = max(
-            0, int(value)
-        )
+    # Per-turn delegation counters live on ``_turn_delegation_state`` directly.
+    # See :class:`chat_turns.TurnDelegationState`.
 
     # -----------------------------------------------------------------
     # Lifecycle
@@ -336,13 +289,14 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         prediction.assistant_response = assistant_response
         if warnings:
             prediction.guardrail_warnings = warnings
-        prediction.effective_max_iters = self._current_effective_max_iters
-        prediction.delegate_calls_turn = self._delegate_calls_turn
-        prediction.runtime_module_calls_turn = self._runtime_module_calls_turn
-        prediction.recursive_delegate_calls_turn = self._recursive_delegate_calls_turn
-        prediction.delegate_fallback_count_turn = self._delegate_fallback_count_turn
+        _ds = self._turn_delegation_state
+        prediction.effective_max_iters = _ds.effective_max_iters
+        prediction.delegate_calls_turn = _ds.delegate_calls_turn
+        prediction.runtime_module_calls_turn = _ds.runtime_module_calls_turn
+        prediction.recursive_delegate_calls_turn = _ds.recursive_delegate_calls_turn
+        prediction.delegate_fallback_count_turn = _ds.delegate_fallback_count_turn
         prediction.delegate_result_truncated_count_turn = (
-            self._delegate_result_truncated_count_turn
+            _ds.delegate_result_truncated_count_turn
         )
         return prediction
 
@@ -606,10 +560,8 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         Runtime-module ownership lives under ``runtime.models``; keep the import
         local here to avoid circular imports during agent initialization.
         """
-        from fleet_rlm.runtime.models.rlm_runtime_modules import (
-            build_runtime_module_config,
-            get_or_build_runtime_module,
-        )
+        from fleet_rlm.runtime.models.builders import build_runtime_module_config
+        from fleet_rlm.runtime.models.registry import get_or_build_runtime_module
 
         return get_or_build_runtime_module(
             self._runtime_modules,
@@ -635,16 +587,6 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
     def _turn_metrics(self) -> dict[str, int]:
         return chat_turns.snapshot_turn_metrics(self).as_payload()
-
-    @staticmethod
-    def _prediction_response_and_trajectory(
-        prediction: dspy.Prediction,
-    ) -> tuple[str, dict[str, Any]]:
-        return chat_turns.prediction_response_and_trajectory(prediction)
-
-    @staticmethod
-    def _prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
-        return chat_turns.prediction_guardrail_warnings(prediction)
 
     def _build_turn_result(
         self,
