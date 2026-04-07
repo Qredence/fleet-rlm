@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-# Prime the circular llm_tools import once so this direct module test can load
-# the refactored helper without going through the normal sandbox package path.
+# Prime the known llm_tools/delegation_policy circular-import path once so this
+# direct-module regression test can import sandbox_delegate_tools afterward.
 try:
     import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
 except ImportError:

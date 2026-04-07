@@ -418,6 +418,15 @@ def _build_cached_runtime_tool(
         f"async def {spec.name}({', '.join(param_defs)}):\n"
         f"    return await _tool_impl({', '.join(call_args)})\n"
     )
+    allowed_namespace_keys = {"_tool_impl"} | {
+        f"__default_{param_name}"
+        for param_name in spec.param_order
+        if param_name == "include_trajectory"
+        or (param_name == "alias" and spec.doc_kwarg is not None)
+        or param_name in spec.param_defaults
+    }
+    if set(namespace) != allowed_namespace_keys:
+        raise ValueError(f"Unexpected generated tool namespace for {spec.name!r}.")
     # ``spec`` values are module-owned declarative constants, so validated
     # identifiers here stay within trusted repo code rather than user input.
     exec(tool_src, namespace)
