@@ -91,7 +91,7 @@ class DaytonaChatRequestOptions:
 def normalize_daytona_chat_request(
     msg: WSMessage,
     workspace_id: str,
-) -> DaytonaChatRequestOptions | None:
+) -> DaytonaChatRequestOptions:
     """Return a typed Daytona request payload for the canonical runtime."""
 
     repo_url = str(msg.repo_url or "").strip() or None

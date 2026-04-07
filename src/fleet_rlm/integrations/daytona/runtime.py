@@ -26,6 +26,7 @@ from .runtime_helpers import (
     _aresolve_clone_ref,
     _astage_context_paths,
     _await_if_needed,
+    _await_volume_ready,
     _build_daytona_client,
     _daytona_import_error,
     _run_async_compat,
@@ -433,12 +434,13 @@ class DaytonaSandboxRuntime:
 
         client = await self._aget_client()
 
-        # Resolve volume if requested
+        # Resolve volume if requested, waiting for it to become ready
         volume_id: str | None = None
         if spec.volume_name:
             volume = await _await_if_needed(
                 client.volume.get(spec.volume_name, create=True)
             )
+            volume = await _await_volume_ready(client, spec.volume_name, volume)
             volume_id = volume.id
 
         create_kwargs = spec.to_create_params(volume_id=volume_id)

@@ -33,6 +33,16 @@ describe("backend contract lock", () => {
     expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
   });
 
+  it("normalizes explicit legacy chat ws URLs to execution", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+
+    const { config } = await loadModules();
+
+    expect(config.rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(config.rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+  });
+
   it("keeps runtime endpoint paths on /api/v1/runtime/*", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
 

@@ -22,21 +22,25 @@ function deriveWsUrl(apiUrl: string, path: string): string {
 }
 
 function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
+  const normalized = wsUrl.replace(/\/$/, "");
+  if (path !== "/api/v1/ws/execution") return normalized;
+  const legacyChatPath = /\/api\/v1\/ws\/chat(?=\/?$|[?#])/;
+  if (!legacyChatPath.test(normalized)) return normalized;
+  if (!/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized)) {
+    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
+  }
+
   try {
-    const url = new URL(wsUrl);
-    if (url.pathname === "/api/v1/ws/chat") {
-      url.pathname = path;
+    const url = new URL(normalized);
+    if (url.pathname.endsWith("/api/v1/ws/chat")) {
+      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/chat$/, "/api/v1/ws/execution");
       return url.toString().replace(/\/$/, "");
     }
   } catch {
-    // Some deploys still pass a host/path fragment instead of an absolute URL.
-    // Preserve that configuration style while rewriting the removed legacy chat path.
-    if (wsUrl.endsWith("/api/v1/ws/chat")) {
-      return `${wsUrl.slice(0, -"/api/v1/ws/chat".length)}${path}`;
-    }
+    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
   }
 
-  return wsUrl;
+  return normalized;
 }
 
 const baseUrl = trimOrEmpty(import.meta.env.VITE_FLEET_API_URL);

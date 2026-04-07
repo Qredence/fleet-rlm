@@ -83,7 +83,7 @@ The parent shares its LLM budget with children via `_share_llm_budget()` to enfo
 
 ### Neutral
 
-- The agent requires a Daytona sandbox (`DaytonaInterpreter`) for tool execution — this is a separate architectural decision (see ADR-002)
+- The agent requires a Daytona sandbox (`DaytonaInterpreter`) for tool execution — this is a separate architectural concern documented outside this ADR
 - Core memory (Persona, Human, Scratchpad blocks) is managed via mixin pattern
 
 ## References
