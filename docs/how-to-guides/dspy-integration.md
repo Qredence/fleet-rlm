@@ -214,14 +214,13 @@ Use `create_runtime_rlm()` for canonical RLM construction:
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
+from fleet_rlm import DaytonaInterpreter
 
 # Set up the Daytona interpreter
 interpreter = DaytonaInterpreter(
-    timeout=600,           # Sandbox timeout in seconds
-    secret_name="LITELLM", # Modal secret containing API keys
-    volume_name="my-vol",  # Optional: persistent Modal volume
-    max_llm_calls=50,      # Limit LLM calls per session
+    timeout=600,          # Sandbox timeout in seconds
+    volume_name="my-vol", # Optional: persistent Daytona volume
+    max_llm_calls=50,     # Limit LLM calls per session
 )
 
 # Create the RLM module
@@ -264,19 +263,19 @@ rlm = build_runtime_module(
 
 Available module names:
 
-| Name                              | Signature                               | Purpose                                |
-| --------------------------------- | --------------------------------------- | -------------------------------------- |
-| `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                  |
-| `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs           |
-| `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations  |
-| `triage_incident_logs`            | `IncidentTriageFromLogs`                | Incident diagnostics                   |
-| `plan_code_change`                | `CodeChangePlan`                        | Implementation planning                |
-| `propose_core_memory_update`      | `CoreMemoryUpdateProposal`              | Memory state updates                   |
-| `memory_tree`                     | `VolumeFileTreeSignature`               | File tree traversal                    |
-| `memory_action_intent`            | `MemoryActionIntentSignature`           | Action classification                  |
-| `memory_structure_audit`          | `MemoryStructureAuditSignature`         | Structure auditing                     |
-| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning                     |
-| `clarification_questions`         | `ClarificationQuestionSignature`        | Ambiguity resolution                   |
+| Name                              | Signature                               | Purpose                               |
+| --------------------------------- | --------------------------------------- | ------------------------------------- |
+| `summarize_long_document`         | `SummarizeLongDocument`                 | Focused summarization                 |
+| `extract_from_logs`               | `ExtractFromLogs`                       | Pattern extraction from logs          |
+| `grounded_answer`                 | `GroundedAnswerWithCitations`           | Evidence-based answers with citations |
+| `triage_incident_logs`            | `IncidentTriageFromLogs`                | Incident diagnostics                  |
+| `plan_code_change`                | `CodeChangePlan`                        | Implementation planning               |
+| `propose_core_memory_update`      | `CoreMemoryUpdateProposal`              | Memory state updates                  |
+| `memory_tree`                     | `VolumeFileTreeSignature`               | File tree traversal                   |
+| `memory_action_intent`            | `MemoryActionIntentSignature`           | Action classification                 |
+| `memory_structure_audit`          | `MemoryStructureAuditSignature`         | Structure auditing                    |
+| `memory_structure_migration_plan` | `MemoryStructureMigrationPlanSignature` | Migration planning                    |
+| `clarification_questions`         | `ClarificationQuestionSignature`        | Ambiguity resolution                  |
 
 ### Recursive Sub-Query RLM
 
@@ -310,7 +309,7 @@ The `dspy.RLM` class extends DSPy with Daytona sandbox execution. Configure it t
 ### Adapter Overrides
 
 Structured runtime modules default to `JSONAdapter`, while non-runtime-module DSPy contexts use
- the optional `DSPY_ADAPTER` override when configured.
+the optional `DSPY_ADAPTER` override when configured.
 
 - `DSPY_STRUCTURED_OUTPUT_ADAPTER=chat|json|none`
 - `DSPY_ADAPTER=chat|json|none`
@@ -318,8 +317,8 @@ Structured runtime modules default to `JSONAdapter`, while non-runtime-module DS
 - `DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING=true|false`
 
 The native function-calling flags are experimental and remain off by default. They exist only as
- opt-in adapter prototypes and should not be enabled as the product default until streaming and
- trajectory compatibility are proven.
+opt-in adapter prototypes and should not be enabled as the product default until streaming and
+trajectory compatibility are proven.
 
 ### DaytonaInterpreter Options
 

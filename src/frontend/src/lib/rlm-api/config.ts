@@ -21,13 +21,29 @@ function deriveWsUrl(apiUrl: string, path: string): string {
   }
 }
 
+function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
+  try {
+    const url = new URL(wsUrl);
+    if (url.pathname === "/api/v1/ws/chat") {
+      url.pathname = path;
+      return url.toString().replace(/\/$/, "");
+    }
+  } catch {
+    if (wsUrl.endsWith("/api/v1/ws/chat")) {
+      return `${wsUrl.slice(0, -"/api/v1/ws/chat".length)}${path}`;
+    }
+  }
+
+  return wsUrl;
+}
+
 const baseUrl = trimOrEmpty(import.meta.env.VITE_FLEET_API_URL);
 const explicitWsUrl = trimOrEmpty(import.meta.env.VITE_FLEET_WS_URL);
 const mockMode = parseBool(import.meta.env.VITE_MOCK_MODE, false);
 
 function getActiveWsUrl(path: string) {
   if (explicitWsUrl) {
-    return explicitWsUrl;
+    return normalizeExplicitWsUrl(explicitWsUrl, path);
   }
   if (baseUrl) return deriveWsUrl(baseUrl, path);
 

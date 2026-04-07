@@ -36,15 +36,15 @@ def resolve_realpath_within_root(
     )
     resolved = os.path.realpath(joined)
     if resolved != root_real and not resolved.startswith(root_real + os.sep):
-        return None, f"{invalid_error_prefix}{raw}]"
+        return None, f"{invalid_error_prefix}{raw}"
     return resolved, None
 
 
 def resolve_mounted_volume_path(
     path: str,
     *,
-    default_root: str = "/data/memory",
-    allowed_root: str = "/data",
+    default_root: str = "/home/daytona/memory",
+    allowed_root: str = "/home/daytona/memory",
 ) -> str:
     raw = str(path or "").strip()
     if not raw:

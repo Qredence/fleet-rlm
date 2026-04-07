@@ -90,8 +90,8 @@ class SandboxSpec:
     env_vars: dict[str, str] | None = None
     labels: dict[str, str] | None = None
     ephemeral: bool = True
-    auto_stop_interval: int | None = 30  # minutes; refresh_activity() resets
-    auto_archive_interval: int | None = 60
+    auto_stop_interval: int | None = 30  # provider minutes; refresh_activity() resets
+    auto_archive_interval: int | None = 60  # provider minutes
     auto_delete_interval: int | None = None
     cpu: int | None = None
     memory: int | None = None
@@ -115,12 +115,7 @@ class SandboxSpec:
             params["labels"] = dict(self.labels)
         if self.ephemeral is not None:
             params["ephemeral"] = self.ephemeral
-        if self.auto_stop_interval is not None:
-            params["auto_stop_interval"] = self.auto_stop_interval
-        if self.auto_archive_interval is not None:
-            params["auto_archive_interval"] = self.auto_archive_interval
-        if self.auto_delete_interval is not None:
-            params["auto_delete_interval"] = self.auto_delete_interval
+        params.update(self._provider_lifecycle_params())
         if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
         if self.cpu is not None or self.memory is not None or self.disk is not None:
@@ -145,6 +140,17 @@ class SandboxSpec:
             if self.volume_subpath:
                 mount_kwargs["subpath"] = self.volume_subpath
             params["volumes"] = [mount_kwargs]
+        return params
+
+    def _provider_lifecycle_params(self) -> dict[str, int]:
+        """Return Daytona lifecycle settings in provider-minute units."""
+        params: dict[str, int] = {}
+        if self.auto_stop_interval is not None:
+            params["auto_stop_interval"] = self.auto_stop_interval
+        if self.auto_archive_interval is not None:
+            params["auto_archive_interval"] = self.auto_archive_interval
+        if self.auto_delete_interval is not None:
+            params["auto_delete_interval"] = self.auto_delete_interval
         return params
 
     def to_create_params(self, *, volume_id: str | None = None) -> dict[str, Any]:
