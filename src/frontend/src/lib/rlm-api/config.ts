@@ -24,6 +24,11 @@ function deriveWsUrl(apiUrl: string, path: string): string {
 function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
   const normalized = wsUrl.replace(/\/$/, "");
   if (path !== "/api/v1/ws/execution") return normalized;
+  const legacyChatPath = /\/api\/v1\/ws\/chat(?=\/?$|[?#])/;
+  if (!legacyChatPath.test(normalized)) return normalized;
+  if (!/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized)) {
+    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
+  }
 
   try {
     const url = new URL(normalized);
@@ -32,7 +37,7 @@ function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
       return url.toString().replace(/\/$/, "");
     }
   } catch {
-    return normalized.replace(/\/api\/v1\/ws\/chat$/, "/api/v1/ws/execution");
+    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
   }
 
   return normalized;
