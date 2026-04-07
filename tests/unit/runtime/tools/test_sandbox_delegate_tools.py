@@ -11,6 +11,7 @@ import pytest
 try:
     import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
 except ImportError:
+    # Optional priming import for regression setup; safe to continue when unavailable.
     pass
 
 from fleet_rlm.runtime.tools import sandbox_delegate_tools
