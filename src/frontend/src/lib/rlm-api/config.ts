@@ -29,6 +29,8 @@ function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
       return url.toString().replace(/\/$/, "");
     }
   } catch {
+    // Some deploys still pass a host/path fragment instead of an absolute URL.
+    // Preserve that configuration style while rewriting the removed legacy chat path.
     if (wsUrl.endsWith("/api/v1/ws/chat")) {
       return `${wsUrl.slice(0, -"/api/v1/ws/chat".length)}${path}`;
     }

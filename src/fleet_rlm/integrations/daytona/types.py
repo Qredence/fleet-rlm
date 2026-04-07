@@ -143,7 +143,12 @@ class SandboxSpec:
         return params
 
     def _daytona_lifecycle_params(self) -> dict[str, int]:
-        """Return Daytona lifecycle settings in provider-minute units."""
+        """Return Daytona lifecycle settings in provider-minute units.
+
+        Keep the minute-unit shaping in one Daytona-specific helper so the
+        SDK boundary stays explicit even though the dataclass fields retain the
+        provider's original parameter names.
+        """
         params: dict[str, int] = {}
         if self.auto_stop_interval is not None:
             params["auto_stop_interval"] = self.auto_stop_interval

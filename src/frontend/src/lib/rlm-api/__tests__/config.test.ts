@@ -42,6 +42,14 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/execution");
   });
 
+  it("leaves a malformed explicit websocket URL unchanged when it is not legacy chat", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/socket");
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+
+    const { rlmApiConfig } = await loadRlmApiConfigModule();
+    expect(rlmApiConfig.wsUrl).toBe("custom-host/socket");
+  });
+
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────
   it("derives wsUrl from VITE_FLEET_API_URL when WS_URL is absent", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
