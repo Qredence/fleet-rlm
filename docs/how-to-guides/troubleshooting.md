@@ -20,41 +20,43 @@ Fix:
 - set `DSPY_LM_MODEL` and `DSPY_LLM_API_KEY` (or `DSPY_LM_API_KEY`)
 - restart terminal/session
 
-## Modal Credentials Missing
+## Daytona Configuration Missing
 
 Symptom:
 
-- Modal tests fail or sandbox startup errors
+- Daytona tests fail or sandbox startup errors
 
 Fix:
 
 ```bash
-uv run modal setup
+echo "$DAYTONA_API_KEY"
+echo "$DAYTONA_API_URL"
 ```
 
 Then re-run runtime tests:
 
-- `POST /api/v1/runtime/tests/modal`
+- `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
 
-## Secret/Volume Mismatch
+## Daytona Volume or LM Configuration Mismatch
 
 Symptom:
 
-- runtime says secret or volume unavailable
+- runtime says volume or LM config unavailable
 
 Fix:
 
 ```bash
-uv run modal secret create LITELLM DSPY_LM_MODEL=... DSPY_LLM_API_KEY=...
-uv run modal volume create rlm-volume-dspy
+echo "$DSPY_LM_MODEL"
+echo "$DSPY_LLM_API_KEY"
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
 
 ## WebSocket Auth Failures
 
 Symptom:
 
-- WS close/errors on `/api/v1/ws/chat` or `/api/v1/ws/execution`
+- WS close/errors on `/api/v1/ws/execution`
 
 Checks:
 

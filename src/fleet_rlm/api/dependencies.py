@@ -13,7 +13,7 @@ from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
-from .execution import ExecutionEventEmitter
+from .events import ExecutionEventEmitter
 from .server_utils import owner_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -48,9 +48,7 @@ class ServerState:
         self.delegate_lm: Any | None = None
         self.sessions: dict[str, dict[str, Any]] = {}
         self.runtime_test_results: dict[str, dict[str, Any]] = {}
-        self.execution_event_emitter = (
-            execution_event_emitter or ExecutionEventEmitter()
-        )
+        self.events_event_emitter = execution_event_emitter or ExecutionEventEmitter()
         self.db_manager: DatabaseManager | None = None
         self.repository: FleetRepository | None = None
         self.auth_provider: AuthProvider | None = None

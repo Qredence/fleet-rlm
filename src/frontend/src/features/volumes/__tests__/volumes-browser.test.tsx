@@ -43,7 +43,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({
 vi.mock("@/hooks/use-runtime-status", () => ({
   useRuntimeStatus: () => ({
     data: {
-      sandbox_provider: "modal",
+      sandbox_provider: "daytona",
     },
   }),
 }));
@@ -94,7 +94,7 @@ describe("VolumesBrowser", () => {
     document.body.innerHTML = "";
   });
 
-  it("defaults to the active runtime provider and switches provider-scoped queries locally", () => {
+  it("uses the Daytona durable volume view by default", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -104,23 +104,10 @@ describe("VolumesBrowser", () => {
     });
 
     expect(useFilesystemMock).toHaveBeenCalled();
-    expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("modal");
-    expect(container.textContent).toContain("Browse the modal mounted durable volume");
-    expect(container.textContent).toContain("/modal");
-
-    const daytonaToggle = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Daytona",
-    );
-    expect(daytonaToggle).toBeTruthy();
-
-    act(() => {
-      daytonaToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
-    expect(clearSelectedFile).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Browse the daytona mounted durable volume");
     expect(container.textContent).toContain("/daytona");
+    expect(clearSelectedFile).not.toHaveBeenCalled();
 
     act(() => {
       root.unmount();

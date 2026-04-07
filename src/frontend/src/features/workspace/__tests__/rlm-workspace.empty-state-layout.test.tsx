@@ -22,7 +22,7 @@ const backendRuntimeState = {
 };
 
 const chatStoreMockState = {
-  runtimeMode: "modal_chat" as "modal_chat" | "daytona_pilot",
+  runtimeMode: "daytona_pilot" as const,
   setRuntimeMode: vi.fn(),
   stopStreaming: vi.fn(),
 };
@@ -160,7 +160,7 @@ describe("WorkspaceScreen empty-state layout", () => {
         ready: false,
         guidance: ["Run Runtime tests from Settings -> Runtime."],
         daytona: {
-          configured: true,
+          configured: false,
           guidance: [],
         },
       },
@@ -169,7 +169,7 @@ describe("WorkspaceScreen empty-state layout", () => {
     const html = renderScreen();
 
     const titleIndex = html.indexOf("Let&#x27;s get to work, how can I help?");
-    const warningIndex = html.indexOf("Runtime warning");
+    const warningIndex = html.indexOf("Daytona setup required");
     const composerIndex = html.indexOf("WorkspaceComposer");
 
     expect(titleIndex).toBeGreaterThanOrEqual(0);

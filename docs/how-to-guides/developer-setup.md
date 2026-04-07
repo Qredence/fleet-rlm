@@ -174,52 +174,30 @@ POSTHOG_ENABLED=false
 > manual MLflow server command aligned, or set `MLFLOW_AUTO_START=false` if you
 > want to manage MLflow yourself.
 
-## 5. Configure Modal Credentials
+## 5. Configure Daytona Credentials
 
-Modal provides the sandbox execution environment. You need a Modal account and credentials.
+Daytona provides the maintained sandbox execution environment.
 
-### Create Modal Account
-
-1. Sign up at [modal.com](https://modal.com)
-2. Verify your email
-
-### Authenticate Modal
+Set the required runtime variables:
 
 ```bash
-uv run modal setup
+export DAYTONA_API_KEY="..."
+export DAYTONA_API_URL="https://app.daytona.io/api"
 ```
 
-This command:
-
-- Opens a browser for authentication
-- Stores credentials in `~/.modal.toml`
-
-### Verify Modal Setup
+Optional:
 
 ```bash
-uv run modal profile current
+export DAYTONA_TARGET="default"
 ```
 
-### Alternative: Environment Variables
-
-For CI/CD or restricted environments, set credentials via environment variables:
+Then verify the runtime path:
 
 ```bash
-export MODAL_TOKEN_ID="ak-..."
-export MODAL_TOKEN_SECRET="as-..."
+uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 ```
 
-### Create Modal Secrets
-
-Store LLM API keys in Modal's secret management:
-
-```bash
-uv run modal secret create LITELLM \
-  DSPY_LM_MODEL=openai/gpt-4o \
-  DSPY_LLM_API_KEY=sk-...
-```
-
-For detailed Modal configuration, see [Configuring Modal](configuring-modal.md).
+For runtime details, see [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md).
 
 ## 6. Frontend Setup (Optional)
 
@@ -392,21 +370,16 @@ uv cache clean
 uv sync --all-extras
 ```
 
-### Modal authentication fails
+### Daytona authentication fails
 
-**Symptom:** "Modal credentials missing" error.
+**Symptom:** Daytona config or connectivity errors.
 
-**Solution:** Re-run Modal setup:
-
-```bash
-uv run modal setup
-```
-
-Or verify environment variables:
+**Solution:** Verify environment variables:
 
 ```bash
-echo $MODAL_TOKEN_ID
-echo $MODAL_TOKEN_SECRET
+echo $DAYTONA_API_KEY
+echo $DAYTONA_API_URL
+echo $DAYTONA_TARGET
 ```
 
 ### Tests fail with import errors
@@ -445,4 +418,4 @@ uv run pre-commit run --hook-stage pre-push --all-files
 
 - Read [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines and testing overview
 - Review [AGENTS.md](../../AGENTS.md) for project architecture and conventions
-- Check [Configuring Modal](configuring-modal.md) for advanced Modal setup
+- Check [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) for runtime details

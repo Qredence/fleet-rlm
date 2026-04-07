@@ -117,7 +117,7 @@ Represents a sandbox execution environment session (Modal, Daytona, etc.).
 | `id` | UUID | Primary key |
 | `tenant_id` | UUID | FK to `tenants.id` |
 | `created_by_user_id` | UUID | FK to `users.id` (composite, optional) |
-| `provider` | Enum | `modal`, `daytona`, `aca_jobs`, or `local` |
+| `provider` | Enum | `daytona`, `aca_jobs`, or `local` |
 | `external_id` | String(255) | Provider's session identifier |
 | `status` | Enum | `active`, `ended`, or `failed` |
 | `started_at` | DateTime | Session start time |
@@ -127,25 +127,6 @@ Represents a sandbox execution environment session (Modal, Daytona, etc.).
 | `updated_at` | DateTime | Last update timestamp |
 
 **Unique constraints:** `(tenant_id, provider, external_id)`
-
-#### ModalVolume
-
-Tracks Modal volume instances for persistent storage.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | UUID | Primary key |
-| `tenant_id` | UUID | FK to `tenants.id` |
-| `provider` | String(32) | Provider name (default: `modal`) |
-| `volume_name` | String(255) | Volume identifier |
-| `external_volume_id` | String(255) | External volume ID (optional) |
-| `environment` | String(64) | Modal environment (optional) |
-| `region` | String(64) | Deployment region (optional) |
-| `metadata_json` | JSONB | Arbitrary metadata |
-| `last_seen_at` | DateTime | Last access time |
-| `last_synced_at` | DateTime | Last sync time |
-| `created_at` | DateTime | Creation timestamp |
-| `updated_at` | DateTime | Last update timestamp |
 
 ### Run & Trace Models
 
@@ -184,8 +165,6 @@ Individual step within a run execution.
 | `input_json` | JSONB | Step input data (nullable) |
 | `output_json` | JSONB | Step output data (nullable) |
 | `sandbox_session_external_id` | String(255) | External sandbox reference |
-| `modal_volume_id` | UUID | FK to `modal_volumes.id` (composite, optional) |
-| `modal_volume_name` | String(255) | Volume name (optional) |
 | `cost_usd_micros` | BigInteger | Cost in micros USD (optional) |
 | `tokens_in` | Integer | Input tokens (optional) |
 | `tokens_out` | Integer | Output tokens (optional) |
@@ -362,7 +341,6 @@ The following tables have RLS policies:
 - `users`
 - `memberships`
 - `sandbox_sessions`
-- `modal_volumes`
 - `runs`
 - `run_steps`
 - `artifacts`

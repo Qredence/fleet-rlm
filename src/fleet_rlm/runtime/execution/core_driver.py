@@ -1,6 +1,6 @@
-"""Sandbox driver for Modal code execution via JSON protocol.
+"""Sandbox driver for code execution via JSON protocol.
 
-This module provides a long-lived JSON protocol driver that runs inside a Modal
+This module provides a long-lived JSON protocol driver that runs inside a
 sandbox. It receives code execution commands via stdin, executes them in a
 controlled environment, and returns results via stdout.
 
@@ -59,7 +59,7 @@ from fleet_rlm.runtime.execution.driver_factories import (
 
 
 def sandbox_driver() -> None:
-    """Run the long-lived JSON protocol driver for Modal Sandbox execution.
+    """Run the long-lived JSON protocol driver for sandbox execution.
 
     This function runs an infinite loop reading JSON commands from stdin,
     executing Python code, and writing results to stdout. It maintains
@@ -78,7 +78,7 @@ def sandbox_driver() -> None:
     """
     # Keep these imports inside the function so the source extracted by
     # ``inspect.getsource(sandbox_driver)`` is self-contained when executed
-    # in the Modal sandbox process.
+    # in the sandbox process.
     import json
     import sys
     from contextlib import redirect_stderr, redirect_stdout
@@ -122,7 +122,7 @@ def sandbox_driver() -> None:
             workspace_write,
         )
     except ModuleNotFoundError:
-        # In Modal, interpreter may execute a bundled script that already
+        # The interpreter may execute a bundled script that already
         # defines these symbols in globals without an installed fleet_rlm package.
         # Access them from globals() instead.
         g: dict[str, Any] = globals()

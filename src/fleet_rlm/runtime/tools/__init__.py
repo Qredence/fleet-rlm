@@ -81,10 +81,9 @@ def build_tool_list(
     """
     from dspy import Tool
 
-    from .chunking import build_chunking_tools
-    from .document import build_document_tools
+    from .content import build_chunking_tools, build_document_tools
     from .filesystem import build_filesystem_tools
-    from .sandbox_common import build_sandbox_tools
+    from .sandbox import build_sandbox_tools
 
     tools: list[Tool] = []
 

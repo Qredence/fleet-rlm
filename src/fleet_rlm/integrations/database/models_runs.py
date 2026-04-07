@@ -98,12 +98,6 @@ class RunStep(Base):
             ondelete="CASCADE",
             name="fk_run_steps_tenant_run__runs_tenant_id_id",
         ),
-        ForeignKeyConstraint(
-            ["tenant_id", "modal_volume_id"],
-            ["modal_volumes.tenant_id", "modal_volumes.id"],
-            ondelete="SET NULL",
-            name="fk_run_steps_tenant_modal_volume__modal_volumes_tenant_id_id",
-        ),
         UniqueConstraint(
             "tenant_id",
             "run_id",
@@ -118,12 +112,6 @@ class RunStep(Base):
             "ix_run_steps_tenant_type_created_at",
             "tenant_id",
             "step_type",
-            "created_at",
-        ),
-        Index(
-            "ix_run_steps_tenant_modal_volume_created_at",
-            "tenant_id",
-            "modal_volume_id",
             "created_at",
         ),
     )
@@ -144,10 +132,6 @@ class RunStep(Base):
     sandbox_session_external_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
-    modal_volume_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
-    modal_volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cost_usd_micros: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)

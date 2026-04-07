@@ -87,6 +87,11 @@ def chat(
         "--trace-mode",
         help="Trace display mode: compact, verbose, or off",
     ),
+    volume_name: str | None = typer.Option(
+        None,
+        "--volume-name",
+        help="Optional Daytona volume name for persistent storage",
+    ),
 ) -> None:
     """Start standalone in-process interactive terminal chat."""
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
@@ -103,6 +108,7 @@ def chat(
         options=TerminalChatOptions(
             docs_path=docs_path,
             trace_mode=resolved_trace_mode,  # type: ignore[arg-type]
+            volume_name=volume_name,
         ),
     )
 
@@ -122,7 +128,7 @@ def daytona_smoke(
 ) -> None:
     """Run a native Daytona smoke validation without invoking an LM."""
     try:
-        from fleet_rlm.integrations.providers.daytona import run_daytona_smoke
+        from fleet_rlm.integrations.daytona import run_daytona_smoke
 
         result = run_daytona_smoke(
             repo=repo,

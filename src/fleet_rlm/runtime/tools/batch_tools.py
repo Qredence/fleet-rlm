@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fleet_rlm.runtime.agent.recursive_runtime import spawn_delegate_sub_agent_async
 from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
 
-from .sandbox_common import _aexecute_submit_ctx, _SandboxToolContext
+from .sandbox.common import _aexecute_submit_ctx, _SandboxToolContext
 from .shared import (
     build_trajectory_payload,
     chunk_text,
@@ -38,7 +38,7 @@ def build_batch_tools(
     sandbox_ctx = _SandboxToolContext(agent=agent)
 
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except Exception:  # pragma: no cover - defensive import guard
@@ -53,7 +53,7 @@ def build_batch_tools(
         )
 
     def _effective_recursive_batch_concurrency(task_count: int) -> int:
-        configured = getattr(agent, "daytona_batch_concurrency", None)
+        configured = getattr(agent, "batch_concurrency", None)
         try:
             value = int(configured) if configured is not None else 0
         except (TypeError, ValueError):

@@ -222,7 +222,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
     content: apiContent,
     isLoading: isContentLoading,
     error: contentError,
-  } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "modal");
+  } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "daytona");
   const resolvedContent = mockContent ?? (apiContent || null);
 
   const handleCopyPath = () => {

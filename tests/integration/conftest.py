@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 
 from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.integrations.providers.daytona.config import resolve_daytona_config
+from fleet_rlm.integrations.daytona.config import resolve_daytona_config
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 
@@ -17,24 +17,6 @@ def _lm_configured() -> bool:
         import dspy
 
         return dspy.settings.lm is not None
-    except Exception:
-        return False
-
-
-def _modal_credentials_present() -> bool:
-    """Check whether Modal credentials are available in environment."""
-    return bool(os.environ.get("MODAL_TOKEN_ID")) and bool(
-        os.environ.get("MODAL_TOKEN_SECRET")
-    )
-
-
-def check_litellm_secret() -> bool:
-    """Check whether Modal LITELLM secret is configured and complete."""
-    try:
-        from fleet_rlm.cli.runners import check_secret_presence
-
-        result = check_secret_presence()
-        return all(result.values())
     except Exception:
         return False
 
@@ -63,7 +45,7 @@ def pytest_collection_modifyitems(
                 pytest.mark.skip(
                     reason=(
                         "live_llm test skipped by default. "
-                        "Set RLM_LIVE_TESTS=1 to include live Modal + LM integration tests."
+                        "Set RLM_LIVE_TESTS=1 to include live Daytona + LM integration tests."
                     )
                 )
             )
@@ -81,12 +63,12 @@ def pytest_collection_modifyitems(
 @pytest.fixture
 def require_litellm() -> None:
     """Skip live integration tests when runtime prerequisites are missing."""
-    if not _modal_credentials_present():
-        pytest.skip("Modal credentials not configured")
+    try:
+        resolve_daytona_config()
+    except Exception as exc:
+        pytest.skip(f"Daytona runtime not configured: {exc}")
     if not _lm_configured():
         pytest.skip("DSPy LM not configured")
-    if not check_litellm_secret():
-        pytest.skip("LITELLM secret not configured")
 
 
 @pytest.fixture
@@ -107,8 +89,10 @@ def require_database_url() -> str:
 def require_qre301_live(require_database_url: str) -> str:
     if os.environ.get("QRE301_LIVE") != "1":
         pytest.skip("QRE301_LIVE=1 is required")
-    if not _modal_credentials_present():
-        pytest.skip("Modal credentials not configured")
+    try:
+        resolve_daytona_config()
+    except Exception as exc:
+        pytest.skip(f"Daytona runtime not configured: {exc}")
     if not configure_planner_from_env():
         pytest.skip("Planner LM not configured")
     return require_database_url

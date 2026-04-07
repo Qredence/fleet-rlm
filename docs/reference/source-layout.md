@@ -67,7 +67,7 @@ than one large chat loop.
 | Path | Description |
 | --- | --- |
 | `config.py` | Planner/delegate LM bootstrap from environment. |
-| `__init__.py` | Lazy runtime export surface for `ModalInterpreter`, planner helpers, and `sandbox_driver`. |
+| `__init__.py` | Lazy runtime export surface for `DaytonaInterpreter`, planner helpers, and `sandbox_driver`. |
 | `agent/` | Shared DSPy orchestration, chat/session state, delegation policy, memory, and command helpers. |
 | `execution/` | Interpreter implementation, streaming helpers, runtime factory, and execution profiles. |
 | `content/` | Chunking, document ingestion, and execution-log processing helpers. |
@@ -88,8 +88,7 @@ than one large chat loop.
 | `database/` | `DatabaseManager`, SQLModel models, repository, and DB-facing types. |
 | `mcp/` | FastMCP server surface. |
 | `observability/` | PostHog and MLflow integrations plus trace/request-context helpers. |
-| `providers/daytona/` | Daytona interpreter backend, bridge/runtime helpers, diagnostics, and volume access. |
-| `providers/modal/` | Modal provider helpers. |
+| `daytona/` | Daytona interpreter backend, bridge/runtime helpers, diagnostics, and volume access. |
 
 ## Scaffold and Assets
 

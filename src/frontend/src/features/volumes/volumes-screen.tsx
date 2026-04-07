@@ -21,9 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import {
   collectExpandableIds,
@@ -47,12 +45,9 @@ export function VolumesBrowser() {
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
   const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
   const isMobile = useIsMobile();
-  const { data: runtimeStatus } = useRuntimeStatus();
   const prefersReduced = useReducedMotion();
-  const defaultProvider: VolumeProvider =
-    runtimeStatus?.sandbox_provider === "daytona" ? "daytona" : "modal";
-  const [selectedProvider, setSelectedProvider] = useState<VolumeProvider | null>(null);
-  const activeProvider = selectedProvider ?? defaultProvider;
+  const activeProvider: VolumeProvider = "daytona";
+  const providerLabel = "Daytona";
   const {
     volumes: filesystem,
     dataSource: filesystemDataSource,
@@ -64,10 +59,6 @@ export function VolumesBrowser() {
   const [fsExpanded, setFsExpanded] = useState<Set<string>>(new Set());
   const [fsSearch, setFsSearch] = useState("");
   const previousProviderRef = useRef<VolumeProvider | null>(null);
-
-  useEffect(() => {
-    setSelectedProvider((current) => current ?? defaultProvider);
-  }, [defaultProvider]);
 
   useEffect(() => {
     if (previousProviderRef.current && previousProviderRef.current !== activeProvider) {
@@ -100,12 +91,6 @@ export function VolumesBrowser() {
     [openCanvas, selectFile],
   );
 
-  const handleProviderChange = useCallback((value: string) => {
-    if (value === "modal" || value === "daytona") {
-      setSelectedProvider(value);
-    }
-  }, []);
-
   const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);
   const fsStats = useMemo(
     () => ({
@@ -116,7 +101,6 @@ export function VolumesBrowser() {
   );
 
   const isDegraded = filesystemDataSource === "fallback";
-  const providerLabel = activeProvider === "daytona" ? "Daytona" : "Modal";
 
   const headerChildren = (
     <div className={cn(isMobile && "px-4")}>
@@ -160,21 +144,6 @@ export function VolumesBrowser() {
           </Button>
         </div>
       </div>
-
-      <ToggleGroup
-        type="single"
-        value={activeProvider}
-        onValueChange={handleProviderChange}
-        className="mb-3"
-        aria-label="Volume provider"
-      >
-        <ToggleGroupItem value="modal" aria-label="Browse Modal durable volume">
-          Modal
-        </ToggleGroupItem>
-        <ToggleGroupItem value="daytona" aria-label="Browse Daytona durable volume">
-          Daytona
-        </ToggleGroupItem>
-      </ToggleGroup>
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

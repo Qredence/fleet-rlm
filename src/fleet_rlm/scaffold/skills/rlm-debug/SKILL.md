@@ -38,7 +38,6 @@ When symptoms involve the workspace UI, focus on these seams:
 
 - `openapi.yaml`
 - `/api/v1/runtime/*`
-- `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 
 The riskiest backend files are:
@@ -52,10 +51,10 @@ The riskiest backend files are:
 
 ## Common Failures
 
-### Runtime mode mismatch
+### Runtime contract drift
 
-- Mismatch between requested `runtime_mode` and backend readiness state
-- Fix by tracing `runtime_mode` through the initial websocket request and store state
+- Frontend or tests still sending legacy runtime-selector fields that the backend ignores or rejects
+- Fix by tracing the first websocket request and confirming the canonical Daytona-only fields: `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
 
 ### Daytona volume confusion
 

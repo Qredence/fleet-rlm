@@ -1,4 +1,4 @@
-"""Typed contracts and runtime-specific request normalization for websocket chat."""
+"""Typed contracts and Daytona request normalization for websocket execution."""
 
 from __future__ import annotations
 
@@ -69,6 +69,11 @@ class ChatAgentProtocol(Protocol):
         cancel_check: Callable[[], bool] | None = None,
         *,
         docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
     ) -> AsyncIterator[StreamEvent]: ...
 
 
@@ -87,10 +92,7 @@ def normalize_daytona_chat_request(
     msg: WSMessage,
     workspace_id: str,
 ) -> DaytonaChatRequestOptions | None:
-    """Return a typed Daytona request payload when the turn targets Daytona."""
-
-    if msg.runtime_mode != "daytona_pilot":
-        return None
+    """Return a typed Daytona request payload for the canonical runtime."""
 
     repo_url = str(msg.repo_url or "").strip() or None
     repo_ref = str(msg.repo_ref or "").strip() or None
@@ -153,7 +155,7 @@ async def prepare_daytona_workspace_for_turn(
         if isinstance(request.batch_concurrency, int) and request.batch_concurrency > 0
         else None
     )
-    setattr(agent, "daytona_batch_concurrency", normalized_batch_concurrency)
+    setattr(agent, "batch_concurrency", normalized_batch_concurrency)
 
     await configure_workspace(
         repo_url=request.repo_url,

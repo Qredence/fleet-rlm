@@ -55,7 +55,7 @@ async def switch_session_if_needed(
             "session": {"state": {}, "session_id": sess_id},
         }
         try:
-            from fleet_rlm.integrations.database.local_store import (
+            from fleet_rlm.integrations.local_store import (
                 create_session as _db_create,
             )
 

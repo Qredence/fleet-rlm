@@ -1,4 +1,4 @@
-"""Output utilities for ModalInterpreter execution flows."""
+"""Output utilities for interpreter execution flows."""
 
 from __future__ import annotations
 

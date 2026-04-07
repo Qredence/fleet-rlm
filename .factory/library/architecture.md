@@ -1,92 +1,81 @@
 # Architecture
 
-Backend architecture for the `src/fleet_rlm` simplification mission.
+How the DSPy runtime, Daytona provider path, and web product surface fit together for this mission.
 
-**What belongs here:** high-level ownership boundaries, runtime flow, and invariants workers should preserve.
-**What does NOT belong here:** per-feature implementation notes or temporary TODOs.
+**What belongs here:** high-level ownership boundaries, runtime flows, integration seams, and invariants.
+**What does NOT belong here:** per-feature TODOs or temporary debugging notes.
 
 ---
 
-## Product Identity
+## Product Shape
 
-`fleet-rlm` is a Web UI-first FastAPI backend for a long-running RLM runtime.
+`fleet-rlm` is a Daytona-backed DSPy application exposed through one product contract:
+- FastAPI serves health/readiness endpoints, runtime/optimization APIs, websocket execution, and the packaged web UI.
+- The workspace frontend consumes the shared `/api/v1/ws/execution` stream and renders live trace/reasoning state.
+- Runtime settings exposes LM/Daytona diagnostics and local configuration write paths.
+- Optimization exposes GEPA/MLflow-backed DSPy program optimization through the UI and API.
 
-The backend is responsible for serving and coordinating all of these surfaces from one product-shaped application:
-- browser shell served by FastAPI
-- canonical HTTP contract under `/api/v1`
-- websocket chat stream under `/api/v1/ws/chat`
-- websocket execution stream under `/api/v1/ws/execution`
-- CLI entrypoints that launch or exercise the same backend/runtime system
-- Daytona-backed workspace/runtime infrastructure
+This mission refactors internals while preserving that full-stack contract.
 
-This mission should make the code read more like that product reality.
+## High-Level Layers
 
-## Current High-Level Layers
+### Backend transport (`src/fleet_rlm/api`)
+Owns the public HTTP/websocket contract, request validation, auth/identity normalization, runtime-settings routes, optimization routes, and websocket event emission.
 
-### `api/`
-Owns transport-facing behavior:
-- FastAPI app factory and lifespan
-- route registration and middleware
-- auth and request/websocket identity resolution
-- websocket orchestration, event shaping, and execution stream subscription
-- runtime-facing HTTP services (`runtime_services/*`)
+### DSPy runtime (`src/fleet_rlm/runtime`)
+Owns Signatures, `dspy.Module` composition, the ReAct chat agent, `dspy.RLM` runtime modules, streaming helpers, evaluation/optimization helpers, and tool orchestration.
 
-### `runtime/`
-Owns shared conversational/runtime behavior:
-- shared ReAct chat agent and session logic
-- streaming helpers and execution interpreter contracts
-- runtime tools and long-context execution utilities
-- shared runtime models/signatures/content processing
+### Daytona integration (`src/fleet_rlm/integrations/daytona`)
+Owns sandbox/session/volume lifecycle, runtime preflight diagnostics, and provider-specific execution behavior beneath the shared runtime contract.
 
-### `integrations/`
-Owns infrastructure and provider-specific behavior:
-- environment/config loaders
-- database/repository layer
-- observability integrations
-- provider-specific runtime implementations, especially Daytona
+### Frontend (`src/frontend/src`)
+Owns the workspace/settings/optimization surfaces, websocket event adaptation, runtime diagnostics presentation, and optimization form UX.
 
-### `cli/`
-Owns command-line entry plumbing only:
-- `fleet` launcher surface
-- `fleet-rlm` Typer commands
-- CLI config bootstrap and terminal chat UX
+## Target Direction for This Mission
 
-Target direction: CLI stays thin; backend/runtime ownership becomes explicit elsewhere.
+### 1. Slimmer DSPy Signatures
+Signatures should describe semantic inputs/outputs and typed result shapes. They should not each carry large operational prompt blocks when those instructions belong in modules, tools, or shared runtime context.
 
-## Target Ownership Direction
+### 2. Cleaner module composition
+`dspy.Module` instances should compose other DSPy modules directly so evaluation, optimization, save/load, and test seams remain visible. Custom wrappers are acceptable only when they preserve or clarify this graph.
 
-### Backend-owned runtime assembly
-The FastAPI/backend path should assemble runtime-mode chat agents through backend-owned seams, even if CLI entrypoints reuse the same underlying helpers. Workers should prefer a backend-facing factory/assembly module over having `api` depend on CLI-oriented runners.
+### 3. Explicit ReAct / RLM boundary
+- `dspy.ReAct` remains the chat-time orchestration layer for tool selection.
+- `dspy.RLM` remains the long-context/interpreter-backed execution layer.
+- The boundary between them should be explicit, with less duplicated orchestration state living outside DSPy-native abstractions.
 
-### Websocket/session lifecycle
-The websocket package should make these phases obvious from names and import direction:
-1. authenticate and resolve identity
-2. prepare runtime models/state
-3. build agent context for the requested runtime mode
-4. drive streaming lifecycle
-5. persist session/manifests/execution state
-6. shape completion/failure payloads
+### 4. Full-stack contract preservation
+Refactors must preserve:
+- `/api/v1/ws/execution` as the canonical workspace stream
+- Daytona-only runtime labeling and request controls
+- frontend trace rendering from live `trajectory_step` / `reasoning_step` events
+- runtime settings and optimization route shapes consumed by the frontend
 
-Workers may merge or move modules if it improves discoverability, but must preserve this lifecycle contract.
+## Critical Flows
 
-### Daytona as first-class infrastructure
-Daytona is not a side path. Provider-specific workspace/interpreter/runtime logic belongs under `integrations/providers/daytona/*`, but it must continue to plug into the shared conversational/runtime contract rather than forking a separate chat architecture.
+### Workspace execution flow
+1. Frontend submits a message over `/api/v1/ws/execution`.
+2. Backend prepares the shared chat runtime and attaches Daytona execution hints.
+3. `RLMReActChatAgent` uses `dspy.ReAct` plus explicit tools/runtime modules.
+4. Long-context or delegated work uses interpreter-backed `dspy.RLM` modules.
+5. Streamed events are emitted to the websocket and adapted by the frontend into transcript/trace UI.
+
+### Runtime settings flow
+1. Frontend loads runtime status/settings.
+2. Backend returns current diagnostic/config snapshots.
+3. User can patch local settings and trigger LM/Daytona smoke tests.
+4. Resulting status/guidance must match what the workspace warning state communicates.
+
+### Optimization flow
+1. Frontend loads optimization availability status.
+2. User submits dataset path + DSPy program spec (`module:attr`).
+3. Backend resolves/instantiates the program and runs GEPA/MLflow-backed optimization.
+4. Structured result metadata returns to the UI.
 
 ## Invariants
 
-- One FastAPI app instance still serves health/readiness, HTTP routes, websocket routes, and the browser shell.
-- `fleet web` remains a thin path to the same backend app.
-- `/api/v1/ws/chat` stays the canonical conversational stream.
-- `/api/v1/ws/execution` stays the canonical execution/workbench stream.
-- `runtime_mode=daytona_pilot` continues to use the shared websocket/chat contract with Daytona-specific execution underneath it.
-- Session state remains identity-scoped.
-- Route/CLI/browser contract behavior must be preserved unless the mission explicitly records an intentional cleanup decision.
-
-## Highest-Risk Seams
-
-- API code that still constructs runtime objects through CLI-owned helpers
-- websocket runtime preparation versus stream/lifecycle ownership split across many files
-- Daytona wrappers that obscure whether behavior is shared-runtime or provider-specific
-- package-root facades and compatibility exports that hide the real owner modules
-
-Workers should collect reachability evidence before collapsing any of these seams.
+- The public runtime contract remains Daytona-only.
+- Frontend consumers must not need to understand backend refactor details.
+- `dspy.Module` graphs stay instantiable from quality/optimization tooling.
+- Runtime settings and optimization responses remain stable enough for generated/frontend clients.
+- The live Daytona path must be end-to-end testable by mission completion.

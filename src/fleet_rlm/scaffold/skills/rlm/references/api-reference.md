@@ -35,7 +35,7 @@ DaytonaInterpreter(
 ## Lifecycle
 
 ```python
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 interp = DaytonaInterpreter(
     repo_url="https://github.com/your-org/your-repo",

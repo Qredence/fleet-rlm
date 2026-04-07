@@ -25,7 +25,7 @@ let runtimeStatusMock: {
 };
 
 const chatStoreMockState = {
-  runtimeMode: "modal_chat" as "modal_chat" | "daytona_pilot",
+  runtimeMode: "daytona_pilot" as const,
   setRuntimeMode: vi.fn(),
 };
 
@@ -109,7 +109,7 @@ describe("WorkspaceScreen runtime warning", () => {
   }
 
   beforeEach(() => {
-    chatStoreMockState.runtimeMode = "modal_chat";
+    chatStoreMockState.runtimeMode = "daytona_pilot";
     chatStoreMockState.setRuntimeMode.mockReset();
     runtimeStatusMock = {
       data: {
@@ -126,7 +126,7 @@ describe("WorkspaceScreen runtime warning", () => {
   it("renders warning banner when runtime status is unhealthy", () => {
     const html = renderScreen();
     expect(html).toContain('data-slot="alert"');
-    expect(html).toContain("Runtime warning");
+    expect(html).toContain("Daytona setup required");
     expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
     expect(html).toContain("Open Runtime Settings");
   });
@@ -140,7 +140,7 @@ describe("WorkspaceScreen runtime warning", () => {
       },
     };
     const html = renderScreen();
-    expect(html).not.toContain("Runtime warning:");
+    expect(html).not.toContain("Daytona setup required");
   });
 
   it("renders Daytona guidance when Daytona mode is selected", () => {

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -92,9 +91,9 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
                 "DSPY_DELEGATE_LM_SMALL_MODEL": "openai/gpt-4.1-nano",
                 "DSPY_DELEGATE_LM_MAX_TOKENS": "2048",
                 "DSPY_LLM_API_KEY": "sk-test",
-                "SECRET_NAME": "ALT_SECRET",
-                "VOLUME_NAME": "alt-volume",
-                "SANDBOX_PROVIDER": "daytona",
+                "DAYTONA_API_KEY": "daytona-test-key",
+                "DAYTONA_API_URL": "https://daytona.example.com",
+                "DAYTONA_TARGET": "local",
             }
         },
     )
@@ -107,23 +106,21 @@ def test_runtime_settings_patch_local_updates_config_and_planner(
         "DSPY_DELEGATE_LM_SMALL_MODEL",
         "DSPY_DELEGATE_LM_MAX_TOKENS",
         "DSPY_LLM_API_KEY",
-        "SECRET_NAME",
-        "VOLUME_NAME",
-        "SANDBOX_PROVIDER",
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "DAYTONA_TARGET",
     }
     state = _server_state(local_client)
     assert state.config.agent_model == "openai/gpt-4o-mini"
     assert state.config.agent_delegate_model == "openai/gpt-4.1-mini"
     assert state.config.agent_delegate_small_model == "openai/gpt-4.1-nano"
     assert state.config.agent_delegate_max_tokens == 2048
-    assert state.config.secret_name == "ALT_SECRET"
-    assert state.config.volume_name == "alt-volume"
-    assert state.config.sandbox_provider == "daytona"
     assert state.planner_lm is planner
     assert state.delegate_lm is delegate
     assert planner_calls[-1] == "openai/gpt-4o-mini"
     assert delegate_calls[-1] == "openai/gpt-4.1-mini"
-    assert os.environ.get("SECRET_NAME") == "ALT_SECRET"
+    assert os.environ.get("DAYTONA_API_URL") == "https://daytona.example.com"
+    assert os.environ.get("DAYTONA_TARGET") == "local"
 
 
 def test_runtime_settings_patch_writes_to_configured_env_path(
@@ -174,19 +171,18 @@ def test_runtime_settings_patch_config_only_updates_keep_loaded_models(
         "/api/v1/runtime/settings",
         json={
             "updates": {
-                "SECRET_NAME": "ALT_SECRET",
-                "VOLUME_NAME": "alt-volume",
-                "SANDBOX_PROVIDER": "daytona",
+                "DAYTONA_API_KEY": "daytona-test-key",
+                "DAYTONA_API_URL": "https://daytona.example.com",
+                "DAYTONA_TARGET": "local",
             }
         },
     )
 
     assert response.status_code == 200
-    assert state.config.secret_name == "ALT_SECRET"
-    assert state.config.volume_name == "alt-volume"
-    assert state.config.sandbox_provider == "daytona"
     assert state.planner_lm is planner
     assert state.delegate_lm is delegate
+    assert os.environ.get("DAYTONA_API_URL") == "https://daytona.example.com"
+    assert os.environ.get("DAYTONA_TARGET") == "local"
 
 
 def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
@@ -198,8 +194,7 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
         "\n".join(
             [
                 "DSPY_LLM_API_KEY=supersecret66",
-                "MODAL_TOKEN_ID=modaltokenN2",
-                "MODAL_TOKEN_SECRET=modalsecretg4",
+                "DAYTONA_API_KEY=daytona-secret99",
             ]
         )
         + "\n",
@@ -212,8 +207,7 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
         json={
             "updates": {
                 "DSPY_LLM_API_KEY": "sup...66",
-                "MODAL_TOKEN_ID": "mod...N2",
-                "MODAL_TOKEN_SECRET": "mod...g4",
+                "DAYTONA_API_KEY": "day...99",
             }
         },
     )
@@ -224,8 +218,7 @@ def test_runtime_settings_patch_ignores_masked_secret_round_trip_values(
 
     text = env_path.read_text(encoding="utf-8")
     assert "DSPY_LLM_API_KEY=supersecret66" in text
-    assert "MODAL_TOKEN_ID=modaltokenN2" in text
-    assert "MODAL_TOKEN_SECRET=modalsecretg4" in text
+    assert "DAYTONA_API_KEY=daytona-secret99" in text
 
 
 def test_runtime_settings_patch_reload_failure_restores_runtime_state(
@@ -234,17 +227,12 @@ def test_runtime_settings_patch_reload_failure_restores_runtime_state(
     tmp_path: Path,
 ) -> None:
     env_path = tmp_path / ".env"
-    original_text = (
-        "DSPY_LM_MODEL=openai/gpt-4o-mini\n"
-        "DSPY_LLM_API_KEY=sk-existing\n"
-        "SECRET_NAME=LITELLM\n"
-    )
+    original_text = "DSPY_LM_MODEL=openai/gpt-4o-mini\nDSPY_LLM_API_KEY=sk-existing\n"
     env_path.write_text(original_text, encoding="utf-8")
 
     state = _server_state(local_client)
     state.config.env_path = env_path
     state.config.agent_model = "openai/gpt-4o-mini"
-    state.config.secret_name = "LITELLM"
     planner = object()
     delegate = object()
     state.planner_lm = planner
@@ -268,7 +256,6 @@ def test_runtime_settings_patch_reload_failure_restores_runtime_state(
         )
 
     assert state.config.agent_model == "openai/gpt-4o-mini"
-    assert state.config.secret_name == "LITELLM"
     assert state.planner_lm is planner
     assert state.delegate_lm is delegate
     assert env_path.read_text(encoding="utf-8") == original_text
@@ -308,69 +295,63 @@ def test_runtime_settings_patch_rejects_unsupported_key(local_client: TestClient
     assert "Unsupported settings key" in response.json().get("detail", "")
 
 
-def test_runtime_modal_smoke_success(
+def test_runtime_daytona_smoke_success(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setenv("MODAL_TOKEN_ID", "token-id")
-    monkeypatch.setenv("MODAL_TOKEN_SECRET", "token-secret")
+    async def _fake_run_daytona_connection_test(*, state):
+        _ = state
+        return {
+            "kind": "daytona",
+            "preflight_ok": True,
+            "ok": True,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "checks": {},
+            "guidance": [],
+            "output_preview": "Daytona connectivity verified.",
+        }
 
-    def _aio_method(value):
-        async def _call(*args, **kwargs):
-            _ = args, kwargs
-            return value
-
-        return SimpleNamespace(aio=_call)
-
-    class _FakeStdout:
-        def __init__(self) -> None:
-            self.read = _aio_method("ok")
-
-    class _FakeProc:
-        def __init__(self) -> None:
-            self.stdout = _FakeStdout()
-            self.wait = _aio_method(None)
-
-    class _FakeSandbox:
-        def __init__(self) -> None:
-            self.exec = _aio_method(_FakeProc())
-            self.terminate = _aio_method(None)
-
-    class _FakeApp:
-        lookup = _aio_method(SimpleNamespace(name="runtime-smoke"))
-
-    class _FakeSandboxNamespace:
-        create = _aio_method(_FakeSandbox())
-
-    fake_modal = SimpleNamespace(App=_FakeApp, Sandbox=_FakeSandboxNamespace)
-    monkeypatch.setitem(sys.modules, "modal", fake_modal)
-
-    response = local_client.post("/api/v1/runtime/tests/modal")
-    assert response.status_code == 200
-    payload = response.json()
-
-    assert payload["kind"] == "modal"
-    assert payload["preflight_ok"] is True
-    assert payload["ok"] is True
-    assert payload["output_preview"] == "ok"
-
-
-def test_runtime_modal_smoke_preflight_failure(
-    local_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
-    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.runtime.load_modal_config",
-        lambda: {},
+        "fleet_rlm.api.routers.runtime.run_daytona_connection_test",
+        _fake_run_daytona_connection_test,
     )
 
-    response = local_client.post("/api/v1/runtime/tests/modal")
+    response = local_client.post("/api/v1/runtime/tests/daytona")
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["kind"] == "modal"
+    assert payload["kind"] == "daytona"
+    assert payload["preflight_ok"] is True
+    assert payload["ok"] is True
+    assert payload["output_preview"] == "Daytona connectivity verified."
+
+
+def test_runtime_daytona_smoke_preflight_failure(
+    local_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _fake_run_daytona_connection_test(*, state):
+        _ = state
+        return {
+            "kind": "daytona",
+            "preflight_ok": False,
+            "ok": False,
+            "checked_at": "2026-01-01T00:00:00+00:00",
+            "checks": {"configured": False},
+            "guidance": ["Missing DAYTONA_API_KEY."],
+            "error": "Daytona preflight checks failed.",
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.runtime.run_daytona_connection_test",
+        _fake_run_daytona_connection_test,
+    )
+
+    response = local_client.post("/api/v1/runtime/tests/daytona")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["kind"] == "daytona"
     assert payload["preflight_ok"] is False
     assert payload["ok"] is False
 
@@ -432,21 +413,20 @@ def test_runtime_status_uses_cached_results(
     monkeypatch: pytest.MonkeyPatch,
 ):
     state = _server_state(local_client)
-    monkeypatch.delenv("SANDBOX_PROVIDER", raising=False)
     state.config.agent_model = None
     state.config.agent_delegate_model = None
     state.config.agent_delegate_small_model = None
 
     state.runtime_test_results = {
-        "modal": {
-            "kind": "modal",
+        "daytona": {
+            "kind": "daytona",
             "ok": True,
             "preflight_ok": True,
             "checked_at": "2026-01-01T00:00:00+00:00",
-            "checks": {"credentials_available": True},
+            "checks": {"configured": True, "api_key_set": True, "target_set": True},
             "guidance": [],
             "latency_ms": 10,
-            "output_preview": "ok",
+            "output_preview": "Daytona connectivity verified.",
             "error": None,
         },
         "lm": {
@@ -466,18 +446,18 @@ def test_runtime_status_uses_cached_results(
     monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "openai/gpt-4.1-mini")
     monkeypatch.setenv("DSPY_DELEGATE_LM_SMALL_MODEL", "openai/gpt-4.1-nano")
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-test")
-    monkeypatch.setenv("MODAL_TOKEN_ID", "token-id")
-    monkeypatch.setenv("MODAL_TOKEN_SECRET", "token-secret")
     monkeypatch.setenv("DAYTONA_API_KEY", "daytona-test-key")
     monkeypatch.setenv("DAYTONA_API_URL", "https://daytona.example.com")
+    monkeypatch.setenv("DAYTONA_TARGET", "local")
 
     response = local_client.get("/api/v1/runtime/status")
     assert response.status_code == 200
     payload = response.json()
 
     assert payload["ready"] is True
-    assert payload["daytona"]["sandbox_provider_set"] is True
-    assert payload["tests"]["modal"]["ok"] is True
+    assert payload["daytona"]["api_key_set"] is True
+    assert payload["daytona"]["target_set"] is True
+    assert payload["tests"]["daytona"]["ok"] is True
     assert payload["tests"]["lm"]["ok"] is True
     assert payload["active_models"]["planner"] == "openai/gpt-4o-mini"
     assert payload["active_models"]["delegate"] == "openai/gpt-4.1-mini"
@@ -490,7 +470,6 @@ def test_runtime_status_ignores_malformed_cached_runtime_tests(
 ) -> None:
     state = _server_state(local_client)
     state.runtime_test_results = {
-        "modal": {"ok": True},
         "lm": "invalid",
         "daytona": {"checked_at": object()},
     }
@@ -501,7 +480,6 @@ def test_runtime_status_ignores_malformed_cached_runtime_tests(
     payload = response.json()
     assert payload["ready"] is False
     assert payload["tests"] == {
-        "modal": None,
         "lm": None,
         "daytona": None,
     }
@@ -597,22 +575,19 @@ def test_runtime_status_marks_mlflow_disabled_when_env_disabled(
     }
 
 
-def test_runtime_status_stays_degraded_until_modal_and_lm_smoke_pass(
+def test_runtime_status_stays_degraded_until_daytona_and_lm_smoke_pass(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
     state.runtime_test_results = {}
-    monkeypatch.setattr(
-        "fleet_rlm.api.routers.runtime.load_modal_config",
-        lambda: {},
-    )
 
     monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
     monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
     monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
-    monkeypatch.delenv("MODAL_TOKEN_ID", raising=False)
-    monkeypatch.delenv("MODAL_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
+    monkeypatch.delenv("DAYTONA_API_URL", raising=False)
+    monkeypatch.delenv("DAYTONA_TARGET", raising=False)
 
     response = local_client.get("/api/v1/runtime/status")
 
@@ -620,7 +595,7 @@ def test_runtime_status_stays_degraded_until_modal_and_lm_smoke_pass(
     payload = response.json()
     assert payload["ready"] is False
     assert payload["llm"]["model_set"] is False
-    assert payload["modal"]["credentials_available"] is False
+    assert payload["daytona"]["configured"] is False
     assert (
         "Run Runtime connection tests to validate live provider connectivity."
         in payload["guidance"]
@@ -631,13 +606,13 @@ def test_runtime_status_keeps_daytona_guidance_nested(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.integrations.providers.daytona.config import DaytonaConfigError
+    from fleet_rlm.integrations.daytona.config import DaytonaConfigError
 
     monkeypatch.delenv("DAYTONA_API_KEY", raising=False)
     monkeypatch.delenv("DAYTONA_API_URL", raising=False)
     monkeypatch.delenv("DAYTONA_API_BASE_URL", raising=False)
     monkeypatch.setattr(
-        "fleet_rlm.integrations.providers.daytona.resolve_daytona_config",
+        "fleet_rlm.integrations.daytona.resolve_daytona_config",
         lambda: (_ for _ in ()).throw(
             DaytonaConfigError(
                 "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
@@ -674,10 +649,9 @@ def test_runtime_volume_tree_maps_backend_errors_to_502(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("volume boom")),
     )
 
@@ -707,51 +681,16 @@ def test_runtime_daytona_volume_tree_maps_backend_errors_to_502(
     assert "Volume listing failed" in response.json().get("detail", "")
 
 
-def test_runtime_volume_tree_uses_explicit_modal_provider_override(
+def test_runtime_volume_tree_rejects_modal_provider_override(
     staging_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = _server_state(staging_client)
-    state.config.sandbox_provider = "daytona"
-    state.config.volume_name = "test-volume"
-    captured: dict[str, object] = {}
-
-    def _fake_list_volume_tree(volume_name: str, root_path: str, max_depth: int):
-        captured.update(
-            {
-                "volume_name": volume_name,
-                "root_path": root_path,
-                "max_depth": max_depth,
-            }
-        )
-        return {
-            "volume_name": volume_name,
-            "root_path": root_path,
-            "nodes": [],
-            "total_files": 0,
-            "total_dirs": 0,
-            "truncated": False,
-        }
-
-    monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
-        _fake_list_volume_tree,
-    )
-
     response = staging_client.get(
         "/api/v1/runtime/volume/tree",
         params={"provider": "modal"},
         headers=_staging_bearer_headers(),
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["provider"] == "modal"
-    assert captured == {
-        "volume_name": "test-volume",
-        "root_path": "/",
-        "max_depth": 3,
-    }
+    assert response.status_code == 422
 
 
 def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
@@ -759,8 +698,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(staging_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     captured: dict[str, object] = {}
 
     async def _fake_list_daytona_volume_tree(
@@ -810,8 +748,7 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(staging_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     captured: dict[str, object] = {}
 
     async def _fake_read_daytona_volume_file_text(
@@ -855,50 +792,16 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
     }
 
 
-def test_runtime_volume_file_uses_explicit_modal_provider_override(
+def test_runtime_volume_file_rejects_modal_provider_override(
     staging_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = _server_state(staging_client)
-    state.config.sandbox_provider = "daytona"
-    state.config.volume_name = "test-volume"
-    captured: dict[str, object] = {}
-
-    def _fake_read_volume_file_text(volume_name: str, path: str, max_bytes: int):
-        captured.update(
-            {
-                "volume_name": volume_name,
-                "path": path,
-                "max_bytes": max_bytes,
-            }
-        )
-        return {
-            "path": path,
-            "mime": "text/plain",
-            "size": 7,
-            "content": "content",
-            "truncated": False,
-        }
-
-    monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
-        _fake_read_volume_file_text,
-    )
-
     response = staging_client.get(
         "/api/v1/runtime/volume/file",
         params={"provider": "modal", "path": "/notes.txt"},
         headers=_staging_bearer_headers(),
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["provider"] == "modal"
-    assert captured == {
-        "volume_name": "test-volume",
-        "path": "/notes.txt",
-        "max_bytes": 200000,
-    }
+    assert response.status_code == 422
 
 
 def test_runtime_volume_tree_defaults_to_active_provider(
@@ -906,10 +809,9 @@ def test_runtime_volume_tree_defaults_to_active_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         lambda volume_name, root_path, max_depth: {
             "volume_name": volume_name,
             "root_path": root_path,
@@ -923,7 +825,7 @@ def test_runtime_volume_tree_defaults_to_active_provider(
     response = local_client.get("/api/v1/runtime/volume/tree")
 
     assert response.status_code == 200
-    assert response.json()["provider"] == "modal"
+    assert response.json()["provider"] == "daytona"
 
 
 def test_runtime_volume_file_maps_not_found_errors_to_404(
@@ -931,10 +833,9 @@ def test_runtime_volume_file_maps_not_found_errors_to_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("No such file")),
     )
 
@@ -970,10 +871,9 @@ def test_runtime_volume_file_maps_directory_errors_to_400(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Is a directory")),
     )
 
@@ -1012,10 +912,9 @@ def test_runtime_volume_file_maps_unknown_errors_to_502(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.read_volume_file_text",
+        "fleet_rlm.api.runtime_services.volumes.aread_daytona_volume_file_text",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Unexpected")),
     )
 
@@ -1038,10 +937,9 @@ def test_runtime_volume_tree_rejects_path_traversal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _server_state(local_client)
-    state.config.sandbox_provider = "modal"
-    state.config.volume_name = "test-volume"
+    state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.volumes.list_volume_tree",
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("volume backend should not be called")
         ),

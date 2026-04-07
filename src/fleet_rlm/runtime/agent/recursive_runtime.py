@@ -12,7 +12,6 @@ import dspy
 from dspy.streaming.streaming_listener import StreamListener
 
 from fleet_rlm.runtime.config import build_dspy_context
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 # NOTE: fleet_rlm.runtime.models.builders is imported lazily inside
@@ -178,8 +177,6 @@ def _delegate_streaming_context(
 
 def _delegate_execution_profile_context(interpreter: Any) -> Any:
     """Force delegate execution profile while the recursive child turn runs."""
-    if isinstance(interpreter, ModalInterpreter):
-        return interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE)
     execution_profile = getattr(interpreter, "execution_profile", None)
     if callable(execution_profile):
         return execution_profile(ExecutionProfile.RLM_DELEGATE)
@@ -238,7 +235,7 @@ async def spawn_delegate_sub_agent_async(
     context: str = "",
     stream_event_callback: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
-    """Run a bounded child RLM query in a fresh child Modal sandbox."""
+    """Run a bounded child RLM query in a fresh child sandbox."""
 
     if agent._current_depth >= agent._max_depth:
         return {
@@ -258,7 +255,7 @@ async def spawn_delegate_sub_agent_async(
         return budget_error
 
     remaining_budget = remaining_llm_budget(agent)
-    if isinstance(agent.interpreter, ModalInterpreter) and remaining_budget <= 0:
+    if remaining_budget <= 0:
         return {
             "status": "error",
             "error": (

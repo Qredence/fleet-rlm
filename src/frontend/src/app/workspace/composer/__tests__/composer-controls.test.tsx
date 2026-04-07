@@ -14,7 +14,6 @@ let currentValueRef: string | undefined;
 const labelByValue: Record<string, string> = {
   auto: "Auto",
   daytona_pilot: "Daytona",
-  modal_chat: "Modal chat",
   rlm_only: "RLM only",
   tools_only: "Tools only",
 };
@@ -114,10 +113,10 @@ describe("composer-controls", () => {
     const onChange = vi.fn();
 
     act(() => {
-      root.render(<RuntimeModeSelect value="modal_chat" onChange={onChange} />);
+      root.render(<RuntimeModeSelect value="daytona_pilot" onChange={onChange} />);
     });
 
-    expect(container.textContent).toContain("Modal chat");
+    expect(container.textContent).toContain("Daytona");
 
     const daytonaOption = Array.from(container.querySelectorAll('[role="menuitemradio"]')).find(
       (item) => item.textContent?.includes("Daytona") ?? false,

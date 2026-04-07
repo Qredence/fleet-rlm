@@ -8,7 +8,7 @@ Before you begin, ensure you have:
 
 - **Python 3.10 or later** — Fleet-RLM requires Python 3.10+
 - **uv package manager** — Recommended for installation. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
-- **Modal account** — Required for sandbox execution. [Sign up for Modal](https://modal.com/)
+- **Daytona API access** — Required for sandbox execution. Configure `DAYTONA_API_KEY` and, if needed, `DAYTONA_API_URL`.
 
 ## Installation
 
@@ -34,15 +34,18 @@ uv run fleet-rlm --help
 
 ## Configuration
 
-### 1. Set Up Modal Credentials
+### 1. Configure Daytona Access
 
-Fleet-RLM uses Modal for secure sandbox execution. Configure your Modal credentials:
+Fleet-RLM uses Daytona for sandbox execution. Add your Daytona settings to `.env`:
 
 ```bash
-modal setup
+DAYTONA_API_KEY=your-daytona-api-key
+# Optional overrides:
+# DAYTONA_API_URL=https://app.daytona.io/api
+# DAYTONA_TARGET=default
 ```
 
-This opens a browser to authenticate with Modal and saves your credentials locally.
+Use your Daytona workspace defaults unless you need a custom API URL or target.
 
 ### 2. Configure LLM Provider
 
@@ -108,8 +111,8 @@ uv run fleet --docs-path README.md
 # Enable verbose trace output
 uv run fleet --trace-mode verbose
 
-# Use a custom Modal volume for persistence
-uv run fleet --volume-name my-volume --secret-name my-secrets
+# Use a custom Daytona volume for persistence
+uv run fleet --volume-name my-volume
 ```
 
 #### Trace Modes
@@ -132,7 +135,7 @@ Example prompts to try:
 
 - "Summarize the architecture of this project."
 - "What are the main entry points?"
-- "Explain the Modal integration."
+- "Explain the Daytona runtime integration."
 
 ## Troubleshooting
 
@@ -144,12 +147,12 @@ Example prompts to try:
 uv tree | rg fleet-rlm
 ```
 
-### "Modal authentication required"
+### "Daytona configuration missing"
 
-**Solution:** Run Modal setup to configure your credentials:
+**Solution:** Add your Daytona credentials to `.env` or export them in the shell:
 
 ```bash
-modal setup
+export DAYTONA_API_KEY=your-daytona-api-key
 ```
 
 ### "DSPY_LM_MODEL not set"
@@ -196,7 +199,7 @@ uv python install 3.12
 - [Tutorial: Document Analysis](02-doc-analysis.md) — Analyze documents with Fleet-RLM
 - [Tutorial: Interactive Chat](03-interactive-chat.md) — Deep dive into terminal chat
 - [Installation Guide](../how-to-guides/installation.md) — Full installation details
-- [Configuring Modal](../how-to-guides/configuring-modal.md) — Advanced Modal setup
+- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) — Runtime and storage model
 
 ## Getting Help
 

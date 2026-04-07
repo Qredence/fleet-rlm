@@ -1,28 +1,29 @@
 commands:
   install: export UV_LINK_MODE=copy && uv sync --all-extras --dev && (cd src/frontend && pnpm install --frozen-lockfile)
-  format: make format
-  lint: make lint
-  typecheck: make typecheck
+  format: make format && (cd src/frontend && pnpm run format)
+  lint: make lint && (cd src/frontend && pnpm run lint:robustness)
+  typecheck: make typecheck && (cd src/frontend && pnpm run type-check)
   test: make test-fast
   build: make build-ui
   quality_gate: make quality-gate
+  runtime_contract: uv run pytest -q tests/ui/ws/test_chat_stream.py tests/unit/runtime/agent/test_chat_agent_runtime.py -m "not live_llm and not live_daytona and not benchmark"
+  runtime_settings_contract: uv run pytest -q tests/ui/server/test_router_runtime.py tests/ui/server/test_api_contract_routes.py -m "not live_llm and not live_daytona and not benchmark"
+  optimization_contract: uv run pytest -q tests/unit/runtime/quality/test_dspy_evaluation.py tests/unit/runtime/quality/test_workspace_metrics.py tests/ui/server/test_api_contract_routes.py -m "not live_llm and not live_daytona and not benchmark"
+  frontend_contract: cd src/frontend && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build
   openapi_check: uv run python scripts/openapi_tools.py generate && uv run python scripts/openapi_tools.py validate && (cd src/frontend && pnpm run api:check)
-  cli_contract: uv run fleet-rlm --help && uv run fleet-rlm init --list && uv run fleet-rlm daytona-smoke --help
-  api_contract: uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/server/test_server_config.py -m "not live_llm and not live_daytona and not benchmark"
-  websocket_contract: uv run pytest -q tests/ui/ws/test_chat_stream.py tests/ui/ws/test_commands.py tests/unit/test_ws_chat_helpers.py tests/unit/test_ws_runtime_prep.py tests/unit/test_ws_completion.py tests/unit/test_ws_persistence.py -m "not live_llm and not live_daytona and not benchmark"
-  daytona_contract: uv run pytest -q tests/unit/test_daytona_rlm_config.py tests/unit/test_daytona_runtime.py tests/unit/test_daytona_interpreter.py tests/unit/test_daytona_workbench_chat_agent.py tests/unit/test_daytona_bridge.py -m "not live_llm and not live_daytona and not benchmark"
-  database_contract: uv run pytest -q tests/integration/test_db_repository.py tests/integration/test_db_migrations.py tests/unit/test_server_auth.py tests/unit/test_ws_errors.py tests/unit/test_ws_loop_exit.py tests/unit/test_ws_persistence.py -m "not live_llm and not live_daytona and not benchmark"
-  browser_shell_smoke: agent-browser open http://127.0.0.1:8100 && agent-browser wait --load networkidle && agent-browser screenshot --annotate && agent-browser close
-  frontend_typecheck: cd src/frontend && pnpm run type-check
-  frontend_lint: cd src/frontend && pnpm run lint:robustness
-  frontend_test: cd src/frontend && pnpm run test:unit
-  frontend_build: cd src/frontend && pnpm run build
-  frontend_format: cd src/frontend && pnpm run format
+  readme_check: test -f README.md
 
 services:
-  api:
-    start: uv run fleet-rlm serve-api --host 127.0.0.1 --port 8100
-    stop: lsof -ti :8100 | xargs kill
-    healthcheck: curl -sf http://127.0.0.1:8100/health
-    port: 8100
+  mlflow:
+    start: echo "Use existing MLflow on http://127.0.0.1:5001"
+    stop: echo "MLflow is managed outside this mission on port 5001"
+    healthcheck: curl -sf http://127.0.0.1:5001
+    port: 5001
     depends_on: []
+
+  api:
+    start: env MLFLOW_AUTO_START=false uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000
+    stop: lsof -ti :8000 | xargs kill
+    healthcheck: curl -sf http://127.0.0.1:8000/health
+    port: 8000
+    depends_on: [mlflow]

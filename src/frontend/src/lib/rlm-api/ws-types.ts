@@ -1,7 +1,7 @@
 export type WsTraceMode = "compact" | "verbose" | "off";
 
 export type WsExecutionMode = "auto" | "rlm_only" | "tools_only";
-export type WsRuntimeMode = "modal_chat" | "daytona_pilot";
+export type WsRuntimeMode = "daytona_pilot";
 
 export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
 
@@ -19,7 +19,6 @@ export interface WsMessageRequest {
   trace?: boolean;
   trace_mode?: WsTraceMode;
   execution_mode?: WsExecutionMode;
-  runtime_mode?: WsRuntimeMode;
   repo_url?: string | null;
   repo_ref?: string | null;
   context_paths?: string[] | null;

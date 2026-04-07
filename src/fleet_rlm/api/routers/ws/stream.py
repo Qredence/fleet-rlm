@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -20,7 +21,7 @@ from fleet_rlm.runtime.execution.streaming import is_terminal_stream_event_kind
 from fleet_rlm.runtime.models import StreamEvent
 
 from ...dependencies import ServerState
-from ...execution import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
 from .execution_support import get_execution_emitter
@@ -45,6 +46,13 @@ from .types import ChatAgentProtocol, LocalPersistFn, PreStreamSetupFn
 logger = logging.getLogger(__name__)
 
 _REPL_HOOK_STEP_QUEUE_MAX = 128
+
+
+@dataclass(slots=True)
+class _ResolvedSessionTarget:
+    workspace_id: str
+    user_id: str
+    sess_id: str
 
 
 def merge_trace_result_metadata(
@@ -116,11 +124,11 @@ class ReplHookBridge:
         self._previous_execution_hook = getattr(
             self._interpreter, "execution_event_callback", None
         )
-        self._interpreter.execution_event_callback = self._interpreter_hook
+        self._interpreter.events_event_callback = self._interpreter_hook
 
     async def stop(self) -> None:
         if self._interpreter is not None:
-            self._interpreter.execution_event_callback = self._previous_execution_hook
+            self._interpreter.events_event_callback = self._previous_execution_hook
         await self._queue.put(None)
         if self._worker_task is not None:
             try:
@@ -396,6 +404,189 @@ async def _process_chat_message(
     )
 
 
+def _ensure_pending_receive_task(
+    *,
+    websocket: WebSocket,
+    pending_receive_task: asyncio.Task[object] | None,
+) -> asyncio.Task[object]:
+    if pending_receive_task is not None:
+        return pending_receive_task
+    return asyncio.create_task(websocket.receive_json())
+
+
+async def _await_message_while_streaming(
+    *,
+    websocket: WebSocket,
+    stream_task: asyncio.Task[str | None],
+    pending_receive_task: asyncio.Task[object] | None,
+    session: _ChatSessionState,
+) -> tuple[
+    WSMessage | None, asyncio.Task[str | None] | None, asyncio.Task[object] | None
+]:
+    pending_receive_task = _ensure_pending_receive_task(
+        websocket=websocket,
+        pending_receive_task=pending_receive_task,
+    )
+    done, _pending = await asyncio.wait(
+        {stream_task, pending_receive_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    if stream_task in done:
+        session.last_loaded_docs_path = await stream_task
+        return None, None, pending_receive_task
+
+    raw_payload = await pending_receive_task
+    msg = await parse_ws_message_or_send_error(
+        websocket=websocket,
+        raw_payload=raw_payload,
+    )
+    return msg, stream_task, None
+
+
+async def _handle_message_while_streaming(
+    *,
+    websocket: WebSocket,
+    msg: WSMessage,
+    agent: ChatAgentProtocol,
+    runtime: _PreparedChatRuntime,
+    session: _ChatSessionState,
+    local_persist: LocalPersistFn,
+) -> bool:
+    if msg.type == "cancel":
+        session.cancel_flag["cancelled"] = True
+        return True
+
+    if msg.type == "command":
+        await handle_command_with_persist(
+            websocket=websocket,
+            agent=agent,
+            payload=msg.model_dump(),
+            session_record=session.session_record,
+            repository=runtime.repository,
+            identity_rows=runtime.identity_rows,
+            persistence_required=runtime.persistence_required,
+            local_persist=local_persist,
+        )
+        return True
+
+    await _try_send_json(
+        websocket,
+        {
+            "type": "error",
+            "message": (
+                "A run is already in progress. Cancel it or wait for "
+                "completion before sending another message."
+            ),
+        },
+    )
+    return True
+
+
+async def _receive_next_chat_message(
+    *,
+    websocket: WebSocket,
+    pending_message: WSMessage | None,
+    pending_receive_task: asyncio.Task[object] | None,
+) -> tuple[WSMessage | None, asyncio.Task[object] | None]:
+    if pending_message is not None:
+        return pending_message, pending_receive_task
+
+    if pending_receive_task is not None:
+        raw_payload = await pending_receive_task
+        pending_receive_task = None
+    else:
+        raw_payload = await websocket.receive_json()
+
+    msg = await parse_ws_message_or_send_error(
+        websocket=websocket,
+        raw_payload=raw_payload,
+    )
+    return msg, pending_receive_task
+
+
+async def _handle_idle_non_turn_message(
+    *,
+    websocket: WebSocket,
+    msg: WSMessage,
+    agent: ChatAgentProtocol,
+    runtime: _PreparedChatRuntime,
+    session: _ChatSessionState,
+    local_persist: LocalPersistFn,
+) -> bool:
+    if msg.type == "cancel":
+        session.cancel_flag["cancelled"] = True
+        await _try_send_json(websocket, cancelled_event_payload())
+        return True
+
+    if msg.type == "command":
+        await handle_command_with_persist(
+            websocket=websocket,
+            agent=agent,
+            payload=msg.model_dump(),
+            session_record=session.session_record,
+            repository=runtime.repository,
+            identity_rows=runtime.identity_rows,
+            persistence_required=runtime.persistence_required,
+            local_persist=local_persist,
+        )
+        return True
+
+    if msg.type != "message":
+        await _try_send_json(
+            websocket,
+            {"type": "error", "message": f"Unknown message type: {msg.type}"},
+        )
+        return True
+
+    return False
+
+
+async def _resolve_session_target(
+    *,
+    state: ServerState,
+    agent: ChatAgentProtocol,
+    interpreter: object | None,
+    session: _ChatSessionState,
+    local_persist: LocalPersistFn,
+    msg: WSMessage,
+) -> _ResolvedSessionTarget:
+    workspace_id, user_id, sess_id = resolve_session_identity(
+        msg=msg,
+        workspace_id=session.canonical_workspace_id,
+        user_id=session.canonical_user_id,
+    )
+    (
+        session.active_key,
+        session.active_manifest_path,
+        session.session_record,
+        session.last_loaded_docs_path,
+    ) = await switch_session_if_needed(
+        state=state,
+        agent=agent,
+        interpreter=interpreter,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        sess_id=sess_id,
+        owner_tenant_claim=session.owner_tenant_claim,
+        owner_user_claim=session.owner_user_claim,
+        active_key=session.active_key,
+        session_record=session.session_record,
+        last_loaded_docs_path=session.last_loaded_docs_path,
+        local_persist=local_persist,
+    )
+    setattr(
+        agent,
+        "_db_session_id",
+        (session.session_record or {}).get("db_session_id"),
+    )
+    return _ResolvedSessionTarget(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        sess_id=sess_id,
+    )
+
+
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
@@ -415,130 +606,56 @@ async def _chat_message_loop(
     try:
         while True:
             if stream_task is not None:
-                if pending_receive_task is None:
-                    pending_receive_task = asyncio.create_task(websocket.receive_json())
-
-                done, _pending = await asyncio.wait(
-                    {stream_task, pending_receive_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                if stream_task in done:
-                    session.last_loaded_docs_path = await stream_task
-                    stream_task = None
-                    continue
-
-                assert pending_receive_task in done
-                raw_payload = await pending_receive_task
-                pending_receive_task = None
-                msg = await parse_ws_message_or_send_error(
+                (
+                    msg,
+                    stream_task,
+                    pending_receive_task,
+                ) = await _await_message_while_streaming(
                     websocket=websocket,
-                    raw_payload=raw_payload,
+                    stream_task=stream_task,
+                    pending_receive_task=pending_receive_task,
+                    session=session,
                 )
                 if msg is None:
                     continue
 
-                if msg.type == "cancel":
-                    session.cancel_flag["cancelled"] = True
+                if await _handle_message_while_streaming(
+                    websocket=websocket,
+                    msg=msg,
+                    agent=agent,
+                    runtime=runtime,
+                    session=session,
+                    local_persist=local_persist,
+                ):
                     continue
-
-                if msg.type == "command":
-                    await handle_command_with_persist(
-                        websocket=websocket,
-                        agent=agent,
-                        payload=msg.model_dump(),
-                        session_record=session.session_record,
-                        repository=runtime.repository,
-                        identity_rows=runtime.identity_rows,
-                        persistence_required=runtime.persistence_required,
-                        local_persist=local_persist,
-                    )
-                    continue
-
-                await _try_send_json(
-                    websocket,
-                    {
-                        "type": "error",
-                        "message": (
-                            "A run is already in progress. Cancel it or wait for "
-                            "completion before sending another message."
-                        ),
-                    },
-                )
                 continue
 
-            if pending_message is not None:
-                msg = pending_message
-                pending_message = None
-            elif pending_receive_task is not None:
-                raw_payload = await pending_receive_task
-                pending_receive_task = None
-                msg = await parse_ws_message_or_send_error(
-                    websocket=websocket,
-                    raw_payload=raw_payload,
-                )
-            else:
-                raw_payload = await websocket.receive_json()
-                msg = await parse_ws_message_or_send_error(
-                    websocket=websocket,
-                    raw_payload=raw_payload,
-                )
+            msg, pending_receive_task = await _receive_next_chat_message(
+                websocket=websocket,
+                pending_message=pending_message,
+                pending_receive_task=pending_receive_task,
+            )
+            pending_message = None
             if msg is None:
                 continue
 
-            if msg.type == "cancel":
-                session.cancel_flag["cancelled"] = True
-                await _try_send_json(websocket, cancelled_event_payload())
-                continue
-
-            workspace_id, user_id, sess_id = resolve_session_identity(
-                msg=msg,
-                workspace_id=session.canonical_workspace_id,
-                user_id=session.canonical_user_id,
-            )
-            (
-                session.active_key,
-                session.active_manifest_path,
-                session.session_record,
-                session.last_loaded_docs_path,
-            ) = await switch_session_if_needed(
+            target = await _resolve_session_target(
                 state=state,
                 agent=agent,
                 interpreter=interpreter,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                sess_id=sess_id,
-                owner_tenant_claim=session.owner_tenant_claim,
-                owner_user_claim=session.owner_user_claim,
-                active_key=session.active_key,
-                session_record=session.session_record,
-                last_loaded_docs_path=session.last_loaded_docs_path,
                 local_persist=local_persist,
-            )
-            setattr(
-                agent,
-                "_db_session_id",
-                (session.session_record or {}).get("db_session_id"),
+                session=session,
+                msg=msg,
             )
 
-            if msg.type == "command":
-                await handle_command_with_persist(
-                    websocket=websocket,
-                    agent=agent,
-                    payload=msg.model_dump(),
-                    session_record=session.session_record,
-                    repository=runtime.repository,
-                    identity_rows=runtime.identity_rows,
-                    persistence_required=runtime.persistence_required,
-                    local_persist=local_persist,
-                )
-                continue
-
-            if msg.type != "message":
-                await _try_send_json(
-                    websocket,
-                    {"type": "error", "message": f"Unknown message type: {msg.type}"},
-                )
+            if await _handle_idle_non_turn_message(
+                websocket=websocket,
+                msg=msg,
+                agent=agent,
+                runtime=runtime,
+                session=session,
+                local_persist=local_persist,
+            ):
                 continue
 
             stream_task = asyncio.create_task(
@@ -550,9 +667,9 @@ async def _chat_message_loop(
                     session=session,
                     local_persist=local_persist,
                     runtime=runtime,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    sess_id=sess_id,
+                    workspace_id=target.workspace_id,
+                    user_id=target.user_id,
+                    sess_id=target.sess_id,
                     execution_emitter=execution_emitter,
                 )
             )

@@ -49,7 +49,7 @@ graph LR
     TOOLS["runtime/tools/"]
     CONTENT["runtime/content/"]
     MODELS["runtime/models/"]
-    PROVIDERS["integrations/providers/"]
+    PROVIDERS["integrations/daytona/"]
 
     CHAT --> SIG
     CHAT --> TOOLS
@@ -70,7 +70,7 @@ graph LR
 | `runtime/agent/chat_agent.py` | `runtime/execution/interpreter.py` | Sandbox-backed execution |
 | `runtime/agent/recursive_runtime.py` | `runtime/execution/*` | Recursive delegation and streamed child turns |
 | `runtime/tools/*` | `runtime/content/*` | Chunking, grounding, document, and log workflows |
-| `runtime/execution/*` | `integrations/providers/*` | Modal/Daytona interpreter backend selection |
+| `runtime/execution/*` | `integrations/daytona/*` | Daytona interpreter/session backend integration |
 
 ## API and WebSocket Map
 
@@ -83,7 +83,7 @@ graph LR
     WS_SESSION["api/routers/ws/session.py"]
     WS_COMMANDS["api/routers/ws/commands.py"]
     WS_HELPERS["api/routers/ws/* helpers"]
-    EXEC["api/execution/"]
+    EXEC["api/events/"]
     AUTH["api/auth/"]
     RUNTIME["runtime/"]
     INTEGRATIONS["integrations/"]
@@ -112,14 +112,14 @@ graph LR
 | `api/bootstrap.py` | `integrations/observability/*` | PostHog and MLflow lifecycle setup |
 | `api/routers/ws/*` | `runtime/agent/*` | Shared runtime execution |
 | `api/routers/ws/commands.py`, `hitl.py` | `runtime/agent/*` | Command dispatch and HITL command handling |
-| `api/routers/ws/lifecycle.py`, `turn_setup.py`, `turn_lifecycle.py` | `integrations/database/*`, `api/execution/*` | Run/turn lifecycle orchestration |
+| `api/routers/ws/lifecycle.py`, `turn_setup.py`, `turn_lifecycle.py` | `integrations/database/*`, `api/events/*` | Run/turn lifecycle orchestration |
 | `api/routers/ws/persistence.py`, `manifest.py`, `artifacts.py` | `integrations/database/*` | Durable state, manifest, and artifact persistence |
-| `api/routers/ws/errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `terminal.py`, `completion.py` | `runtime/models/*`, `api/execution/*` | Failure handling, cancellation, terminal event shaping, and final summaries |
-| `api/routers/ws/types.py` | `integrations/providers/daytona/*` | Daytona-specific request normalization |
-| `api/execution/*` | `runtime/models/*` | Trace/event shaping |
+| `api/routers/ws/errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `terminal.py`, `completion.py` | `runtime/models/*`, `api/events/*` | Failure handling, cancellation, terminal event shaping, and final summaries |
+| `api/routers/ws/types.py` | `integrations/daytona/*` | Daytona-specific request normalization |
+| `api/events/*` | `runtime/models/*` | Trace/event shaping |
 | `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
-| `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/providers/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
-| `api/runtime_services/volumes.py` | `runtime/tools/modal_volumes.py`, `integrations/providers/daytona/volumes.py` | Volume browsing |
+| `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
+| `api/runtime_services/volumes.py` | `integrations/daytona/volumes.py` | Volume browsing |
 
 ## Integration Packages
 
@@ -128,9 +128,9 @@ graph LR
 | `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
 | `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
 | `integrations/mcp/` | FastMCP server surface | `server.py` |
-| `integrations/observability/` | Telemetry and evaluation | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py`, `dspy_evaluation.py`, `gepa_optimization.py`, `workspace_metrics.py` |
-| `integrations/providers/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
-| `integrations/providers/modal/` | Modal provider helpers | provider-specific helpers only |
+| `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
+| `runtime/quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `gepa_optimization.py`, `mlflow_evaluation.py`, `mlflow_optimization.py`, `workspace_metrics.py`, `scorers.py` |
+| `integrations/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
 
 ## Verification
 

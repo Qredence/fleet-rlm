@@ -10,7 +10,7 @@ from fastapi import WebSocket
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.models import StreamEvent
 
-from ...execution import ExecutionStepBuilder
+from ...events import ExecutionStepBuilder
 from .completion import build_execution_completion_summary
 from .failures import classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json

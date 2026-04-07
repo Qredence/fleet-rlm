@@ -66,6 +66,14 @@ def test_default_config_uses_agent_model_env(monkeypatch: pytest.MonkeyPatch):
     assert cfg.agent_model == "openai/gpt-4.1-mini"
 
 
+def test_default_config_ignores_legacy_sandbox_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_PROVIDER", "modal")
+    cfg = ServerRuntimeConfig()
+    assert cfg.sandbox_provider == "daytona"
+
+
 def test_server_runtime_config_treats_blank_model_env_values_as_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

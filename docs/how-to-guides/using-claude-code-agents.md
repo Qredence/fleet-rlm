@@ -56,7 +56,7 @@ The scaffold follows a three-layer model:
 
 Typical usage examples:
 
-- "Load `rlm` and explain whether this should run in `modal_chat` or `daytona_pilot`."
+- "Load `rlm` and explain how this should run in `daytona_pilot`."
 - "Load `daytona-runtime` and explain how the Daytona workbench path persists memory."
 - "Use `rlm-debug` to diagnose websocket or runtime-mode drift."
 - "Delegate this fleet-rlm workspace task to `rlm-orchestrator`."

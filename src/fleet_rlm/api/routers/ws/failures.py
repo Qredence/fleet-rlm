@@ -26,7 +26,7 @@ def classify_stream_failure(exc: Exception) -> str:
         return "llm_timeout"
     if "rate limit" in lowered or "429" in lowered:
         return "llm_rate_limited"
-    if "sandbox" in lowered or "modal" in lowered or "daytona" in lowered:
+    if "sandbox" in lowered or "daytona" in lowered:
         return "sandbox_unavailable"
     return "internal_error"
 
@@ -34,16 +34,8 @@ def classify_stream_failure(exc: Exception) -> str:
 def chat_startup_error_payload(exc: Exception) -> dict[str, object]:
     """Build a stable websocket error envelope for startup failures."""
     error_code = classify_stream_failure(exc)
-    lowered = str(exc).lower()
 
-    if "token id is malformed" in lowered and "modal" in lowered:
-        message = (
-            "Modal authentication failed: Token ID is malformed. "
-            "Update MODAL_TOKEN_ID / MODAL_TOKEN_SECRET or run `uv run modal token set`, "
-            "then restart the server."
-        )
-    else:
-        message = f"Server error: {str(exc)}"
+    message = f"Server error: {str(exc)}"
 
     return _error_envelope(
         code=error_code,

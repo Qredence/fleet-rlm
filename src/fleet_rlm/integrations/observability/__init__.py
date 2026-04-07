@@ -44,9 +44,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "search_annotated_trace_rows": (".mlflow_traces", "search_annotated_trace_rows"),
     "trace_to_dataset_row": (".mlflow_traces", "trace_to_dataset_row"),
     "PostHogLLMCallback": (".posthog_callback", "PostHogLLMCallback"),
-    "build_rlm_scorers": (".scorers", "build_rlm_scorers"),
-    "get_default_judge_model": (".scorers", "get_default_judge_model"),
-    "reasoning_quality_scorer": (".scorers", "reasoning_quality_scorer"),
 }
 
 __all__ = sorted([*_EXPORTS, "configure_analytics"])

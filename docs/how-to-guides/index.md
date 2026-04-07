@@ -8,7 +8,6 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 - [Developer Setup](developer-setup.md) - Local development environment for contributors
 - [Frontend Development](frontend-development.md) - React/TypeScript frontend development workflow
 - [Testing Strategy](testing-strategy.md) - Pytest markers, test organization, and commands
-- [Configuring Modal](configuring-modal.md)
 - [Runtime Settings](runtime-settings.md)
 - [MLflow Tracing, Feedback, Eval, and Optimization](mlflow-workflows.md)
 

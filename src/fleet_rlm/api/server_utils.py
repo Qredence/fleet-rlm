@@ -52,4 +52,4 @@ def resolve_sandbox_provider(raw: str) -> SandboxProvider:
     try:
         return SandboxProvider(normalized)
     except ValueError:
-        return SandboxProvider.MODAL
+        return SandboxProvider.DAYTONA

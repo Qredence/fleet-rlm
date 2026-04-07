@@ -118,7 +118,7 @@ def _read_file_slice_impl(
     num_lines: int = 100,
 ) -> dict[str, Any]:
     """Read a range of lines from a host file without loading the full document."""
-    from .document import _read_document_content
+    from .content.document import _read_document_content
 
     file_path = Path(path)
     if not file_path.exists():

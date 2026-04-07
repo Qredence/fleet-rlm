@@ -21,26 +21,31 @@ function deriveWsUrl(apiUrl: string, path: string): string {
   }
 }
 
+function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
+  try {
+    const url = new URL(wsUrl);
+    if (url.pathname === "/api/v1/ws/chat") {
+      url.pathname = path;
+      return url.toString().replace(/\/$/, "");
+    }
+  } catch {
+    // Some deploys still pass a host/path fragment instead of an absolute URL.
+    // Preserve that configuration style while rewriting the removed legacy chat path.
+    if (wsUrl.endsWith("/api/v1/ws/chat")) {
+      return `${wsUrl.slice(0, -"/api/v1/ws/chat".length)}${path}`;
+    }
+  }
+
+  return wsUrl;
+}
+
 const baseUrl = trimOrEmpty(import.meta.env.VITE_FLEET_API_URL);
 const explicitWsUrl = trimOrEmpty(import.meta.env.VITE_FLEET_WS_URL);
 const mockMode = parseBool(import.meta.env.VITE_MOCK_MODE, false);
 
 function getActiveWsUrl(path: string) {
   if (explicitWsUrl) {
-    if (path === "/api/v1/ws/execution") {
-      if (explicitWsUrl.endsWith("/chat")) {
-        return explicitWsUrl.replace(/\/chat$/, "/execution");
-      }
-      // Explicit URL doesn't end in /chat — derive execution URL from its origin
-      try {
-        const parsed = new URL(explicitWsUrl);
-        parsed.pathname = "/api/v1/ws/execution";
-        return parsed.toString().replace(/\/$/, "");
-      } catch {
-        // Malformed URL; fall through to use explicitWsUrl as-is
-      }
-    }
-    return explicitWsUrl;
+    return normalizeExplicitWsUrl(explicitWsUrl, path);
   }
   if (baseUrl) return deriveWsUrl(baseUrl, path);
 
@@ -54,7 +59,7 @@ function getActiveWsUrl(path: string) {
 
 export const rlmApiConfig = {
   baseUrl,
-  wsUrl: getActiveWsUrl("/api/v1/ws/chat"),
+  wsUrl: getActiveWsUrl("/api/v1/ws/execution"),
   wsExecutionUrl: getActiveWsUrl("/api/v1/ws/execution"),
   e2eMode: parseBool(import.meta.env.VITE_E2E, false),
   mockMode,

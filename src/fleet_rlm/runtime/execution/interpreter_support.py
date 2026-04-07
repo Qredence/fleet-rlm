@@ -1,10 +1,9 @@
 """Shared helpers and event types for interpreter implementations.
 
-This module combines infrastructure used by both the Modal interpreter
-(``interpreter.py``) and the Daytona interpreter
-(``integrations/providers/daytona/interpreter.py``).  It intentionally
-stays separate from the protocol definitions in ``interpreter_protocol.py``
-which are consumed by the tools layer.
+This module contains infrastructure used by the Daytona interpreter
+(``integrations/daytona/interpreter.py``). It intentionally stays separate
+from the protocol definitions in ``interpreter_protocol.py`` which are
+consumed by the tools layer.
 """
 
 from __future__ import annotations

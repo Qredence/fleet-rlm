@@ -100,7 +100,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("attempts to reconnect on close until max retries", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets, getCount } = installSocketFactory();
 
@@ -135,7 +135,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("treats final event as terminal for chat stream", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets, getCount } = installSocketFactory();
 
@@ -165,7 +165,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("ignores malformed frames and continues processing subsequent frames", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -196,7 +196,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("rejects when the server never emits a first frame", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -221,7 +221,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("sends cancel and waits for a terminal frame before closing chat streams", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -259,7 +259,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("warns before forcing a close when cancel does not receive a terminal frame", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
@@ -289,7 +289,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("closes execution subscriptions without sending cancel", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { subscribeToExecutionStream } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -312,7 +312,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("includes only session identity on execution subscriptions", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { subscribeToExecutionStream } = await loadWsClientModule();
     installSocketFactory();
 
@@ -335,7 +335,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("keeps execution subscriptions open after execution_completed frames", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { subscribeToExecutionStream } = await loadWsClientModule();
     const { sockets, getCount } = installSocketFactory();
 
@@ -383,7 +383,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
   });
 
   it("does not retry command requests by default", async () => {
-    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
     const { sendCommandOverWs } = await loadWsClientModule();
     const { sockets, getCount } = installSocketFactory();
 
