@@ -26,6 +26,14 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
   });
 
+  it("normalizes legacy explicit chat websocket URLs to execution", async () => {
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://custom-host:9000/api/v1/ws/chat");
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+
+    const { rlmApiConfig } = await loadRlmApiConfigModule();
+    expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
+  });
+
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────
   it("derives wsUrl from VITE_FLEET_API_URL when WS_URL is absent", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");

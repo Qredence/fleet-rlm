@@ -36,7 +36,7 @@ def resolve_realpath_within_root(
     )
     resolved = os.path.realpath(joined)
     if resolved != root_real and not resolved.startswith(root_real + os.sep):
-        return None, f"{invalid_error_prefix}{raw}]"
+        return None, f"{invalid_error_prefix}[{raw}]"
     return resolved, None
 
 

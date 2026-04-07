@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import {
   collectExpandableIds,
@@ -46,7 +45,6 @@ export function VolumesBrowser() {
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
   const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
   const isMobile = useIsMobile();
-  const { data: runtimeStatus } = useRuntimeStatus();
   const prefersReduced = useReducedMotion();
   const activeProvider: VolumeProvider = "daytona";
   const {
@@ -102,7 +100,7 @@ export function VolumesBrowser() {
   );
 
   const isDegraded = filesystemDataSource === "fallback";
-  const providerLabel = runtimeStatus?.sandbox_provider === "daytona" ? "Daytona" : "Daytona";
+  const providerLabel = "Daytona";
 
   const headerChildren = (
     <div className={cn(isMobile && "px-4")}>

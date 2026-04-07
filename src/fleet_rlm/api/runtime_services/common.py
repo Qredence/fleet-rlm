@@ -24,7 +24,6 @@ def sanitize_error(exc: Exception) -> str:
         os.environ.get("DSPY_LLM_API_KEY"),
         os.environ.get("DSPY_LM_API_KEY"),
         os.environ.get("DAYTONA_API_KEY"),
-        os.environ.get("DAYTONA_API_KEY"),
     ]
 
     for value in sensitive_values:
