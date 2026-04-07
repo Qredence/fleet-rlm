@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 from types import SimpleNamespace
 from typing import Any
@@ -9,7 +10,7 @@ import pytest
 # Prime the known llm_tools/delegation_policy circular-import path once so this
 # direct-module regression test can import sandbox_delegate_tools afterward.
 try:
-    import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
+    importlib.import_module("fleet_rlm.runtime.tools.llm_tools")
 except ImportError:
     # Optional priming import for regression setup; safe to continue when unavailable.
     pass
