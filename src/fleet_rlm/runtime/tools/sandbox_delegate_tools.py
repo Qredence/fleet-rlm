@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import enum
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -46,6 +47,195 @@ class _ToolRegistration:
     name: str
     desc: str
     func: Any
+
+
+# ---------------------------------------------------------------------------
+# Declarative tool-factory types
+# ---------------------------------------------------------------------------
+
+
+class _CoercionKind(enum.Enum):
+    """How to coerce a prediction field into the output payload."""
+
+    STR = "str"
+    STR_LIST = "str_list"
+    INT = "int"
+    DICT_OR_STR_LIST = "dict_or_str_list"
+    SEVERITY = "severity"
+
+
+@dataclass(frozen=True, slots=True)
+class _OutputField:
+    """Declarative spec for a single output field extracted from a prediction."""
+
+    name: str
+    kind: _CoercionKind
+    pred_field: str | None = None  # defaults to *name* when None
+    default: Any = None
+    int_min: int | None = None
+    int_max: int | None = None
+    severity_values: tuple[str, ...] = ("low", "medium", "high", "critical")
+    severity_default: str = "low"
+
+    @property
+    def source(self) -> str:
+        return self.pred_field if self.pred_field is not None else self.name
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedRuntimeToolSpec:
+    """Declarative description of a cached-runtime tool.
+
+    The ``_build_cached_runtime_tool`` factory converts one of these into an
+    async callable with the exact signature expected by ``dspy.Tool``.
+    """
+
+    # Tool identity
+    name: str
+    desc: str
+    module_name: str
+
+    # Positional parameter names in order.  Defines the public signature of
+    # the generated tool so that callers can pass arguments positionally.
+    # Include ``alias`` and ``include_trajectory`` if they can be passed
+    # positionally; the factory pops them from kwargs after mapping.
+    param_order: tuple[str, ...] = ()
+
+    # Parameters forwarded to the runtime module.  Each entry maps a
+    # *tool-parameter name* to the *module kwarg name*.  When the value is
+    # None the tool parameter name is used as-is for the module kwarg.
+    param_mapping: dict[str, str | None] = field(default_factory=dict)
+    # Static defaults for optional tool parameters (key=tool-param name).
+    # Applied when the parameter is absent from kwargs entirely.
+    param_defaults: dict[str, Any] = field(default_factory=dict)
+    # Falsy-fallback defaults: applied when the parameter value is falsy
+    # (e.g., empty string).  Mirrors the ``value or "default"`` pattern.
+    param_falsy_defaults: dict[str, Any] = field(default_factory=dict)
+
+    # Document resolution: when set, the tool gains an ``alias`` parameter
+    # and the resolved document text is forwarded under this kwarg name.
+    doc_kwarg: str | None = None
+
+    # Whether the tool exposes ``doc_chars`` in the output.
+    emit_doc_chars: bool = False
+
+    # Output fields extracted from the prediction.
+    output_fields: tuple[_OutputField, ...] = ()
+
+
+def _coerce_output_field(prediction: Any, spec: _OutputField) -> Any:
+    """Apply a single ``_OutputField`` spec to a prediction."""
+    raw = _prediction_value(prediction, spec.source, spec.default)
+
+    if spec.kind is _CoercionKind.STR:
+        return str(raw)
+
+    if spec.kind is _CoercionKind.STR_LIST:
+        return _coerce_str_list(raw)
+
+    if spec.kind is _CoercionKind.INT:
+        return _coerce_int(
+            raw,
+            default=spec.default or 0,
+            minimum=spec.int_min,
+            maximum=spec.int_max,
+        )
+
+    if spec.kind is _CoercionKind.DICT_OR_STR_LIST:
+        if isinstance(raw, dict):
+            return {str(k): str(v) for k, v in raw.items()}
+        if isinstance(raw, list):
+            return _coerce_str_list(raw)
+        return {}
+
+    if spec.kind is _CoercionKind.SEVERITY:
+        val = str(raw).strip().lower()
+        return val if val in spec.severity_values else spec.severity_default
+
+    return raw  # pragma: no cover - unreachable for known kinds
+
+
+# ---------------------------------------------------------------------------
+# Declarative specs for the four factory-eligible tools
+# ---------------------------------------------------------------------------
+
+_SUMMARIZE_LONG_DOCUMENT = _CachedRuntimeToolSpec(
+    name="summarize_long_document",
+    desc="Summarize a long document with key points and coverage metadata",
+    module_name="summarize_long_document",
+    param_order=("focus", "alias", "include_trajectory"),
+    param_mapping={"focus": None},
+    doc_kwarg="document",
+    emit_doc_chars=True,
+    output_fields=(
+        _OutputField("summary", _CoercionKind.STR, default=""),
+        _OutputField("key_points", _CoercionKind.STR_LIST, default=[]),
+        _OutputField(
+            "coverage_pct", _CoercionKind.INT, default=0, int_min=0, int_max=100
+        ),
+    ),
+)
+
+_EXTRACT_FROM_LOGS = _CachedRuntimeToolSpec(
+    name="extract_from_logs",
+    desc="Extract structured matches and patterns from a loaded log document",
+    module_name="extract_from_logs",
+    param_order=("query", "alias", "include_trajectory"),
+    param_mapping={"query": None},
+    doc_kwarg="logs",
+    emit_doc_chars=True,
+    output_fields=(
+        _OutputField("matches", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("patterns", _CoercionKind.DICT_OR_STR_LIST, default={}),
+        _OutputField("time_range", _CoercionKind.STR, default="unknown"),
+    ),
+)
+
+_TRIAGE_INCIDENT_LOGS = _CachedRuntimeToolSpec(
+    name="triage_incident_logs",
+    desc="Triage incident logs and suggest likely causes and recommended actions",
+    module_name="triage_incident_logs",
+    param_order=("query", "alias", "service_context", "include_trajectory"),
+    param_mapping={"query": None, "service_context": None},
+    param_defaults={"service_context": ""},
+    doc_kwarg="logs",
+    emit_doc_chars=False,
+    output_fields=(
+        _OutputField("severity", _CoercionKind.SEVERITY, default="low"),
+        _OutputField("probable_root_causes", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("impacted_components", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("recommended_actions", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("time_range", _CoercionKind.STR, default="unknown"),
+    ),
+)
+
+_PLAN_CODE_CHANGE = _CachedRuntimeToolSpec(
+    name="plan_code_change",
+    desc="Produce a code-change plan with files, validation commands, and risks",
+    module_name="plan_code_change",
+    param_order=("task", "repo_context", "constraints", "include_trajectory"),
+    param_mapping={"task": None, "repo_context": None, "constraints": None},
+    param_defaults={"repo_context": "", "constraints": ""},
+    param_falsy_defaults={"constraints": "Keep changes minimal."},
+    output_fields=(
+        _OutputField("plan_steps", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("files_to_touch", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("validation_commands", _CoercionKind.STR_LIST, default=[]),
+        _OutputField("risks", _CoercionKind.STR_LIST, default=[]),
+    ),
+)
+
+_DECLARATIVE_SPECS: tuple[_CachedRuntimeToolSpec, ...] = (
+    _SUMMARIZE_LONG_DOCUMENT,
+    _EXTRACT_FROM_LOGS,
+    _TRIAGE_INCIDENT_LOGS,
+    _PLAN_CODE_CHANGE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 
 def _normalize_grounded_citations(value: Any) -> list[GroundedCitation]:
@@ -127,6 +317,79 @@ def _build_tool(registration: _ToolRegistration) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Generic factory: spec -> _ToolRegistration
+# ---------------------------------------------------------------------------
+
+
+def _build_cached_runtime_tool(
+    ctx: _DelegateToolContext,
+    spec: _CachedRuntimeToolSpec,
+) -> _ToolRegistration:
+    """Convert a ``_CachedRuntimeToolSpec`` into a ``_ToolRegistration``."""
+
+    async def _tool_fn(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        # Map positional arguments to keyword arguments using param_order.
+        for idx, value in enumerate(args):
+            if idx < len(spec.param_order):
+                kwargs.setdefault(spec.param_order[idx], value)
+
+        include_trajectory: bool = kwargs.pop("include_trajectory", True)
+
+        # -- Document resolution --
+        document: str | None = None
+        if spec.doc_kwarg is not None:
+            alias = kwargs.pop("alias", "active")
+            document = resolve_document(ctx.agent, alias)
+
+        # -- Build module kwargs --
+        module_kwargs: dict[str, Any] = {}
+        if document is not None:
+            assert spec.doc_kwarg is not None  # guaranteed by branch above
+            module_kwargs[spec.doc_kwarg] = document
+
+        for tool_param, module_kwarg in spec.param_mapping.items():
+            dest = module_kwarg if module_kwarg is not None else tool_param
+            if tool_param in kwargs:
+                value = kwargs[tool_param]
+                # Apply falsy-fallback default (mirrors ``val or "default"``).
+                if not value and tool_param in spec.param_falsy_defaults:
+                    value = spec.param_falsy_defaults[tool_param]
+                module_kwargs[dest] = value
+            elif tool_param in spec.param_defaults:
+                module_kwargs[dest] = spec.param_defaults[tool_param]
+
+        # -- Execute --
+        prediction, error, fallback_used = _run_cached_runtime_module(
+            ctx, module_name=spec.module_name, **module_kwargs
+        )
+        if error is not None:
+            _record_runtime_failure(ctx, error)
+            return error
+
+        # -- Coerce output fields --
+        payload: dict[str, Any] = {}
+        for ofield in spec.output_fields:
+            payload[ofield.name] = _coerce_output_field(prediction, ofield)
+
+        if spec.emit_doc_chars and document is not None:
+            payload["doc_chars"] = len(document)
+
+        return _cached_runtime_success(
+            ctx,
+            prediction=prediction,
+            fallback_used=fallback_used,
+            include_trajectory=include_trajectory,
+            payload=payload,
+        )
+
+    # Preserve the tool name for introspection / debugging.
+    _tool_fn.__name__ = spec.name
+    _tool_fn.__qualname__ = f"_build_cached_runtime_tool.<locals>.{spec.name}"
+
+    return _ToolRegistration(name=spec.name, desc=spec.desc, func=_tool_fn)
+
+
+# ---------------------------------------------------------------------------
 # Variable-mode RLM routing (Algorithm 1, arXiv 2512.24601v2)
 # ---------------------------------------------------------------------------
 
@@ -198,80 +461,12 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
     """Build cached-runtime and recursive delegation tools bound to *agent*."""
     ctx = _DelegateToolContext(agent=agent)
 
-    async def summarize_long_document(
-        focus: str, alias: str = "active", include_trajectory: bool = True
-    ) -> dict[str, Any]:
-        document = resolve_document(ctx.agent, alias)
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="summarize_long_document",
-            document=document,
-            focus=focus,
-        )
-        if error is not None:
-            _record_runtime_failure(ctx, error)
-            return error
+    # -- Factory-generated tools (declarative specs) -------------------------
+    declarative_registrations = [
+        _build_cached_runtime_tool(ctx, spec) for spec in _DECLARATIVE_SPECS
+    ]
 
-        return _cached_runtime_success(
-            ctx,
-            prediction=prediction,
-            fallback_used=fallback_used,
-            include_trajectory=include_trajectory,
-            payload={
-                "summary": str(_prediction_value(prediction, "summary", "")),
-                "key_points": _coerce_str_list(
-                    _prediction_value(prediction, "key_points", [])
-                ),
-                "coverage_pct": _coerce_int(
-                    _prediction_value(prediction, "coverage_pct", 0),
-                    default=0,
-                    minimum=0,
-                    maximum=100,
-                ),
-                "doc_chars": len(document),
-            },
-        )
-
-    async def extract_from_logs(
-        query: str, alias: str = "active", include_trajectory: bool = True
-    ) -> dict[str, Any]:
-        document = resolve_document(ctx.agent, alias)
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="extract_from_logs",
-            logs=document,
-            query=query,
-        )
-        if error is not None:
-            _record_runtime_failure(ctx, error)
-            return error
-
-        raw_patterns = _prediction_value(prediction, "patterns", {})
-        if isinstance(raw_patterns, dict):
-            patterns: dict[str, str] | list[str] = {
-                str(key): str(value) for key, value in raw_patterns.items()
-            }
-        elif isinstance(raw_patterns, list):
-            patterns = _coerce_str_list(raw_patterns)
-        else:
-            patterns = {}
-
-        return _cached_runtime_success(
-            ctx,
-            prediction=prediction,
-            fallback_used=fallback_used,
-            include_trajectory=include_trajectory,
-            payload={
-                "matches": _coerce_str_list(
-                    _prediction_value(prediction, "matches", [])
-                ),
-                "patterns": patterns,
-                "time_range": str(
-                    _prediction_value(prediction, "time_range", "unknown")
-                ),
-                "doc_chars": len(document),
-            },
-        )
+    # -- Hand-written tools (custom logic not suited to the factory) ---------
 
     async def grounded_answer(
         query: str,
@@ -330,86 +525,6 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
             },
         )
 
-    async def triage_incident_logs(
-        query: str,
-        alias: str = "active",
-        service_context: str = "",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        document = resolve_document(ctx.agent, alias)
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="triage_incident_logs",
-            logs=document,
-            service_context=service_context,
-            query=query,
-        )
-        if error is not None:
-            _record_runtime_failure(ctx, error)
-            return error
-
-        severity = str(_prediction_value(prediction, "severity", "low")).strip().lower()
-        if severity not in {"low", "medium", "high", "critical"}:
-            severity = "low"
-
-        return _cached_runtime_success(
-            ctx,
-            prediction=prediction,
-            fallback_used=fallback_used,
-            include_trajectory=include_trajectory,
-            payload={
-                "severity": severity,
-                "probable_root_causes": _coerce_str_list(
-                    _prediction_value(prediction, "probable_root_causes", [])
-                ),
-                "impacted_components": _coerce_str_list(
-                    _prediction_value(prediction, "impacted_components", [])
-                ),
-                "recommended_actions": _coerce_str_list(
-                    _prediction_value(prediction, "recommended_actions", [])
-                ),
-                "time_range": str(
-                    _prediction_value(prediction, "time_range", "unknown")
-                ),
-            },
-        )
-
-    async def plan_code_change(
-        task: str,
-        repo_context: str = "",
-        constraints: str = "",
-        include_trajectory: bool = True,
-    ) -> dict[str, Any]:
-        prediction, error, fallback_used = _run_cached_runtime_module(
-            ctx,
-            module_name="plan_code_change",
-            task=task,
-            repo_context=repo_context,
-            constraints=constraints or "Keep changes minimal.",
-        )
-        if error is not None:
-            _record_runtime_failure(ctx, error)
-            return error
-
-        return _cached_runtime_success(
-            ctx,
-            prediction=prediction,
-            fallback_used=fallback_used,
-            include_trajectory=include_trajectory,
-            payload={
-                "plan_steps": _coerce_str_list(
-                    _prediction_value(prediction, "plan_steps", [])
-                ),
-                "files_to_touch": _coerce_str_list(
-                    _prediction_value(prediction, "files_to_touch", [])
-                ),
-                "validation_commands": _coerce_str_list(
-                    _prediction_value(prediction, "validation_commands", [])
-                ),
-                "risks": _coerce_str_list(_prediction_value(prediction, "risks", [])),
-            },
-        )
-
     async def propose_core_memory_update(
         include_trajectory: bool = True,
     ) -> dict[str, Any]:
@@ -465,31 +580,12 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
             **build_trajectory_payload(result, include_trajectory=True),
         }
 
-    registrations = [
-        _ToolRegistration(
-            name="summarize_long_document",
-            desc="Summarize a long document with key points and coverage metadata",
-            func=summarize_long_document,
-        ),
-        _ToolRegistration(
-            name="extract_from_logs",
-            desc="Extract structured matches and patterns from a loaded log document",
-            func=extract_from_logs,
-        ),
+    # -- Build registration list ---------------------------------------------
+    hand_written_registrations = [
         _ToolRegistration(
             name="grounded_answer",
             desc="Answer a question with grounded citations from a loaded document",
             func=grounded_answer,
-        ),
-        _ToolRegistration(
-            name="triage_incident_logs",
-            desc="Triage incident logs and suggest likely causes and recommended actions",
-            func=triage_incident_logs,
-        ),
-        _ToolRegistration(
-            name="plan_code_change",
-            desc="Produce a code-change plan with files, validation commands, and risks",
-            func=plan_code_change,
         ),
         _ToolRegistration(
             name="propose_core_memory_update",
@@ -502,6 +598,8 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
             func=rlm_query,
         ),
     ]
+
+    registrations = declarative_registrations + hand_written_registrations
     tools: list[Any] = [_build_tool(registration) for registration in registrations]
 
     # Batch tools (parallel_semantic_map, rlm_query_batched) from batch_tools
