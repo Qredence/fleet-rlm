@@ -16,8 +16,9 @@ from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 # NOTE: fleet_rlm.runtime.models.builders is imported lazily inside
 # spawn_delegate_sub_agent_async to avoid the circular import:
-#   builders → core.agent.signatures → core.agent.__init__
-#   → chat_agent/recursive_runtime → builders
+#   builders → fleet_rlm.runtime.agent.signatures
+#   → fleet_rlm.runtime.agent.__init__
+#   → fleet_rlm.runtime.agent.chat_agent/recursive_runtime → builders
 from fleet_rlm.runtime.execution.streaming import (
     ReActStatusProvider,
     StreamingContext,
