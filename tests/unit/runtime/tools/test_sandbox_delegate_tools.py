@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+# Prime llm_tools once so the refactored module can import cleanly in isolation.
 try:
     import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
 except ImportError:
@@ -15,6 +16,7 @@ from fleet_rlm.runtime.tools import sandbox_delegate_tools
 
 
 def _build_registration(spec: sandbox_delegate_tools._CachedRuntimeToolSpec):
+    """Build a single generated tool registration against a minimal fake agent."""
     agent = SimpleNamespace(
         interpreter=SimpleNamespace(mark_runtime_degradation=None),
         _current_depth=0,
@@ -79,3 +81,15 @@ def test_generated_tool_callable_exposes_declared_signature():
     assert str(inspect.signature(tool_fn)) == (
         "(task, repo_context='', constraints='', include_trajectory=True)"
     )
+
+
+def test_generated_tool_callable_rejects_invalid_identifiers():
+    spec = sandbox_delegate_tools._CachedRuntimeToolSpec(
+        name="not-valid-name",
+        desc="desc",
+        module_name="module",
+        param_order=("query",),
+    )
+
+    with pytest.raises(ValueError, match="Invalid generated tool signature"):
+        _build_registration(spec)

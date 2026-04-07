@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import keyword
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -123,6 +124,7 @@ class _CachedRuntimeToolSpec:
     output_fields: tuple[_OutputField, ...] = ()
 
 
+# Sentinel for generated function parameters that should stay required.
 _REQUIRED = object()
 
 
@@ -388,6 +390,13 @@ def _build_cached_runtime_tool(
     namespace: dict[str, Any] = {"_tool_impl": _tool_impl}
     param_defs: list[str] = []
     call_args: list[str] = []
+    identifiers = (spec.name, *spec.param_order)
+    if any(
+        not identifier.isidentifier() or keyword.iskeyword(identifier)
+        for identifier in identifiers
+    ):
+        raise ValueError(f"Invalid generated tool signature for {spec.name!r}.")
+
     for param_name in spec.param_order:
         default: Any = _REQUIRED
         if param_name == "include_trajectory":
