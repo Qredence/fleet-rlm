@@ -1,52 +1,52 @@
 # Performance Regression Guardrail
 
-This guide defines a practical baseline workflow using the benchmark integration tests that exist in this repository.
+Use this guide when runtime changes are large enough that you want a consistent
+before/after validation pass.
 
-## Benchmark Test Source
+## Baseline Lane
 
-Current benchmark suite:
-
-- `tests/integration/test_rlm_benchmarks.py`
-
-These tests are credential-gated and skip when Modal/LM prerequisites are missing.
-
-## Preconditions
-
-- `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` configured
-- planner LM configured (`DSPY_LM_MODEL` + key)
-- Modal secret `LITELLM` available
-
-## Run the Benchmarks
+From the repo root:
 
 ```bash
-# from repo root
-uv run pytest -q tests/integration/test_rlm_benchmarks.py
+make quality-gate
 ```
+
+This runs the shared backend/frontend confidence lane, including:
+
+- Python lint, format check, and type check
+- non-live pytest coverage
+- docs and metadata checks
+- frontend API drift, type check, lint, unit tests, and production build
+
+## Daytona Runtime Spot Check
+
+For runtime-heavy changes, also run:
+
+```bash
+uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
+```
+
+This exercises the live Daytona sandbox path without requiring a full LLM turn.
 
 ## Guardrail Workflow
 
-1. Run benchmark suite on a known-good commit and capture timing/output notes.
-2. Store baseline notes in your PR description or team runbook.
-3. Re-run on branch after major runtime/tool changes.
-4. Investigate any large regressions in runtime duration, iteration counts, or repeated failures.
+1. Run `make quality-gate` on a known-good baseline.
+2. Capture notable timings or runtime observations if the change is
+   performance-sensitive.
+3. Re-run the same lane on your branch.
+4. Investigate regressions in:
+   - runtime duration
+   - repeated fallback/degraded paths
+   - build size changes
+   - unexpected test skips or failures
 
-## Suggested CI/PR Policy
+## When To Use Extra Scrutiny
 
-- Run benchmarks for PRs that change:
-  - `src/fleet_rlm/runtime/*`
-  - `src/fleet_rlm/runtime/agent/*`
-  - `src/fleet_rlm/runtime/execution/*`
-  - `src/fleet_rlm/runtime/tools/*`
-  - `src/fleet_rlm/api/routers/ws/*`
-  - `src/fleet_rlm/runners.py`
-  - server execution streaming logic
-- Treat repeated duration inflation as regression candidates even if tests still pass.
+Apply this guardrail for changes touching:
 
-## Related Checks
-
-```bash
-# quality checks
-uv run ruff check src tests
-uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
-uv run pytest -q
-```
+- `src/fleet_rlm/runtime/*`
+- `src/fleet_rlm/integrations/daytona/*`
+- `src/fleet_rlm/api/routers/ws/*`
+- `src/frontend/src/lib/rlm-api/*`
+- `src/frontend/src/lib/workspace/*`
+- shared request/response or websocket event contracts

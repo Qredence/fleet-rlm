@@ -82,43 +82,9 @@ const RUNTIME_FIELDS: RuntimeField[] = [
     description: "Maximum token budget per planner response.",
     placeholder: "64000",
   },
-  {
-    key: "MODAL_TOKEN_ID",
-    label: "Modal Token ID",
-    description: "Optional Modal token ID override. Leave unchanged to keep current value.",
-    isSecret: true,
-  },
-  {
-    key: "MODAL_TOKEN_SECRET",
-    label: "Modal Token Secret",
-    description: "Optional Modal token secret override. Leave unchanged to keep current value.",
-    isSecret: true,
-  },
-  {
-    key: "SECRET_NAME",
-    label: "Modal Secret Name",
-    description: "Modal secret mounted into sandbox sessions.",
-    placeholder: "LITELLM",
-  },
-  {
-    key: "SANDBOX_PROVIDER",
-    label: "Sandbox Provider",
-    description: "Primary sandbox backend (modal or daytona).",
-    placeholder: "modal",
-  },
-  {
-    key: "VOLUME_NAME",
-    label: "Modal Volume Name",
-    description: "Modal durable volume mounted at /data for persisted runtime state.",
-    placeholder: "rlm-volume-dspy",
-  },
 ];
 
-const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = [
-  "DSPY_LLM_API_KEY",
-  "MODAL_TOKEN_ID",
-  "MODAL_TOKEN_SECRET",
-];
+const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = ["DSPY_LLM_API_KEY", "DAYTONA_API_KEY"];
 
 const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(RUNTIME_SECRET_KEYS);
 
@@ -162,7 +128,6 @@ export function RuntimeForm() {
     settingsQuery,
     statusQuery,
     saveSettings,
-    testModalConnection,
     testDaytonaConnection,
     testLmConnection,
     testAllConnections,
@@ -200,7 +165,6 @@ export function RuntimeForm() {
   const dirtyKeys = useMemo(() => Object.keys(updates), [updates]);
   const hasUnsavedRuntimeChanges = dirtyKeys.length > 0;
   const status = statusQuery.data;
-  const modalTest = status?.tests?.modal;
   const daytonaTest = status?.tests?.daytona;
   const lmTest = status?.tests?.lm;
   const activeModels = status?.active_models;
@@ -234,13 +198,6 @@ export function RuntimeForm() {
       (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
     );
   }, [statusQuery.data?.llm]);
-
-  const modalChecks = useMemo(() => {
-    const source = statusQuery.data?.modal ?? {};
-    return Object.entries(source).filter(
-      (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
-    );
-  }, [statusQuery.data?.modal]);
 
   const daytonaChecks = useMemo(() => {
     const source: RuntimeStatusResponse["daytona"] = statusQuery.data?.daytona ?? {};
@@ -279,26 +236,6 @@ export function RuntimeForm() {
         toast.error("Failed to save runtime settings", {
           description: errorMessage(error),
         });
-      },
-    });
-  };
-
-  const handleTestModal = () => {
-    if (hasUnsavedRuntimeChanges) {
-      showUnsavedRuntimeTestWarning();
-      return;
-    }
-
-    testModalConnection.mutate(undefined, {
-      onSuccess: (result) => {
-        toast[result.ok ? "success" : "error"]("Modal test completed", {
-          description: result.ok
-            ? `Latency ${result.latency_ms ?? 0}ms`
-            : result.error || "Modal connectivity failed.",
-        });
-      },
-      onError: (error) => {
-        toast.error("Modal test failed", { description: errorMessage(error) });
       },
     });
   };
@@ -353,7 +290,7 @@ export function RuntimeForm() {
 
     try {
       const result = await testAllConnections();
-      if (result.modal.ok && result.lm.ok && (result.daytona?.ok ?? true)) {
+      if (result.lm.ok && result.daytona.ok) {
         toast.success("Runtime checks passed");
         return;
       }
@@ -442,8 +379,8 @@ export function RuntimeForm() {
         <CardHeader className="border-b border-border-subtle/70">
           <CardTitle className="text-sm font-medium">Runtime Configuration</CardTitle>
           <CardDescription className="text-sm">
-            Update runtime credentials, model selection, and Modal resource names used by the local
-            environment.
+            Update runtime credentials, Daytona connectivity, and model selection used by the local
+            backend.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
@@ -523,21 +460,12 @@ export function RuntimeForm() {
         <CardHeader className="border-b border-border-subtle/70">
           <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
           <CardDescription className="max-w-xl text-sm">
-            Runs preflight credential checks plus live Modal and LM connectivity smoke tests.
+            Runs preflight credential checks plus live Daytona and LM connectivity smoke tests.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-2.5">
-              <Button
-                variant="secondary"
-                size="lg"
-                className="rounded-lg"
-                onClick={handleTestModal}
-                disabled={testModalConnection.isPending}
-              >
-                {testModalConnection.isPending ? "Testing Modal…" : "Test Modal"}
-              </Button>
               <Button
                 variant="outline"
                 size="lg"
@@ -561,11 +489,7 @@ export function RuntimeForm() {
                 size="lg"
                 className="rounded-lg"
                 onClick={handleTestAll}
-                disabled={
-                  testModalConnection.isPending ||
-                  testLmConnection.isPending ||
-                  testDaytonaConnection.isPending
-                }
+                disabled={testLmConnection.isPending || testDaytonaConnection.isPending}
               >
                 Test All Connections
               </Button>
@@ -581,32 +505,6 @@ export function RuntimeForm() {
       </Card>
 
       <FieldGroup className="gap-0">
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>Modal Smoke</FieldTitle>
-            <FieldDescription>{`Last result: ${testSummary(modalTest)}`}</FieldDescription>
-          </FieldContent>
-          <div className="flex min-w-0 flex-col items-end gap-1 text-right">
-            <Badge variant={testVariant(modalTest)}>
-              {modalTest?.checked_at ? (
-                modalTest.ok ? (
-                  <BadgeCheckIcon />
-                ) : (
-                  <AlertCircleIcon />
-                )
-              ) : (
-                <Clock3Icon />
-              )}
-              {testLabel(modalTest)}
-            </Badge>
-            {modalTest?.checked_at ? (
-              <span className="text-xs text-muted-foreground">
-                {formatCheckedAt(modalTest.checked_at)}
-              </span>
-            ) : null}
-          </div>
-        </Field>
-
         <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
           <FieldContent>
             <FieldTitle>Daytona Smoke</FieldTitle>
@@ -673,16 +571,6 @@ export function RuntimeForm() {
               >
                 {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
                 LM {formatCheckLabel(key)}
-              </Badge>
-            ))}
-            {modalChecks.map(([key, ok]) => (
-              <Badge
-                key={`modal-${key}`}
-                variant={ok ? "outline" : "destructive"}
-                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
-              >
-                {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
-                Modal {formatCheckLabel(key)}
               </Badge>
             ))}
             {daytonaChecks.map(([key, ok]) => (

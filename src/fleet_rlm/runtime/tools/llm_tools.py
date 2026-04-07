@@ -1,4 +1,4 @@
-"""LLM query tools and runtime module helpers for ModalInterpreter.
+"""LLM query tools and runtime module helpers for interpreter-backed RLM flows.
 
 This module provides:
   - LLMQueryMixin: Mixin providing built-in RLM tools for recursive LLM calls
@@ -104,7 +104,7 @@ class LLMQueryMixin:
         target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
         if target_lm is None:
             raise RuntimeError(
-                "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to ModalInterpreter."
+                "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter."
             )
 
         # Execute LM call with timeout to prevent hangs

@@ -23,8 +23,6 @@ Authoritative contracts, interfaces, and implementation-facing facts.
   Architecture Decision Records documenting key design choices.
 - [ADR-001: RLM Runtime Architecture](adr/001-rlm-runtime-architecture.md)
   dspy.RLM as the core reasoning engine with ReAct orchestration.
-- [ADR-002: Modal Sandbox Execution](adr/002-modal-sandbox-execution.md)
-  Modal Sandboxes for isolated code execution.
 - [ADR-003: Neon/Postgres with RLS](adr/003-neon-postgres-rls-persistence.md)
   Serverless PostgreSQL with Row-Level Security for multi-tenant persistence.
 - [ADR-004: Dual Auth Modes](adr/004-dual-auth-modes.md)

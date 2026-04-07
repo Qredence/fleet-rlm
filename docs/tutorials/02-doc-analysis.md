@@ -41,12 +41,12 @@ PY
 
 - `fleet_rlm.cli.runners.run_long_context`
 - `SummarizeLongDocument`
-- Modal sandbox helper stack (`peek`, `grep`, chunking helpers, buffer tools)
+- Daytona sandbox helper stack (`peek`, `grep`, chunking helpers, buffer tools)
 
 ## Validation
 
 If analysis fails:
 
 1. verify planner LM env vars
-2. verify Modal credentials and secret
+2. verify Daytona API configuration
 3. retry with a smaller document first

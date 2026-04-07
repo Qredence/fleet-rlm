@@ -23,7 +23,7 @@ classDiagram
         +alias management
     }
 
-    class ModalInterpreter {
+    class DaytonaInterpreter {
         +volume_name
         +lifecycle()
     }
@@ -35,7 +35,7 @@ classDiagram
     dspy_Module <|-- RLMReActChatAgent
     CoreMemoryMixin <--* RLMReActChatAgent : uses mixin
     DocumentCacheMixin <--* RLMReActChatAgent : uses mixin
-    RLMReActChatAgent --> ModalInterpreter : delegates execution
+    RLMReActChatAgent --> DaytonaInterpreter : delegates execution
     AppConfig ..> RLMReActChatAgent : configures
-    AppConfig ..> ModalInterpreter : configures
+    AppConfig ..> DaytonaInterpreter : configures
 ```

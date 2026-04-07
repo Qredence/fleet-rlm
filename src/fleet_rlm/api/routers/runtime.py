@@ -7,7 +7,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
-from fleet_rlm.utils.modal import load_modal_config
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep, require_http_identity
 from ..runtime_services import (
@@ -18,7 +17,6 @@ from ..runtime_services import (
     load_volume_tree,
     run_daytona_connection_test,
     run_lm_connection_test,
-    run_modal_connection_test,
 )
 from ..schemas.core import (
     RuntimeConnectivityTestResponse,
@@ -107,21 +105,6 @@ async def patch_runtime_settings(
 
 
 @router.post(
-    "/tests/modal",
-    response_model=RuntimeConnectivityTestResponse,
-    responses=AUTH_ERROR_RESPONSES,
-)
-async def test_modal_connection(
-    state: ServerStateDep,
-) -> RuntimeConnectivityTestResponse:
-    """Run the Modal preflight and smoke test used by the Settings diagnostics UI."""
-    return await run_modal_connection_test(
-        state=state,
-        load_modal_config=load_modal_config,
-    )
-
-
-@router.post(
     "/tests/lm",
     response_model=RuntimeConnectivityTestResponse,
     responses=AUTH_ERROR_RESPONSES,
@@ -154,10 +137,7 @@ async def test_daytona_connection(
 )
 async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
-    return build_runtime_status_response(
-        state=state,
-        load_modal_config=load_modal_config,
-    )
+    return build_runtime_status_response(state=state)
 
 
 @router.get(

@@ -31,7 +31,7 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```python
 import dspy
 from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 configure_planner_from_env()  # Load .env and configure the planner LM
 
@@ -81,7 +81,7 @@ finally:
 ### Simple Task
 
 ```python
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 interp = DaytonaInterpreter(timeout=60)
 interp.start()
@@ -101,7 +101,7 @@ finally:
 
 ```python
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 doc = open("large_document.txt").read()
 interp = DaytonaInterpreter(

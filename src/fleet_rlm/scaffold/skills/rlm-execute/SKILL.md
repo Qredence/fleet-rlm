@@ -11,7 +11,7 @@ Execute Python code in Daytona sandboxes with volume persistence.
 
 ```python
 from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 configure_planner_from_env()
 

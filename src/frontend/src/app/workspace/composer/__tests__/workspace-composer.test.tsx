@@ -13,8 +13,6 @@ describe("WorkspaceComposer", () => {
   const baseProps = {
     onChange: () => {},
     onSend: () => {},
-    runtimeMode: "modal_chat" as const,
-    onRuntimeModeChange: () => {},
     executionMode: "auto" as const,
     onExecutionModeChange: () => {},
   };
@@ -39,12 +37,12 @@ describe("WorkspaceComposer", () => {
 
   it("keeps the composer generic even in Daytona mode", () => {
     const html = renderToStaticMarkup(
-      <WorkspaceComposer value="summarize this repo" {...baseProps} runtimeMode="daytona_pilot" />,
+      <WorkspaceComposer value="summarize this repo" {...baseProps} />,
     );
 
     expect(html).not.toContain("Experimental Daytona runtime");
     expect(html).not.toContain('aria-label="Daytona repository URL"');
     expect(html).not.toContain("Tools only");
-    expect(html).toContain("Daytona");
+    expect(html).toContain("Auto");
   });
 });

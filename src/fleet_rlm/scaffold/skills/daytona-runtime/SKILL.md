@@ -34,24 +34,24 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 
 - The top-level conversational runtime is still `RLMReActChatAgent`
 - Recursive work still flows through `dspy.RLM`
-- Websocket surfaces stay `/api/v1/ws/chat` and `/api/v1/ws/execution`
+- The canonical websocket surface stays `/api/v1/ws/execution`
 
 ## Operational Guidance
 
 1. Run `fleet-rlm daytona-smoke` before using `daytona_pilot` in the workspace.
 2. Treat `DAYTONA_TARGET` as SDK routing/config only, not as a workspace id or volume name.
-3. Keep Daytona-specific reasoning in the provider boundary under `integrations/providers/daytona/*`.
+3. Keep Daytona-specific reasoning in the provider boundary under `integrations/daytona/*`.
 4. When debugging durable Daytona persistence, inspect `/home/daytona/memory/{memory,artifacts,buffers,meta}`. Treat the live workspace as transient.
 
 ## Canonical Provider Modules
 
-All Daytona-specific implementation lives under `src/fleet_rlm/integrations/providers/daytona/`:
+All Daytona-specific implementation lives under `src/fleet_rlm/integrations/daytona/`:
 
 - `runtime.py` — `DaytonaSandboxRuntime` and `DaytonaSandboxSession` (canonical async contract)
 - `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter)
 - `interpreter_execution.py` — delegate child interpreter building
 - `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
-- `agent.py` — `DaytonaWorkbenchChatAgent` (Daytona-specific agent/session adapter)
+- `runtime/agent/chat_agent.py` — `RLMReActChatAgent` (canonical shared DSPy chat agent with Daytona workspace/session handling)
 - `diagnostics.py` — structured runtime diagnostics and smoke validation
 - `types.py` — consolidated Daytona types plus chat/session normalization helpers
 - `volumes.py` — Daytona volume browsing

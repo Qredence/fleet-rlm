@@ -135,6 +135,7 @@ Options:
   --docs-path PATH         Optional document path to preload as active context
   --trace / --no-trace     Enable verbose thought/status display
   --trace-mode TEXT        Trace display mode: compact, verbose, or off
+  --volume-name TEXT       Optional Daytona volume name for persistent storage
   --help                   Show this message and exit.
 ```
 
@@ -155,6 +156,9 @@ uv run fleet-rlm chat --docs-path ./docs/architecture.md
 
 # Enable verbose trace output
 uv run fleet-rlm chat --trace --trace-mode verbose
+
+# Persist chat state to a specific Daytona volume
+uv run fleet-rlm chat --volume-name my-volume
 ```
 
 ### `fleet-rlm daytona-smoke`
@@ -183,7 +187,7 @@ The `fleet` command is a lightweight launcher that provides quick access to term
 
 ```text
 usage: fleet [-h] [--docs-path DOCS_PATH] [--trace-mode {compact,verbose,off}]
-             [--volume-name VOLUME_NAME] [--secret-name SECRET_NAME]
+             [--volume-name VOLUME_NAME]
              [{web}]
 
 Start standalone fleet interactive chat. Hydra overrides are supported as
@@ -199,9 +203,7 @@ options:
   --trace-mode {compact,verbose,off}
                         Trace display mode.
   --volume-name VOLUME_NAME
-                        Modal volume name for persistent storage.
-  --secret-name SECRET_NAME
-                        Modal secret name for credentials.
+                        Daytona volume name for persistent storage.
 ```
 
 ### `fleet` (Terminal Chat)
@@ -218,8 +220,8 @@ uv run fleet --docs-path ./README.md
 # Start with verbose tracing
 uv run fleet --trace-mode verbose
 
-# Start with custom Modal volume
-uv run fleet --volume-name my-volume --secret-name my-secret
+# Start with a custom Daytona volume
+uv run fleet --volume-name my-volume
 ```
 
 ### `fleet web`

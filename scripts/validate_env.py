@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -33,49 +34,6 @@ OPTIONAL_FIELDS = {
     "memory",
 }
 ALL_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
-
-
-def _load_modal_config() -> bool:
-    """Load Modal credentials from ~/.modal.toml, if available."""
-    config_path = Path.home() / ".modal.toml"
-    if not config_path.exists():
-        return False
-
-    try:
-        try:
-            import tomllib
-        except ModuleNotFoundError:  # pragma: no cover - py310 fallback
-            import tomli as tomllib  # type: ignore[no-redef]
-
-        with config_path.open("rb") as f:
-            config = tomllib.load(f)
-
-        active_profile = None
-        for profile_data in config.values():
-            if isinstance(profile_data, dict) and profile_data.get("active"):
-                active_profile = profile_data
-                break
-
-        if active_profile is None:
-            for profile_data in config.values():
-                if isinstance(profile_data, dict) and "token_id" in profile_data:
-                    active_profile = profile_data
-                    break
-
-        if active_profile is None:
-            return False
-
-        token_id = active_profile.get("token_id")
-        token_secret = active_profile.get("token_secret")
-        if token_id and token_secret:
-            os.environ["MODAL_TOKEN_ID"] = token_id
-            os.environ["MODAL_TOKEN_SECRET"] = token_secret
-            print(f"Loaded Modal credentials from {config_path}")
-            return True
-    except Exception as exc:
-        print(f"Warning: Error loading ~/.modal.toml: {exc}")
-
-    return False
 
 
 def _validate_agent(path: Path) -> list[str]:
@@ -146,208 +104,71 @@ def _validate_agent(path: Path) -> list[str]:
     return errors
 
 
-def _check_modal_import() -> bool:
-    print("\nTesting Modal import...")
-    try:
-        import modal
+def _print_masked(key: str, value: str | None) -> None:
+    if value:
+        print(f"  {key}: ✓ (redacted)")
+    else:
+        print(f"  {key}: ✗ missing")
 
-        print(f"  ✓ Modal version: {modal.__version__}")
-        return True
-    except ImportError as exc:
-        print(f"  ✗ Cannot import Modal: {exc}")
+
+def _check_daytona_config() -> bool:
+    print("\nChecking Daytona configuration...")
+    try:
+        from fleet_rlm.integrations.daytona import resolve_daytona_config
+
+        config = resolve_daytona_config()
+    except Exception as exc:
+        print(f"  ✗ {exc}")
         return False
 
-
-def _check_modal_credentials() -> bool:
-    print("\n🔑 Checking Modal Credentials...")
-    token_id = os.environ.get("MODAL_TOKEN_ID")
-    token_secret = os.environ.get("MODAL_TOKEN_SECRET")
-
-    if token_id and token_secret:
-        print(f"  MODAL_TOKEN_ID: ✓ ({token_id[:8]}...)")
-        print("  MODAL_TOKEN_SECRET: ✓ (hidden)")
-        return True
-
-    print("  ✗ Modal credentials not found in environment")
-    print("    Run: modal token set")
-    return False
+    _print_masked("DAYTONA_API_KEY", config.api_key)
+    print(f"  DAYTONA_API_URL: ✓ ({config.api_url})")
+    if config.target:
+        print(f"  DAYTONA_TARGET: ✓ ({config.target})")
+    return True
 
 
-def _check_modal_app_lookup() -> bool:
-    print("\nTesting Modal credentials...")
+def _check_lm_runtime_config() -> bool:
+    print("\nChecking sandbox-local LM configuration...")
     try:
-        import modal
+        from fleet_rlm.integrations.daytona import resolve_daytona_lm_runtime_config
 
-        app = modal.App.lookup("test-connection", create_if_missing=True)
-        print(f"  ✓ Credentials working (app: {app.name})")
-        return True
+        config = resolve_daytona_lm_runtime_config()
     except Exception as exc:
-        print(f"  ✗ Credentials failed: {exc}")
+        print(f"  ✗ {exc}")
         return False
 
-
-def _check_litellm_secret(secret_name: str) -> dict[str, bool]:
-    print("\n📋 Checking LITELLM Secret...")
-    try:
-        from fleet_rlm.cli.runners import check_secret_presence
-
-        result = check_secret_presence(secret_name=secret_name)
-        total = len(result)
-        present_count = sum(1 for present in result.values() if present)
-        missing_count = total - present_count
-        print(f"  Secrets present: {present_count}/{total}")
-        if missing_count:
-            print(f"  Secrets missing: {missing_count}")
-        return result
-    except Exception as exc:
-        print(f"  ✗ Error checking secrets: {exc}")
-        return {}
+    print(f"  DSPY_LM_MODEL: ✓ ({config.model})")
+    _print_masked("DSPY_LLM_API_KEY", config.api_key)
+    if config.api_base:
+        print(f"  DSPY_LM_API_BASE: ✓ ({config.api_base})")
+    return True
 
 
 def _test_fleet_rlm_import() -> bool:
     print("\nTesting fleet_rlm import...")
     try:
-        from fleet_rlm import ModalInterpreter  # noqa: F401
+        from fleet_rlm import DaytonaInterpreter  # noqa: F401
 
-        print("  ✓ ModalInterpreter imported")
+        print("  ✓ DaytonaInterpreter imported")
         return True
     except ImportError as exc:
         print(f"  ✗ Cannot import fleet_rlm: {exc}")
         return False
 
 
-def _test_sandbox_creation(timeout: int) -> bool:
-    print("\n🧪 Testing Sandbox Creation...")
+def _run_daytona_smoke(repo: str, ref: str | None, timeout: int) -> bool:
+    print("\nRunning Daytona smoke validation...")
     try:
-        from fleet_rlm import ModalInterpreter
+        from fleet_rlm.integrations.daytona import run_daytona_smoke
 
-        interpreter = ModalInterpreter(timeout=timeout)
-        interpreter.start()
-        try:
-            result = interpreter.execute(
-                """
-import sys
-print(f"Python: {sys.version_info[:2]}")
-SUBMIT(status="healthy", platform=sys.platform)
-"""
-            )
-            output = getattr(result, "output", result)
-            if isinstance(output, dict) and output.get("status") == "healthy":
-                print(
-                    "  ✓ Sandbox healthy "
-                    f"(platform: {output.get('platform', 'unknown')})"
-                )
-                return True
-            print(f"  ✗ Unexpected result: {result} (type: {type(result).__name__})")
-            return False
-        finally:
-            interpreter.shutdown()
+        result = run_daytona_smoke(repo=repo, ref=ref, timeout=float(timeout))
     except Exception as exc:
-        print(f"  ✗ Sandbox test failed: {exc}")
+        print(f"  ✗ Smoke validation crashed: {exc}")
         return False
 
-
-def _test_variable_space(timeout: int) -> bool:
-    print("\n💾 Testing Variable Space...")
-    try:
-        from fleet_rlm import ModalInterpreter
-
-        interpreter = ModalInterpreter(timeout=timeout)
-        interpreter.start()
-        try:
-            interpreter.execute("test_var = {'value': 42, 'items': [1, 2, 3]}")
-            print("  ✓ Variable set")
-
-            result = interpreter.execute(
-                "test_var['items'].append(4)\nSUBMIT(test_var)"
-            )
-            final_output = getattr(result, "output", result)
-            submit_data = (
-                final_output.get("output", final_output)
-                if isinstance(final_output, dict)
-                else final_output
-            )
-            if (
-                isinstance(submit_data, dict)
-                and submit_data.get("value") == 42
-                and submit_data.get("items") == [1, 2, 3, 4]
-            ):
-                print("  ✓ Variable persistence working")
-                return True
-            print(f"  ✗ Variable mismatch: {result}")
-            return False
-        finally:
-            interpreter.shutdown()
-    except Exception as exc:
-        print(f"  ✗ Variable space test failed: {exc}")
-        return False
-
-
-def _test_volume_support(timeout: int, volume_name: str) -> bool:
-    print("\n💿 Testing Volume Support...")
-    try:
-        from fleet_rlm import ModalInterpreter
-
-        interpreter = ModalInterpreter(timeout=timeout, volume_name=volume_name)
-        interpreter.start()
-        try:
-            interpreter.execute(
-                """
-with open('/data/validation_test.txt', 'w') as f:
-    f.write('volume persistence works')
-"""
-            )
-            print("  ✓ Write to volume successful")
-
-            result = interpreter.execute(
-                """
-with open('/data/validation_test.txt', 'r') as f:
-    content = f.read()
-SUBMIT(content)
-"""
-            )
-            final_output = getattr(result, "output", result)
-            content = (
-                final_output.get("output") if isinstance(final_output, dict) else None
-            )
-            if content == "volume persistence works":
-                print("  ✓ Volume read/write working")
-                return True
-            print("  ✗ Volume content mismatch")
-            return False
-        finally:
-            interpreter.shutdown()
-    except Exception as exc:
-        print(f"  ✗ Volume test failed: {exc}")
-        return False
-
-
-def _test_dspy_rlm(timeout: int) -> bool:
-    print("\n🤖 Testing dspy.RLM Integration...")
-    try:
-        import dspy
-        from fleet_rlm import ModalInterpreter, configure_planner_from_env
-
-        configure_planner_from_env()
-        interpreter = ModalInterpreter(timeout=timeout)
-        try:
-            rlm = dspy.RLM(
-                signature="question -> answer",
-                interpreter=interpreter,
-                max_iterations=5,
-                max_llm_calls=10,
-                verbose=False,
-            )
-            result = rlm(question="What is 2 + 2? Calculate using Python.")
-            trajectory = getattr(result, "trajectory", [])
-            print(f"  ✓ RLM completed ({len(trajectory)} iterations)")
-            print(f"  Answer: {getattr(result, 'answer', 'N/A')[:100]}...")
-            return True
-        finally:
-            interpreter.shutdown()
-    except Exception as exc:
-        print(f"  ✗ dspy.RLM test failed: {exc}")
-        return False
+    print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    return result.error_category is None
 
 
 def do_agents(args: argparse.Namespace) -> int:
@@ -371,91 +192,61 @@ def do_agents(args: argparse.Namespace) -> int:
     return 0
 
 
-def do_modal(args: argparse.Namespace) -> int:
-    if not _load_modal_config():
-        print("Warning: Could not load ~/.modal.toml, using existing environment")
-
+def do_daytona(args: argparse.Namespace) -> int:
     print("=" * 60)
-    print("RLM Environment Validation")
+    print("Fleet RLM Daytona Environment Validation")
     print("=" * 60)
     print(f"\nPython: {sys.version}")
     print(f"Working directory: {os.getcwd()}")
 
-    results = {
-        "modal_import": _check_modal_import(),
-        "modal_credentials": _check_modal_credentials(),
-    }
+    daytona_ok = _check_daytona_config()
+    import_ok = _test_fleet_rlm_import()
+    lm_ok = _check_lm_runtime_config()
 
-    if not results["modal_import"] or not results["modal_credentials"]:
-        print("\n❌ Validation failed: Modal import and credentials are required")
-        return 1
-
-    results["modal_app_lookup"] = _check_modal_app_lookup()
-    results["fleet_rlm_import"] = _test_fleet_rlm_import()
-
-    if not results["modal_app_lookup"] or not results["fleet_rlm_import"]:
-        print("\n❌ Validation failed: Modal connectivity or fleet_rlm import failed")
-        return 1
-
-    litellm_result = _check_litellm_secret(args.secret_name)
-    results["litellm_secret"] = (
-        all(litellm_result.values()) if litellm_result else False
-    )
-    if not results["litellm_secret"]:
-        print("\n⚠️  LITELLM secret incomplete - some tests may fail")
-        print(
-            "    Run: modal secret create LITELLM_SECRET_NAME "
-            "DSPY_LM_MODEL=... DSPY_LLM_API_KEY=..."
-        )
-
-    results["sandbox_creation"] = _test_sandbox_creation(args.timeout)
-    if not results["sandbox_creation"]:
-        print("\n❌ Validation failed: Cannot create Modal sandbox")
-        return 1
-
-    results["variable_space"] = _test_variable_space(args.timeout)
-    results["volume_support"] = _test_volume_support(
-        args.timeout,
-        args.volume_name,
-    )
-
-    if args.skip_dspy_rlm:
-        print("\n⏭️  Skipping dspy.RLM test (--skip-dspy-rlm)")
-        results["dspy_rlm"] = False
-    elif results["litellm_secret"]:
-        results["dspy_rlm"] = _test_dspy_rlm(args.rlm_timeout)
+    smoke_ok = True
+    if args.skip_smoke:
+        print("\nSkipping Daytona smoke validation (--skip-smoke)")
+    elif not args.repo:
+        print("\nSkipping Daytona smoke validation (no --repo provided)")
+    elif not daytona_ok or not import_ok:
+        print("\nSkipping Daytona smoke validation (config/import checks failed)")
+        smoke_ok = False
     else:
-        print("\n⏭️  Skipping dspy.RLM test (LITELLM secret not configured)")
-        results["dspy_rlm"] = False
+        smoke_ok = _run_daytona_smoke(args.repo, args.ref, args.timeout)
 
     print("\n" + "=" * 60)
-    print("📊 Validation Summary")
+    print("Validation Summary")
     print("=" * 60)
-    for test_name, passed in results.items():
+    summary = {
+        "daytona_config": daytona_ok,
+        "fleet_rlm_import": import_ok,
+        "lm_runtime_config": lm_ok,
+    }
+    if not args.skip_smoke and args.repo:
+        summary["daytona_smoke"] = smoke_ok
+
+    for name, passed in summary.items():
         status = "✓ PASS" if passed else "✗ FAIL"
-        print(f"  {test_name:20s}: {status}")
+        print(f"  {name:20s}: {status}")
 
-    all_critical = all(
-        [
-            results["modal_import"],
-            results["modal_credentials"],
-            results["modal_app_lookup"],
-            results["fleet_rlm_import"],
-            results["sandbox_creation"],
-            results["variable_space"],
-        ]
-    )
+    if not daytona_ok or not import_ok:
+        print("\nValidation failed: Daytona config and fleet_rlm import are required.")
+        return 1
+    if args.require_lm_config and not lm_ok:
+        print("\nValidation failed: sandbox-local LM config is required.")
+        return 1
+    if "daytona_smoke" in summary and not smoke_ok:
+        print("\nValidation failed: Daytona smoke validation did not complete cleanly.")
+        return 1
 
-    print("\n" + "=" * 60)
-    if all_critical and results["dspy_rlm"]:
-        print("✅ All tests passed! Environment ready for RLM.")
-        return 0
-    if all_critical:
-        print("⚠️  Basic tests passed. Configure LITELLM for full RLM functionality.")
-        return 0
-
-    print("❌ Validation failed. Check errors above.")
-    return 1
+    if not lm_ok:
+        print(
+            "\nBasic Daytona checks passed. Configure DSPY_LM_MODEL and "
+            "DSPY_LLM_API_KEY / DSPY_LM_API_KEY for self-orchestrated runs."
+        )
+    else:
+        print("\nAll requested Daytona checks passed.")
+    return 0
 
 
 def main() -> int:
@@ -469,38 +260,35 @@ def main() -> int:
     )
     parser_agents.set_defaults(func=do_agents)
 
-    parser_modal = subparsers.add_parser(
-        "modal",
-        help="Run Modal, sandbox, and fleet_rlm environment diagnostics",
+    parser_daytona = subparsers.add_parser(
+        "daytona",
+        help="Run Daytona and fleet_rlm environment diagnostics",
     )
-    parser_modal.add_argument(
+    parser_daytona.add_argument(
         "--timeout",
         type=int,
         default=60,
-        help="Interpreter timeout for sandbox, variable, and volume tests.",
+        help="Timeout in seconds for Daytona smoke validation.",
     )
-    parser_modal.add_argument(
-        "--rlm-timeout",
-        type=int,
-        default=120,
-        help="Interpreter timeout for the dspy.RLM integration test.",
+    parser_daytona.add_argument(
+        "--repo",
+        help="Repository URL to clone for Daytona smoke validation.",
     )
-    parser_modal.add_argument(
-        "--secret-name",
-        default="LITELLM",
-        help="Modal secret name used for LITELLM checks.",
+    parser_daytona.add_argument(
+        "--ref",
+        help="Optional branch or commit SHA for Daytona smoke validation.",
     )
-    parser_modal.add_argument(
-        "--volume-name",
-        default="rlm-validation-volume",
-        help="Volume name used for the volume support check.",
-    )
-    parser_modal.add_argument(
-        "--skip-dspy-rlm",
+    parser_daytona.add_argument(
+        "--require-lm-config",
         action="store_true",
-        help="Skip the full dspy.RLM integration step.",
+        help="Fail when sandbox-local LM configuration is missing.",
     )
-    parser_modal.set_defaults(func=do_modal)
+    parser_daytona.add_argument(
+        "--skip-smoke",
+        action="store_true",
+        help="Skip the live Daytona smoke validation step.",
+    )
+    parser_daytona.set_defaults(func=do_daytona)
 
     args = parser.parse_args()
     return args.func(args)

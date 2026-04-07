@@ -16,7 +16,7 @@ fleet-rlm uses pytest markers to categorize tests by scope and runtime requireme
 | `db`          | Database-backed integration tests              | Seconds                        |
 | `e2e`         | End-to-end workflow smoke tests                | Seconds to minutes             |
 | `benchmark`   | Performance/throughput benchmark tests         | Variable                       |
-| `live_llm`    | Tests requiring live Modal + configured LLM    | Variable, requires credentials |
+| `live_llm`    | Tests requiring live Daytona + configured LLM  | Variable, requires credentials |
 
 ### Marker Usage
 
@@ -30,7 +30,7 @@ uv run pytest -q -m "not live_llm and not benchmark"
 
 This ensures fast feedback during development without requiring:
 
-- Modal credentials
+- Daytona credentials
 - Configured LLM API keys
 - External service connections
 
@@ -52,11 +52,11 @@ uv run pytest -q tests/e2e -m "not live_llm and not benchmark"
 
 **Running Live LLM Tests**
 
-Live LLM tests require Modal credentials and configured LLM secrets:
+Live LLM tests require Daytona connectivity and configured LLM credentials:
 
 ```bash
-# Ensure Modal is authenticated
-uv run modal profile current
+# Validate Daytona connectivity first
+uv run python scripts/validate_env.py daytona
 
 # Run live LLM tests
 uv run pytest -q -m "live_llm"
@@ -288,8 +288,8 @@ Live LLM tests require secrets configuration:
 - name: Run live LLM tests
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   env:
-    MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-    MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+    DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
     DSPY_LM_MODEL: ${{ secrets.DSPY_LM_MODEL }}
     DSPY_LM_API_KEY: ${{ secrets.DSPY_LM_API_KEY }}
   run: uv run pytest -q -m "live_llm"

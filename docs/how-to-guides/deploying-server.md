@@ -32,8 +32,7 @@ This starts both the API server and serves frontend static assets.
 | `/api/v1/sessions/state` | Lightweight in-memory session summaries |
 | `/api/v1/runtime/*` | Runtime settings, diagnostics, and volume access |
 | `POST /api/v1/traces/feedback` | Trace correctness/expectation feedback |
-| `/api/v1/ws/chat` | WebSocket chat runtime |
-| `/api/v1/ws/execution` | WebSocket execution stream |
+| `/api/v1/ws/execution` | WebSocket runtime |
 
 ## Production Environment Variables
 
@@ -152,7 +151,7 @@ WebSocket connections support two authentication methods:
 
 2. **Query parameter** (for browsers with limited header support):
    ```
-   wss://your-server/api/v1/ws/chat?access_token=<entra-token>
+   wss://your-server/api/v1/ws/execution?access_token=<entra-token>
    ```
 
 Query parameter auth requires `ALLOW_QUERY_AUTH_TOKENS=true` (automatic in Entra mode).
@@ -204,7 +203,7 @@ Response:
   "planner": "ready",
   "database": "ready",
   "database_required": true,
-  "sandbox_provider": "modal"
+  "sandbox_provider": "daytona"
 }
 ```
 
@@ -252,7 +251,7 @@ Response fields:
 | `planner_configured` | Boolean planner status |
 | `database` | `"ready"`, `"missing"`, `"disabled"`, or `"degraded"` |
 | `database_required` | Whether database is required |
-| `sandbox_provider` | Active sandbox provider (`modal`, `local`, `daytona`) |
+| `sandbox_provider` | Active sandbox provider (`daytona`) |
 
 ### Kubernetes Probes Example
 
@@ -548,5 +547,5 @@ Wildcards (`*`) are not allowed in staging/production.
 
 - [Auth Modes Reference](../reference/auth.md)
 - [Database Architecture](../reference/database.md)
-- [Configuring Modal](./configuring-modal.md)
+- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md)
 - [Runtime Settings](./runtime-settings.md)

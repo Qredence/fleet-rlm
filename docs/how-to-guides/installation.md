@@ -7,7 +7,7 @@ This guide covers installation and setup for `fleet-rlm`.
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package manager
 - [pnpm](https://pnpm.io/) (for frontend development from source)
-- Modal account (for sandbox execution)
+- Daytona credentials (for sandbox execution)
 
 ## Option A: Install from PyPI
 
@@ -95,15 +95,14 @@ pnpm run lint:robustness
 pnpm run test:unit
 ```
 
-### 4. Configure Modal
+### 4. Configure Daytona
 
-Modal credentials are configured per-user. Run:
+Set the Daytona credentials used by the backend runtime:
 
 ```bash
-modal setup
+export DAYTONA_API_KEY="..."
+export DAYTONA_API_URL="https://app.daytona.io/api"
 ```
-
-See [Configuring Modal](configuring-modal.md) for detailed configuration options.
 
 ## Verify the Installation
 
@@ -204,6 +203,6 @@ uv run python scripts/validate_release.py metadata
 ## Next Steps
 
 - [Terminal Chat Tutorial](../tutorials/03-interactive-chat.md) - Learn to use the CLI chat interface
-- [Configuring Modal](configuring-modal.md) - Set up sandbox execution
+- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) - Runtime behavior and storage model
 - [CLI reference](../reference/cli.md) - Review the current `fleet` and `fleet-rlm` surfaces
 - [MLflow Workflows](mlflow-workflows.md) - DSPy tracing, evaluation, and optimization with MLflow

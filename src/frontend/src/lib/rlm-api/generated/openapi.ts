@@ -44,13 +44,6 @@ export interface paths {
      */
     patch: operations["patch_runtime_settings_api_v1_runtime_settings_patch"];
   };
-  "/api/v1/runtime/tests/modal": {
-    /**
-     * Test Modal Connection
-     * @description Run the Modal preflight and smoke test used by the Settings diagnostics UI.
-     */
-    post: operations["test_modal_connection_api_v1_runtime_tests_modal_post"];
-  };
   "/api/v1/runtime/tests/lm": {
     /**
      * Test Lm Connection
@@ -355,7 +348,7 @@ export interface components {
        * @description Runtime subsystem that was tested.
        * @enum {string}
        */
-      kind: "modal" | "lm" | "daytona";
+      kind: "lm" | "daytona";
       /**
        * Ok
        * @description Whether the connectivity test completed successfully.
@@ -483,10 +476,10 @@ export interface components {
       /**
        * Sandbox Provider
        * @description Active sandbox backend selected for runtime execution and volume browsing.
-       * @default modal
-       * @enum {string}
+       * @default daytona
+       * @constant
        */
-      sandbox_provider?: "modal" | "daytona";
+      sandbox_provider?: "daytona";
       /**
        * Llm
        * @description Language-model configuration and readiness diagnostics.
@@ -499,13 +492,6 @@ export interface components {
        * @description MLflow enablement and startup diagnostics.
        */
       mlflow?: {
-        [key: string]: unknown;
-      };
-      /**
-       * Modal
-       * @description Modal configuration and readiness diagnostics.
-       */
-      modal?: {
         [key: string]: unknown;
       };
       /**
@@ -528,8 +514,6 @@ export interface components {
      * @description Cached runtime test results included in the runtime status payload.
      */
     RuntimeTestCache: {
-      /** @description Most recent Modal connectivity test result, if one has been run. */
-      modal?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
       /** @description Most recent language-model connectivity test result, if one has been run. */
       lm?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
       /** @description Most recent Daytona connectivity test result, if one has been run. */
@@ -714,9 +698,9 @@ export interface components {
       /**
        * Provider
        * @description Runtime volume backend used to satisfy the request.
-       * @enum {string}
+       * @constant
        */
-      provider: "modal" | "daytona";
+      provider: "daytona";
       /**
        * Path
        * @description Normalized file path used for the preview request.
@@ -794,9 +778,9 @@ export interface components {
       /**
        * Provider
        * @description Runtime volume backend used to satisfy the request.
-       * @enum {string}
+       * @constant
        */
-      provider: "modal" | "daytona";
+      provider: "daytona";
       /**
        * Volume Name
        * @description Resolved volume name used for the listing request.
@@ -992,28 +976,6 @@ export interface operations {
     };
   };
   /**
-   * Test Modal Connection
-   * @description Run the Modal preflight and smoke test used by the Settings diagnostics UI.
-   */
-  test_modal_connection_api_v1_runtime_tests_modal_post: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
-        };
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Runtime services are unavailable because server startup is incomplete. */
-      503: {
-        content: never;
-      };
-    };
-  };
-  /**
    * Test Lm Connection
    * @description Verify that the planner and delegate language-model configuration can load.
    */
@@ -1091,7 +1053,7 @@ export interface operations {
         /** @description Maximum directory depth to traverse while building the file tree. */
         max_depth?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
-        provider?: ("modal" | "daytona") | null;
+        provider?: "daytona" | null;
       };
     };
     responses: {
@@ -1141,7 +1103,7 @@ export interface operations {
         /** @description Maximum number of bytes of text content to return in the preview response. */
         max_bytes?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
-        provider?: ("modal" | "daytona") | null;
+        provider?: "daytona" | null;
       };
     };
     responses: {

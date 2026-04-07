@@ -14,20 +14,18 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
           DSPY_LLM_API_KEY: "sk-...yz",
           DSPY_LM_API_BASE: "https://api.example.com/v1",
           DSPY_LM_MAX_TOKENS: "64000",
-          MODAL_TOKEN_ID: "tok...12",
-          MODAL_TOKEN_SECRET: "***",
-          SECRET_NAME: "LITELLM",
-          VOLUME_NAME: "rlm-volume-dspy",
+          DAYTONA_API_KEY: "daytona-...12",
+          DAYTONA_API_URL: "https://daytona.example.com",
+          DAYTONA_TARGET: "local",
         },
         masked_values: {
           DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
           DSPY_LLM_API_KEY: "sk-...yz",
           DSPY_LM_API_BASE: "https://api.example.com/v1",
           DSPY_LM_MAX_TOKENS: "64000",
-          MODAL_TOKEN_ID: "tok...12",
-          MODAL_TOKEN_SECRET: "***",
-          SECRET_NAME: "LITELLM",
-          VOLUME_NAME: "rlm-volume-dspy",
+          DAYTONA_API_KEY: "daytona-...12",
+          DAYTONA_API_URL: "https://daytona.example.com",
+          DAYTONA_TARGET: "local",
         },
       },
     },
@@ -36,23 +34,23 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
         app_env: "local",
         write_enabled: true,
         ready: false,
-        sandbox_provider: "modal",
+        sandbox_provider: "daytona",
         active_models: {
           planner: "openai/gemini-3-flash-preview",
           delegate: "openai/gemini-3-flash-preview",
           delegate_small: "openai/gemini-3-flash-preview",
         },
         llm: { model_set: true, api_key_set: true, planner_configured: false },
-        modal: { credentials_available: true, secret_name_set: false },
+        daytona: { configured: true, api_key_set: true, target_set: true },
         tests: {
-          modal: {
-            kind: "modal",
+          daytona: {
+            kind: "daytona",
             ok: false,
             preflight_ok: false,
             checked_at: "2026-02-20T00:00:00+00:00",
             checks: {},
             guidance: [],
-            error: "Modal preflight checks failed.",
+            error: "Daytona preflight checks failed.",
           },
           lm: {
             kind: "lm",
@@ -68,7 +66,6 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
       },
     },
     saveSettings: { isPending: false, mutate: vi.fn() },
-    testModalConnection: { isPending: false, mutate: vi.fn() },
     testDaytonaConnection: {
       isPending: false,
       mutate: vi.fn(),
@@ -111,13 +108,12 @@ describe("RuntimeForm", () => {
     expect(html).toContain("Clear saved value");
     expect(html).toContain("Runtime Configuration");
     expect(html).toContain("Execution target/backend for Daytona provisioning");
-    expect(html).toContain("Modal durable volume mounted at /data for persisted runtime state.");
-    expect(html).toContain("Modal Smoke");
+    expect(html).toContain("Daytona API URL");
+    expect(html).toContain("Daytona Smoke");
     expect(html).toContain("Preflight failed");
     expect(html).toContain("LM Smoke");
     expect(html).toContain("Pass");
     expect(html).toContain("Test Credentials + Connection");
-    expect(html).toContain("Test Modal");
     expect(html).toContain("Test LM");
     expect(html).toContain("Test Daytona");
     expect(html).toContain("Test All Connections");

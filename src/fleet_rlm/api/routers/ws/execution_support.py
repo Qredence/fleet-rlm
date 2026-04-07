@@ -8,7 +8,7 @@ from typing import Any
 from fleet_rlm.integrations.database import RunStepType
 
 from ...dependencies import ServerState
-from ...execution import (
+from ...events import (
     ExecutionEvent,
     ExecutionEventEmitter,
     ExecutionEventType,
@@ -50,7 +50,7 @@ def build_execution_event(
 
 
 def get_execution_emitter(state: ServerState) -> ExecutionEventEmitter:
-    emitter = state.execution_event_emitter
+    emitter = state.events_event_emitter
     if emitter is not None:
         return emitter
 
@@ -59,7 +59,7 @@ def get_execution_emitter(state: ServerState) -> ExecutionEventEmitter:
         max_queue=cfg.ws_execution_max_queue,
         drop_policy=cfg.ws_execution_drop_policy,
     )
-    state.execution_event_emitter = emitter
+    state.events_event_emitter = emitter
     return emitter
 
 

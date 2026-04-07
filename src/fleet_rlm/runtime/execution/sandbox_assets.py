@@ -1,4 +1,4 @@
-"""Sandbox helper assets bundled into the Modal driver process."""
+"""Sandbox helper assets bundled into the driver process."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import subprocess
 from typing import Any
 
 try:
-    from fleet_rlm.runtime.tools.modal_volumes import resolve_realpath_within_root
+    from fleet_rlm.utils.volume_tree import resolve_realpath_within_root
 except ModuleNotFoundError:
-    # The Modal sandbox bootstraps from bundled source text, so package imports
+    # The sandbox bootstraps from bundled source text, so package imports
     # are not available until the host explicitly installs this repo inside the
     # remote environment. Keep a local fallback so the bundled helpers remain
     # self-contained for live sandbox startup.

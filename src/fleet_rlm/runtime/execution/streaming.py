@@ -112,7 +112,7 @@ def build_cancelled_stream_event(
     try:
         _db_sid = getattr(agent, "_db_session_id", None)
         if _db_sid is not None:
-            from fleet_rlm.integrations.database.local_store import add_turn
+            from fleet_rlm.integrations.local_store import add_turn
 
             add_turn(_db_sid, 0, message, marked_partial)
     except Exception:
@@ -186,7 +186,7 @@ def build_final_stream_event(
     try:
         _db_sid = getattr(agent, "_db_session_id", None)
         if _db_sid is not None:
-            from fleet_rlm.integrations.database.local_store import add_turn
+            from fleet_rlm.integrations.local_store import add_turn
 
             add_turn(_db_sid, 0, message, assistant_response)
     except Exception:

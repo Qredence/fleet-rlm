@@ -7,7 +7,7 @@ This tutorial covers the terminal chat interface for Fleet-RLM. You'll learn how
 Before starting this tutorial, ensure you have:
 
 - Fleet-RLM installed (see [Quick Start Guide](01-basic-usage.md))
-- Modal credentials configured (`modal setup`)
+- Daytona runtime configured (`DAYTONA_API_KEY`, `DAYTONA_API_URL`)
 - LLM provider configured in `.env`
 
 ## Starting Terminal Chat
@@ -67,17 +67,17 @@ fleet --trace-mode off
 | `verbose` | Full thought/status display. Shows detailed reasoning process. |
 | `off` | Disable trace output. Shows only final responses. |
 
-### Modal Volume and Secret Configuration
+### Persistent Volume Configuration
 
-For persistence across sessions, you can specify Modal volume and secret names:
+For persistence across sessions, you can specify a Daytona volume name:
 
 ```bash
-fleet --volume-name my-volume --secret-name my-secrets
+fleet --volume-name my-volume
 ```
 
 These options are useful when:
 - Running multiple sessions with shared state
-- Using custom Modal configurations
+- Targeting a specific Daytona-backed workspace volume
 - Persisting data between sessions
 
 ## Slash Commands
@@ -170,12 +170,12 @@ fleet --trace-mode verbose --docs-path README.md
 
 ## Troubleshooting
 
-### "Modal authentication required"
+### "Daytona configuration missing"
 
-Run Modal setup to configure credentials:
+Set your Daytona API key before starting chat:
 
 ```bash
-modal setup
+export DAYTONA_API_KEY=your-daytona-api-key
 ```
 
 ### "DSPY_LM_MODEL not set"
@@ -212,9 +212,9 @@ fleet --docs-path /full/path/to/document.md
 
 ### Session Hangs on Startup
 
-Check your Modal and LLM configuration:
+Check your Daytona and LLM configuration:
 
-1. Verify Modal credentials: `modal setup`
+1. Verify `DAYTONA_API_KEY` is set
 2. Verify LLM API key is valid
 3. Check network connectivity
 

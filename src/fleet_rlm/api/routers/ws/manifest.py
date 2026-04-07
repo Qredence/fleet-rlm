@@ -52,7 +52,7 @@ def _legacy_manifest_path(path: str) -> str | None:
 
 async def _aget_daytona_session(agent: ChatAgentProtocol) -> Any | None:
     try:
-        from fleet_rlm.integrations.providers.daytona.interpreter import (
+        from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
     except ImportError:

@@ -23,6 +23,6 @@ You mentioned an issue with `llm_query` or related RLM tools. The fleet-rlm team
 - Validate `sub_lm` configuration
 
 **Debug checklist:**
-1. Run `modal-interpreter-agent` to check setup
+1. Run `rlm-specialist` to inspect runtime setup
 2. Verify `.env` has valid API credentials
-3. Check volume is accessible (V2 recommended)
+3. Check Daytona durable storage is accessible

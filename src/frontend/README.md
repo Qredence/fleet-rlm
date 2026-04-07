@@ -23,7 +23,7 @@ The development server runs on `http://localhost:5173` and proxies `/api/v1` and
 This frontend targets the current FastAPI surface:
 
 - REST: `/health`, `/ready`, `GET /api/v1/auth/me`, `GET /api/v1/sessions/state`, `/api/v1/runtime/*`, `POST /api/v1/traces/feedback`
-- WebSocket: `/api/v1/ws/chat`, `/api/v1/ws/execution`
+- WebSocket: `/api/v1/ws/execution`
 
 Supported product surfaces:
 
@@ -50,7 +50,7 @@ Optional overrides:
 - `VITE_PUBLIC_POSTHOG_API_KEY`
 - `VITE_PUBLIC_POSTHOG_HOST`
 
-If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/chat` and `/api/v1/ws/execution` from `VITE_FLEET_API_URL`. WebSocket identity is auth-derived; `session_id` is the only client-controlled selector.
+If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/execution` from `VITE_FLEET_API_URL`. WebSocket identity is auth-derived; `session_id` is the only client-controlled selector.
 
 ### Backend Startup
 

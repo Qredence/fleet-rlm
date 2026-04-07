@@ -26,9 +26,9 @@ class StreamingContext:
     execution_profile : str
         Default execution profile label (e.g. ``"ROOT_INTERLOCUTOR"``).
     volume_name : str | None
-        Modal Volume name when persistent storage is attached.
+        Volume name when persistent storage is attached.
     sandbox_active : bool
-        Whether a Modal Sandbox session is currently alive.
+        Whether a sandbox session is currently alive.
     effective_max_iters : int
         Iteration budget computed for this turn.
     execution_mode : str

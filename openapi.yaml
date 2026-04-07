@@ -137,28 +137,6 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - HTTPBearer: []
-  /api/v1/runtime/tests/modal:
-    post:
-      tags:
-      - runtime
-      summary: Test Modal Connection
-      description: Run the Modal preflight and smoke test used by the Settings diagnostics
-        UI.
-      operationId: test_modal_connection_api_v1_runtime_tests_modal_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
-        '503':
-          description: Runtime services are unavailable because server startup is
-            incomplete.
-      security:
-      - HTTPBearer: []
   /api/v1/runtime/tests/lm:
     post:
       tags:
@@ -261,9 +239,7 @@ paths:
         required: false
         schema:
           anyOf:
-          - enum:
-            - modal
-            - daytona
+          - const: daytona
             type: string
           - type: 'null'
           description: Optional runtime volume backend override. Defaults to the active
@@ -334,9 +310,7 @@ paths:
         required: false
         schema:
           anyOf:
-          - enum:
-            - modal
-            - daytona
+          - const: daytona
             type: string
           - type: 'null'
           description: Optional runtime volume backend override. Defaults to the active
@@ -714,7 +688,6 @@ components:
         kind:
           type: string
           enum:
-          - modal
           - lm
           - daytona
           title: Kind
@@ -846,13 +819,11 @@ components:
           description: Resolved planner and delegate model identities.
         sandbox_provider:
           type: string
-          enum:
-          - modal
-          - daytona
+          const: daytona
           title: Sandbox Provider
           description: Active sandbox backend selected for runtime execution and volume
             browsing.
-          default: modal
+          default: daytona
         llm:
           additionalProperties: true
           type: object
@@ -863,11 +834,6 @@ components:
           type: object
           title: Mlflow
           description: MLflow enablement and startup diagnostics.
-        modal:
-          additionalProperties: true
-          type: object
-          title: Modal
-          description: Modal configuration and readiness diagnostics.
         daytona:
           additionalProperties: true
           type: object
@@ -895,12 +861,6 @@ components:
         UI.
     RuntimeTestCache:
       properties:
-        modal:
-          anyOf:
-          - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
-          - type: 'null'
-          description: Most recent Modal connectivity test result, if one has been
-            run.
         lm:
           anyOf:
           - $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
@@ -1099,9 +1059,7 @@ components:
       properties:
         provider:
           type: string
-          enum:
-          - modal
-          - daytona
+          const: daytona
           title: Provider
           description: Runtime volume backend used to satisfy the request.
         path:
@@ -1187,9 +1145,7 @@ components:
       properties:
         provider:
           type: string
-          enum:
-          - modal
-          - daytona
+          const: daytona
           title: Provider
           description: Runtime volume backend used to satisfy the request.
         volume_name:

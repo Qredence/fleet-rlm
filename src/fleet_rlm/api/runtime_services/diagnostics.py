@@ -6,14 +6,13 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from functools import partial
 from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from fleet_rlm.integrations.observability.config import MlflowConfig
-from fleet_rlm.integrations.providers.daytona import DaytonaConfigError
+from fleet_rlm.integrations.daytona import DaytonaConfigError
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
 from ..dependencies import ServerState
@@ -25,14 +24,11 @@ from ..schemas.core import (
 )
 from .common import (
     RUNTIME_TEST_TIMEOUT_SECONDS,
-    coerce_output_text,
     extract_lm_text,
     run_blocking,
     sanitize_error,
     utc_now_iso,
 )
-
-LoadModalConfig = Callable[[], Any]
 
 
 def resolve_active_model(value: str | None, env_key: str) -> str:
@@ -61,42 +57,6 @@ def connectivity_result_from_cache(
         return RuntimeConnectivityTestResponse(**cached)
     except ValidationError:
         return None
-
-
-def modal_preflight(
-    *,
-    secret_name: str,
-    load_modal_config: LoadModalConfig,
-) -> tuple[dict[str, bool], list[str]]:
-    modal_cfg_candidate = load_modal_config()
-    modal_cfg = modal_cfg_candidate if isinstance(modal_cfg_candidate, dict) else {}
-    credentials_from_env = bool(
-        os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET")
-    )
-    credentials_from_profile = bool(
-        modal_cfg.get("token_id") and modal_cfg.get("token_secret")
-    )
-    credentials_available = credentials_from_env or credentials_from_profile
-    secret_name_set = bool(secret_name.strip())
-
-    checks = {
-        "credentials_from_env": credentials_from_env,
-        "credentials_from_profile": credentials_from_profile,
-        "credentials_available": credentials_available,
-        "secret_name_set": secret_name_set,
-    }
-
-    guidance: list[str] = []
-    if not credentials_available:
-        guidance.append(
-            "Modal credentials missing. Configure MODAL_TOKEN_ID/MODAL_TOKEN_SECRET or run `modal setup`."
-        )
-    if not secret_name_set:
-        guidance.append(
-            "Runtime secret name is empty. Set SECRET_NAME in Runtime settings."
-        )
-
-    return checks, guidance
 
 
 def lm_preflight() -> tuple[dict[str, bool], list[str]]:
@@ -135,16 +95,13 @@ def daytona_preflight(
         "api_key_set": bool(api_key),
         "api_url_set": bool(api_url),
         "target_set": bool(target),
-        "sandbox_provider_set": bool(
-            (os.environ.get("SANDBOX_PROVIDER") or sandbox_provider or "").strip()
-        ),
         "legacy_api_base_url_ok": not bool(legacy_api_base),
         "configured": False,
     }
 
     guidance: list[str] = []
     try:
-        from fleet_rlm.integrations.providers.daytona import resolve_daytona_config
+        from fleet_rlm.integrations.daytona import resolve_daytona_config
 
         resolve_daytona_config()
         checks["configured"] = True
@@ -166,7 +123,7 @@ def daytona_preflight(
 
 def build_runtime_test_result(
     *,
-    kind: Literal["modal", "lm", "daytona"],
+    kind: Literal["lm", "daytona"],
     ok: bool,
     preflight_ok: bool,
     checked_at: str,
@@ -191,7 +148,7 @@ def build_runtime_test_result(
 
 def preflight_failure_result(
     *,
-    kind: Literal["modal", "lm", "daytona"],
+    kind: Literal["lm", "daytona"],
     checked_at: str,
     checks: dict[str, Any],
     guidance: list[str],
@@ -217,7 +174,7 @@ async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | 
 async def run_connectivity_test(
     *,
     state: ServerState,
-    kind: Literal["modal", "lm", "daytona"],
+    kind: Literal["lm", "daytona"],
     preflight_ok: bool,
     checks: dict[str, Any],
     guidance: list[str],
@@ -269,53 +226,6 @@ async def run_connectivity_test(
     )
     cache_runtime_test(state=state, result=result)
     return result
-
-
-async def run_modal_connection_test(
-    *,
-    state: ServerState,
-    load_modal_config: LoadModalConfig,
-) -> RuntimeConnectivityTestResponse:
-    checks, guidance = modal_preflight(
-        secret_name=state.config.secret_name,
-        load_modal_config=load_modal_config,
-    )
-    sandbox = None
-
-    async def _run_smoke() -> tuple[bool, str | None, str | None]:
-        nonlocal sandbox
-        import modal
-
-        app = await modal.App.lookup.aio(
-            "fleet-rlm-runtime-smoke", create_if_missing=True
-        )
-        sandbox = await modal.Sandbox.create.aio(app=app, timeout=30)
-        proc = await sandbox.exec.aio("python", "-c", "print('ok')", timeout=15)
-        await proc.wait.aio()
-        output_preview = coerce_output_text(await proc.stdout.read.aio())
-        if output_preview != "ok":
-            return False, output_preview, "Modal sandbox returned unexpected output."
-        return True, output_preview, None
-
-    try:
-        return await run_connectivity_test(
-            state=state,
-            kind="modal",
-            preflight_ok=checks["credentials_available"] and checks["secret_name_set"],
-            checks=checks,
-            guidance=guidance,
-            preflight_error="Modal preflight checks failed.",
-            default_error="Modal connectivity test failed.",
-            timeout_error=(
-                f"Modal test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
-                "Check connectivity and credentials."
-            ),
-            run_smoke=_run_smoke,
-        )
-    finally:
-        if sandbox is not None:
-            with suppress(Exception):
-                await sandbox.terminate.aio()
 
 
 async def run_lm_connection_test(
@@ -404,7 +314,7 @@ async def run_daytona_connection_test(
         try:
             from daytona import Daytona, DaytonaConfig
 
-            from fleet_rlm.integrations.providers.daytona import (
+            from fleet_rlm.integrations.daytona import (
                 resolve_daytona_config,
             )
 
@@ -449,33 +359,29 @@ async def run_daytona_connection_test(
 def build_runtime_status_response(
     *,
     state: ServerState,
-    load_modal_config: LoadModalConfig,
 ) -> RuntimeStatusResponse:
     mlflow_cfg = MlflowConfig.from_env()
     llm_checks, llm_guidance = lm_preflight()
-    modal_checks, modal_guidance = modal_preflight(
-        secret_name=state.config.secret_name,
-        load_modal_config=load_modal_config,
-    )
     daytona_checks, daytona_guidance = daytona_preflight(
         sandbox_provider=state.config.sandbox_provider,
     )
 
-    modal_test = connectivity_result_from_cache(state=state, kind="modal")
     lm_test = connectivity_result_from_cache(state=state, kind="lm")
     daytona_test = connectivity_result_from_cache(state=state, kind="daytona")
 
     ready = state.is_ready and bool(
-        modal_test is not None and modal_test.ok and lm_test is not None and lm_test.ok
+        daytona_test is not None
+        and daytona_test.ok
+        and lm_test is not None
+        and lm_test.ok
     )
     mlflow_startup_status = state.optional_service_status.get("mlflow", "pending")
     mlflow_startup_error = state.optional_service_errors.get("mlflow")
 
     guidance: list[str] = []
     guidance.extend(llm_guidance)
-    guidance.extend(modal_guidance)
     guidance.extend(daytona_guidance)
-    if modal_test is None or lm_test is None:
+    if daytona_test is None or lm_test is None:
         guidance.append(
             "Run Runtime connection tests to validate live provider connectivity."
         )
@@ -496,9 +402,7 @@ def build_runtime_status_response(
         app_env=state.config.app_env,
         write_enabled=state.config.app_env == "local",
         ready=ready,
-        sandbox_provider=(
-            "daytona" if state.config.sandbox_provider == "daytona" else "modal"
-        ),
+        sandbox_provider="daytona",
         active_models=RuntimeActiveModels(
             planner=resolve_active_model(state.config.agent_model, "DSPY_LM_MODEL"),
             delegate=resolve_active_model(
@@ -524,15 +428,10 @@ def build_runtime_status_response(
             "startup_status": mlflow_startup_status,
             "startup_error": mlflow_startup_error,
         },
-        modal={
-            **modal_checks,
-            "secret_name": state.config.secret_name,
-            "configured_volume": state.config.volume_name or "",
-        },
         daytona={
             **daytona_checks,
             "guidance": daytona_guidance,
         },
-        tests=RuntimeTestCache(modal=modal_test, lm=lm_test, daytona=daytona_test),
+        tests=RuntimeTestCache(lm=lm_test, daytona=daytona_test),
         guidance=guidance,
     )

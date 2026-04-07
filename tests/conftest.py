@@ -5,7 +5,7 @@ from typing import Iterator
 
 import pytest
 
-pytest_plugins = ("tests.unit.fixtures_react",)
+pytest_plugins = ("tests.unit.fixtures_react", "tests.unit.fixtures_daytona")
 
 
 def _suite_from_path(path: Path) -> str | None:
@@ -30,7 +30,8 @@ def pytest_configure(config: pytest.Config) -> None:
         "db": "database-backed integration tests",
         "e2e": "end-to-end test suite",
         "benchmark": "performance/throughput benchmark tests",
-        "live_llm": ("tests that require live Modal + configured LM/LITELLM secret"),
+        "live_llm": "tests that require a live configured LM / LiteLLM backend",
+        "live_daytona": "tests that require a live Daytona backend and explicit opt-in",
     }
     for marker, description in marker_docs.items():
         config.addinivalue_line("markers", f"{marker}: {description}")

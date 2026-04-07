@@ -54,7 +54,7 @@ For independent jobs that each need their own sandbox, spawn multiple
 
 ```python
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 tasks = [
     "result = sum(range(1000)); SUBMIT(total=result)",
@@ -91,7 +91,7 @@ All tasks write to the same persistent Daytona volume:
 
 ```python
 from concurrent.futures import ThreadPoolExecutor
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 VOLUME = 'rlm-volume-dspy'
 REPO = 'https://github.com/your-org/your-repo'
@@ -128,7 +128,7 @@ with ThreadPoolExecutor(max_workers=3) as pool:
 
 ```python
 from concurrent.futures import ThreadPoolExecutor
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 REPO = 'https://github.com/your-org/your-repo'
 
@@ -161,7 +161,7 @@ with ThreadPoolExecutor(max_workers=2) as pool:
 For smaller workloads, reuse a single interpreter across multiple executions:
 
 ```python
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 interp = DaytonaInterpreter(
     repo_url="https://github.com/your-org/your-repo",

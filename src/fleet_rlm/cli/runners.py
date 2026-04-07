@@ -7,8 +7,7 @@ cleanup.
 
 Runner categories:
     - Long-context analysis/summarization: run_long_context
-    - Diagnostics: check_secret_presence, check_secret_key
-    - Interactive ReAct chat: build_react_chat_agent, run_react_chat_once
+    - Interactive ReAct chat: build_chat_agent, run_react_chat_once
 
 All runners automatically:
     1. Configure the DSPy planner from environment
@@ -21,37 +20,32 @@ All runners automatically:
 from __future__ import annotations
 
 from contextlib import nullcontext
-import json
 import os
 from pathlib import Path
 from typing import Any, Literal
 
 import dspy
 
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 from fleet_rlm.runtime.agent.signatures import (
     SummarizeLongDocument,
 )
 from fleet_rlm.runtime.config import build_dspy_context
-from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 from fleet_rlm.integrations.observability.mlflow_runtime import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,
     new_client_request_id,
 )
-from .runtime_factory import (
+from fleet_rlm.runtime.factory import (
     _build_react_agent_from_options,
     _ReActAgentOptions,
     _require_planner_ready,
-    build_chat_agent_for_runtime_mode,
-    build_react_chat_agent,
+    build_chat_agent,
 )
 
 __all__ = [
-    "build_chat_agent_for_runtime_mode",
-    "build_react_chat_agent",
-    "check_secret_key",
-    "check_secret_presence",
+    "build_chat_agent",
     "run_long_context",
     "run_react_chat_once",
     "arun_react_chat_once",
@@ -266,8 +260,8 @@ def run_long_context(
         max_llm_calls: Maximum LLM calls (default: 50).
         verbose: Enable verbose output (default: True).
         timeout: Sandbox timeout in seconds (default: 900).
-        secret_name: Modal secret name (default: "LITELLM").
-        volume_name: Optional Modal volume name for persistence.
+        secret_name: Unused compatibility argument retained for older callers.
+        volume_name: Optional Daytona volume name for persistence.
         include_trajectory: Include RLM trajectory metadata in output.
         env_file: Optional path to .env file.
 
@@ -292,9 +286,7 @@ def run_long_context(
     sig = SummarizeLongDocument
 
     with (
-        ModalInterpreter(
-            timeout=timeout, secret_name=secret_name, volume_name=volume_name
-        ) as interpreter,
+        DaytonaInterpreter(timeout=timeout, volume_name=volume_name) as interpreter,
         mlflow_request_context(
             _runner_trace_context(
                 entrypoint="run-long-context",
@@ -330,61 +322,3 @@ def run_long_context(
             response,
             response_preview=response_preview,
         )
-
-
-def check_secret_presence(*, secret_name: str = "LITELLM") -> dict[str, bool]:
-    """Check which DSPy environment variables are present in a Modal secret.
-
-    Creates a temporary sandbox with the specified secret and checks
-    for the presence of DSPy-related environment variables.
-
-    Args:
-        secret_name: Name of the Modal secret to check (default: "LITELLM").
-
-    Returns:
-        Dictionary mapping environment variable names to boolean presence.
-    """
-    import modal
-
-    app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
-    sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
-    try:
-        code = (
-            "import json, os\n"
-            "keys = ['DSPY_LM_MODEL','DSPY_LM_API_BASE','DSPY_LLM_API_KEY','DSPY_LM_MAX_TOKENS']\n"
-            "print(json.dumps({k: bool(os.environ.get(k)) for k in keys}))\n"
-        )
-        proc = sb.exec("python", "-c", code, timeout=60)
-        proc.wait()
-        return json.loads(proc.stdout.read().strip())
-    finally:
-        sb.terminate()
-
-
-def check_secret_key(
-    *, secret_name: str = "LITELLM", key: str = "DSPY_LLM_API_KEY"
-) -> dict[str, Any]:
-    """Check a specific environment variable in a Modal secret.
-
-    Args:
-        secret_name: Name of the Modal secret to check (default: "LITELLM").
-        key: Environment variable name to check (default: "DSPY_LLM_API_KEY").
-
-    Returns:
-        Dictionary with ``present`` (bool) and ``length`` (int) keys.
-    """
-    import modal
-
-    app = modal.App.lookup("dspy-rlm-secret-check", create_if_missing=True)
-    sb = modal.Sandbox.create(app=app, secrets=[modal.Secret.from_name(secret_name)])
-    try:
-        code = (
-            "import json, os\n"
-            f"val=os.environ.get({key!r}, '')\n"
-            "print(json.dumps({'present': bool(val), 'length': len(val)}))\n"
-        )
-        proc = sb.exec("python", "-c", code, timeout=60)
-        proc.wait()
-        return json.loads(proc.stdout.read().strip())
-    finally:
-        sb.terminate()
