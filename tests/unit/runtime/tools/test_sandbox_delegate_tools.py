@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-# Prime llm_tools once so the refactored module can import cleanly in isolation.
+# Prime the circular llm_tools import once so this direct module test can load
+# the refactored helper without going through the normal sandbox package path.
 try:
     import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
 except ImportError:
@@ -83,12 +84,22 @@ def test_generated_tool_callable_exposes_declared_signature():
     )
 
 
-def test_generated_tool_callable_rejects_invalid_identifiers():
+@pytest.mark.parametrize(
+    ("tool_name", "param_order"),
+    [
+        ("not-valid-name", ("query",)),
+        ("def", ("query",)),
+        ("valid_name", ("1query",)),
+    ],
+)
+def test_generated_tool_callable_rejects_invalid_identifiers(
+    tool_name: str, param_order: tuple[str, ...]
+):
     spec = sandbox_delegate_tools._CachedRuntimeToolSpec(
-        name="not-valid-name",
+        name=tool_name,
         desc="desc",
         module_name="module",
-        param_order=("query",),
+        param_order=param_order,
     )
 
     with pytest.raises(ValueError, match="Invalid generated tool signature"):

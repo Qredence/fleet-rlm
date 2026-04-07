@@ -418,6 +418,8 @@ def _build_cached_runtime_tool(
         f"async def {spec.name}({', '.join(param_defs)}):\n"
         f"    return await _tool_impl({', '.join(call_args)})\n"
     )
+    # ``spec`` values are module-owned declarative constants, so validated
+    # identifiers here stay within trusted repo code rather than user input.
     exec(tool_src, namespace)
     _tool_fn = namespace[spec.name]
 
