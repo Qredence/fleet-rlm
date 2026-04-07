@@ -9,11 +9,7 @@ import pytest
 
 # Prime the known llm_tools/delegation_policy circular-import path once so this
 # direct-module regression test can import sandbox_delegate_tools afterward.
-try:
-    importlib.import_module("fleet_rlm.runtime.tools.llm_tools")
-except ImportError:
-    # Optional priming import for regression setup; safe to continue when unavailable.
-    pass
+import fleet_rlm.runtime.tools.llm_tools  # noqa: F401
 
 from fleet_rlm.runtime.tools import sandbox_delegate_tools
 
