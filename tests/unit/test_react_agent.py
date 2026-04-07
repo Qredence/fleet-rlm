@@ -491,7 +491,7 @@ def test_get_tool_raises_on_unknown_name(monkeypatch):
 
 
 def test_get_runtime_module_caches_instances(monkeypatch):
-    import fleet_rlm.runtime.models.rlm_runtime_modules as runtime_modules
+    import fleet_rlm.runtime.models.registry as runtime_modules
 
     created: list[tuple[str, object, int, int, bool]] = []
     fake_module = object()

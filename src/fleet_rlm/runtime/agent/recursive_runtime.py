@@ -15,10 +15,10 @@ from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
-# NOTE: fleet_rlm.runtime.models.rlm_runtime_modules is imported lazily inside
+# NOTE: fleet_rlm.runtime.models.builders is imported lazily inside
 # spawn_delegate_sub_agent_async to avoid the circular import:
-#   rlm_runtime_modules → core.agent.signatures → core.agent.__init__
-#   → chat_agent/recursive_runtime → rlm_runtime_modules
+#   builders → core.agent.signatures → core.agent.__init__
+#   → chat_agent/recursive_runtime → builders
 from fleet_rlm.runtime.execution.streaming import (
     ReActStatusProvider,
     StreamingContext,
@@ -279,8 +279,8 @@ async def spawn_delegate_sub_agent_async(
     effective_max_iters = max(1, int(getattr(agent, "rlm_max_iterations", 30)))
     effective_max_llm_calls = max(1, int(getattr(agent, "rlm_max_llm_calls", 50)))
     # Lazily imported here to avoid circular:
-    # rlm_runtime_modules → core.agent.signatures → core.agent → recursive_runtime → here
-    from fleet_rlm.runtime.models.rlm_runtime_modules import (
+    # builders → core.agent.signatures → core.agent → recursive_runtime → here
+    from fleet_rlm.runtime.models.builders import (
         build_recursive_subquery_rlm,
     )  # noqa: PLC0415
 
