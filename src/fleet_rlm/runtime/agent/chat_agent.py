@@ -560,7 +560,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         Runtime-module ownership lives under ``runtime.models``; keep the import
         local here to avoid circular imports during agent initialization.
         """
-        from fleet_rlm.runtime.models.rlm_runtime_modules import (
+        from fleet_rlm.runtime.models.registry import (
             build_runtime_module_config,
             get_or_build_runtime_module,
         )
