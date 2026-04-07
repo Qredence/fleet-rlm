@@ -123,6 +123,9 @@ class _CachedRuntimeToolSpec:
     output_fields: tuple[_OutputField, ...] = ()
 
 
+_REQUIRED = object()
+
+
 def _coerce_output_field(prediction: Any, spec: _OutputField) -> Any:
     """Apply a single ``_OutputField`` spec to a prediction."""
     raw = _prediction_value(prediction, spec.source, spec.default)
@@ -327,12 +330,7 @@ def _build_cached_runtime_tool(
 ) -> _ToolRegistration:
     """Convert a ``_CachedRuntimeToolSpec`` into a ``_ToolRegistration``."""
 
-    async def _tool_fn(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        # Map positional arguments to keyword arguments using param_order.
-        for idx, value in enumerate(args):
-            if idx < len(spec.param_order):
-                kwargs.setdefault(spec.param_order[idx], value)
-
+    async def _tool_impl(**kwargs: Any) -> dict[str, Any]:
         include_trajectory: bool = kwargs.pop("include_trajectory", True)
 
         # -- Document resolution --
@@ -351,12 +349,17 @@ def _build_cached_runtime_tool(
             dest = module_kwarg if module_kwarg is not None else tool_param
             if tool_param in kwargs:
                 value = kwargs[tool_param]
-                # Apply falsy-fallback default (mirrors ``val or "default"``).
-                if not value and tool_param in spec.param_falsy_defaults:
-                    value = spec.param_falsy_defaults[tool_param]
-                module_kwargs[dest] = value
             elif tool_param in spec.param_defaults:
-                module_kwargs[dest] = spec.param_defaults[tool_param]
+                value = spec.param_defaults[tool_param]
+            else:
+                continue
+
+            # Apply falsy-fallback default after resolving either an explicit
+            # value or a configured default so this mirrors ``val or "default"``.
+            if not value and tool_param in spec.param_falsy_defaults:
+                value = spec.param_falsy_defaults[tool_param]
+
+            module_kwargs[dest] = value
 
         # -- Execute --
         prediction, error, fallback_used = _run_cached_runtime_module(
@@ -381,6 +384,33 @@ def _build_cached_runtime_tool(
             include_trajectory=include_trajectory,
             payload=payload,
         )
+
+    namespace: dict[str, Any] = {"_tool_impl": _tool_impl}
+    param_defs: list[str] = []
+    call_args: list[str] = []
+    for param_name in spec.param_order:
+        default: Any = _REQUIRED
+        if param_name == "include_trajectory":
+            default = True
+        elif param_name == "alias" and spec.doc_kwarg is not None:
+            default = "active"
+        elif param_name in spec.param_defaults:
+            default = spec.param_defaults[param_name]
+
+        if default is _REQUIRED:
+            param_defs.append(param_name)
+        else:
+            default_name = f"__default_{param_name}"
+            namespace[default_name] = default
+            param_defs.append(f"{param_name}={default_name}")
+        call_args.append(f"{param_name}={param_name}")
+
+    tool_src = (
+        f"async def {spec.name}({', '.join(param_defs)}):\n"
+        f"    return await _tool_impl({', '.join(call_args)})\n"
+    )
+    exec(tool_src, namespace)
+    _tool_fn = namespace[spec.name]
 
     # Preserve the tool name for introspection / debugging.
     _tool_fn.__name__ = spec.name
