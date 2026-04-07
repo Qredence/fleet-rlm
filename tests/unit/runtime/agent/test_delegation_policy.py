@@ -54,10 +54,10 @@ def test_invoke_runtime_module_records_budget_and_fallback() -> None:
     assert result.error is None
     assert result.prediction == {"answer": "ok"}
     assert result.fallback_used is True
-    assert agent._delegate_calls_turn == 1
-    assert agent._runtime_module_calls_turn == 1
-    assert agent._recursive_delegate_calls_turn == 0
-    assert agent._delegate_fallback_count_turn == 1
+    assert agent._turn_delegation_state.delegate_calls_turn == 1
+    assert agent._turn_delegation_state.runtime_module_calls_turn == 1
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 0
+    assert agent._turn_delegation_state.delegate_fallback_count_turn == 1
 
 
 def test_invoke_runtime_module_uses_context_builder_for_module(monkeypatch) -> None:
@@ -116,4 +116,4 @@ def test_normalize_delegate_result_truncates_and_tracks_counter() -> None:
     assert payload["delegate_output_truncated"] is True
     assert payload["answer"].endswith("[truncated delegate output]")
     assert payload["assistant_response"] == payload["answer"]
-    assert agent._delegate_result_truncated_count_turn == 1
+    assert agent._turn_delegation_state.delegate_result_truncated_count_turn == 1

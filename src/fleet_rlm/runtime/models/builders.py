@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys as _sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -224,12 +223,7 @@ def _create_configured_runtime_rlm(
     *,
     signature: type[dspy.Signature],
 ) -> dspy.Module:
-    # Resolve through the compat shim so unittest.mock.patch takes effect.
-    _mod = _sys.modules.get(
-        "fleet_rlm.runtime.models.rlm_runtime_modules", _sys.modules[__name__]
-    )
-    _create = getattr(_mod, "create_runtime_rlm", create_runtime_rlm)
-    return _create(
+    return create_runtime_rlm(
         signature=signature,
         interpreter=config.interpreter,
         max_iterations=config.max_iterations,
@@ -514,17 +508,7 @@ class MemoryMigrationPlanningModule(dspy.Module):
             max_llm_calls=max_llm_calls,
             verbose=verbose,
         )
-        # Resolve through the backwards-compat shim when loaded so that
-        # ``unittest.mock.patch`` on that module takes effect.
-        _mod = _sys.modules.get(
-            "fleet_rlm.runtime.models.rlm_runtime_modules", _sys.modules[__name__]
-        )
-        _AuditCls = getattr(
-            _mod,
-            "MemoryStructureAuditPlanningModule",
-            MemoryStructureAuditPlanningModule,
-        )
-        self._memory_structure_audit = _AuditCls(
+        self._memory_structure_audit = MemoryStructureAuditPlanningModule(
             interpreter=config.interpreter,
             max_iterations=config.max_iterations,
             max_llm_calls=config.max_llm_calls,
