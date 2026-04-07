@@ -2,50 +2,53 @@
 
 ## Validation Surface
 
-This mission refactors backend structure without intentionally changing product behavior. Validation must still exercise the real product surfaces that define the backend contract.
-
-### Browser shell
+### Workspace shell and live execution
 - Tool: `agent-browser`
-- Entry: API-served shell at `http://127.0.0.1:8100/app/workspace`
-- What to verify: shell loads, sidebar/navigation is present, composer is present, no obvious shell-serving regression
+- Entry: `http://127.0.0.1:8000/app/workspace`
+- Verify: shell loads, runtime warning/remediation flows are coherent, live workspace execution succeeds after Daytona readiness repair, and trace/reasoning cards still render from streamed events
 
-### HTTP surface
-- Tools: `curl`, focused `pytest`
-- What to verify: `/health`, `/ready`, canonical HTTP route availability, runtime status/diagnostics payloads
+### Runtime diagnostics and settings
+- Tools: `agent-browser`, `curl`, focused `pytest`
+- Verify: `/health`, `/ready`, `/api/v1/runtime/status`, settings snapshot/load-save behavior, and LM/Daytona smoke-test controls/results
 
-### WebSocket surface
-- Tool: focused `pytest`
-- What to verify: canonical `/api/v1/ws/chat` and `/api/v1/ws/execution` behavior, session scoping, Daytona runtime-mode routing, event envelope continuity
+### Optimization
+- Tools: `agent-browser`, focused `pytest`, `curl`
+- Verify: optimization status/guidance rendering, form controls, and structured run responses for valid requests
 
-### CLI surface
-- Tool: shell commands
-- What to verify: `fleet web`, `fleet-rlm --help`, `fleet-rlm daytona-smoke --help`
+### Shared backend contract
+- Tools: focused `pytest`
+- Verify: websocket execution envelope, Daytona request-control propagation, chat agent runtime behavior, and DSPy optimization/evaluation entrypoint compatibility
 
 ## Validation Readiness Dry Run
 
-Dry run completed successfully using a temporary local server on `127.0.0.1:8100`.
+Dry run completed before mission start.
 
 Observed results:
-- `GET /health` returned `200` with the expected health payload.
-- `GET /ready` returned `200` with planner/database/sandbox readiness fields.
-- `agent-browser` loaded `/app/workspace` successfully and captured an annotated screenshot showing sidebar/navigation and message composer.
+- `GET /health` returned `200`
+- `GET /ready` returned `200`
+- `GET /api/v1/runtime/status` returned `200`
+- Browser navigation to `/app/workspace` succeeded
+- A live websocket execution attempted to start but failed because Daytona volume `rlm-volume-dspy` was in `pending_create`
+- The workspace/settings surfaces exposed runtime guidance, confirming the contract surface is reachable even though the live path is blocked
 
-Resource observations from the dry run:
-- Machine capacity: `10` CPU cores, `16 GiB` RAM.
-- Backend server RSS during the shell smoke stayed around `43–53 MiB`.
-- The shell smoke completed successfully without starting a separate frontend dev server.
-- Existing local IDE, MCP, MLflow, and unrelated app processes already consume meaningful headroom, so validation should stay conservative.
+Required follow-up:
+- The mission must repair Daytona readiness enough that a real workspace execution can complete during user testing
 
 ## Validation Concurrency
 
-### Browser shell (`agent-browser`)
+Machine profile observed during planning:
+- CPU cores: `10`
+- Memory: `16 GiB`
+- Existing local processes already consume meaningful headroom (MLflow, Playwright, pytest, IDE/MCP helpers)
+
+### Live workspace execution
 - Max concurrent validators: `1`
-- Rationale: browser automation is heavier and should avoid contention with existing local processes; one shell validator is sufficient for this refactor mission.
+- Rationale: the Daytona-backed execution path is the heaviest and depends on shared external/provider state
 
-### HTTP / CLI smoke
+### Read-only UI/API checks
 - Max concurrent validators: `3`
-- Rationale: curl/help checks are lightweight, but they still share the same local repo environment and should not saturate the machine while workers or validators are active.
+- Rationale: browser navigation and API/status checks are lighter, but still share the same local app/server resources
 
-### WebSocket / pytest contract lanes
-- Treat as serialized per feature unless a validator explicitly proves safe isolation.
-- Rationale: websocket/session/daytona checks all exercise shared backend state and are better treated as contract lanes than as highly parallel user flows.
+### Focused pytest contract lanes
+- Run as serialized lanes unless the validator proves isolation is safe
+- Rationale: websocket/runtime/provider tests share backend state and should remain deterministic

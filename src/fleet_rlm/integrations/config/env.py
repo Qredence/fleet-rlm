@@ -25,12 +25,12 @@ class MemoryConfig(BaseModel):
     )
     archival_path: str = Field(
         default="/data/memory",
-        description="Root path for archival memory in the Modal Volume.",
+        description="Root path for archival memory in the persistent volume.",
     )
 
 
 class InterpreterConfig(BaseModel):
-    """Configuration for the Modal Interpreter sandbox."""
+    """Configuration for the interpreter sandbox."""
 
     image: str = Field(
         default="python:3.13-slim-bookworm",
@@ -38,7 +38,7 @@ class InterpreterConfig(BaseModel):
     )
     volume_name: str | None = Field(
         default=None,
-        description="Name of the Modal Volume to mount (e.g., 'agent-volume').",
+        description="Name of the persistent volume to mount (e.g., 'rlm-volume-dspy').",
     )
     timeout: int = Field(
         default=900,
@@ -46,7 +46,7 @@ class InterpreterConfig(BaseModel):
     )
     secrets: list[str] = Field(
         default_factory=list,
-        description="List of Modal Secret names to inject into the sandbox.",
+        description="List of secret names to inject into the sandbox.",
     )
     async_execute: bool = Field(
         default=True,

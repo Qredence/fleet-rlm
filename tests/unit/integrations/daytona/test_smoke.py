@@ -5,49 +5,14 @@ from dspy.primitives import FinalOutput
 from fleet_rlm.integrations.daytona.config import DaytonaConfigError
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.integrations.daytona.diagnostics import run_daytona_smoke
-
-
-class _FakeSession:
-    def __init__(self) -> None:
-        self.sandbox_id = "sbx-123"
-        self.workspace_path = "/workspace/repo"
-        self.phase_timings_ms = {"sandbox_create": 2, "repo_clone": 4}
-        self.driver_started = False
-        self.deleted = False
-
-    def start_driver(self, *, timeout: float = 30.0) -> None:
-        del timeout
-        self.driver_started = True
-
-    def delete(self) -> None:
-        self.deleted = True
-
-
-class _FakeRuntime:
-    def __init__(self, session: _FakeSession | None = None) -> None:
-        self.session = session or _FakeSession()
-        self.close_calls = 0
-
-    def create_workspace_session(
-        self,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-        volume_name: str | None = None,
-    ) -> _FakeSession:
-        del repo_url, ref, context_paths, volume_name
-        return self.session
-
-    def close(self) -> None:
-        self.close_calls += 1
+from tests.unit.fixtures_daytona import FakeDaytonaRuntime, FakeDaytonaSession
 
 
 class _FakeInterpreter:
     def __init__(
         self,
         *,
-        runtime: _FakeRuntime,
+        runtime: FakeDaytonaRuntime,
         owns_runtime: bool = False,
         repo_url: str | None,
         repo_ref: str | None,
@@ -60,7 +25,7 @@ class _FakeInterpreter:
         self.session = runtime.create_workspace_session(repo_url=None, ref=None)
         self.counter = 0
 
-    def _ensure_session_sync(self) -> _FakeSession:
+    def _ensure_session_sync(self) -> FakeDaytonaSession:
         return self.session
 
     def start(self) -> None:
@@ -82,7 +47,9 @@ class _FakeInterpreter:
 
 
 def test_run_daytona_smoke_validates_context_persistence(monkeypatch) -> None:
-    runtime = _FakeRuntime()
+    runtime = FakeDaytonaRuntime()
+    runtime.session.sandbox_id = "sbx-123"
+    runtime.session.workspace_path = "/workspace/repo"
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.interpreter.DaytonaInterpreter",
         _FakeInterpreter,
@@ -105,7 +72,7 @@ def test_run_daytona_smoke_validates_context_persistence(monkeypatch) -> None:
     assert result.phase_timings_ms["repo_clone"] == 4
     assert result.workspace_path == "/workspace/repo"
     assert "cleanup" in result.phase_timings_ms
-    assert runtime.session.deleted is True
+    assert runtime.session.deleted == 1
 
 
 def test_run_daytona_smoke_reports_config_errors(monkeypatch) -> None:
@@ -125,7 +92,7 @@ def test_run_daytona_smoke_reports_config_errors(monkeypatch) -> None:
 
 
 def test_run_daytona_smoke_reports_clone_failures(monkeypatch) -> None:
-    class _BrokenRuntime(_FakeRuntime):
+    class _BrokenRuntime(FakeDaytonaRuntime):
         def create_workspace_session(
             self,
             *,
@@ -133,7 +100,7 @@ def test_run_daytona_smoke_reports_clone_failures(monkeypatch) -> None:
             ref: str | None,
             context_paths: list[str] | None = None,
             volume_name: str | None = None,
-        ) -> _FakeSession:
+        ) -> FakeDaytonaSession:
             del repo_url, ref, context_paths, volume_name
             raise DaytonaDiagnosticError(
                 "Daytona repo clone failure: bad ref",
@@ -163,7 +130,7 @@ def test_run_daytona_smoke_reports_execution_failures_and_cleans_up(
             del code
             raise RuntimeError("execution broke")
 
-    runtime = _FakeRuntime()
+    runtime = FakeDaytonaRuntime()
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.interpreter.DaytonaInterpreter",
         _BrokenInterpreter,
@@ -176,21 +143,21 @@ def test_run_daytona_smoke_reports_execution_failures_and_cleans_up(
     assert result.termination_phase == "exec_step_1"
     assert result.error_category == "driver_execution_error"
     assert "execution broke" in str(result.error_message)
-    assert runtime.session.deleted is True
+    assert runtime.session.deleted == 1
 
 
 def test_run_daytona_smoke_closes_owned_runtime_after_startup_failure(
     monkeypatch,
 ) -> None:
     class _BrokenInterpreter(_FakeInterpreter):
-        def _ensure_session_sync(self) -> _FakeSession:
+        def _ensure_session_sync(self) -> FakeDaytonaSession:
             raise DaytonaDiagnosticError(
                 "Daytona sandbox create failure: invalid credentials",
                 category="sandbox_create_clone_error",
                 phase="sandbox_create",
             )
 
-    runtime = _FakeRuntime()
+    runtime = FakeDaytonaRuntime()
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime.DaytonaSandboxRuntime",
         lambda: runtime,

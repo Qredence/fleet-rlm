@@ -7,13 +7,17 @@ the closure-based DSPy tool builder that binds document ops to an agent.
 from __future__ import annotations
 
 from pathlib import Path
-from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import dspy
 import pytest
+
+from tests.unit.fixtures_daytona import (
+    FakeDaytonaWorkspaceInterpreter,
+    FakeDaytonaWorkspaceSession,
+)
 
 
 def _make_fake_agent(tmp_path: Path) -> Any:
@@ -32,55 +36,6 @@ def _make_fake_agent(tmp_path: Path) -> Any:
         interpreter=None,
     )
     return agent
-
-
-class _FakeDaytonaSession:
-    def __init__(self, workspace_path: str = "/workspace/repo") -> None:
-        self.workspace_path = workspace_path
-        self.files: dict[str, str] = {}
-        self.read_calls: list[str] = []
-        self.list_calls: list[str] = []
-
-    def _resolve(self, path: str) -> str:
-        candidate = PurePosixPath(path)
-        if candidate.is_absolute():
-            return str(candidate)
-        return str(PurePosixPath(self.workspace_path) / candidate)
-
-    def read_file(self, path: str) -> str:
-        resolved = self._resolve(path)
-        self.read_calls.append(resolved)
-        if resolved not in self.files:
-            raise FileNotFoundError(resolved)
-        return self.files[resolved]
-
-    def list_files(self, path: str) -> list[Any]:
-        resolved = self._resolve(path)
-        self.list_calls.append(resolved)
-        prefix = resolved.rstrip("/") + "/"
-        items: dict[str, bool] = {}
-        for file_path in self.files:
-            if not file_path.startswith(prefix):
-                continue
-            remainder = file_path[len(prefix) :]
-            if not remainder:
-                continue
-            segment, _, tail = remainder.partition("/")
-            items.setdefault(segment, bool(tail))
-        if not items:
-            raise FileNotFoundError(resolved)
-        return [
-            SimpleNamespace(name=name, is_dir=is_dir)
-            for name, is_dir in sorted(items.items())
-        ]
-
-
-class _FakeDaytonaInterpreter:
-    def __init__(self, session: _FakeDaytonaSession) -> None:
-        self._session = session
-
-    def _ensure_session_sync(self) -> _FakeDaytonaSession:
-        return self._session
 
 
 # ---------------------------------------------------------------------------
@@ -202,9 +157,9 @@ def test_load_document_daytona_workspace_relative_file(tmp_path: Path):
     from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaWorkspaceSession()
     session.files["/workspace/repo/paper.txt"] = "paper body"
-    agent.interpreter = _FakeDaytonaInterpreter(session)
+    agent.interpreter = FakeDaytonaWorkspaceInterpreter(session)
 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
@@ -235,9 +190,9 @@ def test_load_document_daytona_workspace_relative_file_wins_over_host(tmp_path: 
     readme.write_text("host readme")
 
     agent = _make_fake_agent(tmp_path)
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaWorkspaceSession()
     session.files["/workspace/repo/README.md"] = "daytona readme"
-    agent.interpreter = _FakeDaytonaInterpreter(session)
+    agent.interpreter = FakeDaytonaWorkspaceInterpreter(session)
 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
@@ -264,7 +219,7 @@ def test_load_document_daytona_workspace_missing_file_raises(tmp_path: Path):
     from fleet_rlm.runtime.tools.content.document import build_document_tools
 
     agent = _make_fake_agent(tmp_path)
-    agent.interpreter = _FakeDaytonaInterpreter(_FakeDaytonaSession())
+    agent.interpreter = FakeDaytonaWorkspaceInterpreter(FakeDaytonaWorkspaceSession())
 
     tools = build_document_tools(agent)
     load_fn = next(t.func for t in tools if t.name == "load_document")
@@ -282,8 +237,8 @@ def test_load_daytona_workspace_text_sync_rejects_parent_traversal(
     )
 
     agent = _make_fake_agent(tmp_path)
-    session = _FakeDaytonaSession()
-    agent.interpreter = _FakeDaytonaInterpreter(session)
+    session = FakeDaytonaWorkspaceSession()
+    agent.interpreter = FakeDaytonaWorkspaceInterpreter(session)
 
     loaded = _load_daytona_workspace_text_sync(
         _SandboxToolContext(agent=agent),

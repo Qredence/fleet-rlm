@@ -1,6 +1,8 @@
 # fleet-rlm Documentation
 
-`fleet-rlm` provides secure, cloud-sandboxed recursive language model workflows with a Web UI, API, and optional MCP server. The default product path is Modal-backed. The Daytona path is experimental, but it plugs into the same workspace and transport contract instead of acting like a separate app.
+`fleet-rlm` provides an adaptive recursive language model workspace with a Web
+UI, API, and optional MCP server. The maintained product path is DSPy-native
+and Daytona-backed, with one shared workspace and transport contract.
 
 This documentation is for both:
 
@@ -28,6 +30,7 @@ Next steps:
 ## Use the product
 
 - [Installation](how-to-guides/installation.md)
+- [Adaptive RLM Product Spec](explanation/product-spec.md)
 - [Runtime settings](how-to-guides/runtime-settings.md)
 - [LiteLLM proxy model availability](litellm-models.md)
 - [Deploying the API server](how-to-guides/deploying-server.md)
