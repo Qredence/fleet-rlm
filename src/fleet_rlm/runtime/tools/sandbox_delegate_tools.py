@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import keyword
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -121,6 +122,10 @@ class _CachedRuntimeToolSpec:
 
     # Output fields extracted from the prediction.
     output_fields: tuple[_OutputField, ...] = ()
+
+
+# Sentinel for generated function parameters that should stay required.
+_REQUIRED = object()
 
 
 def _coerce_output_field(prediction: Any, spec: _OutputField) -> Any:
@@ -327,12 +332,7 @@ def _build_cached_runtime_tool(
 ) -> _ToolRegistration:
     """Convert a ``_CachedRuntimeToolSpec`` into a ``_ToolRegistration``."""
 
-    async def _tool_fn(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        # Map positional arguments to keyword arguments using param_order.
-        for idx, value in enumerate(args):
-            if idx < len(spec.param_order):
-                kwargs.setdefault(spec.param_order[idx], value)
-
+    async def _tool_impl(**kwargs: Any) -> dict[str, Any]:
         include_trajectory: bool = kwargs.pop("include_trajectory", True)
 
         # -- Document resolution --
@@ -343,19 +343,25 @@ def _build_cached_runtime_tool(
 
         # -- Build module kwargs --
         module_kwargs: dict[str, Any] = {}
-        if document is not None and spec.doc_kwarg is not None:
+        if document is not None:
+            assert spec.doc_kwarg is not None  # guaranteed by branch above
             module_kwargs[spec.doc_kwarg] = document
 
         for tool_param, module_kwarg in spec.param_mapping.items():
             dest = module_kwarg if module_kwarg is not None else tool_param
             if tool_param in kwargs:
                 value = kwargs[tool_param]
-                # Apply falsy-fallback default (mirrors ``val or "default"``).
-                if not value and tool_param in spec.param_falsy_defaults:
-                    value = spec.param_falsy_defaults[tool_param]
-                module_kwargs[dest] = value
             elif tool_param in spec.param_defaults:
-                module_kwargs[dest] = spec.param_defaults[tool_param]
+                value = spec.param_defaults[tool_param]
+            else:
+                continue
+
+            # Apply falsy-fallback default after resolving either an explicit
+            # value or a configured default so this mirrors ``val or "default"``.
+            if not value and tool_param in spec.param_falsy_defaults:
+                value = spec.param_falsy_defaults[tool_param]
+
+            module_kwargs[dest] = value
 
         # -- Execute --
         prediction, error, fallback_used = _run_cached_runtime_module(
@@ -380,6 +386,51 @@ def _build_cached_runtime_tool(
             include_trajectory=include_trajectory,
             payload=payload,
         )
+
+    namespace: dict[str, Any] = {"_tool_impl": _tool_impl}
+    param_defs: list[str] = []
+    call_args: list[str] = []
+    identifiers = (spec.name, *spec.param_order)
+    if any(
+        not identifier.isidentifier() or keyword.iskeyword(identifier)
+        for identifier in identifiers
+    ):
+        raise ValueError(f"Invalid generated tool signature for {spec.name!r}.")
+
+    for param_name in spec.param_order:
+        default: Any = _REQUIRED
+        if param_name == "include_trajectory":
+            default = True
+        elif param_name == "alias" and spec.doc_kwarg is not None:
+            default = "active"
+        elif param_name in spec.param_defaults:
+            default = spec.param_defaults[param_name]
+
+        if default is _REQUIRED:
+            param_defs.append(param_name)
+        else:
+            default_name = f"__default_{param_name}"
+            namespace[default_name] = default
+            param_defs.append(f"{param_name}={default_name}")
+        call_args.append(f"{param_name}={param_name}")
+
+    tool_src = (
+        f"async def {spec.name}({', '.join(param_defs)}):\n"
+        f"    return await _tool_impl({', '.join(call_args)})\n"
+    )
+    allowed_namespace_keys = {"_tool_impl"} | {
+        f"__default_{param_name}"
+        for param_name in spec.param_order
+        if param_name == "include_trajectory"
+        or (param_name == "alias" and spec.doc_kwarg is not None)
+        or param_name in spec.param_defaults
+    }
+    if set(namespace) != allowed_namespace_keys:
+        raise ValueError(f"Unexpected generated tool namespace for {spec.name!r}.")
+    # ``spec`` values are module-owned declarative constants, so validated
+    # identifiers here stay within trusted repo code rather than user input.
+    exec(tool_src, namespace)
+    _tool_fn = namespace[spec.name]
 
     # Preserve the tool name for introspection / debugging.
     _tool_fn.__name__ = spec.name
