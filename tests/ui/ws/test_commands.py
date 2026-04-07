@@ -20,7 +20,7 @@ def test_websocket_command_validation(
     expected_substring: str,
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -44,7 +44,7 @@ def test_websocket_command_rejects_legacy_identity_fields(
     websocket_auth_headers,
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {
@@ -68,7 +68,7 @@ def test_websocket_command_rejects_null_legacy_identity_fields(
     websocket_auth_headers,
 ):
     with ws_client.websocket_connect(
-        "/api/v1/ws/chat", headers=websocket_auth_headers
+        "/api/v1/ws/execution", headers=websocket_auth_headers
     ) as websocket:
         websocket.send_json(
             {

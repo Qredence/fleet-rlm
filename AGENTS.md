@@ -81,12 +81,15 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 
 Shared runtime contract:
 
-- `runtime_mode=modal_chat`: default product path
-- `runtime_mode=daytona_pilot`: Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime
-- `execution_mode`: Modal-only request option
+- The shared backend/frontend runtime contract is Daytona-only.
+- Request-side `runtime_mode` selection is no longer part of the public websocket contract.
+- `execution_mode` remains a per-turn execution hint for the Daytona-backed runtime.
 - Daytona-only request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
 - Durable mounted-volume roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`
 - Session manifests on durable storage live under `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`
+- Daytona idle lifecycle uses provider timers with minute semantics:
+  - `auto_stop_interval=30`
+  - `auto_archive_interval=60`
 
 Canonical shared endpoints:
 
@@ -98,7 +101,6 @@ Canonical shared endpoints:
 - `POST /api/v1/traces/feedback`
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
-- `/api/v1/ws/chat`
 - `/api/v1/ws/execution`
 
 Cross-stack source-of-truth boundaries:
@@ -116,7 +118,7 @@ Cross-stack source-of-truth boundaries:
 
 - Search for existing ownership boundaries before adding new modules.
 - Prefer extending existing service/helper modules over introducing parallel abstractions.
-- Keep Modal and Daytona on the same conversational/runtime architecture; Daytona-specific logic belongs in the provider/interpreter layer.
+- Treat FastAPI as the transport root, DSPy as the runtime core, and Daytona as the only public sandbox backend.
 - Treat the Volumes surface as a browser for mounted durable storage only; the live workspace is transient execution state.
 - Do not hand-edit generated files or build output unless the task is specifically about generated artifacts.
 - If backend request/response shapes or OpenAPI-facing metadata change, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update frontend API artifacts, and verify drift with `pnpm run api:check`.
@@ -201,4 +203,4 @@ When updating this repository, keep these aligned:
 - `AGENTS.md`, subsystem AGENTS files, and relevant durable docs in `docs/`
 - `Makefile`, `pyproject.toml`, and `src/frontend/package.json`
 - `openapi.yaml` and generated frontend API artifacts
-- Supported route surfaces and runtime-mode behavior across backend and frontend
+- Supported route surfaces and Daytona-only runtime behavior across backend and frontend

@@ -20,20 +20,10 @@ export const RUNTIME_EDITABLE_KEYS = [
   "DAYTONA_API_KEY",
   "DAYTONA_API_URL",
   "DAYTONA_TARGET",
-  "MODAL_TOKEN_ID",
-  "MODAL_TOKEN_SECRET",
-  "SANDBOX_PROVIDER",
-  "SECRET_NAME",
-  "VOLUME_NAME",
 ] as const;
 
 export type RuntimeEditableKey = (typeof RUNTIME_EDITABLE_KEYS)[number];
-export const RUNTIME_SECRET_EDITABLE_KEYS = [
-  "DSPY_LLM_API_KEY",
-  "DAYTONA_API_KEY",
-  "MODAL_TOKEN_ID",
-  "MODAL_TOKEN_SECRET",
-] as const;
+export const RUNTIME_SECRET_EDITABLE_KEYS = ["DSPY_LLM_API_KEY", "DAYTONA_API_KEY"] as const;
 export type RuntimeSecretEditableKey = (typeof RUNTIME_SECRET_EDITABLE_KEYS)[number];
 
 export const RUNTIME_LM_EDITABLE_KEYS = [
@@ -145,13 +135,6 @@ export function useRuntimeSettings() {
     },
   });
 
-  const testModalConnection = useMutation({
-    mutationFn: () => runtimeEndpoints.testModal(),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: runtimeKeys.status() });
-    },
-  });
-
   const testLmConnection = useMutation({
     mutationFn: () => runtimeEndpoints.testLm(),
     onSuccess: async () => {
@@ -167,25 +150,15 @@ export function useRuntimeSettings() {
   });
 
   const testAllConnections = useCallback(async () => {
-    const modal = await testModalConnection.mutateAsync();
     const lm = await testLmConnection.mutateAsync();
-    const daytona =
-      statusQuery.data?.sandbox_provider === "daytona"
-        ? await testDaytonaConnection.mutateAsync()
-        : null;
-    return { modal, lm, daytona };
-  }, [
-    statusQuery.data?.sandbox_provider,
-    testDaytonaConnection,
-    testLmConnection,
-    testModalConnection,
-  ]);
+    const daytona = await testDaytonaConnection.mutateAsync();
+    return { lm, daytona };
+  }, [testDaytonaConnection, testLmConnection]);
 
   return {
     settingsQuery,
     statusQuery,
     saveSettings,
-    testModalConnection,
     testDaytonaConnection,
     testLmConnection,
     testAllConnections,

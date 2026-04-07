@@ -25,7 +25,6 @@ class MembershipRole(str, enum.Enum):
 
 
 class SandboxProvider(str, enum.Enum):
-    MODAL = "modal"
     DAYTONA = "daytona"
     ACA_JOBS = "aca_jobs"
     LOCAL = "local"

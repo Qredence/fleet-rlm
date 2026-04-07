@@ -43,13 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--volume-name",
         type=str,
         default=None,
-        help="Modal volume name for persistent storage.",
-    )
-    parser.add_argument(
-        "--secret-name",
-        type=str,
-        default=None,
-        help="Modal secret name for credentials.",
+        help="Daytona volume name for persistent storage.",
     )
     return parser
 
@@ -110,6 +104,7 @@ def main() -> None:
         options=TerminalChatOptions(
             docs_path=args.docs_path,
             trace_mode=args.trace_mode,
+            volume_name=args.volume_name,
         ),
     )
 

@@ -25,16 +25,8 @@ from .models_enums import (
 @dataclass(frozen=True)
 class IdentityUpsertResult:
     tenant_id: uuid.UUID
-    user_id: uuid.UUID
-    tenant_status: TenantStatus | None = None
-    membership_role: MembershipRole | None = None
-
-
-@dataclass(frozen=True)
-class ControlPlaneIdentityResolution:
-    tenant_id: uuid.UUID
-    tenant_status: TenantStatus
     user_id: uuid.UUID | None = None
+    tenant_status: TenantStatus | None = None
     membership_role: MembershipRole | None = None
 
 

@@ -3,17 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { getMockFilesystem } from "@/features/volumes/use-volumes";
 
 describe("getMockFilesystem", () => {
-  it("uses the canonical durable roots for modal", () => {
-    const filesystem = getMockFilesystem("modal");
-
-    expect(filesystem.map((node) => node.path)).toEqual([
-      "/data/memory",
-      "/data/artifacts",
-      "/data/buffers",
-      "/data/meta",
-    ]);
-  });
-
   it("uses the canonical durable roots for daytona", () => {
     const filesystem = getMockFilesystem("daytona");
 

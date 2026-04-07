@@ -1,4 +1,4 @@
-import { AtSign, Brain, Globe, MessagesSquare, Paperclip, Sparkles, Wrench } from "lucide-react";
+import { AtSign, Brain, Globe, Paperclip, Sparkles, Wrench } from "lucide-react";
 import type { ComponentType } from "react";
 
 import {
@@ -34,7 +34,6 @@ const EXECUTION_MODE_OPTIONS = [
 ] satisfies ComposerSelectOption<WsExecutionMode>[];
 
 const RUNTIME_MODE_OPTIONS = [
-  { id: "modal_chat", icon: MessagesSquare, label: "Modal chat" },
   { id: "daytona_pilot", icon: Globe, label: "Daytona" },
 ] satisfies ComposerSelectOption<WsRuntimeMode>[];
 

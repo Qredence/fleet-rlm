@@ -7,33 +7,45 @@ Run: uv run python .claude/skills/rlm-debug/scripts/diagnose.py
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 
-def check_modal() -> bool:
-    """Check Modal installation and credentials."""
-    print("--- Modal ---")
-    try:
-        import modal
+def check_daytona() -> bool:
+    """Check Daytona configuration and optional CLI availability."""
+    print("--- Daytona ---")
+    api_key = os.environ.get("DAYTONA_API_KEY", "")
+    api_url = os.environ.get("DAYTONA_API_URL", "")
 
-        print(f"  Version: {modal.__version__}")
-    except ImportError:
-        print("  FAIL: modal not installed. Run: uv sync")
-        return False
-
-    token_id = os.environ.get("MODAL_TOKEN_ID", "")
-    config_path = Path.home() / ".modal.toml"
-
-    if token_id:
-        print("  Token (env): present (hidden)")
-    elif config_path.exists():
-        print("  Token (file): present (hidden)")
+    ok = True
+    if api_key:
+        print("  DAYTONA_API_KEY: present (hidden)")
     else:
-        print("  FAIL: No credentials. Run: uv run modal token set")
-        return False
+        print("  FAIL: DAYTONA_API_KEY is missing")
+        ok = False
 
-    return True
+    if api_url:
+        print(f"  DAYTONA_API_URL: {api_url}")
+    else:
+        print("  FAIL: DAYTONA_API_URL is missing")
+        ok = False
+
+    try:
+        result = subprocess.run(
+            ["daytona", "version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        output = (result.stdout or result.stderr).strip()
+        if output:
+            print(f"  CLI: {output.splitlines()[0]}")
+    except FileNotFoundError:
+        print("  CLI: not installed (optional)")
+
+    return ok
 
 
 def check_env() -> bool:
@@ -43,7 +55,7 @@ def check_env() -> bool:
     if env_path.exists():
         print(f"  .env file: found ({env_path.stat().st_size} bytes)")
     else:
-        print("  .env file: MISSING (create at project root)")
+        print("  .env file: MISSING (create at project root if needed)")
 
     required = ["DSPY_LM_MODEL"]
     fallback_keys = [("DSPY_LLM_API_KEY", "DSPY_LM_API_KEY")]
@@ -52,7 +64,7 @@ def check_env() -> bool:
     for key in required:
         val = os.environ.get(key, "")
         if val:
-            print(f"  {key}: present (hidden)")
+            print(f"  {key}: present ({val})")
         else:
             print(f"  {key}: MISSING")
             ok = False
@@ -68,47 +80,11 @@ def check_env() -> bool:
     return ok
 
 
-def check_secret() -> bool:
-    """Check LITELLM Modal secret."""
-    print("\n--- LITELLM Secret ---")
-    try:
-        from fleet_rlm.cli.runners import check_secret_presence
-
-        result = check_secret_presence()
-        ok = True
-        for idx, (key, present) in enumerate(result.items(), start=1):
-            status = "OK" if present else "MISSING"
-            print(f"  Secret {idx}: {status}")
-            if not present:
-                ok = False
-        return ok
-    except Exception as e:
-        print(f"  Could not check: {e}")
-        return False
-
-
-def check_volumes() -> bool:
-    """List Modal volumes."""
-    print("\n--- Volumes ---")
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["uv", "run", "modal", "volume", "list"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        output = result.stdout.strip()
-        if output:
-            for line in output.splitlines()[:10]:
-                print(f"  {line}")
-        else:
-            print("  (none found)")
-        return result.returncode == 0
-    except Exception as e:
-        print(f"  Could not list: {e}")
-        return False
+def check_daytona_smoke_hint() -> bool:
+    """Print the canonical smoke command."""
+    print("\n--- Daytona Smoke ---")
+    print("  Run: uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]")
+    return True
 
 
 def check_fleet_rlm() -> bool:
@@ -137,10 +113,9 @@ def main() -> None:
 
     results = {
         "fleet-rlm": check_fleet_rlm(),
-        "modal": check_modal(),
+        "daytona": check_daytona(),
         "environment": check_env(),
-        "secret": check_secret(),
-        "volumes": check_volumes(),
+        "smoke": check_daytona_smoke_hint(),
     }
 
     print("\n" + "=" * 40)
@@ -148,12 +123,11 @@ def main() -> None:
     print("=" * 40)
     summary_labels = {
         "fleet-rlm": "fleet-rlm",
-        "modal": "modal",
+        "daytona": "daytona",
         "environment": "environment",
-        "secret": "LITELLM secret",
-        "volumes": "volumes",
+        "smoke": "smoke command",
     }
-    for key in ("fleet-rlm", "modal", "environment", "secret", "volumes"):
+    for key in ("fleet-rlm", "daytona", "environment", "smoke"):
         passed = results[key]
         label = summary_labels[key]
         print(f"  {label:15s}: {'OK' if passed else 'FAIL'}")

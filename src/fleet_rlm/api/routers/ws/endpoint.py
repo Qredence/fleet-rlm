@@ -16,8 +16,9 @@ from fleet_rlm.integrations.observability.trace_context import (
 from fleet_rlm.runtime.config import build_dspy_context
 
 from ...dependencies import get_server_state_from_websocket
-from ...execution import (
-    ExecutionSubscription,
+from ...events import ExecutionSubscription
+from ...runtime_services.chat_persistence import (
+    build_local_persist_fn as _build_local_persist_fn,
 )
 from ...server_utils import sanitize_id as _sanitize_id
 from .execution_support import get_execution_emitter
@@ -30,7 +31,6 @@ from .helpers import (
     _try_send_json,
 )
 from .messages import parse_ws_message_or_send_error
-from .persistence import persist_session_state
 from .runtime import (
     _build_chat_agent_context,
     _new_chat_session_state,
@@ -44,72 +44,36 @@ router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
 
 
-@router.websocket("/ws/execution")
-async def execution_stream(
+async def _reject_unsupported_identity_query_params(
     websocket: WebSocket,
-    workspace_id: str | None = None,
-    user_id: str | None = None,
-    session_id: str | None = None,
+    *,
+    workspace_id: str | None,
+    user_id: str | None,
+) -> bool:
+    if workspace_id is None and user_id is None:
+        return False
+
+    await websocket.accept()
+    if await _try_send_json(
+        websocket,
+        _error_envelope(
+            code="unsupported_identity_query_params",
+            message=(
+                "Execution stream identity is derived from auth. Remove "
+                "workspace_id/user_id query params and use session_id only."
+            ),
+        ),
+    ):
+        await _close_websocket_safely(websocket, code=1008)
+    return True
+
+
+async def _run_chat_execution_stream(
+    *,
+    websocket: WebSocket,
+    state,
+    identity,
 ) -> None:
-    """Dedicated execution stream for Artifact Canvas consumers."""
-    if workspace_id is not None or user_id is not None:
-        await websocket.accept()
-        if await _try_send_json(
-            websocket,
-            _error_envelope(
-                code="unsupported_identity_query_params",
-                message=(
-                    "Execution stream identity is derived from auth. Remove "
-                    "workspace_id/user_id query params and use session_id only."
-                ),
-            ),
-        ):
-            await _close_websocket_safely(websocket, code=1008)
-        return
-
-    state = get_server_state_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, state)
-    if identity is None:
-        return
-
-    subscription = ExecutionSubscription(
-        workspace_id=_sanitize_id(identity.tenant_claim, "default"),
-        user_id=_sanitize_id(identity.user_claim, "anonymous"),
-        session_id=str(session_id or "").strip(),
-    )
-    if not subscription.session_id:
-        await websocket.accept()
-        if await _try_send_json(
-            websocket,
-            _error_envelope(
-                code="missing_session_id",
-                message="Missing required query param: session_id",
-            ),
-        ):
-            await _close_websocket_safely(websocket, code=1008)
-        return
-    emitter = get_execution_emitter(state)
-    await emitter.connect(websocket, subscription)
-
-    try:
-        while True:
-            # Keep the socket alive for heartbeat/ping frames.
-            await websocket.receive()
-    except WebSocketDisconnect:
-        await emitter.disconnect(websocket)
-    except Exception:
-        logger.debug("execution_stream_receive_error", exc_info=True)
-        await emitter.disconnect(websocket)
-
-
-@router.websocket("/ws/chat")
-async def chat_streaming(websocket: WebSocket) -> None:
-    """Streaming WebSocket endpoint with native DSPy async streaming."""
-    state = get_server_state_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, state)
-    if identity is None:
-        return
-
     await websocket.accept()
     runtime = await _prepare_chat_runtime(
         websocket=websocket,
@@ -133,32 +97,18 @@ async def chat_streaming(websocket: WebSocket) -> None:
                     raw_payload=raw_payload,
                 )
 
-            agent_context = _build_chat_agent_context(
-                runtime,
-                runtime_mode=getattr(initial_msg, "runtime_mode", "modal_chat"),
-            )
+            agent_context = _build_chat_agent_context(runtime)
             async with agent_context as agent:
                 interpreter = getattr(agent, "interpreter", None)
                 _set_interpreter_default_profile(interpreter, runtime.cfg)
                 session = _new_chat_session_state(runtime, identity)
-
-                async def local_persist(
-                    *, include_volume_save: bool = True, latest_user_message: str = ""
-                ) -> None:
-                    await persist_session_state(
-                        state=state,
-                        agent=agent,
-                        session_record=session.session_record,
-                        active_manifest_path=session.active_manifest_path,
-                        active_run_db_id=session.active_run_db_id,
-                        interpreter=interpreter,
-                        repository=runtime.repository,
-                        identity_rows=runtime.identity_rows,
-                        persistence_required=runtime.persistence_required,
-                        include_volume_save=include_volume_save,
-                        latest_user_message=latest_user_message,
-                    )
-
+                local_persist = _build_local_persist_fn(
+                    state=state,
+                    runtime=runtime,
+                    agent=agent,
+                    interpreter=interpreter,
+                    session=session,
+                )
                 await _chat_message_loop(
                     websocket=websocket,
                     state=state,
@@ -172,6 +122,81 @@ async def chat_streaming(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     except Exception as exc:
-        logger.exception("WebSocket chat startup failed: %s", _sanitize_for_log(exc))
+        logger.exception(
+            "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
+        )
         if await _try_send_json(websocket, chat_startup_error_payload(exc)):
             await _close_websocket_safely(websocket, code=1011)
+
+
+async def _run_execution_subscription_stream(
+    *,
+    websocket: WebSocket,
+    state,
+    identity,
+    session_id: str,
+) -> None:
+    subscription = ExecutionSubscription(
+        workspace_id=_sanitize_id(identity.tenant_claim, "default"),
+        user_id=_sanitize_id(identity.user_claim, "anonymous"),
+        session_id=str(session_id or "").strip(),
+    )
+    if not subscription.session_id:
+        await websocket.accept()
+        if await _try_send_json(
+            websocket,
+            _error_envelope(
+                code="missing_session_id",
+                message="Missing required query param: session_id",
+            ),
+        ):
+            await _close_websocket_safely(websocket, code=1008)
+        return
+
+    emitter = get_execution_emitter(state)
+    await emitter.connect(websocket, subscription)
+
+    try:
+        while True:
+            await websocket.receive()
+    except WebSocketDisconnect:
+        await emitter.disconnect(websocket)
+    except Exception:
+        logger.debug("execution_stream_receive_error", exc_info=True)
+        await emitter.disconnect(websocket)
+
+
+@router.websocket("/ws/execution")
+async def execution_stream(
+    websocket: WebSocket,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Canonical websocket endpoint for both execution streaming and subscriptions."""
+    if await _reject_unsupported_identity_query_params(
+        websocket,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        return
+
+    state = get_server_state_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, state)
+    if identity is None:
+        return
+
+    if not session_id:
+        await _run_chat_execution_stream(
+            websocket=websocket,
+            state=state,
+            identity=identity,
+        )
+        return
+
+    await _run_execution_subscription_stream(
+        websocket=websocket,
+        state=state,
+        identity=identity,
+        session_id=session_id,
+    )

@@ -1,4 +1,4 @@
-"""Database package for fleet-rlm Neon persistence."""
+"""Async Neon/Postgres persistence package for fleet-rlm."""
 
 from .engine import DatabaseManager, to_async_database_url, to_sync_database_url
 from .models_base import Base
@@ -23,7 +23,7 @@ from .models_identity import Membership, Tenant, User
 from .models_jobs import Job, TenantSubscription
 from .models_memory import MemoryItem
 from .models_runs import Artifact, RLMProgram, RLMTrace, Run, RunStep
-from .models_sandbox import ModalVolume, SandboxSession
+from .models_sandbox import SandboxSession
 from .repository import FleetRepository
 
 __all__ = [
@@ -42,7 +42,6 @@ __all__ = [
     "MemoryKind",
     "MemoryScope",
     "MemorySource",
-    "ModalVolume",
     "RLMProgram",
     "RLMTrace",
     "Run",

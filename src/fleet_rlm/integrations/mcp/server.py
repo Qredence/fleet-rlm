@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fleet_rlm.cli import runners
 from fleet_rlm.runtime.config import get_delegate_lm_from_env
+from fleet_rlm.runtime.factory import build_chat_agent
 
 if TYPE_CHECKING:
     from fleet_rlm.integrations.config.env import AppConfig
@@ -56,6 +58,50 @@ class MCPRuntimeConfig:
             agent_delegate_model=config.agent.delegate_model,
             agent_delegate_max_tokens=config.agent.delegate_max_tokens,
         )
+
+
+def _chat_agent_kwargs(
+    *,
+    cfg: MCPRuntimeConfig,
+    delegate_lm: Any | None,
+    docs_path: str | None,
+) -> dict[str, Any]:
+    return {
+        "docs_path": docs_path,
+        "react_max_iters": cfg.react_max_iters,
+        "deep_react_max_iters": cfg.deep_react_max_iters,
+        "enable_adaptive_iters": cfg.enable_adaptive_iters,
+        "rlm_max_iterations": cfg.rlm_max_iterations,
+        "rlm_max_llm_calls": cfg.rlm_max_llm_calls,
+        "max_depth": cfg.rlm_max_depth,
+        "timeout": cfg.timeout,
+        "secret_name": cfg.secret_name,
+        "volume_name": cfg.volume_name,
+        "interpreter_async_execute": cfg.interpreter_async_execute,
+        "guardrail_mode": cfg.agent_guardrail_mode,
+        "max_output_chars": cfg.agent_max_output_chars,
+        "min_substantive_chars": cfg.agent_min_substantive_chars,
+        "delegate_lm": delegate_lm,
+        "delegate_max_calls_per_turn": cfg.delegate_max_calls_per_turn,
+        "delegate_result_truncation_chars": cfg.delegate_result_truncation_chars,
+    }
+
+
+def _run_with_chat_agent(
+    *,
+    cfg: MCPRuntimeConfig,
+    delegate_lm: Any | None,
+    docs_path: str | None,
+    operation: Callable[[Any], dict[str, Any]],
+) -> dict[str, Any]:
+    with build_chat_agent(
+        **_chat_agent_kwargs(
+            cfg=cfg,
+            delegate_lm=delegate_lm,
+            docs_path=docs_path,
+        )
+    ) as agent:
+        return operation(agent)
 
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
@@ -121,31 +167,17 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
         max_chunks: int = 24,
         include_trajectory: bool = True,
     ) -> dict:
-        with runners.build_react_chat_agent(
-            docs_path=docs_path,
-            react_max_iters=cfg.react_max_iters,
-            deep_react_max_iters=cfg.deep_react_max_iters,
-            enable_adaptive_iters=cfg.enable_adaptive_iters,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            rlm_max_llm_calls=cfg.rlm_max_llm_calls,
-            max_depth=cfg.rlm_max_depth,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            interpreter_async_execute=cfg.interpreter_async_execute,
-            guardrail_mode=cfg.agent_guardrail_mode,
-            max_output_chars=cfg.agent_max_output_chars,
-            min_substantive_chars=cfg.agent_min_substantive_chars,
+        return _run_with_chat_agent(
+            cfg=cfg,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-        ) as agent:
-            return agent.grounded_answer(
+            docs_path=docs_path,
+            operation=lambda agent: agent.grounded_answer(
                 query=query,
                 chunk_strategy=chunk_strategy,
                 max_chunks=max_chunks,
                 include_trajectory=include_trajectory,
-            )
+            ),
+        )
 
     @server.tool
     def triage_incident_logs(
@@ -154,30 +186,16 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
         service_context: str = "",
         include_trajectory: bool = True,
     ) -> dict:
-        with runners.build_react_chat_agent(
-            docs_path=docs_path,
-            react_max_iters=cfg.react_max_iters,
-            deep_react_max_iters=cfg.deep_react_max_iters,
-            enable_adaptive_iters=cfg.enable_adaptive_iters,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            rlm_max_llm_calls=cfg.rlm_max_llm_calls,
-            max_depth=cfg.rlm_max_depth,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            interpreter_async_execute=cfg.interpreter_async_execute,
-            guardrail_mode=cfg.agent_guardrail_mode,
-            max_output_chars=cfg.agent_max_output_chars,
-            min_substantive_chars=cfg.agent_min_substantive_chars,
+        return _run_with_chat_agent(
+            cfg=cfg,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-        ) as agent:
-            return agent.triage_incident_logs(
+            docs_path=docs_path,
+            operation=lambda agent: agent.triage_incident_logs(
                 query=query,
                 service_context=service_context,
                 include_trajectory=include_trajectory,
-            )
+            ),
+        )
 
     @server.tool
     def memory_tree(
@@ -186,56 +204,30 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
         max_depth: int = 4,
         include_hidden: bool = False,
     ) -> dict:
-        with runners.build_react_chat_agent(
-            docs_path=docs_path,
-            react_max_iters=cfg.react_max_iters,
-            deep_react_max_iters=cfg.deep_react_max_iters,
-            enable_adaptive_iters=cfg.enable_adaptive_iters,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            rlm_max_llm_calls=cfg.rlm_max_llm_calls,
-            max_depth=cfg.rlm_max_depth,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            interpreter_async_execute=cfg.interpreter_async_execute,
-            guardrail_mode=cfg.agent_guardrail_mode,
-            max_output_chars=cfg.agent_max_output_chars,
-            min_substantive_chars=cfg.agent_min_substantive_chars,
+        return _run_with_chat_agent(
+            cfg=cfg,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-        ) as agent:
-            return agent.memory_tree(
+            docs_path=docs_path,
+            operation=lambda agent: agent.memory_tree(
                 root_path=root_path,
                 max_depth=max_depth,
                 include_hidden=include_hidden,
-            )
+            ),
+        )
 
     @server.tool
     def memory_structure_audit(
         docs_path: str | None = None,
         usage_goals: str = "",
     ) -> dict:
-        with runners.build_react_chat_agent(
-            docs_path=docs_path,
-            react_max_iters=cfg.react_max_iters,
-            deep_react_max_iters=cfg.deep_react_max_iters,
-            enable_adaptive_iters=cfg.enable_adaptive_iters,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            rlm_max_llm_calls=cfg.rlm_max_llm_calls,
-            max_depth=cfg.rlm_max_depth,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            interpreter_async_execute=cfg.interpreter_async_execute,
-            guardrail_mode=cfg.agent_guardrail_mode,
-            max_output_chars=cfg.agent_max_output_chars,
-            min_substantive_chars=cfg.agent_min_substantive_chars,
+        return _run_with_chat_agent(
+            cfg=cfg,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-        ) as agent:
-            return agent.memory_structure_audit(usage_goals=usage_goals)
+            docs_path=docs_path,
+            operation=lambda agent: agent.memory_structure_audit(
+                usage_goals=usage_goals
+            ),
+        )
 
     @server.tool
     def clarification_questions(
@@ -243,28 +235,14 @@ def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
         docs_path: str | None = None,
         operation_risk: str = "medium",
     ) -> dict:
-        with runners.build_react_chat_agent(
-            docs_path=docs_path,
-            react_max_iters=cfg.react_max_iters,
-            deep_react_max_iters=cfg.deep_react_max_iters,
-            enable_adaptive_iters=cfg.enable_adaptive_iters,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            rlm_max_llm_calls=cfg.rlm_max_llm_calls,
-            max_depth=cfg.rlm_max_depth,
-            timeout=cfg.timeout,
-            secret_name=cfg.secret_name,
-            volume_name=cfg.volume_name,
-            interpreter_async_execute=cfg.interpreter_async_execute,
-            guardrail_mode=cfg.agent_guardrail_mode,
-            max_output_chars=cfg.agent_max_output_chars,
-            min_substantive_chars=cfg.agent_min_substantive_chars,
+        return _run_with_chat_agent(
+            cfg=cfg,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-        ) as agent:
-            return agent.clarification_questions(
+            docs_path=docs_path,
+            operation=lambda agent: agent.clarification_questions(
                 request=request,
                 operation_risk=operation_risk,
-            )
+            ),
+        )
 
     return server

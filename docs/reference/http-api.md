@@ -56,7 +56,7 @@ Readiness check with component status.
   "planner": "ready",
   "database": "ready",
   "database_required": true,
-  "sandbox_provider": "modal"
+  "sandbox_provider": "daytona"
 }
 ```
 
@@ -116,20 +116,20 @@ Returns current runtime settings snapshot.
   "keys": [
     "DSPY_LM_MODEL",
     "DSPY_DELEGATE_LM_MODEL",
-    "DAYTONA_API_URL",
-    "SANDBOX_PROVIDER"
+    "DAYTONA_API_KEY",
+    "DAYTONA_API_URL"
   ],
   "values": {
     "DSPY_LM_MODEL": "openai/gpt-4o",
     "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4o-mini",
-    "DAYTONA_API_URL": "https://app.daytona.io/api",
-    "SANDBOX_PROVIDER": "modal"
+    "DAYTONA_API_KEY": "***",
+    "DAYTONA_API_URL": "https://app.daytona.io/api"
   },
   "masked_values": {
     "DSPY_LM_MODEL": "openai/gpt-4o",
     "DSPY_DELEGATE_LM_MODEL": "openai/gpt-4o-mini",
-    "DAYTONA_API_URL": "https://app.daytona.io/api",
-    "SANDBOX_PROVIDER": "modal"
+    "DAYTONA_API_KEY": "***",
+    "DAYTONA_API_URL": "https://app.daytona.io/api"
   }
 }
 ```
@@ -158,7 +158,7 @@ Updates runtime settings. **Local environment only** (`APP_ENV=local`).
 }
 ```
 
-**Allowed keys:** `DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`, `DSPY_DELEGATE_LM_SMALL_MODEL`, `DSPY_LLM_API_KEY`, `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`, `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `SECRET_NAME`, `VOLUME_NAME`, `SANDBOX_PROVIDER`
+**Allowed keys:** `DSPY_LM_MODEL`, `DSPY_DELEGATE_LM_MODEL`, `DSPY_DELEGATE_LM_SMALL_MODEL`, `DSPY_DELEGATE_LM_MAX_TOKENS`, `DSPY_LLM_API_KEY`, `DSPY_LM_API_BASE`, `DSPY_LM_MAX_TOKENS`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_TARGET`
 
 ### `GET /api/v1/runtime/status`
 
@@ -187,46 +187,16 @@ Returns runtime status with active models and connectivity test cache.
     "startup_status": "pending",
     "startup_error": null
   },
-  "modal": {
-    "credentials_available": true,
-    "secret_name_set": true,
-    "secret_name": "LITELLM",
-    "configured_volume": "fleet-rlm-volume"
-  },
   "daytona": {
-    "sandbox_provider_set": true,
     "api_key_set": true,
     "api_url_set": true,
     "target_set": true
   },
   "tests": {
-    "modal": { "ok": true, "latency_ms": 150 },
     "lm": { "ok": true, "latency_ms": 850 },
     "daytona": { "ok": true, "latency_ms": 640 }
   },
   "guidance": []
-}
-```
-
-### `POST /api/v1/runtime/tests/modal`
-
-Tests Modal sandbox connectivity.
-
-**Response:**
-
-```json
-{
-  "kind": "modal",
-  "ok": true,
-  "preflight_ok": true,
-  "checked_at": "2026-03-09T12:00:00Z",
-  "checks": {
-    "credentials_available": true,
-    "secret_name_set": true
-  },
-  "guidance": [],
-  "latency_ms": 150,
-  "output_preview": "ok"
 }
 ```
 
@@ -285,7 +255,7 @@ Lists the file tree of the configured runtime volume.
 |-----------|------|---------|-------------|
 | `root_path` | string | `/` | - |
 | `max_depth` | integer | `3` | 1-10 |
-| `provider` | `"modal"` \| `"daytona"` | active backend | - |
+| `provider` | `"daytona"` | active backend | - |
 
 **Response:**
 
@@ -327,7 +297,7 @@ Reads a volume file as UTF-8 text for frontend preview.
 |-----------|------|----------|-------------|
 | `path` | string | yes | min length 1 |
 | `max_bytes` | integer | no | 1-1,000,000, default 200,000 |
-| `provider` | `"modal"` \| `"daytona"` | no | active backend when omitted |
+| `provider` | `"daytona"` | no | active backend when omitted |
 
 **Response:**
 
@@ -410,18 +380,18 @@ Records human feedback and optional ground truth for an MLflow trace.
 
 ## WebSocket Endpoints
 
-Real-time bidirectional communication for chat and execution observability.
+Real-time bidirectional communication for conversational turns and execution observability.
 
 ---
 
-### `WS /api/v1/ws/chat`
+### `WS /api/v1/ws/execution`
 
-Primary streaming chat interface for RLM conversations. Supports message streaming, cancellation, and command dispatch.
+Primary streaming interface for RLM conversations and workbench execution. Supports message streaming, cancellation, command dispatch, and execution observability.
 
 **Connection:**
 
 ```text
-ws://localhost:8000/api/v1/ws/chat
+ws://localhost:8000/api/v1/ws/execution
 ```
 
 **Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
@@ -446,7 +416,7 @@ Send a user message to initiate or continue a conversation.
   "trace": true,
   "trace_mode": "compact",
   "execution_mode": "auto",
-  "runtime_mode": "modal_chat",
+  "repo_url": "https://github.com/qredence/fleet-rlm.git",
   "session_id": "session-uuid"
 }
 ```
@@ -461,7 +431,6 @@ Send a user message to initiate or continue a conversation.
 | `trace` | boolean | no | `true` | Enable tracing |
 | `trace_mode` | `"compact"` \| `"verbose"` \| `"off"` | no | `"compact"` | Trace output verbosity |
 | `execution_mode` | `"auto"` \| `"rlm_only"` \| `"tools_only"` | no | `"auto"` | Execution strategy |
-| `runtime_mode` | `"modal_chat"` \| `"daytona_pilot"` | no | `"modal_chat"` | Top-level runtime selector |
 | `repo_url` | string | no | `null` | Daytona-only repository URL |
 | `repo_ref` | string | no | `null` | Daytona branch or commit; requires `repo_url` |
 | `context_paths` | string[] | no | `null` | Daytona-only staged local host paths |
@@ -476,16 +445,8 @@ Send a user message to initiate or continue a conversation.
 | `rlm_only` | Deep reasoning only, no tool execution |
 | `tools_only` | Direct tool execution without RLM reasoning |
 
-**Runtime Modes:**
+Daytona-specific request rules:
 
-| Mode | Behavior |
-|------|----------|
-| `modal_chat` | Default product runtime with Modal-backed execution |
-| `daytona_pilot` | Experimental Daytona-backed variant of the shared ReAct + `dspy.RLM` runtime inside `Workbench` |
-
-When `runtime_mode="daytona_pilot"`:
-
-- `execution_mode` is ignored
 - `repo_ref` requires `repo_url`
 - request-side `max_depth` is rejected
 - Daytona source controls may be included via `repo_url`, `repo_ref`,
@@ -839,7 +800,7 @@ The following endpoints have been removed from the API:
 
 | Endpoint | Status | Notes |
 |----------|--------|-------|
-| `/api/v1/chat` | Removed | Use `WS /api/v1/ws/chat` instead |
+| `/api/v1/chat` | Removed | Use `WS /api/v1/ws/execution` instead |
 | `/api/v1/auth/login` | Removed | Authentication via bearer tokens only |
 | `/api/v1/auth/logout` | Removed | Not applicable for token-based auth |
 | `/api/v1/tasks*` | Removed | Task management discontinued |

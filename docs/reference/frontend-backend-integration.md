@@ -24,21 +24,19 @@ Backend serves:
 
 - Health: `/health`, `/ready`
 - Versioned API: `/api/v1/*`
-- WebSockets: `/api/v1/ws/chat`, `/api/v1/ws/execution`
+- WebSockets: `/api/v1/ws/execution`
 
 ## Backend Surfaces Used by Frontend
 
 Primary interactive/chat surfaces:
 
-- Canonical: `WS /api/v1/ws/chat`
-- Observability: `WS /api/v1/ws/execution`
+- Canonical: `WS /api/v1/ws/execution`
 
 Runtime setup surfaces:
 
 - `GET /api/v1/auth/me`
 - `GET /api/v1/runtime/settings`
 - `PATCH /api/v1/runtime/settings` (local-only writes)
-- `POST /api/v1/runtime/tests/modal`
 - `POST /api/v1/runtime/tests/lm`
 - `POST /api/v1/runtime/tests/daytona`
 - `GET /api/v1/runtime/status`
@@ -52,7 +50,7 @@ Runtime settings behavior:
   - `active_models.planner`
   - `active_models.delegate`
   - `active_models.delegate_small`
-- `execution_mode` is Modal-only request state. Daytona requests do not send it.
+- `execution_mode` remains part of the Daytona-backed request state.
 - Daytona-specific source controls are `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 
@@ -94,18 +92,15 @@ Deprecated/planned surfaces removed from backend:
 
 ## WebSocket Behavior
 
-### `/api/v1/ws/chat`
+### `/api/v1/ws/execution`
 
 - Accepts `message`, `cancel`, and `command` payloads.
-- Emits `event`, `command_result`, and `error` envelopes.
-- Canonical purpose: conversational turn streaming only. The transcript should stay focused on
-  user/assistant exchange plus lightweight live trace.
+- Emits `event`, `command_result`, `error`, and execution-observability envelopes.
+- Canonical purpose: conversational turn streaming plus workbench execution observability.
 - Auth claims are canonical tenant/user authority.
 - `session_id` is the only authoritative client-controlled selector for websocket binding.
 - `workspace_id` and `user_id` are unsupported on websocket payloads and should be rejected immediately.
-- `runtime_mode` selects the top-level runtime:
-  - `modal_chat` for the default product path
-  - `daytona_pilot` for the Daytona-backed variant of the shared ReAct + `dspy.RLM` workspace runtime
+- `daytona_pilot` is the public runtime label for the shared workbench runtime.
 - Daytona `message` frames may also carry `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 - Daytona requests reject request-side `max_depth`, and `repo_ref` requires
@@ -128,7 +123,6 @@ Deprecated/planned surfaces removed from backend:
   - terminal: `final`, `cancelled`, `error`
 - Every chat event payload should carry normalized runtime metadata under `payload.runtime` when
   runtime state is known. The stable keys are:
-  - `runtime_mode`
   - `execution_mode`
   - `depth`
   - `max_depth`
@@ -174,22 +168,21 @@ Trajectory payload handling:
 ### `/api/v1/ws/execution`
 
 - Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
+- The same route is also the canonical conversational websocket stream when no `session_id` query
+  param is provided.
 - Filters by auth-derived identity plus `session_id`.
 - `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
 - Emits `execution_started`, `execution_step`, `execution_completed`.
-- `execution_completed.summary` is the canonical canvas/workbench summary for both runtimes.
-  Frontend workbench state should hydrate from this summary rather than scraping Daytona-only
-  fields from `/ws/chat final`.
+- `execution_completed.summary` is the canonical canvas/workbench summary for the Daytona-backed
+  runtime. Frontend workbench state should hydrate from this summary rather than scraping data from
+  transcript-final payloads.
 - `execution_step.step` now carries additive actor metadata:
   - `depth` (optional)
   - `actor_kind` (`root_rlm | sub_agent | delegate | unknown`, optional)
   - `actor_id` (optional)
   - `lane_key` (optional)
-- `execution_completed.summary` should be shaped so both Modal/ReAct and Daytona/RLM can hydrate
-  the same frontend canvas shell.
-- Minimum required top-level fields across both runtime modes:
+- Minimum required top-level fields:
   - `run_id`
-  - `runtime_mode`
   - `task`
   - `final_artifact`
   - `summary`

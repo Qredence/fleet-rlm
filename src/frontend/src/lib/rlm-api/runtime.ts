@@ -3,7 +3,6 @@ import { rlmApiConfig } from "@/lib/rlm-api/config";
 import {
   applyMockRuntimeUpdates,
   getMockLmTest,
-  getMockModalTest,
   getMockDaytonaTest,
   getMockRuntimeSettings,
   getMockRuntimeStatus,
@@ -87,18 +86,6 @@ export const runtimeEndpoints = {
         ),
       () => applyMockRuntimeUpdates(input.updates),
       shouldUseRuntimeWriteFallback,
-    );
-  },
-
-  testModal(signal?: AbortSignal) {
-    return withRuntimeFallback(
-      () =>
-        rlmApiClient.post<RuntimeConnectivityTestResponse>(
-          "/api/v1/runtime/tests/modal",
-          undefined,
-          signal,
-        ),
-      () => getMockModalTest(),
     );
   },
 

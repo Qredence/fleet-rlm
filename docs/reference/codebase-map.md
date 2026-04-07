@@ -47,7 +47,7 @@ Key notes:
   - `cli/runners.py`
   - `integrations/mcp/server.py`
 - Outgoing:
-  - `src/fleet_rlm/integrations/providers/*`
+  - `src/fleet_rlm/integrations/daytona/*`
   - `src/fleet_rlm/integrations/database/*`
 
 Key notes:
@@ -71,8 +71,9 @@ Key notes:
 Key notes:
 
 - `integrations/config/*` replaces the old top-level `conf/` split.
-- `integrations/observability/*` replaces the old analytics feature namespace.
-- `integrations/providers/daytona/*` is the canonical Daytona implementation surface, now centered on `interpreter.py`, `runtime.py`, and `bridge.py`.
+- `integrations/observability/*` now owns telemetry and tracing only.
+- `runtime/quality/*` owns DSPy evaluation, optimization, and scorer wiring.
+- `integrations/daytona/*` is the canonical Daytona implementation surface, centered on `interpreter.py`, `runtime.py`, and `bridge.py`.
 - `integrations/mcp/server.py` remains the MCP entrypoint.
 
 ### `src/fleet_rlm/cli/`
@@ -96,13 +97,13 @@ Key notes:
 These boundaries must stay aligned when making non-trivial backend changes:
 
 1. Websocket contract
-   `api/routers/ws/*`, `api/execution/*`, `runtime/execution/*`,
+   `api/routers/ws/*`, `api/events/*`, `runtime/execution/*`,
    `src/frontend/src/lib/rlm-api/*`, and the workspace stores/screens.
-2. Runtime mode split
+2. Daytona execution contract
    `api/schemas/core.py`, `api/routers/ws/types.py`,
-   `integrations/providers/daytona/*`, and the frontend runtime settings flow.
+   `integrations/daytona/*`, and the frontend runtime settings flow.
 3. Persistence and trace shaping
-   `integrations/database/*`, `api/execution/*`, and `/api/v1/sessions/state`.
+   `integrations/database/*`, `api/events/*`, and `/api/v1/sessions/state`.
 4. CLI/runtime assembly
    `cli/fleet_cli.py`, `cli/commands/serve_cmds.py`, `api/main.py`,
    and `integrations/mcp/server.py`.
@@ -113,7 +114,7 @@ The largest remaining complexity centers are:
 
 1. `runtime/agent/*` and `runtime/execution/*`
    Shared runtime behavior is still spread across multiple focused modules.
-2. `integrations/providers/daytona/*`
+2. `integrations/daytona/*`
    Daytona is now flattened at the provider root, but it is still a large subsystem.
 3. `api/routers/ws/*`
    The transport split is greatly reduced, but websocket changes still cascade into frontend workbench rendering.

@@ -93,7 +93,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
             headers=headers,
         ) as execution_ws:
             with client.websocket_connect(
-                "/api/v1/ws/chat", headers=headers
+                "/api/v1/ws/execution", headers=headers
             ) as chat_ws:
                 chat_ws.send_json(
                     {

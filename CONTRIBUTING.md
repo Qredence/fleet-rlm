@@ -375,11 +375,12 @@ uv run fleet-rlm --help   # Direct CLI help
 uv run fleet --help       # Shorthand CLI help
 ```
 
-### Modal Setup
+### Daytona Setup
 
 ```bash
-uv run modal setup        # Authenticate Modal
-uv run modal volume create rlm-volume-dspy  # Create volume
+export DAYTONA_API_KEY="..."
+export DAYTONA_API_URL="https://app.daytona.io/api"
+uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 ```
 
 For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](scripts/RELEASING.md).
@@ -392,7 +393,7 @@ For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](script
 - **Issues**: Search existing issues on GitHub
 - **Discussions**: Use GitHub Discussions for questions
 - **DSPy Docs**: https://dspy-docs.vercel.app/
-- **Modal Docs**: https://modal.com/docs
+- **Daytona Docs**: https://www.daytona.io/docs
 
 ---
 

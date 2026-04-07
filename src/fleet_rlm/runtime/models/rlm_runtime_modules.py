@@ -5,7 +5,6 @@ This module re-exports every public symbol so that existing imports
 from ``fleet_rlm.runtime.models.rlm_runtime_modules`` keep working.
 """
 
-import sys as _sys
 from typing import Any as _Any
 from typing import MutableMapping as _MutableMapping
 
@@ -55,8 +54,8 @@ def get_or_build_runtime_module(
     if module is not None:
         return module
 
-    # Resolve through *this* module's namespace so patches land correctly.
-    _build: _Any = _sys.modules[__name__].build_runtime_module
+    # Resolve through the shim module namespace so patches land correctly.
+    _build: _Any = globals()["build_runtime_module"]
     module = _build(
         name,
         interpreter=config.interpreter,

@@ -55,7 +55,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isStreaming: false,
   sessionId: createBackendSessionId(),
   error: null,
-  runtimeMode: "modal_chat",
+  runtimeMode: "daytona_pilot",
   streamController: null,
 
   setSessionId: (id) => set({ sessionId: id }),
@@ -104,7 +104,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   streamMessage: async (text, onFrameCallback, queryClient, options) => {
-    const { sessionId, isStreaming, runtimeMode } = get();
+    const { sessionId, isStreaming } = get();
 
     if (isStreaming || !text.trim()) return;
 
@@ -117,37 +117,31 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
 
     const traceEnabled = options?.traceEnabled ?? true;
-    const resolvedRuntimeMode = options?.runtimeMode ?? runtimeMode;
-    const firstFrameTimeoutMs =
-      resolvedRuntimeMode === "daytona_pilot" ? DAYTONA_FIRST_FRAME_TIMEOUT_MS : undefined;
+    const firstFrameTimeoutMs = DAYTONA_FIRST_FRAME_TIMEOUT_MS;
 
     const payload = {
       type: "message",
       content: text,
       trace: traceEnabled,
-      runtime_mode: resolvedRuntimeMode,
       analytics_enabled: telemetryClient.isAnonymousTelemetryEnabled(),
       session_id: sessionId,
       trace_mode: traceEnabled ? "compact" : "off",
+      execution_mode: options?.executionMode ?? "auto",
     } as const;
 
     const request = { ...payload } as Record<string, unknown>;
-    if (resolvedRuntimeMode === "modal_chat") {
-      request.execution_mode = options?.executionMode ?? "auto";
-    } else {
-      if (options?.repoUrl !== undefined) {
-        request.repo_url = options.repoUrl || null;
-      }
-      if (options?.repoRef !== undefined) {
-        const repoUrl = options.repoUrl ?? null;
-        request.repo_ref = repoUrl && options.repoRef.trim() ? options.repoRef : null;
-      }
-      if (options?.contextPaths !== undefined) {
-        request.context_paths = options.contextPaths.length > 0 ? options.contextPaths : null;
-      }
-      if (options?.batchConcurrency !== undefined) {
-        request.batch_concurrency = options.batchConcurrency;
-      }
+    if (options?.repoUrl !== undefined) {
+      request.repo_url = options.repoUrl || null;
+    }
+    if (options?.repoRef !== undefined) {
+      const repoUrl = options.repoUrl ?? null;
+      request.repo_ref = repoUrl && options.repoRef.trim() ? options.repoRef : null;
+    }
+    if (options?.contextPaths !== undefined) {
+      request.context_paths = options.contextPaths.length > 0 ? options.contextPaths : null;
+    }
+    if (options?.batchConcurrency !== undefined) {
+      request.batch_concurrency = options.batchConcurrency;
     }
 
     try {

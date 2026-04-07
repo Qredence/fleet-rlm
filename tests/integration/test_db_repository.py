@@ -87,7 +87,7 @@ async def test_repository_smoke_flow(repository: FleetRepository):
             scope_id=str(run.id),
             kind=MemoryKind.SUMMARY,
             source=MemorySource.SYSTEM,
-            uri=f"modal-volume://memory/{run.id}/summary.md",
+            uri=f"daytona-volume://memory/{run.id}/summary.md",
             content_text="hello world",
             tags=["integration", "smoke"],
         )
@@ -123,7 +123,7 @@ async def test_repository_smoke_flow(repository: FleetRepository):
     assert leased_jobs
     assert memory_items
     assert any(
-        item.uri == f"modal-volume://memory/{run.id}/summary.md"
+        item.uri == f"daytona-volume://memory/{run.id}/summary.md"
         for item in memory_items
     )
 
@@ -487,7 +487,7 @@ async def test_upsert_sandbox_session_tracks_created_by_user(
 
     sandbox_session_id = await repository.upsert_sandbox_session(
         tenant_id=identity.tenant_id,
-        provider=SandboxProvider.MODAL,
+        provider=SandboxProvider.DAYTONA,
         external_id=f"sandbox-{uuid.uuid4()}",
         created_by_user_id=identity.user_id,
     )

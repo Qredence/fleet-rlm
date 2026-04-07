@@ -16,7 +16,7 @@ vi.mock("@/lib/rlm-api", () => ({
     trace: true,
     workspaceId: "test-workspace",
     userId: "test-user",
-    wsUrl: "ws://localhost:8000/api/v1/ws/chat",
+    wsUrl: "ws://localhost:8000/api/v1/ws/execution",
   },
 }));
 
@@ -48,7 +48,7 @@ function resetStore() {
     isStreaming: false,
     sessionId: "mock-session-id",
     error: null,
-    runtimeMode: "modal_chat",
+    runtimeMode: "daytona_pilot",
     streamController: null,
   });
 }
@@ -72,7 +72,7 @@ describe("useChatStore — state management", () => {
     expect(typeof sessionId).toBe("string");
     expect(sessionId.length).toBeGreaterThan(0);
     expect(error).toBeNull();
-    expect(runtimeMode).toBe("modal_chat");
+    expect(runtimeMode).toBe("daytona_pilot");
   });
 
   // ── setSessionId ───────────────────────────────────────────────────────────
@@ -237,7 +237,6 @@ describe("useChatStore — streamMessage", () => {
       content: "test",
       trace: true,
       trace_mode: "compact",
-      runtime_mode: "modal_chat",
       execution_mode: "auto",
       analytics_enabled: true,
       session_id: "sess-abc",
@@ -255,7 +254,6 @@ describe("useChatStore — streamMessage", () => {
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
-      runtime_mode: "modal_chat",
       execution_mode: "tools_only",
     });
   });
@@ -268,9 +266,8 @@ describe("useChatStore — streamMessage", () => {
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
-      runtime_mode: "daytona_pilot",
+      execution_mode: "auto",
     });
-    expect(payload).not.toHaveProperty("execution_mode");
     expect(payload).not.toHaveProperty("repo_url");
     expect(payload).not.toHaveProperty("repo_ref");
     expect(payload).not.toHaveProperty("context_paths");
@@ -291,7 +288,7 @@ describe("useChatStore — streamMessage", () => {
 
     const [payload] = vi.mocked(streamChatOverWs).mock.calls[0] ?? [];
     expect(payload).toMatchObject({
-      runtime_mode: "daytona_pilot",
+      execution_mode: "auto",
       repo_url: "https://github.com/qredence/fleet-rlm.git",
       repo_ref: "main",
       context_paths: ["/Users/zocho/Documents/spec.pdf", "/workspace/docs"],

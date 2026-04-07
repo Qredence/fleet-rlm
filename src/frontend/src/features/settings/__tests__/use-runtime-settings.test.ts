@@ -9,8 +9,8 @@ describe("computeRuntimeUpdates", () => {
   it("returns an empty update payload when values are unchanged", () => {
     const baseline = {
       DSPY_LM_MODEL: "openai/gpt-4o-mini",
-      SECRET_NAME: "LITELLM",
-      VOLUME_NAME: "rlm-volume-dspy",
+      DAYTONA_API_URL: "https://daytona.example.com",
+      DAYTONA_TARGET: "local",
     };
 
     expect(computeRuntimeUpdates({ ...baseline }, baseline)).toEqual({});
@@ -19,31 +19,31 @@ describe("computeRuntimeUpdates", () => {
   it("includes changed non-secret values in the update payload", () => {
     const baseline = {
       DSPY_LM_MODEL: "openai/gpt-4o-mini",
-      SECRET_NAME: "LITELLM",
-      VOLUME_NAME: "rlm-volume-dspy",
+      DAYTONA_API_URL: "https://daytona.example.com",
+      DAYTONA_TARGET: "local",
     };
     const current = {
       ...baseline,
       DSPY_LM_MODEL: "openai/gpt-4.1-mini",
-      SECRET_NAME: "ALT_SECRET",
+      DAYTONA_TARGET: "staging",
     };
 
     expect(computeRuntimeUpdates(current, baseline)).toEqual({
       DSPY_LM_MODEL: "openai/gpt-4.1-mini",
-      SECRET_NAME: "ALT_SECRET",
+      DAYTONA_TARGET: "staging",
     });
   });
 
   it("keeps explicit empty-string updates for cleared non-secret values", () => {
     const baseline = {
-      VOLUME_NAME: "rlm-volume-dspy",
+      DAYTONA_API_URL: "https://daytona.example.com",
     };
     const current = {
-      VOLUME_NAME: "",
+      DAYTONA_API_URL: "",
     };
 
     expect(computeRuntimeUpdates(current, baseline)).toEqual({
-      VOLUME_NAME: "",
+      DAYTONA_API_URL: "",
     });
   });
 
@@ -96,8 +96,8 @@ describe("computeLmRuntimeUpdates", () => {
       DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
       DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
       DSPY_LM_API_BASE: "https://proxy.example/v1",
-      SECRET_NAME: "LITELLM",
-      MODAL_TOKEN_ID: "modal-id",
+      DAYTONA_API_URL: "https://daytona.example.com",
+      DAYTONA_TARGET: "local",
     };
     const current = {
       ...baseline,
@@ -105,8 +105,8 @@ describe("computeLmRuntimeUpdates", () => {
       DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-nano",
       DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
       DSPY_LM_API_BASE: "https://proxy2.example/v1",
-      SECRET_NAME: "SHOULD_NOT_BE_INCLUDED",
-      MODAL_TOKEN_ID: "should-not-be-included",
+      DAYTONA_API_URL: "https://ignored.example.com",
+      DAYTONA_TARGET: "ignored",
     };
 
     expect(computeLmRuntimeUpdates(current, baseline)).toEqual({

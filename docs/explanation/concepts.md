@@ -54,7 +54,7 @@ All surfaces converge on shared orchestration/runtime modules.
 
 The system emits:
 
-- chat stream events (`/api/v1/ws/chat`)
+- chat stream events (`/api/v1/ws/execution`)
 - execution graph events (`/api/v1/ws/execution`)
 
 Persistence model:

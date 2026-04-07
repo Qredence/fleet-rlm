@@ -36,7 +36,6 @@ Hook content in Markdown...
 | `hookify.fleet-rlm-document-process.local.md` | Document processing keywords | Suggests RLM skills for document analysis |
 | `hookify.fleet-rlm-large-file.local.md` | Large file mentions | Recommends RLM for files >100K lines |
 | `hookify.fleet-rlm-llm-query-error.local.md` | llm_query errors | Provides debugging guidance |
-| `hookify.fleet-rlm-modal-error.local.md` | Modal/sandbox errors | Suggests debugging skills/agents |
 
 ### 2. Tool-Based Hooks
 
@@ -72,7 +71,7 @@ hookify.{context}.{trigger}.{scope}.md
 ```
 
 - `context`: Project/domain (e.g., `fleet-rlm`)
-- `trigger`: What activates the hook (e.g., `large-file`, `modal-error`)
+- `trigger`: What activates the hook (e.g., `large-file`, `llm-query-error`)
 - `scope`: `local` (project-specific) or `global` (user-wide)
 
 ## Adding New Hooks

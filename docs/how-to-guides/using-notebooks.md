@@ -1,40 +1,41 @@
 # Jupyter Notebook Workflows
 
-While the CLI is great for automation, Jupyter Notebooks provide an interactive environment for experimenting with RLM.
+Jupyter notebooks are useful for interactive experiments with the Daytona-backed
+runtime, DSPy signatures, and document-processing helpers.
 
-## Setting Up
+## Setup
 
-Ensure you have configured your environment as described in [Installation](installation.md). Then launch Jupyter Lab:
+Start from the same environment described in
+[Installation](installation.md), then launch Jupyter Lab:
 
 ```bash
-uv run jupyter lab notebooks/rlm-dspy-modal.ipynb
+uv run jupyter lab
 ```
 
-## Notebook Structure
+Create a notebook in your preferred workspace and import the maintained
+Daytona-backed interfaces directly from `fleet_rlm`.
 
-The provided notebook `notebooks/rlm-dspy-modal.ipynb` is a comprehensive guide covering:
+## Typical Notebook Flow
 
-1.  **Setup**: Imports and environment configuration.
-2.  **Modal Sandbox Driver**: Defining the `driver.py` code that runs remotely.
-3.  **ModalInterpreter**: The Python class bridging DSPy and Modal (supports `with` context manager).
-4.  **Demos**:
-    - Basic Fibonacci generation.
-    - Long Document Analysis (with sandbox helpers: `peek`, `grep`, `chunk_by_size`, `chunk_by_headers`).
-    - Parallel Processing.
-    - Stateful Multi-Step Logic (with `add_buffer` / `get_buffer`).
-    - Persistent Storage with Volumes (with `save_to_volume` / `load_from_volume`).
-    - Custom Tools.
+1. Configure environment variables for Daytona and your planner LM.
+2. Import `DaytonaInterpreter` or higher-level helpers such as
+   `run_long_context(...)`.
+3. Use the sandbox helpers (`peek`, `grep`, `chunk_by_size`,
+   `chunk_by_headers`, volume helpers, workspace helpers) through normal runtime
+   calls rather than copying driver code into the notebook.
+4. Keep durable state under the Daytona-mounted roots:
+   `memory/`, `artifacts/`, `buffers/`, and `meta/`.
 
 ## PDF Inputs
 
 When a notebook flow calls the ReAct document tools, `load_document` and
 `read_file_slice` can ingest PDF files directly via MarkItDown with a pypdf
-fallback. If a PDF is scanned/image-only and no text can be extracted, the
-tool returns guidance to run OCR first.
+fallback. If a PDF is scanned/image-only and no text can be extracted, the tool
+returns guidance to run OCR first.
 
 ## Headless Execution
 
-You can run the notebook as a script (headlessly) for testing or CI/CD purposes. This executes all cells in order.
+You can execute notebooks in CI or from the terminal with `nbconvert`:
 
 ```bash
 uv run jupyter nbconvert \
@@ -42,5 +43,14 @@ uv run jupyter nbconvert \
   --execute \
   --inplace \
   --ExecutePreprocessor.timeout=3600 \
-  notebooks/rlm-dspy-modal.ipynb
+  <your-notebook>.ipynb
 ```
+
+## Recommendation
+
+For production or repeatable validation flows, prefer the maintained CLI and
+server surfaces over notebook-only logic:
+
+- `uv run fleet web`
+- `uv run fleet-rlm serve-api --port 8000`
+- `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`

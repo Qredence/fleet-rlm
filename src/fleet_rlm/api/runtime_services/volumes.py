@@ -11,13 +11,9 @@ from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.providers.daytona.volumes import (
+from fleet_rlm.integrations.daytona.volumes import (
     alist_daytona_volume_tree,
     aread_daytona_volume_file_text,
-)
-from fleet_rlm.runtime.tools.modal_volumes import (
-    list_volume_tree,
-    read_volume_file_text,
 )
 
 from ..auth import NormalizedIdentity
@@ -48,26 +44,14 @@ def resolve_daytona_volume_name(
     return _sanitize_id(identity.tenant_claim, state.config.ws_default_workspace_id)
 
 
-def resolve_modal_volume_name(*, state: ServerState) -> str:
-    """Return the configured Modal volume name or raise if none is set."""
-    volume_name = state.config.volume_name
-    if not volume_name:
-        raise HTTPException(
-            status_code=422,
-            detail="No Modal Volume configured (interpreter.volume_name is unset).",
-        )
-    return volume_name
-
-
 def resolve_volume_provider(
     *,
     state: ServerState,
     provider: VolumeProvider | None,
 ) -> VolumeProvider:
     """Select the effective volume backend, honoring request overrides first."""
-    if provider is not None:
-        return provider
-    return "daytona" if state.config.sandbox_provider == "daytona" else "modal"
+    _ = state
+    return provider or "daytona"
 
 
 def normalize_volume_file_path(path: str) -> str:
@@ -108,18 +92,11 @@ def _resolve_volume_backend(
     provider: VolumeProvider | None,
 ) -> _ResolvedVolumeBackend:
     effective_provider = resolve_volume_provider(state=state, provider=provider)
-    if effective_provider == "daytona":
-        return _ResolvedVolumeBackend(
-            provider=effective_provider,
-            volume_name=resolve_daytona_volume_name(identity=identity, state=state),
-            list_tree=alist_daytona_volume_tree,
-            read_file_text=aread_daytona_volume_file_text,
-        )
     return _ResolvedVolumeBackend(
         provider=effective_provider,
-        volume_name=resolve_modal_volume_name(state=state),
-        list_tree=list_volume_tree,
-        read_file_text=read_volume_file_text,
+        volume_name=resolve_daytona_volume_name(identity=identity, state=state),
+        list_tree=alist_daytona_volume_tree,
+        read_file_text=aread_daytona_volume_file_text,
     )
 
 

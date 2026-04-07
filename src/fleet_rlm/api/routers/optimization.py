@@ -113,7 +113,7 @@ def _run_gepa_optimization(
     train_ratio: float,
 ) -> dict:
     """Blocking wrapper around optimize_program_with_gepa."""
-    from fleet_rlm.integrations.observability.gepa_optimization import (
+    from fleet_rlm.runtime.quality.gepa_optimization import (
         optimize_program_with_gepa,
     )
 
@@ -195,7 +195,7 @@ async def run_optimization(
 
     db_run_id = None
     try:
-        from fleet_rlm.integrations.database.local_store import (
+        from fleet_rlm.integrations.local_store import (
             create_optimization_run as _db_create_run,
         )
 
@@ -225,7 +225,7 @@ async def run_optimization(
         logger.exception("GEPA optimization failed")
         if db_run_id is not None:
             try:
-                from fleet_rlm.integrations.database.local_store import (
+                from fleet_rlm.integrations.local_store import (
                     fail_optimization_run,
                 )
 
@@ -245,7 +245,7 @@ async def run_optimization(
 
     if db_run_id is not None:
         try:
-            from fleet_rlm.integrations.database.local_store import (
+            from fleet_rlm.integrations.local_store import (
                 complete_optimization_run,
             )
 

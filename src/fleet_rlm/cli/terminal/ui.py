@@ -64,7 +64,7 @@ class _FleetCompleter(Completer):
                 sub = (
                     text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
                 )
-                for choice in ("llm", "model", "modal"):
+                for choice in ("llm", "model"):
                     if choice.startswith(sub):
                         yield Completion(
                             choice,

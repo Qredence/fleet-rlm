@@ -109,7 +109,7 @@ token = jwt.encode(
 **3. WebSocket Query Parameters**:
 
 ```text
-ws://localhost:8000/api/v1/ws/chat?debug_tenant_id=tenant-123&debug_user_id=user-456
+ws://localhost:8000/api/v1/ws/execution?debug_tenant_id=tenant-123&debug_user_id=user-456
 ```
 
 #### Configuration

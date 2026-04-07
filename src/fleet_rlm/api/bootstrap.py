@@ -16,7 +16,7 @@ from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 from .auth import build_auth_provider
 from .config import ServerRuntimeConfig
 from .dependencies import ServerState
-from .execution import ExecutionEventEmitter
+from .events import ExecutionEventEmitter
 from .bootstrap_observability import (
     initialize_mlflow_runtime_service,
     initialize_posthog_runtime_service,

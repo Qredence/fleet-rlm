@@ -12,7 +12,7 @@ Manage Daytona sandboxes and durable volumes for fleet-rlm's DaytonaInterpreter.
 ### Create and Use a Sandbox
 
 ```python
-from fleet_rlm.integrations.providers.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
 # Basic sandbox
 interp = DaytonaInterpreter(timeout=600)

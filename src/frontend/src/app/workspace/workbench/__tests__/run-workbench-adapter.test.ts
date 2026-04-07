@@ -173,13 +173,13 @@ describe("runWorkbenchAdapter", () => {
           source_type: "execution_completed",
           run_summary: {
             run_id: "run-456",
-            runtime_mode: "modal_chat",
+            runtime_mode: "daytona_pilot",
             task: "Analyze the diligence corpus",
             status: "completed",
             final_artifact: {
               kind: "markdown",
               value: {
-                summary: "Modal execution summary",
+                summary: "Daytona execution summary",
               },
             },
             summary: {
@@ -202,29 +202,29 @@ describe("runWorkbenchAdapter", () => {
     expect(next.runId).toBe("run-456");
     expect(next.status).toBe("completed");
     expect(next.finalArtifact?.value).toMatchObject({
-      summary: "Modal execution summary",
+      summary: "Daytona execution summary",
     });
     expect(next.summary?.warnings).toEqual(["One warning"]);
     expect(next.attachments[0]?.name).toBe("result.md");
   });
 
-  it("hydrates a rich modal execution_completed summary without relying on chat final run_result", () => {
+  it("hydrates a rich Daytona execution_completed summary without relying on chat final run_result", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Summarize the runtime",
     });
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Modal summary complete", {
+      makeEvent("final", "Daytona summary complete", {
         source_type: "execution_completed",
         run_summary: {
-          run_id: "run-modal-1",
-          runtime_mode: "modal_chat",
+          run_id: "run-daytona-2",
+          runtime_mode: "daytona_pilot",
           task: "Summarize the runtime",
           status: "completed",
           context_sources: [
             {
-              source_id: "ctx-modal-1",
+              source_id: "ctx-daytona-2",
               kind: "file",
               host_path: "/workspace/runtime.md",
               staged_path: "/workspace/context/runtime.md",
@@ -232,7 +232,7 @@ describe("runWorkbenchAdapter", () => {
           ],
           prompts: [
             {
-              handle_id: "prompt-modal-1",
+              handle_id: "prompt-daytona-2",
               label: "Planner prompt",
               preview: "Summarize the runtime shape",
             },
@@ -241,14 +241,14 @@ describe("runWorkbenchAdapter", () => {
             {
               iteration: 1,
               status: "completed",
-              reasoning_summary: "Planner synthesized a modal summary.",
+              reasoning_summary: "Planner synthesized a Daytona summary.",
               callback_count: 1,
               finalized: true,
             },
           ],
           callbacks: [
             {
-              id: "callback-modal-1",
+              id: "callback-daytona-2",
               callback_name: "llm_query",
               iteration: 1,
               status: "completed",
@@ -258,7 +258,7 @@ describe("runWorkbenchAdapter", () => {
           ],
           sources: [
             {
-              source_id: "src-modal-1",
+              source_id: "src-daytona-2",
               kind: "file",
               title: "runtime.md",
               display_url: "/workspace/runtime.md",
@@ -266,42 +266,42 @@ describe("runWorkbenchAdapter", () => {
           ],
           attachments: [
             {
-              attachment_id: "attachment-modal-1",
+              attachment_id: "attachment-daytona-2",
               name: "runtime.md",
             },
           ],
           final_artifact: {
             kind: "markdown",
             value: {
-              summary: "Modal execution summary",
-              final_markdown: "## Modal\nSummary",
+              summary: "Daytona execution summary",
+              final_markdown: "## Daytona\nSummary",
             },
           },
           summary: {
             termination_reason: "final",
-            warnings: ["Modal warning"],
+            warnings: ["Daytona warning"],
             duration_ms: 321,
           },
-          warnings: ["Modal warning"],
+          warnings: ["Daytona warning"],
         },
       }),
     );
 
     expect(next.status).toBe("completed");
-    expect(next.runId).toBe("run-modal-1");
+    expect(next.runId).toBe("run-daytona-2");
     expect(next.contextSources[0]?.hostPath).toBe("/workspace/runtime.md");
-    expect(next.promptHandles[0]?.handleId).toBe("prompt-modal-1");
-    expect(next.iterations[0]?.reasoningSummary).toContain("modal");
+    expect(next.promptHandles[0]?.handleId).toBe("prompt-daytona-2");
+    expect(next.iterations[0]?.reasoningSummary).toContain("Daytona");
     expect(next.callbacks[0]?.callbackName).toBe("llm_query");
-    expect(next.sources[0]?.sourceId).toBe("src-modal-1");
+    expect(next.sources[0]?.sourceId).toBe("src-daytona-2");
     expect(next.attachments[0]?.name).toBe("runtime.md");
     expect(next.finalArtifact?.value).toMatchObject({
-      summary: "Modal execution summary",
+      summary: "Daytona execution summary",
     });
     expect(next.summary).toMatchObject({
       terminationReason: "final",
       durationMs: 321,
-      warnings: ["Modal warning"],
+      warnings: ["Daytona warning"],
     });
   });
 
@@ -709,13 +709,13 @@ describe("runWorkbenchAdapter", () => {
       }),
     );
 
-    const modalFrame = makeEvent("status", "Modal chat status", {
+    const lateStatusFrame = makeEvent("status", "Daytona status", {
       runtime: {
         execution_profile: "ROOT_INTERLOCUTOR",
       },
     });
 
-    expect(shouldApplyRunFrame(completed, modalFrame)).toBe(false);
+    expect(shouldApplyRunFrame(completed, lateStatusFrame)).toBe(false);
   });
 
   it("ignores raw websocket error envelopes after a completed run", () => {
@@ -725,9 +725,9 @@ describe("runWorkbenchAdapter", () => {
       }),
       makeEvent("final", "Done", {
         source_type: "execution_completed",
-        runtime_mode: "modal_chat",
+        runtime_mode: "daytona_pilot",
         runtime: {
-          runtime_mode: "modal_chat",
+          runtime_mode: "daytona_pilot",
           run_id: "run-790",
         },
         run_summary: {

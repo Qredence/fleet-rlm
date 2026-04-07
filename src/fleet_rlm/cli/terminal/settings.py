@@ -28,18 +28,13 @@ _SETTINGS_KEYS = (
 
 
 def run_settings(session: Any, section: str) -> None:
-    """Run the settings configuration dialog.
-
-    Args:
-        session: The terminal chat session instance.
-        section: The settings section to configure (llm, model, modal).
-    """
+    """Run the settings configuration dialog."""
     section_norm = section.strip().lower()
     if not section_norm:
         section_norm = (
             _prompt_choice(
                 "Settings section:",
-                ["llm", "model", "modal"],
+                ["llm", "model"],
                 allow_freeform=True,
             )
             .strip()
@@ -50,11 +45,7 @@ def run_settings(session: Any, section: str) -> None:
         settings_llm(session, model_only=section_norm == "model")
         return
 
-    if section_norm == "modal":
-        settings_modal(session)
-        return
-
-    session._print_error("unknown settings section. try: /settings llm|model|modal")
+    session._print_error("unknown settings section. try: /settings llm|model")
 
 
 def settings_llm(session: Any, *, model_only: bool) -> None:
@@ -120,57 +111,6 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
     )
 
 
-def settings_modal(session: Any) -> None:
-    """Configure Modal credentials.
-
-    Args:
-        session: The terminal chat session instance.
-    """
-    from .commands import _confirm
-
-    env_path = _resolve_env_path()
-    updates: dict[str, str] = {}
-
-    session.console.print(
-        Panel(
-            "Store Modal credentials in local .env (optional for this CLI).",
-            title="settings modal",
-        )
-    )
-
-    token_id = _prompt_value(
-        key="MODAL_TOKEN_ID",
-        default="",
-        secret=False,
-    )
-    if token_id:
-        updates["MODAL_TOKEN_ID"] = token_id
-
-    token_secret = _prompt_value(
-        key="MODAL_TOKEN_SECRET",
-        default="",
-        secret=True,
-    )
-    if token_secret:
-        updates["MODAL_TOKEN_SECRET"] = token_secret
-
-    if updates:
-        if _confirm(f"Write {len(updates)} Modal value(s) to {env_path}?"):
-            _write_env_updates(env_path=env_path, updates=updates)
-            session.console.print(
-                f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]"
-            )
-        else:
-            session._print_warning("Settings update cancelled.")
-    else:
-        session._print_warning("No changes made.")
-
-    session.console.print("\n[bold]next steps:[/]")
-    session.console.print("  uv run modal setup")
-    session.console.print("  uv run modal volume create rlm-volume-dspy")
-    session.console.print("  uv run modal secret create LITELLM ...")
-
-
 def run_long_context(session: Any, arg_text: str) -> None:
     """Run a long-context processing task.
 
@@ -225,49 +165,6 @@ def run_long_context(session: Any, arg_text: str) -> None:
             return
 
     session._print_result(result, title="run-long-context")
-
-
-def check_secret(session: Any) -> None:
-    """Check if the Modal secret is configured.
-
-    Args:
-        session: The terminal chat session instance.
-    """
-    from .commands import _authorize_command
-
-    if not _authorize_command(session, command="check-secret"):
-        return
-
-    with session.console.status("[cyan]Checking secret...[/]", spinner="line"):
-        try:
-            result = runners.check_secret_presence(secret_name=session.secret_name)
-        except Exception as exc:  # pragma: no cover - runtime path
-            session._print_error(str(exc))
-            return
-
-    session._print_result(result, title="check-secret")
-
-
-def check_secret_key(session: Any, *, key: str) -> None:
-    """Check if a specific key exists in the Modal secret.
-
-    Args:
-        session: The terminal chat session instance.
-        key: The secret key to check.
-    """
-    from .commands import _authorize_command
-
-    if not _authorize_command(session, command="check-secret-key"):
-        return
-
-    with session.console.status("[cyan]Checking secret key...[/]", spinner="line"):
-        try:
-            result = runners.check_secret_key(secret_name=session.secret_name, key=key)
-        except Exception as exc:  # pragma: no cover - runtime path
-            session._print_error(str(exc))
-            return
-
-    session._print_result(result, title=f"check-secret-key ({key})")
 
 
 def _resolve_env_path() -> Path:

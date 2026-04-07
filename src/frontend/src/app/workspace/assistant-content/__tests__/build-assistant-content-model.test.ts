@@ -119,14 +119,7 @@ describe("buildAssistantContentModel", () => {
         runtimeMode: "daytona_pilot",
         volumeName: "rlm-volume-dspy",
       }),
-    ).toEqual([
-      "runtime daytona_pilot",
-      "mode rlm",
-      "sandbox",
-      "sandbox sb-1234567",
-      "rlm-volume-dspy",
-      "rlm delegate",
-    ]);
+    ).toEqual(["mode rlm", "sandbox", "sandbox sb-1234567", "rlm-volume-dspy", "rlm delegate"]);
   });
 
   it("builds overview and sorted timeline items from trace reasoning and trajectory data", () => {
