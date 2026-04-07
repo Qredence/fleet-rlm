@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import inspect
 import keyword
 from contextlib import nullcontext
 from dataclasses import dataclass, field
