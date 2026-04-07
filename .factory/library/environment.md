@@ -1,34 +1,38 @@
 # Environment
 
-Environment variables, external dependencies, and mission setup notes.
+Environment variables, external dependencies, and setup notes for the DSPy refactor mission.
 
-**What belongs here:** current local environment facts, secret handling rules, off-limits resources, and setup expectations.
-**What does NOT belong here:** service commands or ports beyond high-level constraints (use `.factory/services.yaml`).
+**What belongs here:** required env vars, external services, provider notes, local setup caveats.
+**What does NOT belong here:** service commands/ports (see `.factory/services.yaml`).
 
 ---
 
-## Mission environment facts
+## Required Runtime Inputs
 
-- Use the existing repo environment with `uv` and the local `.venv`.
-- Frontend build assets already exist under `src/frontend/dist`; browser validation should use the API-served shell rather than starting a separate frontend dev server.
-- `.env` is gitignored and must never be committed.
-- Preserve the pre-existing unrelated working-tree edit in `src/fleet_rlm/api/bootstrap_observability.py` unless a feature explicitly requires changing that file.
+### DSPy / LM
+- `DSPY_LM_MODEL` or equivalent configured planner model
+- `DSPY_LM_API_KEY` or provider-specific API key consumed by the runtime settings flow
+- Optional `LM_API_BASE` / proxy URL when routed through LiteLLM-compatible infrastructure
 
-## Ports and local services
+### Daytona
+- `DAYTONA_API_KEY`
+- `DAYTONA_API_URL`
+- `DAYTONA_TARGET`
+- Any volume/workspace defaults used by the local runtime configuration
 
-- Mission validation service port: `8100`
-- Avoid interfering with local listeners already using `3000`, `5000`, `5001`, and `8000`.
-- A local MLflow server appears to be running on `5001`; treat it as off-limits unless the orchestrator explicitly changes scope.
-- An unrelated local service already uses `8000`; do not stop or reuse it during this mission.
+### MLflow / optimization
+- Existing MLflow server is available on `http://127.0.0.1:5001`
+- Prefer `MLFLOW_AUTO_START=false` during local mission validation so workers reuse the existing service instead of starting a competing one
+- Optimization requires MLflow to be enabled plus a valid trace dataset and resolvable DSPy program spec
 
-## Credential and external dependency posture
+## Local Notes
 
-- No new external accounts or credentials are planned for this mission.
-- Use current local configuration only; if a feature unexpectedly requires new live provider setup, return to the orchestrator.
-- Never print or persist secret values from `.env`, Modal secrets, or provider credentials.
+- The local app entrypoint for validation is `uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000`.
+- The packaged UI is served by FastAPI; a separate frontend dev server is not required for browser validation.
+- During planning, live workspace execution failed because Daytona volume `rlm-volume-dspy` was stuck in `pending_create`. This mission explicitly includes fixing that readiness path.
 
-## Contract-sensitive workflow notes
+## Safety Notes
 
-- If API/OpenAPI-facing request or response shapes change, regenerate and validate `openapi.yaml`, then run frontend API drift checks.
-- Browser validation authority is `agent-browser` against `127.0.0.1:8100`.
-- Do not introduce schema migrations or external service changes as part of this simplification mission.
+- Do not commit secrets written through runtime settings.
+- Treat runtime settings secret fields as write-only; preserve redaction behavior.
+- Reuse the configured MLflow service rather than mutating its deployment.

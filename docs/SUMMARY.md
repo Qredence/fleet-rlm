@@ -55,6 +55,7 @@
 ## Explanation
 
 * [Explanation](explanation/index.md)
+  * [Adaptive RLM Product Spec](explanation/product-spec.md)
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)

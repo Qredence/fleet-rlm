@@ -144,7 +144,7 @@ markers = [
     "db: database-backed integration tests",
     "e2e: end-to-end test suite",
     "benchmark: performance/throughput benchmark tests",
-    "live_llm: tests that require live Modal + configured LM/LITELLM secret",
+    "live_llm: tests that require a live configured LM / LiteLLM backend",
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]
 

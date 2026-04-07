@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from fleet_rlm.api.routers.ws import manifest as ws_manifest
+from tests.unit.fixtures_daytona import FakeDaytonaStorageSession
 
 
 class _RecordingInterpreter:
@@ -26,22 +27,6 @@ class _RecordingInterpreter:
             }
         )
         return self.result
-
-
-class _FakeDaytonaSession:
-    def __init__(self) -> None:
-        self.read_calls: list[str] = []
-        self.write_calls: list[tuple[str, str]] = []
-        self.file_contents: dict[str, str] = {}
-
-    async def aread_file(self, path: str) -> str:
-        self.read_calls.append(path)
-        return self.file_contents[path]
-
-    async def awrite_file(self, path: str, content: str) -> str:
-        self.write_calls.append((path, content))
-        self.file_contents[path] = content
-        return path
 
 
 def test_manifest_path_uses_default_session_id_when_missing() -> None:
@@ -91,7 +76,7 @@ def test_load_manifest_from_volume_parses_json_payload(monkeypatch) -> None:
 
 
 def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/meta/workspaces/test/session.json"] = (
         '{"rev": 3, "state": {"ok": true}}'
     )
@@ -102,7 +87,7 @@ def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
         ),
     )
 
-    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+    async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
     monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
@@ -120,7 +105,7 @@ def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
 
 
 def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> None:
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/workspaces/test/session.json"] = (
         '{"rev": 5}'
     )
@@ -131,7 +116,7 @@ def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> Non
         ),
     )
 
-    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+    async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
     monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
@@ -152,7 +137,7 @@ def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> Non
 def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
     monkeypatch,
 ) -> None:
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     session.file_contents[
         "/home/daytona/memory/workspaces/workspace-1/users/user-1/"
         "memory/react-session-session-a.json"
@@ -164,7 +149,7 @@ def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
         ),
     )
 
-    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+    async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
     monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
@@ -223,7 +208,7 @@ def test_save_manifest_to_volume_returns_saved_path(monkeypatch) -> None:
 
 
 def test_save_manifest_to_volume_uses_daytona_session(monkeypatch) -> None:
-    session = _FakeDaytonaSession()
+    session = FakeDaytonaStorageSession()
     agent = cast(
         Any,
         SimpleNamespace(
@@ -231,7 +216,7 @@ def test_save_manifest_to_volume_uses_daytona_session(monkeypatch) -> None:
         ),
     )
 
-    async def _fake_get_daytona_session(_agent) -> _FakeDaytonaSession:
+    async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
     monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)

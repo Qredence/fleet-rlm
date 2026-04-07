@@ -35,11 +35,7 @@ def test_web_subcommand_rewrites_to_serve_api_on_port_8000(
         forwarded["argv"] = list(fleet_cli.sys.argv)
 
     monkeypatch.setattr("fleet_rlm.cli.fleet_cli.main", fake_cli_main)
-    monkeypatch.setattr(
-        fleet_cli.sys,
-        "argv",
-        ["fleet", "web", "runtime_mode=daytona_pilot"],
-    )
+    monkeypatch.setattr(fleet_cli.sys, "argv", ["fleet", "web"])
 
     fleet_cli.main()
 
@@ -50,7 +46,6 @@ def test_web_subcommand_rewrites_to_serve_api_on_port_8000(
         "0.0.0.0",
         "--port",
         "8000",
-        "runtime_mode=daytona_pilot",
     ]
     assert (
         "Starting Web UI and API server on http://0.0.0.0:8000 ..."
