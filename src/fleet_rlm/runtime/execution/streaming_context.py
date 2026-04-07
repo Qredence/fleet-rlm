@@ -126,7 +126,7 @@ class StreamingContext:
             effective_max_iters=(
                 effective_max_iters
                 if effective_max_iters is not None
-                else agent._current_effective_max_iters
+                else agent._turn_delegation_state.effective_max_iters
             ),
             execution_mode=str(getattr(agent, "execution_mode", "auto") or "auto"),
             sandbox_id=str(sandbox_id).strip() or None if sandbox_id else None,
