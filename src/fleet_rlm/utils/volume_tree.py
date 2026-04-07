@@ -43,8 +43,8 @@ def resolve_realpath_within_root(
 def resolve_mounted_volume_path(
     path: str,
     *,
-    default_root: str = "/data/memory",
-    allowed_root: str = "/data",
+    default_root: str = "/home/daytona/memory",
+    allowed_root: str = "/home/daytona/memory",
 ) -> str:
     raw = str(path or "").strip()
     if not raw:

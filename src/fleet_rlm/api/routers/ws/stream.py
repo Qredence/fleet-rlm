@@ -188,7 +188,7 @@ async def run_streaming_turn(
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
     mlflow_trace_context: Any | None = None,
-    prepare_stream: PreStreamSetupFn | None = None,
+    prepare_stream: PreStreamSetupFn,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -247,13 +247,12 @@ async def run_streaming_turn(
 
 async def _run_prepared_stream(
     *,
-    prepare_stream: PreStreamSetupFn | None,
+    prepare_stream: PreStreamSetupFn,
     mlflow_trace_context: Any | None,
     stream_body: Callable[[], Awaitable[None]],
 ) -> None:
     if mlflow_trace_context is None:
-        if prepare_stream is not None:
-            await prepare_stream()
+        await prepare_stream()
         await stream_body()
         return
 
@@ -262,8 +261,7 @@ async def _run_prepared_stream(
     )
 
     with mlflow_request_context(mlflow_trace_context):
-        if prepare_stream is not None:
-            await prepare_stream()
+        await prepare_stream()
         await stream_body()
 
 

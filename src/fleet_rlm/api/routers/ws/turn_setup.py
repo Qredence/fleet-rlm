@@ -34,7 +34,7 @@ class PreparedStreamingTurn:
     last_loaded_docs_path: str | None
     analytics_enabled: bool | None
     mlflow_trace_context: Any | None
-    prepare_stream: PreStreamSetupFn | None
+    prepare_stream: PreStreamSetupFn
 
 
 async def _reject_empty_message(
@@ -56,10 +56,8 @@ def _build_prepare_stream(
     agent: ChatAgentProtocol,
     msg: WSMessage,
     workspace_id: str,
-) -> PreStreamSetupFn | None:
+) -> PreStreamSetupFn:
     daytona_request = normalize_daytona_chat_request(msg, workspace_id=workspace_id)
-    if daytona_request is None:
-        return None
 
     async def _prepare_stream() -> None:
         await prepare_daytona_workspace_for_turn(
@@ -153,7 +151,7 @@ async def prepare_chat_message_turn(
         msg=msg,
         workspace_id=workspace_id,
     )
-    sandbox_provider = "daytona" if prepare_stream is not None else None
+    sandbox_provider = "daytona"
 
     await local_persist(include_volume_save=True, latest_user_message=message)
     session.cancel_flag["cancelled"] = False

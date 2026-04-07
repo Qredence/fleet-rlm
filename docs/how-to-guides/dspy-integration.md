@@ -214,13 +214,12 @@ Use `create_runtime_rlm()` for canonical RLM construction:
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
+from fleet_rlm import DaytonaInterpreter
 
 # Set up the Daytona interpreter
 interpreter = DaytonaInterpreter(
     timeout=600,           # Sandbox timeout in seconds
-    secret_name="LITELLM", # Modal secret containing API keys
-    volume_name="my-vol",  # Optional: persistent Modal volume
+    volume_name="my-vol",  # Optional: persistent Daytona volume
     max_llm_calls=50,      # Limit LLM calls per session
 )
 
@@ -248,9 +247,9 @@ For production use, prefer registry-based module construction:
 
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
-from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
+from fleet_rlm import DaytonaInterpreter
 
-interpreter = DaytonaInterpreter(timeout=600, secret_name="LITELLM")
+interpreter = DaytonaInterpreter(timeout=600)
 
 # Build by name (strings are validated against RUNTIME_MODULE_NAMES)
 rlm = build_runtime_module(
@@ -284,9 +283,9 @@ For delegated sub-problems, use the recursive query pattern:
 
 ```python
 from fleet_rlm.runtime.models.rlm_runtime_modules import build_recursive_subquery_rlm
-from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
+from fleet_rlm import DaytonaInterpreter
 
-interpreter = DaytonaInterpreter(timeout=300, secret_name="LITELLM")
+interpreter = DaytonaInterpreter(timeout=300)
 
 rlm = build_recursive_subquery_rlm(
     interpreter=interpreter,
@@ -324,29 +323,24 @@ The native function-calling flags are experimental and remain off by default. Th
 ### DaytonaInterpreter Options
 
 ```python
-from fleet_rlm.runtime.execution.interpreter import DaytonaInterpreter
+from fleet_rlm import DaytonaInterpreter
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 interpreter = DaytonaInterpreter(
     # Core settings
     timeout=900,                    # Total sandbox lifetime (seconds)
-    secret_name="LITELLM",          # Modal secret for API keys
-    volume_name="persistent-vol",   # Optional Modal volume for persistence
+    volume_name="persistent-vol",   # Optional Daytona durable volume name
+    repo_url="https://github.com/example/repo.git",
+    repo_ref="main",
+    context_paths=["docs/architecture.md"],
 
     # Execution limits
     max_llm_calls=100,              # Max LLM calls per session
     llm_call_timeout=120,           # Timeout per LLM call (seconds)
     execute_timeout=300,            # Timeout per code execution (seconds)
-    idle_timeout=60,                # Sandbox idle timeout (seconds)
 
     # Execution profile
     default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-
-    # Async execution
-    async_execute=True,             # Enable async sandbox operations
-
-    # Debugging
-    verbose=True,                   # Print debug information
 )
 ```
 
