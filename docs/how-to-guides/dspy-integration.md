@@ -212,7 +212,7 @@ Modules wrap signatures with execution logic. Fleet-rlm provides factory functio
 Use `create_runtime_rlm()` for canonical RLM construction:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import create_runtime_rlm
+from fleet_rlm.runtime.models.builders import create_runtime_rlm
 from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
@@ -247,7 +247,7 @@ print(result.key_points)
 For production use, prefer registry-based module construction:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import build_runtime_module
+from fleet_rlm.runtime.models.registry import build_runtime_module
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=600, secret_name="LITELLM")
@@ -283,7 +283,7 @@ Available module names:
 For delegated sub-problems, use the recursive query pattern:
 
 ```python
-from fleet_rlm.runtime.models.rlm_runtime_modules import build_recursive_subquery_rlm
+from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
 from fleet_rlm.runtime.execution.interpreter import ModalInterpreter
 
 interpreter = ModalInterpreter(timeout=300, secret_name="LITELLM")

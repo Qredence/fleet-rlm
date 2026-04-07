@@ -2,8 +2,8 @@
 
 NOTE: All imports of registry/builders are intentionally deferred inside
 each test function to avoid triggering the circular import chain:
-  core.agent.chat_agent → core.models.builders
-  → core.agent.signatures → core.agent
+  fleet_rlm.runtime.agent.chat_agent → fleet_rlm.runtime.models.builders
+  → fleet_rlm.runtime.agent.signatures → fleet_rlm.runtime.agent
 
 Verifies:
 - RUNTIME_MODULE_REGISTRY contains all expected names

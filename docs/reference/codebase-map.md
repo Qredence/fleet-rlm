@@ -57,7 +57,7 @@ Key notes:
 - `runtime/execution/*` owns interpreter/session/streaming behavior.
 - `runtime/content/*` replaces the old split across chunking/document-ingestion/log “features”.
 - `runtime/tools/*` is the typed tool-adapter surface consumed by the shared chat runtime.
-- `runtime/models/rlm_runtime_modules.py` remains the DSPy runtime-module assembly point shared by the agent runtime.
+- `runtime/models/builders.py` and `runtime/models/registry.py` are the DSPy runtime-module assembly points shared by the agent runtime.
 
 ### `src/fleet_rlm/integrations/`
 

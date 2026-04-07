@@ -402,7 +402,7 @@ sequenceDiagram
     autonumber
     participant Parent as Parent Agent<br/>(RLMReActChatAgent)
     participant Delegate as delegate_sub_agent.py
-    participant Builder as rlm_runtime_modules.py
+    participant Builder as builders.py
     participant ChildCtx as Child Interpreter
     participant ChildRLM as Child dspy.RLM
     participant StreamCb as StreamEventCallback
@@ -453,7 +453,7 @@ sequenceDiagram
 | `spawn_delegate_sub_agent_async` | `runtime/agent/recursive_runtime.py` | Main entry point for delegation                   |
 | `claim_delegate_slot_or_error`   | `runtime/agent/delegation_policy.py` | Enforce `delegate_max_calls_per_turn` limit       |
 | `build_child_interpreter`        | `runtime/agent/delegation_policy.py` | Create or reuse ModalInterpreter for child        |
-| `build_recursive_subquery_rlm`   | `runtime/models/rlm_runtime_modules.py` | Construct `dspy.RLM` module with sandbox tools |
+| `build_recursive_subquery_rlm`   | `runtime/models/builders.py`            | Construct `dspy.RLM` module with sandbox tools |
 | `_delegate_streaming_context`    | `runtime/agent/recursive_runtime.py` | Build `StreamingContext` for child depth tracking |
 
 **Depth and Budget Controls:**
