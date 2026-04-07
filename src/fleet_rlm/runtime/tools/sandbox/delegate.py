@@ -130,8 +130,6 @@ def _build_tool(registration: _ToolRegistration) -> Any:
 # Variable-mode RLM routing (Algorithm 1, arXiv 2512.24601v2)
 # ---------------------------------------------------------------------------
 
-_VARIABLE_MODE_THRESHOLD = VARIABLE_MODE_THRESHOLD
-
 
 def _has_interpreter(agent: RLMReActChatAgent) -> bool:
     """Check whether the agent has a started interpreter for variable mode."""
@@ -446,7 +444,7 @@ def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
         # (Algorithm 1, arXiv 2512.24601v2): prompt stored as REPL
         # variable, LLM sees only metadata and explores via code.
         combined_len = len(query) + len(context)
-        if combined_len > _VARIABLE_MODE_THRESHOLD and _has_interpreter(ctx.agent):
+        if combined_len > VARIABLE_MODE_THRESHOLD and _has_interpreter(ctx.agent):
             return await _variable_mode_rlm_query(ctx, query, context)
 
         result = await spawn_delegate_sub_agent_async(

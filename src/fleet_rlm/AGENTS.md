@@ -124,7 +124,7 @@ Layering rules:
 Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
-- Keep runtime modules/orchestration under `runtime/agent/*` and `runtime/models/rlm_runtime_modules.py`
+- Keep runtime modules/orchestration under `runtime/agent/*` and `runtime/models/{builders,registry}.py`
 - Keep shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
