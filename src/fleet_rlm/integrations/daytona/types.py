@@ -115,7 +115,7 @@ class SandboxSpec:
             params["labels"] = dict(self.labels)
         if self.ephemeral is not None:
             params["ephemeral"] = self.ephemeral
-        params.update(self._provider_lifecycle_params())
+        params.update(self._daytona_lifecycle_params())
         if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
         if self.cpu is not None or self.memory is not None or self.disk is not None:
@@ -142,7 +142,7 @@ class SandboxSpec:
             params["volumes"] = [mount_kwargs]
         return params
 
-    def _provider_lifecycle_params(self) -> dict[str, int]:
+    def _daytona_lifecycle_params(self) -> dict[str, int]:
         """Return Daytona lifecycle settings in provider-minute units."""
         params: dict[str, int] = {}
         if self.auto_stop_interval is not None:
