@@ -45,6 +45,27 @@ class DaytonaDiagnosticError(RuntimeError):
         self.phase = phase
 
 
+class VolumeNotReadyError(DaytonaDiagnosticError):
+    """Raised when a Daytona volume does not reach ``ready`` state in time."""
+
+    def __init__(
+        self,
+        *,
+        volume_name: str,
+        volume_state: str,
+        timeout_seconds: float,
+    ) -> None:
+        self.volume_name = volume_name
+        self.volume_state = volume_state
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Volume '{volume_name}' is in state '{volume_state}' "
+            f"after {timeout_seconds}s. Check Daytona dashboard.",
+            category="sandbox_create_clone_error",
+            phase="sandbox_create",
+        )
+
+
 def category_for_phase(phase: str) -> str:
     """Return the stable error category for a smoke/runtime phase."""
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .config import DaytonaConfigError, ResolvedDaytonaConfig, resolve_daytona_config
-from .diagnostics import DaytonaDiagnosticError, run_daytona_smoke
+from .diagnostics import DaytonaDiagnosticError, VolumeNotReadyError, run_daytona_smoke
 from .interpreter import DaytonaInterpreter
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
@@ -29,6 +29,7 @@ __all__ = [
     "ResolvedDaytonaConfig",
     "SandboxLmRuntimeConfig",
     "SandboxSpec",
+    "VolumeNotReadyError",
     "resolve_daytona_config",
     "run_daytona_smoke",
 ]

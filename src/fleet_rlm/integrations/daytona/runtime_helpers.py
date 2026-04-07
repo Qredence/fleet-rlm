@@ -6,10 +6,12 @@ import atexit
 import asyncio
 import inspect
 import json
+import logging
 import os
 import re
 import subprocess
 import threading
+import time as _time
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
 
@@ -17,8 +19,10 @@ from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
 
 from .config import ResolvedDaytonaConfig
-from .diagnostics import DaytonaDiagnosticError
+from .diagnostics import DaytonaDiagnosticError, VolumeNotReadyError
 from .types import ContextSource
+
+_logger = logging.getLogger(__name__)
 
 DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 
@@ -158,6 +162,69 @@ def _build_daytona_client(config: ResolvedDaytonaConfig) -> Any:
             api_url=config.api_url.rstrip("/"),
             target=config.target,
         )
+    )
+
+
+_VOLUME_READY_STATES = frozenset({"ready"})
+_VOLUME_ERROR_STATES = frozenset({"error", "failed", "deleted"})
+
+
+def _normalize_volume_state(volume: Any) -> str:
+    return str(getattr(volume, "state", "") or "").lower().strip()
+
+
+def _raise_if_volume_error(volume_name: str, state: str) -> None:
+    if state in _VOLUME_ERROR_STATES:
+        raise DaytonaDiagnosticError(
+            f"Volume '{volume_name}' is in error state '{state}'",
+            category="sandbox_create_clone_error",
+            phase="sandbox_create",
+        )
+
+
+async def _await_volume_ready(
+    client: Any,
+    volume_name: str,
+    volume: Any,
+    *,
+    timeout: float = 60.0,
+) -> Any:
+    """Poll until a Daytona volume reaches ``ready`` state.
+
+    Returns the (possibly refreshed) volume object.  Raises
+    ``VolumeNotReadyError`` on timeout or ``DaytonaDiagnosticError``
+    when the volume enters a terminal error state.
+    """
+    state = _normalize_volume_state(volume)
+
+    if state in _VOLUME_READY_STATES:
+        return volume
+    _raise_if_volume_error(volume_name, state)
+
+    deadline = _time.monotonic() + timeout
+    interval = 1.0
+
+    while _time.monotonic() < deadline:
+        _logger.debug(
+            "Volume '%s' not ready (state=%s), polling in %.1fs",
+            volume_name,
+            state,
+            interval,
+        )
+        await asyncio.sleep(interval)
+        interval = min(interval * 2, 10.0)
+
+        volume = await _await_if_needed(client.volume.get(volume_name))
+        state = _normalize_volume_state(volume)
+
+        if state in _VOLUME_READY_STATES:
+            return volume
+        _raise_if_volume_error(volume_name, state)
+
+    raise VolumeNotReadyError(
+        volume_name=volume_name,
+        volume_state=state,
+        timeout_seconds=timeout,
     )
 
 
@@ -759,6 +826,7 @@ __all__ = [
     "_astage_local_file",
     "_aupload_remote_text",
     "_await_if_needed",
+    "_await_volume_ready",
     "_build_clone_kwargs",
     "_build_staged_filename",
     "_build_daytona_client",

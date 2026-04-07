@@ -18,7 +18,7 @@ from .runtime import (
     _build_daytona_client,
     _run_async_compat,
 )
-from .runtime_helpers import _aensure_daytona_volume_layout
+from .runtime_helpers import _aensure_daytona_volume_layout, _await_volume_ready
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,7 @@ async def _amounted_daytona_volume(volume_name: str) -> AsyncIterator[Any]:
 
     client = _build_daytona_client(resolve_daytona_config())
     volume = await _await_if_needed(client.volume.get(volume_name, create=True))
+    volume = await _await_volume_ready(client, volume_name, volume)
     sandbox = await _await_if_needed(
         client.create(
             CreateSandboxFromSnapshotParams(
