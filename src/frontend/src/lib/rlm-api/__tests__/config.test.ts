@@ -24,6 +24,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://custom-host:9000/api/v1/ws/execution/events",
+    );
   });
 
   it("rewrites the legacy explicit chat websocket URL to execution", async () => {
@@ -32,6 +35,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://custom-host:9000/api/v1/ws/execution/events",
+    );
   });
 
   it("rewrites a legacy explicit chat websocket suffix even when the URL is malformed", async () => {
@@ -40,6 +46,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "custom-host/api/v1/ws/execution/events",
+    );
   });
 
   it("leaves a malformed explicit websocket URL unchanged when it is not legacy chat", async () => {
@@ -48,6 +57,7 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("custom-host/socket");
+    expect(rlmApiConfig.wsExecutionUrl).toBe("custom-host/socket");
   });
 
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────
@@ -57,6 +67,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/execution/events",
+    );
   });
 
   it("maps https:// to wss:// when deriving from VITE_FLEET_API_URL", async () => {
@@ -65,6 +78,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("wss://api.example.com/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "wss://api.example.com/api/v1/ws/execution/events",
+    );
   });
 
   it("always sets the path to /api/v1/ws/execution when deriving from API URL", async () => {
@@ -73,6 +89,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:8000/api/v1/ws/execution/events",
+    );
   });
 
   // ── VITE_FLEET_WS_URL takes precedence ──────────────────────────────────────
@@ -82,6 +101,9 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://explicit:1234/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://explicit:1234/api/v1/ws/execution/events",
+    );
   });
 
   // ── other config fields ──────────────────────────────────────────────────────

@@ -24,13 +24,14 @@ Backend serves:
 
 - Health: `/health`, `/ready`
 - Versioned API: `/api/v1/*`
-- WebSockets: `/api/v1/ws/execution`
+- WebSockets: `/api/v1/ws/execution`, `/api/v1/ws/execution/events`
 
 ## Backend Surfaces Used by Frontend
 
 Primary interactive/chat surfaces:
 
 - Canonical: `WS /api/v1/ws/execution`
+- Passive execution subscriptions: `WS /api/v1/ws/execution/events`
 
 Runtime setup surfaces:
 
@@ -95,11 +96,12 @@ Deprecated/planned surfaces removed from backend:
 ### `/api/v1/ws/execution`
 
 - Accepts `message`, `cancel`, and `command` payloads.
-- Emits `event`, `command_result`, `error`, and execution-observability envelopes.
-- Canonical purpose: conversational turn streaming plus workbench execution observability.
+- Emits `event`, `command_result`, and `error` envelopes.
+- Canonical purpose: conversational turn streaming.
 - Auth claims are canonical tenant/user authority.
-- `session_id` is the only authoritative client-controlled selector for websocket binding.
+- `session_id` remains the authoritative client-controlled selector for chat-session restore/continue on message and command payloads.
 - `workspace_id` and `user_id` are unsupported on websocket payloads and should be rejected immediately.
+- Query `session_id` is intentionally unsupported on this route.
 - `daytona_pilot` is the public runtime label for the shared workbench runtime.
 - Daytona `message` frames may also carry `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
@@ -168,9 +170,7 @@ Trajectory payload handling:
 ### `/api/v1/ws/execution`
 
 - Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
-- The same route is also the canonical conversational websocket stream when no `session_id` query
-  param is provided.
-- Filters by auth-derived identity plus `session_id`.
+- Filters by auth-derived identity plus query `session_id`.
 - `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
 - Emits `execution_started`, `execution_step`, `execution_completed`.
 - `execution_completed.summary` is the canonical canvas/workbench summary for the Daytona-backed
@@ -201,6 +201,13 @@ Trajectory payload handling:
 - `execution_step.step.type` remains runtime-agnostic with the current `llm | tool | repl | memory
   | output` lane model.
 - `execution_step.step.timestamp` is emitted as numeric Unix epoch seconds by the backend; the frontend may normalize it for display, but should not require ISO strings on the wire.
+
+### `/api/v1/ws/execution/events`
+
+- Dedicated passive execution/workbench subscription stream.
+- Requires query `session_id`.
+- Accepts no message, cancel, or command frames.
+- Emits `execution_started`, `execution_step`, and `execution_completed`.
 
 ### Unified Workspace Canvas Contract
 

@@ -23,21 +23,23 @@ function deriveWsUrl(apiUrl: string, path: string): string {
 
 function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
   const normalized = wsUrl.replace(/\/$/, "");
-  if (path !== "/api/v1/ws/execution") return normalized;
-  const legacyChatPath = /\/api\/v1\/ws\/chat(?=\/?$|[?#])/;
-  if (!legacyChatPath.test(normalized)) return normalized;
+  const defaultWsPath = /\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)(?=\/?$|[?#])/;
+  if (!defaultWsPath.test(normalized)) return normalized;
   if (!/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized)) {
-    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
+    return normalized.replace(defaultWsPath, path);
   }
 
   try {
     const url = new URL(normalized);
-    if (url.pathname.endsWith("/api/v1/ws/chat")) {
-      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/chat$/, "/api/v1/ws/execution");
+    if (/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(
+        /\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/,
+        path,
+      );
       return url.toString().replace(/\/$/, "");
     }
   } catch {
-    return normalized.replace(legacyChatPath, "/api/v1/ws/execution");
+    return normalized.replace(defaultWsPath, path);
   }
 
   return normalized;
@@ -64,7 +66,7 @@ function getActiveWsUrl(path: string) {
 export const rlmApiConfig = {
   baseUrl,
   wsUrl: getActiveWsUrl("/api/v1/ws/execution"),
-  wsExecutionUrl: getActiveWsUrl("/api/v1/ws/execution"),
+  wsExecutionUrl: getActiveWsUrl("/api/v1/ws/execution/events"),
   e2eMode: parseBool(import.meta.env.VITE_E2E, false),
   mockMode,
   timeoutMs: 30_000,

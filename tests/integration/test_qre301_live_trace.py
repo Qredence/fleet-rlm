@@ -89,7 +89,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
         assert status_resp.status_code == 200
 
         with client.websocket_connect(
-            f"/api/v1/ws/execution?session_id={session_id}",
+            f"/api/v1/ws/execution/events?session_id={session_id}",
             headers=headers,
         ) as execution_ws:
             with client.websocket_connect(

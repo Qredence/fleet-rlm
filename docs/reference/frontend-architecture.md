@@ -70,7 +70,8 @@ The main frontend slices are:
 
 Runtime expectations:
 
-- `/api/v1/ws/execution` is the canonical execution/workbench stream.
+- `/api/v1/ws/execution` is the canonical conversational websocket stream.
+- `/api/v1/ws/execution/events` is the passive execution/workbench stream.
 - `daytona_pilot` is the public runtime path and sends `execution_mode`, `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 - Frontend workbench state should hydrate from `execution_completed.summary`, not

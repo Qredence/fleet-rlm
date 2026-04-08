@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -444,10 +445,7 @@ def test_execution_websocket_rejects_legacy_identity_query_params(
     ws_client, websocket_auth_headers
 ):
     with ws_client.websocket_connect(
-        (
-            "/api/v1/ws/execution?session_id=session-123"
-            "&workspace_id=spoofed-workspace&user_id=spoofed-user"
-        ),
+        "/api/v1/ws/execution?workspace_id=spoofed-workspace&user_id=spoofed-user",
         headers=websocket_auth_headers,
     ) as websocket:
         error = websocket.receive_json()
@@ -457,6 +455,81 @@ def test_execution_websocket_rejects_legacy_identity_query_params(
     assert error["type"] == "error"
     assert error["code"] == "unsupported_identity_query_params"
     assert "session_id only" in error["message"]
+    assert exc_info.value.code == 1008
+
+
+def test_execution_websocket_rejects_query_session_id(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution?session_id=session-123",
+        headers=websocket_auth_headers,
+    ) as websocket:
+        error = websocket.receive_json()
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "execution_query_session_id_removed"
+    assert "/api/v1/ws/execution/events" in error["message"]
+    assert exc_info.value.code == 1008
+
+
+def test_execution_websocket_emits_startup_status_before_slow_startup_failure(
+    ws_client, websocket_auth_headers, monkeypatch: pytest.MonkeyPatch
+):
+    class _SlowFailingAgent:
+        async def __aenter__(self):
+            await asyncio.sleep(0.01)
+            raise RuntimeError("Daytona sandbox unavailable during startup")
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            _ = (exc_type, exc_val, exc_tb)
+            return False
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
+        lambda **kwargs: _SlowFailingAgent(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.ws.endpoint._EXECUTION_STARTUP_STATUS_DELAY_SECONDS",
+        0.0,
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution", headers=websocket_auth_headers
+    ) as websocket:
+        websocket.send_json({"type": "message", "content": "hello"})
+        status = websocket.receive_json()
+        error = websocket.receive_json()
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
+
+    assert status["type"] == "event"
+    assert status["data"]["kind"] == "status"
+    assert status["data"]["text"] == "Preparing Daytona workspace..."
+    assert status["data"]["payload"]["phase"] == "startup"
+    assert status["data"]["payload"]["runtime"]["runtime_mode"] == "daytona_pilot"
+    assert error["type"] == "error"
+    assert error["code"] == "sandbox_unavailable"
+    assert "Daytona sandbox unavailable during startup" in error["message"]
+    assert exc_info.value.code == 1011
+
+
+def test_execution_subscription_websocket_requires_session_id(
+    ws_client, websocket_auth_headers
+):
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution/events",
+        headers=websocket_auth_headers,
+    ) as websocket:
+        error = websocket.receive_json()
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
+
+    assert error["type"] == "error"
+    assert error["code"] == "missing_session_id"
+    assert "session_id" in error["message"]
     assert exc_info.value.code == 1008
 
 
@@ -523,7 +596,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     )
 
     with ws_client.websocket_connect(
-        "/api/v1/ws/execution?session_id=session-123",
+        "/api/v1/ws/execution/events?session_id=session-123",
         headers=websocket_auth_headers,
     ) as execution_ws:
         with ws_client.websocket_connect(

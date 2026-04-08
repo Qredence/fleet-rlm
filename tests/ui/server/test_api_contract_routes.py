@@ -26,6 +26,7 @@ _REQUIRED_HTTP_PATHS = {
 
 _REQUIRED_WS_PATHS = {
     "/api/v1/ws/execution",
+    "/api/v1/ws/execution/events",
 }
 
 
@@ -102,6 +103,7 @@ def test_ws_router_split_modules_import() -> None:
 
     assert ws.router is not None
     assert ws_endpoint.execution_stream is not None
+    assert ws_endpoint.execution_events_stream is not None
     assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
     assert ws_completion.build_execution_completion_summary is not None
@@ -131,6 +133,7 @@ def test_ws_router_registers_expected_websocket_routes() -> None:
         route.path for route in ws.router.routes if getattr(route, "path", None)
     }
     assert "/ws/execution" in websocket_paths
+    assert "/ws/execution/events" in websocket_paths
 
 
 def test_sessions_state_endpoint_exists_and_returns_expected_shape(
@@ -357,6 +360,13 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
         assert operation.get("security"), (
             f"expected OpenAPI security on {method} {path}"
         )
+
+
+def test_openapi_and_health_share_the_same_version(local_client: TestClient) -> None:
+    assert (
+        local_client.app.openapi()["info"]["version"]
+        == local_client.get("/health").json()["version"]
+    )
 
 
 def test_runtime_contract_endpoints_remain_available(

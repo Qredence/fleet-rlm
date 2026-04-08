@@ -124,17 +124,26 @@ class ReplHookBridge:
         self._previous_execution_hook = getattr(
             self._interpreter, "execution_event_callback", None
         )
-        self._interpreter.events_event_callback = self._interpreter_hook
+        self._interpreter.execution_event_callback = self._dispatch_interpreter_hook
 
     async def stop(self) -> None:
         if self._interpreter is not None:
-            self._interpreter.events_event_callback = self._previous_execution_hook
+            self._interpreter.execution_event_callback = self._previous_execution_hook
         await self._queue.put(None)
         if self._worker_task is not None:
             try:
                 await self._worker_task
             except asyncio.CancelledError:
                 logger.debug("REPL step worker task was cancelled during shutdown")
+
+    def _dispatch_interpreter_hook(self, payload: dict[str, Any]) -> None:
+        previous_hook = self._previous_execution_hook
+        if callable(previous_hook):
+            try:
+                previous_hook(payload)
+            except Exception:  # pragma: no cover - defensive callback isolation
+                logger.debug("previous_execution_event_callback_failed", exc_info=True)
+        self._interpreter_hook(payload)
 
     async def _emit_and_persist_repl_step(self, step_data: ExecutionStep) -> None:
         if self._lifecycle.run_completed:
@@ -585,6 +594,127 @@ async def _resolve_session_target(
     )
 
 
+class _ExecutionConnectionLoop:
+    """Connection-scoped websocket message loop for one execution socket."""
+
+    def __init__(
+        self,
+        *,
+        websocket: WebSocket,
+        state: ServerState,
+        runtime: _PreparedChatRuntime,
+        agent: ChatAgentProtocol,
+        interpreter: object | None,
+        session: _ChatSessionState,
+        local_persist: LocalPersistFn,
+        initial_message: WSMessage | None = None,
+    ) -> None:
+        self.websocket = websocket
+        self.state = state
+        self.runtime = runtime
+        self.agent = agent
+        self.interpreter = interpreter
+        self.session = session
+        self.local_persist = local_persist
+        self.execution_emitter = get_execution_emitter(state)
+        self.stream_task: asyncio.Task[str | None] | None = None
+        self.pending_receive_task: asyncio.Task[object] | None = None
+        self.pending_message = initial_message
+
+    async def run(self) -> None:
+        try:
+            while True:
+                if self.stream_task is not None:
+                    (
+                        msg,
+                        self.stream_task,
+                        self.pending_receive_task,
+                    ) = await _await_message_while_streaming(
+                        websocket=self.websocket,
+                        stream_task=self.stream_task,
+                        pending_receive_task=self.pending_receive_task,
+                        session=self.session,
+                    )
+                    if msg is None:
+                        continue
+
+                    if await _handle_message_while_streaming(
+                        websocket=self.websocket,
+                        msg=msg,
+                        agent=self.agent,
+                        runtime=self.runtime,
+                        session=self.session,
+                        local_persist=self.local_persist,
+                    ):
+                        continue
+                    continue
+
+                (
+                    self.pending_message,
+                    self.pending_receive_task,
+                ) = await _receive_next_chat_message(
+                    websocket=self.websocket,
+                    pending_message=self.pending_message,
+                    pending_receive_task=self.pending_receive_task,
+                )
+                msg = self.pending_message
+                self.pending_message = None
+                if msg is None:
+                    continue
+
+                target = await _resolve_session_target(
+                    state=self.state,
+                    agent=self.agent,
+                    interpreter=self.interpreter,
+                    local_persist=self.local_persist,
+                    session=self.session,
+                    msg=msg,
+                )
+
+                if await _handle_idle_non_turn_message(
+                    websocket=self.websocket,
+                    msg=msg,
+                    agent=self.agent,
+                    runtime=self.runtime,
+                    session=self.session,
+                    local_persist=self.local_persist,
+                ):
+                    continue
+
+                self.stream_task = asyncio.create_task(
+                    _process_chat_message(
+                        websocket=self.websocket,
+                        msg=msg,
+                        agent=self.agent,
+                        interpreter=self.interpreter,
+                        session=self.session,
+                        local_persist=self.local_persist,
+                        runtime=self.runtime,
+                        workspace_id=target.workspace_id,
+                        user_id=target.user_id,
+                        sess_id=target.sess_id,
+                        execution_emitter=self.execution_emitter,
+                    )
+                )
+        except WebSocketDisconnect:
+            await handle_chat_disconnect(
+                pending_receive_task=self.pending_receive_task,
+                stream_task=self.stream_task,
+                cancel_flag=self.session.cancel_flag,
+                local_persist=self.local_persist,
+                lifecycle=self.session.lifecycle,
+            )
+        except Exception as exc:
+            await handle_chat_loop_exception(
+                websocket=self.websocket,
+                exc=exc,
+                pending_receive_task=self.pending_receive_task,
+                stream_task=self.stream_task,
+                local_persist=self.local_persist,
+                lifecycle=self.session.lifecycle,
+            )
+
+
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
@@ -596,95 +726,14 @@ async def _chat_message_loop(
     local_persist: LocalPersistFn,
     initial_message: WSMessage | None = None,
 ) -> None:
-    execution_emitter = get_execution_emitter(state)
-    stream_task: asyncio.Task[str | None] | None = None
-    pending_receive_task: asyncio.Task[object] | None = None
-    pending_message = initial_message
-
-    try:
-        while True:
-            if stream_task is not None:
-                (
-                    msg,
-                    stream_task,
-                    pending_receive_task,
-                ) = await _await_message_while_streaming(
-                    websocket=websocket,
-                    stream_task=stream_task,
-                    pending_receive_task=pending_receive_task,
-                    session=session,
-                )
-                if msg is None:
-                    continue
-
-                if await _handle_message_while_streaming(
-                    websocket=websocket,
-                    msg=msg,
-                    agent=agent,
-                    runtime=runtime,
-                    session=session,
-                    local_persist=local_persist,
-                ):
-                    continue
-                continue
-
-            msg, pending_receive_task = await _receive_next_chat_message(
-                websocket=websocket,
-                pending_message=pending_message,
-                pending_receive_task=pending_receive_task,
-            )
-            pending_message = None
-            if msg is None:
-                continue
-
-            target = await _resolve_session_target(
-                state=state,
-                agent=agent,
-                interpreter=interpreter,
-                local_persist=local_persist,
-                session=session,
-                msg=msg,
-            )
-
-            if await _handle_idle_non_turn_message(
-                websocket=websocket,
-                msg=msg,
-                agent=agent,
-                runtime=runtime,
-                session=session,
-                local_persist=local_persist,
-            ):
-                continue
-
-            stream_task = asyncio.create_task(
-                _process_chat_message(
-                    websocket=websocket,
-                    msg=msg,
-                    agent=agent,
-                    interpreter=interpreter,
-                    session=session,
-                    local_persist=local_persist,
-                    runtime=runtime,
-                    workspace_id=target.workspace_id,
-                    user_id=target.user_id,
-                    sess_id=target.sess_id,
-                    execution_emitter=execution_emitter,
-                )
-            )
-    except WebSocketDisconnect:
-        await handle_chat_disconnect(
-            pending_receive_task=pending_receive_task,
-            stream_task=stream_task,
-            cancel_flag=session.cancel_flag,
-            local_persist=local_persist,
-            lifecycle=session.lifecycle,
-        )
-    except Exception as exc:
-        await handle_chat_loop_exception(
-            websocket=websocket,
-            exc=exc,
-            pending_receive_task=pending_receive_task,
-            stream_task=stream_task,
-            local_persist=local_persist,
-            lifecycle=session.lifecycle,
-        )
+    loop = _ExecutionConnectionLoop(
+        websocket=websocket,
+        state=state,
+        runtime=runtime,
+        agent=agent,
+        interpreter=interpreter,
+        session=session,
+        local_persist=local_persist,
+        initial_message=initial_message,
+    )
+    await loop.run()

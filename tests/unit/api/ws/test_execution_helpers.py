@@ -11,6 +11,7 @@ from fastapi import WebSocketDisconnect
 from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.routers.ws.stream import (
+    ReplHookBridge,
     _emit_stream_event,
 )
 from fleet_rlm.api.routers.ws.helpers import (
@@ -112,6 +113,24 @@ class _NoopStepBuilder:
         return None
 
 
+class _RecordingLifecycle(_LifecycleStub):
+    def __init__(self) -> None:
+        super().__init__()
+        self.emitted_steps: list[Any] = []
+        self.persisted_steps: list[Any] = []
+
+    async def emit_step(self, step: Any) -> None:
+        self.emitted_steps.append(step)
+
+    async def persist_step(self, step: Any) -> None:
+        self.persisted_steps.append(step)
+
+
+class _InterpreterHookStepBuilder:
+    def from_interpreter_hook(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"id": "step-1", "payload": payload}
+
+
 def test_try_send_json_returns_false_after_websocket_close() -> None:
     assert (
         asyncio.run(_try_send_json(cast(Any, _ClosedSendWebSocket()), {"ok": True}))
@@ -171,6 +190,48 @@ def test_emit_stream_event_sends_terminal_error_before_run_completion() -> None:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+
+    asyncio.run(scenario())
+
+
+def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook() -> (
+    None
+):
+    async def scenario() -> None:
+        lifecycle = _RecordingLifecycle()
+        previous_calls: list[dict[str, Any]] = []
+        previous_hook = previous_calls.append
+        interpreter = SimpleNamespace(execution_event_callback=previous_hook)
+
+        def enqueue_nonblocking(
+            queue: asyncio.Queue[dict[str, Any] | None],
+            step: dict[str, Any],
+        ) -> bool:
+            queue.put_nowait(step)
+            return True
+
+        bridge = ReplHookBridge(
+            ws_loop=asyncio.get_running_loop(),
+            lifecycle=lifecycle,
+            step_builder=cast(Any, _InterpreterHookStepBuilder()),
+            interpreter=interpreter,
+            enqueue_nonblocking=enqueue_nonblocking,
+        )
+
+        await bridge.start()
+        assert interpreter.execution_event_callback is not previous_hook
+
+        payload = {"kind": "sandbox_output", "text": "hello"}
+        interpreter.execution_event_callback(payload)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert previous_calls == [payload]
+        assert lifecycle.emitted_steps == [{"id": "step-1", "payload": payload}]
+        assert lifecycle.persisted_steps == [{"id": "step-1", "payload": payload}]
+
+        await bridge.stop()
+        assert interpreter.execution_event_callback is previous_hook
 
     asyncio.run(scenario())
 

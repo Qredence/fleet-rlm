@@ -67,7 +67,8 @@ Frontend source lives under `src/frontend/src/`.
 
 ## Runtime and API Contract Rules
 
-- `/api/v1/ws/execution` is the canonical workbench stream.
+- `/api/v1/ws/execution` is the canonical conversational websocket stream.
+- `/api/v1/ws/execution/events` is the passive workbench stream.
 - Frontend workbench state should hydrate from
   `execution_completed.summary`, not from legacy chat-final
   payloads.
@@ -89,8 +90,9 @@ Optional overrides:
 - `VITE_PUBLIC_POSTHOG_API_KEY`
 - `VITE_PUBLIC_POSTHOG_HOST`
 
-If `VITE_FLEET_WS_URL` is unset, the frontend derives the websocket URL for
-`/api/v1/ws/execution` from `VITE_FLEET_API_URL`.
+If `VITE_FLEET_WS_URL` is unset, the frontend derives websocket URLs for
+`/api/v1/ws/execution` and `/api/v1/ws/execution/events` from
+`VITE_FLEET_API_URL`.
 
 ## OpenAPI Sync Workflow
 

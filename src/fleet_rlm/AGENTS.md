@@ -93,6 +93,7 @@ Canonical HTTP and websocket surfaces:
 - `POST /api/v1/optimization/run`
 - `POST /api/v1/traces/feedback`
 - `/api/v1/ws/execution`
+- `/api/v1/ws/execution/events`
 - Optional `/scalar` docs when `scalar_fastapi` is installed
 
 Runtime-mode boundaries:
@@ -144,7 +145,20 @@ API ownership:
 
 Websocket/runtime contract rules:
 
-- Treat `/api/v1/ws/execution` as the canonical conversational and execution/workbench websocket stream
+- Treat `/api/v1/ws/execution` as the canonical conversational websocket stream
+- Treat `/api/v1/ws/execution/events` as the dedicated passive execution/workbench event stream
+- Keep `/api/v1/ws/execution` execution-only:
+  - accept auth plus websocket frames
+  - reject query `session_id`
+  - use message-level `session_id` only to allocate, restore, or continue chat sessions
+  - emit an early `status` event when initial Daytona startup is slow so the client does not hit first-frame timeout before the real reply or startup error
+- Keep `/api/v1/ws/execution/events` subscription-only:
+  - require query `session_id`
+  - do not route message, cancel, or command frames through this socket
+  - emit only `execution_started`, `execution_step`, and `execution_completed`
+- Keep websocket workspace/user identity auth-derived on both routes; reject client-supplied `workspace_id` and `user_id`
+- Treat `execution_completed.summary` as the canonical workbench/canvas hydration payload
+- Keep interpreter-originated REPL execution steps wired through `execution_event_callback` and preserve any previously installed callback when bridging hooks
 - Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping
 - Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution
 - When Daytona falls back after a controlled failure, preserve the answer but mark the turn as degraded in final payloads and MLflow metadata
@@ -157,6 +171,8 @@ Daytona-specific boundaries:
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
 - Keep Daytona volume browsing in `integrations/daytona/volumes.py`
+- Keep Daytona volume readiness/state normalization in `integrations/daytona/runtime_helpers.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
+- When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
 - Keep `rlm_query` as the shared agent-level recursive entrypoint; `rlm_query_batched` remains Daytona-only
@@ -207,7 +223,7 @@ Fast backend confidence:
 
 Focused backend/runtime coverage:
 
-- `uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/api/ws/test_execution_helpers.py`
+- `uv run pytest -q tests/unit/api/ws/test_messages.py tests/unit/api/ws/test_execution_helpers.py tests/unit/package/test_exports.py tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py`
 
 Daytona-focused backend coverage:
 

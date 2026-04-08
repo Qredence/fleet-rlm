@@ -43,7 +43,8 @@ Generated or synced artifacts to avoid hand-editing:
 - Preserve the supported app surfaces: `Workbench`, `Volumes`, `Optimization`, and `Settings`.
 - Keep retired `taxonomy`, `skills`, `memory`, and `analytics` paths falling through to `/404`.
 - Keep runtime labels, websocket behavior, and request controls aligned with the backend contract.
-- Treat `/api/v1/ws/execution` as the canonical conversational and execution/workbench stream.
+- Treat `/api/v1/ws/execution` as the canonical conversational websocket stream.
+- Treat `/api/v1/ws/execution/events` as the dedicated passive execution/workbench event stream.
 - Hydrate workbench state from `execution_completed.summary`, not Daytona-only chat-final payload scraping.
 - Render Daytona `sandbox_output` status frames as sandbox/debug trace cards while keeping `trajectory_step` and `reasoning_step` as the main live trace surfaces.
 - Prefer the shadcn/Base UI baseline over one-off wrappers, parallel token layers, or custom mini-design-systems.

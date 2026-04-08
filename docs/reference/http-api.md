@@ -380,13 +380,13 @@ Records human feedback and optional ground truth for an MLflow trace.
 
 ## WebSocket Endpoints
 
-Real-time bidirectional communication for conversational turns and execution observability.
+Real-time websocket communication for conversational turns and execution observability.
 
 ---
 
 ### `WS /api/v1/ws/execution`
 
-Primary streaming interface for RLM conversations and workbench execution. Supports message streaming, cancellation, command dispatch, and execution observability.
+Primary bidirectional streaming interface for RLM conversations. Supports message streaming, cancellation, and command dispatch.
 
 **Connection:**
 
@@ -651,14 +651,14 @@ Sent when an error occurs that doesn't fit the event stream model.
 
 ---
 
-### `WS /api/v1/ws/execution`
+### `WS /api/v1/ws/execution/events`
 
-Dedicated execution observability stream for Artifact Canvas consumers. Provides structured execution graph events separate from the chat stream.
+Dedicated passive execution observability stream for Artifact Canvas consumers. Provides structured execution graph events separate from the chat stream.
 
 **Connection:**
 
 ```text
-ws://localhost:8000/api/v1/ws/execution?session_id=session-uuid
+ws://localhost:8000/api/v1/ws/execution/events?session_id=session-uuid
 ```
 
 **Query Parameters:**
@@ -669,7 +669,7 @@ ws://localhost:8000/api/v1/ws/execution?session_id=session-uuid
 
 **Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
 
-The backend resolves workspace and user identity from auth claims or server defaults. Client-provided `workspace_id` and `user_id` are rejected; `session_id` is the only authoritative selector for stream binding.
+The backend resolves workspace and user identity from auth claims or server defaults. Client-provided `workspace_id` and `user_id` are rejected; query `session_id` is the authoritative selector for passive execution stream binding. The conversational `/api/v1/ws/execution` route rejects query `session_id`.
 
 ---
 

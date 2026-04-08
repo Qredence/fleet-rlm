@@ -1,4 +1,4 @@
-"""WebSocket streaming chat endpoint."""
+"""WebSocket execution and subscription endpoints."""
 
 # NOTE: Do NOT add ``from __future__ import annotations`` here.
 # FastAPI inspects handler parameter *types* at runtime to detect
@@ -6,13 +6,18 @@
 # that introspection, causing WebSocket endpoints to reject connections
 # with HTTP 403 ("Field required" for a query param named ``websocket``).
 
+import asyncio
+from contextlib import suppress
+from datetime import datetime, timezone
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
+from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.runtime.config import build_dspy_context
 
 from ...dependencies import get_server_state_from_websocket
@@ -38,10 +43,13 @@ from .runtime import (
     _set_interpreter_default_profile,
 )
 from .stream import _chat_message_loop
+from .terminal import build_stream_event_dict
 
 router = APIRouter(tags=["websocket"])
 
 logger = logging.getLogger(__name__)
+
+_EXECUTION_STARTUP_STATUS_DELAY_SECONDS = 0.25
 
 
 async def _reject_unsupported_identity_query_params(
@@ -68,65 +76,135 @@ async def _reject_unsupported_identity_query_params(
     return True
 
 
-async def _run_chat_execution_stream(
-    *,
+async def _reject_execution_query_session_id(
     websocket: WebSocket,
-    state,
-    identity,
-) -> None:
+    *,
+    session_id: str | None,
+) -> bool:
+    if not str(session_id or "").strip():
+        return False
+
     await websocket.accept()
-    runtime = await _prepare_chat_runtime(
-        websocket=websocket,
-        state=state,
-        identity=identity,
-    )
-    if runtime is None:
-        return
+    if await _try_send_json(
+        websocket,
+        _error_envelope(
+            code="execution_query_session_id_removed",
+            message=(
+                "Execution websocket no longer accepts query session_id. Send "
+                "session_id in the message payload to resume chat sessions, or use "
+                "/api/v1/ws/execution/events for passive subscriptions."
+            ),
+        ),
+    ):
+        await _close_websocket_safely(websocket, code=1008)
+    return True
 
-    analytics_distinct_id = (identity.user_claim or "").strip() or None
-    try:
-        with (
-            runtime_distinct_id_context(analytics_distinct_id),
-            build_dspy_context(lm=runtime.planner_lm),
-        ):
-            initial_msg = None
-            while initial_msg is None:
-                raw_payload = await websocket.receive_json()
-                initial_msg = await parse_ws_message_or_send_error(
-                    websocket=websocket,
-                    raw_payload=raw_payload,
-                )
 
-            agent_context = _build_chat_agent_context(runtime)
-            async with agent_context as agent:
-                interpreter = getattr(agent, "interpreter", None)
-                _set_interpreter_default_profile(interpreter, runtime.cfg)
-                session = _new_chat_session_state(runtime, identity)
-                local_persist = _build_local_persist_fn(
-                    state=state,
-                    runtime=runtime,
-                    agent=agent,
-                    interpreter=interpreter,
-                    session=session,
-                )
-                await _chat_message_loop(
-                    websocket=websocket,
-                    state=state,
-                    runtime=runtime,
-                    agent=agent,
-                    interpreter=interpreter,
-                    session=session,
-                    local_persist=local_persist,
-                    initial_message=initial_msg,
-                )
-    except WebSocketDisconnect:
-        return
-    except Exception as exc:
-        logger.exception(
-            "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
+class _ExecutionWebSocketConnection:
+    """Connection-scoped execution orchestration for one websocket client."""
+
+    def __init__(self, *, websocket: WebSocket, state: Any, identity: Any) -> None:
+        self.websocket = websocket
+        self.state = state
+        self.identity = identity
+
+    async def _emit_delayed_startup_status(self) -> None:
+        await asyncio.sleep(_EXECUTION_STARTUP_STATUS_DELAY_SECONDS)
+        startup_event = StreamEvent(
+            kind="status",
+            text="Preparing Daytona workspace...",
+            payload={
+                "phase": "startup",
+                "runtime": {"runtime_mode": "daytona_pilot"},
+            },
+            timestamp=datetime.now(timezone.utc),
         )
-        if await _try_send_json(websocket, chat_startup_error_payload(exc)):
-            await _close_websocket_safely(websocket, code=1011)
+        await _try_send_json(
+            self.websocket,
+            {
+                "type": "event",
+                "data": build_stream_event_dict(
+                    event=startup_event,
+                    payload=startup_event.payload,
+                ),
+            },
+        )
+
+    async def _cancel_startup_status_task(
+        self, task: asyncio.Task[None] | None
+    ) -> None:
+        if task is None:
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    async def _receive_initial_message(self):
+        initial_msg = None
+        while initial_msg is None:
+            raw_payload = await self.websocket.receive_json()
+            initial_msg = await parse_ws_message_or_send_error(
+                websocket=self.websocket,
+                raw_payload=raw_payload,
+            )
+        return initial_msg
+
+    async def run(self) -> None:
+        await self.websocket.accept()
+        runtime = await _prepare_chat_runtime(
+            websocket=self.websocket,
+            state=self.state,
+            identity=self.identity,
+        )
+        if runtime is None:
+            return
+
+        analytics_distinct_id = (self.identity.user_claim or "").strip() or None
+        startup_status_task: asyncio.Task[None] | None = None
+        try:
+            with (
+                runtime_distinct_id_context(analytics_distinct_id),
+                build_dspy_context(lm=runtime.planner_lm),
+            ):
+                initial_msg = await self._receive_initial_message()
+                if initial_msg.type == "message":
+                    startup_status_task = asyncio.create_task(
+                        self._emit_delayed_startup_status()
+                    )
+                agent_context = _build_chat_agent_context(runtime)
+                async with agent_context as agent:
+                    await self._cancel_startup_status_task(startup_status_task)
+                    startup_status_task = None
+                    interpreter = getattr(agent, "interpreter", None)
+                    _set_interpreter_default_profile(interpreter, runtime.cfg)
+                    session = _new_chat_session_state(runtime, self.identity)
+                    local_persist = _build_local_persist_fn(
+                        state=self.state,
+                        runtime=runtime,
+                        agent=agent,
+                        interpreter=interpreter,
+                        session=session,
+                    )
+                    await _chat_message_loop(
+                        websocket=self.websocket,
+                        state=self.state,
+                        runtime=runtime,
+                        agent=agent,
+                        interpreter=interpreter,
+                        session=session,
+                        local_persist=local_persist,
+                        initial_message=initial_msg,
+                    )
+        except WebSocketDisconnect:
+            await self._cancel_startup_status_task(startup_status_task)
+            return
+        except Exception as exc:
+            await self._cancel_startup_status_task(startup_status_task)
+            logger.exception(
+                "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
+            )
+            if await _try_send_json(self.websocket, chat_startup_error_payload(exc)):
+                await _close_websocket_safely(self.websocket, code=1011)
 
 
 async def _run_execution_subscription_stream(
@@ -173,7 +251,37 @@ async def execution_stream(
     user_id: str | None = None,
     session_id: str | None = None,
 ) -> None:
-    """Canonical websocket endpoint for both execution streaming and subscriptions."""
+    """Canonical websocket endpoint for execution streaming only."""
+    if await _reject_unsupported_identity_query_params(
+        websocket,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    ):
+        return
+    if await _reject_execution_query_session_id(websocket, session_id=session_id):
+        return
+
+    state = get_server_state_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, state)
+    if identity is None:
+        return
+
+    connection = _ExecutionWebSocketConnection(
+        websocket=websocket,
+        state=state,
+        identity=identity,
+    )
+    await connection.run()
+
+
+@router.websocket("/ws/execution/events")
+async def execution_events_stream(
+    websocket: WebSocket,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Dedicated websocket endpoint for passive execution-event subscriptions."""
     if await _reject_unsupported_identity_query_params(
         websocket,
         workspace_id=workspace_id,
@@ -186,17 +294,9 @@ async def execution_stream(
     if identity is None:
         return
 
-    if not session_id:
-        await _run_chat_execution_stream(
-            websocket=websocket,
-            state=state,
-            identity=identity,
-        )
-        return
-
     await _run_execution_subscription_stream(
         websocket=websocket,
         state=state,
         identity=identity,
-        session_id=session_id,
+        session_id=str(session_id or "").strip(),
     )

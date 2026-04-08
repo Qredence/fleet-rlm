@@ -326,7 +326,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     await Promise.resolve();
 
     const connectionUrl = new URL(String(MockWebSocket.mock.calls[0]?.[0]));
-    expect(connectionUrl.pathname).toBe("/api/v1/ws/execution");
+    expect(connectionUrl.pathname).toBe("/api/v1/ws/execution/events");
     expect(connectionUrl.searchParams.get("session_id")).toBe("session-1");
     expect(connectionUrl.searchParams.has("workspace_id")).toBe(false);
     expect(connectionUrl.searchParams.has("user_id")).toBe(false);
