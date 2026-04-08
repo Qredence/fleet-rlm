@@ -9,7 +9,9 @@ Use this guide when you want `fleet-rlm` to emit MLflow traces during live DSPy 
 make mlflow-server
 ```
 
-That starts an OSS MLflow tracking server on `http://127.0.0.1:5001` using `sqlite:///mlruns.db`.
+That starts an OSS MLflow tracking server on `http://127.0.0.1:5001` using `sqlite:///.data/mlruns.db` by default.
+
+If you need a different local backend store, override `MLFLOW_LOCAL_BACKEND_STORE_URI` before running `make mlflow-server` or starting `uv run fleet web`.
 
 ### Optional: Auto-start MLflow in local development
 
@@ -29,10 +31,20 @@ Notes:
 - Auto-start only runs when `APP_ENV=local`.
 - The port comes from `MLFLOW_TRACKING_URI`, so keep that value aligned with your
   local MLflow server.
+- The backend store comes from `MLFLOW_LOCAL_BACKEND_STORE_URI` and defaults to
+  `sqlite:///.data/mlruns.db`.
 - Set `MLFLOW_AUTO_START=false` if you prefer to manage MLflow manually with
   `make mlflow-server`.
 - Startup still succeeds if MLflow cannot be reached; the app reports MLflow as
   degraded instead of failing boot.
+
+If the local startup logs report `Detected out-of-date database schema`, upgrade the configured backend store before retrying:
+
+```bash
+uv run mlflow db upgrade sqlite:///.data/mlruns.db
+```
+
+If the local tracking history does not matter, you can also delete the SQLite database file backing `MLFLOW_LOCAL_BACKEND_STORE_URI` and let MLflow recreate it on the next startup.
 
 ## 2. Enable MLflow in fleet-rlm
 
@@ -43,6 +55,9 @@ Set the following environment variables before starting the server or running of
 export MLFLOW_ENABLED=true
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 export MLFLOW_EXPERIMENT=fleet-rlm
+
+# optional override for the local auto-started OSS server / make mlflow-server
+# export MLFLOW_LOCAL_BACKEND_STORE_URI=sqlite:///.data/mlruns.db
 
 # optional model registry / deployment id
 # export MLFLOW_ACTIVE_MODEL_ID=model-123

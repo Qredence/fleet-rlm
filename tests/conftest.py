@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
 import pytest
+
+# Keep test collection deterministic: importing DSPy/LiteLLM via shared fixtures
+# should not trigger a remote model-cost fetch.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
 pytest_plugins = ("tests.unit.fixtures_react", "tests.unit.fixtures_daytona")
 

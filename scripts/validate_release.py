@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 from pathlib import Path
 import re
 import subprocess
@@ -43,7 +44,6 @@ ALLOWED_TRACKED_MJS_EXACT = {
     "src/frontend/postcss.config.mjs",
     "src/frontend/scripts/check-api-sync.mjs",
 }
-INIT_VERSION_PATTERN = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
 WHEEL_UI_PREFIX = "fleet_rlm/ui/dist/"
 
 
@@ -75,11 +75,20 @@ def _read_pyproject_version() -> str:
 
 
 def _read_init_version() -> str:
-    text = INIT_PATH.read_text(encoding="utf-8")
-    match = INIT_VERSION_PATTERN.search(text)
-    if not match:
-        raise ValueError("Could not locate __version__ in src/fleet_rlm/__init__.py")
-    return match.group(1)
+    spec = importlib.util.spec_from_file_location(
+        "fleet_rlm_release_version_probe",
+        INIT_PATH,
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError("Could not load src/fleet_rlm/__init__.py for version check")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    version = getattr(module, "__version__", None)
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("Could not resolve __version__ from src/fleet_rlm/__init__.py")
+    return version.strip()
 
 
 def _changelog_has_version(version: str) -> bool:

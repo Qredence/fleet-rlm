@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -14,7 +15,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fleet_rlm import __version__
-from fleet_rlm.integrations.observability.config import MlflowConfig, PostHogConfig
+from fleet_rlm.integrations.observability.config import (
+    MlflowConfig,
+    PostHogConfig,
+    PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI,
+)
 
 from .dependencies import ServerState
 
@@ -106,6 +111,36 @@ def _mlflow_startup_socket_ready(*, port: int) -> bool:
         sock.close()
 
 
+def resolve_mlflow_tracking_port(tracking_uri: str) -> int:
+    """Return the TCP port targeted by *tracking_uri*, defaulting to 5001."""
+
+    try:
+        match = re.search(r":(\d+)", tracking_uri.strip())
+        return int(match.group(1)) if match else 5001
+    except (ValueError, AttributeError):
+        return 5001
+
+
+def build_local_mlflow_unavailable_error(
+    *,
+    tracking_uri: str,
+    backend_store_uri: str,
+) -> str:
+    """Return actionable guidance when local MLflow auto-start remains unavailable."""
+
+    resolved_tracking_uri = tracking_uri.strip() or "http://127.0.0.1:5001"
+    resolved_backend_store_uri = (
+        backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+    )
+    return (
+        f"Local MLflow auto-start did not become reachable at {resolved_tracking_uri}. "
+        f"Backend store: {resolved_backend_store_uri}. "
+        "If startup logs mention an out-of-date schema, run "
+        f"'uv run mlflow db upgrade {resolved_backend_store_uri}' or recreate the "
+        "local backend store if that history is disposable."
+    )
+
+
 def resolve_mlflow_auto_start_enabled(
     *,
     app_env: str,
@@ -135,6 +170,7 @@ async def start_mlflow_server(
     *,
     app_env: str,
     tracking_uri: str,
+    backend_store_uri: str,
 ) -> subprocess.Popen | None:
     """Start a local MLflow tracking server if configured and not already running."""
     tracking_uri = tracking_uri.strip()
@@ -148,13 +184,10 @@ async def start_mlflow_server(
     if app_env != "local":
         return None
 
-    try:
-        import re
-
-        match = re.search(r":(\d+)", tracking_uri)
-        port = int(match.group(1)) if match else 5001
-    except (ValueError, AttributeError):
-        port = 5001
+    port = resolve_mlflow_tracking_port(tracking_uri)
+    resolved_backend_store_uri = (
+        backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+    )
 
     if _mlflow_startup_socket_ready(port=port):
         logger.info("MLflow tracking server already running at %s", tracking_uri)
@@ -170,7 +203,7 @@ async def start_mlflow_server(
                 "mlflow",
                 "server",
                 "--backend-store-uri",
-                "sqlite:///.data/mlruns.db",
+                resolved_backend_store_uri,
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -264,8 +297,13 @@ async def initialize_mlflow_runtime_service(
         mlflow_enabled=mlflow_cfg.enabled,
         tracking_uri=mlflow_cfg.tracking_uri,
     )
+    tracking_port = resolve_mlflow_tracking_port(mlflow_cfg.tracking_uri)
     state.mlflow_server_process = (
-        await start_mlflow_server(app_env=app_env, tracking_uri=mlflow_cfg.tracking_uri)
+        await start_mlflow_server(
+            app_env=app_env,
+            tracking_uri=mlflow_cfg.tracking_uri,
+            backend_store_uri=mlflow_cfg.local_backend_store_uri,
+        )
         if auto_start_enabled
         else None
     )
@@ -273,11 +311,19 @@ async def initialize_mlflow_runtime_service(
     from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
 
     initialized = await asyncio.to_thread(initialize_mlflow, mlflow_cfg)
+    startup_error = None
+    if not initialized:
+        startup_error = "MLflow runtime initialization unavailable"
+        if auto_start_enabled and not _mlflow_startup_socket_ready(port=tracking_port):
+            startup_error = build_local_mlflow_unavailable_error(
+                tracking_uri=mlflow_cfg.tracking_uri,
+                backend_store_uri=mlflow_cfg.local_backend_store_uri,
+            )
     set_optional_service_status(
         state,
         "mlflow",
         "ready" if initialized else "degraded",
-        error=None if initialized else "MLflow runtime initialization unavailable",
+        error=startup_error,
     )
 
 

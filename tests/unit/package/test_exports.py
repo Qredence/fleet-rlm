@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from importlib.metadata import version
 
 import pytest
 
@@ -19,6 +20,10 @@ def test_root_all_exports_are_resolvable() -> None:
 def test_root_all_matches_declared_lazy_exports() -> None:
     expected_exports = {"__version__"} | set(fleet_rlm._LAZY_ATTRS)
     assert set(fleet_rlm.__all__) == expected_exports
+
+
+def test_root_package_version_matches_installed_metadata() -> None:
+    assert fleet_rlm.__version__ == version("fleet-rlm")
 
 
 def test_database_package_exports_are_resolvable() -> None:

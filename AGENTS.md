@@ -102,6 +102,7 @@ Canonical shared endpoints:
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
 - `/api/v1/ws/execution`
+- `/api/v1/ws/execution/events`
 
 Cross-stack source-of-truth boundaries:
 
@@ -145,10 +146,10 @@ Repository setup and shared workflows:
 - `uv run python scripts/openapi_tools.py generate`
 - `uv run python scripts/openapi_tools.py validate`
 - `make clean`
-- `make test-fast`
-- `make quality-gate`
-- `make release-artifacts`
-- `make release-check`
+- `make test`
+- `make check`
+- `make build-release`
+- `make release`
 
 Frontend-only loop:
 
@@ -159,7 +160,7 @@ Frontend-only loop:
 
 Useful maintenance commands:
 
-- `make metadata-check`
+- `make check-release`
 - `uv run python scripts/check_docs_quality.py`
 - `uv run python scripts/check_agents_md_freshness.py`
 
@@ -175,12 +176,12 @@ Mandatory baseline before commit or PR:
 Docs-only changes:
 
 - `uv run python scripts/check_docs_quality.py`
-- `make metadata-check`
+- `make check-release`
 
 Backend or shared contract changes:
 
-- `make test-fast`
-- `make quality-gate`
+- `make test`
+- `make check`
 
 Frontend-only changes:
 
@@ -193,8 +194,8 @@ Frontend-only changes:
 
 Release-oriented confidence:
 
-- `make release-artifacts`
-- `make release-check`
+- `make build-release`
+- `make release`
 
 ## Maintenance Checklist
 

@@ -40,6 +40,7 @@ async def test_start_mlflow_server_uses_lightweight_local_command(
     proc = await bootstrap_observability.start_mlflow_server(
         app_env="local",
         tracking_uri="http://127.0.0.1:5001",
+        backend_store_uri="sqlite:///.data/mlruns.db",
     )
 
     assert proc is not None
@@ -84,6 +85,43 @@ async def test_start_mlflow_server_returns_none_when_process_exits_early(
     proc = await bootstrap_observability.start_mlflow_server(
         app_env="local",
         tracking_uri="http://127.0.0.1:5001",
+        backend_store_uri="sqlite:///.data/mlruns.db",
     )
 
     assert proc is None
+
+
+@pytest.mark.asyncio
+async def test_start_mlflow_server_uses_configured_backend_store_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    popen_calls: list[list[str]] = []
+
+    monkeypatch.setattr(
+        bootstrap_observability,
+        "_mlflow_startup_socket_ready",
+        lambda *, port: port == 5001 and len(popen_calls) > 0,
+    )
+
+    async def _fake_sleep(_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(bootstrap_observability.asyncio, "sleep", _fake_sleep)
+
+    def _fake_popen(args: list[str], **_kwargs) -> _FakeProcess:
+        popen_calls.append(list(args))
+        return _FakeProcess()
+
+    monkeypatch.setattr(bootstrap_observability.subprocess, "Popen", _fake_popen)
+
+    proc = await bootstrap_observability.start_mlflow_server(
+        app_env="local",
+        tracking_uri="http://127.0.0.1:5001",
+        backend_store_uri="sqlite:////tmp/fleet-mlflow.db",
+    )
+
+    assert proc is not None
+    assert popen_calls[0][4:6] == [
+        "--backend-store-uri",
+        "sqlite:////tmp/fleet-mlflow.db",
+    ]

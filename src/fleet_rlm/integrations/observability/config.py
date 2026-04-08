@@ -10,6 +10,7 @@ from fleet_rlm.integrations.config._env_utils import env_bool as _env_bool
 
 PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com"
 PROJECT_POSTHOG_DEFAULT_API_KEY: str | None = None
+PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI = "sqlite:///.data/mlruns.db"
 
 
 class PostHogConfig(BaseModel):
@@ -64,6 +65,7 @@ class MlflowConfig(BaseModel):
 
     enabled: bool = Field(default=True)
     tracking_uri: str = Field(default="http://127.0.0.1:5001")
+    local_backend_store_uri: str = Field(default=PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI)
     experiment: str = Field(default="fleet-rlm")
     active_model_id: str | None = Field(default=None)
     dspy_log_traces_from_compile: bool = Field(default=False)
@@ -78,12 +80,19 @@ class MlflowConfig(BaseModel):
         tracking_uri = (
             os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5001"
         ).strip()
+        local_backend_store_uri = (
+            os.getenv("MLFLOW_LOCAL_BACKEND_STORE_URI")
+            or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+        ).strip()
         experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
         active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
         enabled_raw = os.getenv("MLFLOW_ENABLED")
         return cls(
             enabled=_env_bool(enabled_raw, default=True),
             tracking_uri=tracking_uri,
+            local_backend_store_uri=(
+                local_backend_store_uri or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+            ),
             experiment=experiment or "fleet-rlm",
             active_model_id=active_model_id,
             dspy_log_traces_from_compile=_env_bool(

@@ -45,14 +45,15 @@ async def test_initialize_mlflow_runtime_service_infers_local_auto_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = ServerState()
-    started: list[tuple[str, str]] = []
+    started: list[tuple[str, str, str]] = []
 
     async def _fake_start_mlflow_server(
         *,
         app_env: str,
         tracking_uri: str,
+        backend_store_uri: str,
     ) -> SimpleNamespace:
-        started.append((app_env, tracking_uri))
+        started.append((app_env, tracking_uri, backend_store_uri))
         return SimpleNamespace(pid=1234)
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
@@ -69,7 +70,13 @@ async def test_initialize_mlflow_runtime_service_infers_local_auto_start(
 
     await initialize_mlflow_runtime_service(state, app_env="local")
 
-    assert started == [("local", "http://127.0.0.1:5001")]
+    assert started == [
+        (
+            "local",
+            "http://127.0.0.1:5001",
+            "sqlite:///.data/mlruns.db",
+        )
+    ]
     assert state.mlflow_server_process is not None
     assert state.optional_service_status["mlflow"] == "ready"
 
@@ -90,14 +97,15 @@ async def test_initialize_mlflow_runtime_service_skips_auto_start_when_disabled_
     auto_start_env: str | None,
 ) -> None:
     state = ServerState()
-    started: list[tuple[str, str]] = []
+    started: list[tuple[str, str, str]] = []
 
     async def _fake_start_mlflow_server(
         *,
         app_env: str,
         tracking_uri: str,
+        backend_store_uri: str,
     ) -> SimpleNamespace:
-        started.append((app_env, tracking_uri))
+        started.append((app_env, tracking_uri, backend_store_uri))
         return SimpleNamespace(pid=1234)
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
@@ -120,6 +128,53 @@ async def test_initialize_mlflow_runtime_service_skips_auto_start_when_disabled_
     assert started == []
     assert state.mlflow_server_process is None
     assert state.optional_service_status["mlflow"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_initialize_mlflow_runtime_service_surfaces_local_upgrade_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = ServerState()
+
+    async def _fake_start_mlflow_server(
+        *,
+        app_env: str,
+        tracking_uri: str,
+        backend_store_uri: str,
+    ) -> None:
+        _ = (app_env, tracking_uri, backend_store_uri)
+        return None
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+    monkeypatch.setenv(
+        "MLFLOW_LOCAL_BACKEND_STORE_URI",
+        "sqlite:///.data/custom-mlruns.db",
+    )
+    monkeypatch.delenv("MLFLOW_AUTO_START", raising=False)
+    monkeypatch.setattr(
+        "fleet_rlm.api.bootstrap_observability.start_mlflow_server",
+        _fake_start_mlflow_server,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.bootstrap_observability._mlflow_startup_socket_ready",
+        lambda *, port: False,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+        lambda config: False,
+    )
+
+    await initialize_mlflow_runtime_service(state, app_env="local")
+
+    assert state.optional_service_status["mlflow"] == "degraded"
+    assert state.optional_service_errors["mlflow"] == (
+        "Local MLflow auto-start did not become reachable at http://127.0.0.1:5001. "
+        "Backend store: sqlite:///.data/custom-mlruns.db. "
+        "If startup logs mention an out-of-date schema, run "
+        "'uv run mlflow db upgrade sqlite:///.data/custom-mlruns.db' or recreate the "
+        "local backend store if that history is disposable."
+    )
 
 
 class _CaptureClient:
