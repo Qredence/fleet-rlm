@@ -244,6 +244,15 @@ def test_await_volume_ready_returns_immediately_when_ready() -> None:
     assert client._call_count == 0
 
 
+def test_await_volume_ready_accepts_id_only_handles_without_state() -> None:
+    volume = SimpleNamespace(id="vol-1")
+    client = _FakeVolumeClient([])
+
+    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    assert result is volume
+    assert client._call_count == 0
+
+
 @pytest.mark.parametrize("state", ["VolumeState.READY", "volumestate.ready"])
 def test_await_volume_ready_accepts_enum_like_ready_strings(state: str) -> None:
     volume = SimpleNamespace(id="vol-1", state=state)

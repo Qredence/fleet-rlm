@@ -203,6 +203,22 @@ def _volume_state_details(volume: Any) -> tuple[str, str]:
     return raw_state, normalized_state
 
 
+def _volume_state_missing(
+    volume: Any, *, raw_state: str, normalized_state: str
+) -> bool:
+    """Return whether the SDK response omitted a usable state token.
+
+    Some Daytona SDK responses include a created volume ``id`` but omit the
+    ``state`` field entirely. The runtime has historically treated those
+    handles as ready enough to continue, and several sync workflow tests rely
+    on that contract.
+    """
+
+    if raw_state or normalized_state:
+        return False
+    return bool(getattr(volume, "id", None))
+
+
 def _raise_if_volume_error(
     volume_name: str,
     *,
@@ -238,6 +254,8 @@ async def _await_volume_ready(
     """
     raw_state, state = _volume_state_details(volume)
 
+    if _volume_state_missing(volume, raw_state=raw_state, normalized_state=state):
+        return volume
     if state in _VOLUME_READY_STATES:
         return volume
     _raise_if_volume_error(
@@ -269,6 +287,8 @@ async def _await_volume_ready(
         volume = await _await_if_needed(client.volume.get(volume_name))
         raw_state, state = _volume_state_details(volume)
 
+        if _volume_state_missing(volume, raw_state=raw_state, normalized_state=state):
+            return volume
         if state in _VOLUME_READY_STATES:
             return volume
         _raise_if_volume_error(
