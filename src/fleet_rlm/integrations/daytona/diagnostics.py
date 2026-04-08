@@ -54,12 +54,23 @@ class VolumeNotReadyError(DaytonaDiagnosticError):
         volume_name: str,
         volume_state: str,
         timeout_seconds: float,
+        raw_volume_state: str | None = None,
     ) -> None:
         self.volume_name = volume_name
         self.volume_state = volume_state
+        self.raw_volume_state = raw_volume_state or volume_state
         self.timeout_seconds = timeout_seconds
+        state_description = f"'{volume_state}'"
+        if (
+            self.raw_volume_state
+            and self.raw_volume_state.strip()
+            and self.raw_volume_state != volume_state
+        ):
+            state_description = (
+                f"normalized='{volume_state}' (raw='{self.raw_volume_state}')"
+            )
         super().__init__(
-            f"Volume '{volume_name}' is in state '{volume_state}' "
+            f"Volume '{volume_name}' is in state {state_description} "
             f"after {timeout_seconds}s. Check Daytona dashboard.",
             category="sandbox_create_clone_error",
             phase="sandbox_create",

@@ -169,14 +169,55 @@ _VOLUME_READY_STATES = frozenset({"ready"})
 _VOLUME_ERROR_STATES = frozenset({"error", "failed", "deleted"})
 
 
-def _normalize_volume_state(volume: Any) -> str:
-    return str(getattr(volume, "state", "") or "").lower().strip()
+def _canonicalize_volume_state_token(value: Any) -> str:
+    candidates: list[str] = []
+
+    if isinstance(value, str):
+        candidates.append(value)
+    else:
+        state_value = getattr(value, "value", None)
+        if state_value not in (None, ""):
+            candidates.append(str(state_value))
+        state_name = getattr(value, "name", None)
+        if state_name not in (None, ""):
+            candidates.append(str(state_name))
+        if value not in (None, ""):
+            candidates.append(str(value))
+
+    for candidate in candidates:
+        normalized = candidate.strip().lower()
+        if not normalized:
+            continue
+        normalized = normalized.replace("-", "_").replace(" ", "_")
+        if "." in normalized:
+            normalized = normalized.rsplit(".", 1)[-1]
+        if normalized:
+            return normalized
+    return ""
 
 
-def _raise_if_volume_error(volume_name: str, state: str) -> None:
-    if state in _VOLUME_ERROR_STATES:
+def _volume_state_details(volume: Any) -> tuple[str, str]:
+    raw_state_value = getattr(volume, "state", None)
+    raw_state = str(raw_state_value or "").strip()
+    normalized_state = _canonicalize_volume_state_token(raw_state_value)
+    return raw_state, normalized_state
+
+
+def _raise_if_volume_error(
+    volume_name: str,
+    *,
+    raw_state: str,
+    normalized_state: str,
+) -> None:
+    if normalized_state in _VOLUME_ERROR_STATES:
+        message = f"Volume '{volume_name}' is in error state '{normalized_state}'"
+        if raw_state and raw_state != normalized_state:
+            message = (
+                f"Volume '{volume_name}' is in error state "
+                f"'{normalized_state}' (raw='{raw_state}')"
+            )
         raise DaytonaDiagnosticError(
-            f"Volume '{volume_name}' is in error state '{state}'",
+            message,
             category="sandbox_create_clone_error",
             phase="sandbox_create",
         )
@@ -195,35 +236,51 @@ async def _await_volume_ready(
     ``VolumeNotReadyError`` on timeout or ``DaytonaDiagnosticError``
     when the volume enters a terminal error state.
     """
-    state = _normalize_volume_state(volume)
+    raw_state, state = _volume_state_details(volume)
 
     if state in _VOLUME_READY_STATES:
         return volume
-    _raise_if_volume_error(volume_name, state)
+    _raise_if_volume_error(
+        volume_name,
+        raw_state=raw_state,
+        normalized_state=state,
+    )
 
     deadline = _time.monotonic() + timeout
     interval = 1.0
 
     while _time.monotonic() < deadline:
         _logger.debug(
-            "Volume '%s' not ready (state=%s), polling in %.1fs",
+            (
+                "Volume '%s' not ready "
+                "(raw_state=%s, normalized_state=%s, state_type=%s, state_repr=%r), "
+                "polling in %.1fs"
+            ),
             volume_name,
-            state,
+            raw_state or "<empty>",
+            state or "<empty>",
+            type(getattr(volume, "state", None)).__name__,
+            getattr(volume, "state", None),
             interval,
         )
         await asyncio.sleep(interval)
         interval = min(interval * 2, 10.0)
 
         volume = await _await_if_needed(client.volume.get(volume_name))
-        state = _normalize_volume_state(volume)
+        raw_state, state = _volume_state_details(volume)
 
         if state in _VOLUME_READY_STATES:
             return volume
-        _raise_if_volume_error(volume_name, state)
+        _raise_if_volume_error(
+            volume_name,
+            raw_state=raw_state,
+            normalized_state=state,
+        )
 
     raise VolumeNotReadyError(
         volume_name=volume_name,
-        volume_state=state,
+        volume_state=state or raw_state or "unknown",
+        raw_volume_state=raw_state or None,
         timeout_seconds=timeout,
     )
 

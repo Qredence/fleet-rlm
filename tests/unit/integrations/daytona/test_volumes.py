@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from enum import Enum
 from types import SimpleNamespace
 
 import pytest
@@ -215,9 +216,64 @@ class _FakeVolumeClient:
         return SimpleNamespace(id=f"vol-{name}", state=state)
 
 
+class _VolumeStateEnum(Enum):
+    READY = "ready"
+
+
+class _ValueOnlyState:
+    value = "ready"
+
+    def __str__(self) -> str:
+        return "custom-value-state"
+
+
+class _NameOnlyState:
+    name = "READY"
+
+    def __str__(self) -> str:
+        return "custom-name-state"
+
+
 def test_await_volume_ready_returns_immediately_when_ready() -> None:
     """When the volume is already ``ready``, no polling occurs."""
     volume = SimpleNamespace(id="vol-1", state="ready")
+    client = _FakeVolumeClient([])
+
+    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    assert result is volume
+    assert client._call_count == 0
+
+
+@pytest.mark.parametrize("state", ["VolumeState.READY", "volumestate.ready"])
+def test_await_volume_ready_accepts_enum_like_ready_strings(state: str) -> None:
+    volume = SimpleNamespace(id="vol-1", state=state)
+    client = _FakeVolumeClient([])
+
+    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    assert result is volume
+    assert client._call_count == 0
+
+
+def test_await_volume_ready_accepts_enum_value_objects() -> None:
+    volume = SimpleNamespace(id="vol-1", state=_VolumeStateEnum.READY)
+    client = _FakeVolumeClient([])
+
+    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    assert result is volume
+    assert client._call_count == 0
+
+
+def test_await_volume_ready_accepts_value_only_objects() -> None:
+    volume = SimpleNamespace(id="vol-1", state=_ValueOnlyState())
+    client = _FakeVolumeClient([])
+
+    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    assert result is volume
+    assert client._call_count == 0
+
+
+def test_await_volume_ready_accepts_name_only_objects() -> None:
+    volume = SimpleNamespace(id="vol-1", state=_NameOnlyState())
     client = _FakeVolumeClient([])
 
     result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
@@ -245,7 +301,16 @@ def test_await_volume_ready_timeout_raises_volume_not_ready_error() -> None:
     err = exc_info.value
     assert err.volume_name == "test-vol"
     assert err.volume_state == "pending_create"
+    assert err.raw_volume_state == "pending_create"
     assert err.timeout_seconds == 0.1
+
+
+def test_await_volume_ready_timeout_error_includes_raw_and_normalized_states() -> None:
+    volume = SimpleNamespace(id="vol-1", state="VolumeState.PENDING_CREATE")
+    client = _FakeVolumeClient(["VolumeState.PENDING_CREATE"] * 50)
+
+    with pytest.raises(VolumeNotReadyError, match="raw='VolumeState.PENDING_CREATE'"):
+        asyncio.run(_await_volume_ready(client, "test-vol", volume, timeout=0.1))
 
 
 def test_await_volume_ready_error_state_raises_diagnostic_error() -> None:
