@@ -5,10 +5,35 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-
-from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
+from typing import TYPE_CHECKING, cast
 
 from .config import initialize_app_config, split_hydra_overrides
+
+if TYPE_CHECKING:
+    from fleet_rlm.integrations.config.env import AppConfig
+    from .terminal.chat import TerminalChatOptions
+
+
+def _build_terminal_chat_options(
+    *,
+    docs_path: Path | None = None,
+    trace_mode: str = "compact",
+    volume_name: str | None = None,
+) -> TerminalChatOptions:
+    from fleet_rlm.cli.terminal.chat import TerminalChatOptions
+    from fleet_rlm.runtime.models.streaming import TraceMode
+
+    return TerminalChatOptions(
+        docs_path=docs_path,
+        trace_mode=cast(TraceMode, trace_mode),
+        volume_name=volume_name,
+    )
+
+
+def run_terminal_chat(*, config: AppConfig, options: TerminalChatOptions) -> None:
+    from fleet_rlm.cli.terminal.chat import run_terminal_chat as _run_terminal_chat
+
+    _run_terminal_chat(config=config, options=options)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -101,7 +126,7 @@ def main() -> None:
 
     run_terminal_chat(
         config=config,
-        options=TerminalChatOptions(
+        options=_build_terminal_chat_options(
             docs_path=args.docs_path,
             trace_mode=args.trace_mode,
             volume_name=args.volume_name,

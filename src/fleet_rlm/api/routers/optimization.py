@@ -6,6 +6,7 @@ import logging
 import os
 from functools import partial
 from pathlib import Path
+from typing import Any, Literal, TypeAlias, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -25,7 +26,10 @@ router = APIRouter(
     dependencies=[Depends(require_http_identity)],
 )
 
-AUTH_ERROR_RESPONSES = {
+OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
+
+
+AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     401: {
         "description": "Authentication is required or the provided token is invalid."
     },
@@ -109,7 +113,7 @@ def _run_gepa_optimization(
     dataset_path: Path,
     program_spec: str,
     output_path: Path | None,
-    auto: str,
+    auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
 ) -> dict:
     """Blocking wrapper around optimize_program_with_gepa."""
@@ -121,7 +125,7 @@ def _run_gepa_optimization(
         dataset_path=dataset_path,
         program_spec=program_spec,
         output_path=output_path,
-        auto=auto,  # type: ignore[arg-type]
+        auto=auto,
         train_ratio=train_ratio,
     )
 
@@ -129,11 +133,16 @@ def _run_gepa_optimization(
 @router.post(
     "/run",
     response_model=GEPAOptimizationResponse,
-    responses={
-        **AUTH_ERROR_RESPONSES,
-        400: {"description": "Invalid optimization parameters."},
-        503: {"description": "GEPA optimization is unavailable in this environment."},
-    },
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid optimization parameters."},
+            503: {
+                "description": "GEPA optimization is unavailable in this environment."
+            },
+        },
+    ),
 )
 async def run_optimization(
     request: GEPAOptimizationRequest,

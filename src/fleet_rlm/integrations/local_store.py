@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Column, Integer
+from sqlalchemy import Column, Integer, text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 _DEFAULT_DB_DIR = Path(".data")
@@ -181,7 +181,7 @@ def get_turns(session_id: int) -> list[ChatTurn]:
         stmt = (
             select(ChatTurn)
             .where(ChatTurn.session_id == session_id)
-            .order_by(ChatTurn.turn_index)  # type: ignore[arg-type]
+            .order_by(text("turn_index"))
         )
         return list(db.exec(stmt).all())
 

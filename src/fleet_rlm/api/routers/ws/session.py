@@ -43,7 +43,7 @@ async def switch_session_if_needed(
             if interpreter is not None
             else {}
         )
-        cached = {
+        cached: dict[str, Any] = {
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,

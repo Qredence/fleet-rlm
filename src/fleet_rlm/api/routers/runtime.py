@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, TypeAlias
 
 from fastapi import APIRouter, Depends, Query
 
@@ -35,7 +35,10 @@ router = APIRouter(
     dependencies=[Depends(require_http_identity)],
 )
 
-AUTH_ERROR_RESPONSES = {
+OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
+
+
+AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     401: {
         "description": "Authentication is required or the provided token is invalid."
     },
@@ -44,13 +47,13 @@ AUTH_ERROR_RESPONSES = {
     },
 }
 
-SETTINGS_WRITE_RESPONSES = {
+SETTINGS_WRITE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The supplied runtime setting values failed validation."},
     403: {"description": "Runtime settings can only be updated when APP_ENV=local."},
 }
 
-VOLUME_TREE_RESPONSES = {
+VOLUME_TREE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The requested root path is invalid."},
     502: {
@@ -61,7 +64,7 @@ VOLUME_TREE_RESPONSES = {
     },
 }
 
-VOLUME_FILE_RESPONSES = {
+VOLUME_FILE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {
         "description": "The requested file path is invalid or points to a directory."

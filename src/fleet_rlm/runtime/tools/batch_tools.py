@@ -36,20 +36,23 @@ def build_batch_tools(
     ``rlm_query_batched`` is returned in *append* when it **is** available.
     """
     sandbox_ctx = _SandboxToolContext(agent=agent)
+    daytona_interpreter_type: type[Any] | None = None
 
     try:
         from fleet_rlm.integrations.daytona.interpreter import (
             DaytonaInterpreter,
         )
+
+        daytona_interpreter_type = DaytonaInterpreter
     except Exception:  # pragma: no cover - defensive import guard
-        DaytonaInterpreter = None  # type: ignore[assignment]
+        daytona_interpreter_type = None
 
     # -- Daytona helpers -------------------------------------------------------
 
     def _supports_daytona_recursive_batching() -> bool:
         return bool(
-            DaytonaInterpreter is not None
-            and isinstance(agent.interpreter, DaytonaInterpreter)
+            daytona_interpreter_type is not None
+            and isinstance(agent.interpreter, daytona_interpreter_type)
         )
 
     def _effective_recursive_batch_concurrency(task_count: int) -> int:

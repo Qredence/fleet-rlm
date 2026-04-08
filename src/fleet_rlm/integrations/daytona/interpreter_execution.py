@@ -721,7 +721,9 @@ def finalize_execution_result(
 
     if final_payload is not None:
         output_keys = (
-            list(final_payload.keys())[:50] if isinstance(final_payload, dict) else None
+            [str(key) for key in list(final_payload.keys())[:50]]
+            if isinstance(final_payload, dict)
+            else None
         )
         emit_execution_event(
             interpreter,

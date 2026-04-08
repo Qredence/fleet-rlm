@@ -21,7 +21,7 @@ from functools import wraps
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import typer
 
@@ -95,19 +95,21 @@ def chat(
 ) -> None:
     """Start standalone in-process interactive terminal chat."""
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
+    from fleet_rlm.runtime.models.streaming import TraceMode
 
     config = _require_config(
         error_message="Error: Config not initialized. Run via python -m fleet_rlm.cli"
     )
 
-    resolved_trace_mode = trace_mode
-    if resolved_trace_mode is None:
+    if trace_mode in {"compact", "verbose", "off"}:
+        resolved_trace_mode: TraceMode = cast(TraceMode, trace_mode)
+    else:
         resolved_trace_mode = "verbose" if trace else "compact"
     run_terminal_chat(
         config=config,
         options=TerminalChatOptions(
             docs_path=docs_path,
-            trace_mode=resolved_trace_mode,  # type: ignore[arg-type]
+            trace_mode=resolved_trace_mode,
             volume_name=volume_name,
         ),
     )
