@@ -235,7 +235,7 @@ async def _emit_stream_event(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: OrchestrationSessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
