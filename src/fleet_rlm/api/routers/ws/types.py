@@ -25,7 +25,8 @@ class StreamEventLike(Protocol):
     """
 
     @property
-    def kind(self) -> str: ...
+    def kind(self) -> str:
+        raise NotImplementedError
 
     @property
     def text(self) -> str: ...
