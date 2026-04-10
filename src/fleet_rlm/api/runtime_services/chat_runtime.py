@@ -19,7 +19,7 @@ from ..dependencies import ServerState
 from ..server_utils import sanitize_id as _sanitize_id
 
 if TYPE_CHECKING:
-    from fleet_rlm.orchestration_app import OrchestrationSessionContext
+    from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 
 @dataclass(slots=True)

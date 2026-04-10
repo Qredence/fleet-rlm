@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.orchestration_app import (
+from fleet_rlm.agent_host.sessions import (
     OrchestrationSessionContext,
     switch_orchestration_session,
 )

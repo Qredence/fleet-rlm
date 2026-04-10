@@ -5,7 +5,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.terminal as ws_terminal
-from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
