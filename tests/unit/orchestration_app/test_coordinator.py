@@ -65,6 +65,12 @@ def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:
         session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
     )
     assert (
+        session_record["orchestration"]["continuation"]["continuation_token"]
+        == session_record["manifest"]["metadata"]["orchestration"]["continuation"][
+            "continuation_token"
+        ]
+    )
+    assert (
         session_record["manifest"]["metadata"]["orchestration"]["pending_approval"][
             "message_id"
         ]
@@ -110,6 +116,14 @@ def test_resolve_hitl_updates_checkpoint_state() -> None:
         "resolution": "Approve",
     }
     assert session_record["orchestration"]["workflow_stage"] == "continued"
+    assert session_record["orchestration"]["continuation"]["continuation_token"] == (
+        "token-123"
+    )
+    assert session_record["orchestration"]["continuation"]["resolution"] == "Approve"
     assert session_record["manifest"]["metadata"]["orchestration"][
         "workflow_stage"
     ] == ("continued")
+    assert session.workflow_stage == "continued"
+    assert session.continuation_token == "token-123"
+    assert session.continuation is not None
+    assert session.continuation.resolution == "Approve"

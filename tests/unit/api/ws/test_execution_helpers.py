@@ -360,7 +360,13 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
     state = SimpleNamespace(sessions={})
     agent = FakeChatAgent()
 
-    key, manifest_path, session_record, docs_path = await switch_session_if_needed(
+    (
+        key,
+        manifest_path,
+        session_record,
+        docs_path,
+        orchestration_session,
+    ) = await switch_session_if_needed(
         state=cast(Any, state),
         agent=cast(Any, agent),
         interpreter=None,
@@ -379,6 +385,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
+    assert orchestration_session.session_id == "session-a"
     assert agent.areset_calls == 1
     assert agent.reset_calls == 0
 
@@ -396,7 +403,13 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
     )
     agent = FakeChatAgent()
 
-    key, manifest_path, session_record, docs_path = await switch_session_if_needed(
+    (
+        key,
+        manifest_path,
+        session_record,
+        docs_path,
+        orchestration_session,
+    ) = await switch_session_if_needed(
         state=cast(Any, state),
         agent=cast(Any, agent),
         interpreter=None,
@@ -415,6 +428,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
+    assert orchestration_session.session_record_link.key == key
     assert agent.aimport_session_state_calls == 1
     assert agent.import_session_state_calls == 0
     assert agent.areset_calls == 0

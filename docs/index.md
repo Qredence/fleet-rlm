@@ -46,6 +46,7 @@ Then open `http://localhost:8000`.
 - [Backend/Frontend Wiring Analysis](wiring-analysis.md)
 - [Phase 3 orchestration seams note](notes/phase-3-orchestration-seams.md)
 - [Phase 4 outer orchestration note](notes/phase-4-outer-orchestration.md)
+- [Phase 5 session orchestration note](notes/phase-5-session-orchestration.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)

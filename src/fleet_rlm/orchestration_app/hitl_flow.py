@@ -9,6 +9,7 @@ from typing import Any
 from fleet_rlm.worker import WorkspaceEvent
 
 from .checkpoints import (
+    ContinuationCheckpoint,
     OrchestrationCheckpointState,
     checkpoint_for_hitl_request,
     current_utc_iso_timestamp,
@@ -146,9 +147,14 @@ def finalize_hitl_state_for_terminal_event(
     if session is None or not event.terminal:
         return
     state = session.load_checkpoint_state()
-    if state.pending_approval is None:
+    # Only non-pending turns should collapse to a completed workflow stage; an
+    # unresolved approval must survive terminal worker events for later resume.
+    if state.pending_approval is None and state.workflow_stage != "completed":
         session.save_checkpoint_state(
-            OrchestrationCheckpointState(workflow_stage="completed")
+            OrchestrationCheckpointState(
+                workflow_stage="completed",
+                continuation=state.continuation,
+            )
         )
 
 
@@ -186,9 +192,27 @@ def resolve_hitl_command(
         pending = state.pending_approval
         if pending is not None and pending.message_id == message_id:
             pending.resolution = action_label
-            pending.resolved_at = current_utc_iso_timestamp()
+            resolved_at = current_utc_iso_timestamp()
+            pending.resolved_at = resolved_at
+            continuation = state.continuation or ContinuationCheckpoint(
+                continuation_token=pending.continuation_token,
+                message_id=pending.message_id,
+                source=pending.source,
+                requested_at=pending.requested_at or resolved_at,
+                updated_at=resolved_at,
+            )
+            continuation.message_id = pending.message_id
+            continuation.source = pending.source
+            continuation.requested_at = (
+                pending.requested_at or continuation.requested_at
+            )
+            continuation.updated_at = resolved_at
+            continuation.resolution = action_label
             session.save_checkpoint_state(
-                OrchestrationCheckpointState(workflow_stage="continued")
+                OrchestrationCheckpointState(
+                    workflow_stage="continued",
+                    continuation=continuation,
+                )
             )
 
     return HitlResolution(

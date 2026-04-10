@@ -25,6 +25,39 @@ def current_utc_iso_timestamp() -> str:
 
 
 @dataclass(slots=True)
+class ContinuationCheckpoint:
+    """Minimal resumable continuation metadata retained across turns."""
+
+    continuation_token: str
+    message_id: str | None = None
+    source: str | None = None
+    requested_at: str = ""
+    updated_at: str = ""
+    resolution: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ContinuationCheckpoint | None:
+        continuation_token = str(payload.get("continuation_token", "")).strip()
+        if not continuation_token:
+            return None
+        timestamp = (
+            str(payload.get("updated_at", "")).strip() or current_utc_iso_timestamp()
+        )
+        requested_at = str(payload.get("requested_at", "")).strip() or timestamp
+        return cls(
+            continuation_token=continuation_token,
+            message_id=str(payload.get("message_id", "")).strip() or None,
+            source=str(payload.get("source", "")).strip() or None,
+            requested_at=requested_at,
+            updated_at=timestamp,
+            resolution=str(payload.get("resolution", "")).strip() or None,
+        )
+
+
+@dataclass(slots=True)
 class PendingApprovalCheckpoint:
     """Minimal resumable approval checkpoint owned by the outer layer."""
 
@@ -81,11 +114,15 @@ class OrchestrationCheckpointState:
     """Minimal outer orchestration continuation state persisted with the session."""
 
     workflow_stage: WorkflowStage = "idle"
+    continuation: ContinuationCheckpoint | None = None
     pending_approval: PendingApprovalCheckpoint | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "workflow_stage": self.workflow_stage,
+            "continuation": (
+                self.continuation.to_dict() if self.continuation is not None else None
+            ),
             "pending_approval": (
                 self.pending_approval.to_dict()
                 if self.pending_approval is not None
@@ -100,14 +137,34 @@ class OrchestrationCheckpointState:
         workflow_stage = str(payload.get("workflow_stage", "idle")).strip()
         if workflow_stage not in _WORKFLOW_STAGES:
             workflow_stage = "idle"
+        continuation_payload = payload.get("continuation")
+        continuation = (
+            ContinuationCheckpoint.from_dict(continuation_payload)
+            if isinstance(continuation_payload, dict)
+            else None
+        )
         pending_payload = payload.get("pending_approval")
         pending = (
             PendingApprovalCheckpoint.from_dict(pending_payload)
             if isinstance(pending_payload, dict)
             else None
         )
+        if continuation is None and pending is not None:
+            continuation = ContinuationCheckpoint(
+                continuation_token=pending.continuation_token,
+                message_id=pending.message_id,
+                source=pending.source,
+                requested_at=pending.requested_at or current_utc_iso_timestamp(),
+                updated_at=(
+                    pending.resolved_at
+                    or pending.requested_at
+                    or current_utc_iso_timestamp()
+                ),
+                resolution=pending.resolution,
+            )
         return cls(
             workflow_stage=cast(WorkflowStage, workflow_stage),
+            continuation=continuation,
             pending_approval=pending,
         )
 
@@ -120,14 +177,22 @@ def checkpoint_for_hitl_request(
     source: str | None,
     action_labels: list[str] | None,
 ) -> OrchestrationCheckpointState:
+    requested_at = current_utc_iso_timestamp()
     return OrchestrationCheckpointState(
         workflow_stage="awaiting_hitl_resolution",
+        continuation=ContinuationCheckpoint(
+            continuation_token=continuation_token,
+            message_id=message_id,
+            source=source,
+            requested_at=requested_at,
+            updated_at=requested_at,
+        ),
         pending_approval=PendingApprovalCheckpoint(
             message_id=message_id,
             continuation_token=continuation_token,
             question=question,
             source=source,
             action_labels=action_labels or [],
-            requested_at=current_utc_iso_timestamp(),
+            requested_at=requested_at,
         ),
     )
