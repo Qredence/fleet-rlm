@@ -3,11 +3,10 @@ from __future__ import annotations
 import ast
 import asyncio
 import importlib
-from pathlib import Path
-
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fleet_rlm.worker import (
@@ -79,8 +78,11 @@ def test_worker_contracts_do_not_import_transport_types() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported_modules.add(node.module)
 
-    assert all(
-        not name.startswith(("fastapi", "starlette")) for name in imported_modules
+    forbidden_imports = sorted(
+        name for name in imported_modules if name.startswith(("fastapi", "starlette"))
+    )
+    assert not forbidden_imports, (
+        f"Found forbidden transport imports in worker contracts: {forbidden_imports}"
     )
 
 
