@@ -43,6 +43,19 @@ def _resolved_manifest_path(
     )
 
 
+def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str:
+    """Preserve the existing websocket manifest layout used during session switch."""
+
+    manifest_path = _resolved_manifest_path(
+        workspace_id=owner_id,
+        user_id=workspace_id,
+        session_id=session_id,
+    )
+    if manifest_path is None:
+        raise ValueError("owner_id, workspace_id, and session_id are required")
+    return manifest_path
+
+
 def _continuation_metadata(
     *,
     continuation: ContinuationCheckpoint | None,
@@ -315,13 +328,11 @@ async def switch_orchestration_session(
 
     key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
     owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
-    manifest_path = _resolved_manifest_path(
-        workspace_id=owner_id,
-        user_id=workspace_id,
+    manifest_path = _switch_manifest_path(
+        owner_id=owner_id,
+        workspace_id=workspace_id,
         session_id=sess_id,
     )
-    if manifest_path is None:
-        raise ValueError("workspace_id and sess_id are required for manifest path")
 
     if active_key == key and session_record is not None:
         return SessionSwitchOutcome(
@@ -351,7 +362,7 @@ async def switch_orchestration_session(
             if interpreter is not None
             else {}
         )
-        cached = {
+        cached: dict[str, Any] = {
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,
@@ -365,7 +376,7 @@ async def switch_orchestration_session(
         try:
             from fleet_rlm.integrations.local_store import create_session as _db_create
 
-            cached["db_session_id"] = str(_db_create(title=sess_id).id)
+            cached["db_session_id"] = _db_create(title=sess_id).id
         except Exception:
             pass
 
