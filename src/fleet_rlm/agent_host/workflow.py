@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from dataclasses import dataclass
+from threading import Lock
 from uuid import uuid4
 
 from agent_framework import (
@@ -25,6 +26,7 @@ from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
 _WORKSPACE_HOST_EXECUTOR_ID = "orchestration_app_worker_path"
 _HOSTED_TASK_REGISTRY: dict[str, "HostedWorkspaceTaskState"] = {}
+_HOSTED_TASK_REGISTRY_LOCK = Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +48,8 @@ class HostedWorkspaceTaskState:
 def resolve_hosted_workspace_task(task_id: str) -> HostedWorkspaceTaskState:
     """Resolve the process-local task state for one hosted workflow execution."""
 
-    task_state = _HOSTED_TASK_REGISTRY.get(task_id)
+    with _HOSTED_TASK_REGISTRY_LOCK:
+        task_state = _HOSTED_TASK_REGISTRY.get(task_id)
     if task_state is None:
         raise KeyError(f"Unknown hosted workspace task: {task_id}")
     return task_state
@@ -62,15 +65,17 @@ def register_hosted_workspace_task(
     """Register non-copyable request state for one Agent Framework workflow run."""
 
     task_id = f"workspace-task-{uuid4()}"
-    _HOSTED_TASK_REGISTRY[task_id] = HostedWorkspaceTaskState(
-        request=request,
-        session=session,
-        output_queue=output_queue,
-    )
+    with _HOSTED_TASK_REGISTRY_LOCK:
+        _HOSTED_TASK_REGISTRY[task_id] = HostedWorkspaceTaskState(
+            request=request,
+            session=session,
+            output_queue=output_queue,
+        )
     try:
         yield HostedWorkspaceTaskInput(task_id=task_id)
     finally:
-        _HOSTED_TASK_REGISTRY.pop(task_id, None)
+        with _HOSTED_TASK_REGISTRY_LOCK:
+            _HOSTED_TASK_REGISTRY.pop(task_id, None)
 
 
 class OrchestrationAppWorkflowExecutor(Executor):
@@ -98,6 +103,9 @@ class OrchestrationAppWorkflowExecutor(Executor):
 def build_workspace_host_workflow() -> Workflow:
     """Build the canonical outer workflow host for the websocket execution path."""
 
+    # Do not cache this Workflow instance across requests: Agent Framework runner
+    # state is safer when kept request-local, and TestClient/event-loop shutdown
+    # was flaky when a shared workflow object crossed loop boundaries.
     executor = OrchestrationAppWorkflowExecutor(id=_WORKSPACE_HOST_EXECUTOR_ID)
     return WorkflowBuilder(
         name="workspace-orchestration-host",
