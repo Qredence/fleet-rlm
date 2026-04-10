@@ -403,6 +403,9 @@ async def _handle_message_while_streaming(
         )
         return True
 
+    if session.lifecycle is not None and session.lifecycle.run_completed:
+        return False
+
     await _try_send_json(
         websocket,
         {
@@ -564,6 +567,9 @@ class _ExecutionConnectionLoop:
                     )
                     if msg is None:
                         continue
+                    if self.stream_task is None:
+                        self.pending_message = msg
+                        continue
 
                     if await _handle_message_while_streaming(
                         websocket=self.websocket,
@@ -574,6 +580,7 @@ class _ExecutionConnectionLoop:
                         local_persist=self.local_persist,
                     ):
                         continue
+                    self.pending_message = msg
                     continue
 
                 (
