@@ -15,6 +15,21 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agent-framework-core"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/84/483ff4dd079e51df3c1b4b5f276260a466906d83872fbfc515f2ced108cf/agent_framework_core-1.0.0.tar.gz", hash = "sha256:445f2c13f3a710f399a0d630811ab820dfa811e0723f4825a2d1764592bf5ef5", size = 284082, upload-time = "2026-04-02T16:39:10.397Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/b7/56fd7bfaa3c08fa65b2cc0fa4aaacb58c8fb811d15cdf4e81bcfdcaf6697/agent_framework_core-1.0.0-py3-none-any.whl", hash = "sha256:f4e0b5eec386e099a24b796224482dfcc4c58a5f746c544d8696b403d3f81d42", size = 321407, upload-time = "2026-04-02T16:39:41.895Z" },
+]
+
+[[package]]
 name = "aiofile"
 version = "3.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1672,6 +1687,7 @@ name = "fleet-rlm"
 version = "0.5.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agent-framework-core" },
     { name = "aiosqlite" },
     { name = "asyncpg" },
     { name = "daytona" },
@@ -1756,6 +1772,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-framework-core", specifier = "==1.0.0" },
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", marker = "extra == 'full'", specifier = ">=1.13,<2" },
     { name = "alembic", marker = "extra == 'server'", specifier = ">=1.13,<2" },

@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-
-from agent_framework import ResponseStream, WorkflowEvent, WorkflowRunResult
 
 from fleet_rlm.worker import WorkspaceEvent
 
 
-async def iter_workspace_host_outputs(
-    stream: ResponseStream[WorkflowEvent, WorkflowRunResult],
+async def iter_workspace_host_queue(
+    queue: asyncio.Queue[WorkspaceEvent | None],
 ) -> AsyncIterator[WorkspaceEvent]:
-    """Yield only worker-native workspace events from the hosted workflow stream."""
+    """Yield worker-native events from the hosted queue until the sentinel arrives."""
 
-    async for event in stream:
-        if event.type != "output":
-            continue
-        output = event.data
-        if not isinstance(output, WorkspaceEvent):
-            raise TypeError(
-                "Agent Framework workspace host emitted a non-WorkspaceEvent output"
-            )
-        yield output
+    while True:
+        event = await queue.get()
+        if event is None:
+            return
+        yield event

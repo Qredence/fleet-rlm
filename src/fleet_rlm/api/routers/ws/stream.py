@@ -623,7 +623,7 @@ class _ExecutionConnectionLoop:
                         execution_emitter=self.execution_emitter,
                     )
                 )
-        except WebSocketDisconnect:
+        except (asyncio.CancelledError, WebSocketDisconnect):
             await handle_chat_disconnect(
                 pending_receive_task=self.pending_receive_task,
                 stream_task=self.stream_task,

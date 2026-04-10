@@ -188,7 +188,7 @@ class _ExecutionWebSocketConnection:
                         local_persist=local_persist,
                         initial_message=initial_msg,
                     )
-        except WebSocketDisconnect:
+        except (asyncio.CancelledError, WebSocketDisconnect):
             await self._cancel_startup_status_task(startup_status_task)
             return
         except Exception as exc:
