@@ -64,3 +64,4 @@
 
 * [Phase 1: Worker Boundary Extraction](notes/phase-1-worker-boundary.md)
 * [Phase 2: Websocket Transport Thinning](notes/phase-2-ws-thinning.md)
+* [Phase 3: Orchestration Seams](notes/phase-3-orchestration-seams.md)
