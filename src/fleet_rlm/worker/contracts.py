@@ -13,7 +13,8 @@ WorkspaceTaskStatus = Literal["completed", "cancelled", "error"]
 class WorkspaceTaskAgent(Protocol):
     """Minimal runtime agent surface required by the worker boundary."""
 
-    def set_execution_mode(self, execution_mode: str) -> None: ...
+    def set_execution_mode(self, execution_mode: str) -> None:
+        raise NotImplementedError
 
     def aiter_chat_turn_stream(
         self,
@@ -27,7 +28,8 @@ class WorkspaceTaskAgent(Protocol):
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
-    ) -> AsyncIterator[object]: ...
+    ) -> AsyncIterator[object]:
+        raise NotImplementedError
 
 
 @dataclass(slots=True)
