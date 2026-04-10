@@ -20,7 +20,7 @@ _WORKFLOW_STAGES = {
 }
 
 
-def utc_now_iso() -> str:
+def current_utc_iso_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -67,7 +67,10 @@ class PendingApprovalCheckpoint:
             question=str(payload.get("question", "")).strip() or None,
             source=str(payload.get("source", "")).strip() or None,
             action_labels=action_labels,
-            requested_at=str(payload.get("requested_at", "")).strip() or utc_now_iso(),
+            requested_at=(
+                str(payload.get("requested_at", "")).strip()
+                or current_utc_iso_timestamp()
+            ),
             resolved_at=str(payload.get("resolved_at", "")).strip() or None,
             resolution=str(payload.get("resolution", "")).strip() or None,
         )
@@ -125,6 +128,6 @@ def checkpoint_for_hitl_request(
             question=question,
             source=source,
             action_labels=action_labels or [],
-            requested_at=utc_now_iso(),
+            requested_at=current_utc_iso_timestamp(),
         ),
     )

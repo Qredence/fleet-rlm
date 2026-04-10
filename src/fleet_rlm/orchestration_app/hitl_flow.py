@@ -11,7 +11,7 @@ from fleet_rlm.worker import WorkspaceEvent
 from .checkpoints import (
     OrchestrationCheckpointState,
     checkpoint_for_hitl_request,
-    utc_now_iso,
+    current_utc_iso_timestamp,
 )
 from .sessions import OrchestrationSessionContext
 
@@ -54,14 +54,18 @@ def _build_hitl_resolution_result(
     }
 
 
+def _merge_hitl_nested_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    hitl_payload = payload.get("hitl")
+    if not isinstance(hitl_payload, dict):
+        return payload
+    merged = dict(hitl_payload)
+    merged.update({k: v for k, v in payload.items() if k != "hitl"})
+    return merged
+
+
 def _checkpoint_payload(event: WorkspaceEvent) -> dict[str, Any]:
     payload = dict(event.payload) if isinstance(event.payload, dict) else {}
-    hitl_payload = payload.get("hitl")
-    if isinstance(hitl_payload, dict):
-        merged = dict(hitl_payload)
-        merged.update({k: v for k, v in payload.items() if k != "hitl"})
-        return merged
-    return payload
+    return _merge_hitl_nested_payload(payload)
 
 
 def _extract_action_labels(payload: dict[str, Any]) -> list[str]:
@@ -167,7 +171,7 @@ def resolve_hitl_command(
         pending = state.pending_approval
         if pending is not None and pending.message_id == message_id:
             pending.resolution = action_label
-            pending.resolved_at = utc_now_iso()
+            pending.resolved_at = current_utc_iso_timestamp()
             session.save_checkpoint_state(
                 OrchestrationCheckpointState(workflow_stage="continued")
             )
