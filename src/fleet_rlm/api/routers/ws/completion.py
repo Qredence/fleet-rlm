@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.runtime.models import StreamEvent
+from .types import StreamEventLike
 
 
 def _as_record(value: Any) -> dict[str, Any]:
@@ -38,7 +38,7 @@ def _canonical_run_status(kind: str, payload: dict[str, Any]) -> str:
     return "error"
 
 
-def _build_fallback_final_artifact(event: StreamEvent) -> dict[str, Any] | None:
+def _build_fallback_final_artifact(event: StreamEventLike) -> dict[str, Any] | None:
     if event.kind != "final":
         return None
     return {
@@ -54,7 +54,7 @@ def _build_fallback_final_artifact(event: StreamEvent) -> dict[str, Any] | None:
 
 def _build_minimum_summary(
     *,
-    event: StreamEvent,
+    event: StreamEventLike,
     summary_payload: dict[str, Any],
     warnings: list[Any],
 ) -> dict[str, Any]:
@@ -69,7 +69,7 @@ def _build_minimum_summary(
 
 def build_execution_completion_summary(
     *,
-    event: StreamEvent,
+    event: StreamEventLike,
     request_message: str,
     run_id: str,
 ) -> dict[str, Any]:

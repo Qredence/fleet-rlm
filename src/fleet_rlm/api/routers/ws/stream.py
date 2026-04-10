@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -332,7 +332,7 @@ async def _emit_stream_event(
                 payload if isinstance(payload, dict) else None
             ),
         )
-    event_dict = build_stream_event_dict(event=cast(Any, event), payload=payload)
+    event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = is_terminal_stream_event_kind(event.kind)
     if not is_terminal_event:
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
@@ -354,7 +354,7 @@ async def _emit_stream_event(
         await handle_terminal_stream_event(
             websocket=websocket,
             lifecycle=lifecycle,
-            event=cast(Any, event),
+            event=event,
             event_dict=event_dict,
             step=step,
             persist_session_state=persist_session_state,
