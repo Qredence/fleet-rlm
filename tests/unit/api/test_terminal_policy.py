@@ -9,7 +9,7 @@ from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.worker import WorkspaceEvent
 
 
-class _LifecycleStub:
+class _MockExecutionLifecycleManager:
     def __init__(self) -> None:
         self.run_id = "test-run"
         self.completed_with: dict[str, Any] | None = None
@@ -30,13 +30,13 @@ class _LifecycleStub:
         }
 
 
-def _ts(epoch: float = 1_234_567_890.0) -> datetime:
+def _timestamp_from_epoch(epoch: float = 1_234_567_890.0) -> datetime:
     return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
 
 def test_terminal_policy_shim_preserves_legacy_call_shape() -> None:
     async def scenario() -> None:
-        lifecycle = _LifecycleStub()
+        lifecycle = _MockExecutionLifecycleManager()
         persist_calls: list[bool] = []
         sent_calls: list[str] = []
 
@@ -52,7 +52,7 @@ def test_terminal_policy_shim_preserves_legacy_call_shape() -> None:
             event=WorkspaceEvent(
                 kind="final",
                 text="done",
-                timestamp=_ts(),
+                timestamp=_timestamp_from_epoch(),
                 terminal=True,
             ),
             step=None,
