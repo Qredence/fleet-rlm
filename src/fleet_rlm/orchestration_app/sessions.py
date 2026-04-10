@@ -56,7 +56,7 @@ def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) 
     return manifest_path
 
 
-def _continuation_metadata(
+def _build_continuation_state_metadata(
     *,
     continuation: ContinuationCheckpoint | None,
     pending_approval: PendingApprovalCheckpoint | None,
@@ -198,7 +198,7 @@ class OrchestrationSessionContext:
                 else None
             )
         )
-        self.continuation_metadata = _continuation_metadata(
+        self.continuation_metadata = _build_continuation_state_metadata(
             continuation=state.continuation,
             pending_approval=state.pending_approval,
         )
@@ -226,7 +226,7 @@ class OrchestrationSessionContext:
                 else None
             )
         )
-        self.continuation_metadata = _continuation_metadata(
+        self.continuation_metadata = _build_continuation_state_metadata(
             continuation=state.continuation,
             pending_approval=state.pending_approval,
         )
@@ -353,7 +353,7 @@ async def switch_orchestration_session(
     if session_record is not None:
         await local_persist(include_volume_save=True)
 
-    cached = state.sessions.get(key)
+    cached: dict[str, Any] | None = state.sessions.get(key)
     if cached is None:
         from ..api.routers.ws.manifest import load_manifest_from_volume
 
@@ -362,7 +362,7 @@ async def switch_orchestration_session(
             if interpreter is not None
             else {}
         )
-        cached: dict[str, Any] = {
+        cached = {
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,

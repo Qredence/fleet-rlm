@@ -64,7 +64,12 @@ def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:
     assert (
         session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
     )
-    assert session_record["orchestration"]["continuation"]["continuation_token"]
+    assert (
+        session_record["orchestration"]["continuation"]["continuation_token"]
+        == session_record["manifest"]["metadata"]["orchestration"]["continuation"][
+            "continuation_token"
+        ]
+    )
     assert (
         session_record["manifest"]["metadata"]["orchestration"]["pending_approval"][
             "message_id"

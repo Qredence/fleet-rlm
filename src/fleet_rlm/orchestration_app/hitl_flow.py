@@ -147,6 +147,8 @@ def finalize_hitl_state_for_terminal_event(
     if session is None or not event.terminal:
         return
     state = session.load_checkpoint_state()
+    # Only non-pending turns should collapse to a completed workflow stage; an
+    # unresolved approval must survive terminal worker events for later resume.
     if state.pending_approval is None and state.workflow_stage != "completed":
         session.save_checkpoint_state(
             OrchestrationCheckpointState(
