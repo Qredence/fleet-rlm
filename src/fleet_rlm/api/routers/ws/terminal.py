@@ -45,7 +45,12 @@ async def handle_terminal_stream_event(
     request_message: str,
     orchestration_session: OrchestrationSessionContext | None = None,
 ) -> None:
-    """Handle final/cancelled/error websocket events without changing ordering."""
+    """Handle terminal websocket events without changing ordering.
+
+    ``orchestration_session`` stays optional for compatibility paths that have
+    not restored a resumable session record yet; when present, the outer layer
+    updates authoritative workflow/continuation state before persistence.
+    """
     if not await apply_terminal_event_policy(
         lifecycle=lifecycle,
         event=event,

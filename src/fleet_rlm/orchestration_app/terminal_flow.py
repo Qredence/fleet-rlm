@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 SendTerminalEvent = Callable[[], Awaitable[bool]]
 
 
+def is_terminal_event(event: StreamEventLike) -> bool:
+    """Return orchestration terminal semantics for worker-compatible events."""
+
+    return event.kind in {"final", "cancelled", "error"} or bool(
+        getattr(event, "terminal", False)
+    )
+
+
 def terminal_run_status(event: StreamEventLike) -> RunStatus:
     """Return the authoritative terminal run status for one worker event."""
 
@@ -43,9 +51,7 @@ def finalize_terminal_session_state(
 
     if session is None:
         return
-    if event.kind not in {"final", "cancelled", "error"} and not bool(
-        getattr(event, "terminal", False)
-    ):
+    if not is_terminal_event(event):
         return
 
     state = session.load_checkpoint_state()

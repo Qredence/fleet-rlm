@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
 from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
 from fleet_rlm.worker import WorkspaceEvent
-from tests.ui.fixtures_ui import ts
 
 
 class _LifecycleStub:
@@ -31,6 +31,10 @@ class _LifecycleStub:
             "error_json": error_json,
             "summary": summary,
         }
+
+
+def _ts(epoch: float = 1_234_567_890.0) -> datetime:
+    return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
 
 def _session(session_record: dict[str, Any]) -> OrchestrationSessionContext:
@@ -61,7 +65,9 @@ def test_apply_terminal_event_policy_final_marks_completed_before_send() -> None
             "manifest": {"metadata": {}},
         }
         session = _session(session_record)
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(
+            kind="final", text="done", timestamp=_ts(), terminal=True
+        )
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             operations.append(f"persist:{include_volume_save}")
@@ -117,7 +123,9 @@ def test_apply_terminal_event_policy_error_preserves_pending_continuation() -> N
             "manifest": {"metadata": {}},
         }
         session = _session(session_record)
-        event = WorkspaceEvent(kind="error", text="boom", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(
+            kind="error", text="boom", timestamp=_ts(), terminal=True
+        )
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             operations.append(f"persist:{include_volume_save}")
@@ -162,7 +170,7 @@ def test_apply_terminal_event_policy_cancelled_marks_run_cancelled() -> None:
         event = WorkspaceEvent(
             kind="cancelled",
             text="stopped",
-            timestamp=ts(),
+            timestamp=_ts(),
             terminal=True,
         )
 
