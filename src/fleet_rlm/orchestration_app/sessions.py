@@ -277,7 +277,7 @@ async def _restore_agent_state(
     await agent.areset(clear_sandbox_buffers=True)
 
 
-def _restoreable_session_state(session_record: dict[str, Any]) -> Any:
+def _restorable_session_state(session_record: dict[str, Any]) -> Any:
     session_data = session_record.get("session")
     restored_state: Any = (
         session_data.get("state", {}) if isinstance(session_data, dict) else {}
@@ -392,7 +392,7 @@ async def switch_orchestration_session(
 
     await _restore_agent_state(
         agent=agent,
-        restored_state=_restoreable_session_state(cached),
+        restored_state=_restorable_session_state(cached),
     )
 
     return SessionSwitchOutcome(
