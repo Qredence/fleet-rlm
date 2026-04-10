@@ -27,6 +27,21 @@ def test_handle_resolve_hitl_emits_event_and_command_result() -> None:
             command="resolve_hitl",
             args={"message_id": "hitl-123", "action_label": "Approve"},
             command_response=_command_response,
+            session_record={
+                "workspace_id": "workspace-1",
+                "user_id": "user-1",
+                "session_id": "session-1",
+                "manifest": {"metadata": {}},
+                "orchestration": {
+                    "workflow_stage": "awaiting_hitl_resolution",
+                    "pending_approval": {
+                        "message_id": "hitl-123",
+                        "continuation_token": "token-123",
+                        "workflow_stage": "awaiting_hitl_resolution",
+                        "requested_at": "2026-04-10T15:00:00Z",
+                    },
+                },
+            },
         )
 
         assert handled is True
@@ -47,6 +62,7 @@ def test_handle_resolve_hitl_rejects_missing_args() -> None:
             command="resolve_hitl",
             args={"message_id": ""},
             command_response=_command_response,
+            session_record=None,
         )
 
         assert handled is True
@@ -74,6 +90,7 @@ def test_handle_resolve_hitl_ignores_other_commands() -> None:
             command="list_documents",
             args={},
             command_response=_command_response,
+            session_record=None,
         )
 
         assert handled is False

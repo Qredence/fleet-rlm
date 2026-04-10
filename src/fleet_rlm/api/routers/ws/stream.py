@@ -17,7 +17,11 @@ from fleet_rlm.integrations.observability.mlflow_context import (
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.worker import WorkspaceEvent, stream_workspace_task
+from fleet_rlm.orchestration_app import (
+    OrchestrationSessionContext,
+    stream_orchestrated_workspace_task,
+)
+from fleet_rlm.worker import WorkspaceEvent
 
 from ...orchestration.repl_bridge import ReplHookBridge
 from ...dependencies import ServerState
@@ -106,6 +110,7 @@ async def run_streaming_turn(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
+    orchestration_session: OrchestrationSessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
@@ -137,6 +142,7 @@ async def run_streaming_turn(
                 websocket=websocket,
                 agent=agent,
                 prepared_turn=prepared_turn,
+                orchestration_session=orchestration_session,
                 cancel_check=cancel_check,
                 lifecycle=lifecycle,
                 step_builder=step_builder,
@@ -186,6 +192,7 @@ async def _stream_agent_events(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
+    orchestration_session: OrchestrationSessionContext | None,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
@@ -200,9 +207,12 @@ async def _stream_agent_events(
 
     with runtime_telemetry_enabled_context(analytics_enabled):
         # The worker boundary owns request.prepare execution via
-        # stream_workspace_task(...), so websocket transport only builds the
-        # request and consumes worker-native events.
-        async for worker_event in stream_workspace_task(worker_request):
+        # stream_workspace_task(...); the outer orchestration layer only wraps
+        # that worker seam with continuation/checkpoint policy.
+        async for worker_event in stream_orchestrated_workspace_task(
+            request=worker_request,
+            session=orchestration_session,
+        ):
             await _emit_stream_event(
                 websocket=websocket,
                 lifecycle=lifecycle,
@@ -300,10 +310,20 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
+    orchestration_session = OrchestrationSessionContext.from_session_record(
+        session.session_record
+    ) or OrchestrationSessionContext(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=sess_id,
+        session_record=session.session_record,
+    )
+
     return await run_streaming_turn(
         websocket=websocket,
         agent=agent,
         prepared_turn=prepared_turn,
+        orchestration_session=orchestration_session,
         cancel_check=cancel_check,
         interpreter=interpreter,
         persist_session_state=local_persist,

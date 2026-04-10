@@ -18,9 +18,14 @@ async def handle_resolve_hitl(
     command: str,
     args: dict[str, Any],
     command_response: CommandResponseBuilder,
+    session_record: dict[str, Any] | None = None,
 ) -> bool:
     """Handle the special websocket HITL resolution command when present."""
-    resolution = resolve_hitl_command(command=command, args=args)
+    resolution = resolve_hitl_command(
+        command=command,
+        args=args,
+        session_record=session_record,
+    )
     if resolution is None:
         return False
 
