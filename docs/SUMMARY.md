@@ -59,3 +59,7 @@
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
+
+## Notes
+
+* [Phase 1: Worker Boundary Extraction](notes/phase-1-worker-boundary.md)
