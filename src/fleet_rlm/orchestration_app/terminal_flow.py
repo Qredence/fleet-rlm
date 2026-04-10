@@ -24,7 +24,13 @@ SendTerminalEvent = Callable[[], Awaitable[bool]]
 
 
 def is_terminal_event(event: StreamEventLike) -> bool:
-    """Return orchestration terminal semantics for worker-compatible events."""
+    """Return orchestration terminal semantics for worker-compatible events.
+
+    The worker boundary sets ``terminal`` on normalized worker events, while
+    websocket transport and compatibility paths may still surface legacy events
+    that only expose the canonical terminal kinds. Checking both preserves the
+    existing websocket/frontend contract across both shapes.
+    """
 
     return event.kind in {"final", "cancelled", "error"} or bool(
         getattr(event, "terminal", False)
@@ -68,6 +74,25 @@ def finalize_terminal_session_state(
     )
 
 
+async def finalize_and_persist_terminal_session_state(
+    *,
+    event: StreamEventLike,
+    session: OrchestrationSessionContext | None,
+    persist_session_state: LocalPersistFn,
+    failure_log_message: str,
+) -> None:
+    """Apply outer terminal session-state policy before best-effort persistence."""
+
+    finalize_terminal_session_state(event=event, session=session)
+    try:
+        await persist_session_state(include_volume_save=True)
+    except Exception:
+        if "%s" in failure_log_message:
+            logger.exception(failure_log_message, event.kind)
+        else:
+            logger.exception(failure_log_message)
+
+
 async def apply_terminal_event_policy(
     *,
     lifecycle: ExecutionLifecycleManager,
@@ -86,13 +111,14 @@ async def apply_terminal_event_policy(
         run_id=lifecycle.run_id,
     )
     if event.kind == "final":
-        finalize_terminal_session_state(event=event, session=session)
-        try:
-            await persist_session_state(include_volume_save=True)
-        except Exception:
-            logger.exception(
+        await finalize_and_persist_terminal_session_state(
+            event=event,
+            session=session,
+            persist_session_state=persist_session_state,
+            failure_log_message=(
                 "Failed to persist session state before final event; continuing"
-            )
+            ),
+        )
         await lifecycle.complete_run(
             terminal_run_status(event),
             step=step,
@@ -104,14 +130,14 @@ async def apply_terminal_event_policy(
     if not sent:
         return False
 
-    finalize_terminal_session_state(event=event, session=session)
-    try:
-        await persist_session_state(include_volume_save=True)
-    except Exception:
-        logger.exception(
-            "Failed to persist session state after %s event; completing run anyway",
-            event.kind,
-        )
+    await finalize_and_persist_terminal_session_state(
+        event=event,
+        session=session,
+        persist_session_state=persist_session_state,
+        failure_log_message=(
+            "Failed to persist session state after %s event; completing run anyway"
+        ),
+    )
 
     error_json: dict[str, Any] | None = (
         {"error": event.text, "kind": event.kind} if event.kind == "error" else None
