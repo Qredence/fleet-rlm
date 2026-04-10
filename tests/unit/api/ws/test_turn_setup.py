@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 import uuid
 
 from fleet_rlm.api.routers.ws.runtime import _ChatSessionState
@@ -138,6 +139,7 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         )
 
         assert prepared is not None
+        # Turn setup should carry the requested mode without eagerly mutating the agent.
         assert agent.execution_mode == "auto"
         assert persist_calls == [
             {"include_volume_save": True, "latest_user_message": "hello"}
@@ -176,8 +178,7 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
 
 
 def test_build_workspace_task_request_uses_prepared_turn_inputs() -> None:
-    async def fake_initialize_turn_lifecycle(**kwargs: Any):
-        _ = kwargs
+    async def fake_initialize_turn_lifecycle(**_: Any):
         return SimpleNamespace(), object(), "run-123", uuid.uuid4()
 
     async def scenario() -> None:
@@ -202,6 +203,7 @@ def test_build_workspace_task_request_uses_prepared_turn_inputs() -> None:
                 type="message",
                 content=" hello ",
                 execution_mode="tools_only",
+                trace=True,
                 repo_url="https://github.com/example/repo.git",
             ),
             agent=cast(Any, agent),
@@ -237,10 +239,9 @@ def test_build_workspace_task_request_uses_prepared_turn_inputs() -> None:
         assert request.repo_url == "https://github.com/example/repo.git"
         assert request.repo_ref is None
         assert request.context_paths is None
+        assert request.batch_concurrency is None
         assert request.workspace_id == "workspace"
         assert request.prepare is prepared.prepare_worker
-
-    from unittest.mock import patch
 
     with patch(
         "fleet_rlm.api.routers.ws.turn_setup.initialize_turn_lifecycle",

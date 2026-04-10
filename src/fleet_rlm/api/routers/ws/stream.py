@@ -94,6 +94,7 @@ def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 class ReplHookBridge:
     """Queue and forward interpreter REPL hook callbacks to lifecycle handlers."""
+
     # TODO(phase-3): move REPL callback bridging behind the outer orchestration
     # layer so websocket transport only consumes worker-native events.
 
@@ -282,6 +283,9 @@ async def _stream_agent_events(
     )
 
     with runtime_telemetry_enabled_context(analytics_enabled):
+        # The worker boundary owns request.prepare execution via
+        # stream_workspace_task(...), so websocket transport only builds the
+        # request and consumes worker-native events.
         async for worker_event in stream_workspace_task(worker_request):
             await _emit_stream_event(
                 websocket=websocket,

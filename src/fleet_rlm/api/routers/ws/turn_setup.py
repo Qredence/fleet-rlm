@@ -58,6 +58,17 @@ async def _reject_empty_message(
     return True
 
 
+def _optional_context_paths(
+    raw_context_paths: list[str] | None,
+    normalized_context_paths: list[str],
+) -> list[str] | None:
+    """Preserve the distinction between unspecified and explicitly empty paths."""
+
+    if raw_context_paths is None:
+        return None
+    return list(normalized_context_paths)
+
+
 def _build_prepare_stream(
     *,
     agent: ChatAgentProtocol,
@@ -152,7 +163,7 @@ async def prepare_chat_message_turn(
         return None
 
     execution_mode = msg.execution_mode
-    daytona_request, prepare_stream = _build_prepare_stream(
+    daytona_request, prepare_worker = _build_prepare_stream(
         agent=agent,
         msg=msg,
         workspace_id=workspace_id,
@@ -191,6 +202,11 @@ async def prepare_chat_message_turn(
             "Turn lifecycle initialization returned no lifecycle manager"
         )
 
+    context_paths = _optional_context_paths(
+        msg.context_paths,
+        daytona_request.context_paths,
+    )
+
     return PreparedStreamingTurn(
         message=message,
         docs_path=msg.docs_path,
@@ -199,14 +215,12 @@ async def prepare_chat_message_turn(
         workspace_id=workspace_id,
         repo_url=daytona_request.repo_url,
         repo_ref=daytona_request.repo_ref,
-        context_paths=(
-            list(daytona_request.context_paths) if msg.context_paths is not None else None
-        ),
+        context_paths=context_paths,
         batch_concurrency=daytona_request.batch_concurrency,
         lifecycle=session.lifecycle,
         step_builder=step_builder,
         last_loaded_docs_path=session.last_loaded_docs_path,
         analytics_enabled=getattr(msg, "analytics_enabled", None),
         mlflow_trace_context=trace_context,
-        prepare_worker=prepare_stream,
+        prepare_worker=prepare_worker,
     )
