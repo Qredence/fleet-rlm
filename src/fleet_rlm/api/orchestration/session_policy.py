@@ -100,6 +100,7 @@ async def switch_execution_session(
 
             cached["db_session_id"] = _db_create(title=sess_id).id
         except Exception:
+            # Best-effort local DB session creation; continue without db_session_id.
             pass
 
     cached["session_id"] = sess_id
