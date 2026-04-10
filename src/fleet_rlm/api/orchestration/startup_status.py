@@ -44,4 +44,4 @@ async def cancel_startup_status_task(task: asyncio.Task[None] | None) -> None:
         return
     task.cancel()
     with suppress(asyncio.CancelledError):
-        await task
+        _ = await task
