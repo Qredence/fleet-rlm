@@ -82,4 +82,3 @@ async def apply_terminal_event_policy(
         ),
     )
     return True
-

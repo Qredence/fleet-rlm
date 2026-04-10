@@ -82,7 +82,7 @@ async def switch_execution_session(
             if interpreter is not None
             else {}
         )
-        cached = {
+        cached: dict[str, Any] = {
             "key": key,
             "workspace_id": workspace_id,
             "user_id": user_id,
@@ -121,4 +121,3 @@ async def switch_execution_session(
         session_record=cached,
         last_loaded_docs_path=None,
     )
-

@@ -107,4 +107,3 @@ class ReplHookBridge:
         self._ws_loop.call_soon_threadsafe(
             lambda step_data=repl_step: self._queue_repl_step(step_data)
         )
-

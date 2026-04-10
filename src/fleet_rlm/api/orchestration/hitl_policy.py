@@ -77,4 +77,3 @@ def resolve_hitl_command(
             action_label=action_label,
         ),
     )
-

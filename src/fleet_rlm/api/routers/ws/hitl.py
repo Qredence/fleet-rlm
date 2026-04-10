@@ -25,9 +25,7 @@ async def handle_resolve_hitl(
         return False
 
     if resolution.event_payload is not None:
-        await websocket.send_json(
-            {"type": "event", "data": resolution.event_payload}
-        )
+        await websocket.send_json({"type": "event", "data": resolution.event_payload})
 
     await websocket.send_json(
         command_response(

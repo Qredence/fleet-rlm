@@ -21,12 +21,12 @@ from fleet_rlm.worker import WorkspaceEvent, stream_workspace_task
 
 from ...orchestration.repl_bridge import ReplHookBridge
 from ...dependencies import ServerState
-from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
 from .execution_support import get_execution_emitter
 from .errors import handle_stream_error
-from .helpers import _sanitize_for_log, _try_send_json
+from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager
 from .loop_exit import handle_chat_disconnect, handle_chat_loop_exception
 from .messages import parse_ws_message_or_send_error, resolve_session_identity
