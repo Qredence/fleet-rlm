@@ -47,6 +47,7 @@ Then open `http://localhost:8000`.
 - [Phase 3 orchestration seams note](notes/phase-3-orchestration-seams.md)
 - [Phase 4 outer orchestration note](notes/phase-4-outer-orchestration.md)
 - [Phase 5 session orchestration note](notes/phase-5-session-orchestration.md)
+- [Phase 6 terminal orchestration note](notes/phase-6-terminal-orchestration.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
