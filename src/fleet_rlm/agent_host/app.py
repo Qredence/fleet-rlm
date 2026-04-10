@@ -45,7 +45,7 @@ async def stream_hosted_workspace_task(
         try:
             async for event in iter_workspace_host_queue(output_queue):
                 if _is_terminal_host_event(event):
-                    await host_task
+                    pass
                 yield event
         finally:
             if not host_task.done():
