@@ -8,7 +8,6 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
-from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
 
 from ...events import ExecutionStep
 from .helpers import _try_send_json
@@ -49,6 +48,8 @@ async def handle_terminal_stream_event(
     not restored a resumable session record yet; when present, the outer layer
     updates authoritative workflow/continuation state before persistence.
     """
+    from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
+
     if not await apply_terminal_event_policy(
         lifecycle=lifecycle,
         event=event,
