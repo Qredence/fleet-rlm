@@ -98,6 +98,7 @@ async def _handle_command(
         command=command,
         args=args,
         command_response=_command_response,
+        session_record=session_record,
     ):
         return
 
