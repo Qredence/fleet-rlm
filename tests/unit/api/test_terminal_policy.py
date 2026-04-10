@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from fleet_rlm.api.orchestration.terminal_policy import apply_terminal_event_policy
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.worker import WorkspaceEvent
+
+_TEST_EVENT_EPOCH = 1_234_567_890.0
 
 
 class _MockExecutionLifecycleManager:
@@ -30,7 +32,7 @@ class _MockExecutionLifecycleManager:
         }
 
 
-def _timestamp_from_epoch(epoch: float = 1_234_567_890.0) -> datetime:
+def _timestamp_from_epoch(epoch: float = _TEST_EVENT_EPOCH) -> datetime:
     return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
 
@@ -38,17 +40,18 @@ def test_terminal_policy_shim_preserves_legacy_call_shape() -> None:
     async def scenario() -> None:
         lifecycle = _MockExecutionLifecycleManager()
         persist_calls: list[bool] = []
-        sent_calls: list[str] = []
+        sent_count = 0
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
 
         async def send_terminal_event() -> bool:
-            sent_calls.append("sent")
+            nonlocal sent_count
+            sent_count += 1
             return True
 
         sent = await apply_terminal_event_policy(
-            lifecycle=lifecycle,  # type: ignore[arg-type]
+            lifecycle=cast(Any, lifecycle),
             event=WorkspaceEvent(
                 kind="final",
                 text="done",
@@ -56,14 +59,14 @@ def test_terminal_policy_shim_preserves_legacy_call_shape() -> None:
                 terminal=True,
             ),
             step=None,
-            persist_session_state=persist_session_state,  # type: ignore[arg-type]
+            persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
             send_terminal_event=send_terminal_event,
         )
 
         assert sent is True
         assert persist_calls == [True]
-        assert sent_calls == ["sent"]
+        assert sent_count == 1
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["status"] is RunStatus.COMPLETED
 

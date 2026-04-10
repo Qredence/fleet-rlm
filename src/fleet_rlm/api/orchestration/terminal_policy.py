@@ -28,6 +28,7 @@ async def apply_terminal_event_policy(
         lifecycle=lifecycle,
         event=event,
         step=step,
+        # Legacy api.orchestration importers did not manage orchestration sessions.
         session=None,
         persist_session_state=persist_session_state,
         request_message=request_message,
