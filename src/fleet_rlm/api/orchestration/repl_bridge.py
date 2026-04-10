@@ -19,8 +19,9 @@ _REPL_HOOK_STEP_QUEUE_MAX = 128
 class ReplHookBridge:
     """Queue and forward interpreter REPL hook callbacks to lifecycle handlers."""
 
-    # TODO(phase-4): move REPL callback bridging behind the outer orchestration
-    # layer so websocket transport only consumes worker-native events.
+    # TODO(outer-orchestration): move REPL callback bridging behind the future
+    # outer orchestration layer so websocket transport only consumes worker-native
+    # events.
 
     def __init__(
         self,
