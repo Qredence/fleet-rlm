@@ -10,17 +10,17 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.agent_host import (
+    OrchestrationSessionContext,
+    build_orchestration_session_context,
+    stream_hosted_workspace_task,
+)
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.mlflow_context import (
     merge_trace_result_metadata as _merge_trace_result_metadata,
 )
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
-)
-from fleet_rlm.orchestration_app import (
-    OrchestrationSessionContext,
-    build_orchestration_session_context,
-    stream_orchestrated_workspace_task,
 )
 from fleet_rlm.worker import WorkspaceEvent
 
@@ -207,10 +207,9 @@ async def _stream_agent_events(
     )
 
     with runtime_telemetry_enabled_context(analytics_enabled):
-        # The worker boundary owns request.prepare execution via
-        # stream_workspace_task(...); the outer orchestration layer only wraps
-        # that worker seam with continuation/checkpoint policy.
-        async for worker_event in stream_orchestrated_workspace_task(
+        # The Agent Framework outer host wraps the existing orchestration_app
+        # continuation layer, which still preserves the fleet_rlm.worker seam.
+        async for worker_event in stream_hosted_workspace_task(
             request=worker_request,
             session=orchestration_session,
         ):
@@ -624,7 +623,7 @@ class _ExecutionConnectionLoop:
                         execution_emitter=self.execution_emitter,
                     )
                 )
-        except WebSocketDisconnect:
+        except (asyncio.CancelledError, WebSocketDisconnect):
             await handle_chat_disconnect(
                 pending_receive_task=self.pending_receive_task,
                 stream_task=self.stream_task,

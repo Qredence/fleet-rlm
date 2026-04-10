@@ -12,16 +12,16 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from fleet_rlm.agent_host import (
+    cancel_startup_status_task,
+    emit_delayed_startup_status,
+)
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
 from fleet_rlm.runtime.config import build_dspy_context
 
 from ...dependencies import get_server_state_from_websocket
-from ...orchestration.startup_status import (
-    cancel_startup_status_task,
-    emit_delayed_startup_status,
-)
 from ...events import ExecutionSubscription
 from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
@@ -188,7 +188,7 @@ class _ExecutionWebSocketConnection:
                         local_persist=local_persist,
                         initial_message=initial_msg,
                     )
-        except WebSocketDisconnect:
+        except (asyncio.CancelledError, WebSocketDisconnect):
             await self._cancel_startup_status_task(startup_status_task)
             return
         except Exception as exc:

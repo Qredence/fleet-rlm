@@ -51,6 +51,7 @@ Inside `src/frontend`, use `pnpm install --frozen-lockfile` and `pnpm run ...`.
 
 Top-level areas:
 
+- `src/fleet_rlm/agent_host/`: thin Microsoft Agent Framework outer host around orchestration_app and the worker seam
 - `src/fleet_rlm/`: backend package, CLI, runtime logic, integrations, packaged UI assets
 - `src/frontend/`: React app, routes, shell, workspace UI, websocket/API client
 - `tests/unit/`, `tests/ui/`, `tests/integration/`, `tests/e2e/`: automated test suites

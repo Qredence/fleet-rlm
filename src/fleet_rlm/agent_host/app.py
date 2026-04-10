@@ -1,0 +1,54 @@
+"""Public entrypoints for the Agent Framework orchestration host."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import suppress
+
+from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
+
+from .adapters import iter_workspace_host_queue
+from .sessions import OrchestrationSessionContext
+from .workflow import register_hosted_workspace_task, run_workspace_host
+
+
+def _is_terminal_host_event(event: WorkspaceEvent) -> bool:
+    return bool(getattr(event, "terminal", False)) or event.kind in {
+        "final",
+        "cancelled",
+        "error",
+    }
+
+
+async def stream_hosted_workspace_task(
+    *,
+    request: WorkspaceTaskRequest,
+    session: OrchestrationSessionContext | None = None,
+) -> AsyncIterator[WorkspaceEvent]:
+    """Stream the websocket execution path through the Agent Framework host."""
+
+    output_queue: asyncio.Queue[WorkspaceEvent | None] = asyncio.Queue()
+
+    async def _run_host(host_input) -> None:
+        try:
+            await run_workspace_host(host_input=host_input)
+        finally:
+            await output_queue.put(None)
+
+    with register_hosted_workspace_task(
+        request=request,
+        session=session,
+        output_queue=output_queue,
+    ) as host_input:
+        host_task = asyncio.create_task(_run_host(host_input))
+        try:
+            async for event in iter_workspace_host_queue(output_queue):
+                if _is_terminal_host_event(event):
+                    pass
+                yield event
+        finally:
+            if not host_task.done():
+                host_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await host_task
