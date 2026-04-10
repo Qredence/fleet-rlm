@@ -7,10 +7,8 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.orchestration_app import (
-    OrchestrationSessionContext,
-    apply_terminal_event_policy,
-)
+from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
+from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
 
 from ...events import ExecutionStep
 from .helpers import _try_send_json

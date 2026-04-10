@@ -4,10 +4,7 @@ import asyncio
 from contextlib import suppress
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.terminal import (
-    build_stream_event_dict,
-    handle_terminal_stream_event,
-)
+import fleet_rlm.api.routers.ws.terminal as ws_terminal
 from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
@@ -65,7 +62,7 @@ def test_build_stream_event_dict_serializes_core_fields() -> None:
         kind="status", text="hello", payload={"ok": True}, timestamp=ts()
     )
 
-    event_dict = build_stream_event_dict(event=event, payload=event.payload)
+    event_dict = ws_terminal.build_stream_event_dict(event=event, payload=event.payload)
 
     assert event_dict["kind"] == "status"
     assert event_dict["text"] == "hello"
@@ -84,11 +81,13 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
 
-        await handle_terminal_stream_event(
+        await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            event_dict=ws_terminal.build_stream_event_dict(
+                event=event, payload=event.payload
+            ),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -113,11 +112,13 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
             _ = include_volume_save
             raise RuntimeError("volume unavailable")
 
-        await handle_terminal_stream_event(
+        await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            event_dict=ws_terminal.build_stream_event_dict(
+                event=event, payload=event.payload
+            ),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -141,11 +142,13 @@ def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
             _ = include_volume_save
 
         task = asyncio.create_task(
-            handle_terminal_stream_event(
+            ws_terminal.handle_terminal_stream_event(
                 websocket=cast(Any, websocket),
                 lifecycle=cast(Any, lifecycle),
                 event=event,
-                event_dict=build_stream_event_dict(event=event, payload=event.payload),
+                event_dict=ws_terminal.build_stream_event_dict(
+                    event=event, payload=event.payload
+                ),
                 step=None,
                 persist_session_state=cast(Any, persist_session_state),
                 request_message="hello",
@@ -184,11 +187,13 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
 
-        await handle_terminal_stream_event(
+        await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            event_dict=ws_terminal.build_stream_event_dict(
+                event=event, payload=event.payload
+            ),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -231,11 +236,13 @@ def test_handle_terminal_stream_event_delegates_to_orchestration_app(
             fake_apply_terminal_event_policy,
         )
 
-        await handle_terminal_stream_event(
+        await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            event_dict=ws_terminal.build_stream_event_dict(
+                event=event, payload=event.payload
+            ),
             step=None,
             orchestration_session=session,
             persist_session_state=cast(Any, persist_session_state),
