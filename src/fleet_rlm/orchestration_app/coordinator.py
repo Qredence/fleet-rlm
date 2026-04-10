@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import fleet_rlm.worker as worker_boundary
-from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
 from .hitl_flow import (
     HitlResolution,
@@ -22,9 +21,9 @@ class WorkspaceOrchestrationCoordinator:
     async def stream_workspace_task(
         self,
         *,
-        request: WorkspaceTaskRequest,
+        request: worker_boundary.WorkspaceTaskRequest,
         session: OrchestrationSessionContext | None = None,
-    ) -> AsyncIterator[WorkspaceEvent]:
+    ) -> AsyncIterator[worker_boundary.WorkspaceEvent]:
         async for worker_event in worker_boundary.stream_workspace_task(request):
             event = checkpoint_hitl_request(event=worker_event, session=session)
             finalize_hitl_state_for_terminal_event(event=event, session=session)
@@ -45,9 +44,9 @@ _COORDINATOR = WorkspaceOrchestrationCoordinator()
 
 async def stream_orchestrated_workspace_task(
     *,
-    request: WorkspaceTaskRequest,
+    request: worker_boundary.WorkspaceTaskRequest,
     session: OrchestrationSessionContext | None = None,
-) -> AsyncIterator[WorkspaceEvent]:
+) -> AsyncIterator[worker_boundary.WorkspaceEvent]:
     async for event in _COORDINATOR.stream_workspace_task(
         request=request, session=session
     ):
