@@ -136,6 +136,7 @@ def checkpoint_hitl_request(
         terminal=event.terminal,
     )
 
+
 def resolve_hitl_command(
     *,
     command: str,

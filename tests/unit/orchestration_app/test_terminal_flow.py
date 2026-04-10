@@ -34,12 +34,14 @@ class _LifecycleStub:
 
 
 def _session(session_record: dict[str, Any]) -> OrchestrationSessionContext:
-    return OrchestrationSessionContext(
+    session = OrchestrationSessionContext(
         workspace_id="workspace-1",
         user_id="user-1",
         session_id="session-1",
         session_record=session_record,
     )
+    session.refresh_from_session_record()
+    return session
 
 
 def test_apply_terminal_event_policy_final_marks_completed_before_send() -> None:

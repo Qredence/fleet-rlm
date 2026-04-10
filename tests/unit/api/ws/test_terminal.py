@@ -204,7 +204,9 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     asyncio.run(scenario())
 
 
-def test_handle_terminal_stream_event_delegates_to_orchestration_app(monkeypatch) -> None:
+def test_handle_terminal_stream_event_delegates_to_orchestration_app(
+    monkeypatch,
+) -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
