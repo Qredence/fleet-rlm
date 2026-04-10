@@ -17,8 +17,7 @@ from fleet_rlm.integrations.observability.mlflow_context import (
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.runtime.execution.streaming import is_terminal_stream_event_kind
-from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest, stream_workspace_task
+from fleet_rlm.worker import WorkspaceEvent, stream_workspace_task
 
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
@@ -40,8 +39,9 @@ from .task_control import (
     should_reload_docs_path,
 )
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
-from .turn_setup import prepare_chat_message_turn
-from .types import ChatAgentProtocol, LocalPersistFn, PreStreamSetupFn
+from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
+from .types import ChatAgentProtocol, LocalPersistFn, StreamEventLike
+from .worker_request import build_workspace_task_request
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +92,21 @@ def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
     return metadata
 
 
+def _is_terminal_transport_event(event: StreamEventLike) -> bool:
+    """Return websocket-terminal semantics for worker and legacy runtime events."""
+
+    return bool(getattr(event, "terminal", False)) or event.kind in {
+        "final",
+        "cancelled",
+        "error",
+    }
+
+
 class ReplHookBridge:
     """Queue and forward interpreter REPL hook callbacks to lifecycle handlers."""
+
+    # TODO(phase-3): move REPL callback bridging behind the outer orchestration
+    # layer so websocket transport only consumes worker-native events.
 
     def __init__(
         self,
@@ -186,21 +199,15 @@ async def run_streaming_turn(
     *,
     websocket: WebSocket,
     agent: ChatAgentProtocol,
-    message: str,
-    docs_path: str | None,
-    trace: bool,
+    prepared_turn: PreparedStreamingTurn,
     cancel_check: Callable[[], bool],
-    lifecycle: ExecutionLifecycleManager,
-    step_builder: ExecutionStepBuilder,
     interpreter: object | None,
-    last_loaded_docs_path: str | None,
-    analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
-    mlflow_trace_context: Any | None = None,
-    prepare_stream: PreStreamSetupFn,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
+    lifecycle = prepared_turn.lifecycle
+    step_builder = prepared_turn.step_builder
     await lifecycle.emit_started()
     ws_loop = asyncio.get_running_loop()
     repl_hook_bridge = ReplHookBridge(
@@ -212,9 +219,10 @@ async def run_streaming_turn(
     )
     await repl_hook_bridge.start()
 
-    if should_reload_docs_path(last_loaded_docs_path, docs_path):
-        agent.load_document(str(docs_path))
-        last_loaded_docs_path = str(docs_path).strip()
+    last_loaded_docs_path = prepared_turn.last_loaded_docs_path
+    if should_reload_docs_path(last_loaded_docs_path, prepared_turn.docs_path):
+        agent.load_document(str(prepared_turn.docs_path))
+        last_loaded_docs_path = str(prepared_turn.docs_path).strip()
 
     try:
 
@@ -222,20 +230,16 @@ async def run_streaming_turn(
             await _stream_agent_events(
                 websocket=websocket,
                 agent=agent,
-                request_message=message,
-                message=message,
-                docs_path=docs_path,
-                trace=trace,
+                prepared_turn=prepared_turn,
                 cancel_check=cancel_check,
                 lifecycle=lifecycle,
                 step_builder=step_builder,
-                analytics_enabled=analytics_enabled,
+                analytics_enabled=prepared_turn.analytics_enabled,
                 persist_session_state=persist_session_state,
             )
 
         await _run_prepared_stream(
-            prepare_stream=prepare_stream,
-            mlflow_trace_context=mlflow_trace_context,
+            mlflow_trace_context=prepared_turn.mlflow_trace_context,
             stream_body=_stream_body,
         )
     except WebSocketDisconnect:
@@ -246,7 +250,7 @@ async def run_streaming_turn(
             lifecycle=lifecycle,
             step_builder=step_builder,
             exc=exc,
-            request_message=message,
+            request_message=prepared_turn.message,
         )
     finally:
         await repl_hook_bridge.stop()
@@ -256,12 +260,10 @@ async def run_streaming_turn(
 
 async def _run_prepared_stream(
     *,
-    prepare_stream: PreStreamSetupFn,
     mlflow_trace_context: Any | None,
     stream_body: Callable[[], Awaitable[None]],
 ) -> None:
     if mlflow_trace_context is None:
-        await prepare_stream()
         await stream_body()
         return
 
@@ -270,7 +272,6 @@ async def _run_prepared_stream(
     )
 
     with mlflow_request_context(mlflow_trace_context):
-        await prepare_stream()
         await stream_body()
 
 
@@ -278,26 +279,23 @@ async def _stream_agent_events(
     *,
     websocket: WebSocket,
     agent: ChatAgentProtocol,
-    request_message: str,
-    message: str,
-    docs_path: str | None,
-    trace: bool,
+    prepared_turn: PreparedStreamingTurn,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
 ) -> None:
-    worker_request = WorkspaceTaskRequest(
+    worker_request = build_workspace_task_request(
         agent=agent,
-        message=message,
-        trace=trace,
-        docs_path=docs_path,
+        prepared_turn=prepared_turn,
         cancel_check=cancel_check,
-        execution_mode=getattr(agent, "execution_mode", None),
     )
 
     with runtime_telemetry_enabled_context(analytics_enabled):
+        # The worker boundary owns request.prepare execution via
+        # stream_workspace_task(...), so websocket transport only builds the
+        # request and consumes worker-native events.
         async for worker_event in stream_workspace_task(worker_request):
             await _emit_stream_event(
                 websocket=websocket,
@@ -305,7 +303,7 @@ async def _stream_agent_events(
                 step_builder=step_builder,
                 event=worker_event,
                 persist_session_state=persist_session_state,
-                request_message=request_message,
+                request_message=prepared_turn.message,
             )
 
     if not lifecycle.run_completed:
@@ -318,7 +316,7 @@ async def _emit_stream_event(
     websocket: WebSocket,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    event: WorkspaceEvent,
+    event: WorkspaceEvent | StreamEventLike,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
@@ -333,7 +331,7 @@ async def _emit_stream_event(
             ),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
-    is_terminal_event = is_terminal_stream_event_kind(event.kind)
+    is_terminal_event = _is_terminal_transport_event(event)
     if not is_terminal_event:
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
@@ -399,18 +397,10 @@ async def _process_chat_message(
     return await run_streaming_turn(
         websocket=websocket,
         agent=agent,
-        message=prepared_turn.message,
-        docs_path=prepared_turn.docs_path,
-        trace=prepared_turn.trace,
+        prepared_turn=prepared_turn,
         cancel_check=cancel_check,
-        lifecycle=prepared_turn.lifecycle,
-        step_builder=prepared_turn.step_builder,
         interpreter=interpreter,
-        last_loaded_docs_path=prepared_turn.last_loaded_docs_path,
-        analytics_enabled=prepared_turn.analytics_enabled,
         persist_session_state=local_persist,
-        mlflow_trace_context=prepared_turn.mlflow_trace_context,
-        prepare_stream=prepared_turn.prepare_stream,
     )
 
 

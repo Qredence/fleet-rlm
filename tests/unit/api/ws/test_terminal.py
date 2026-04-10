@@ -8,7 +8,7 @@ from fleet_rlm.api.routers.ws.terminal import (
     build_stream_event_dict,
     handle_terminal_stream_event,
 )
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.worker import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
@@ -60,7 +60,7 @@ class _HangingLifecycle(_LifecycleStub):
 
 
 def test_build_stream_event_dict_serializes_core_fields() -> None:
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="status", text="hello", payload={"ok": True}, timestamp=ts()
     )
 
@@ -78,7 +78,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         persist_calls: list[bool] = []
-        event = StreamEvent(kind="final", text="done", timestamp=ts())
+        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
@@ -106,7 +106,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = StreamEvent(kind="final", text="done", timestamp=ts())
+        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
@@ -134,7 +134,7 @@ def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _HangingLifecycle()
-        event = StreamEvent(kind="error", text="boom", timestamp=ts())
+        event = WorkspaceEvent(kind="error", text="boom", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
@@ -169,7 +169,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = StreamEvent(
+        event = WorkspaceEvent(
             kind="final",
             text="claimed success",
             payload={
@@ -177,6 +177,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
                 "runtime_failure_category": "tool_execution_error",
             },
             timestamp=ts(),
+            terminal=True,
         )
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:

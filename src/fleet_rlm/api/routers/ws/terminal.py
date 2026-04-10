@@ -51,6 +51,8 @@ async def handle_terminal_stream_event(
     request_message: str,
 ) -> None:
     """Handle final/cancelled/error websocket events without changing ordering."""
+    # TODO(phase-3): move terminal persistence ordering behind the outer
+    # orchestration layer once websocket transport no longer owns cleanup policy.
     if event.kind == "final":
         try:
             await persist_session_state(include_volume_save=True)

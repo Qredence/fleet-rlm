@@ -17,8 +17,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
-from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.runtime.config import build_dspy_context
+from fleet_rlm.worker import WorkspaceEvent
 
 from ...dependencies import get_server_state_from_websocket
 from ...events import ExecutionSubscription
@@ -110,7 +110,7 @@ class _ExecutionWebSocketConnection:
 
     async def _emit_delayed_startup_status(self) -> None:
         await asyncio.sleep(_EXECUTION_STARTUP_STATUS_DELAY_SECONDS)
-        startup_event = StreamEvent(
+        startup_event = WorkspaceEvent(
             kind="status",
             text="Preparing Daytona workspace...",
             payload={

@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from fleet_rlm.api.routers.ws.errors import handle_stream_error
 from fleet_rlm.integrations.database import RunStatus
+from fleet_rlm.worker import WorkspaceEvent
 
 
 class _ClosedSendWebSocket:
@@ -99,5 +100,13 @@ def test_handle_stream_error_completes_run_with_error_summary() -> None:
         assert lifecycle.completed_with["status"] == RunStatus.FAILED
         assert lifecycle.completed_with["error_json"]["error"] == "boom"
         assert lifecycle.completed_with["summary"]["status"] == "error"
+        assert lifecycle.completed_with["summary"]["termination_reason"] == "error"
+        terminal_event = WorkspaceEvent(
+            kind="error",
+            text="Streaming error: boom",
+            payload={"error_type": "RuntimeError", "error_code": "internal_error"},
+            terminal=True,
+        )
+        assert terminal_event.terminal is True
 
     asyncio.run(scenario())

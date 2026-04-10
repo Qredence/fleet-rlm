@@ -150,6 +150,11 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
         "message": "analyze the repo",
         "trace": True,
         "docs_path": None,
+        "repo_url": "https://github.com/qredence/fleet-rlm.git",
+        "repo_ref": "main",
+        "context_paths": ["/Users/zocho/Documents/spec.pdf"],
+        "batch_concurrency": 5,
+        "volume_name": "default",
     }
     assert fake_agent.interpreter.workspace_config_calls[-1] == {
         "repo_url": "https://github.com/qredence/fleet-rlm.git",
@@ -276,6 +281,8 @@ def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
         "message": "analyze the repo",
         "trace": True,
         "docs_path": None,
+        "repo_url": "https://github.com/qredence/fleet-rlm.git",
+        "volume_name": "default",
     }
     assert (
         fake_agent.interpreter.repo_url == "https://github.com/qredence/fleet-rlm.git"
@@ -324,6 +331,11 @@ def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_ag
         "message": "review these docs",
         "trace": True,
         "docs_path": None,
+        "context_paths": [
+            "/Users/zocho/Documents/spec.pdf",
+            "/Volumes/StorageBackup/_RLM/fleet-rlm-dspy/docs",
+        ],
+        "volume_name": "default",
     }
     assert fake_agent.interpreter.repo_url is None
     assert fake_agent.interpreter.context_paths == [
@@ -369,6 +381,7 @@ def test_websocket_accepts_daytona_reasoning_only_requests(
         "message": "think through this architecture",
         "trace": True,
         "docs_path": None,
+        "volume_name": "default",
     }
     assert fake_agent.interpreter.repo_url is None
     assert fake_agent.interpreter.repo_ref is None
