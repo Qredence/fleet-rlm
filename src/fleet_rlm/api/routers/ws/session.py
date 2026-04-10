@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm.orchestration_app import OrchestrationSessionContext, switch_orchestration_session
+
 from ...dependencies import ServerState
-from ...orchestration.session_policy import switch_execution_session
 from .types import ChatAgentProtocol, LocalPersistFn
 
 
@@ -23,9 +24,9 @@ async def switch_session_if_needed(
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
-) -> tuple[str, str, dict[str, Any], str | None]:
+) -> tuple[str, str, dict[str, Any], str | None, OrchestrationSessionContext]:
     """Switch and restore session state when session identity changed."""
-    outcome = await switch_execution_session(
+    outcome = await switch_orchestration_session(
         state=state,
         agent=agent,
         interpreter=interpreter,
@@ -44,4 +45,5 @@ async def switch_session_if_needed(
         outcome.manifest_path,
         outcome.session_record,
         outcome.last_loaded_docs_path,
+        outcome.orchestration_session,
     )

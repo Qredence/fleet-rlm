@@ -19,6 +19,7 @@ from fleet_rlm.integrations.observability.trace_context import (
 )
 from fleet_rlm.orchestration_app import (
     OrchestrationSessionContext,
+    build_orchestration_session_context,
     stream_orchestrated_workspace_task,
 )
 from fleet_rlm.worker import WorkspaceEvent
@@ -310,14 +311,15 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
-    orchestration_session = OrchestrationSessionContext.from_session_record(
-        session.session_record
-    ) or OrchestrationSessionContext(
+    orchestration_session = session.orchestration_session or build_orchestration_session_context(
+        session_record=session.session_record,
         workspace_id=workspace_id,
         user_id=user_id,
         session_id=sess_id,
-        session_record=session.session_record,
+        key=session.active_key,
+        manifest_path=session.active_manifest_path,
     )
+    session.orchestration_session = orchestration_session
 
     return await run_streaming_turn(
         websocket=websocket,
@@ -487,6 +489,7 @@ async def _resolve_session_target(
         session.active_manifest_path,
         session.session_record,
         session.last_loaded_docs_path,
+        session.orchestration_session,
     ) = await switch_session_if_needed(
         state=state,
         agent=agent,

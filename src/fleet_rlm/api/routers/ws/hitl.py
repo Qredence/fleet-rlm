@@ -7,7 +7,10 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from ...orchestration.hitl_policy import resolve_hitl_command
+from fleet_rlm.orchestration_app import (
+    build_orchestration_session_context,
+    resolve_hitl_continuation,
+)
 
 CommandResponseBuilder = Callable[..., dict[str, Any]]
 
@@ -21,10 +24,10 @@ async def handle_resolve_hitl(
     session_record: dict[str, Any] | None = None,
 ) -> bool:
     """Handle the special websocket HITL resolution command when present."""
-    resolution = resolve_hitl_command(
+    resolution = resolve_hitl_continuation(
         command=command,
         args=args,
-        session_record=session_record,
+        session=build_orchestration_session_context(session_record=session_record),
     )
     if resolution is None:
         return False
