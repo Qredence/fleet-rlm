@@ -201,7 +201,9 @@ def resolve_hitl_command(
             )
             continuation.message_id = pending.message_id
             continuation.source = pending.source
-            continuation.requested_at = pending.requested_at or continuation.requested_at
+            continuation.requested_at = (
+                pending.requested_at or continuation.requested_at
+            )
             continuation.updated_at = resolved_at
             continuation.resolution = action_label
             session.save_checkpoint_state(

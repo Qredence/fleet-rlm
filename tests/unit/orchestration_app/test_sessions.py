@@ -46,7 +46,7 @@ def test_build_orchestration_session_context_reads_manifest_metadata() -> None:
                         "requested_at": "2026-04-10T15:00:00Z",
                         "updated_at": "2026-04-10T15:01:00Z",
                         "resolution": "Approve",
-                    }
+                    },
                 }
             }
         },
@@ -126,10 +126,10 @@ async def test_switch_orchestration_session_restores_cached_state_and_context() 
     assert outcome.orchestration_session.workflow_stage == "awaiting_hitl_resolution"
     assert outcome.orchestration_session.continuation_token == "token-123"
     assert outcome.orchestration_session.pending_approval is not None
-    assert (
-        outcome.orchestration_session.pending_approval.action_labels
-        == ["Approve", "Reject"]
-    )
+    assert outcome.orchestration_session.pending_approval.action_labels == [
+        "Approve",
+        "Reject",
+    ]
     assert agent.aimport_session_state_calls == 1
     assert agent.areset_calls == 0
 

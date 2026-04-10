@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.orchestration_app import OrchestrationSessionContext, switch_orchestration_session
+from fleet_rlm.orchestration_app import (
+    OrchestrationSessionContext,
+    switch_orchestration_session,
+)
 
 from ...dependencies import ServerState
 from .types import ChatAgentProtocol, LocalPersistFn

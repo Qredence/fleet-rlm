@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from ..api.dependencies import ServerState, session_key
-from ..api.routers.ws.manifest import _manifest_path, load_manifest_from_volume
 from ..api.server_utils import owner_fingerprint
+from ..api.server_utils import sanitize_id as _sanitize_id
 from .checkpoints import (
     ContinuationCheckpoint,
     OrchestrationCheckpointState,
@@ -16,17 +15,8 @@ from .checkpoints import (
     WorkflowStage,
 )
 
-LocalPersistFn = Callable[..., Awaitable[None]]
-
-
-class SessionOrchestrationAgent(Protocol):
-    """Minimal agent surface needed for same-process session restore/switch."""
-
-    interpreter: object | None
-
-    async def aimport_session_state(self, state: dict[str, Any]) -> object: ...
-
-    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+if TYPE_CHECKING:
+    from ..api.routers.ws.types import ChatAgentProtocol, LocalPersistFn
 
 
 @dataclass(slots=True)
@@ -46,7 +36,11 @@ def _resolved_manifest_path(
 ) -> str | None:
     if not workspace_id or not user_id or not session_id:
         return None
-    return _manifest_path(workspace_id, user_id, session_id)
+    safe_session_id = _sanitize_id(session_id, "default-session")
+    return (
+        f"meta/workspaces/{workspace_id}/users/{user_id}/"
+        f"react-session-{safe_session_id}.json"
+    )
 
 
 def _continuation_metadata(
@@ -164,10 +158,13 @@ class OrchestrationSessionContext:
 
     def refresh_from_session_record(self) -> None:
         self.session_record_link = SessionRecordLink(
-            key=self.session_record_link.key or self._string_record_value("key") or None,
+            key=self.session_record_link.key
+            or self._string_record_value("key")
+            or None,
             manifest_path=self.session_record_link.manifest_path
             or _resolved_manifest_path(
-                workspace_id=self.workspace_id or self._string_record_value("workspace_id"),
+                workspace_id=self.workspace_id
+                or self._string_record_value("workspace_id"),
                 user_id=self.user_id or self._string_record_value("user_id"),
                 session_id=self.session_id or self._string_record_value("session_id"),
             ),
@@ -258,7 +255,7 @@ class SessionSwitchOutcome:
 
 async def _restore_agent_state(
     *,
-    agent: SessionOrchestrationAgent,
+    agent: ChatAgentProtocol,
     restored_state: Any,
 ) -> None:
     if isinstance(restored_state, dict) and restored_state:
@@ -302,7 +299,7 @@ def build_orchestration_session_context(
 async def switch_orchestration_session(
     *,
     state: ServerState,
-    agent: SessionOrchestrationAgent,
+    agent: ChatAgentProtocol,
     interpreter: object | None,
     workspace_id: str,
     user_id: str,
@@ -318,7 +315,13 @@ async def switch_orchestration_session(
 
     key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
     owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
-    manifest_path = _manifest_path(owner_id, workspace_id, sess_id)
+    manifest_path = _resolved_manifest_path(
+        workspace_id=owner_id,
+        user_id=workspace_id,
+        session_id=sess_id,
+    )
+    if manifest_path is None:
+        raise ValueError("workspace_id and sess_id are required for manifest path")
 
     if active_key == key and session_record is not None:
         return SessionSwitchOutcome(
@@ -341,6 +344,8 @@ async def switch_orchestration_session(
 
     cached = state.sessions.get(key)
     if cached is None:
+        from ..api.routers.ws.manifest import load_manifest_from_volume
+
         manifest = (
             await load_manifest_from_volume(agent, manifest_path)
             if interpreter is not None
@@ -360,7 +365,7 @@ async def switch_orchestration_session(
         try:
             from fleet_rlm.integrations.local_store import create_session as _db_create
 
-            cached["db_session_id"] = _db_create(title=sess_id).id
+            cached["db_session_id"] = str(_db_create(title=sess_id).id)
         except Exception:
             pass
 

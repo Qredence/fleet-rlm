@@ -311,13 +311,16 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
-    orchestration_session = session.orchestration_session or build_orchestration_session_context(
-        session_record=session.session_record,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        session_id=sess_id,
-        key=session.active_key,
-        manifest_path=session.active_manifest_path,
+    orchestration_session = (
+        session.orchestration_session
+        or build_orchestration_session_context(
+            session_record=session.session_record,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=sess_id,
+            key=session.active_key,
+            manifest_path=session.active_manifest_path,
+        )
     )
     session.orchestration_session = orchestration_session
 

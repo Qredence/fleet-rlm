@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fleet_rlm.orchestration_app import SessionSwitchOutcome, switch_orchestration_session
+from fleet_rlm.orchestration_app import (
+    SessionSwitchOutcome,
+    switch_orchestration_session,
+)
 
 
 async def switch_execution_session(**kwargs) -> SessionSwitchOutcome:
