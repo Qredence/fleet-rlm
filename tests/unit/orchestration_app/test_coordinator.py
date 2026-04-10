@@ -16,9 +16,7 @@ class _AgentStub:
 
     async def aiter_chat_turn_stream(self, *args, **kwargs):
         _ = (args, kwargs)
-        # Keep this as an async generator for protocol compatibility in tests.
-        if False:  # pragma: no cover
-            yield None
+        return None
 
 
 def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:

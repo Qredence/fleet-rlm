@@ -158,7 +158,13 @@ def resolve_hitl_command(
     args: dict[str, Any],
     session: OrchestrationSessionContext | None = None,
 ) -> HitlResolution | None:
-    """Resolve HITL continuation policy in the outer orchestration layer."""
+    """Resolve HITL continuation policy in the outer orchestration layer.
+
+    ``session`` stays optional for compatibility paths where websocket transport
+    has not established a resumable session record yet; in that case the outer
+    layer still preserves the existing command/event contract without
+    checkpoint-state updates.
+    """
 
     if command != "resolve_hitl":
         return None

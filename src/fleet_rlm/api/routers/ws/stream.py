@@ -310,16 +310,20 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
+    orchestration_session = OrchestrationSessionContext.from_session_record(
+        session.session_record
+    ) or OrchestrationSessionContext(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=sess_id,
+        session_record=session.session_record,
+    )
+
     return await run_streaming_turn(
         websocket=websocket,
         agent=agent,
         prepared_turn=prepared_turn,
-        orchestration_session=OrchestrationSessionContext(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            session_id=sess_id,
-            session_record=session.session_record,
-        ),
+        orchestration_session=orchestration_session,
         cancel_check=cancel_check,
         interpreter=interpreter,
         persist_session_state=local_persist,
