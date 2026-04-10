@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fleet_rlm.api.orchestration.startup_status import (
+from fleet_rlm.agent_host.startup_status import (
     build_startup_status_event,
     cancel_startup_status_task,
     emit_delayed_startup_status,
