@@ -103,9 +103,10 @@ class OrchestrationAppWorkflowExecutor(Executor):
 def build_workspace_host_workflow() -> Workflow:
     """Build the canonical outer workflow host for the websocket execution path."""
 
-    # Do not cache this Workflow instance across requests: Agent Framework runner
-    # state is safer when kept request-local, and TestClient/event-loop shutdown
-    # was flaky when a shared workflow object crossed loop boundaries.
+    # This builder intentionally creates a fresh Workflow per call instead of
+    # caching a module-level instance: Agent Framework runner state is safer
+    # when kept request-local, and TestClient/event-loop shutdown was flaky when
+    # a shared workflow object crossed loop boundaries.
     executor = OrchestrationAppWorkflowExecutor(id=_WORKSPACE_HOST_EXECUTOR_ID)
     return WorkflowBuilder(
         name="workspace-orchestration-host",
