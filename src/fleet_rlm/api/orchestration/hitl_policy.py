@@ -1,4 +1,4 @@
-"""Compatibility HITL policy delegating into the outer orchestration layer."""
+"""Compatibility HITL policy delegating into the Agent Framework host layer."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def resolve_hitl_command(
     args: dict[str, Any],
     session_record: dict[str, Any] | None = None,
 ) -> HitlResolution | None:
-    """Resolve the special websocket HITL continuation command via outer glue."""
+    """Resolve the special websocket HITL continuation command via host-owned glue."""
 
     return resolve_hitl_continuation(
         command=command,
