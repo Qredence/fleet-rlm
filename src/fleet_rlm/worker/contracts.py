@@ -41,7 +41,7 @@ class WorkspaceTaskRequest:
     docs_path: str | None = None
     repo_url: str | None = None
     repo_ref: str | None = None
-    context_paths: list[str] = field(default_factory=list)
+    context_paths: list[str] | None = None
     batch_concurrency: int | None = None
     workspace_id: str | None = None
     cancel_check: Callable[[], bool] | None = None

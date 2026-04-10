@@ -118,3 +118,26 @@ def test_stream_workspace_task_yields_normalized_workspace_events() -> None:
 
     assert [event.kind for event in events] == ["status", "final"]
     assert events[-1].terminal is True
+    assert agent.stream_calls[0]["context_paths"] is None
+
+
+def test_stream_workspace_task_preserves_unspecified_optional_overrides() -> None:
+    agent = _FakeAgent()
+    request = WorkspaceTaskRequest(agent=agent, message="hello")
+
+    async def _collect() -> None:
+        async for _event in stream_workspace_task(request):
+            pass
+
+    asyncio.run(_collect())
+
+    assert agent.stream_calls[0] == {
+        "message": "hello",
+        "trace": True,
+        "docs_path": None,
+        "repo_url": None,
+        "repo_ref": None,
+        "context_paths": None,
+        "batch_concurrency": None,
+        "volume_name": None,
+    }
