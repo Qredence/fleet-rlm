@@ -9,25 +9,24 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.runtime.models import StreamEvent
 
 from ...events import ExecutionStep
 from .completion import final_event_failed, build_execution_completion_summary
 from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager
-from .types import LocalPersistFn
+from .types import LocalPersistFn, StreamEventLike
 
 logger = logging.getLogger(__name__)
 
 
-def _final_run_status(event: StreamEvent) -> RunStatus:
+def _final_run_status(event: StreamEventLike) -> RunStatus:
     payload = event.payload if isinstance(event.payload, dict) else {}
     return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
 
 
 def build_stream_event_dict(
     *,
-    event: StreamEvent,
+    event: StreamEventLike,
     payload: Any,
 ) -> dict[str, Any]:
     """Serialize one stream event for websocket delivery."""
@@ -45,7 +44,7 @@ async def handle_terminal_stream_event(
     *,
     websocket: WebSocket,
     lifecycle: ExecutionLifecycleManager,
-    event: StreamEvent,
+    event: StreamEventLike,
     event_dict: dict[str, Any],
     step: ExecutionStep | None,
     persist_session_state: LocalPersistFn,

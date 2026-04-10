@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- The notes below summarize the current branch delta on top of `0.4.99`.
+- No unreleased changes yet.
+
+## [0.5.0] - 2026-04-10
 
 ### Highlights (User Impact)
 

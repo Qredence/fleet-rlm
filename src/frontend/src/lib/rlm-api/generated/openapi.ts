@@ -272,7 +272,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.4.99
+       * @default 0.5.0
        */
       version?: string;
     };

@@ -32,10 +32,7 @@ function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
   try {
     const url = new URL(normalized);
     if (/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/.test(url.pathname)) {
-      url.pathname = url.pathname.replace(
-        /\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/,
-        path,
-      );
+      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/, path);
       return url.toString().replace(/\/$/, "");
     }
   } catch {

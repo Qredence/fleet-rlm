@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
 from fleet_rlm.runtime.models import StreamEvent
@@ -13,6 +14,30 @@ from ...schemas import WSMessage
 
 LocalPersistFn = Callable[..., Awaitable[None]]
 PreStreamSetupFn = Callable[[], Awaitable[None]]
+
+
+class StreamEventLike(Protocol):
+    """Minimal stream-event surface required by WS terminal/completion helpers.
+
+    Both ``StreamEvent`` (runtime model) and ``WorkspaceEvent`` (worker
+    contract) satisfy this protocol, so the helpers in ``terminal.py`` and
+    ``completion.py`` can accept either without unsafe casts.
+    """
+
+    @property
+    def kind(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @property
+    def timestamp(self) -> datetime:
+        raise NotImplementedError
 
 
 class MaintenanceInterpreterProtocol(Protocol):
