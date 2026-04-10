@@ -4,7 +4,6 @@ import asyncio
 from contextlib import suppress
 from typing import Any, cast
 
-import fleet_rlm.api.routers.ws.terminal as ws_terminal
 from fleet_rlm.api.routers.ws.terminal import (
     build_stream_event_dict,
     handle_terminal_stream_event,
