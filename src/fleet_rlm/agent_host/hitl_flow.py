@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.worker import WorkspaceEvent
 
@@ -14,7 +14,9 @@ from .checkpoints import (
     checkpoint_for_hitl_request,
     current_utc_iso_timestamp,
 )
-from .sessions import OrchestrationSessionContext
+
+if TYPE_CHECKING:
+    from .sessions import OrchestrationSessionContext
 
 
 @dataclass(slots=True)
@@ -169,7 +171,9 @@ def resolve_hitl_continuation(
             )
             continuation.message_id = pending.message_id
             continuation.source = pending.source
-            continuation.requested_at = pending.requested_at or continuation.requested_at
+            continuation.requested_at = (
+                pending.requested_at or continuation.requested_at
+            )
             continuation.updated_at = resolved_at
             continuation.resolution = action_label
             session.save_checkpoint_state(
