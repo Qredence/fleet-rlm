@@ -580,7 +580,6 @@ class _ExecutionConnectionLoop:
                         local_persist=self.local_persist,
                     ):
                         continue
-                    self.pending_message = msg
                     continue
 
                 (
