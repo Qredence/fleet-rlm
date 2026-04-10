@@ -141,7 +141,7 @@ async def _noop_persist(*, include_volume_save: bool = True) -> None:
     _ = include_volume_save
 
 
-def test_orchestration_app_sessions_is_compatibility_export() -> None:
+def test_orchestration_session_context_builds_from_agent_host() -> None:
     context = build_orchestration_session_context(
         session_record={"manifest": {"metadata": {}}}
     )
