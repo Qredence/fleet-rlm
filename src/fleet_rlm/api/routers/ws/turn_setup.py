@@ -15,6 +15,7 @@ from .lifecycle import ExecutionLifecycleManager
 from .runtime import _ChatSessionState, _PreparedChatRuntime
 from .types import (
     ChatAgentProtocol,
+    DaytonaChatRequestOptions,
     LocalPersistFn,
     PreStreamSetupFn,
     normalize_daytona_chat_request,
@@ -24,17 +25,23 @@ from .types import (
 
 @dataclass(slots=True)
 class PreparedStreamingTurn:
-    """Normalized websocket turn setup ready for stream execution."""
+    """Normalized websocket turn setup ready for worker-boundary execution."""
 
     message: str
     docs_path: str | None
     trace: bool
+    execution_mode: str
+    workspace_id: str
+    repo_url: str | None
+    repo_ref: str | None
+    context_paths: list[str] | None
+    batch_concurrency: int | None
     lifecycle: ExecutionLifecycleManager
     step_builder: ExecutionStepBuilder
     last_loaded_docs_path: str | None
     analytics_enabled: bool | None
     mlflow_trace_context: Any | None
-    prepare_stream: PreStreamSetupFn
+    prepare_worker: PreStreamSetupFn
 
 
 async def _reject_empty_message(
@@ -56,7 +63,7 @@ def _build_prepare_stream(
     agent: ChatAgentProtocol,
     msg: WSMessage,
     workspace_id: str,
-) -> PreStreamSetupFn:
+) -> tuple[DaytonaChatRequestOptions, PreStreamSetupFn]:
     daytona_request = normalize_daytona_chat_request(msg, workspace_id=workspace_id)
 
     async def _prepare_stream() -> None:
@@ -66,7 +73,7 @@ def _build_prepare_stream(
             docs_path=msg.docs_path,
         )
 
-    return _prepare_stream
+    return daytona_request, _prepare_stream
 
 
 async def _initialize_turn_components(
@@ -145,8 +152,7 @@ async def prepare_chat_message_turn(
         return None
 
     execution_mode = msg.execution_mode
-    agent.set_execution_mode(execution_mode)
-    prepare_stream = _build_prepare_stream(
+    daytona_request, prepare_stream = _build_prepare_stream(
         agent=agent,
         msg=msg,
         workspace_id=workspace_id,
@@ -189,10 +195,18 @@ async def prepare_chat_message_turn(
         message=message,
         docs_path=msg.docs_path,
         trace=bool(msg.trace),
+        execution_mode=execution_mode,
+        workspace_id=workspace_id,
+        repo_url=daytona_request.repo_url,
+        repo_ref=daytona_request.repo_ref,
+        context_paths=(
+            list(daytona_request.context_paths) if msg.context_paths is not None else None
+        ),
+        batch_concurrency=daytona_request.batch_concurrency,
         lifecycle=session.lifecycle,
         step_builder=step_builder,
         last_loaded_docs_path=session.last_loaded_docs_path,
         analytics_enabled=getattr(msg, "analytics_enabled", None),
         mlflow_trace_context=trace_context,
-        prepare_stream=prepare_stream,
+        prepare_worker=prepare_stream,
     )

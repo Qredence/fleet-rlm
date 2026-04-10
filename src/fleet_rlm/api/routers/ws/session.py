@@ -26,6 +26,8 @@ async def switch_session_if_needed(
     local_persist: LocalPersistFn,
 ) -> tuple[str, str, dict[str, Any], str | None]:
     """Switch and restore session state when session identity changed."""
+    # TODO(phase-3): move session restore/persist orchestration behind the outer
+    # orchestration layer; websocket transport should only manage socket state.
     key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
     owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
     manifest_path = _manifest_path(owner_id, workspace_id, sess_id)

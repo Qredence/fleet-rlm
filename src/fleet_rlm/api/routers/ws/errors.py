@@ -8,7 +8,7 @@ import time
 from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.worker import WorkspaceEvent
 
 from ...events import ExecutionStepBuilder
 from .completion import build_execution_completion_summary
@@ -71,10 +71,11 @@ async def handle_stream_error(
             "code": error_code,
         },
         summary=build_execution_completion_summary(
-            event=StreamEvent(
+            event=WorkspaceEvent(
                 kind="error",
                 text=error_text,
                 payload=error_payload,
+                terminal=True,
             ),
             request_message=request_message,
             run_id=lifecycle.run_id,

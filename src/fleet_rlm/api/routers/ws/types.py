@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.worker.contracts import WorkspaceTaskAgent
 
 from ...schemas import WSMessage
 
@@ -17,11 +17,10 @@ PreStreamSetupFn = Callable[[], Awaitable[None]]
 
 
 class StreamEventLike(Protocol):
-    """Minimal stream-event surface required by WS terminal/completion helpers.
+    """Minimal worker-event surface required by WS terminal/completion helpers.
 
-    Both ``StreamEvent`` (runtime model) and ``WorkspaceEvent`` (worker
-    contract) satisfy this protocol, so the helpers in ``terminal.py`` and
-    ``completion.py`` can accept either without unsafe casts.
+    ``WorkspaceEvent`` satisfies this protocol directly, and transport-created
+    compatibility events can do the same without depending on runtime models.
     """
 
     @property
@@ -53,7 +52,7 @@ class MaintenanceInterpreterProtocol(Protocol):
     def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
 
 
-class ChatAgentProtocol(Protocol):
+class ChatAgentProtocol(WorkspaceTaskAgent, Protocol):
     """Subset of chat-agent behavior used by websocket runtime helpers."""
 
     interpreter: MaintenanceInterpreterProtocol | None
@@ -86,20 +85,6 @@ class ChatAgentProtocol(Protocol):
     async def execute_command(
         self, command: str, args: dict[str, Any]
     ) -> dict[str, Any] | object: ...
-
-    def aiter_chat_turn_stream(
-        self,
-        message: str,
-        trace: bool = True,
-        cancel_check: Callable[[], bool] | None = None,
-        *,
-        docs_path: str | None = None,
-        repo_url: str | None = None,
-        repo_ref: str | None = None,
-        context_paths: list[str] | None = None,
-        batch_concurrency: int | None = None,
-        volume_name: str | None = None,
-    ) -> AsyncIterator[StreamEvent]: ...
 
 
 @dataclass(slots=True)

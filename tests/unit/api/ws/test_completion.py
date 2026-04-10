@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from fleet_rlm.api.routers.ws.completion import build_execution_completion_summary
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.worker import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
 def test_build_execution_completion_summary_preserves_run_result_and_guarantees_minimum_fields() -> (
     None
 ):
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="final",
         text="done",
         payload={
@@ -17,6 +17,7 @@ def test_build_execution_completion_summary_preserves_run_result_and_guarantees_
             "summary": {"duration_ms": 12, "warnings": ["slow"]},
         },
         timestamp=ts(),
+        terminal=True,
     )
 
     summary = build_execution_completion_summary(
@@ -36,11 +37,12 @@ def test_build_execution_completion_summary_preserves_run_result_and_guarantees_
 
 
 def test_build_execution_completion_summary_builds_fallback_final_artifact() -> None:
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="final",
         text="answer text",
         payload={"runtime_mode": "daytona_pilot", "sources": [{"id": "src-1"}]},
         timestamp=ts(),
+        terminal=True,
     )
 
     summary = build_execution_completion_summary(
@@ -59,7 +61,7 @@ def test_build_execution_completion_summary_builds_fallback_final_artifact() -> 
 def test_build_execution_completion_summary_prefers_top_level_final_artifact_when_present() -> (
     None
 ):
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="final",
         text="raw fallback text",
         payload={
@@ -71,6 +73,7 @@ def test_build_execution_completion_summary_prefers_top_level_final_artifact_whe
             },
         },
         timestamp=ts(),
+        terminal=True,
     )
 
     summary = build_execution_completion_summary(
@@ -85,11 +88,12 @@ def test_build_execution_completion_summary_prefers_top_level_final_artifact_whe
 
 
 def test_build_execution_completion_summary_builds_error_summary() -> None:
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="error",
         text="boom",
         payload={"summary": {"duration_ms": 55}},
         timestamp=ts(),
+        terminal=True,
     )
 
     summary = build_execution_completion_summary(
@@ -106,7 +110,7 @@ def test_build_execution_completion_summary_builds_error_summary() -> None:
 
 
 def test_build_execution_completion_summary_marks_tool_error_final_as_error() -> None:
-    event = StreamEvent(
+    event = WorkspaceEvent(
         kind="final",
         text="claimed success",
         payload={
@@ -114,6 +118,7 @@ def test_build_execution_completion_summary_marks_tool_error_final_as_error() ->
             "runtime_failure_category": "tool_execution_error",
         },
         timestamp=ts(),
+        terminal=True,
     )
 
     summary = build_execution_completion_summary(

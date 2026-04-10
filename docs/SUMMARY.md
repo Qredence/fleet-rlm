@@ -63,3 +63,4 @@
 ## Notes
 
 * [Phase 1: Worker Boundary Extraction](notes/phase-1-worker-boundary.md)
+* [Phase 2: Websocket Transport Thinning](notes/phase-2-ws-thinning.md)

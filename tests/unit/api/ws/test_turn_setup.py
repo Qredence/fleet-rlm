@@ -7,6 +7,7 @@ import uuid
 
 from fleet_rlm.api.routers.ws.runtime import _ChatSessionState
 from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
+from fleet_rlm.api.routers.ws.worker_request import build_workspace_task_request
 from fleet_rlm.api.schemas import WSMessage
 from tests.ui.fixtures_ui import FakeChatAgent
 
@@ -137,7 +138,7 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         )
 
         assert prepared is not None
-        assert agent.execution_mode == "tools_only"
+        assert agent.execution_mode == "auto"
         assert persist_calls == [
             {"include_volume_save": True, "latest_user_message": "hello"}
         ]
@@ -147,10 +148,16 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         assert prepared.message == "hello"
         assert prepared.docs_path == "docs/current.md"
         assert prepared.trace is False
+        assert prepared.execution_mode == "tools_only"
+        assert prepared.workspace_id == "workspace"
+        assert prepared.repo_url == "https://github.com/example/repo.git"
+        assert prepared.repo_ref == "main"
+        assert prepared.context_paths == ["src", "docs"]
+        assert prepared.batch_concurrency == 4
         assert prepared.last_loaded_docs_path == "docs/last.md"
         assert prepared.analytics_enabled is None
-        assert prepared.prepare_stream is not None
-        await prepared.prepare_stream()
+        assert prepared.prepare_worker is not None
+        await prepared.prepare_worker()
         assert workspace_config_calls == [
             {
                 "repo_url": "https://github.com/example/repo.git",
@@ -166,3 +173,77 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         assert init_calls[0]["turn_index"] == 1
 
     asyncio.run(scenario())
+
+
+def test_build_workspace_task_request_uses_prepared_turn_inputs() -> None:
+    async def fake_initialize_turn_lifecycle(**kwargs: Any):
+        _ = kwargs
+        return SimpleNamespace(), object(), "run-123", uuid.uuid4()
+
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        agent = FakeChatAgent()
+        session = _ChatSessionState(
+            canonical_workspace_id="workspace",
+            canonical_user_id="user",
+            owner_tenant_claim="workspace",
+            owner_user_claim="user",
+            cancel_flag={"cancelled": False},
+            session_record={"id": "session-record"},
+            last_loaded_docs_path=None,
+        )
+
+        async def local_persist(**kwargs: Any) -> None:
+            _ = kwargs
+
+        prepared = await prepare_chat_message_turn(
+            websocket=cast(Any, websocket),
+            msg=WSMessage(
+                type="message",
+                content=" hello ",
+                execution_mode="tools_only",
+                repo_url="https://github.com/example/repo.git",
+            ),
+            agent=cast(Any, agent),
+            session=session,
+            local_persist=cast(Any, local_persist),
+            runtime=cast(
+                Any,
+                SimpleNamespace(
+                    planner_lm=object(),
+                    cfg=SimpleNamespace(app_env="test"),
+                    repository=None,
+                    identity_rows=None,
+                    persistence_required=False,
+                ),
+            ),
+            workspace_id="workspace",
+            user_id="user",
+            sess_id="session",
+            execution_emitter=cast(Any, object()),
+        )
+        assert prepared is not None
+
+        request = build_workspace_task_request(
+            agent=agent,
+            prepared_turn=prepared,
+            cancel_check=lambda: False,
+        )
+
+        assert request.agent is agent
+        assert request.message == "hello"
+        assert request.execution_mode == "tools_only"
+        assert request.trace is True
+        assert request.repo_url == "https://github.com/example/repo.git"
+        assert request.repo_ref is None
+        assert request.context_paths is None
+        assert request.workspace_id == "workspace"
+        assert request.prepare is prepared.prepare_worker
+
+    from unittest.mock import patch
+
+    with patch(
+        "fleet_rlm.api.routers.ws.turn_setup.initialize_turn_lifecycle",
+        fake_initialize_turn_lifecycle,
+    ):
+        asyncio.run(scenario())

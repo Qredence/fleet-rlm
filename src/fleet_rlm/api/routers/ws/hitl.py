@@ -49,6 +49,8 @@ async def handle_resolve_hitl(
     command_response: CommandResponseBuilder,
 ) -> bool:
     """Handle the special websocket HITL resolution command when present."""
+    # TODO(phase-3): move HITL/workflow continuation handling behind the outer
+    # orchestration layer instead of keeping it in websocket command transport.
     if command != "resolve_hitl":
         return False
 
