@@ -1,14 +1,14 @@
-"""Compatibility HITL policy delegating into the outer orchestration layer."""
+"""Compatibility HITL policy delegating into the Agent Framework host layer."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.orchestration_app import (
+from fleet_rlm.agent_host.hitl_flow import (
     HitlResolution,
-    OrchestrationSessionContext,
     resolve_hitl_continuation,
 )
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 
 def resolve_hitl_command(
@@ -17,7 +17,7 @@ def resolve_hitl_command(
     args: dict[str, Any],
     session_record: dict[str, Any] | None = None,
 ) -> HitlResolution | None:
-    """Resolve the special websocket HITL continuation command via outer glue."""
+    """Resolve the special websocket HITL continuation command via host-owned glue."""
 
     return resolve_hitl_continuation(
         command=command,

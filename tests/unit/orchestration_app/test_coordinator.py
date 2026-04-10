@@ -19,7 +19,7 @@ class _AgentStub:
         return None
 
 
-def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:
+def test_coordinator_streams_worker_events_without_hitl_ownership(monkeypatch) -> None:
     request = WorkspaceTaskRequest(agent=_AgentStub(), message="approve this")
     session_record = {"manifest": {"metadata": {}}}
     session = OrchestrationSessionContext(
@@ -60,70 +60,41 @@ def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:
 
     assert calls == [request]
     assert events[0].kind == "hitl_request"
-    assert isinstance(events[0].payload["message_id"], str)
-    assert (
-        session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
-    )
-    assert (
-        session_record["orchestration"]["continuation"]["continuation_token"]
-        == session_record["manifest"]["metadata"]["orchestration"]["continuation"][
-            "continuation_token"
-        ]
-    )
-    assert (
-        session_record["manifest"]["metadata"]["orchestration"]["pending_approval"][
-            "message_id"
-        ]
-        == events[0].payload["message_id"]
-    )
+    assert "message_id" not in events[0].payload
+    assert events[1].kind == "final"
+    assert "orchestration" not in session_record
 
 
-def test_resolve_hitl_updates_checkpoint_state() -> None:
-    session_record = {
-        "orchestration": {
-            "workflow_stage": "awaiting_hitl_resolution",
-            "pending_approval": {
-                "message_id": "hitl-123",
-                "continuation_token": "token-123",
-                "workflow_stage": "awaiting_hitl_resolution",
-                "question": "Approve deployment?",
-                "source": "clarification_questions",
-                "action_labels": ["Approve", "Reject"],
-                "requested_at": "2026-04-10T15:00:00Z",
-            },
-        },
-        "manifest": {"metadata": {}},
-    }
-    session = OrchestrationSessionContext(
-        workspace_id="workspace-1",
-        user_id="user-1",
-        session_id="session-1",
-        session_record=session_record,
+def test_resolve_hitl_continuation_delegates_to_agent_host(monkeypatch) -> None:
+    from fleet_rlm.agent_host.hitl_flow import HitlResolution
+
+    captured: dict[str, object] = {}
+
+    def _fake_resolve_hitl_continuation(*, command, args, session):
+        captured["command"] = command
+        captured["args"] = args
+        captured["session"] = session
+        return HitlResolution(
+            event_payload={"kind": "hitl_resolved"},
+            command_result={"status": "ok"},
+        )
+
+    monkeypatch.setattr(
+        "fleet_rlm.orchestration_app.coordinator.resolve_agent_host_hitl_continuation",
+        _fake_resolve_hitl_continuation,
     )
 
     resolution = resolve_hitl_continuation(
         command="resolve_hitl",
         args={"message_id": "hitl-123", "action_label": "Approve"},
-        session=session,
+        session=None,
     )
 
     assert resolution is not None
-    assert resolution.event_payload is not None
-    assert resolution.event_payload["kind"] == "hitl_resolved"
-    assert resolution.command_result == {
-        "status": "ok",
-        "message_id": "hitl-123",
-        "resolution": "Approve",
+    assert resolution.event_payload == {"kind": "hitl_resolved"}
+    assert resolution.command_result == {"status": "ok"}
+    assert captured == {
+        "command": "resolve_hitl",
+        "args": {"message_id": "hitl-123", "action_label": "Approve"},
+        "session": None,
     }
-    assert session_record["orchestration"]["workflow_stage"] == "continued"
-    assert session_record["orchestration"]["continuation"]["continuation_token"] == (
-        "token-123"
-    )
-    assert session_record["orchestration"]["continuation"]["resolution"] == "Approve"
-    assert session_record["manifest"]["metadata"]["orchestration"][
-        "workflow_stage"
-    ] == ("continued")
-    assert session.workflow_stage == "continued"
-    assert session.continuation_token == "token-123"
-    assert session.continuation is not None
-    assert session.continuation.resolution == "Approve"

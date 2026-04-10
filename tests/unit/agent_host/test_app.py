@@ -6,7 +6,7 @@ from agent_framework import Workflow
 
 from fleet_rlm.agent_host.app import stream_hosted_workspace_task
 from fleet_rlm.agent_host.workflow import build_workspace_host_workflow
-from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
 
@@ -23,7 +23,55 @@ def test_build_workspace_host_workflow_returns_agent_framework_workflow() -> Non
     assert isinstance(build_workspace_host_workflow(), Workflow)
 
 
-def test_stream_hosted_workspace_task_preserves_orchestration_and_worker_boundary(
+def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
+    monkeypatch,
+) -> None:
+    request = WorkspaceTaskRequest(agent=_AgentStub(), message="approve this")
+    session_record = {"manifest": {"metadata": {}}}
+    session = OrchestrationSessionContext(
+        workspace_id="workspace-1",
+        user_id="user-1",
+        session_id="session-1",
+        session_record=session_record,
+    )
+
+    async def _fake_stream_orchestrated_workspace_task(*, request, session):
+        _ = (request, session)
+        yield WorkspaceEvent(
+            kind="hitl_request",
+            text="Approve deployment?",
+            payload={
+                "question": "Approve deployment?",
+                "actions": [{"label": "Approve"}, {"label": "Reject"}],
+            },
+        )
+        yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
+
+    monkeypatch.setattr(
+        "fleet_rlm.agent_host.workflow.stream_orchestrated_workspace_task",
+        _fake_stream_orchestrated_workspace_task,
+    )
+
+    async def _collect() -> list[WorkspaceEvent]:
+        return [
+            event
+            async for event in stream_hosted_workspace_task(
+                request=request,
+                session=session,
+            )
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert events[0].kind == "hitl_request"
+    assert isinstance(events[0].payload["message_id"], str)
+    assert events[1].kind == "final"
+    assert (
+        session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
+    )
+
+
+def test_stream_hosted_workspace_task_preserves_worker_boundary(
     monkeypatch,
 ) -> None:
     request = WorkspaceTaskRequest(agent=_AgentStub(), message="approve this")

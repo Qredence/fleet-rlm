@@ -7,10 +7,8 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from fleet_rlm.orchestration_app import (
-    build_orchestration_session_context,
-    resolve_hitl_continuation,
-)
+from fleet_rlm.agent_host.hitl_flow import resolve_hitl_continuation
+from fleet_rlm.agent_host.sessions import build_orchestration_session_context
 
 CommandResponseBuilder = Callable[..., dict[str, Any]]
 

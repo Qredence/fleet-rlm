@@ -49,6 +49,7 @@ Then open `http://localhost:8000`.
 - [Phase 5 session orchestration note](notes/phase-5-session-orchestration.md)
 - [Phase 6 terminal orchestration note](notes/phase-6-terminal-orchestration.md)
 - [Phase 7/8 Agent Framework transition note](notes/phase-7-8-agent-framework-transition.md)
+- [Phase 9 Agent host HITL migration note](notes/phase-9-agent-host-hitl-migration.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
