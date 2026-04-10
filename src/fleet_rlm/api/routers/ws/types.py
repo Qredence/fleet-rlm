@@ -31,7 +31,8 @@ class StreamEventLike(Protocol):
     def text(self) -> str: ...
 
     @property
-    def payload(self) -> dict[str, Any]: ...
+    def payload(self) -> dict[str, Any]:
+        raise NotImplementedError
 
     @property
     def timestamp(self) -> datetime:
