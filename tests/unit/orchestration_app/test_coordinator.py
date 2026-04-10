@@ -125,3 +125,5 @@ def test_resolve_hitl_updates_checkpoint_state() -> None:
     ] == ("continued")
     assert session.workflow_stage == "continued"
     assert session.continuation_token == "token-123"
+    assert session.continuation is not None
+    assert session.continuation.resolution == "Approve"
