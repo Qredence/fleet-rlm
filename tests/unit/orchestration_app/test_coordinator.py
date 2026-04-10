@@ -21,9 +21,7 @@ class _AgentStub:
             yield None
 
 
-def test_outer_coordinator_uses_worker_boundary_and_checkpoints_hitl(
-    monkeypatch,
-) -> None:
+def test_coordinator_checkpoints_hitl_events(monkeypatch) -> None:
     request = WorkspaceTaskRequest(agent=_AgentStub(), message="approve this")
     session_record = {"manifest": {"metadata": {}}}
     session = OrchestrationSessionContext(
@@ -76,7 +74,7 @@ def test_outer_coordinator_uses_worker_boundary_and_checkpoints_hitl(
     )
 
 
-def test_resolve_hitl_continuation_updates_outer_checkpoint_state() -> None:
+def test_resolve_hitl_updates_checkpoint_state() -> None:
     session_record = {
         "orchestration": {
             "workflow_stage": "awaiting_hitl_resolution",

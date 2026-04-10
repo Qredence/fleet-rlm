@@ -55,6 +55,13 @@ def _build_hitl_resolution_result(
 
 
 def _merge_hitl_nested_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy nested HITL payloads to the flat checkpoint shape.
+
+    Worker/runtime events may arrive as either a flat HITL payload or a payload
+    nested under ``payload["hitl"]``; flattening lets the outer layer store one
+    checkpoint model without changing the websocket envelope contract.
+    """
+
     hitl_payload = payload.get("hitl")
     if not isinstance(hitl_payload, dict):
         return payload
@@ -82,6 +89,8 @@ def _extract_action_labels(payload: dict[str, Any]) -> list[str]:
             return labels
     raw_options = payload.get("options")
     if isinstance(raw_options, list):
+        # Older HITL events may carry plain string options instead of structured
+        # action objects, so preserve both payload styles in the checkpoint.
         return [str(item).strip() for item in raw_options if str(item).strip()]
     return []
 
