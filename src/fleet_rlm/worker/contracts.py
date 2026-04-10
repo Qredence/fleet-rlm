@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 WorkspaceTaskStatus = Literal["completed", "cancelled", "error"]
@@ -55,7 +55,7 @@ class WorkspaceEvent:
     kind: str
     text: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     terminal: bool = False
 
 

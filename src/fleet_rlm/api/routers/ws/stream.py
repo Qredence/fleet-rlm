@@ -338,7 +338,7 @@ async def _emit_stream_event(
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
 
-    event_timestamp = event.timestamp.timestamp() if event.timestamp else 0.0
+    event_timestamp = event.timestamp.timestamp()
     step = step_builder.from_stream_event(
         kind=event.kind,
         text=event.text,
