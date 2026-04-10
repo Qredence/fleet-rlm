@@ -1,4 +1,4 @@
-"""Minimal outer coordinator that wraps the one-task worker boundary."""
+"""Reduced compatibility coordinator around the one-task worker boundary."""
 
 from __future__ import annotations
 
@@ -6,16 +6,16 @@ from collections.abc import AsyncIterator
 
 import fleet_rlm.worker as worker_boundary
 
-from .hitl_flow import (
+from fleet_rlm.agent_host.hitl_flow import (
     HitlResolution,
-    checkpoint_hitl_request,
-    resolve_hitl_command,
+    resolve_hitl_continuation as resolve_agent_host_hitl_continuation,
 )
+
 from .sessions import OrchestrationSessionContext
 
 
 class WorkspaceOrchestrationCoordinator:
-    """Own narrowly-scoped continuation policy around worker execution."""
+    """Preserve the worker seam while migrated policy moves into agent_host."""
 
     async def stream_workspace_task(
         self,
@@ -24,8 +24,7 @@ class WorkspaceOrchestrationCoordinator:
         session: OrchestrationSessionContext | None = None,
     ) -> AsyncIterator[worker_boundary.WorkspaceEvent]:
         async for worker_event in worker_boundary.stream_workspace_task(request):
-            event = checkpoint_hitl_request(event=worker_event, session=session)
-            yield event
+            yield worker_event
 
     def resolve_hitl_continuation(
         self,
@@ -34,7 +33,13 @@ class WorkspaceOrchestrationCoordinator:
         args: dict[str, object],
         session: OrchestrationSessionContext | None = None,
     ) -> HitlResolution | None:
-        return resolve_hitl_command(command=command, args=args, session=session)
+        # TODO(phase-10): remove this compatibility delegation once remaining
+        # websocket/orchestration call sites import Agent Framework seams directly.
+        return resolve_agent_host_hitl_continuation(
+            command=command,
+            args=args,
+            session=session,
+        )
 
 
 _COORDINATOR = WorkspaceOrchestrationCoordinator()

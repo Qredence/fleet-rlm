@@ -1,4 +1,4 @@
-"""Agent Framework workflow that wraps the existing orchestration_app stream."""
+"""Agent Framework workflow that owns hosted orchestration around the worker seam."""
 
 from __future__ import annotations
 
@@ -18,8 +18,9 @@ from agent_framework import (
 )
 from typing_extensions import Never
 
+from .hitl_flow import checkpoint_hitl_request
+from .sessions import OrchestrationSessionContext
 from fleet_rlm.orchestration_app import (
-    OrchestrationSessionContext,
     stream_orchestrated_workspace_task,
 )
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
@@ -79,10 +80,7 @@ def register_hosted_workspace_task(
 
 
 class OrchestrationAppWorkflowExecutor(Executor):
-    """Thin Agent Framework executor that delegates to orchestration_app."""
-
-    # TODO(agent-framework): move more continuation policy from
-    # orchestration_app into Agent Framework after this outer-host seam is proven.
+    """Agent Framework executor that applies hosted HITL policy around worker flow."""
 
     @handler
     async def run(
@@ -95,6 +93,7 @@ class OrchestrationAppWorkflowExecutor(Executor):
             request=task_state.request,
             session=task_state.session,
         ):
+            event = checkpoint_hitl_request(event=event, session=task_state.session)
             if task_state.output_queue is not None:
                 await task_state.output_queue.put(event)
             await ctx.yield_output(event)
@@ -111,8 +110,8 @@ def build_workspace_host_workflow() -> Workflow:
     return WorkflowBuilder(
         name="workspace-orchestration-host",
         description=(
-            "Thin Microsoft Agent Framework host around orchestration_app and the "
-            "fleet_rlm.worker execution seam."
+            "Microsoft Agent Framework host around orchestration_app and the "
+            "fleet_rlm.worker execution seam, including hosted HITL policy."
         ),
         start_executor=executor,
         output_executors=[executor],

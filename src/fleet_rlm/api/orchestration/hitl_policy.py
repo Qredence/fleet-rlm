@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.orchestration_app import (
+from fleet_rlm.agent_host.hitl_flow import (
     HitlResolution,
-    OrchestrationSessionContext,
     resolve_hitl_continuation,
 )
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 
 def resolve_hitl_command(
