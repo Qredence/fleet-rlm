@@ -142,7 +142,11 @@ async def _noop_persist(*, include_volume_save: bool = True) -> None:
 
 
 def test_orchestration_session_context_builds_from_agent_host() -> None:
-    context = build_orchestration_session_context(
-        session_record={"manifest": {"metadata": {}}}
-    )
+    session_record = {
+        "session_id": "session-a",
+        "manifest": {"metadata": {}},
+    }
+    context = build_orchestration_session_context(session_record=session_record)
     assert isinstance(context, CompatibilitySessionContext)
+    assert context.session_record is session_record
+    assert context.session_id == "session-a"
