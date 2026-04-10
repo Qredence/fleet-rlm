@@ -40,7 +40,7 @@ from .task_control import (
 )
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
 from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
-from .types import ChatAgentProtocol, LocalPersistFn
+from .types import ChatAgentProtocol, LocalPersistFn, StreamEventLike
 from .worker_request import build_workspace_task_request
 
 logger = logging.getLogger(__name__)
@@ -306,7 +306,7 @@ async def _emit_stream_event(
     websocket: WebSocket,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    event: WorkspaceEvent,
+    event: WorkspaceEvent | StreamEventLike,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
@@ -321,7 +321,11 @@ async def _emit_stream_event(
             ),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
-    is_terminal_event = event.terminal
+    is_terminal_event = bool(getattr(event, "terminal", False)) or event.kind in {
+        "final",
+        "cancelled",
+        "error",
+    }
     if not is_terminal_event:
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
