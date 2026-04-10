@@ -378,6 +378,7 @@ async def switch_orchestration_session(
 
             cached["db_session_id"] = _db_create(title=sess_id).id
         except Exception:
+            # Best-effort DB linkage only; continue with in-memory session state if unavailable.
             pass
 
     cached["session_id"] = sess_id
