@@ -167,7 +167,7 @@ def resolve_hitl_command(
         pending = state.pending_approval
         if pending is not None and pending.message_id == message_id:
             pending.resolution = action_label
-            pending.resolved_at = pending.resolved_at or utc_now_iso()
+            pending.resolved_at = utc_now_iso()
             session.save_checkpoint_state(
                 OrchestrationCheckpointState(workflow_stage="continued")
             )
