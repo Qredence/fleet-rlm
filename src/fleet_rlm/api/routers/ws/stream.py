@@ -92,6 +92,16 @@ def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
     return metadata
 
 
+def _is_terminal_transport_event(event: StreamEventLike) -> bool:
+    """Return websocket-terminal semantics for worker and legacy runtime events."""
+
+    return bool(getattr(event, "terminal", False)) or event.kind in {
+        "final",
+        "cancelled",
+        "error",
+    }
+
+
 class ReplHookBridge:
     """Queue and forward interpreter REPL hook callbacks to lifecycle handlers."""
 
@@ -321,11 +331,7 @@ async def _emit_stream_event(
             ),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
-    is_terminal_event = bool(getattr(event, "terminal", False)) or event.kind in {
-        "final",
-        "cancelled",
-        "error",
-    }
+    is_terminal_event = _is_terminal_transport_event(event)
     if not is_terminal_event:
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
