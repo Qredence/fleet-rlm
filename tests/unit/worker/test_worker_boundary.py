@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ast
+import asyncio
+import importlib
+from pathlib import Path
+
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-
-import asyncio
 
 from fleet_rlm.worker import (
     WorkspaceTaskRequest,
@@ -64,14 +67,21 @@ class _FakeAgent:
 
 
 def test_worker_contracts_do_not_import_transport_types() -> None:
-    contracts_source = __import__(
-        "fleet_rlm.worker.contracts", fromlist=["__name__"]
-    ).__file__
+    module = importlib.import_module("fleet_rlm.worker.contracts")
+    contracts_source = module.__file__
     assert contracts_source is not None
-    with open(contracts_source, encoding="utf-8") as handle:
-        content = handle.read()
-    assert "fastapi" not in content
-    assert "WebSocket" not in content
+
+    tree = ast.parse(Path(contracts_source).read_text(encoding="utf-8"))
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported_modules.add(node.module)
+
+    assert all(
+        not name.startswith(("fastapi", "starlette")) for name in imported_modules
+    )
 
 
 def test_run_workspace_task_executes_end_to_end() -> None:

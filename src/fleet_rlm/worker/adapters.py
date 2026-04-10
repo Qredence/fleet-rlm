@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .contracts import WorkspaceEvent, WorkspaceTaskRequest, WorkspaceTaskStatus
+from fleet_rlm.runtime.execution.streaming import is_terminal_stream_event_kind
 
-_TERMINAL_EVENT_KINDS = frozenset({"final", "cancelled", "error"})
+from .contracts import WorkspaceEvent, WorkspaceTaskRequest, WorkspaceTaskStatus
 
 
 def build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
@@ -42,7 +42,7 @@ def to_workspace_event(event: Any) -> WorkspaceEvent:
         text=str(getattr(event, "text", "") or ""),
         payload=dict(getattr(event, "payload", {}) or {}),
         timestamp=timestamp,
-        terminal=str(getattr(event, "kind", "")) in _TERMINAL_EVENT_KINDS,
+        terminal=is_terminal_stream_event_kind(str(getattr(event, "kind", ""))),
     )
 
 
