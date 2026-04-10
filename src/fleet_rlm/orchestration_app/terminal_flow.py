@@ -87,10 +87,7 @@ async def finalize_and_persist_terminal_session_state(
     try:
         await persist_session_state(include_volume_save=True)
     except Exception:
-        if "%s" in failure_log_message:
-            logger.exception(failure_log_message, event.kind)
-        else:
-            logger.exception(failure_log_message)
+        logger.exception(failure_log_message, event.kind)
 
 
 async def apply_terminal_event_policy(
@@ -116,7 +113,7 @@ async def apply_terminal_event_policy(
             session=session,
             persist_session_state=persist_session_state,
             failure_log_message=(
-                "Failed to persist session state before final event; continuing"
+                "Failed to persist session state before %s event; continuing"
             ),
         )
         await lifecycle.complete_run(
