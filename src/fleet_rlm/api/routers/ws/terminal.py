@@ -7,7 +7,11 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from ...orchestration.terminal_policy import apply_terminal_event_policy
+from fleet_rlm.orchestration_app import (
+    OrchestrationSessionContext,
+    apply_terminal_event_policy,
+)
+
 from ...events import ExecutionStep
 from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager
@@ -39,12 +43,14 @@ async def handle_terminal_stream_event(
     step: ExecutionStep | None,
     persist_session_state: LocalPersistFn,
     request_message: str,
+    orchestration_session: OrchestrationSessionContext | None = None,
 ) -> None:
     """Handle final/cancelled/error websocket events without changing ordering."""
     if not await apply_terminal_event_policy(
         lifecycle=lifecycle,
         event=event,
         step=step,
+        session=orchestration_session,
         persist_session_state=persist_session_state,
         request_message=request_message,
         send_terminal_event=lambda: _try_send_json(

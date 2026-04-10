@@ -219,6 +219,7 @@ async def _stream_agent_events(
                 lifecycle=lifecycle,
                 step_builder=step_builder,
                 event=worker_event,
+                orchestration_session=orchestration_session,
                 persist_session_state=persist_session_state,
                 request_message=prepared_turn.message,
             )
@@ -234,6 +235,7 @@ async def _emit_stream_event(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
+    orchestration_session: OrchestrationSessionContext | None,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
@@ -272,6 +274,7 @@ async def _emit_stream_event(
             event=event,
             event_dict=event_dict,
             step=step,
+            orchestration_session=orchestration_session,
             persist_session_state=persist_session_state,
             request_message=request_message,
         )

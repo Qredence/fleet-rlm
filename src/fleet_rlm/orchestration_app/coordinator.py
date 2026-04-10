@@ -9,7 +9,6 @@ import fleet_rlm.worker as worker_boundary
 from .hitl_flow import (
     HitlResolution,
     checkpoint_hitl_request,
-    finalize_hitl_state_for_terminal_event,
     resolve_hitl_command,
 )
 from .sessions import OrchestrationSessionContext
@@ -26,7 +25,6 @@ class WorkspaceOrchestrationCoordinator:
     ) -> AsyncIterator[worker_boundary.WorkspaceEvent]:
         async for worker_event in worker_boundary.stream_workspace_task(request):
             event = checkpoint_hitl_request(event=worker_event, session=session)
-            finalize_hitl_state_for_terminal_event(event=event, session=session)
             yield event
 
     def resolve_hitl_continuation(
