@@ -2,26 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.integrations.database import RunStatus
-
+from ...orchestration.terminal_policy import apply_terminal_event_policy
 from ...events import ExecutionStep
-from .completion import final_event_failed, build_execution_completion_summary
 from .helpers import _try_send_json
 from .lifecycle import ExecutionLifecycleManager
 from .types import LocalPersistFn, StreamEventLike
-
-logger = logging.getLogger(__name__)
-
-
-def _final_run_status(event: StreamEventLike) -> RunStatus:
-    payload = event.payload if isinstance(event.payload, dict) else {}
-    return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
 
 
 def build_stream_event_dict(
@@ -51,56 +41,14 @@ async def handle_terminal_stream_event(
     request_message: str,
 ) -> None:
     """Handle final/cancelled/error websocket events without changing ordering."""
-    # TODO(phase-3): move terminal persistence ordering behind the outer
-    # orchestration layer once websocket transport no longer owns cleanup policy.
-    if event.kind == "final":
-        try:
-            await persist_session_state(include_volume_save=True)
-        except Exception:
-            # Preserve the happy-path websocket response even if session persistence
-            # regresses during cleanup. The final answer is already available, so
-            # continue run completion and delivery instead of downgrading to a
-            # transport error.
-            logger.exception(
-                "Failed to persist session state before final event; continuing"
-            )
-        await lifecycle.complete_run(
-            _final_run_status(event),
-            step=step,
-            summary=build_execution_completion_summary(
-                event=event,
-                request_message=request_message,
-                run_id=lifecycle.run_id,
-            ),
-        )
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
-        return
-
-    if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-        raise WebSocketDisconnect(code=1001)
-
-    try:
-        await persist_session_state(include_volume_save=True)
-    except Exception:
-        # Keep terminal ordering intact: send the event first, then try to persist,
-        # but always finish the lifecycle record even if persistence fails.
-        logger.exception(
-            "Failed to persist session state after %s event; completing run anyway",
-            event.kind,
-        )
-
-    status = RunStatus.CANCELLED if event.kind == "cancelled" else RunStatus.FAILED
-    error_json = (
-        {"error": event.text, "kind": event.kind} if event.kind == "error" else None
-    )
-    await lifecycle.complete_run(
-        status,
+    if not await apply_terminal_event_policy(
+        lifecycle=lifecycle,
+        event=event,
         step=step,
-        error_json=error_json,
-        summary=build_execution_completion_summary(
-            event=event,
-            request_message=request_message,
-            run_id=lifecycle.run_id,
+        persist_session_state=persist_session_state,
+        request_message=request_message,
+        send_terminal_event=lambda: _try_send_json(
+            websocket, {"type": "event", "data": event_dict}
         ),
-    )
+    ):
+        raise WebSocketDisconnect(code=1001)

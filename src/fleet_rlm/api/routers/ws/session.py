@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...dependencies import ServerState, session_key
-from ...server_utils import owner_fingerprint
-from .manifest import _manifest_path, load_manifest_from_volume
+from ...dependencies import ServerState
+from ...orchestration.session_policy import switch_execution_session
 from .types import ChatAgentProtocol, LocalPersistFn
 
 
@@ -26,64 +25,23 @@ async def switch_session_if_needed(
     local_persist: LocalPersistFn,
 ) -> tuple[str, str, dict[str, Any], str | None]:
     """Switch and restore session state when session identity changed."""
-    # TODO(phase-3): move session restore/persist orchestration behind the outer
-    # orchestration layer; websocket transport should only manage socket state.
-    key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
-    owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)
-    manifest_path = _manifest_path(owner_id, workspace_id, sess_id)
-
-    if active_key == key and session_record is not None:
-        return key, manifest_path, session_record, last_loaded_docs_path
-
-    if session_record is not None:
-        await local_persist(include_volume_save=True)
-
-    cached = state.sessions.get(key)
-    if cached is None:
-        manifest = (
-            await load_manifest_from_volume(agent, manifest_path)
-            if interpreter is not None
-            else {}
-        )
-        cached: dict[str, Any] = {
-            "key": key,
-            "workspace_id": workspace_id,
-            "user_id": user_id,
-            "owner_tenant_claim": owner_tenant_claim,
-            "owner_user_claim": owner_user_claim,
-            "owner_fingerprint": owner_id,
-            "session_id": sess_id,
-            "manifest": manifest if isinstance(manifest, dict) else {},
-            "session": {"state": {}, "session_id": sess_id},
-        }
-        try:
-            from fleet_rlm.integrations.local_store import (
-                create_session as _db_create,
-            )
-
-            cached["db_session_id"] = _db_create(title=sess_id).id
-        except Exception:
-            pass
-
-    cached["session_id"] = sess_id
-    cached["workspace_id"] = workspace_id
-    cached["user_id"] = user_id
-    cached["owner_tenant_claim"] = owner_tenant_claim
-    cached["owner_user_claim"] = owner_user_claim
-    cached["owner_fingerprint"] = owner_id
-    state.sessions[key] = cached
-
-    session_data = cached.get("session")
-    restored_state: Any = (
-        session_data.get("state", {}) if isinstance(session_data, dict) else {}
+    outcome = await switch_execution_session(
+        state=state,
+        agent=agent,
+        interpreter=interpreter,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        sess_id=sess_id,
+        owner_tenant_claim=owner_tenant_claim,
+        owner_user_claim=owner_user_claim,
+        active_key=active_key,
+        session_record=session_record,
+        last_loaded_docs_path=last_loaded_docs_path,
+        local_persist=local_persist,
     )
-    manifest_data = cached.get("manifest")
-    if not restored_state and isinstance(manifest_data, dict):
-        restored_state = manifest_data.get("state", {})
-
-    if isinstance(restored_state, dict) and restored_state:
-        await agent.aimport_session_state(restored_state)
-    else:
-        await agent.areset(clear_sandbox_buffers=True)
-
-    return key, manifest_path, cached, None
+    return (
+        outcome.key,
+        outcome.manifest_path,
+        outcome.session_record,
+        outcome.last_loaded_docs_path,
+    )

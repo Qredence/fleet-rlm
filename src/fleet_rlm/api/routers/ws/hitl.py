@@ -2,43 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import WebSocket
 
+from ...orchestration.hitl_policy import resolve_hitl_command
+
 CommandResponseBuilder = Callable[..., dict[str, Any]]
-
-
-def _build_hitl_resolved_event(
-    *,
-    message_id: str,
-    action_label: str,
-) -> dict[str, Any]:
-    return {
-        "kind": "hitl_resolved",
-        "text": action_label,
-        "payload": {
-            "message_id": message_id,
-            "resolution": action_label,
-            "source": "command",
-        },
-        "version": 1,
-        "event_id": str(uuid.uuid4()),
-    }
-
-
-def _build_hitl_resolution_result(
-    *,
-    message_id: str,
-    action_label: str,
-) -> dict[str, Any]:
-    return {
-        "status": "ok",
-        "message_id": message_id,
-        "resolution": action_label,
-    }
 
 
 async def handle_resolve_hitl(
@@ -49,42 +20,19 @@ async def handle_resolve_hitl(
     command_response: CommandResponseBuilder,
 ) -> bool:
     """Handle the special websocket HITL resolution command when present."""
-    # TODO(phase-3): move HITL/workflow continuation handling behind the outer
-    # orchestration layer instead of keeping it in websocket command transport.
-    if command != "resolve_hitl":
+    resolution = resolve_hitl_command(command=command, args=args)
+    if resolution is None:
         return False
 
-    message_id = str(args.get("message_id", "")).strip()
-    action_label = str(args.get("action_label", "")).strip()
-    if not message_id or not action_label:
+    if resolution.event_payload is not None:
         await websocket.send_json(
-            command_response(
-                command=command,
-                result={
-                    "status": "error",
-                    "error": "resolve_hitl requires message_id and action_label",
-                    "message_id": message_id or None,
-                },
-            )
+            {"type": "event", "data": resolution.event_payload}
         )
-        return True
 
-    await websocket.send_json(
-        {
-            "type": "event",
-            "data": _build_hitl_resolved_event(
-                message_id=message_id,
-                action_label=action_label,
-            ),
-        }
-    )
     await websocket.send_json(
         command_response(
             command=command,
-            result=_build_hitl_resolution_result(
-                message_id=message_id,
-                action_label=action_label,
-            ),
+            result=resolution.command_result,
         )
     )
     return True

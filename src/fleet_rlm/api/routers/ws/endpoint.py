@@ -7,8 +7,6 @@
 # with HTTP 403 ("Field required" for a query param named ``websocket``).
 
 import asyncio
-from contextlib import suppress
-from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -18,9 +16,12 @@ from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
 from fleet_rlm.runtime.config import build_dspy_context
-from fleet_rlm.worker import WorkspaceEvent
 
 from ...dependencies import get_server_state_from_websocket
+from ...orchestration.startup_status import (
+    cancel_startup_status_task,
+    emit_delayed_startup_status,
+)
 from ...events import ExecutionSubscription
 from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
@@ -109,35 +110,27 @@ class _ExecutionWebSocketConnection:
         self.identity = identity
 
     async def _emit_delayed_startup_status(self) -> None:
-        await asyncio.sleep(_EXECUTION_STARTUP_STATUS_DELAY_SECONDS)
-        startup_event = WorkspaceEvent(
-            kind="status",
-            text="Preparing Daytona workspace...",
-            payload={
-                "phase": "startup",
-                "runtime": {"runtime_mode": "daytona_pilot"},
-            },
-            timestamp=datetime.now(timezone.utc),
-        )
-        await _try_send_json(
-            self.websocket,
-            {
-                "type": "event",
-                "data": build_stream_event_dict(
-                    event=startup_event,
-                    payload=startup_event.payload,
-                ),
-            },
+        async def _emit_event(event) -> None:
+            await _try_send_json(
+                self.websocket,
+                {
+                    "type": "event",
+                    "data": build_stream_event_dict(
+                        event=event,
+                        payload=event.payload,
+                    ),
+                },
+            )
+
+        await emit_delayed_startup_status(
+            delay_seconds=_EXECUTION_STARTUP_STATUS_DELAY_SECONDS,
+            emit_event=_emit_event,
         )
 
     async def _cancel_startup_status_task(
         self, task: asyncio.Task[None] | None
     ) -> None:
-        if task is None:
-            return
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        await cancel_startup_status_task(task)
 
     async def _receive_initial_message(self):
         initial_msg = None
