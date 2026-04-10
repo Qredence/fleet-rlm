@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -18,7 +18,7 @@ from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
 from fleet_rlm.runtime.execution.streaming import is_terminal_stream_event_kind
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest, stream_workspace_task
 
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
@@ -288,20 +288,22 @@ async def _stream_agent_events(
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
 ) -> None:
-    with runtime_telemetry_enabled_context(analytics_enabled):
-        event_stream = agent.aiter_chat_turn_stream(
-            message=message,
-            trace=trace,
-            cancel_check=cancel_check,
-            docs_path=docs_path,
-        )
+    worker_request = WorkspaceTaskRequest(
+        agent=agent,
+        message=message,
+        trace=trace,
+        docs_path=docs_path,
+        cancel_check=cancel_check,
+        execution_mode=getattr(agent, "execution_mode", None),
+    )
 
-        async for event in event_stream:
+    with runtime_telemetry_enabled_context(analytics_enabled):
+        async for worker_event in stream_workspace_task(worker_request):
             await _emit_stream_event(
                 websocket=websocket,
                 lifecycle=lifecycle,
                 step_builder=step_builder,
-                event=event,
+                event=worker_event,
                 persist_session_state=persist_session_state,
                 request_message=request_message,
             )
@@ -316,7 +318,7 @@ async def _emit_stream_event(
     websocket: WebSocket,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    event: StreamEvent,
+    event: WorkspaceEvent,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
@@ -330,17 +332,18 @@ async def _emit_stream_event(
                 payload if isinstance(payload, dict) else None
             ),
         )
-    event_dict = build_stream_event_dict(event=event, payload=payload)
+    event_dict = build_stream_event_dict(event=cast(Any, event), payload=payload)
     is_terminal_event = is_terminal_stream_event_kind(event.kind)
     if not is_terminal_event:
         if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
             raise WebSocketDisconnect(code=1001)
 
+    event_timestamp = event.timestamp.timestamp() if event.timestamp else 0.0
     step = step_builder.from_stream_event(
         kind=event.kind,
         text=event.text,
         payload=payload,
-        timestamp=event.timestamp.timestamp(),
+        timestamp=event_timestamp,
     )
     if step is not None:
         await lifecycle.emit_step(step)
@@ -351,7 +354,7 @@ async def _emit_stream_event(
         await handle_terminal_stream_event(
             websocket=websocket,
             lifecycle=lifecycle,
-            event=event,
+            event=cast(Any, event),
             event_dict=event_dict,
             step=step,
             persist_session_state=persist_session_state,
