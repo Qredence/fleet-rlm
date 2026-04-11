@@ -75,7 +75,7 @@ dev = [
     "ruff>=0.15.9",
     "ty>=0.0.29",
     "build>=1.2",
-    "twine>=5.1",
+    "twine>=6.2.0",
 ]
 mcp = ["fastmcp>=3.2.0,<4", "httpx[socks]>=0.28.1,<1", "pydantic>=2.12.5,<3"]
 server = [
