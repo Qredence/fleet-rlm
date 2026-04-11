@@ -50,7 +50,8 @@ class HostedExecutionStepSink(Protocol):
 
     async def persist_step(self, step: Any) -> None: ...
 
-    def record_persistence_error(self, exc: Exception) -> None: ...
+    def record_persistence_error(self, exc: Exception) -> None:
+        pass
 
 
 def resolve_hosted_execution_state_refs(
