@@ -7,9 +7,11 @@ from typing import Any, Protocol
 
 
 def _string_or_none(value: object) -> str | None:
-    return str(value).strip() or None if value else None
+    if value is None:
+        return None
 
-
+    text = str(value).strip()
+    return text or None
 @dataclass(frozen=True, slots=True)
 class HostedExecutionStateRefs:
     """Lightweight references to Daytona-owned execution state."""
