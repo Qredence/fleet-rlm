@@ -45,6 +45,11 @@ from .recursive_reflection import (
     build_workspace_reflection_inputs,
     coerce_workspace_reflection_decision,
 )
+from .recursive_verification import (
+    append_recursive_verification_summary,
+    build_recursive_verification_inputs,
+    coerce_recursive_verification_decision,
+)
 from .recursive_context_selection import (
     build_recursive_context_selection_inputs,
     coerce_recursive_context_selection_decision,
@@ -629,9 +634,43 @@ async def spawn_delegate_sub_agent_async(
                             **subquery_result,
                         }
                     )
-            return _aggregate_decomposition_results(
+            aggregated_result = _aggregate_decomposition_results(
                 decision=decomposition_decision,
                 results=collected_results,
+            )
+            if not bool(getattr(agent, "recursive_verification_enabled", False)):
+                return aggregated_result
+
+            verification_module = agent.get_recursive_verification_module()
+            verification_inputs = build_recursive_verification_inputs(
+                user_request=prompt,
+                assembled_recursive_context=context,
+                decomposition_decision=decomposition_decision,
+                results=collected_results,
+                runtime_metadata=runtime_metadata
+                if isinstance(runtime_metadata, dict)
+                else None,
+                interpreter_context_paths=list(
+                    getattr(child_interpreter, "context_paths", []) or []
+                ),
+            )
+            try:
+                verification_prediction = await verification_module.acall(
+                    **verification_inputs.as_kwargs()
+                )
+                verification_decision = coerce_recursive_verification_decision(
+                    verification_prediction,
+                    fallback_summary=aggregated_result.get("answer", ""),
+                )
+            except Exception:
+                logger.warning(
+                    "Recursive verification failed; preserving aggregated decomposition result",
+                    exc_info=True,
+                )
+                return aggregated_result
+            return append_recursive_verification_summary(
+                aggregated_result,
+                verification_decision,
             )
 
         profile_context = _delegate_execution_profile_context(child_interpreter)

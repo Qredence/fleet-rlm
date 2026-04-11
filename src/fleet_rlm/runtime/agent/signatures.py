@@ -382,6 +382,44 @@ class AssembleRecursiveWorkspaceContext(dspy.Signature):
     )
 
 
+class VerifyRecursiveAggregation(dspy.Signature):
+    """Semantically verify bounded decomposition-driven recursive results."""
+
+    user_request: str = dspy.InputField(desc="Current delegated user or parent request")
+    assembled_recursive_context: str = dspy.InputField(
+        desc="Bounded recursive context assembled from Daytona-backed handles and summaries"
+    )
+    decomposition_plan_summary: str = dspy.InputField(
+        desc="Bounded summary of the recursive decomposition and Python/runtime aggregation plan"
+    )
+    collected_subquery_outputs: list[str] = dspy.InputField(
+        desc="Bounded summaries of collected subquery outputs prepared by Python/runtime"
+    )
+    latest_sandbox_evidence: str = dspy.InputField(
+        desc="Latest bounded sandbox, tool, or code evidence summary relevant to the aggregate"
+    )
+    verification_status: Literal[
+        "sufficient",
+        "needs_repair",
+        "needs_more_recursion",
+        "needs_human_review",
+    ] = dspy.OutputField(
+        desc="Whether the aggregated result is sufficient, needs repair, needs more recursion, or needs human review"
+    )
+    missing_evidence: list[str] = dspy.OutputField(
+        desc="Key missing evidence or checks that weaken the current aggregate"
+    )
+    contradictions: list[str] = dspy.OutputField(
+        desc="Conflicts or inconsistencies detected across the bounded subquery outputs"
+    )
+    verified_summary: str = dspy.OutputField(
+        desc="Concise verified synthesis that is safe to pass into recursive reflection"
+    )
+    verification_rationale: str = dspy.OutputField(
+        desc="Why the aggregate is or is not strong enough for the next recursive step"
+    )
+
+
 class RLMVariableSignature(dspy.Signature):
     """Explore and answer questions about an arbitrarily long prompt.
 
@@ -423,6 +461,7 @@ __all__ = [
     "RLMVariableSignature",
     "RecursiveSubQuerySignature",
     "SummarizeLongDocument",
+    "VerifyRecursiveAggregation",
     "VolumeFileTreeSignature",
     "VolumeTreeNode",
 ]
