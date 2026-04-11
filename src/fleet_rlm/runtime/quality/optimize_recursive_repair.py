@@ -40,7 +40,9 @@ def load_recursive_repair_rows(dataset_path: Path) -> list[RecursiveRepairRow]:
     payload = json.loads(text)
     if isinstance(payload, list):
         return payload
-    raise ValueError("Expected a JSON array or JSONL file of recursive repair examples.")
+    raise ValueError(
+        "Expected a JSON array or JSONL file of recursive repair examples."
+    )
 
 
 def rows_to_recursive_repair_examples(
@@ -78,7 +80,9 @@ def rows_to_recursive_repair_examples(
             ).with_inputs(*_INPUT_KEYS)
         )
     if not examples:
-        raise ValueError("No valid recursive repair examples were found in the dataset.")
+        raise ValueError(
+            "No valid recursive repair examples were found in the dataset."
+        )
     return examples
 
 
@@ -140,11 +144,13 @@ def build_recursive_repair_feedback_metric() -> Any:
             score += 0.15
             feedback.append("No repair subqueries were expected or introduced.")
 
-        bounded_count = len(actual_steps) + len(actual_subqueries)
+        bounded_count = max(len(actual_steps), len(actual_subqueries))
         if bounded_count > 0:
             if repair_budget > 0 and bounded_count <= max(1, repair_budget + 1):
                 score += 0.15
-                feedback.append("Repair plan stays within the requested bounded budget.")
+                feedback.append(
+                    "Repair plan stays within the requested bounded budget."
+                )
             else:
                 feedback.append("Repair plan exceeded the requested bounded budget.")
         else:
@@ -158,7 +164,9 @@ def build_recursive_repair_feedback_metric() -> Any:
 
         if repair_rationale:
             score += 0.05
-            feedback.append("Repair rationale explains why the plan should stay narrow.")
+            feedback.append(
+                "Repair rationale explains why the plan should stay narrow."
+            )
         else:
             feedback.append("Repair rationale is empty.")
 
@@ -175,7 +183,11 @@ def resolve_recursive_repair_output_path(output_path: Path | None = None) -> Pat
 
     if output_path is not None:
         return output_path
-    root = _DAYTONA_ARTIFACT_ROOT if _DAYTONA_ARTIFACT_ROOT.exists() else _DEFAULT_ARTIFACT_ROOT
+    root = (
+        _DAYTONA_ARTIFACT_ROOT
+        if _DAYTONA_ARTIFACT_ROOT.exists()
+        else _DEFAULT_ARTIFACT_ROOT
+    )
     return root / "plan_recursive_repair.json"
 
 
@@ -188,7 +200,9 @@ def optimize_recursive_repair_module(
 ) -> dict[str, Any]:
     """Run GEPA offline against the recursive repair module."""
 
-    examples = rows_to_recursive_repair_examples(load_recursive_repair_rows(dataset_path))
+    examples = rows_to_recursive_repair_examples(
+        load_recursive_repair_rows(dataset_path)
+    )
     trainset, valset = split_examples(examples, train_ratio=train_ratio)
     metric = build_recursive_repair_feedback_metric()
     program = PlanRecursiveRepairModule()
@@ -236,7 +250,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Optimize the recursive repair DSPy module offline with GEPA."
     )
-    parser.add_argument("dataset_path", type=Path, help="Path to JSON or JSONL examples.")
+    parser.add_argument(
+        "dataset_path", type=Path, help="Path to JSON or JSONL examples."
+    )
     parser.add_argument(
         "--output-path",
         type=Path,

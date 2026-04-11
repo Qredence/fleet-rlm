@@ -352,7 +352,9 @@ def _effective_recursive_repair_budget(agent: RLMReActChatAgent) -> int:
         1,
         min(
             _MAX_RECURSIVE_REPAIR_BUDGET,
-            configured_budget if configured_budget > 0 else _DEFAULT_RECURSIVE_REPAIR_BUDGET,
+            configured_budget
+            if configured_budget > 0
+            else _DEFAULT_RECURSIVE_REPAIR_BUDGET,
         ),
     )
 
@@ -368,7 +370,10 @@ def _repair_plan_tasks(
         for item in getattr(decision, "repair_subqueries", []) or []
         if str(item or "").strip()
     ]
-    if getattr(decision, "repair_mode", "no_repair") == "bounded_repair_loop" and subqueries:
+    if (
+        getattr(decision, "repair_mode", "no_repair") == "bounded_repair_loop"
+        and subqueries
+    ):
         return subqueries[:repair_budget]
     if subqueries:
         return [subqueries[0]]
@@ -398,7 +403,9 @@ def _aggregate_recursive_repair_results(
 
     return {
         "status": "ok",
-        "answer": "\n\n".join(section for section in answer_sections if section).strip(),
+        "answer": "\n\n".join(
+            section for section in answer_sections if section
+        ).strip(),
         "assistant_response": "\n\n".join(
             section for section in answer_sections if section
         ).strip(),
@@ -916,7 +923,9 @@ async def spawn_delegate_sub_agent_async(
                 else context
             ),
             latest_result=normalized_result,
-            runtime_metadata=runtime_metadata if isinstance(runtime_metadata, dict) else None,
+            runtime_metadata=runtime_metadata
+            if isinstance(runtime_metadata, dict)
+            else None,
             reflection_decision=decision,
             repair_budget=repair_budget,
             recursion_depth=agent._current_depth + 1,
@@ -925,7 +934,9 @@ async def spawn_delegate_sub_agent_async(
         repair_module = agent.get_recursive_repair_module()
         try:
             with _reflection_lm_context():
-                repair_prediction = await repair_module.acall(**repair_inputs.as_kwargs())
+                repair_prediction = await repair_module.acall(
+                    **repair_inputs.as_kwargs()
+                )
             repair_decision = coerce_recursive_repair_decision(
                 repair_prediction,
                 latest_failure_signals=repair_inputs.latest_failure_signals,

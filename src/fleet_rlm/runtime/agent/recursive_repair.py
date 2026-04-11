@@ -34,7 +34,9 @@ _MAX_STEPS = 4
 _MAX_SUBQUERIES = 3
 _MAX_SUBQUERY_CHARS = 240
 _MAX_REPAIR_BUDGET = 3
-_DEFAULT_REPAIR_TARGET = "Inspect the narrow failing workspace step before broadening recursion."
+_DEFAULT_REPAIR_TARGET = (
+    "Inspect the narrow failing workspace step before broadening recursion."
+)
 _DEFAULT_REPAIR_RATIONALE = (
     "Keep semantic repair planning in DSPy while Python/runtime executes only a "
     "bounded Daytona-backed repair attempt."
@@ -186,7 +188,9 @@ def coerce_recursive_repair_decision(
 
     normalized_budget = max(1, min(int(repair_budget), _MAX_REPAIR_BUDGET))
     repair_target = (
-        _compact_text(get_prediction_field("repair_target", ""), limit=_MAX_TARGET_CHARS)
+        _compact_text(
+            get_prediction_field("repair_target", ""), limit=_MAX_TARGET_CHARS
+        )
         or _DEFAULT_REPAIR_TARGET
     )
     repair_steps = _coerce_string_list(
@@ -234,7 +238,9 @@ def build_recursive_repair_inputs(
 
     metadata = runtime_metadata if isinstance(runtime_metadata, dict) else {}
     verification_payload = latest_result.get("recursive_verification")
-    verification = verification_payload if isinstance(verification_payload, dict) else {}
+    verification = (
+        verification_payload if isinstance(verification_payload, dict) else {}
+    )
 
     verification_parts = [
         _compact_text(verification.get("verified_summary", ""), limit=320),
@@ -319,7 +325,9 @@ def build_recursive_repair_inputs(
         evidence_parts.append(
             "trajectory=" + _compact_text(trajectory, limit=_MAX_STEP_CHARS)
         )
-    answer_summary = latest_result.get("answer") or latest_result.get("assistant_response")
+    answer_summary = latest_result.get("answer") or latest_result.get(
+        "assistant_response"
+    )
     if answer_summary:
         evidence_parts.append(
             "latest_result=" + _compact_text(answer_summary, limit=_MAX_STEP_CHARS)

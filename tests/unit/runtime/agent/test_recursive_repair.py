@@ -90,7 +90,9 @@ def test_build_recursive_repair_inputs_stays_summary_only() -> None:
             "recursive_verification": {
                 "verification_status": "needs_repair",
                 "missing_evidence": ["Run one bounded verification step."],
-                "contradictions": ["The repair landed but the rerun still fails elsewhere."],
+                "contradictions": [
+                    "The repair landed but the rerun still fails elsewhere."
+                ],
                 "verified_summary": "One narrow repair exists but needs one more bounded check.",
                 "verification_rationale": "The current result is coherent but still incomplete.",
             },
@@ -160,7 +162,9 @@ async def test_spawn_delegate_sub_agent_async_preserves_generic_retry_when_repai
     _bind_repair_module_factory(agent, _raise_repair_should_stay_off)
     _bind_reflection_module_factory(agent, _FakeReflectionModule)
 
-    result = await spawn_delegate_sub_agent_async(agent, prompt="inspect", context="ctx")
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
 
     assert result["status"] == "ok"
     assert len(calls) == 2
@@ -247,10 +251,7 @@ async def test_spawn_delegate_sub_agent_async_executes_bounded_recursive_repair_
         "Inspect the failing import path",
         "Run one bounded verification rerun",
     ]
-    assert all(
-        "Recursive repair plan:" in context
-        for _, context in calls[1:]
-    )
+    assert all("Recursive repair plan:" in context for _, context in calls[1:])
     assert result["recursive_repair"]["repair_mode"] == "bounded_repair_loop"
     assert "Recursive repair executed bounded_repair_loop" in result["final_reasoning"]
     assert "Recursive reflection chose repair_and_retry" in result["final_reasoning"]

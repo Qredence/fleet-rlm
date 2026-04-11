@@ -57,7 +57,9 @@ def test_optimize_recursive_repair_module_runs_gepa_and_persists_artifacts(
     tmp_path: Path,
 ) -> None:
     dataset_path = tmp_path / "recursive-repair.json"
-    dataset_path.write_text(json.dumps([_dataset_row(), _dataset_row()]), encoding="utf-8")
+    dataset_path.write_text(
+        json.dumps([_dataset_row(), _dataset_row()]), encoding="utf-8"
+    )
     output_path = tmp_path / "optimized" / "recursive-repair.json"
 
     captured: dict[str, Any] = {}
