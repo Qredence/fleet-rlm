@@ -70,11 +70,10 @@ def rows_to_recursive_verification_examples(
                 row.get("decomposition_plan_summary", "") or ""
             ),
             collected_subquery_outputs=[
-                str(item or "") for item in row.get("collected_subquery_outputs", []) or []
+                str(item or "")
+                for item in row.get("collected_subquery_outputs", []) or []
             ],
-            latest_sandbox_evidence=str(
-                row.get("latest_sandbox_evidence", "") or ""
-            ),
+            latest_sandbox_evidence=str(row.get("latest_sandbox_evidence", "") or ""),
             verification_status=str(
                 row.get("verification_status", "sufficient") or "sufficient"
             ),
@@ -143,6 +142,9 @@ def build_recursive_verification_feedback_metric() -> Any:
                 if missing_overlap >= 0.75
                 else "Missing-evidence selection missed important representative gaps."
             )
+        elif not actual_missing:
+            score += 0.2
+            feedback.append("No missing evidence was expected or introduced.")
 
         if expected_contradictions:
             contradiction_overlap = len(
@@ -154,22 +156,35 @@ def build_recursive_verification_feedback_metric() -> Any:
                 if contradiction_overlap >= 0.75
                 else "Contradictions missed important representative conflicts."
             )
+        elif not actual_contradictions:
+            score += 0.2
+            feedback.append("No contradictions were expected or introduced.")
 
         if verified_summary:
             score += 0.15
             feedback.append("Verified summary is present.")
-            longest_input = max((len(str(item or "")) for item in bounded_outputs), default=0)
-            if longest_input <= 0 or len(verified_summary) <= max(240, longest_input * 2):
+            longest_input = max(
+                (len(str(item or "")) for item in bounded_outputs), default=0
+            )
+            if longest_input <= 0 or len(verified_summary) <= max(
+                240, longest_input * 2
+            ):
                 score += 0.05
-                feedback.append("Verified summary stays bounded relative to the inputs.")
+                feedback.append(
+                    "Verified summary stays bounded relative to the inputs."
+                )
             else:
-                feedback.append("Verified summary is too verbose for bounded recursive handoff.")
+                feedback.append(
+                    "Verified summary is too verbose for bounded recursive handoff."
+                )
         else:
             feedback.append("Verified summary is empty.")
 
         if verification_rationale:
             score += 0.05
-            feedback.append("Verification rationale explains the recursive decision signal.")
+            feedback.append(
+                "Verification rationale explains the recursive decision signal."
+            )
         else:
             feedback.append(
                 "Verification rationale is empty; explain why the aggregate is or is not sufficient."

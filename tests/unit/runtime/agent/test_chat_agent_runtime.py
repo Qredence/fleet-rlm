@@ -448,6 +448,7 @@ def test_build_chat_agent_threads_interpreter_async_execute(
         volume_name="tenant-a",
         extra_tools=[_extra_tool],
         interpreter_async_execute=False,
+        planner_lm=object(),
     )
 
     assert isinstance(agent, _FakeRLMReActChatAgent)
@@ -473,7 +474,10 @@ def test_build_chat_agent_threads_recursive_verification_flag(
         _FakeRLMReActChatAgent,
     )
 
-    agent = runtime_factory.build_chat_agent(recursive_verification_enabled=True)
+    agent = runtime_factory.build_chat_agent(
+        recursive_verification_enabled=True,
+        planner_lm=object(),
+    )
 
     assert isinstance(agent, _FakeRLMReActChatAgent)
     assert captured["recursive_verification_enabled"] is True

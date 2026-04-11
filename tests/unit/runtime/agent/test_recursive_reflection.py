@@ -269,10 +269,14 @@ async def test_spawn_delegate_sub_agent_async_runs_recursive_verification_before
 
     class _FakeReflectionModule:
         async def acall(self, **kwargs: Any) -> dict[str, Any]:
-            assert "recursive_verification_status=needs_repair" in kwargs[
-                "latest_sandbox_evidence"
-            ]
-            assert "Run one bounded verification step." in kwargs["latest_sandbox_evidence"]
+            assert (
+                "recursive_verification_status=needs_repair"
+                in kwargs["latest_sandbox_evidence"]
+            )
+            assert (
+                "Run one bounded verification step."
+                in kwargs["latest_sandbox_evidence"]
+            )
             assert kwargs["latest_tool_or_code_result"].startswith(
                 "The repair path is plausible"
             )
@@ -299,7 +303,10 @@ async def test_spawn_delegate_sub_agent_async_runs_recursive_verification_before
 
     assert result["status"] == "ok"
     assert result["recursive_verification"]["verification_status"] == "needs_repair"
-    assert "Recursive verification assessed the aggregated subquery results as needs_repair." in result["final_reasoning"]
+    assert (
+        "Recursive verification assessed the aggregated subquery results as needs_repair."
+        in result["final_reasoning"]
+    )
 
 
 @pytest.mark.asyncio

@@ -194,7 +194,8 @@ def build_workspace_reflection_inputs(
                     "missing_evidence="
                     + "; ".join(
                         _compact_text(item, limit=120)
-                        for item in verification_payload.get("missing_evidence", []) or []
+                        for item in verification_payload.get("missing_evidence", [])
+                        or []
                     )
                     if verification_payload.get("missing_evidence")
                     else ""

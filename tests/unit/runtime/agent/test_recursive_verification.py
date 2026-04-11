@@ -87,7 +87,10 @@ def test_build_recursive_verification_inputs_stays_summary_only() -> None:
     )
 
     assert "decomposition_mode=fan_out" in inputs.decomposition_plan_summary
-    assert any(row.startswith("[1] Inspect traceback") for row in inputs.collected_subquery_outputs)
+    assert any(
+        row.startswith("[1] Inspect traceback")
+        for row in inputs.collected_subquery_outputs
+    )
     assert "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json" in (
         inputs.latest_sandbox_evidence
     )

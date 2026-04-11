@@ -119,7 +119,9 @@ def test_optimize_recursive_verification_module_runs_gepa_and_persists_artifacts
     assert captured["valset"]
 
 
-def test_recursive_verification_feedback_metric_scores_quality_and_boundedness() -> None:
+def test_recursive_verification_feedback_metric_scores_quality_and_boundedness() -> (
+    None
+):
     metric = build_recursive_verification_feedback_metric()
     gold = dspy.Example(**_dataset_row())
     pred = dspy.Example(
