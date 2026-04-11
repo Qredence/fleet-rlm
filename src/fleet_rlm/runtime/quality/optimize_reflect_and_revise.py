@@ -27,7 +27,9 @@ _INPUT_KEYS = [
     "loop_state",
 ]
 _DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/reflect-and-revise")
-_DAYTONA_ARTIFACT_ROOT = Path("/home/daytona/memory/artifacts/quality/reflect-and-revise")
+_DAYTONA_ARTIFACT_ROOT = Path(
+    "/home/daytona/memory/artifacts/quality/reflect-and-revise"
+)
 
 
 def load_reflection_rows(dataset_path: Path) -> list[ReflectionOptimizationRow]:
@@ -102,7 +104,9 @@ def build_reflection_feedback_metric() -> Any:
             if plan_score >= 0.5:
                 feedback.append("Revised plan preserves key repair/recurse guidance.")
             else:
-                feedback.append("Revised plan misses important guidance from the trace.")
+                feedback.append(
+                    "Revised plan misses important guidance from the trace."
+                )
         elif actual_plan:
             score += 0.1
             feedback.append("Revised plan is present for an open-ended trace.")
@@ -126,7 +130,11 @@ def resolve_reflection_output_path(output_path: Path | None = None) -> Path:
 
     if output_path is not None:
         return output_path
-    root = _DAYTONA_ARTIFACT_ROOT if _DAYTONA_ARTIFACT_ROOT.exists() else _DEFAULT_ARTIFACT_ROOT
+    root = (
+        _DAYTONA_ARTIFACT_ROOT
+        if _DAYTONA_ARTIFACT_ROOT.exists()
+        else _DEFAULT_ARTIFACT_ROOT
+    )
     return root / "reflect_and_revise_workspace_step.json"
 
 
@@ -190,7 +198,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Optimize the recursive reflection DSPy module offline with GEPA."
     )
-    parser.add_argument("dataset_path", type=Path, help="Path to JSON or JSONL examples.")
+    parser.add_argument(
+        "dataset_path", type=Path, help="Path to JSON or JSONL examples."
+    )
     parser.add_argument(
         "--output-path",
         type=Path,

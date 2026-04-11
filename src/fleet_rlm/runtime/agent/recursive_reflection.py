@@ -99,7 +99,9 @@ class ReflectAndReviseWorkspaceStepModule(dspy.Module):
         )
         return dspy.Prediction(
             next_action=_coerce_action(getattr(prediction, "next_action", "finalize")),
-            revised_plan=_compact_text(getattr(prediction, "revised_plan", ""), limit=800),
+            revised_plan=_compact_text(
+                getattr(prediction, "revised_plan", ""), limit=800
+            ),
             rationale=_compact_text(getattr(prediction, "rationale", ""), limit=800),
             confidence=_coerce_confidence(getattr(prediction, "confidence", 0.0)),
         )
@@ -112,18 +114,26 @@ class ReflectAndReviseWorkspaceStepModule(dspy.Module):
         return coerce_workspace_reflection_decision(prediction)
 
 
-def coerce_workspace_reflection_decision(prediction: Any) -> WorkspaceReflectionDecision:
+def coerce_workspace_reflection_decision(
+    prediction: Any,
+) -> WorkspaceReflectionDecision:
     """Normalize dict-like or attribute-like prediction output."""
 
     if isinstance(prediction, dict):
-        getter = prediction.get
+        get_prediction_field = prediction.get
     else:
-        getter = lambda name, default=None: getattr(prediction, name, default)
+
+        def get_prediction_field(name: str, default: Any = None) -> Any:
+            return getattr(prediction, name, default)
+
     return WorkspaceReflectionDecision(
-        next_action=_coerce_action(getter("next_action", "finalize")),
-        revised_plan=_compact_text(getter("revised_plan", ""), limit=800),
-        rationale=_compact_text(getter("rationale", ""), limit=800),
-        confidence=_coerce_confidence(getter("confidence", 0.0)),
+        next_action=_coerce_action(get_prediction_field("next_action", "finalize")),
+        revised_plan=_compact_text(
+            get_prediction_field("revised_plan", ""),
+            limit=800,
+        ),
+        rationale=_compact_text(get_prediction_field("rationale", ""), limit=800),
+        confidence=_coerce_confidence(get_prediction_field("confidence", 0.0)),
     )
 
 
@@ -141,31 +151,41 @@ def build_workspace_reflection_inputs(
     """Build reflection inputs from summarized Daytona-backed evidence only."""
 
     metadata = runtime_metadata if isinstance(runtime_metadata, dict) else {}
-    working_memory_summary = "\n".join(
-        part
-        for part in (
-            f"volume_name={metadata.get('volume_name')}" if metadata.get("volume_name") else "",
-            f"workspace_path={metadata.get('workspace_path')}"
-            if metadata.get("workspace_path")
-            else "",
-            f"sandbox_id={metadata.get('sandbox_id')}" if metadata.get("sandbox_id") else "",
-            f"memory_handle={metadata.get('memory_handle')}"
-            if metadata.get("memory_handle")
-            else "",
+    working_memory_summary = (
+        "\n".join(
+            part
+            for part in (
+                f"volume_name={metadata.get('volume_name')}"
+                if metadata.get("volume_name")
+                else "",
+                f"workspace_path={metadata.get('workspace_path')}"
+                if metadata.get("workspace_path")
+                else "",
+                f"sandbox_id={metadata.get('sandbox_id')}"
+                if metadata.get("sandbox_id")
+                else "",
+                f"memory_handle={metadata.get('memory_handle')}"
+                if metadata.get("memory_handle")
+                else "",
+            )
+            if part
         )
-        if part
-    ) or "No durable memory contents were copied; only workspace handles are available."
+        or "No durable memory contents were copied; only workspace handles are available."
+    )
 
-    latest_evidence = "\n".join(
-        part
-        for part in (
-            _compact_text(latest_result.get("final_reasoning", "")),
-            _compact_text(latest_result.get("trajectory", "")),
-            _compact_text(metadata.get("runtime_failure_category", "")),
-            _compact_text(metadata.get("runtime_failure_phase", "")),
+    latest_evidence = (
+        "\n".join(
+            part
+            for part in (
+                _compact_text(latest_result.get("final_reasoning", "")),
+                _compact_text(latest_result.get("trajectory", "")),
+                _compact_text(metadata.get("runtime_failure_category", "")),
+                _compact_text(metadata.get("runtime_failure_phase", "")),
+            )
+            if part
         )
-        if part
-    ) or "No additional sandbox evidence was captured."
+        or "No additional sandbox evidence was captured."
+    )
 
     latest_result_summary = _compact_text(
         latest_result.get("answer")
@@ -186,7 +206,8 @@ def build_workspace_reflection_inputs(
         working_memory_summary=working_memory_summary,
         current_plan=_compact_text(current_plan, limit=800),
         latest_sandbox_evidence=latest_evidence,
-        latest_tool_or_code_result=latest_result_summary or "No recent tool result was recorded.",
+        latest_tool_or_code_result=latest_result_summary
+        or "No recent tool result was recorded.",
         loop_state=loop_state,
     )
 
@@ -204,7 +225,8 @@ def build_recursive_retry_prompt(
         for part in (
             str(original_context or "").strip(),
             "Recursive reflection guidance:",
-            decision.revised_plan or "Re-evaluate the current workspace state before finalizing.",
+            decision.revised_plan
+            or "Re-evaluate the current workspace state before finalizing.",
             (
                 "Repair the last attempt using the most recent sandbox evidence, "
                 "then retry only the minimum necessary next step."

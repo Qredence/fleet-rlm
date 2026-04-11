@@ -17,6 +17,10 @@ from tests.unit.fixtures_react import FakeInterpreter
 pytestmark = pytest.mark.usefixtures("react_records")
 
 
+def _raise_reflection_should_stay_off() -> None:
+    raise AssertionError("reflection should stay off")
+
+
 def test_reflection_module_coerces_typed_outputs() -> None:
     class _FakePredictor:
         def __call__(self, **_kwargs: Any) -> Any:
@@ -92,11 +96,13 @@ async def test_spawn_delegate_sub_agent_async_skips_reflection_when_disabled(
         lambda **_kwargs: _FakeChildModule(),
     )
     agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: (_ for _ in ()).throw(AssertionError("reflection should stay off")),
+        lambda self: _raise_reflection_should_stay_off(),
         agent,
     )
 
-    result = await spawn_delegate_sub_agent_async(agent, prompt="inspect", context="ctx")
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
 
     assert result["status"] == "ok"
     assert result["answer"] == "done"
@@ -113,7 +119,11 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         recursive_reflection_enabled=True,
     )
     agent.prepare_routed_turn()
-    setattr(agent.interpreter, "current_runtime_metadata", lambda: {"volume_name": "tenant-a"})
+    setattr(
+        agent.interpreter,
+        "current_runtime_metadata",
+        lambda: {"volume_name": "tenant-a"},
+    )
 
     attempts: list[tuple[str, str]] = []
     answers = iter(["first attempt", "recovered answer"])
@@ -146,7 +156,9 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         agent,
     )
 
-    result = await spawn_delegate_sub_agent_async(agent, prompt="inspect", context="ctx")
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
 
     assert result["status"] == "ok"
     assert result["answer"] == "recovered answer"

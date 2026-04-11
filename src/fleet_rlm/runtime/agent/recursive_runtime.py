@@ -405,7 +405,9 @@ async def spawn_delegate_sub_agent_async(
         user_request=prompt,
         current_plan=context,
         latest_result=normalized_result,
-        runtime_metadata=runtime_metadata if isinstance(runtime_metadata, dict) else None,
+        runtime_metadata=runtime_metadata
+        if isinstance(runtime_metadata, dict)
+        else None,
         recursion_depth=agent._current_depth + 1,
         max_depth=agent._max_depth,
         reflection_passes=_reflection_passes,

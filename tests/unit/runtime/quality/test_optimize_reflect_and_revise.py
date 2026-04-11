@@ -47,7 +47,9 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
     tmp_path: Path,
 ) -> None:
     dataset_path = tmp_path / "reflect.json"
-    dataset_path.write_text(json.dumps([_dataset_row(), _dataset_row()]), encoding="utf-8")
+    dataset_path.write_text(
+        json.dumps([_dataset_row(), _dataset_row()]), encoding="utf-8"
+    )
     output_path = tmp_path / "optimized" / "reflect.json"
 
     captured: dict[str, Any] = {}
@@ -61,7 +63,9 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
             captured["metric"] = metric
             captured["auto"] = auto
 
-        def compile(self, program: dspy.Module, *, trainset: list[Any], valset: list[Any] | None):
+        def compile(
+            self, program: dspy.Module, *, trainset: list[Any], valset: list[Any] | None
+        ):
             captured["program"] = program
             captured["trainset"] = trainset
             captured["valset"] = valset
