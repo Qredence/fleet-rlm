@@ -7,8 +7,7 @@ from typing import Any, Protocol
 
 
 def _string_or_none(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text or None
+    return str(value).strip() or None if value else None
 
 
 @dataclass(frozen=True, slots=True)

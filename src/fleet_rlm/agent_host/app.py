@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+import logging
 from contextlib import suppress
 
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
@@ -12,6 +13,8 @@ from .adapters import iter_workspace_host_queue
 from .repl_bridge import ReplHookBridge
 from .sessions import OrchestrationSessionContext
 from .workflow import register_hosted_workspace_task, run_workspace_host
+
+logger = logging.getLogger(__name__)
 
 
 def _is_terminal_host_event(event: WorkspaceEvent) -> bool:
@@ -38,9 +41,18 @@ async def stream_hosted_workspace_task(
         finally:
             await output_queue.put(None)
 
-    if hosted_repl_bridge is not None:
-        await hosted_repl_bridge.start()
+    bridge_started = False
     try:
+        if hosted_repl_bridge is not None:
+            try:
+                await hosted_repl_bridge.start()
+            except Exception:
+                try:
+                    await hosted_repl_bridge.stop()
+                except Exception:  # pragma: no cover - defensive cleanup
+                    logger.debug("hosted_repl_bridge_cleanup_failed", exc_info=True)
+                raise
+            bridge_started = True
         with register_hosted_workspace_task(
             request=request,
             session=session,
@@ -58,5 +70,5 @@ async def stream_hosted_workspace_task(
                 with suppress(asyncio.CancelledError):
                     await host_task
     finally:
-        if hosted_repl_bridge is not None:
+        if hosted_repl_bridge is not None and bridge_started:
             await hosted_repl_bridge.stop()
