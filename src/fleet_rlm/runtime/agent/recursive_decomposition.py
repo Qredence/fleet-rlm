@@ -15,6 +15,7 @@ _ALLOWED_MODES: tuple[RecursiveDecompositionMode, ...] = (
     "fan_out",
 )
 _MAX_SUMMARY_CHARS = 800
+_MAX_REQUEST_CHARS = 800
 _MAX_CONTEXT_CHARS = 1200
 _MAX_SUBQUERY_CHARS = 320
 _MAX_SUBQUERY_BUDGET = 4
@@ -233,13 +234,16 @@ def build_recursive_decomposition_inputs(
         )
 
     return RecursiveDecompositionInputs(
-        user_request=_compact_text(user_request, limit=800),
+        user_request=_compact_text(user_request, limit=_MAX_REQUEST_CHARS),
         assembled_recursive_context=_compact_text(
             "\n".join(part for part in context_parts if part),
             limit=_MAX_CONTEXT_CHARS,
         )
         or "No additional recursive context was assembled for this pass.",
-        current_plan=_compact_text(current_plan or user_request, limit=800),
+        current_plan=_compact_text(
+            current_plan or user_request,
+            limit=_MAX_REQUEST_CHARS,
+        ),
         loop_state=(
             f"recursion_depth={recursion_depth}; "
             f"max_depth={max_depth}; "
@@ -248,7 +252,7 @@ def build_recursive_decomposition_inputs(
         ),
         latest_sandbox_evidence=_compact_text(
             "; ".join(evidence_parts),
-            limit=800,
+            limit=_MAX_REQUEST_CHARS,
         )
         or "No fresh sandbox evidence is available before this recursive pass.",
         subquery_budget=max(1, min(int(subquery_budget), _MAX_SUBQUERY_BUDGET)),
