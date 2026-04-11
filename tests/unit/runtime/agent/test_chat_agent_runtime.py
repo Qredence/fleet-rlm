@@ -483,6 +483,29 @@ def test_build_chat_agent_threads_recursive_verification_flag(
     assert captured["recursive_verification_enabled"] is True
 
 
+def test_build_chat_agent_threads_recursive_repair_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRLMReActChatAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.factory.RLMReActChatAgent",
+        _FakeRLMReActChatAgent,
+    )
+
+    agent = runtime_factory.build_chat_agent(
+        recursive_repair_enabled=True,
+        planner_lm=object(),
+    )
+
+    assert isinstance(agent, _FakeRLMReActChatAgent)
+    assert captured["recursive_repair_enabled"] is True
+
+
 @pytest.mark.asyncio
 async def test_sandbox_spec_flows_from_agent_to_runtime() -> None:
     """Verify SandboxSpec is threaded from agent → interpreter → runtime."""
