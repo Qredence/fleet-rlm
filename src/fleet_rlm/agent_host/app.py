@@ -71,4 +71,7 @@ async def stream_hosted_workspace_task(
                     await host_task
     finally:
         if hosted_repl_bridge is not None and bridge_started:
-            await hosted_repl_bridge.stop()
+            try:
+                await hosted_repl_bridge.stop()
+            except Exception:  # pragma: no cover - defensive cleanup
+                logger.debug("hosted_repl_bridge_cleanup_failed", exc_info=True)
