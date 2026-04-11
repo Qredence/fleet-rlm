@@ -6,6 +6,7 @@ import inspect
 import logging
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 import dspy
@@ -40,6 +41,11 @@ from .recursive_reflection import (
     build_workspace_reflection_inputs,
     coerce_workspace_reflection_decision,
 )
+from .recursive_context_selection import (
+    build_recursive_context_selection_inputs,
+    coerce_recursive_context_selection_decision,
+    materialize_recursive_context,
+)
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
@@ -50,6 +56,7 @@ logger = logging.getLogger(__name__)
 _MAX_NESTED_TRAJECTORY_STEPS = 5
 _MAX_NESTED_TRAJECTORY_TEXT = 512
 _MAX_REFLECTION_PASSES = 1
+_DEFAULT_RECURSIVE_CONTEXT_BUDGET = 1600
 
 
 def _compact_nested_trajectory_value(value: Any) -> Any:
@@ -413,19 +420,73 @@ async def spawn_delegate_sub_agent_async(
         reflection_passes=_reflection_passes,
         fallback_used=fallback_used,
     )
+    selected_recursive_context = None
     reflection_module = agent.get_recursive_reflection_module()
     reflection_lm = (
         parent_lm
         if fallback_used
         else (delegate_lm if delegate_lm is not None else parent_lm)
     )
-    reflection_lm_context = (
-        build_dspy_context(lm=reflection_lm)
-        if reflection_lm is not None
-        else nullcontext()
-    )
+    def _reflection_lm_context() -> Any:
+        return (
+            build_dspy_context(lm=reflection_lm)
+            if reflection_lm is not None
+            else nullcontext()
+        )
+
+    if bool(getattr(agent, "recursive_context_selection_enabled", False)):
+        context_budget = min(
+            _DEFAULT_RECURSIVE_CONTEXT_BUDGET,
+            max(400, int(getattr(agent, "delegate_result_truncation_chars", 8000) // 4)),
+        )
+        selection_inputs = build_recursive_context_selection_inputs(
+            user_request=prompt,
+            current_plan=context,
+            latest_result=normalized_result,
+            runtime_metadata=runtime_metadata
+            if isinstance(runtime_metadata, dict)
+            else None,
+            recursion_depth=agent._current_depth + 1,
+            max_depth=agent._max_depth,
+            reflection_passes=_reflection_passes,
+            fallback_used=fallback_used,
+            context_budget=context_budget,
+            interpreter_context_paths=list(
+                getattr(child_interpreter, "context_paths", []) or []
+            ),
+        )
+        selection_module = agent.get_recursive_context_selection_module()
+        try:
+            with _reflection_lm_context():
+                selection_prediction = await selection_module.acall(
+                    **selection_inputs.as_kwargs()
+                )
+            selection_decision = coerce_recursive_context_selection_decision(
+                selection_prediction,
+                working_memory_catalog=selection_inputs.working_memory_catalog,
+                recent_sandbox_evidence_catalog=(
+                    selection_inputs.recent_sandbox_evidence_catalog
+                ),
+                latest_tool_or_code_result=selection_inputs.latest_tool_or_code_result,
+                context_budget=selection_inputs.context_budget,
+            )
+        except Exception:
+            logger.warning(
+                "Recursive context selection failed; preserving existing reflection inputs",
+                exc_info=True,
+            )
+        else:
+            selected_recursive_context = materialize_recursive_context(
+                inputs=selection_inputs,
+                decision=selection_decision,
+            )
+            reflection_inputs = replace(
+                reflection_inputs,
+                working_memory_summary=selected_recursive_context.working_memory_summary,
+                latest_sandbox_evidence=selected_recursive_context.latest_sandbox_evidence,
+            )
     try:
-        with reflection_lm_context:
+        with _reflection_lm_context():
             reflection_prediction = await reflection_module.acall(
                 **reflection_inputs.as_kwargs()
             )
@@ -448,6 +509,11 @@ async def spawn_delegate_sub_agent_async(
         original_prompt=prompt,
         original_context=context,
         decision=decision,
+        assembled_recursive_context=(
+            selected_recursive_context.retry_context
+            if selected_recursive_context is not None
+            else ""
+        ),
     )
     retry_result = await spawn_delegate_sub_agent_async(
         agent,

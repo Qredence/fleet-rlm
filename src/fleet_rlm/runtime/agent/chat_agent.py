@@ -111,6 +111,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
         recursive_reflection_enabled: bool = False,
+        recursive_context_selection_enabled: bool = False,
         execution_mode: ExecutionMode = "auto",
     ) -> None:
         super().__init__()
@@ -129,6 +130,9 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             256, int(delegate_result_truncation_chars)
         )
         self.recursive_reflection_enabled = bool(recursive_reflection_enabled)
+        self.recursive_context_selection_enabled = bool(
+            recursive_context_selection_enabled
+        )
         self.execution_mode: ExecutionMode = execution_mode
         self.secret_name = secret_name
         self.default_volume_name = volume_name
@@ -172,6 +176,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
         self._runtime_modules: dict[str, dspy.Module] = {}
         self._recursive_reflection_module: dspy.Module | None = None
+        self._recursive_context_selection_module: dspy.Module | None = None
 
         # Register Core Memory tools
         self._extra_tools.extend([self.core_memory_append, self.core_memory_replace])
@@ -586,6 +591,18 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
             self._recursive_reflection_module = ReflectAndReviseWorkspaceStepModule()
         return self._recursive_reflection_module
+
+    def get_recursive_context_selection_module(self) -> dspy.Module:
+        """Return the cached recursive context-selection module for worker retries."""
+        if self._recursive_context_selection_module is None:
+            from fleet_rlm.runtime.agent.recursive_context_selection import (
+                AssembleRecursiveWorkspaceContextModule,
+            )
+
+            self._recursive_context_selection_module = (
+                AssembleRecursiveWorkspaceContextModule()
+            )
+        return self._recursive_context_selection_module
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""

@@ -28,6 +28,13 @@ def _bind_reflection_module_factory(agent: Any, factory: Any) -> None:
     )
 
 
+def _bind_context_selection_module_factory(agent: Any, factory: Any) -> None:
+    agent.get_recursive_context_selection_module = MethodType(  # type: ignore[method-assign]
+        lambda self: factory(),
+        agent,
+    )
+
+
 def test_reflection_module_coerces_typed_outputs() -> None:
     class _FakePredictor:
         def __call__(self, **_kwargs: Any) -> Any:
@@ -121,12 +128,17 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         max_depth=4,
         delegate_max_calls_per_turn=4,
         recursive_reflection_enabled=True,
+        recursive_context_selection_enabled=True,
     )
     agent.prepare_routed_turn()
     setattr(
         agent.interpreter,
         "current_runtime_metadata",
-        lambda: {"volume_name": "tenant-a"},
+        lambda: {
+            "volume_name": "tenant-a",
+            "workspace_path": "/workspace/repo",
+            "memory_handle": "meta/workspaces/tenant-a/users/u/react-session.json",
+        },
     )
 
     attempts: list[tuple[str, str]] = []
@@ -144,6 +156,12 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
     class _FakeReflectionModule:
         async def acall(self, **kwargs: Any) -> dict[str, Any]:
             assert kwargs["user_request"] == "inspect"
+            assert (
+                kwargs["working_memory_summary"]
+                == "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json | Bounded durable memory handle."
+            )
+            assert "Selected traceback summary only." in kwargs["latest_sandbox_evidence"]
+            assert "answer | first attempt" not in kwargs["latest_sandbox_evidence"]
             return {
                 "next_action": "repair_and_retry",
                 "revised_plan": "Fix the last failing step and rerun only the repair path.",
@@ -151,11 +169,30 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
                 "confidence": 0.92,
             }
 
+    class _FakeContextSelectionModule:
+        async def acall(self, **kwargs: Any) -> dict[str, Any]:
+            assert kwargs["user_request"] == "inspect"
+            assert any(
+                entry.startswith(
+                    "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+                )
+                for entry in kwargs["working_memory_catalog"]
+            )
+            return {
+                "selected_memory_handles": [
+                    "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+                ],
+                "selected_evidence_ids": ["final_reasoning"],
+                "assembled_context_summary": "Selected traceback summary only.",
+                "omission_rationale": "Skip the broader answer text to stay within budget.",
+            }
+
     monkeypatch.setattr(
         "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
         lambda **_kwargs: _FakeChildModule(),
     )
     _bind_reflection_module_factory(agent, _FakeReflectionModule)
+    _bind_context_selection_module_factory(agent, _FakeContextSelectionModule)
 
     result = await spawn_delegate_sub_agent_async(
         agent, prompt="inspect", context="ctx"
@@ -165,6 +202,11 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
     assert result["answer"] == "recovered answer"
     assert len(attempts) == 2
     assert attempts[1][0] == "inspect"
+    assert "Recursive context assembly:" in attempts[1][1]
+    assert "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json" in attempts[
+        1
+    ][1]
+    assert "answer | first attempt" not in attempts[1][1]
     assert "Recursive reflection guidance:" in attempts[1][1]
     assert "repair_and_retry" in result["final_reasoning"]
     assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
