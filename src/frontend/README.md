@@ -29,6 +29,7 @@ Supported product surfaces:
 
 - `/app/workspace`
 - `/app/volumes`
+- `/app/optimization`
 - `/app/settings`
 
 Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics` routes should fall through to `/404`.

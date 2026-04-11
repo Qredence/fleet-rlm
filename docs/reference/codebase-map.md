@@ -4,7 +4,7 @@ This document summarizes the current backend package layout with the runtime cor
 
 ## Current Ordering
 
-1. **Runtime core**: `src/fleet_rlm/worker/`, `src/fleet_rlm/runtime/`, `src/fleet_rlm/integrations/daytona/`
+1. **Runtime core**: `src/fleet_rlm/worker/`, `src/fleet_rlm/runtime/`, `src/fleet_rlm/integrations/` (with `src/fleet_rlm/integrations/daytona/` as the execution substrate)
 2. **Outer orchestration host**: `src/fleet_rlm/agent_host/`
 3. **Thin transport shell**: `src/fleet_rlm/api/`
 4. **Transitional bridge layers**: `src/fleet_rlm/orchestration_app/`, `src/fleet_rlm/api/orchestration/`
@@ -16,6 +16,7 @@ This document summarizes the current backend package layout with the runtime cor
 | --- | --- | --- |
 | `src/fleet_rlm/worker/` | worker boundary | task contracts and worker-side adapters feeding the shared runtime |
 | `src/fleet_rlm/runtime/` | recursive runtime core | chat agent, recursive runtime, execution helpers, content helpers, tools, runtime models, and quality workflows |
+| `src/fleet_rlm/integrations/` | external systems boundary | config, database, MCP, observability, and provider integrations, including the Daytona execution substrate |
 | `src/fleet_rlm/integrations/daytona/` | Daytona substrate | interpreter, runtime/session lifecycle, volume helpers, diagnostics, and provider bridge code |
 | `src/fleet_rlm/agent_host/` | outer orchestration host | Agent Framework workflow, hosted HITL/checkpoint policy, execution events, and startup/repl bridges |
 | `src/fleet_rlm/api/` | transport shell | FastAPI auth, routers, schemas, websocket transport, and API-side services |

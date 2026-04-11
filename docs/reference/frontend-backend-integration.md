@@ -11,6 +11,7 @@ The live frontend shell supports only:
 
 - `/app/workspace`
 - `/app/volumes`
+- `/app/optimization`
 - `/app/settings`
 
 Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics`
