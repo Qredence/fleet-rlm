@@ -46,7 +46,8 @@ class HostedExecutionStepSink(Protocol):
     """Minimal lifecycle sink surface needed by the hosted REPL bridge."""
 
     @property
-    def run_completed(self) -> bool: ...
+    def run_completed(self) -> bool:
+        pass
 
     async def emit_step(self, step: Any) -> None: ...
 
