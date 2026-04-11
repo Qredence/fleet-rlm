@@ -33,7 +33,8 @@ class HostedExecutionEvent:
 class HostedExecutionEventRouter(Protocol):
     """Callback used for lightweight host-side execution event fan-out."""
 
-    def __call__(self, event: HostedExecutionEvent) -> None: ...
+    def __call__(self, event: HostedExecutionEvent) -> None:
+        pass
 
 
 class HostedExecutionStepBuilder(Protocol):
