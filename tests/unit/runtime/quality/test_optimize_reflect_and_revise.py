@@ -33,7 +33,7 @@ def test_rows_to_reflection_examples_preserves_typed_inputs() -> None:
 
     assert len(examples) == 1
     assert examples[0].next_action == "repair_and_retry"
-    assert examples[0].inputs().toDict() == {
+    assert dict(examples[0].inputs()) == {
         "user_request": row["user_request"],
         "working_memory_summary": row["working_memory_summary"],
         "current_plan": row["current_plan"],

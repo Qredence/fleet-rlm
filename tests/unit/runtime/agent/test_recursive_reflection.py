@@ -21,11 +21,9 @@ def _raise_reflection_should_stay_off() -> None:
     raise AssertionError("reflection should stay off")
 
 
-def _bind_reflection_module(agent: Any, reflection_module: Any) -> None:
+def _bind_reflection_module_factory(agent: Any, factory: Any) -> None:
     agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: (
-            reflection_module() if callable(reflection_module) else reflection_module
-        ),
+        lambda self: factory(),
         agent,
     )
 
@@ -104,7 +102,7 @@ async def test_spawn_delegate_sub_agent_async_skips_reflection_when_disabled(
         "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
         lambda **_kwargs: _FakeChildModule(),
     )
-    _bind_reflection_module(agent, _raise_reflection_should_stay_off)
+    _bind_reflection_module_factory(agent, _raise_reflection_should_stay_off)
 
     result = await spawn_delegate_sub_agent_async(
         agent, prompt="inspect", context="ctx"
@@ -157,7 +155,7 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
         lambda **_kwargs: _FakeChildModule(),
     )
-    _bind_reflection_module(agent, _FakeReflectionModule())
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
 
     result = await spawn_delegate_sub_agent_async(
         agent, prompt="inspect", context="ctx"
@@ -212,7 +210,7 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_delegate_lm(
         "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
         lambda *, lm: dspy.context(lm=lm),
     )
-    _bind_reflection_module(agent, _FakeReflectionModule())
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
 
     with dspy.context(lm=parent_lm_marker):
         result = await spawn_delegate_sub_agent_async(
@@ -269,7 +267,7 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_parent_lm_aft
         "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
         lambda *, lm: dspy.context(lm=lm),
     )
-    _bind_reflection_module(agent, _FakeReflectionModule())
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
 
     with dspy.context(lm=parent_lm_marker):
         result = await spawn_delegate_sub_agent_async(
