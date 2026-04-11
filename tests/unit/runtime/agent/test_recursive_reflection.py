@@ -21,6 +21,15 @@ def _raise_reflection_should_stay_off() -> None:
     raise AssertionError("reflection should stay off")
 
 
+def _bind_reflection_module(agent: Any, reflection_module: Any) -> None:
+    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
+        lambda self: (
+            reflection_module() if callable(reflection_module) else reflection_module
+        ),
+        agent,
+    )
+
+
 def test_reflection_module_coerces_typed_outputs() -> None:
     class _FakePredictor:
         def __call__(self, **_kwargs: Any) -> Any:
@@ -95,10 +104,7 @@ async def test_spawn_delegate_sub_agent_async_skips_reflection_when_disabled(
         "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
         lambda **_kwargs: _FakeChildModule(),
     )
-    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: _raise_reflection_should_stay_off(),
-        agent,
-    )
+    _bind_reflection_module(agent, _raise_reflection_should_stay_off)
 
     result = await spawn_delegate_sub_agent_async(
         agent, prompt="inspect", context="ctx"
@@ -151,10 +157,7 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
         lambda **_kwargs: _FakeChildModule(),
     )
-    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: _FakeReflectionModule(),
-        agent,
-    )
+    _bind_reflection_module(agent, _FakeReflectionModule())
 
     result = await spawn_delegate_sub_agent_async(
         agent, prompt="inspect", context="ctx"
@@ -180,20 +183,20 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_delegate_lm(
     agent.prepare_routed_turn()
     setattr(agent.interpreter, "current_runtime_metadata", lambda: {})
 
-    parent_lm = object()
-    delegate_lm = object()
-    agent.delegate_lm = delegate_lm
+    parent_lm_marker = object()
+    delegate_lm_marker = object()
+    agent.delegate_lm = delegate_lm_marker
 
     class _FakeChildModule:
         async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
-            assert dspy.settings.lm is delegate_lm
+            assert dspy.settings.lm is delegate_lm_marker
             assert prompt == "inspect"
             assert context == "ctx"
             return dspy.Prediction(answer="done", trajectory={})
 
     class _FakeReflectionModule:
         async def acall(self, **_kwargs: Any) -> dict[str, Any]:
-            assert dspy.settings.lm is delegate_lm
+            assert dspy.settings.lm is delegate_lm_marker
             return {
                 "next_action": "finalize",
                 "revised_plan": "done",
@@ -209,12 +212,9 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_delegate_lm(
         "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
         lambda *, lm: dspy.context(lm=lm),
     )
-    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: _FakeReflectionModule(),
-        agent,
-    )
+    _bind_reflection_module(agent, _FakeReflectionModule())
 
-    with dspy.context(lm=parent_lm):
+    with dspy.context(lm=parent_lm_marker):
         result = await spawn_delegate_sub_agent_async(
             agent, prompt="inspect", context="ctx"
         )
@@ -234,9 +234,9 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_parent_lm_aft
     agent.prepare_routed_turn()
     setattr(agent.interpreter, "current_runtime_metadata", lambda: {})
 
-    parent_lm = object()
-    delegate_lm = object()
-    agent.delegate_lm = delegate_lm
+    parent_lm_marker = object()
+    delegate_lm_marker = object()
+    agent.delegate_lm = delegate_lm_marker
     child_calls = 0
 
     class _FakeChildModule:
@@ -244,16 +244,16 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_parent_lm_aft
             nonlocal child_calls
             child_calls += 1
             if child_calls == 1:
-                assert dspy.settings.lm is delegate_lm
+                assert dspy.settings.lm is delegate_lm_marker
                 raise RuntimeError("delegate lm failed")
-            assert dspy.settings.lm is parent_lm
+            assert dspy.settings.lm is parent_lm_marker
             assert prompt == "inspect"
             assert context == "ctx"
             return dspy.Prediction(answer="done", trajectory={})
 
     class _FakeReflectionModule:
         async def acall(self, **_kwargs: Any) -> dict[str, Any]:
-            assert dspy.settings.lm is parent_lm
+            assert dspy.settings.lm is parent_lm_marker
             return {
                 "next_action": "finalize",
                 "revised_plan": "done",
@@ -269,12 +269,9 @@ async def test_spawn_delegate_sub_agent_async_runs_reflection_with_parent_lm_aft
         "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
         lambda *, lm: dspy.context(lm=lm),
     )
-    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
-        lambda self: _FakeReflectionModule(),
-        agent,
-    )
+    _bind_reflection_module(agent, _FakeReflectionModule())
 
-    with dspy.context(lm=parent_lm):
+    with dspy.context(lm=parent_lm_marker):
         result = await spawn_delegate_sub_agent_async(
             agent, prompt="inspect", context="ctx"
         )
