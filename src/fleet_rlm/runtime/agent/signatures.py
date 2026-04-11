@@ -310,6 +310,42 @@ class ReflectAndReviseWorkspaceStep(dspy.Signature):
     confidence: float = dspy.OutputField(desc="Decision confidence from 0.0 to 1.0")
 
 
+class AssembleRecursiveWorkspaceContext(dspy.Signature):
+    """Select bounded Daytona-backed memory/evidence for the next recursive pass."""
+
+    user_request: str = dspy.InputField(desc="Current delegated user or parent request")
+    current_plan: str = dspy.InputField(
+        desc="Current execution plan or delegate context summary"
+    )
+    loop_state: str = dspy.InputField(
+        desc="Current recursion depth, retry budget, and loop state summary"
+    )
+    working_memory_catalog: list[str] = dspy.InputField(
+        desc="Compact catalog of Daytona-backed memory handles or bounded memory summaries"
+    )
+    recent_sandbox_evidence_catalog: list[str] = dspy.InputField(
+        desc="Compact catalog of recent sandbox, tool, or code evidence summaries"
+    )
+    latest_tool_or_code_result: str = dspy.InputField(
+        desc="Latest tool, code, or child-result summary"
+    )
+    context_budget: int = dspy.InputField(
+        desc="Maximum target character budget for the next recursive context"
+    )
+    selected_memory_handles: list[str] = dspy.OutputField(
+        desc="Most relevant Daytona-backed memory handles or memory section handles to surface next"
+    )
+    selected_evidence_ids: list[str] = dspy.OutputField(
+        desc="Most relevant recent evidence ids to surface next"
+    )
+    assembled_context_summary: str = dspy.OutputField(
+        desc="Bounded summary describing what the next recursive pass should see"
+    )
+    omission_rationale: str = dspy.OutputField(
+        desc="Why other memory/evidence was omitted to control context size"
+    )
+
+
 class RLMVariableSignature(dspy.Signature):
     """Explore and answer questions about an arbitrarily long prompt.
 
@@ -340,6 +376,7 @@ __all__ = [
     "GroundedAnswerWithCitations",
     "GroundedCitation",
     "IncidentTriageFromLogs",
+    "AssembleRecursiveWorkspaceContext",
     "MemoryActionIntentSignature",
     "MemoryMigrationOperation",
     "MemoryStructureAuditSignature",
