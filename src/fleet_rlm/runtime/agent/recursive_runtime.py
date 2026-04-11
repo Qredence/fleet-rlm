@@ -335,7 +335,7 @@ def _reserve_recursive_delegate_slots_or_error(
     additional_slots: int,
 ) -> dict[str, Any] | None:
     normalized_slots = max(0, int(additional_slots))
-    if normalized_slots <= 0:
+    if normalized_slots == 0:
         return None
 
     limit = max(1, int(getattr(agent, "delegate_max_calls_per_turn", 1)))

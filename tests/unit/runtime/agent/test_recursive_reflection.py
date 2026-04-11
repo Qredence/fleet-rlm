@@ -244,14 +244,15 @@ async def test_spawn_delegate_sub_agent_async_fan_out_consumes_delegate_budget(
         prompt="repair the recursive failure",
         context="Use only the staged traceback summary.",
     )
+    assert first_result["status"] == "ok"
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+
     second_result = await spawn_delegate_sub_agent_async(
         agent,
         prompt="one more delegate call",
         context="ctx",
     )
 
-    assert first_result["status"] == "ok"
-    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
     assert second_result["status"] == "error"
     assert second_result["delegate_max_calls_per_turn"] == 2
 
