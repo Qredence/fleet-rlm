@@ -110,6 +110,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         delegate_lm: Any | None = None,
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
+        recursive_decomposition_enabled: bool = False,
         recursive_reflection_enabled: bool = False,
         recursive_context_selection_enabled: bool = False,
         execution_mode: ExecutionMode = "auto",
@@ -129,6 +130,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.delegate_result_truncation_chars = max(
             256, int(delegate_result_truncation_chars)
         )
+        self.recursive_decomposition_enabled = bool(recursive_decomposition_enabled)
         self.recursive_reflection_enabled = bool(recursive_reflection_enabled)
         self.recursive_context_selection_enabled = bool(
             recursive_context_selection_enabled
@@ -175,6 +177,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._started = False
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
         self._runtime_modules: dict[str, dspy.Module] = {}
+        self._recursive_decomposition_module: dspy.Module | None = None
         self._recursive_reflection_module: dspy.Module | None = None
         self._recursive_context_selection_module: dspy.Module | None = None
 
@@ -591,6 +594,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
 
             self._recursive_reflection_module = ReflectAndReviseWorkspaceStepModule()
         return self._recursive_reflection_module
+
+    def get_recursive_decomposition_module(self) -> dspy.Module:
+        """Return the cached recursive decomposition module for worker-side planning."""
+        if self._recursive_decomposition_module is None:
+            from fleet_rlm.runtime.agent.recursive_decomposition import (
+                PlanRecursiveSubqueriesModule,
+            )
+
+            self._recursive_decomposition_module = PlanRecursiveSubqueriesModule()
+        return self._recursive_decomposition_module
 
     def get_recursive_context_selection_module(self) -> dspy.Module:
         """Return the cached recursive context-selection module for worker retries."""

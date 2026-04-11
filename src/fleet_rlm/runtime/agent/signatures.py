@@ -310,6 +310,42 @@ class ReflectAndReviseWorkspaceStep(dspy.Signature):
     confidence: float = dspy.OutputField(desc="Decision confidence from 0.0 to 1.0")
 
 
+class PlanRecursiveSubqueries(dspy.Signature):
+    """Plan bounded semantic decomposition for the next recursive workspace pass."""
+
+    user_request: str = dspy.InputField(desc="Current delegated user or parent request")
+    assembled_recursive_context: str = dspy.InputField(
+        desc="Bounded recursive context assembled from Daytona-backed handles and summaries"
+    )
+    current_plan: str = dspy.InputField(
+        desc="Current execution plan or delegate context summary"
+    )
+    loop_state: str = dspy.InputField(
+        desc="Current recursion depth, retry budget, and loop state summary"
+    )
+    latest_sandbox_evidence: str = dspy.InputField(
+        desc="Latest bounded sandbox, tool, or code evidence summary available before the next pass"
+    )
+    subquery_budget: int = dspy.InputField(
+        desc="Maximum number of bounded semantic subqueries allowed for the next pass"
+    )
+    decomposition_mode: Literal["single_pass", "fan_out"] = dspy.OutputField(
+        desc="Whether the next recursive pass should stay single_pass or fan_out into bounded subqueries"
+    )
+    subqueries: list[str] = dspy.OutputField(
+        desc="Bounded semantic subqueries or subproblems for the next recursive pass"
+    )
+    batching_strategy: str = dspy.OutputField(
+        desc="How Python/runtime should batch the proposed subqueries, for example serial or batched"
+    )
+    aggregation_plan: str = dspy.OutputField(
+        desc="How Python/runtime should aggregate the subquery results for the parent recursive state"
+    )
+    decomposition_rationale: str = dspy.OutputField(
+        desc="Why this decomposition shape fits the current recursive state"
+    )
+
+
 class AssembleRecursiveWorkspaceContext(dspy.Signature):
     """Select bounded Daytona-backed memory/evidence for the next recursive pass."""
 
@@ -377,6 +413,7 @@ __all__ = [
     "GroundedCitation",
     "IncidentTriageFromLogs",
     "AssembleRecursiveWorkspaceContext",
+    "PlanRecursiveSubqueries",
     "MemoryActionIntentSignature",
     "MemoryMigrationOperation",
     "MemoryStructureAuditSignature",

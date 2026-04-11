@@ -33,6 +33,13 @@ from .optimize_recursive_context_selection import (
     resolve_recursive_context_selection_output_path,
     rows_to_recursive_context_selection_examples,
 )
+from .optimize_recursive_decomposition import (
+    build_recursive_decomposition_feedback_metric,
+    load_recursive_decomposition_rows,
+    optimize_recursive_decomposition_module,
+    resolve_recursive_decomposition_output_path,
+    rows_to_recursive_decomposition_examples,
+)
 from .scorers import (
     build_rlm_scorers,
     get_default_judge_model,
@@ -48,6 +55,7 @@ from .workspace_metrics import (
 __all__ = [
     "build_default_scorers",
     "build_exact_match_metric",
+    "build_recursive_decomposition_feedback_metric",
     "build_gepa_feedback_metric",
     "build_recursive_context_selection_feedback_metric",
     "build_reflection_feedback_metric",
@@ -62,16 +70,20 @@ __all__ = [
     "get_default_judge_model",
     "load_symbol",
     "load_trace_rows",
+    "load_recursive_decomposition_rows",
     "load_recursive_context_selection_rows",
     "load_reflection_rows",
     "optimize_program_with_gepa",
+    "optimize_recursive_decomposition_module",
     "optimize_recursive_context_selection_module",
     "optimize_reflect_and_revise_module",
     "optimize_program_with_mipro",
     "resolve_recursive_context_selection_output_path",
     "resolve_reflection_output_path",
     "reasoning_quality_scorer",
+    "resolve_recursive_decomposition_output_path",
     "rows_to_reflection_examples",
+    "rows_to_recursive_decomposition_examples",
     "rows_to_recursive_context_selection_examples",
     "rows_to_examples",
     "rows_with_expected_responses",

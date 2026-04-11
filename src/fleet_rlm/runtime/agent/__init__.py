@@ -14,6 +14,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".recursive_context_selection",
         "AssembleRecursiveWorkspaceContextModule",
     ),
+    "PlanRecursiveSubqueries": (
+        ".signatures",
+        "PlanRecursiveSubqueries",
+    ),
+    "PlanRecursiveSubqueriesModule": (
+        ".recursive_decomposition",
+        "PlanRecursiveSubqueriesModule",
+    ),
     "RLMReActChatAgent": (".chat_agent", "RLMReActChatAgent"),
     "ReflectAndReviseWorkspaceStepModule": (
         ".recursive_reflection",

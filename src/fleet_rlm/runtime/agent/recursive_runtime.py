@@ -35,6 +35,10 @@ from .delegation_policy import (
     record_delegate_fallback,
     remaining_llm_budget,
 )
+from .recursive_decomposition import (
+    build_recursive_decomposition_inputs,
+    coerce_recursive_decomposition_decision,
+)
 from .recursive_reflection import (
     append_reflection_rationale,
     build_recursive_retry_prompt,
@@ -58,6 +62,8 @@ _MAX_NESTED_TRAJECTORY_TEXT = 512
 _MAX_REFLECTION_PASSES = 1
 _MIN_RECURSIVE_CONTEXT_BUDGET = 400
 _DEFAULT_RECURSIVE_CONTEXT_BUDGET = 1600
+_DEFAULT_RECURSIVE_SUBQUERY_BUDGET = 2
+_MAX_RECURSIVE_SUBQUERY_BUDGET = 4
 _DEFAULT_DELEGATE_TRUNCATION_CHARS = 8000
 
 
@@ -211,6 +217,115 @@ async def _emit_stream_event_callback(
         _ = await result
 
 
+def _effective_recursive_subquery_budget(
+    agent: RLMReActChatAgent,
+    *,
+    remaining_budget: int,
+) -> int:
+    configured = getattr(agent, "batch_concurrency", None)
+    try:
+        configured_batch = int(configured) if configured is not None else 0
+    except (TypeError, ValueError):
+        configured_batch = 0
+
+    base_budget = (
+        configured_batch if configured_batch > 0 else _DEFAULT_RECURSIVE_SUBQUERY_BUDGET
+    )
+    delegate_limit = max(1, int(getattr(agent, "delegate_max_calls_per_turn", 1)))
+    return max(
+        1,
+        min(
+            _MAX_RECURSIVE_SUBQUERY_BUDGET,
+            base_budget,
+            delegate_limit,
+            max(1, int(remaining_budget)),
+        ),
+    )
+
+
+def _batched_subqueries(subqueries: list[str], *, batch_size: int) -> list[list[str]]:
+    normalized_batch_size = max(1, int(batch_size))
+    return [
+        subqueries[index : index + normalized_batch_size]
+        for index in range(0, len(subqueries), normalized_batch_size)
+    ]
+
+
+def _decomposition_batch_size(
+    agent: RLMReActChatAgent,
+    *,
+    batching_strategy: str,
+    subquery_count: int,
+) -> int:
+    if str(batching_strategy or "").strip().lower() != "batched":
+        return 1
+    configured = getattr(agent, "batch_concurrency", None)
+    try:
+        configured_batch = int(configured) if configured is not None else 0
+    except (TypeError, ValueError):
+        configured_batch = 0
+    effective = configured_batch if configured_batch > 0 else min(2, subquery_count)
+    return max(1, min(effective, max(1, subquery_count)))
+
+
+def _build_decomposition_subquery_context(
+    *,
+    original_context: str,
+    decision: Any,
+    batch_index: int,
+    total_batches: int,
+) -> str:
+    parts = [
+        str(original_context or "").strip(),
+        "Recursive decomposition plan:",
+        f"batch={batch_index}/{total_batches}",
+        f"batching_strategy={decision.batching_strategy}",
+        f"aggregation_plan={decision.aggregation_plan}",
+        f"decomposition_rationale={decision.decomposition_rationale}",
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _aggregate_decomposition_results(
+    *,
+    decision: Any,
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    answer_sections: list[str] = []
+    trajectory_steps: list[dict[str, Any]] = []
+    for index, item in enumerate(results, start=1):
+        subquery = str(item.get("subquery", "") or "").strip()
+        answer = str(item.get("answer") or item.get("assistant_response") or "").strip()
+        answer_sections.append(f"[{index}] {subquery}\n{answer}".strip())
+        trajectory_steps.append(
+            {
+                "thought": f"Recursive decomposition subquery {index}: {subquery}",
+                "result": _compact_nested_trajectory_value(answer),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "answer": "\n\n".join(section for section in answer_sections if section).strip(),
+        "assistant_response": "\n\n".join(
+            section for section in answer_sections if section
+        ).strip(),
+        "trajectory": {"steps": trajectory_steps},
+        "final_reasoning": "\n".join(
+            part
+            for part in (
+                (
+                    "Recursive decomposition chose "
+                    f"{decision.decomposition_mode} with {decision.batching_strategy} batching."
+                ),
+                decision.decomposition_rationale,
+                f"Aggregation plan: {decision.aggregation_plan}",
+            )
+            if part
+        ).strip(),
+    }
+
+
 def _delegate_trajectory_events(
     prediction: dspy.Prediction,
     *,
@@ -316,9 +431,17 @@ async def spawn_delegate_sub_agent_async(
     )
 
     async def _execute_child() -> dict[str, Any]:
-        async def _run_prediction() -> dict[str, Any]:
+        async def _run_prediction(
+            *,
+            task_prompt: str,
+            task_context: str,
+            status_text: str | None = None,
+        ) -> dict[str, Any]:
             if stream_event_callback is None:
-                prediction = await child_module.acall(prompt=prompt, context=context)
+                prediction = await child_module.acall(
+                    prompt=task_prompt,
+                    context=task_context,
+                )
                 return _prediction_payload(prediction)
 
             ctx = _delegate_streaming_context(
@@ -326,6 +449,15 @@ async def spawn_delegate_sub_agent_async(
                 interpreter=child_interpreter,
                 effective_max_iters=effective_max_iters,
             )
+            if status_text:
+                await _emit_stream_event_callback(
+                    stream_event_callback,
+                    StreamEvent(
+                        kind="status",
+                        text=status_text,
+                        payload=ctx.enrich({"recursive_decomposition": True}),
+                    ),
+                )
             final_prediction: dspy.Prediction | None = None
             last_tool_name_ref: list[str | None] = [None]
 
@@ -347,7 +479,7 @@ async def spawn_delegate_sub_agent_async(
                 prediction = await child_module.acall(prompt=prompt, context=context)
                 return _prediction_payload(prediction)
 
-            output_stream = stream_program(prompt=prompt, context=context)
+            output_stream = stream_program(prompt=task_prompt, context=task_context)
             async for value in output_stream:
                 if isinstance(value, dspy.Prediction):
                     final_prediction = value
@@ -370,14 +502,97 @@ async def spawn_delegate_sub_agent_async(
                 )
             return _prediction_payload(final_prediction)
 
+        async def _run_decomposition_plan() -> dict[str, Any]:
+            if not bool(getattr(agent, "recursive_decomposition_enabled", False)):
+                return await _run_prediction(task_prompt=prompt, task_context=context)
+
+            metadata_fn = getattr(child_interpreter, "current_runtime_metadata", None)
+            runtime_metadata = metadata_fn() if callable(metadata_fn) else {}
+            decomposition_inputs = build_recursive_decomposition_inputs(
+                user_request=prompt,
+                current_plan=context or prompt,
+                assembled_recursive_context=context,
+                runtime_metadata=runtime_metadata
+                if isinstance(runtime_metadata, dict)
+                else None,
+                recursion_depth=agent._current_depth + 1,
+                max_depth=agent._max_depth,
+                fallback_used=fallback_used,
+                subquery_budget=_effective_recursive_subquery_budget(
+                    agent,
+                    remaining_budget=remaining_budget,
+                ),
+                interpreter_context_paths=list(
+                    getattr(child_interpreter, "context_paths", []) or []
+                ),
+            )
+            decomposition_module = agent.get_recursive_decomposition_module()
+            try:
+                decomposition_prediction = await decomposition_module.acall(
+                    **decomposition_inputs.as_kwargs()
+                )
+                decomposition_decision = coerce_recursive_decomposition_decision(
+                    decomposition_prediction,
+                    fallback_query=prompt,
+                    subquery_budget=decomposition_inputs.subquery_budget,
+                )
+            except Exception:
+                logger.warning(
+                    "Recursive decomposition failed; preserving single-pass child execution",
+                    exc_info=True,
+                )
+                return await _run_prediction(task_prompt=prompt, task_context=context)
+
+            if (
+                decomposition_decision.decomposition_mode != "fan_out"
+                or len(decomposition_decision.subqueries) <= 1
+            ):
+                return await _run_prediction(task_prompt=prompt, task_context=context)
+
+            batched_subqueries = _batched_subqueries(
+                decomposition_decision.subqueries,
+                batch_size=_decomposition_batch_size(
+                    agent,
+                    batching_strategy=decomposition_decision.batching_strategy,
+                    subquery_count=len(decomposition_decision.subqueries),
+                ),
+            )
+            collected_results: list[dict[str, Any]] = []
+            for batch_index, batch in enumerate(batched_subqueries, start=1):
+                subquery_context = _build_decomposition_subquery_context(
+                    original_context=context,
+                    decision=decomposition_decision,
+                    batch_index=batch_index,
+                    total_batches=len(batched_subqueries),
+                )
+                for subquery in batch:
+                    subquery_result = await _run_prediction(
+                        task_prompt=subquery,
+                        task_context=subquery_context,
+                        status_text=(
+                            "Recursive decomposition executing "
+                            f"{len(collected_results) + 1}/{len(decomposition_decision.subqueries)}"
+                        ),
+                    )
+                    collected_results.append(
+                        {
+                            "subquery": subquery,
+                            **subquery_result,
+                        }
+                    )
+            return _aggregate_decomposition_results(
+                decision=decomposition_decision,
+                results=collected_results,
+            )
+
         profile_context = _delegate_execution_profile_context(child_interpreter)
         if child_interpreter is agent.interpreter:
             with profile_context:
-                return await _run_prediction()
+                return await _run_decomposition_plan()
 
         async with child_interpreter:
             with profile_context:
-                return await _run_prediction()
+                return await _run_decomposition_plan()
 
     try:
         with lm_context:
