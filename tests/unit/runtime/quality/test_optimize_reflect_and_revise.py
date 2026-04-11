@@ -64,8 +64,12 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
             captured["auto"] = auto
 
         def compile(
-            self, program: dspy.Module, *, trainset: list[Any], valset: list[Any] | None
-        ):
+            self,
+            program: dspy.Module,
+            *,
+            trainset: list[Any],
+            valset: list[Any] | None,
+        ) -> _FakeOptimizedProgram:
             captured["program"] = program
             captured["trainset"] = trainset
             captured["valset"] = valset
