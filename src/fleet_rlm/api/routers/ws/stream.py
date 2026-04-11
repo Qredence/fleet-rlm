@@ -207,8 +207,8 @@ async def _stream_agent_events(
     )
 
     with runtime_telemetry_enabled_context(analytics_enabled):
-        # The Agent Framework outer host wraps the existing orchestration_app
-        # continuation layer, which still preserves the fleet_rlm.worker seam.
+        # The Agent Framework outer host owns hosted HITL plus hosted
+        # continuation/session policy while still preserving the worker seam.
         async for worker_event in stream_hosted_workspace_task(
             request=worker_request,
             session=orchestration_session,

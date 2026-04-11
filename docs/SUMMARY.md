@@ -66,3 +66,4 @@
 * [Phase 2: Websocket Transport Thinning](notes/phase-2-ws-thinning.md)
 * [Phase 3: Orchestration Seams](notes/phase-3-orchestration-seams.md)
 * [Phase 7/8: Agent Framework Transition](notes/phase-7-8-agent-framework-transition.md)
+* [Phase 10: Agent host session migration](notes/phase-10-agent-host-session-migration.md)

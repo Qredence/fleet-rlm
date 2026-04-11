@@ -5,9 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.orchestration_app import (
+from fleet_rlm.agent_host import (
     build_orchestration_session_context,
     switch_orchestration_session,
+)
+from fleet_rlm.orchestration_app.sessions import (
+    OrchestrationSessionContext as CompatibilitySessionContext,
 )
 
 
@@ -136,3 +139,14 @@ async def test_switch_orchestration_session_restores_cached_state_and_context() 
 
 async def _noop_persist(*, include_volume_save: bool = True) -> None:
     _ = include_volume_save
+
+
+def test_orchestration_session_context_builds_from_agent_host() -> None:
+    session_record = {
+        "session_id": "session-a",
+        "manifest": {"metadata": {}},
+    }
+    context = build_orchestration_session_context(session_record=session_record)
+    assert isinstance(context, CompatibilitySessionContext)
+    assert context.session_record is session_record
+    assert context.session_id == "session-a"

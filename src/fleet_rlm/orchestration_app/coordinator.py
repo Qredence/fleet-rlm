@@ -10,8 +10,7 @@ from fleet_rlm.agent_host.hitl_flow import (
     HitlResolution,
     resolve_hitl_continuation as resolve_agent_host_hitl_continuation,
 )
-
-from .sessions import OrchestrationSessionContext
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 
 class WorkspaceOrchestrationCoordinator:
@@ -33,8 +32,6 @@ class WorkspaceOrchestrationCoordinator:
         args: dict[str, object],
         session: OrchestrationSessionContext | None = None,
     ) -> HitlResolution | None:
-        # TODO(phase-10): remove this compatibility delegation once remaining
-        # websocket/orchestration call sites import Agent Framework seams directly.
         return resolve_agent_host_hitl_continuation(
             command=command,
             args=args,
