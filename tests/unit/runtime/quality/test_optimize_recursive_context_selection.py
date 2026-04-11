@@ -7,6 +7,7 @@ from typing import Any
 import dspy
 
 from fleet_rlm.runtime.quality.optimize_recursive_context_selection import (
+    build_recursive_context_selection_feedback_metric,
     optimize_recursive_context_selection_module,
     rows_to_recursive_context_selection_examples,
 )
@@ -123,3 +124,21 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
     assert captured["auto"] == "medium"
     assert captured["trainset"]
     assert captured["valset"]
+
+
+def test_recursive_context_selection_feedback_metric_scores_relevance_and_boundedness() -> (
+    None
+):
+    metric = build_recursive_context_selection_feedback_metric()
+    gold = dspy.Example(**_dataset_row())
+    pred = dspy.Example(
+        selected_memory_handles=gold.selected_memory_handles,
+        selected_evidence_ids=gold.selected_evidence_ids,
+        assembled_context_summary="Bounded summary",
+        omission_rationale="Omit unrelated traces.",
+    )
+
+    result = metric(gold, pred)
+
+    assert result.score == 1.0
+    assert "within the requested context budget" in result.feedback

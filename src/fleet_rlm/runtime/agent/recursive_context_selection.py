@@ -14,6 +14,9 @@ _MAX_CONTEXT_BUDGET = 2400
 _MAX_SELECTED_ITEMS = 4
 _MAX_CATALOG_ENTRIES = 6
 _MAX_CATALOG_ENTRY_CHARS = 240
+_DEFAULT_OMISSION_RATIONALE = (
+    "Omit unselected durable memory and verbose traces to stay within budget."
+)
 
 
 def _compact_text(value: Any, *, limit: int = _MAX_SUMMARY_CHARS) -> str:
@@ -241,7 +244,7 @@ def coerce_recursive_context_selection_decision(
             get_prediction_field("omission_rationale", ""),
             limit=400,
         )
-        or "Omit unselected durable memory and verbose traces to stay within budget."
+        or _DEFAULT_OMISSION_RATIONALE
     )
     return RecursiveContextSelectionDecision(
         selected_memory_handles=selected_memory_handles,
