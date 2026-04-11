@@ -1025,7 +1025,9 @@ async def spawn_delegate_sub_agent_async(
                         decision,
                     )
             if repair_decision.repair_mode == "needs_human_review":
-                return append_recursive_repair_summary(reflected_result, repair_decision)
+                return append_recursive_repair_summary(
+                    reflected_result, repair_decision
+                )
 
     retry_prompt, retry_context = build_recursive_retry_prompt(
         original_prompt=prompt,

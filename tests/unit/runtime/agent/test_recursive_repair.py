@@ -436,7 +436,8 @@ async def test_spawn_delegate_sub_agent_async_preserves_human_review_path_from_r
     assert result["status"] == "ok"
     assert [prompt for prompt, _ in calls] == ["repair the recursive failure"]
     assert result["recursive_repair"]["repair_mode"] == "needs_human_review"
-    assert "Recursive repair planning chose needs_human_review." in result[
-        "final_reasoning"
-    ]
+    assert (
+        "Recursive repair planning chose needs_human_review."
+        in result["final_reasoning"]
+    )
     assert "Recursive reflection guidance:" not in calls[0][1]
