@@ -391,7 +391,7 @@ def _aggregate_recursive_repair_results(
 ) -> dict[str, Any]:
     answer_sections: list[str] = []
     trajectory_steps: list[dict[str, Any]] = []
-    for index, (task, item) in enumerate(zip(tasks, results, strict=False), start=1):
+    for index, (task, item) in enumerate(zip(tasks, results, strict=True), start=1):
         answer = str(item.get("answer") or item.get("assistant_response") or "").strip()
         answer_sections.append(f"[{index}] {task}\n{answer}".strip())
         trajectory_steps.append(

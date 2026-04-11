@@ -152,6 +152,11 @@ class PlanRecursiveRepairModule(dspy.Module):
         latest_failure_signals: str,
         repair_budget: int,
     ) -> dspy.Prediction:
+        """Normalize summary-only repair inputs into a bounded repair decision.
+
+        All string inputs should already be compact Daytona-backed summaries rather
+        than raw durable memory or full execution state payloads.
+        """
         prediction = self.predictor(
             user_request=user_request,
             assembled_recursive_context=assembled_recursive_context,

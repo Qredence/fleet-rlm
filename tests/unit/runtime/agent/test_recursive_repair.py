@@ -16,6 +16,8 @@ from tests.unit.fixtures_react import FakeInterpreter
 
 pytestmark = pytest.mark.usefixtures("react_records")
 
+_TEST_LARGE_BLOB_MULTIPLIER = 200
+
 
 def _raise_repair_should_stay_off() -> None:
     raise AssertionError("recursive repair should stay off")
@@ -102,7 +104,7 @@ def test_build_recursive_repair_inputs_stays_summary_only() -> None:
             "workspace_path": "/workspace/repo",
             "sandbox_id": "sbx-123",
             "memory_handle": "meta/workspaces/tenant-a/users/u/react-session.json",
-            "memory_blob": "SECRET" * 200,
+            "memory_blob": "SECRET" * _TEST_LARGE_BLOB_MULTIPLIER,
         },
         reflection_decision=type(
             "_Decision",
@@ -189,7 +191,7 @@ async def test_spawn_delegate_sub_agent_async_executes_bounded_recursive_repair_
         lambda: {
             "workspace_path": "/workspace/repo",
             "memory_handle": "meta/workspaces/tenant-a/users/u/react-session.json",
-            "memory_blob": "SECRET" * 200,
+            "memory_blob": "SECRET" * _TEST_LARGE_BLOB_MULTIPLIER,
         },
     )
 
