@@ -1,15 +1,16 @@
 # Fleet-RLM Documentation
 
-Welcome to the `fleet-rlm` documentation. The docs are organized roughly around
-the [Diataxis framework](https://diataxis.fr/) and describe the maintained
-product: an adaptive DSPy + Daytona workspace for recursive task execution.
+Welcome to the `fleet-rlm` documentation. The docs are organized roughly around the [Diataxis framework](https://diataxis.fr/) and describe the maintained product: a Daytona-backed recursive DSPy workspace with a thin FastAPI/WebSocket transport and a narrow Agent Framework host around it.
 
 ## Quick Links
 
 | Category | Description |
 |----------|-------------|
 | [Adaptive RLM Product Spec](explanation/product-spec.md) | User-facing product definition and capability model |
-| [Architecture](architecture.md) | System architecture diagrams and data flows |
+| [Architecture](architecture.md) | Current architecture overview and layer ownership |
+| [Current Architecture and Transition Note](notes/current-architecture-transition.md) | Migration status and cleanup guidance for transitional layers |
+| [Codebase Map](reference/codebase-map.md) | Focused backend ownership map |
+| [Module Map](reference/module-map.md) | Current backend module relationships |
 | [Tutorials](tutorials/index.md) | Learning-oriented guides for getting started |
 | [How-to Guides](how-to-guides/index.md) | Task-oriented guides for specific goals |
 | [Reference](reference/index.md) | Information-oriented technical documentation |
@@ -43,24 +44,13 @@ Then open `http://localhost:8000`.
 ### Understand the System
 
 - [Architecture Overview](architecture.md)
+- [Current Architecture and Transition Note](notes/current-architecture-transition.md)
+- [Backend Codebase Map](reference/codebase-map.md)
+- [Python Backend Module Map](reference/module-map.md)
 - [Backend/Frontend Wiring Analysis](wiring-analysis.md)
-- [Phase 3 orchestration seams note](notes/phase-3-orchestration-seams.md)
-- [Phase 4 outer orchestration note](notes/phase-4-outer-orchestration.md)
-- [Phase 5 session orchestration note](notes/phase-5-session-orchestration.md)
-- [Phase 6 terminal orchestration note](notes/phase-6-terminal-orchestration.md)
-- [Phase 7/8 Agent Framework transition note](notes/phase-7-8-agent-framework-transition.md)
-- [Phase 9 Agent host HITL migration note](notes/phase-9-agent-host-hitl-migration.md)
-- [Phase 10 Agent host session migration note](notes/phase-10-agent-host-session-migration.md)
-- [Phase 11 Agent host REPL bridge migration note](notes/phase-11-agent-host-repl-bridge.md)
-- [Phase 12 DSPy recursive module + GEPA note](notes/phase-12-dspy-recursive-module-gepa.md)
-- [Phase 13 recursive context assembly note](notes/phase-13-recursive-context-assembly.md)
-- [Phase 14 recursive decomposition module note](notes/phase-14-recursive-decomposition-module.md)
-- [Phase 15 recursive verification module note](notes/phase-15-recursive-verification-module.md)
-- [Phase 16 recursive repair module note](notes/phase-16-recursive-repair-module.md)
-- [Module Map](reference/module-map.md)
-- [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
 - [Historical Snapshots](historical/index.md)
+- [Phase-by-phase migration notes](historical/index.md#architecture-and-migration-history)
 
 ### Contribute
 
@@ -75,6 +65,7 @@ When documentation conflicts with implementation, treat these as authoritative:
 - **CLI truth**: `uv run fleet-rlm --help` and `uv run fleet --help`
 - **API truth**: `openapi.yaml`
 - **WebSocket truth**: `src/fleet_rlm/api/routers/ws/endpoint.py` and adjacent helpers in `src/fleet_rlm/api/routers/ws/`
+- **Runtime core truth**: `src/fleet_rlm/runtime/agent/chat_agent.py`, `src/fleet_rlm/runtime/agent/recursive_runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`
 
 ---
 

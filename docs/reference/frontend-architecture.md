@@ -34,6 +34,7 @@ The live frontend shell supports only:
 
 - `/app/workspace`
 - `/app/volumes`
+- `/app/optimization`
 - `/app/settings`
 
 Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer

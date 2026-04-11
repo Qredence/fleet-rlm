@@ -69,9 +69,9 @@ See [Auth Modes](../reference/auth.md).
 
 - Deprecated and planned/stub REST surfaces were removed.
 - Requests to `/api/v1/tasks*`, `/api/v1/sessions*` CRUD, and `/api/v1/{taxonomy|analytics|search|memory|sandbox}*` now return `404 Not Found`.
-- The supported product surfaces are `Workbench`, `Volumes`, and
-  `Settings`. Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and
-  `/app/analytics` paths now fall through to the frontend not-found route
+- The supported product surfaces are `Workbench`, `Volumes`, `Optimization`,
+  and `Settings`. Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`,
+  and `/app/analytics` paths now fall through to the frontend not-found route
   instead of remaining first-class pages or redirect shims.
 
 ## Diagnostic Commands

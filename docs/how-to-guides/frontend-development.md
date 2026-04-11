@@ -56,14 +56,15 @@ Frontend source lives under `src/frontend/src/`.
 
 ## Product Surface Rules
 
-- Supported frontend surfaces are `/app/workspace`, `/app/volumes`, and
-  `/app/settings`.
+- Supported frontend surfaces are `/app/workspace`, `/app/volumes`,
+  `/app/optimization`, and `/app/settings`.
 - Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and
   `/app/analytics` routes should fall through to `/404`.
 - Thin route wrappers under `routes/` should render screen modules instead of
   owning page logic.
-- `workspace`, `volumes`, and `settings` behavior should stay in `screens/`,
-  `app/`, and `lib/` rather than reintroducing the older `features/` layout.
+- `workspace`, `volumes`, `optimization`, and `settings` behavior should stay
+  in `screens/`, `app/`, and `lib/` rather than reintroducing the older
+  `features/` layout.
 
 ## Runtime and API Contract Rules
 

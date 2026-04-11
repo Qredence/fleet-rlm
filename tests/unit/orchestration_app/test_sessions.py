@@ -6,11 +6,9 @@ import pytest
 
 from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.agent_host import (
+    OrchestrationSessionContext,
     build_orchestration_session_context,
     switch_orchestration_session,
-)
-from fleet_rlm.orchestration_app.sessions import (
-    OrchestrationSessionContext as CompatibilitySessionContext,
 )
 
 
@@ -147,6 +145,6 @@ def test_orchestration_session_context_builds_from_agent_host() -> None:
         "manifest": {"metadata": {}},
     }
     context = build_orchestration_session_context(session_record=session_record)
-    assert isinstance(context, CompatibilitySessionContext)
+    assert isinstance(context, OrchestrationSessionContext)
     assert context.session_record is session_record
     assert context.session_id == "session-a"

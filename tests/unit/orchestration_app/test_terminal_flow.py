@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
 from fleet_rlm.worker import WorkspaceEvent
 

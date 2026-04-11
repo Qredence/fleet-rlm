@@ -1,11 +1,15 @@
-"""Minimal outer orchestration entrypoints around the one-task worker runtime."""
+"""Transitional orchestration entrypoints around the worker boundary.
+
+This package intentionally stays small while Agent Framework ownership moves into
+``fleet_rlm.agent_host``. Re-export only the still-needed transition seams here.
+"""
 
 from .coordinator import (
     resolve_hitl_continuation,
     stream_orchestrated_workspace_task,
 )
-from .hitl_flow import HitlResolution
-from .sessions import (
+from fleet_rlm.agent_host.hitl_flow import HitlResolution
+from fleet_rlm.agent_host.sessions import (
     OrchestrationSessionContext,
     SessionRecordLink,
     SessionSwitchOutcome,

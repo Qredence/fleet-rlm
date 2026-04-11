@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.orchestration_app.coordinator import (
     resolve_hitl_continuation,
     stream_orchestrated_workspace_task,
 )
-from fleet_rlm.orchestration_app.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
 

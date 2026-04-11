@@ -2,6 +2,7 @@
 
 * [Documentation Home](index.md)
 * [Architecture Overview](architecture.md)
+* [Current Architecture and Transition Note](notes/current-architecture-transition.md)
 * [fleet-rlm Documentation](README.md)
 * [Contributing to fleet-rlm](../CONTRIBUTING.md)
 * [LiteLLM Proxy Model Availability](litellm-models.md)
@@ -60,8 +61,9 @@
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
 
-## Notes
+## Historical Notes
 
+* [Historical Snapshots](historical/index.md)
 * [Phase 1: Worker Boundary Extraction](notes/phase-1-worker-boundary.md)
 * [Phase 2: Websocket Transport Thinning](notes/phase-2-ws-thinning.md)
 * [Phase 3: Orchestration Seams](notes/phase-3-orchestration-seams.md)

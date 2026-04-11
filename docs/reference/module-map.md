@@ -1,8 +1,6 @@
 # Python Backend Module Map
 
-This document maps the current module relationships within `src/fleet_rlm/`.
-It reflects the simplified backend split across `api/`, `cli/`, `runtime/`,
-`integrations/`, and `scaffold/`.
+This document maps the current module relationships within `src/fleet_rlm/` with the runtime core centered explicitly.
 
 ## Layered Overview
 
@@ -10,21 +8,34 @@ It reflects the simplified backend split across `api/`, `cli/`, `runtime/`,
 graph TB
     CLI["cli/"]
     API["api/"]
+    HOST["agent_host/"]
+    BRIDGE["orchestration_app/ + api/orchestration/"]
+    WORKER["worker/"]
     RUNTIME["runtime/"]
+    DAYTONA["integrations/daytona/"]
     INTEGRATIONS["integrations/"]
+    QUALITY["runtime/quality/"]
     SCAFFOLD["scaffold/"]
     UI["ui/dist"]
 
     CLI --> API
+    CLI --> WORKER
     CLI --> RUNTIME
     CLI --> INTEGRATIONS
     CLI --> SCAFFOLD
 
+    API --> HOST
     API --> RUNTIME
     API --> INTEGRATIONS
     API --> UI
 
+    HOST --> BRIDGE
+    HOST --> WORKER
+    BRIDGE --> WORKER
+    WORKER --> RUNTIME
+    RUNTIME --> DAYTONA
     RUNTIME --> INTEGRATIONS
+    QUALITY --> RUNTIME
 ```
 
 ## Runtime Surfaces
@@ -33,46 +44,51 @@ graph TB
 | --- | --- | --- |
 | `fleet` | `cli/main.py` | `cli/fleet_cli.py`, `cli/terminal/*` |
 | `fleet-rlm` | `cli/fleet_cli.py` | `cli/commands/*`, `cli/runners.py`, `integrations/config/*` |
-| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `integrations/database/*`, `integrations/observability/*` |
+| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `agent_host/*`, `integrations/database/*`, `integrations/observability/*` |
 | FastMCP server | `integrations/mcp/server.py:create_mcp_server` | `cli/runners.py`, `runtime/agent/*`, `runtime/config.py` |
 
-## Shared Runtime Map
+## Core Runtime Map
 
 ```mermaid
 graph LR
     CHAT["runtime/agent/chat_agent.py"]
     RLM["runtime/agent/recursive_runtime.py"]
     SIG["runtime/agent/signatures.py"]
-    EXEC["runtime/execution/interpreter.py"]
-    STREAM["runtime/execution/streaming.py"]
-    STREAM_CTX["runtime/execution/streaming_context.py"]
     TOOLS["runtime/tools/"]
     CONTENT["runtime/content/"]
     MODELS["runtime/models/"]
-    PROVIDERS["integrations/daytona/"]
+    WORKER["worker/"]
+    EXEC["runtime/execution/*"]
+    DAYTONA_INTERPRETER["integrations/daytona/interpreter.py"]
+    DAYTONA_RUNTIME["integrations/daytona/runtime.py"]
+    QUALITY["runtime/quality/"]
 
+    WORKER --> CHAT
     CHAT --> SIG
     CHAT --> TOOLS
     CHAT --> EXEC
-    CHAT --> STREAM
-    CHAT --> STREAM_CTX
     CHAT --> RLM
+    CHAT --> MODELS
     TOOLS --> CONTENT
-    EXEC --> PROVIDERS
-    STREAM --> MODELS
+    EXEC --> DAYTONA_INTERPRETER
+    EXEC --> DAYTONA_RUNTIME
+    RLM --> DAYTONA_INTERPRETER
+    QUALITY --> CHAT
 ```
 
 ### Key dependencies
 
 | From | To | Purpose |
 | --- | --- | --- |
+| `worker/*` | `runtime/agent/*` | Worker boundary feeding the shared runtime core |
 | `runtime/agent/chat_agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
-| `runtime/agent/chat_agent.py` | `runtime/execution/interpreter.py` | Sandbox-backed execution |
-| `runtime/agent/recursive_runtime.py` | `runtime/execution/*` | Recursive delegation and streamed child turns |
-| `runtime/tools/*` | `runtime/content/*` | Chunking, grounding, document, and log workflows |
-| `runtime/execution/*` | `integrations/daytona/*` | Daytona interpreter/session backend integration |
+| `runtime/agent/chat_agent.py` | `runtime/execution/*` | Streaming turn execution and interpreter support |
+| `runtime/agent/recursive_runtime.py` | `integrations/daytona/*` | Recursive child execution over the Daytona substrate |
+| `runtime/execution/*` | `integrations/daytona/interpreter.py`, `integrations/daytona/runtime.py` | Stateful interpreter/session backend integration |
+| `runtime/models/*` | `runtime/agent/*` | Builder, registry, and runtime-model exports |
+| `runtime/quality/*` | `runtime/agent/*`, `runtime/models/*` | Offline evaluation and optimization against the live runtime graph |
 
-## API and WebSocket Map
+## API, Host, and Transition Map
 
 ```mermaid
 graph LR
@@ -81,26 +97,27 @@ graph LR
     WS_ENDPOINT["api/routers/ws/endpoint.py"]
     WS_STREAM["api/routers/ws/stream.py"]
     WS_SESSION["api/routers/ws/session.py"]
-    WS_COMMANDS["api/routers/ws/commands.py"]
     WS_HELPERS["api/routers/ws/* helpers"]
-    EXEC["api/events/"]
-    AUTH["api/auth/"]
-    RUNTIME["runtime/"]
-    INTEGRATIONS["integrations/"]
+    RUNTIME_SERVICES["api/runtime_services/*"]
+    HOST_WORKFLOW["agent_host/workflow.py"]
+    HOST_APP["agent_host/app.py"]
+    BRIDGE["orchestration_app/*"]
+    API_BRIDGE["api/orchestration/*"]
+    WORKER["worker/*"]
+    RUNTIME["runtime/*"]
 
     APP --> ROUTERS
-    ROUTERS --> AUTH
     ROUTERS --> WS_ENDPOINT
-    ROUTERS --> EXEC
-    ROUTERS --> INTEGRATIONS
+    ROUTERS --> RUNTIME_SERVICES
     WS_ENDPOINT --> WS_SESSION
     WS_ENDPOINT --> WS_STREAM
     WS_ENDPOINT --> WS_HELPERS
-    WS_STREAM --> WS_COMMANDS
-    WS_STREAM --> WS_HELPERS
-    WS_STREAM --> RUNTIME
-    WS_SESSION --> RUNTIME
-    WS_SESSION --> INTEGRATIONS
+    WS_STREAM --> HOST_WORKFLOW
+    WS_SESSION --> HOST_APP
+    HOST_WORKFLOW --> BRIDGE
+    HOST_WORKFLOW --> WORKER
+    BRIDGE --> API_BRIDGE
+    BRIDGE --> RUNTIME
 ```
 
 ### Key dependencies
@@ -108,15 +125,9 @@ graph LR
 | From | To | Purpose |
 | --- | --- | --- |
 | `api/main.py` | `api/bootstrap.py` | Runtime bootstrap lifecycle, critical startup, and optional warmup scheduling |
-| `api/bootstrap.py` | `integrations/database/*` | Database manager and repository setup |
-| `api/bootstrap.py` | `integrations/observability/*` | PostHog and MLflow lifecycle setup |
-| `api/routers/ws/*` | `runtime/agent/*` | Shared runtime execution |
-| `api/routers/ws/commands.py`, `hitl.py` | `runtime/agent/*` | Command dispatch and HITL command handling |
-| `api/routers/ws/lifecycle.py`, `turn_setup.py`, `turn_lifecycle.py` | `integrations/database/*`, `api/events/*` | Run/turn lifecycle orchestration |
-| `api/routers/ws/persistence.py`, `manifest.py`, `artifacts.py` | `integrations/database/*` | Durable state, manifest, and artifact persistence |
-| `api/routers/ws/errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `terminal.py`, `completion.py` | `runtime/models/*`, `api/events/*` | Failure handling, cancellation, terminal event shaping, and final summaries |
-| `api/routers/ws/types.py` | `integrations/daytona/*` | Daytona-specific request normalization |
-| `api/events/*` | `runtime/models/*` | Trace/event shaping |
+| `api/routers/ws/*` | `agent_host/*` | Hosted execution, HITL policy, execution events, and startup/repl bridging |
+| `agent_host/workflow.py` | `orchestration_app/*`, `worker/*` | Host policy around the worker seam |
+| `api/orchestration/*` | `agent_host/*`, `orchestration_app/*` | Compatibility shims that preserve older orchestration call sites |
 | `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
 | `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
 | `api/runtime_services/volumes.py` | `integrations/daytona/volumes.py` | Volume browsing |
@@ -129,8 +140,8 @@ graph LR
 | `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
 | `integrations/mcp/` | FastMCP server surface | `server.py` |
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
+| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `bridge.py`, `runtime_helpers.py` |
 | `runtime/quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `gepa_optimization.py`, `mlflow_evaluation.py`, `mlflow_optimization.py`, `workspace_metrics.py`, `scorers.py` |
-| `integrations/daytona/` | Daytona interpreter backend | `agent.py`, `bridge.py`, `interpreter.py`, `runtime.py`, `volumes.py`, `config.py`, `diagnostics.py`, `types.py`, `interpreter_execution.py`, `interpreter_assets.py`, `runtime_helpers.py` |
 
 ## Verification
 
