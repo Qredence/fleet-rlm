@@ -42,6 +42,13 @@ def _bind_context_selection_module_factory(agent: Any, factory: Any) -> None:
     )
 
 
+def _bind_verification_module_factory(agent: Any, factory: Any) -> None:
+    agent.get_recursive_verification_module = MethodType(  # type: ignore[method-assign]
+        lambda self: factory(),
+        agent,
+    )
+
+
 def test_reflection_module_coerces_typed_outputs() -> None:
     class _FakePredictor:
         def __call__(self, **_kwargs: Any) -> Any:
@@ -204,6 +211,105 @@ async def test_spawn_delegate_sub_agent_async_uses_recursive_decomposition_plan(
 
 
 @pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_runs_recursive_verification_before_reflection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+        recursive_verification_enabled=True,
+        recursive_reflection_enabled=True,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.prepare_routed_turn()
+    setattr(
+        agent.interpreter,
+        "current_runtime_metadata",
+        lambda: {
+            "workspace_path": "/workspace/repo",
+            "memory_handle": "meta/workspaces/tenant-a/users/u/react-session.json",
+            "memory_blob": "SECRET" * 200,
+        },
+    )
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            return dspy.Prediction(
+                answer=f"{prompt} done",
+                trajectory={"trajectory": [{"thought": prompt}]},
+                final_reasoning=f"{prompt} finished",
+            )
+
+    class _FakeDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [
+                    "Inspect the traceback",
+                    "Repair the failing import path",
+                ],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine the bounded findings in Python.",
+                "decomposition_rationale": "Split the repair into bounded semantic work.",
+            }
+
+    class _FakeVerificationModule:
+        async def acall(self, **kwargs: Any) -> dict[str, Any]:
+            assert kwargs["user_request"] == "repair the recursive failure"
+            assert "decomposition_mode=fan_out" in kwargs["decomposition_plan_summary"]
+            assert len(kwargs["collected_subquery_outputs"]) == 2
+            assert "SECRET" not in kwargs["latest_sandbox_evidence"]
+            return {
+                "verification_status": "needs_repair",
+                "missing_evidence": ["Run one bounded verification step."],
+                "contradictions": [],
+                "verified_summary": "The repair path is plausible but still needs one bounded verification step.",
+                "verification_rationale": "The aggregate is coherent, but evidence is still missing.",
+            }
+
+    class _FakeReflectionModule:
+        async def acall(self, **kwargs: Any) -> dict[str, Any]:
+            assert (
+                "recursive_verification_status=needs_repair"
+                in kwargs["latest_sandbox_evidence"]
+            )
+            assert (
+                "Run one bounded verification step."
+                in kwargs["latest_sandbox_evidence"]
+            )
+            assert kwargs["latest_tool_or_code_result"].startswith(
+                "The repair path is plausible"
+            )
+            return {
+                "next_action": "finalize",
+                "revised_plan": "Use the verified summary as the final synthesis.",
+                "rationale": "Verification tightened the aggregate before reflection.",
+                "confidence": 0.9,
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FakeDecompositionModule)
+    _bind_verification_module_factory(agent, _FakeVerificationModule)
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+
+    assert result["status"] == "ok"
+    assert result["recursive_verification"]["verification_status"] == "needs_repair"
+    assert (
+        "Recursive verification assessed the aggregated subquery results as needs_repair."
+        in result["final_reasoning"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_spawn_delegate_sub_agent_async_fan_out_consumes_delegate_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -333,6 +439,55 @@ async def test_spawn_delegate_sub_agent_async_uses_single_pass_when_decompositio
 
     assert result["status"] == "ok"
     assert calls == [("inspect", "ctx")]
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_preserves_aggregate_when_verification_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+        recursive_verification_enabled=True,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.prepare_routed_turn()
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            return dspy.Prediction(answer=f"{prompt} done", trajectory={})
+
+    class _FakeDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [
+                    "Inspect the traceback",
+                    "Repair the failing import path",
+                ],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine findings in Python.",
+                "decomposition_rationale": "Use bounded semantic work.",
+            }
+
+    class _FailingVerificationModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("verifier unavailable")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FakeDecompositionModule)
+    _bind_verification_module_factory(agent, _FailingVerificationModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
+
+    assert result["status"] == "ok"
+    assert "recursive_verification" not in result
+    assert "Recursive decomposition chose fan_out" in result["final_reasoning"]
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,18 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "ReflectAndReviseWorkspaceStep",
     ),
     "RecursiveSubQuerySignature": (".signatures", "RecursiveSubQuerySignature"),
+    "RecursiveVerificationStatus": (
+        ".recursive_verification",
+        "RecursiveVerificationStatus",
+    ),
+    "VerifyRecursiveAggregation": (
+        ".signatures",
+        "VerifyRecursiveAggregation",
+    ),
+    "VerifyRecursiveAggregationModule": (
+        ".recursive_verification",
+        "VerifyRecursiveAggregationModule",
+    ),
     "spawn_delegate_sub_agent_async": (
         ".recursive_runtime",
         "spawn_delegate_sub_agent_async",

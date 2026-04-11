@@ -151,6 +151,8 @@ def build_workspace_reflection_inputs(
     """Build reflection inputs from summarized Daytona-backed evidence only."""
 
     metadata = runtime_metadata if isinstance(runtime_metadata, dict) else {}
+    verification = latest_result.get("recursive_verification")
+    verification_payload = verification if isinstance(verification, dict) else {}
     working_memory_summary = (
         "\n".join(
             part
@@ -179,6 +181,35 @@ def build_workspace_reflection_inputs(
             for part in (
                 _compact_text(latest_result.get("final_reasoning", "")),
                 _compact_text(latest_result.get("trajectory", "")),
+                (
+                    "recursive_verification_status="
+                    + _compact_text(
+                        verification_payload.get("verification_status", ""),
+                        limit=120,
+                    )
+                    if verification_payload.get("verification_status")
+                    else ""
+                ),
+                (
+                    "missing_evidence="
+                    + "; ".join(
+                        _compact_text(item, limit=120)
+                        for item in verification_payload.get("missing_evidence", [])
+                        or []
+                    )
+                    if verification_payload.get("missing_evidence")
+                    else ""
+                ),
+                (
+                    "contradictions="
+                    + "; ".join(
+                        _compact_text(item, limit=120)
+                        for item in verification_payload.get("contradictions", []) or []
+                    )
+                    if verification_payload.get("contradictions")
+                    else ""
+                ),
+                _compact_text(verification_payload.get("verification_rationale", "")),
                 _compact_text(metadata.get("runtime_failure_category", "")),
                 _compact_text(metadata.get("runtime_failure_phase", "")),
             )
@@ -188,7 +219,8 @@ def build_workspace_reflection_inputs(
     )
 
     latest_result_summary = _compact_text(
-        latest_result.get("answer")
+        verification_payload.get("verified_summary")
+        or latest_result.get("answer")
         or latest_result.get("assistant_response")
         or latest_result.get("error")
         or "",

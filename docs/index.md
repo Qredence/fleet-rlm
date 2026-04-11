@@ -55,6 +55,7 @@ Then open `http://localhost:8000`.
 - [Phase 12 DSPy recursive module + GEPA note](notes/phase-12-dspy-recursive-module-gepa.md)
 - [Phase 13 recursive context assembly note](notes/phase-13-recursive-context-assembly.md)
 - [Phase 14 recursive decomposition module note](notes/phase-14-recursive-decomposition-module.md)
+- [Phase 15 recursive verification module note](notes/phase-15-recursive-verification-module.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)
