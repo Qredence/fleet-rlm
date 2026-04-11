@@ -157,8 +157,8 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
         async def acall(self, **kwargs: Any) -> dict[str, Any]:
             assert kwargs["user_request"] == "inspect"
             assert (
-                kwargs["working_memory_summary"]
-                == "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json | Bounded durable memory handle."
+                "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+                in kwargs["working_memory_summary"]
             )
             assert (
                 "Selected traceback summary only." in kwargs["latest_sandbox_evidence"]

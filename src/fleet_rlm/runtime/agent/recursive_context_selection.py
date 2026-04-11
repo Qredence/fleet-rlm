@@ -36,7 +36,7 @@ def _coerce_string_list(
     valid_options: list[str],
     limit: int = _MAX_SELECTED_ITEMS,
 ) -> list[str]:
-    if isinstance(value, list | tuple | set):
+    if isinstance(value, (list, tuple, set)):
         raw_items = [str(item or "").strip() for item in value]
     else:
         raw_text = str(value or "").strip()
