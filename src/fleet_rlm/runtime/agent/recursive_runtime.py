@@ -391,18 +391,25 @@ def _aggregate_recursive_repair_results(
 ) -> dict[str, Any]:
     answer_sections: list[str] = []
     trajectory_steps: list[dict[str, Any]] = []
+    error_messages: list[str] = []
     for index, (task, item) in enumerate(zip(tasks, results, strict=True), start=1):
+        status = str(item.get("status", "ok") or "ok").strip()
         answer = str(item.get("answer") or item.get("assistant_response") or "").strip()
-        answer_sections.append(f"[{index}] {task}\n{answer}".strip())
+        error = str(item.get("error", "") or "").strip()
+        section_body = answer or error
+        answer_sections.append(f"[{index}] {task}\n{section_body}".strip())
         trajectory_steps.append(
             {
                 "thought": f"Recursive repair task {index}: {task}",
-                "result": _compact_nested_trajectory_value(answer),
+                "result": _compact_nested_trajectory_value(section_body),
+                "status": status,
             }
         )
+        if status == "error" and error:
+            error_messages.append(f"[{index}] {task}: {error}")
 
-    return {
-        "status": "ok",
+    aggregated: dict[str, Any] = {
+        "status": "error" if error_messages else "ok",
         "answer": "\n\n".join(
             section for section in answer_sections if section
         ).strip(),
@@ -424,6 +431,9 @@ def _aggregate_recursive_repair_results(
             if part
         ).strip(),
     }
+    if error_messages:
+        aggregated["error"] = "Recursive repair failed: " + "; ".join(error_messages)
+    return aggregated
 
 
 def _reserve_recursive_delegate_slots_or_error(
@@ -913,7 +923,9 @@ async def spawn_delegate_sub_agent_async(
     if agent._current_depth + 1 >= agent._max_depth:
         return reflected_result
 
-    if bool(getattr(agent, "recursive_repair_enabled", False)):
+    if decision.next_action == "repair_and_retry" and bool(
+        getattr(agent, "recursive_repair_enabled", False)
+    ):
         repair_budget = _effective_recursive_repair_budget(agent)
         repair_inputs = build_recursive_repair_inputs(
             user_request=prompt,
@@ -974,15 +986,16 @@ async def spawn_delegate_sub_agent_async(
                         )
                         repair_results: list[dict[str, Any]] = []
                         for task_prompt in repair_tasks:
-                            repair_results.append(
-                                await spawn_delegate_sub_agent_async(
-                                    agent,
-                                    prompt=task_prompt,
-                                    context=repair_context,
-                                    stream_event_callback=stream_event_callback,
-                                    _reflection_passes=_reflection_passes + 1,
-                                )
+                            task_result = await spawn_delegate_sub_agent_async(
+                                agent,
+                                prompt=task_prompt,
+                                context=repair_context,
+                                stream_event_callback=stream_event_callback,
+                                _reflection_passes=_reflection_passes + 1,
                             )
+                            repair_results.append(task_result)
+                            if str(task_result.get("status", "ok") or "ok") == "error":
+                                break
                         return append_reflection_rationale(
                             append_recursive_repair_summary(
                                 _aggregate_recursive_repair_results(

@@ -257,3 +257,125 @@ async def test_spawn_delegate_sub_agent_async_executes_bounded_recursive_repair_
     assert result["recursive_repair"]["repair_mode"] == "bounded_repair_loop"
     assert "Recursive repair executed bounded_repair_loop" in result["final_reasoning"]
     assert "Recursive reflection chose repair_and_retry" in result["final_reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_does_not_run_repair_when_reflection_recurses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_reflection_enabled=True,
+        recursive_repair_enabled=True,
+    )
+    agent.prepare_routed_turn()
+
+    calls: list[tuple[str, str]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            return dspy.Prediction(answer=f"{prompt} done", trajectory={})
+
+    class _FakeReflectionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "next_action": "recurse",
+                "revised_plan": "Refine the recursive context and recurse once more.",
+                "rationale": "A broader recursive pass is needed before repair.",
+                "confidence": 0.8,
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_repair_module_factory(agent, _raise_repair_should_stay_off)
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+
+    assert result["status"] == "ok"
+    assert len(calls) == 2
+    assert "Recursive reflection guidance:" in calls[1][1]
+    assert "Recursive repair plan:" not in calls[1][1]
+    assert "recursive_repair" not in result
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_propagates_recursive_repair_task_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_reflection_enabled=True,
+        recursive_repair_enabled=True,
+    )
+    agent.prepare_routed_turn()
+
+    calls: list[tuple[str, str]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            if prompt == "Run one bounded verification rerun":
+                raise RuntimeError("verification rerun failed")
+            return dspy.Prediction(
+                answer=f"{prompt} done",
+                trajectory={"trajectory": [{"thought": prompt}]},
+                final_reasoning=f"{prompt} finished",
+            )
+
+    class _FakeReflectionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "next_action": "repair_and_retry",
+                "revised_plan": "Repair the import path and run one bounded rerun.",
+                "rationale": "The failure is narrow enough for bounded repair.",
+                "confidence": 0.9,
+            }
+
+    class _FakeRepairModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "repair_mode": "bounded_repair_loop",
+                "repair_target": "Repair the failing import path.",
+                "repair_steps": [
+                    "Inspect the failing import path.",
+                    "Run one bounded verification rerun.",
+                ],
+                "repair_subqueries": [
+                    "Inspect the failing import path",
+                    "Run one bounded verification rerun",
+                    "This task should never run",
+                ],
+                "repair_rationale": "Use the narrow traceback evidence before broader recursion.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
+    _bind_repair_module_factory(agent, _FakeRepairModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+
+    assert [prompt for prompt, _ in calls] == [
+        "repair the recursive failure",
+        "Inspect the failing import path",
+        "Run one bounded verification rerun",
+    ]
+    assert result["status"] == "error"
+    assert "Recursive repair failed:" in result["error"]
+    assert "verification rerun failed" in result["error"]
+    assert "This task should never run" not in result["answer"]
+    assert result["recursive_repair"]["repair_mode"] == "bounded_repair_loop"
