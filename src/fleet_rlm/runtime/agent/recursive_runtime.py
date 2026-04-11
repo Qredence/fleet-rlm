@@ -306,7 +306,9 @@ def _aggregate_decomposition_results(
 
     return {
         "status": "ok",
-        "answer": "\n\n".join(section for section in answer_sections if section).strip(),
+        "answer": "\n\n".join(
+            section for section in answer_sections if section
+        ).strip(),
         "assistant_response": "\n\n".join(
             section for section in answer_sections if section
         ).strip(),

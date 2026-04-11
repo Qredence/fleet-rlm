@@ -228,7 +228,9 @@ def build_recursive_decomposition_inputs(
         if normalized_path:
             evidence_parts.append(f"context_path={normalized_path}")
     if evidence_parts:
-        context_parts.append("Available Daytona-backed handles: " + "; ".join(evidence_parts))
+        context_parts.append(
+            "Available Daytona-backed handles: " + "; ".join(evidence_parts)
+        )
 
     return RecursiveDecompositionInputs(
         user_request=_compact_text(user_request, limit=800),

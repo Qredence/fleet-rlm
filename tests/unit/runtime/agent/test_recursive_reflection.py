@@ -134,6 +134,7 @@ async def test_spawn_delegate_sub_agent_async_uses_recursive_decomposition_plan(
         interpreter=FakeInterpreter(),
         recursive_decomposition_enabled=True,
     )
+    agent.interpreter.max_llm_calls = 10
     agent.batch_concurrency = 2
     agent.prepare_routed_turn()
     setattr(
@@ -191,8 +192,9 @@ async def test_spawn_delegate_sub_agent_async_uses_recursive_decomposition_plan(
     assert calls[1][0] == "Repair the failing import path"
     assert all("Recursive decomposition plan:" in item[1] for item in calls)
     assert "Summarize the bounded fix" not in result["answer"]
-    assert "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json" in (
-        decomposition_kwargs["latest_sandbox_evidence"]
+    assert (
+        "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+        in (decomposition_kwargs["latest_sandbox_evidence"])
     )
     assert "SECRET" not in decomposition_kwargs["assembled_recursive_context"]
     assert "SECRET" not in decomposition_kwargs["latest_sandbox_evidence"]

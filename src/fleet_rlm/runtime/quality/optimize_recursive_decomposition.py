@@ -11,7 +11,9 @@ import dspy
 from dspy.teleprompt import GEPA
 from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
-from fleet_rlm.runtime.agent.recursive_decomposition import PlanRecursiveSubqueriesModule
+from fleet_rlm.runtime.agent.recursive_decomposition import (
+    PlanRecursiveSubqueriesModule,
+)
 from fleet_rlm.runtime.agent.signatures import PlanRecursiveSubqueries
 
 from .mlflow_optimization import split_examples
@@ -59,8 +61,7 @@ def rows_to_recursive_decomposition_examples(
         if not isinstance(row, dict):
             continue
         if any(
-            key not in row
-            for key in (*_INPUT_KEYS, "decomposition_mode", "subqueries")
+            key not in row for key in (*_INPUT_KEYS, "decomposition_mode", "subqueries")
         ):
             continue
         example = dspy.Example(
