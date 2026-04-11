@@ -30,6 +30,7 @@ _MAX_SUMMARY_CHARS = 900
 _MAX_SIGNAL_CHARS = 900
 _MAX_TARGET_CHARS = 220
 _MAX_STEP_CHARS = 220
+_MAX_RATIONALE_CHARS = 800
 _MAX_STEPS = 4
 _MAX_SUBQUERIES = 3
 _MAX_SUBQUERY_CHARS = 240
@@ -222,7 +223,7 @@ def coerce_recursive_repair_decision(
         repair_subqueries=repair_subqueries,
         repair_rationale=_compact_text(
             get_prediction_field("repair_rationale", ""),
-            limit=800,
+            limit=_MAX_RATIONALE_CHARS,
         )
         or _DEFAULT_REPAIR_RATIONALE,
     )
