@@ -437,7 +437,7 @@ async def spawn_delegate_sub_agent_async(
             *,
             task_prompt: str,
             task_context: str,
-            status_text: str | None = None,
+            decomposition_progress_message: str | None = None,
         ) -> dict[str, Any]:
             if stream_event_callback is None:
                 prediction = await child_module.acall(
@@ -451,12 +451,12 @@ async def spawn_delegate_sub_agent_async(
                 interpreter=child_interpreter,
                 effective_max_iters=effective_max_iters,
             )
-            if status_text:
+            if decomposition_progress_message:
                 await _emit_stream_event_callback(
                     stream_event_callback,
                     StreamEvent(
                         kind="status",
-                        text=status_text,
+                        text=decomposition_progress_message,
                         payload=ctx.enrich({"recursive_decomposition": True}),
                     ),
                 )
@@ -571,7 +571,7 @@ async def spawn_delegate_sub_agent_async(
                     subquery_result = await _run_prediction(
                         task_prompt=subquery,
                         task_context=subquery_context,
-                        status_text=(
+                        decomposition_progress_message=(
                             "Recursive decomposition executing "
                             f"{len(collected_results) + 1}/{len(decomposition_decision.subqueries)}"
                         ),

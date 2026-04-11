@@ -19,7 +19,7 @@ from fleet_rlm.runtime.agent.signatures import PlanRecursiveSubqueries
 from .mlflow_optimization import split_examples
 
 RecursiveDecompositionRow = dict[str, Any]
-_INPUT_KEYS = [
+_DECOMPOSITION_INPUT_KEYS = [
     "user_request",
     "assembled_recursive_context",
     "current_plan",
@@ -61,7 +61,12 @@ def rows_to_recursive_decomposition_examples(
         if not isinstance(row, dict):
             continue
         if any(
-            key not in row for key in (*_INPUT_KEYS, "decomposition_mode", "subqueries")
+            key not in row
+            for key in (
+                *_DECOMPOSITION_INPUT_KEYS,
+                "decomposition_mode",
+                "subqueries",
+            )
         ):
             continue
         example = dspy.Example(
@@ -78,7 +83,7 @@ def rows_to_recursive_decomposition_examples(
             batching_strategy=str(row.get("batching_strategy", "") or ""),
             aggregation_plan=str(row.get("aggregation_plan", "") or ""),
             decomposition_rationale=str(row.get("decomposition_rationale", "") or ""),
-        ).with_inputs(*_INPUT_KEYS)
+        ).with_inputs(*_DECOMPOSITION_INPUT_KEYS)
         examples.append(example)
     if not examples:
         raise ValueError(

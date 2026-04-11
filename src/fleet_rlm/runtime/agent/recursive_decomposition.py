@@ -20,6 +20,16 @@ _MAX_CONTEXT_CHARS = 1200
 _MAX_SUBQUERY_CHARS = 320
 _MAX_SUBQUERY_BUDGET = 4
 _DEFAULT_BATCHING_STRATEGY = "serial"
+_BATCHING_STRATEGY_ALIASES = {
+    "single": "serial",
+    "single_pass": "serial",
+    "serial": "serial",
+    "sequential": "serial",
+    "batch": "batched",
+    "batched": "batched",
+    "parallel": "batched",
+    "parallelizable": "batched",
+}
 _DEFAULT_AGGREGATION_PLAN = (
     "Aggregate the bounded subquery results in Python without moving durable memory "
     "or execution state into orchestration state."
@@ -46,16 +56,7 @@ def _coerce_mode(value: Any, *, subquery_count: int) -> RecursiveDecompositionMo
 
 def _coerce_batching_strategy(value: Any, *, subquery_count: int) -> str:
     strategy = str(value or "").strip().lower().replace("-", "_")
-    normalized = {
-        "single": "serial",
-        "single_pass": "serial",
-        "serial": "serial",
-        "sequential": "serial",
-        "batch": "batched",
-        "batched": "batched",
-        "parallel": "batched",
-        "parallelizable": "batched",
-    }.get(strategy)
+    normalized = _BATCHING_STRATEGY_ALIASES.get(strategy)
     if normalized:
         return normalized
     return "batched" if subquery_count > 1 else _DEFAULT_BATCHING_STRATEGY
