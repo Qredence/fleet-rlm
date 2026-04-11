@@ -42,6 +42,7 @@ class _ReActAgentOptions:
     delegate_result_truncation_chars: int = 8000
     recursive_decomposition_enabled: bool = False
     recursive_verification_enabled: bool = False
+    recursive_repair_enabled: bool = False
 
 
 def _require_planner_ready(env_file: Path | None = None) -> None:
@@ -87,6 +88,7 @@ def _build_react_agent_from_options(
         delegate_result_truncation_chars=options.delegate_result_truncation_chars,
         recursive_decomposition_enabled=options.recursive_decomposition_enabled,
         recursive_verification_enabled=options.recursive_verification_enabled,
+        recursive_repair_enabled=options.recursive_repair_enabled,
         interpreter_async_execute=options.interpreter_async_execute,
         sandbox_spec=options.sandbox_spec,
         sub_lm=options.sub_lm,
@@ -128,6 +130,7 @@ def build_chat_agent(
     delegate_result_truncation_chars: int = 8000,
     recursive_decomposition_enabled: bool = False,
     recursive_verification_enabled: bool = False,
+    recursive_repair_enabled: bool = False,
 ) -> RLMReActChatAgent:
     """Build the canonical Daytona-backed DSPy chat agent."""
     options = _ReActAgentOptions(
@@ -156,6 +159,7 @@ def build_chat_agent(
         delegate_result_truncation_chars=delegate_result_truncation_chars,
         recursive_decomposition_enabled=recursive_decomposition_enabled,
         recursive_verification_enabled=recursive_verification_enabled,
+        recursive_repair_enabled=recursive_repair_enabled,
     )
     return _build_react_agent_from_options(
         options=options,

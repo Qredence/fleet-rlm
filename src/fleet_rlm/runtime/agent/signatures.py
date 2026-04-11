@@ -420,6 +420,48 @@ class VerifyRecursiveAggregation(dspy.Signature):
     )
 
 
+class PlanRecursiveRepair(dspy.Signature):
+    """Plan bounded semantic repair when a recursive result is still insufficient."""
+
+    user_request: str = dspy.InputField(desc="Current delegated user or parent request")
+    assembled_recursive_context: str = dspy.InputField(
+        desc="Bounded recursive context assembled from Daytona-backed handles and summaries"
+    )
+    verification_summary: str = dspy.InputField(
+        desc="Bounded summary of verification, reflection, and insufficiency signals"
+    )
+    latest_sandbox_evidence: str = dspy.InputField(
+        desc="Latest bounded sandbox, tool, or code evidence summary relevant to repair"
+    )
+    latest_failure_signals: str = dspy.InputField(
+        desc="Compact recent failure signals, contradictions, or missing evidence summaries"
+    )
+    repair_budget: int = dspy.InputField(
+        desc="Maximum number of bounded repair steps or repair subqueries Python/runtime may execute"
+    )
+    repair_mode: Literal[
+        "targeted_repair",
+        "bounded_repair_loop",
+        "needs_more_recursion",
+        "needs_human_review",
+        "no_repair",
+    ] = dspy.OutputField(
+        desc="Whether to do a targeted repair, bounded repair loop, escalate, or skip repair"
+    )
+    repair_target: str = dspy.OutputField(
+        desc="The narrow workspace/code/tool target that should be repaired first"
+    )
+    repair_steps: list[str] = dspy.OutputField(
+        desc="Bounded repair steps for Python/runtime to execute inside the existing Daytona-backed loop"
+    )
+    repair_subqueries: list[str] = dspy.OutputField(
+        desc="Optional bounded repair subqueries for Python/runtime child delegation"
+    )
+    repair_rationale: str = dspy.OutputField(
+        desc="Why this repair plan is appropriate and why it should stay narrow or escalate"
+    )
+
+
 class RLMVariableSignature(dspy.Signature):
     """Explore and answer questions about an arbitrarily long prompt.
 
@@ -451,6 +493,7 @@ __all__ = [
     "GroundedCitation",
     "IncidentTriageFromLogs",
     "AssembleRecursiveWorkspaceContext",
+    "PlanRecursiveRepair",
     "PlanRecursiveSubqueries",
     "MemoryActionIntentSignature",
     "MemoryMigrationOperation",

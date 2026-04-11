@@ -45,6 +45,12 @@ from .recursive_reflection import (
     build_workspace_reflection_inputs,
     coerce_workspace_reflection_decision,
 )
+from .recursive_repair import (
+    append_recursive_repair_summary,
+    build_recursive_repair_inputs,
+    build_recursive_repair_retry_context,
+    coerce_recursive_repair_decision,
+)
 from .recursive_verification import (
     append_recursive_verification_summary,
     build_recursive_verification_inputs,
@@ -69,6 +75,8 @@ _MIN_RECURSIVE_CONTEXT_BUDGET = 400
 _DEFAULT_RECURSIVE_CONTEXT_BUDGET = 1600
 _DEFAULT_RECURSIVE_SUBQUERY_BUDGET = 2
 _MAX_RECURSIVE_SUBQUERY_BUDGET = 4
+_DEFAULT_RECURSIVE_REPAIR_BUDGET = 2
+_MAX_RECURSIVE_REPAIR_BUDGET = 3
 _DEFAULT_DELEGATE_TRUNCATION_CHARS = 8000
 
 
@@ -328,6 +336,83 @@ def _aggregate_decomposition_results(
                 ),
                 decision.decomposition_rationale,
                 f"Aggregation plan: {decision.aggregation_plan}",
+            )
+            if part
+        ).strip(),
+    }
+
+
+def _effective_recursive_repair_budget(agent: RLMReActChatAgent) -> int:
+    configured = getattr(agent, "batch_concurrency", None)
+    try:
+        configured_budget = int(configured) if configured is not None else 0
+    except (TypeError, ValueError):
+        configured_budget = 0
+    return max(
+        1,
+        min(
+            _MAX_RECURSIVE_REPAIR_BUDGET,
+            configured_budget if configured_budget > 0 else _DEFAULT_RECURSIVE_REPAIR_BUDGET,
+        ),
+    )
+
+
+def _repair_plan_tasks(
+    *,
+    original_prompt: str,
+    decision: Any,
+    repair_budget: int,
+) -> list[str]:
+    subqueries = [
+        str(item or "").strip()
+        for item in getattr(decision, "repair_subqueries", []) or []
+        if str(item or "").strip()
+    ]
+    if getattr(decision, "repair_mode", "no_repair") == "bounded_repair_loop" and subqueries:
+        return subqueries[:repair_budget]
+    if subqueries:
+        return [subqueries[0]]
+    target = str(getattr(decision, "repair_target", "") or "").strip()
+    if target:
+        return [target]
+    return [str(original_prompt or "").strip()]
+
+
+def _aggregate_recursive_repair_results(
+    *,
+    decision: Any,
+    tasks: list[str],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    answer_sections: list[str] = []
+    trajectory_steps: list[dict[str, Any]] = []
+    for index, (task, item) in enumerate(zip(tasks, results, strict=False), start=1):
+        answer = str(item.get("answer") or item.get("assistant_response") or "").strip()
+        answer_sections.append(f"[{index}] {task}\n{answer}".strip())
+        trajectory_steps.append(
+            {
+                "thought": f"Recursive repair task {index}: {task}",
+                "result": _compact_nested_trajectory_value(answer),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "answer": "\n\n".join(section for section in answer_sections if section).strip(),
+        "assistant_response": "\n\n".join(
+            section for section in answer_sections if section
+        ).strip(),
+        "trajectory": {"steps": trajectory_steps},
+        "trajectory_truncated": False,
+        "final_reasoning": "\n".join(
+            part
+            for part in (
+                (
+                    "Recursive repair executed "
+                    f"{getattr(decision, 'repair_mode', 'no_repair')} across {len(results)} bounded task(s)."
+                ),
+                f"Repair target: {getattr(decision, 'repair_target', '')}",
+                getattr(decision, "repair_rationale", ""),
             )
             if part
         ).strip(),
@@ -820,6 +905,104 @@ async def spawn_delegate_sub_agent_async(
 
     if agent._current_depth + 1 >= agent._max_depth:
         return reflected_result
+
+    if bool(getattr(agent, "recursive_repair_enabled", False)):
+        repair_budget = _effective_recursive_repair_budget(agent)
+        repair_inputs = build_recursive_repair_inputs(
+            user_request=prompt,
+            assembled_recursive_context=(
+                selected_recursive_context.retry_context
+                if selected_recursive_context is not None
+                else context
+            ),
+            latest_result=normalized_result,
+            runtime_metadata=runtime_metadata if isinstance(runtime_metadata, dict) else None,
+            reflection_decision=decision,
+            repair_budget=repair_budget,
+            recursion_depth=agent._current_depth + 1,
+            max_depth=agent._max_depth,
+        )
+        repair_module = agent.get_recursive_repair_module()
+        try:
+            with _reflection_lm_context():
+                repair_prediction = await repair_module.acall(**repair_inputs.as_kwargs())
+            repair_decision = coerce_recursive_repair_decision(
+                repair_prediction,
+                latest_failure_signals=repair_inputs.latest_failure_signals,
+                repair_budget=repair_inputs.repair_budget,
+            )
+        except Exception:
+            logger.warning(
+                "Recursive repair planning failed; preserving generic recursive retry path",
+                exc_info=True,
+            )
+        else:
+            reflected_result = append_recursive_repair_summary(
+                reflected_result, repair_decision
+            )
+            if repair_decision.repair_mode in {
+                "targeted_repair",
+                "bounded_repair_loop",
+            }:
+                repair_tasks = _repair_plan_tasks(
+                    original_prompt=prompt,
+                    decision=repair_decision,
+                    repair_budget=repair_inputs.repair_budget,
+                )
+                if len(repair_tasks) > 1:
+                    reservation_error = _reserve_recursive_delegate_slots_or_error(
+                        agent,
+                        additional_slots=len(repair_tasks) - 1,
+                    )
+                    if reservation_error is not None:
+                        logger.info(
+                            "Recursive repair exceeded delegate budget; preserving generic recursive retry path"
+                        )
+                    else:
+                        repair_context = build_recursive_repair_retry_context(
+                            original_context=context,
+                            assembled_recursive_context=repair_inputs.assembled_recursive_context,
+                            decision=repair_decision,
+                        )
+                        repair_results: list[dict[str, Any]] = []
+                        for task_prompt in repair_tasks:
+                            repair_results.append(
+                                await spawn_delegate_sub_agent_async(
+                                    agent,
+                                    prompt=task_prompt,
+                                    context=repair_context,
+                                    stream_event_callback=stream_event_callback,
+                                    _reflection_passes=_reflection_passes + 1,
+                                )
+                            )
+                        return append_reflection_rationale(
+                            append_recursive_repair_summary(
+                                _aggregate_recursive_repair_results(
+                                    decision=repair_decision,
+                                    tasks=repair_tasks,
+                                    results=repair_results,
+                                ),
+                                repair_decision,
+                            ),
+                            decision,
+                        )
+                else:
+                    repair_context = build_recursive_repair_retry_context(
+                        original_context=context,
+                        assembled_recursive_context=repair_inputs.assembled_recursive_context,
+                        decision=repair_decision,
+                    )
+                    repair_result = await spawn_delegate_sub_agent_async(
+                        agent,
+                        prompt=repair_tasks[0],
+                        context=repair_context,
+                        stream_event_callback=stream_event_callback,
+                        _reflection_passes=_reflection_passes + 1,
+                    )
+                    return append_reflection_rationale(
+                        append_recursive_repair_summary(repair_result, repair_decision),
+                        decision,
+                    )
 
     retry_prompt, retry_context = build_recursive_retry_prompt(
         original_prompt=prompt,

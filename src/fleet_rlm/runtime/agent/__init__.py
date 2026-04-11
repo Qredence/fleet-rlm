@@ -14,6 +14,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".recursive_context_selection",
         "AssembleRecursiveWorkspaceContextModule",
     ),
+    "PlanRecursiveRepair": (
+        ".signatures",
+        "PlanRecursiveRepair",
+    ),
+    "PlanRecursiveRepairModule": (
+        ".recursive_repair",
+        "PlanRecursiveRepairModule",
+    ),
     "PlanRecursiveSubqueries": (
         ".signatures",
         "PlanRecursiveSubqueries",
