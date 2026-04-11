@@ -49,9 +49,11 @@ class HostedExecutionStepSink(Protocol):
     def run_completed(self) -> bool:
         pass
 
-    async def emit_step(self, step: Any) -> None: ...
+    async def emit_step(self, step: Any) -> None:
+        pass
 
-    async def persist_step(self, step: Any) -> None: ...
+    async def persist_step(self, step: Any) -> None:
+        pass
 
     def record_persistence_error(self, exc: Exception) -> None:
         pass
