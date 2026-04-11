@@ -105,6 +105,17 @@ def _fallback_context_summary(
     )
 
 
+def _build_latest_sandbox_evidence(
+    *,
+    decision: RecursiveContextSelectionDecision,
+    selected_evidence_entries: list[str],
+) -> str:
+    parts = [decision.assembled_context_summary, *selected_evidence_entries]
+    if decision.omission_rationale:
+        parts.append(f"Omitted context: {decision.omission_rationale}")
+    return "\n".join(part for part in parts if part)
+
+
 @dataclass(frozen=True, slots=True)
 class RecursiveContextSelectionInputs:
     """Typed input for recursive context assembly."""
@@ -353,18 +364,9 @@ def materialize_recursive_context(
         "\n".join(selected_memory_entries)
         or "No additional Daytona-backed memory handles were selected."
     )
-    latest_sandbox_evidence = "\n".join(
-        part
-        for part in (
-            decision.assembled_context_summary,
-            *selected_evidence_entries,
-            (
-                f"Omitted context: {decision.omission_rationale}"
-                if decision.omission_rationale
-                else ""
-            ),
-        )
-        if part
+    latest_sandbox_evidence = _build_latest_sandbox_evidence(
+        decision=decision,
+        selected_evidence_entries=selected_evidence_entries,
     )
     retry_context = "\n\n".join(
         part

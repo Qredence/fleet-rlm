@@ -221,9 +221,7 @@ def optimize_recursive_context_selection_module(
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     optimized.save(str(resolved_output_path))
 
-    manifest_path = resolved_output_path.parent / (
-        f"{resolved_output_path.stem}.manifest.json"
-    )
+    manifest_path = resolved_output_path.with_suffix(".manifest.json")
     manifest_path.write_text(
         json.dumps(
             {

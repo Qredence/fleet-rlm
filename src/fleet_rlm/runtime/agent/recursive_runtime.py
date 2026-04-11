@@ -56,7 +56,9 @@ logger = logging.getLogger(__name__)
 _MAX_NESTED_TRAJECTORY_STEPS = 5
 _MAX_NESTED_TRAJECTORY_TEXT = 512
 _MAX_REFLECTION_PASSES = 1
+_MIN_RECURSIVE_CONTEXT_BUDGET = 400
 _DEFAULT_RECURSIVE_CONTEXT_BUDGET = 1600
+_DEFAULT_DELEGATE_TRUNCATION_CHARS = 8000
 
 
 def _compact_nested_trajectory_value(value: Any) -> Any:
@@ -439,7 +441,15 @@ async def spawn_delegate_sub_agent_async(
         context_budget = min(
             _DEFAULT_RECURSIVE_CONTEXT_BUDGET,
             max(
-                400, int(getattr(agent, "delegate_result_truncation_chars", 8000) // 4)
+                _MIN_RECURSIVE_CONTEXT_BUDGET,
+                int(
+                    getattr(
+                        agent,
+                        "delegate_result_truncation_chars",
+                        _DEFAULT_DELEGATE_TRUNCATION_CHARS,
+                    )
+                    // 4
+                ),
             ),
         )
         selection_inputs = build_recursive_context_selection_inputs(
