@@ -40,7 +40,8 @@ class HostedExecutionEventRouter(Protocol):
 class HostedExecutionStepBuilder(Protocol):
     """Minimal step-builder surface needed by the hosted REPL bridge."""
 
-    def from_interpreter_hook(self, payload: dict[str, Any]) -> Any: ...
+    def from_interpreter_hook(self, payload: dict[str, Any]) -> Any:
+        pass
 
 
 class HostedExecutionStepSink(Protocol):
