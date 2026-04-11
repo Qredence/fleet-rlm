@@ -379,3 +379,64 @@ async def test_spawn_delegate_sub_agent_async_propagates_recursive_repair_task_f
     assert "verification rerun failed" in result["error"]
     assert "This task should never run" not in result["answer"]
     assert result["recursive_repair"]["repair_mode"] == "bounded_repair_loop"
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_preserves_human_review_path_from_repair_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_reflection_enabled=True,
+        recursive_repair_enabled=True,
+    )
+    agent.prepare_routed_turn()
+
+    calls: list[tuple[str, str]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            return dspy.Prediction(answer=f"{prompt} done", trajectory={})
+
+    class _FakeReflectionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "next_action": "repair_and_retry",
+                "revised_plan": "Pause retries and request human review for the risky repair.",
+                "rationale": "The worker should not keep retrying once the repair becomes risky.",
+                "confidence": 0.85,
+            }
+
+    class _FakeRepairModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "repair_mode": "needs_human_review",
+                "repair_target": "Review the risky filesystem mutation before another retry.",
+                "repair_steps": [
+                    "Summarize the risky workspace mutation for human review.",
+                ],
+                "repair_subqueries": [],
+                "repair_rationale": "The remaining repair path is too risky for another automated recursive pass.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_reflection_module_factory(agent, _FakeReflectionModule)
+    _bind_repair_module_factory(agent, _FakeRepairModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+
+    assert result["status"] == "ok"
+    assert [prompt for prompt, _ in calls] == ["repair the recursive failure"]
+    assert result["recursive_repair"]["repair_mode"] == "needs_human_review"
+    assert "Recursive repair planning chose needs_human_review." in result[
+        "final_reasoning"
+    ]
+    assert "Recursive reflection guidance:" not in calls[0][1]
