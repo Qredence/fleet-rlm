@@ -948,9 +948,6 @@ async def spawn_delegate_sub_agent_async(
                 exc_info=True,
             )
         else:
-            reflected_result = append_recursive_repair_summary(
-                reflected_result, repair_decision
-            )
             if repair_decision.repair_mode in {
                 "targeted_repair",
                 "bounded_repair_loop",
