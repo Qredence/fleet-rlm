@@ -28,17 +28,18 @@ def _dataset_row() -> dict[str, Any]:
 
 
 def test_rows_to_reflection_examples_preserves_typed_inputs() -> None:
-    examples = rows_to_reflection_examples([_dataset_row()])
+    row = _dataset_row()
+    examples = rows_to_reflection_examples([row])
 
     assert len(examples) == 1
     assert examples[0].next_action == "repair_and_retry"
-    assert examples[0]._input_keys == {
-        "user_request",
-        "working_memory_summary",
-        "current_plan",
-        "latest_sandbox_evidence",
-        "latest_tool_or_code_result",
-        "loop_state",
+    assert examples[0].inputs().toDict() == {
+        "user_request": row["user_request"],
+        "working_memory_summary": row["working_memory_summary"],
+        "current_plan": row["current_plan"],
+        "latest_sandbox_evidence": row["latest_sandbox_evidence"],
+        "latest_tool_or_code_result": row["latest_tool_or_code_result"],
+        "loop_state": row["loop_state"],
     }
 
 

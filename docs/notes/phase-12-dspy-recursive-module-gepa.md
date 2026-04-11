@@ -6,8 +6,8 @@ Preserve the fleet-rlm worker boundary, Agent Framework hosted orchestration, Da
 
 Phase 12 makes one narrow recursive worker behavior explicit as DSPy code:
 
-- `ReflectAndReviseWorkspaceStep` in `/home/runner/work/fleet-rlm/fleet-rlm/src/fleet_rlm/runtime/agent/signatures.py`
-- `ReflectAndReviseWorkspaceStepModule` in `/home/runner/work/fleet-rlm/fleet-rlm/src/fleet_rlm/runtime/agent/recursive_reflection.py`
+- `ReflectAndReviseWorkspaceStep` in `src/fleet_rlm/runtime/agent/signatures.py`
+- `ReflectAndReviseWorkspaceStepModule` in `src/fleet_rlm/runtime/agent/recursive_reflection.py`
 
 The module decides whether the current recursive workspace step should:
 
@@ -16,7 +16,7 @@ The module decides whether the current recursive workspace step should:
 - request human review
 - repair and retry
 
-The live adapter stays inside the worker/runtime layer at the recursive delegate seam in `/home/runner/work/fleet-rlm/fleet-rlm/src/fleet_rlm/runtime/agent/recursive_runtime.py`.
+The live adapter stays inside the worker/runtime layer at the recursive delegate seam in `src/fleet_rlm/runtime/agent/recursive_runtime.py`.
 
 ## How long memory and evidence stay Daytona-backed
 
@@ -33,7 +33,7 @@ Durable memory still lives in Daytona volumes, execution still happens in Dayton
 
 ## How GEPA is used offline
 
-Offline optimization lives in `/home/runner/work/fleet-rlm/fleet-rlm/src/fleet_rlm/runtime/quality/optimize_reflect_and_revise.py`.
+Offline optimization lives in `src/fleet_rlm/runtime/quality/optimize_reflect_and_revise.py`.
 
 That entrypoint:
 

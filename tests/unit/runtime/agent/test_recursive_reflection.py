@@ -167,3 +167,118 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
     assert "Recursive reflection guidance:" in attempts[1][1]
     assert "repair_and_retry" in result["final_reasoning"]
     assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_runs_reflection_with_delegate_lm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_reflection_enabled=True,
+    )
+    agent.prepare_routed_turn()
+    setattr(agent.interpreter, "current_runtime_metadata", lambda: {})
+
+    parent_lm = object()
+    delegate_lm = object()
+    agent.delegate_lm = delegate_lm
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            assert dspy.settings.lm is delegate_lm
+            assert prompt == "inspect"
+            assert context == "ctx"
+            return dspy.Prediction(answer="done", trajectory={})
+
+    class _FakeReflectionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            assert dspy.settings.lm is delegate_lm
+            return {
+                "next_action": "finalize",
+                "revised_plan": "done",
+                "rationale": "Delegate LM context should stay active for reflection.",
+                "confidence": 0.8,
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
+        lambda *, lm: dspy.context(lm=lm),
+    )
+    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
+        lambda self: _FakeReflectionModule(),
+        agent,
+    )
+
+    with dspy.context(lm=parent_lm):
+        result = await spawn_delegate_sub_agent_async(
+            agent, prompt="inspect", context="ctx"
+        )
+
+    assert result["status"] == "ok"
+    assert result["answer"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_runs_reflection_with_parent_lm_after_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_reflection_enabled=True,
+    )
+    agent.prepare_routed_turn()
+    setattr(agent.interpreter, "current_runtime_metadata", lambda: {})
+
+    parent_lm = object()
+    delegate_lm = object()
+    agent.delegate_lm = delegate_lm
+    child_calls = 0
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            nonlocal child_calls
+            child_calls += 1
+            if child_calls == 1:
+                assert dspy.settings.lm is delegate_lm
+                raise RuntimeError("delegate lm failed")
+            assert dspy.settings.lm is parent_lm
+            assert prompt == "inspect"
+            assert context == "ctx"
+            return dspy.Prediction(answer="done", trajectory={})
+
+    class _FakeReflectionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            assert dspy.settings.lm is parent_lm
+            return {
+                "next_action": "finalize",
+                "revised_plan": "done",
+                "rationale": "Fallback should reuse the parent LM for reflection.",
+                "confidence": 0.8,
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.recursive_runtime.build_dspy_context",
+        lambda *, lm: dspy.context(lm=lm),
+    )
+    agent.get_recursive_reflection_module = MethodType(  # type: ignore[method-assign]
+        lambda self: _FakeReflectionModule(),
+        agent,
+    )
+
+    with dspy.context(lm=parent_lm):
+        result = await spawn_delegate_sub_agent_async(
+            agent, prompt="inspect", context="ctx"
+        )
+
+    assert result["status"] == "ok"
+    assert result["answer"] == "done"
+    assert result["delegate_lm_fallback"] is True

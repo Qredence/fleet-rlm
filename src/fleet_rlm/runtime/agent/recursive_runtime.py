@@ -414,10 +414,21 @@ async def spawn_delegate_sub_agent_async(
         fallback_used=fallback_used,
     )
     reflection_module = agent.get_recursive_reflection_module()
+    reflection_lm = (
+        parent_lm
+        if fallback_used
+        else (delegate_lm if delegate_lm is not None else parent_lm)
+    )
+    reflection_lm_context = (
+        build_dspy_context(lm=reflection_lm)
+        if reflection_lm is not None
+        else nullcontext()
+    )
     try:
-        reflection_prediction = await reflection_module.acall(
-            **reflection_inputs.as_kwargs()
-        )
+        with reflection_lm_context:
+            reflection_prediction = await reflection_module.acall(
+                **reflection_inputs.as_kwargs()
+            )
     except Exception:
         logger.warning(
             "Recursive reflection failed; preserving normalized delegate result",
