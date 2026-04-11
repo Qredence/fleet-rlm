@@ -313,6 +313,7 @@ def _aggregate_decomposition_results(
             section for section in answer_sections if section
         ).strip(),
         "trajectory": {"steps": trajectory_steps},
+        "trajectory_truncated": False,
         "final_reasoning": "\n".join(
             part
             for part in (
@@ -326,6 +327,39 @@ def _aggregate_decomposition_results(
             if part
         ).strip(),
     }
+
+
+def _reserve_recursive_delegate_slots_or_error(
+    agent: RLMReActChatAgent,
+    *,
+    additional_slots: int,
+) -> dict[str, Any] | None:
+    normalized_slots = max(0, int(additional_slots))
+    if normalized_slots <= 0:
+        return None
+
+    limit = max(1, int(getattr(agent, "delegate_max_calls_per_turn", 1)))
+    state = getattr(agent, "_turn_delegation_state", None)
+    claimed_so_far = max(0, int(getattr(state, "recursive_delegate_calls_turn", 0)))
+    if claimed_so_far + normalized_slots > limit:
+        return {
+            "status": "error",
+            "error": (
+                "Delegate call budget reached for this turn. "
+                f"Maximum delegate calls per turn is {limit}."
+            ),
+            "delegate_max_calls_per_turn": limit,
+        }
+
+    for _ in range(normalized_slots):
+        budget_error = claim_delegate_slot_or_error(
+            agent,
+            depth_error_suffix="Cannot spawn delegate sub-agent.",
+            budget_kind="recursive_delegate",
+        )
+        if budget_error is not None:
+            return budget_error
+    return None
 
 
 def _delegate_trajectory_events(
@@ -552,6 +586,16 @@ async def spawn_delegate_sub_agent_async(
                 decomposition_decision.decomposition_mode != "fan_out"
                 or len(decomposition_decision.subqueries) <= 1
             ):
+                return await _run_prediction(task_prompt=prompt, task_context=context)
+
+            reservation_error = _reserve_recursive_delegate_slots_or_error(
+                agent,
+                additional_slots=len(decomposition_decision.subqueries) - 1,
+            )
+            if reservation_error is not None:
+                logger.info(
+                    "Recursive decomposition exceeded delegate budget; using single-pass child execution"
+                )
                 return await _run_prediction(task_prompt=prompt, task_context=context)
 
             batched_subqueries = _batched_subqueries(

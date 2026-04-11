@@ -198,7 +198,62 @@ async def test_spawn_delegate_sub_agent_async_uses_recursive_decomposition_plan(
     )
     assert "SECRET" not in decomposition_kwargs["assembled_recursive_context"]
     assert "SECRET" not in decomposition_kwargs["latest_sandbox_evidence"]
+    assert result["trajectory_truncated"] is False
     assert "Recursive decomposition chose fan_out" in result["final_reasoning"]
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_fan_out_consumes_delegate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+        delegate_max_calls_per_turn=2,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.batch_concurrency = 2
+    agent.prepare_routed_turn()
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            return dspy.Prediction(answer=f"{prompt} done", trajectory={})
+
+    class _FakeDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [
+                    "Inspect the traceback",
+                    "Repair the failing import path",
+                ],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine the bounded findings in Python.",
+                "decomposition_rationale": "Split the repair into bounded semantic work.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FakeDecompositionModule)
+
+    first_result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+    second_result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="one more delegate call",
+        context="ctx",
+    )
+
+    assert first_result["status"] == "ok"
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+    assert second_result["status"] == "error"
+    assert second_result["delegate_max_calls_per_turn"] == 2
 
 
 @pytest.mark.asyncio
