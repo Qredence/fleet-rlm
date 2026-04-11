@@ -217,13 +217,15 @@ def build_recursive_retry_prompt(
     original_prompt: str,
     original_context: str,
     decision: WorkspaceReflectionDecision,
+    assembled_recursive_context: str = "",
 ) -> tuple[str, str]:
     """Return the prompt/context pair for one follow-up recursive pass."""
 
     updated_context = "\n\n".join(
         part
         for part in (
-            str(original_context or "").strip(),
+            str(assembled_recursive_context or "").strip()
+            or str(original_context or "").strip(),
             "Recursive reflection guidance:",
             decision.revised_plan
             or "Re-evaluate the current workspace state before finalizing.",

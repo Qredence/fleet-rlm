@@ -6,6 +6,14 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "AssembleRecursiveWorkspaceContext": (
+        ".signatures",
+        "AssembleRecursiveWorkspaceContext",
+    ),
+    "AssembleRecursiveWorkspaceContextModule": (
+        ".recursive_context_selection",
+        "AssembleRecursiveWorkspaceContextModule",
+    ),
     "RLMReActChatAgent": (".chat_agent", "RLMReActChatAgent"),
     "ReflectAndReviseWorkspaceStepModule": (
         ".recursive_reflection",
