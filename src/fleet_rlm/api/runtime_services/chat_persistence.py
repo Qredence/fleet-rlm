@@ -165,6 +165,9 @@ class ExecutionLifecycleManager:
                 f"Durable state write failed: {self._persistence_error}",
             )
 
+    def record_persistence_error(self, exc: Exception) -> None:
+        self._persistence_error = exc
+
     async def _persist_worker(self) -> None:
         if not self._can_persist or self._persist_queue is None:
             return
