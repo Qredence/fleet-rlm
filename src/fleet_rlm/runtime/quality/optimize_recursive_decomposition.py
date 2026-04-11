@@ -70,19 +70,17 @@ def rows_to_recursive_decomposition_examples(
         ):
             continue
         example = dspy.Example(
-            user_request=str(row.get("user_request", "") or ""),
-            assembled_recursive_context=str(
-                row.get("assembled_recursive_context", "") or ""
-            ),
-            current_plan=str(row.get("current_plan", "") or ""),
-            loop_state=str(row.get("loop_state", "") or ""),
-            latest_sandbox_evidence=str(row.get("latest_sandbox_evidence", "") or ""),
-            subquery_budget=int(row.get("subquery_budget", 0) or 0),
-            decomposition_mode=str(row.get("decomposition_mode", "") or ""),
-            subqueries=[str(item or "") for item in row.get("subqueries", []) or []],
-            batching_strategy=str(row.get("batching_strategy", "") or ""),
-            aggregation_plan=str(row.get("aggregation_plan", "") or ""),
-            decomposition_rationale=str(row.get("decomposition_rationale", "") or ""),
+            user_request=str(row.get("user_request", "")),
+            assembled_recursive_context=str(row.get("assembled_recursive_context", "")),
+            current_plan=str(row.get("current_plan", "")),
+            loop_state=str(row.get("loop_state", "")),
+            latest_sandbox_evidence=str(row.get("latest_sandbox_evidence", "")),
+            subquery_budget=int(row.get("subquery_budget", 0)),
+            decomposition_mode=str(row.get("decomposition_mode", "")),
+            subqueries=[str(item or "") for item in row.get("subqueries", [])],
+            batching_strategy=str(row.get("batching_strategy", "")),
+            aggregation_plan=str(row.get("aggregation_plan", "")),
+            decomposition_rationale=str(row.get("decomposition_rationale", "")),
         ).with_inputs(*_DECOMPOSITION_INPUT_KEYS)
         examples.append(example)
     if not examples:
@@ -103,17 +101,17 @@ def build_recursive_decomposition_feedback_metric() -> Any:
         pred_trace: Any = None,
     ) -> ScoreWithFeedback:
         _ = trace, pred_name, pred_trace
-        expected_mode = str(getattr(gold, "decomposition_mode", "single_pass") or "")
-        actual_mode = str(getattr(pred, "decomposition_mode", "single_pass") or "")
+        expected_mode = str(getattr(gold, "decomposition_mode", "single_pass")).strip()
+        actual_mode = str(getattr(pred, "decomposition_mode", "single_pass")).strip()
         expected_subqueries = [
-            str(item or "") for item in (getattr(gold, "subqueries", []) or [])
+            str(item or "") for item in getattr(gold, "subqueries", [])
         ]
         actual_subqueries = [
-            str(item or "") for item in (getattr(pred, "subqueries", []) or [])
+            str(item or "") for item in getattr(pred, "subqueries", [])
         ]
-        subquery_budget = int(getattr(gold, "subquery_budget", 0) or 0)
-        aggregation_plan = str(getattr(pred, "aggregation_plan", "") or "").strip()
-        rationale = str(getattr(pred, "decomposition_rationale", "") or "").strip()
+        subquery_budget = int(getattr(gold, "subquery_budget", 0))
+        aggregation_plan = str(getattr(pred, "aggregation_plan", "")).strip()
+        rationale = str(getattr(pred, "decomposition_rationale", "")).strip()
 
         score = 0.0
         feedback: list[str] = []

@@ -478,7 +478,10 @@ async def spawn_delegate_sub_agent_async(
                     ),
                 )
             except Exception:
-                prediction = await child_module.acall(prompt=prompt, context=context)
+                prediction = await child_module.acall(
+                    prompt=task_prompt,
+                    context=task_context,
+                )
                 return _prediction_payload(prediction)
 
             output_stream = stream_program(prompt=task_prompt, context=task_context)
