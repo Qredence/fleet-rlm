@@ -51,14 +51,6 @@ def _coerce_string_list(
         if len(selected) >= limit:
             return selected
 
-    if selected:
-        return selected
-
-    for item in valid_options:
-        if item not in selected:
-            selected.append(item)
-        if len(selected) >= min(limit, len(valid_options)):
-            break
     return selected
 
 

@@ -49,6 +49,42 @@ def test_context_selection_module_coerces_bounded_outputs() -> None:
     assert prediction.omission_rationale
 
 
+def test_context_selection_module_leaves_invalid_selections_empty() -> None:
+    class _FakePredictor:
+        def __call__(self, **_kwargs: Any) -> Any:
+            return {
+                "selected_memory_handles": ["missing=handle"],
+                "selected_evidence_ids": "missing",
+                "assembled_context_summary": "",
+                "omission_rationale": "",
+            }
+
+    module = AssembleRecursiveWorkspaceContextModule(predictor=_FakePredictor())
+
+    prediction = module(
+        user_request="repair the failing workspace step",
+        current_plan="Inspect the latest failure and retry narrowly.",
+        loop_state="recursion_depth=1",
+        working_memory_catalog=[
+            "memory_handle=meta/workspaces/ws-1/users/u/session.json | Durable memory handle.",
+            "workspace_path=/workspace/repo | Active workspace.",
+        ],
+        recent_sandbox_evidence_catalog=[
+            "trajectory | {'steps': [{'thought': 'inspect'}]}",
+            "final_reasoning | A repairable syntax error was found.",
+        ],
+        latest_tool_or_code_result="SyntaxError: invalid syntax",
+        context_budget=600,
+    )
+
+    assert prediction.selected_memory_handles == []
+    assert prediction.selected_evidence_ids == []
+    assert (
+        "Latest result: SyntaxError: invalid syntax"
+        in prediction.assembled_context_summary
+    )
+
+
 def test_build_recursive_context_selection_inputs_stays_summary_only() -> None:
     inputs = build_recursive_context_selection_inputs(
         user_request="Investigate the workspace",

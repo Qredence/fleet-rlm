@@ -211,7 +211,7 @@ def optimize_recursive_context_selection_module(
     metric = build_recursive_context_selection_feedback_metric()
     program = AssembleRecursiveWorkspaceContextModule()
     optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset)
+    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
 
     validation_score = None
     if valset:

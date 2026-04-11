@@ -126,6 +126,50 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
     assert captured["valset"]
 
 
+def test_optimize_recursive_context_selection_module_uses_none_for_empty_valset(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    dataset_path = tmp_path / "recursive-context-single.json"
+    dataset_path.write_text(json.dumps([_dataset_row()]), encoding="utf-8")
+    output_path = tmp_path / "optimized" / "recursive-context-single.json"
+
+    captured: dict[str, Any] = {}
+
+    class _FakeOptimizedProgram(dspy.Module):
+        def save(self, path: str) -> None:
+            Path(path).write_text('{"optimized": true}\n', encoding="utf-8")
+
+    class _FakeGEPA:
+        def __init__(self, *, metric: Any, auto: str | None) -> None:
+            _ = metric, auto
+
+        def compile(
+            self,
+            program: dspy.Module,
+            *,
+            trainset: list[Any],
+            valset: list[Any] | None,
+        ) -> _FakeOptimizedProgram:
+            captured["trainset"] = trainset
+            captured["valset"] = valset
+            return _FakeOptimizedProgram()
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimize_recursive_context_selection.GEPA",
+        _FakeGEPA,
+    )
+
+    result = optimize_recursive_context_selection_module(
+        dataset_path=dataset_path,
+        output_path=output_path,
+    )
+
+    assert result["validation_examples"] == 0
+    assert captured["trainset"]
+    assert captured["valset"] is None
+
+
 def test_recursive_context_selection_feedback_metric_scores_relevance_and_boundedness() -> (
     None
 ):
