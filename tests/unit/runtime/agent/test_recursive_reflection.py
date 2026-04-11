@@ -28,6 +28,13 @@ def _bind_reflection_module_factory(agent: Any, factory: Any) -> None:
     )
 
 
+def _bind_decomposition_module_factory(agent: Any, factory: Any) -> None:
+    agent.get_recursive_decomposition_module = MethodType(  # type: ignore[method-assign]
+        lambda self: factory(),
+        agent,
+    )
+
+
 def _bind_context_selection_module_factory(agent: Any, factory: Any) -> None:
     agent.get_recursive_context_selection_module = MethodType(  # type: ignore[method-assign]
         lambda self: factory(),
@@ -117,6 +124,215 @@ async def test_spawn_delegate_sub_agent_async_skips_reflection_when_disabled(
 
     assert result["status"] == "ok"
     assert result["answer"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_uses_recursive_decomposition_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.batch_concurrency = 2
+    agent.prepare_routed_turn()
+    setattr(
+        agent.interpreter,
+        "current_runtime_metadata",
+        lambda: {
+            "workspace_path": "/workspace/repo",
+            "memory_handle": "meta/workspaces/tenant-a/users/u/react-session.json",
+            "memory_blob": "SECRET" * 200,
+        },
+    )
+
+    calls: list[tuple[str, str]] = []
+    decomposition_kwargs: dict[str, Any] = {}
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            return dspy.Prediction(
+                answer=f"{prompt} done",
+                trajectory={"trajectory": [{"thought": prompt}]},
+                final_reasoning=f"{prompt} finished",
+            )
+
+    class _FakeDecompositionModule:
+        async def acall(self, **kwargs: Any) -> dict[str, Any]:
+            decomposition_kwargs.update(kwargs)
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [
+                    "Inspect the traceback",
+                    "Repair the failing import path",
+                    "Summarize the bounded fix",
+                ],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine the bounded findings in Python.",
+                "decomposition_rationale": "Split the repair into bounded semantic work.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FakeDecompositionModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+
+    assert result["status"] == "ok"
+    assert len(calls) == 2
+    assert calls[0][0] == "Inspect the traceback"
+    assert calls[1][0] == "Repair the failing import path"
+    assert all("Recursive decomposition plan:" in item[1] for item in calls)
+    assert "Summarize the bounded fix" not in result["answer"]
+    assert (
+        "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+        in (decomposition_kwargs["latest_sandbox_evidence"])
+    )
+    assert "SECRET" not in decomposition_kwargs["assembled_recursive_context"]
+    assert "SECRET" not in decomposition_kwargs["latest_sandbox_evidence"]
+    assert result["trajectory_truncated"] is False
+    assert "Recursive decomposition chose fan_out" in result["final_reasoning"]
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_fan_out_consumes_delegate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+        delegate_max_calls_per_turn=2,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.batch_concurrency = 2
+    agent.prepare_routed_turn()
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            return dspy.Prediction(answer=f"{prompt} done", trajectory={})
+
+    class _FakeDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [
+                    "Inspect the traceback",
+                    "Repair the failing import path",
+                ],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine the bounded findings in Python.",
+                "decomposition_rationale": "Split the repair into bounded semantic work.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FakeDecompositionModule)
+
+    first_result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="repair the recursive failure",
+        context="Use only the staged traceback summary.",
+    )
+    assert first_result["status"] == "ok"
+    assert agent._turn_delegation_state.recursive_delegate_calls_turn == 2
+
+    second_result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt="one more delegate call",
+        context="ctx",
+    )
+
+    assert second_result["status"] == "error"
+    assert second_result["delegate_max_calls_per_turn"] == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_falls_back_to_single_pass_when_decomposition_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.prepare_routed_turn()
+
+    calls: list[tuple[str, str]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            return dspy.Prediction(answer="done", trajectory={})
+
+    class _FailingDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("planner unavailable")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _FailingDecompositionModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
+
+    assert result["status"] == "ok"
+    assert calls == [("inspect", "ctx")]
+
+
+@pytest.mark.asyncio
+async def test_spawn_delegate_sub_agent_async_uses_single_pass_when_decomposition_returns_no_subqueries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        recursive_decomposition_enabled=True,
+    )
+    agent.interpreter.max_llm_calls = 10
+    agent.prepare_routed_turn()
+
+    calls: list[tuple[str, str]] = []
+
+    class _FakeChildModule:
+        async def acall(self, *, prompt: str, context: str) -> dspy.Prediction:
+            calls.append((prompt, context))
+            return dspy.Prediction(answer="done", trajectory={})
+
+    class _EmptyDecompositionModule:
+        async def acall(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "decomposition_mode": "fan_out",
+                "subqueries": [],
+                "batching_strategy": "batched",
+                "aggregation_plan": "Combine findings in Python.",
+                "decomposition_rationale": "No safe split is available.",
+            }
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        lambda **_kwargs: _FakeChildModule(),
+    )
+    _bind_decomposition_module_factory(agent, _EmptyDecompositionModule)
+
+    result = await spawn_delegate_sub_agent_async(
+        agent, prompt="inspect", context="ctx"
+    )
+
+    assert result["status"] == "ok"
+    assert calls == [("inspect", "ctx")]
 
 
 @pytest.mark.asyncio
