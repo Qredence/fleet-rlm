@@ -3,7 +3,7 @@
 ## Scope and Reading Order
 
 This file is written for AI coding agents working in `fleet-rlm-dspy`.
-Use it for repo-wide operating rules, shared contracts, and top-level validation.
+Use it for repo-wide workflow and contract rules, shared contracts, and top-level validation.
 
 Read in this order before editing code:
 
@@ -51,7 +51,9 @@ Inside `src/frontend`, use `pnpm install --frozen-lockfile` and `pnpm run ...`.
 
 Top-level areas:
 
-- `src/fleet_rlm/agent_host/`: thin Microsoft Agent Framework outer host around orchestration_app and the worker seam
+- `src/fleet_rlm/api/`: thin FastAPI/WebSocket transport shell for auth, routers, schemas, websocket lifecycle, and API-side services
+- `src/fleet_rlm/agent_host/`: narrow but real Microsoft Agent Framework outer orchestration host around the worker seam
+- `src/fleet_rlm/orchestration_app/`: transitional orchestration bridge that still carries compatibility seams beneath `agent_host/`
 - `src/fleet_rlm/`: backend package, CLI, runtime logic, integrations, packaged UI assets
 - `src/frontend/`: React app, routes, shell, workspace UI, websocket/API client
 - `tests/unit/`, `tests/ui/`, `tests/integration/`, `tests/e2e/`: automated test suites
@@ -64,7 +66,10 @@ Top-level areas:
 Ownership expectations:
 
 - Keep backend transport/API concerns in `src/fleet_rlm/api/`
-- Keep backend runtime/business logic in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/`
+- Keep outer orchestration host policy in `src/fleet_rlm/agent_host/`
+- Keep transitional compatibility seams in `src/fleet_rlm/orchestration_app/` and `src/fleet_rlm/api/orchestration/`
+- Keep recursive runtime/business logic in `src/fleet_rlm/worker/`, `src/fleet_rlm/runtime/`, and `src/fleet_rlm/integrations/daytona/`
+- Keep offline DSPy evaluation and optimization helpers in `src/fleet_rlm/runtime/quality/`
 - Keep packaged scaffold assets in `src/fleet_rlm/scaffold/` curated directly; do not auto-sync them from `.claude/`
 - Keep frontend route ownership in `src/frontend/src/routes/`
 - Keep frontend screen entrypoints thin and push feature internals into `src/frontend/src/app/` and `src/frontend/src/lib/`
@@ -120,7 +125,8 @@ Cross-stack source-of-truth boundaries:
 
 - Search for existing ownership boundaries before adding new modules.
 - Prefer extending existing service/helper modules over introducing parallel abstractions.
-- Treat FastAPI as the transport root, DSPy as the runtime core, and Daytona as the only public sandbox backend.
+- Treat FastAPI/WebSocket as the transport root, `agent_host/` as the hosted outer policy layer, and the recursive DSPy + Daytona runtime as the system core.
+- Treat `src/fleet_rlm/orchestration_app/` and `src/fleet_rlm/api/orchestration/` as transitional layers to shrink over time rather than places to grow new product logic.
 - Treat the Volumes surface as a browser for mounted durable storage only; the live workspace is transient execution state.
 - Do not hand-edit generated files or build output unless the task is specifically about generated artifacts.
 - If backend request/response shapes or OpenAPI-facing metadata change, regenerate the root spec with `uv run python scripts/openapi_tools.py generate`, update frontend API artifacts, and verify drift with `pnpm run api:check`.
@@ -133,7 +139,7 @@ Common mistakes to avoid:
 - Reintroducing retired routes as first-class surfaces
 - Hand-editing generated OpenAPI or route tree files
 - Using `bun` or ad-hoc frontend tooling instead of `pnpm` + Vite+
-- Moving shared contract logic into screen-only or transport-only layers
+- Moving cognition or Daytona execution ownership into transport or outer-host wrappers
 - Treating `/ready` or Volumes semantics differently from the implemented runtime contract
 
 ## Canonical Commands

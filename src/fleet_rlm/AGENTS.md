@@ -47,10 +47,11 @@ Artifacts and areas to treat carefully:
 
 Active top-level areas under `src/fleet_rlm/`:
 
-- `agent_host/`: thin Microsoft Agent Framework outer host that wraps orchestration_app and preserves the worker boundary
-- `api/`: FastAPI app, auth, routers, schemas, event shaping, and server utilities
+- `agent_host/`: narrow but real Microsoft Agent Framework outer host that wraps the worker seam and hosted policy
+- `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities
+- `orchestration_app/`: transitional orchestration bridge that still carries compatibility seams beneath `agent_host/`
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
-- `runtime/`: shared chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
+- `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, observability, MCP, and external-system integrations
 - `scaffold/`: packaged Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
@@ -100,7 +101,7 @@ Canonical HTTP and websocket surfaces:
 Runtime-mode boundaries:
 
 - The public backend/frontend runtime contract is Daytona-only.
-- The canonical chat runtime is the Daytona-backed DSPy ReAct + `dspy.RLM` workbench agent.
+- The canonical chat runtime is the Daytona-backed recursive DSPy ReAct + `dspy.RLM` workbench agent.
 - Request-side `runtime_mode` selection is not part of the public websocket contract.
 - `execution_mode` remains a per-turn execution hint for the Daytona-backed runtime
 - Daytona request controls are `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency`
@@ -118,9 +119,10 @@ Auth, persistence, and observability constraints:
 
 Layering rules:
 
-- Keep Agent Framework outer-host orchestration in `agent_host/`; delegate session/HITL/terminal compatibility downward instead of rebuilding transport logic there
+- Keep Agent Framework outer-host orchestration in `agent_host/`; it is real hosted policy, but it should stay narrow and sit around the worker seam
 - Keep transport logic in `api/` only
-- Keep business/runtime behavior in `runtime/` or `integrations/`
+- Treat `orchestration_app/` and `api/orchestration/` as transitional compatibility layers rather than destinations for new core logic
+- Keep recursive business/runtime behavior in `worker/`, `runtime/`, or `integrations/daytona/`
 - Keep runtime config imports lightweight; config/package-root modules must not import DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks as import-time side effects
 - Reuse existing helpers before introducing new compatibility wrappers
 
@@ -128,6 +130,8 @@ Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
 - Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
+- Keep the main cognition loop in `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py`
+- Keep Daytona execution and durable workspace/session semantics in `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py`
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
@@ -144,6 +148,7 @@ API ownership:
 - Keep websocket runtime preparation in `src/fleet_rlm/api/runtime_services/chat_runtime.py`
 - Keep websocket run/session persistence orchestration in `src/fleet_rlm/api/runtime_services/chat_persistence.py`
 - Keep websocket event shaping and session lifecycle inside `src/fleet_rlm/api/routers/ws/*`
+- Keep `api/orchestration/*` limited to compatibility shims while migration continues
 
 Websocket/runtime contract rules:
 
@@ -192,7 +197,7 @@ Common mistakes to avoid:
 
 - Putting business logic into routers or CLI entrypoints
 - Adding heavy imports to config/package roots
-- Reintroducing parallel Daytona chat/runtime orchestrators outside the shared ReAct runtime
+- Reintroducing parallel Daytona chat/runtime orchestrators outside the shared recursive runtime
 - Hand-editing packaged UI build output or generated OpenAPI artifacts
 - Treating Volumes or `/ready` semantics differently from the implemented contract
 
