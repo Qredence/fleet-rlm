@@ -139,7 +139,7 @@ This layer supports the runtime core but is not the online websocket execution p
 | --- | --- | --- |
 | `api/` | thin transport shell | `api/main.py`, `api/routers/ws/endpoint.py`, `api/routers/ws/stream.py` |
 | `agent_host/` | outer orchestration host | `agent_host/workflow.py`, `agent_host/app.py` |
-| `orchestration_app/` | transitional bridge | `orchestration_app/coordinator.py`, `orchestration_app/sessions.py` |
+| `orchestration_app/` | transitional bridge | `orchestration_app/coordinator.py`, `orchestration_app/terminal_flow.py` |
 | `api/orchestration/` | compatibility shims | `api/orchestration/*.py` |
 | `worker/` | worker boundary and task contract | `worker/contracts.py`, `worker/adapters.py` |
 | `runtime/agent/` | main cognition loop | `runtime/agent/chat_agent.py`, `runtime/agent/recursive_runtime.py` |

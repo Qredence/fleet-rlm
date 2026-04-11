@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fleet_rlm.integrations.database import RunStatus
+from fleet_rlm.agent_host.checkpoints import OrchestrationCheckpointState
+from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 from ..api.events import ExecutionStep
 from ..api.routers.ws.completion import (
@@ -15,8 +17,6 @@ from ..api.routers.ws.completion import (
 )
 from ..api.routers.ws.lifecycle import ExecutionLifecycleManager
 from ..api.routers.ws.types import LocalPersistFn, StreamEventLike
-from .checkpoints import OrchestrationCheckpointState
-from .sessions import OrchestrationSessionContext
 
 logger = logging.getLogger(__name__)
 
