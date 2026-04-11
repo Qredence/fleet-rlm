@@ -19,6 +19,13 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
+from .optimize_reflect_and_revise import (
+    build_reflection_feedback_metric,
+    load_reflection_rows,
+    optimize_reflect_and_revise_module,
+    resolve_reflection_output_path,
+    rows_to_reflection_examples,
+)
 from .scorers import (
     build_rlm_scorers,
     get_default_judge_model,
@@ -35,6 +42,7 @@ __all__ = [
     "build_default_scorers",
     "build_exact_match_metric",
     "build_gepa_feedback_metric",
+    "build_reflection_feedback_metric",
     "build_program",
     "build_rlm_scorers",
     "completeness_feedback_metric",
@@ -46,9 +54,13 @@ __all__ = [
     "get_default_judge_model",
     "load_symbol",
     "load_trace_rows",
+    "load_reflection_rows",
     "optimize_program_with_gepa",
+    "optimize_reflect_and_revise_module",
     "optimize_program_with_mipro",
+    "resolve_reflection_output_path",
     "reasoning_quality_scorer",
+    "rows_to_reflection_examples",
     "rows_to_examples",
     "rows_with_expected_responses",
     "save_evaluation_result",

@@ -276,6 +276,40 @@ class RecursiveSubQuerySignature(dspy.Signature):
     answer: str = dspy.OutputField(desc="Answer for the parent caller")
 
 
+class ReflectAndReviseWorkspaceStep(dspy.Signature):
+    """Choose whether one recursive workspace step should recurse, repair, or finalize."""
+
+    user_request: str = dspy.InputField(desc="Current delegated user or parent request")
+    working_memory_summary: str = dspy.InputField(
+        desc="Summary or handles for Daytona-backed long memory and workspace state"
+    )
+    current_plan: str = dspy.InputField(
+        desc="Current execution plan or delegate context summary"
+    )
+    latest_sandbox_evidence: str = dspy.InputField(
+        desc="Selected sandbox evidence snippets or runtime metadata summary"
+    )
+    latest_tool_or_code_result: str = dspy.InputField(
+        desc="Latest tool, code, or child-result summary"
+    )
+    loop_state: str = dspy.InputField(
+        desc="Current recursion depth, retry budget, and loop state summary"
+    )
+    next_action: Literal[
+        "recurse",
+        "finalize",
+        "request_human_review",
+        "repair_and_retry",
+    ] = dspy.OutputField(
+        desc="Next step: recurse, finalize, request_human_review, or repair_and_retry"
+    )
+    revised_plan: str = dspy.OutputField(
+        desc="Updated plan for the next recursive step or repair attempt"
+    )
+    rationale: str = dspy.OutputField(desc="Why this action should happen next")
+    confidence: float = dspy.OutputField(desc="Decision confidence from 0.0 to 1.0")
+
+
 class RLMVariableSignature(dspy.Signature):
     """Explore and answer questions about an arbitrarily long prompt.
 
@@ -310,6 +344,7 @@ __all__ = [
     "MemoryMigrationOperation",
     "MemoryStructureAuditSignature",
     "MemoryStructureMigrationPlanSignature",
+    "ReflectAndReviseWorkspaceStep",
     "RLMReActChatSignature",
     "RLMVariableSignature",
     "RecursiveSubQuerySignature",
