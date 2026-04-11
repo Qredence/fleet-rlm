@@ -264,8 +264,14 @@ def append_recursive_verification_summary(
     result: dict[str, Any],
     decision: RecursiveVerificationDecision,
 ) -> dict[str, Any]:
-    """Attach verification data without changing public websocket payload shapes."""
+    """Return a copy of ``result`` with internal recursive-verification metadata.
 
+    This helper adds a top-level ``recursive_verification`` field containing the
+    serialized :class:`RecursiveVerificationDecision` for downstream runtime or
+    delegate-result consumers, and appends a human-readable verification note to
+    ``final_reasoning``. It therefore does change the shape of the returned
+    mapping at this internal layer.
+    """
     updated = dict(result)
     updated["recursive_verification"] = asdict(decision)
     note_parts = [
