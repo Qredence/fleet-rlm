@@ -427,6 +427,7 @@ async def spawn_delegate_sub_agent_async(
         if fallback_used
         else (delegate_lm if delegate_lm is not None else parent_lm)
     )
+
     def _reflection_lm_context() -> Any:
         return (
             build_dspy_context(lm=reflection_lm)
@@ -437,7 +438,9 @@ async def spawn_delegate_sub_agent_async(
     if bool(getattr(agent, "recursive_context_selection_enabled", False)):
         context_budget = min(
             _DEFAULT_RECURSIVE_CONTEXT_BUDGET,
-            max(400, int(getattr(agent, "delegate_result_truncation_chars", 8000) // 4)),
+            max(
+                400, int(getattr(agent, "delegate_result_truncation_chars", 8000) // 4)
+            ),
         )
         selection_inputs = build_recursive_context_selection_inputs(
             user_request=prompt,

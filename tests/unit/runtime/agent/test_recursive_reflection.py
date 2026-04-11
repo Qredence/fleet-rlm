@@ -160,7 +160,9 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
                 kwargs["working_memory_summary"]
                 == "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json | Bounded durable memory handle."
             )
-            assert "Selected traceback summary only." in kwargs["latest_sandbox_evidence"]
+            assert (
+                "Selected traceback summary only." in kwargs["latest_sandbox_evidence"]
+            )
             assert "answer | first attempt" not in kwargs["latest_sandbox_evidence"]
             return {
                 "next_action": "repair_and_retry",
@@ -203,9 +205,10 @@ async def test_spawn_delegate_sub_agent_async_can_retry_once_from_reflection(
     assert len(attempts) == 2
     assert attempts[1][0] == "inspect"
     assert "Recursive context assembly:" in attempts[1][1]
-    assert "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json" in attempts[
-        1
-    ][1]
+    assert (
+        "memory_handle=meta/workspaces/tenant-a/users/u/react-session.json"
+        in attempts[1][1]
+    )
     assert "answer | first attempt" not in attempts[1][1]
     assert "Recursive reflection guidance:" in attempts[1][1]
     assert "repair_and_retry" in result["final_reasoning"]

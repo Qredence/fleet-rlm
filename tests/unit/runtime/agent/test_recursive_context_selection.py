@@ -127,5 +127,7 @@ def test_materialize_recursive_context_uses_selected_items_only() -> None:
         selected.working_memory_summary
     )
     assert "workspace_path=/workspace/repo" not in selected.retry_context
-    assert "final_reasoning | The traceback points at one file." in selected.retry_context
+    assert (
+        "final_reasoning | The traceback points at one file." in selected.retry_context
+    )
     assert "trajectory |" not in selected.retry_context

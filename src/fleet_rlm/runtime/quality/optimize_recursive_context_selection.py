@@ -62,7 +62,11 @@ def rows_to_recursive_context_selection_examples(
             continue
         if any(
             key not in row
-            for key in (*_INPUT_KEYS, "selected_memory_handles", "selected_evidence_ids")
+            for key in (
+                *_INPUT_KEYS,
+                "selected_memory_handles",
+                "selected_evidence_ids",
+            )
         ):
             continue
         example = dspy.Example(
@@ -114,7 +118,9 @@ def build_recursive_context_selection_feedback_metric() -> Any:
         actual_memory = set(getattr(pred, "selected_memory_handles", []) or [])
         expected_evidence = set(getattr(gold, "selected_evidence_ids", []) or [])
         actual_evidence = set(getattr(pred, "selected_evidence_ids", []) or [])
-        actual_summary = str(getattr(pred, "assembled_context_summary", "") or "").strip()
+        actual_summary = str(
+            getattr(pred, "assembled_context_summary", "") or ""
+        ).strip()
         expected_budget = int(getattr(gold, "context_budget", 0) or 0)
         omission_rationale = str(getattr(pred, "omission_rationale", "") or "").strip()
 
@@ -125,9 +131,13 @@ def build_recursive_context_selection_feedback_metric() -> Any:
             memory_overlap = len(expected_memory & actual_memory) / len(expected_memory)
             score += 0.35 * memory_overlap
             if memory_overlap >= 0.75:
-                feedback.append("Selected memory handles match the representative trace.")
+                feedback.append(
+                    "Selected memory handles match the representative trace."
+                )
             else:
-                feedback.append("Memory-handle selection missed relevant Daytona-backed state.")
+                feedback.append(
+                    "Memory-handle selection missed relevant Daytona-backed state."
+                )
 
         if expected_evidence:
             evidence_overlap = len(expected_evidence & actual_evidence) / len(
@@ -137,7 +147,9 @@ def build_recursive_context_selection_feedback_metric() -> Any:
             if evidence_overlap >= 0.75:
                 feedback.append("Selected evidence ids match the representative trace.")
             else:
-                feedback.append("Evidence selection missed relevant recent sandbox/code results.")
+                feedback.append(
+                    "Evidence selection missed relevant recent sandbox/code results."
+                )
 
         if actual_summary:
             score += 0.15
@@ -156,7 +168,9 @@ def build_recursive_context_selection_feedback_metric() -> Any:
             score += 0.05
             feedback.append("Omission rationale explains what was left out.")
         else:
-            feedback.append("Omission rationale is empty; explain how context size was controlled.")
+            feedback.append(
+                "Omission rationale is empty; explain how context size was controlled."
+            )
 
         return ScoreWithFeedback(
             score=max(0.0, min(1.0, score)),

@@ -48,6 +48,9 @@ def _coerce_string_list(
         if len(selected) >= limit:
             return selected
 
+    if selected:
+        return selected
+
     for item in valid_options:
         if item not in selected:
             selected.append(item)
@@ -56,7 +59,9 @@ def _coerce_string_list(
     return selected
 
 
-def _normalize_catalog(catalog: list[str], *, limit: int = _MAX_CATALOG_ENTRIES) -> list[str]:
+def _normalize_catalog(
+    catalog: list[str], *, limit: int = _MAX_CATALOG_ENTRIES
+) -> list[str]:
     normalized: list[str] = []
     for entry in catalog:
         text = _compact_text(entry, limit=_MAX_CATALOG_ENTRY_CHARS)
@@ -231,10 +236,13 @@ def coerce_recursive_context_selection_decision(
             ),
             context_budget=summary_limit,
         )
-    omission_rationale = _compact_text(
-        get_prediction_field("omission_rationale", ""),
-        limit=400,
-    ) or "Omit unselected durable memory and verbose traces to stay within budget."
+    omission_rationale = (
+        _compact_text(
+            get_prediction_field("omission_rationale", ""),
+            limit=400,
+        )
+        or "Omit unselected durable memory and verbose traces to stay within budget."
+    )
     return RecursiveContextSelectionDecision(
         selected_memory_handles=selected_memory_handles,
         selected_evidence_ids=selected_evidence_ids,
@@ -296,13 +304,16 @@ def build_recursive_context_selection_inputs(
             )
 
     normalized_budget = max(400, min(int(context_budget), _MAX_CONTEXT_BUDGET))
-    latest_result_summary = _compact_text(
-        latest_result.get("answer")
-        or latest_result.get("assistant_response")
-        or latest_result.get("error")
-        or "",
-        limit=800,
-    ) or "No recent tool result was recorded."
+    latest_result_summary = (
+        _compact_text(
+            latest_result.get("answer")
+            or latest_result.get("assistant_response")
+            or latest_result.get("error")
+            or "",
+            limit=800,
+        )
+        or "No recent tool result was recorded."
+    )
     return RecursiveContextSelectionInputs(
         user_request=_compact_text(user_request, limit=800),
         current_plan=_compact_text(current_plan, limit=800),
