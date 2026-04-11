@@ -110,6 +110,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         delegate_lm: Any | None = None,
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
+        recursive_reflection_enabled: bool = False,
         execution_mode: ExecutionMode = "auto",
     ) -> None:
         super().__init__()
@@ -127,6 +128,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self.delegate_result_truncation_chars = max(
             256, int(delegate_result_truncation_chars)
         )
+        self.recursive_reflection_enabled = bool(recursive_reflection_enabled)
         self.execution_mode: ExecutionMode = execution_mode
         self.secret_name = secret_name
         self.default_volume_name = volume_name
@@ -169,6 +171,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._started = False
         self._extra_tools: list[Callable[..., Any]] = list(extra_tools or [])
         self._runtime_modules: dict[str, dspy.Module] = {}
+        self._recursive_reflection_module: dspy.Module | None = None
 
         # Register Core Memory tools
         self._extra_tools.extend([self.core_memory_append, self.core_memory_replace])
@@ -573,6 +576,16 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
                 verbose=self.verbose,
             ),
         )
+
+    def get_recursive_reflection_module(self) -> dspy.Module:
+        """Return the cached recursive reflection module for worker-side retries."""
+        if self._recursive_reflection_module is None:
+            from fleet_rlm.runtime.agent.recursive_reflection import (
+                ReflectAndReviseWorkspaceStepModule,
+            )
+
+            self._recursive_reflection_module = ReflectAndReviseWorkspaceStepModule()
+        return self._recursive_reflection_module
 
     def history_messages(self) -> list[Any]:
         """Return chat history messages as a defensive list copy."""

@@ -34,6 +34,12 @@ from .delegation_policy import (
     record_delegate_fallback,
     remaining_llm_budget,
 )
+from .recursive_reflection import (
+    append_reflection_rationale,
+    build_recursive_retry_prompt,
+    build_workspace_reflection_inputs,
+    coerce_workspace_reflection_decision,
+)
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
@@ -43,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_NESTED_TRAJECTORY_STEPS = 5
 _MAX_NESTED_TRAJECTORY_TEXT = 512
+_MAX_REFLECTION_PASSES = 1
 
 
 def _compact_nested_trajectory_value(value: Any) -> Any:
@@ -234,6 +241,7 @@ async def spawn_delegate_sub_agent_async(
     prompt: str,
     context: str = "",
     stream_event_callback: Callable[[Any], Any] | None = None,
+    _reflection_passes: int = 0,
 ) -> dict[str, Any]:
     """Run a bounded child RLM query in a fresh child sandbox."""
 
@@ -380,8 +388,72 @@ async def spawn_delegate_sub_agent_async(
         else:
             return {"status": "error", "error": f"Sub-agent execution failed: {exc}"}
 
-    return normalize_delegate_result(
+    normalized_result = normalize_delegate_result(
         agent=agent,
         raw_result=raw_result,
         fallback_used=fallback_used,
     )
+    if (
+        not bool(getattr(agent, "recursive_reflection_enabled", False))
+        or _reflection_passes >= _MAX_REFLECTION_PASSES
+    ):
+        return normalized_result
+
+    metadata_fn = getattr(child_interpreter, "current_runtime_metadata", None)
+    runtime_metadata = metadata_fn() if callable(metadata_fn) else {}
+    reflection_inputs = build_workspace_reflection_inputs(
+        user_request=prompt,
+        current_plan=context,
+        latest_result=normalized_result,
+        runtime_metadata=runtime_metadata
+        if isinstance(runtime_metadata, dict)
+        else None,
+        recursion_depth=agent._current_depth + 1,
+        max_depth=agent._max_depth,
+        reflection_passes=_reflection_passes,
+        fallback_used=fallback_used,
+    )
+    reflection_module = agent.get_recursive_reflection_module()
+    reflection_lm = (
+        parent_lm
+        if fallback_used
+        else (delegate_lm if delegate_lm is not None else parent_lm)
+    )
+    reflection_lm_context = (
+        build_dspy_context(lm=reflection_lm)
+        if reflection_lm is not None
+        else nullcontext()
+    )
+    try:
+        with reflection_lm_context:
+            reflection_prediction = await reflection_module.acall(
+                **reflection_inputs.as_kwargs()
+            )
+    except Exception:
+        logger.warning(
+            "Recursive reflection failed; preserving normalized delegate result",
+            exc_info=True,
+        )
+        return normalized_result
+
+    decision = coerce_workspace_reflection_decision(reflection_prediction)
+    reflected_result = append_reflection_rationale(normalized_result, decision)
+    if decision.next_action not in {"recurse", "repair_and_retry"}:
+        return reflected_result
+
+    if agent._current_depth + 1 >= agent._max_depth:
+        return reflected_result
+
+    retry_prompt, retry_context = build_recursive_retry_prompt(
+        original_prompt=prompt,
+        original_context=context,
+        decision=decision,
+    )
+    retry_result = await spawn_delegate_sub_agent_async(
+        agent,
+        prompt=retry_prompt,
+        context=retry_context,
+        stream_event_callback=stream_event_callback,
+        _reflection_passes=_reflection_passes + 1,
+    )
+    return append_reflection_rationale(retry_result, decision)

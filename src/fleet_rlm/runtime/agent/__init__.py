@@ -7,7 +7,15 @@ from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "RLMReActChatAgent": (".chat_agent", "RLMReActChatAgent"),
+    "ReflectAndReviseWorkspaceStepModule": (
+        ".recursive_reflection",
+        "ReflectAndReviseWorkspaceStepModule",
+    ),
     "RLMReActChatSignature": (".signatures", "RLMReActChatSignature"),
+    "ReflectAndReviseWorkspaceStep": (
+        ".signatures",
+        "ReflectAndReviseWorkspaceStep",
+    ),
     "RecursiveSubQuerySignature": (".signatures", "RecursiveSubQuerySignature"),
     "spawn_delegate_sub_agent_async": (
         ".recursive_runtime",
