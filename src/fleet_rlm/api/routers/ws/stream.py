@@ -12,6 +12,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.agent_host import (
     OrchestrationSessionContext,
+    ReplHookBridge,
     build_orchestration_session_context,
     stream_hosted_workspace_task,
 )
@@ -24,7 +25,6 @@ from fleet_rlm.integrations.observability.trace_context import (
 )
 from fleet_rlm.worker import WorkspaceEvent
 
-from ...orchestration.repl_bridge import ReplHookBridge
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
@@ -129,7 +129,6 @@ async def run_streaming_turn(
         interpreter=interpreter,
         enqueue_nonblocking=enqueue_latest_nonblocking,
     )
-    await repl_hook_bridge.start()
 
     last_loaded_docs_path = prepared_turn.last_loaded_docs_path
     if should_reload_docs_path(last_loaded_docs_path, prepared_turn.docs_path):
@@ -146,6 +145,7 @@ async def run_streaming_turn(
                 orchestration_session=orchestration_session,
                 cancel_check=cancel_check,
                 lifecycle=lifecycle,
+                hosted_repl_bridge=repl_hook_bridge,
                 step_builder=step_builder,
                 analytics_enabled=prepared_turn.analytics_enabled,
                 persist_session_state=persist_session_state,
@@ -165,8 +165,6 @@ async def run_streaming_turn(
             exc=exc,
             request_message=prepared_turn.message,
         )
-    finally:
-        await repl_hook_bridge.stop()
 
     return last_loaded_docs_path
 
@@ -196,6 +194,7 @@ async def _stream_agent_events(
     orchestration_session: OrchestrationSessionContext | None,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
+    hosted_repl_bridge: ReplHookBridge | None,
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
@@ -212,6 +211,7 @@ async def _stream_agent_events(
         async for worker_event in stream_hosted_workspace_task(
             request=worker_request,
             session=orchestration_session,
+            hosted_repl_bridge=hosted_repl_bridge,
         ):
             await _emit_stream_event(
                 websocket=websocket,

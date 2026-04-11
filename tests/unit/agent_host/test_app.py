@@ -19,6 +19,17 @@ class _AgentStub:
         return None
 
 
+class _BridgeStub:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def start(self) -> None:
+        self.calls.append("start")
+
+    async def stop(self) -> None:
+        self.calls.append("stop")
+
+
 def test_build_workspace_host_workflow_returns_agent_framework_workflow() -> None:
     assert isinstance(build_workspace_host_workflow(), Workflow)
 
@@ -119,3 +130,31 @@ def test_stream_hosted_workspace_task_preserves_worker_boundary(
     assert (
         session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
     )
+
+
+def test_stream_hosted_workspace_task_owns_bridge_lifecycle(monkeypatch) -> None:
+    request = WorkspaceTaskRequest(agent=_AgentStub(), message="run code")
+    bridge = _BridgeStub()
+
+    async def _fake_stream_orchestrated_workspace_task(*, request, session):
+        _ = (request, session)
+        yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
+
+    monkeypatch.setattr(
+        "fleet_rlm.agent_host.workflow.stream_orchestrated_workspace_task",
+        _fake_stream_orchestrated_workspace_task,
+    )
+
+    async def _collect() -> list[WorkspaceEvent]:
+        return [
+            event
+            async for event in stream_hosted_workspace_task(
+                request=request,
+                hosted_repl_bridge=bridge,  # type: ignore[arg-type]
+            )
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert [event.kind for event in events] == ["final"]
+    assert bridge.calls == ["start", "stop"]

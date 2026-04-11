@@ -51,6 +51,7 @@ Then open `http://localhost:8000`.
 - [Phase 7/8 Agent Framework transition note](notes/phase-7-8-agent-framework-transition.md)
 - [Phase 9 Agent host HITL migration note](notes/phase-9-agent-host-hitl-migration.md)
 - [Phase 10 Agent host session migration note](notes/phase-10-agent-host-session-migration.md)
+- [Phase 11 Agent host REPL bridge migration note](notes/phase-11-agent-host-repl-bridge.md)
 - [Module Map](reference/module-map.md)
 - [Codebase Map](reference/codebase-map.md)
 - [Concepts](explanation/concepts.md)

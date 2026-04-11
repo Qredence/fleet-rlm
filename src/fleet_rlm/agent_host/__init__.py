@@ -2,6 +2,7 @@
 
 from .app import stream_hosted_workspace_task
 from .hitl_flow import HitlResolution, resolve_hitl_continuation
+from .repl_bridge import ReplHookBridge
 from .sessions import (
     OrchestrationSessionContext,
     SessionRecordLink,
@@ -18,6 +19,7 @@ from .startup_status import (
 __all__ = [
     "HitlResolution",
     "OrchestrationSessionContext",
+    "ReplHookBridge",
     "SessionRecordLink",
     "SessionSwitchOutcome",
     "build_orchestration_session_context",
