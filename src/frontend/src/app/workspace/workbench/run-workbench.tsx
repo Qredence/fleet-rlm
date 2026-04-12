@@ -101,9 +101,14 @@ function humanizeKind(kind: string): string {
 
 function statusBadgeVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
   if (status === "completed") return "default";
+  if (status === "needs_human_review") return "outline";
   if (status === "error") return "destructive";
   if (status === "running") return "secondary";
   return "outline";
+}
+
+function humanizeStatus(status: string): string {
+  return status.replace(/_/g, " ");
 }
 
 function IterationRow({
@@ -274,6 +279,7 @@ export function RunWorkbench() {
   const renderedSelectedTab =
     selectedTab === "callbacks" || selectedTab === "prompts" ? "iterations" : selectedTab;
   const warningCount = summary?.warnings?.length ?? 0;
+  const humanReview = summary?.humanReview;
 
   return (
     <div
@@ -301,6 +307,30 @@ export function RunWorkbench() {
         </Alert>
       ) : null}
 
+      {humanReview?.required ? (
+        <Alert className="shrink-0 border-accent/25 bg-accent/5 text-foreground">
+          <TriangleAlert />
+          <AlertTitle>Human review needed</AlertTitle>
+          <AlertDescription>
+            <div className="space-y-2">
+              {humanReview.reason ? <p>{humanReview.reason}</p> : null}
+              {humanReview.repairTarget ? (
+                <p>
+                  <span className="font-medium">Review target:</span> {humanReview.repairTarget}
+                </p>
+              ) : null}
+              {humanReview.repairSteps?.length ? (
+                <ul className="list-disc pl-5">
+                  {humanReview.repairSteps.map((step, index) => (
+                    <li key={`human-review-step-${index}`}>{step}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className="shrink-0 rounded-xl border border-border-subtle/80 bg-card/80 px-3 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -313,9 +343,9 @@ export function RunWorkbench() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
+            <Badge variant={statusBadgeVariant(status)}>{humanizeStatus(status)}</Badge>
             {summary?.terminationReason ? (
-              <Badge variant="secondary">{summary.terminationReason}</Badge>
+              <Badge variant="secondary">{humanizeStatus(summary.terminationReason)}</Badge>
             ) : null}
           </div>
         </div>

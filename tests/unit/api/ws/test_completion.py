@@ -130,3 +130,38 @@ def test_build_execution_completion_summary_marks_tool_error_final_as_error() ->
     assert summary["status"] == "error"
     assert summary["termination_reason"] == "final"
     assert summary["final_artifact"]["value"]["summary"] == "claimed success"
+
+
+def test_build_execution_completion_summary_surfaces_human_review_terminal_state() -> (
+    None
+):
+    event = WorkspaceEvent(
+        kind="final",
+        text="Need a human to review the risky repair.",
+        payload={
+            "recursive_repair": {
+                "repair_mode": "needs_human_review",
+                "repair_target": "Review the risky filesystem mutation.",
+                "repair_steps": ["Confirm the proposed workspace mutation."],
+                "repair_rationale": "The remaining repair path is too risky.",
+            },
+            "final_reasoning": "Recursive repair requested a human review checkpoint.",
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="repair the workspace",
+        run_id="run-human-review",
+    )
+
+    assert summary["status"] == "needs_human_review"
+    assert summary["termination_reason"] == "needs_human_review"
+    assert summary["human_review"]["required"] is True
+    assert (
+        summary["summary"]["human_review"]["reason"]
+        == "Recursive repair requested a human review checkpoint."
+    )
+    assert summary["human_review"]["repair_target"] == "Review the risky filesystem mutation."

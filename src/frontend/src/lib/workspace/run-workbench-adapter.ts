@@ -8,9 +8,11 @@ import type {
   CallbackSummary,
   CompatBackfillInfo,
   ContextSourceSummary,
+  HumanReviewSummary,
   IterationSummary,
   PromptHandleSummary,
   RunSummary,
+  RunStatus,
   RunWorkbenchState,
 } from "@/lib/workspace/workspace-types";
 
@@ -449,6 +451,7 @@ function normalizeSummary(raw: unknown): RunSummary | undefined {
     terminationReason: asText(record.termination_reason ?? record.terminationReason),
     error: asText(record.error) ?? null,
     warnings: normalizeWarnings(record.warnings),
+    humanReview: normalizeHumanReview(record.human_review ?? record.humanReview),
   };
 }
 
@@ -494,6 +497,33 @@ function resolveCompatFinalArtifact(
 function compatBackfillEventId(frame: WsServerMessage): string {
   if (frame.type === "error") return `frame-error-${Date.now()}`;
   return String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`);
+}
+
+function normalizeHumanReview(raw: unknown): HumanReviewSummary | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const repairSteps = asArray(record.repair_steps ?? record.repairSteps)
+    .map((item) => asText(item))
+    .filter((item): item is string => Boolean(item));
+  return {
+    required: record.required !== false,
+    reason: asText(record.reason),
+    repairMode: asText(record.repair_mode ?? record.repairMode),
+    repairTarget: asText(record.repair_target ?? record.repairTarget),
+    repairSteps,
+  };
+}
+
+function normalizeRunStatus(value: unknown): RunStatus | undefined {
+  const status = asText(value);
+  if (!status) return undefined;
+  if (status === "needs_human_review") return "needs_human_review";
+  if (status === "completed") return "completed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "error" || status === "failed") return "error";
+  if (status === "running") return "running";
+  if (status === "bootstrapping") return "bootstrapping";
+  return undefined;
 }
 
 function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
@@ -670,7 +700,10 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
 
 export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMessage): boolean {
   const acceptsTerminalCompat =
-    state.status === "bootstrapping" || state.status === "running" || state.status === "completed";
+    state.status === "bootstrapping" ||
+    state.status === "running" ||
+    state.status === "completed" ||
+    state.status === "needs_human_review";
   const acceptsRawError = state.status === "bootstrapping" || state.status === "running";
   if (frame.type === "error") {
     return acceptsRawError;
@@ -689,8 +722,12 @@ export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMes
 function statusFromFrame(
   current: RunWorkbenchState["status"],
   frame: WsServerMessage,
+  payload?: Record<string, unknown>,
+  runSummary?: Record<string, unknown>,
 ): RunWorkbenchState["status"] {
   if (frame.type === "error") return "error";
+  const payloadStatus = normalizeRunStatus(runSummary?.status ?? payload?.status);
+  if (payloadStatus) return payloadStatus;
   if (frame.data.kind === "final") return "completed";
   if (frame.data.kind === "cancelled") return "cancelled";
   if (frame.data.kind === "error") return "error";
@@ -869,13 +906,16 @@ export function applyFrameToRunWorkbenchState(
     } satisfies CompatBackfillInfo;
   }
 
-  const nextStatus = statusFromFrame(next.status, frame);
+  const nextStatus = statusFromFrame(next.status, frame, payload, runSummary);
   // When the run reaches a terminal state, finalize any orphaned "running"
   // callbacks that were never resolved (e.g. reused runs replaying tool_call
   // events without matching tool_result events).
   const terminalCallbackStatus = nextStatus === "cancelled" ? "cancelled" : "completed";
   const finalCallbacks =
-    nextStatus === "completed" || nextStatus === "error" || nextStatus === "cancelled"
+    nextStatus === "completed" ||
+    nextStatus === "needs_human_review" ||
+    nextStatus === "error" ||
+    nextStatus === "cancelled"
       ? next.callbacks.map((cb) =>
           cb.status === "running" ? { ...cb, status: terminalCallbackStatus } : cb,
         )

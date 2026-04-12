@@ -480,6 +480,66 @@ def _extract_final_attachments(
     return normalized
 
 
+def _prediction_record(
+    final_prediction: dspy.Prediction | None,
+    field_name: str,
+) -> dict[str, Any]:
+    if final_prediction is None:
+        return {}
+    raw = getattr(final_prediction, field_name, None)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _prediction_text(
+    final_prediction: dspy.Prediction | None,
+    field_name: str,
+) -> str | None:
+    if final_prediction is None:
+        return None
+    return _as_text(getattr(final_prediction, field_name, None))
+
+
+def _prediction_text_list(
+    final_prediction: dspy.Prediction | None,
+    field_name: str,
+) -> list[str]:
+    if final_prediction is None:
+        return []
+    raw = getattr(final_prediction, field_name, None)
+    if not isinstance(raw, list):
+        return []
+    return [item for item in (_as_text(entry) for entry in raw) if item]
+
+
+def _build_human_review_payload(
+    final_prediction: dspy.Prediction | None,
+) -> dict[str, Any] | None:
+    recursive_repair = _prediction_record(final_prediction, "recursive_repair")
+    if _as_text(recursive_repair.get("repair_mode")) != "needs_human_review":
+        return None
+
+    repair_steps = _prediction_text_list(final_prediction, "repair_steps")
+    if not repair_steps:
+        raw_steps = recursive_repair.get("repair_steps")
+        if isinstance(raw_steps, list):
+            repair_steps = [item for item in (_as_text(entry) for entry in raw_steps) if item]
+
+    reason = (
+        _prediction_text(final_prediction, "final_reasoning")
+        or _as_text(recursive_repair.get("repair_rationale"))
+        or _as_text(recursive_repair.get("repair_target"))
+        or "Recursive repair requested human review before continuing."
+    )
+
+    return {
+        "required": True,
+        "reason": reason,
+        "repair_mode": "needs_human_review",
+        "repair_target": _as_text(recursive_repair.get("repair_target")),
+        "repair_steps": repair_steps,
+    }
+
+
 def _build_final_payload(
     *,
     final_prediction: dspy.Prediction | None,
@@ -521,6 +581,12 @@ def _build_final_payload(
         "fallback": fallback,
         **turn_metrics,
     }
+    recursive_repair = _prediction_record(final_prediction, "recursive_repair")
+    if recursive_repair:
+        payload["recursive_repair"] = recursive_repair
+    human_review = _build_human_review_payload(final_prediction)
+    if human_review is not None:
+        payload["human_review"] = human_review
     if fallback_error_type:
         payload["error_type"] = fallback_error_type
     if effective_max_iters is not None:
