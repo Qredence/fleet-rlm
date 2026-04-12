@@ -283,6 +283,7 @@ export type RunStatus =
   | "cancelling"
   | "running"
   | "completed"
+  | "needs_human_review"
   | "error"
   | "cancelled";
 
@@ -376,6 +377,15 @@ export interface RunSummary {
   terminationReason?: string;
   error?: string | null;
   warnings?: string[];
+  humanReview?: HumanReviewSummary;
+}
+
+export interface HumanReviewSummary {
+  required: boolean;
+  reason?: string;
+  repairMode?: string;
+  repairTarget?: string;
+  repairSteps?: string[];
 }
 
 export interface CompatBackfillInfo {

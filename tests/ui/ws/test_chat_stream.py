@@ -677,6 +677,71 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
     )
 
 
+def test_execution_events_surface_needs_human_review_summary(
+    ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
+):
+    fake_agent.set_events(
+        [
+            StreamEvent(
+                kind="status",
+                text="Planning repair path",
+                payload={"iteration": 1, "phase": "repair"},
+                timestamp=ts(1.0),
+            ),
+            StreamEvent(
+                kind="final",
+                text="Need a human to review the risky repair.",
+                payload={
+                    "recursive_repair": {
+                        "repair_mode": "needs_human_review",
+                        "repair_target": "Review the risky workspace mutation.",
+                        "repair_steps": ["Approve or reject the risky mutation."],
+                        "repair_rationale": "The remaining repair path is too risky.",
+                    },
+                    "final_reasoning": "Recursive repair requested a human review checkpoint.",
+                    "summary": {"duration_ms": 21},
+                },
+                timestamp=ts(2.0),
+            ),
+        ]
+    )
+
+    with ws_client.websocket_connect(
+        "/api/v1/ws/execution/events?session_id=session-human-review",
+        headers=websocket_auth_headers,
+    ) as execution_ws:
+        with ws_client.websocket_connect(
+            "/api/v1/ws/execution", headers=websocket_auth_headers
+        ) as chat_ws:
+            chat_ws.send_json(
+                {
+                    "type": "message",
+                    "content": "repair the risky workspace",
+                    "session_id": "session-human-review",
+                }
+            )
+
+            while True:
+                chat_data = chat_ws.receive_json()
+                if (
+                    chat_data["type"] == "event"
+                    and chat_data["data"]["kind"] == "final"
+                ):
+                    break
+
+            while True:
+                event = execution_ws.receive_json()
+                if event["type"] == "execution_completed":
+                    break
+
+    assert event["summary"]["status"] == "needs_human_review"
+    assert event["summary"]["termination_reason"] == "needs_human_review"
+    assert event["summary"]["human_review"]["required"] is True
+    assert event["summary"]["human_review"]["repair_target"] == (
+        "Review the risky workspace mutation."
+    )
+
+
 def test_websocket_final_event_waits_for_run_completion(
     ws_client, fake_agent: FakeChatAgent, websocket_auth_headers
 ):

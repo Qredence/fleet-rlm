@@ -208,6 +208,47 @@ describe("runWorkbenchAdapter", () => {
     expect(next.attachments[0]?.name).toBe("result.md");
   });
 
+  it("maps needs_human_review execution summaries into a stable workbench state", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Repair the risky workspace",
+    });
+
+    const next = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("final", "Need a human to review the risky repair.", {
+        source_type: "execution_completed",
+        run_summary: {
+          run_id: "run-human-review",
+          runtime_mode: "daytona_pilot",
+          task: "Repair the risky workspace",
+          status: "needs_human_review",
+          summary: {
+            termination_reason: "needs_human_review",
+            human_review: {
+              required: true,
+              reason: "Recursive repair requested a human review checkpoint.",
+              repair_target: "Review the risky workspace mutation.",
+              repair_steps: ["Approve or reject the risky mutation."],
+            },
+          },
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              summary: "Need a human to review the risky repair.",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(next.status).toBe("needs_human_review");
+    expect(next.summary?.terminationReason).toBe("needs_human_review");
+    expect(next.summary?.humanReview).toMatchObject({
+      required: true,
+      repairTarget: "Review the risky workspace mutation.",
+    });
+  });
+
   it("hydrates a rich Daytona execution_completed summary without relying on chat final run_result", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Summarize the runtime",

@@ -36,3 +36,4 @@ These notes explain how the repo moved from a thicker websocket/orchestration su
 - [Phase 14: Recursive Decomposition Module](../notes/phase-14-recursive-decomposition-module.md)
 - [Phase 15: Recursive Verification Module](../notes/phase-15-recursive-verification-module.md)
 - [Phase 17: Recursive Repair Module](../notes/phase-17-recursive-repair-module.md)
+- [Phase 18: Working backend/frontend path](../notes/phase-18-working-backend-frontend-path.md)

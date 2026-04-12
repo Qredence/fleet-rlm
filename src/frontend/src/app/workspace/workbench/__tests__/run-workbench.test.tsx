@@ -165,4 +165,25 @@ describe("RunWorkbench", () => {
 
     mockedWorkbenchStore.selectedTab = "iterations";
   });
+
+  it("renders a human review alert when the run pauses for bounded escalation", () => {
+    mockedWorkbenchStore.status = "needs_human_review";
+    mockedWorkbenchStore.summary = {
+      durationMs: 1234,
+      terminationReason: "needs_human_review",
+      humanReview: {
+        required: true,
+        reason: "Recursive repair requested a human review checkpoint.",
+        repairTarget: "Review the risky workspace mutation.",
+        repairSteps: ["Approve or reject the risky mutation."],
+      },
+      warnings: [],
+    };
+
+    const html = renderToStaticMarkup(<RunWorkbench />);
+
+    expect(html).toContain("Human review needed");
+    expect(html).toContain("Review the risky workspace mutation.");
+    expect(html).toContain("needs human review");
+  });
 });
