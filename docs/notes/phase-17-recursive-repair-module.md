@@ -1,10 +1,10 @@
-# Phase 16 recursive repair module note
+# Phase 17 recursive repair module note
 
-Preserve the fleet-rlm worker boundary, Agent Framework hosted orchestration, Daytona Sandbox/Volume behavior, and the current websocket/frontend contract. Phase 16 adds one more DSPy-native recursive worker module for bounded repair planning, while keeping execution ownership inside the Daytona-backed worker loop.
+Preserve the fleet-rlm worker boundary, Agent Framework hosted orchestration, Daytona Sandbox/Volume behavior, and the current websocket/frontend contract. Phase 17 adds one more DSPy-native recursive worker module for bounded repair planning, while keeping execution ownership inside the Daytona-backed worker loop.
 
 ## What moved into DSPy
 
-Phase 16 promotes one more worker-side recursive sub-decision into typed DSPy code:
+Phase 17 promotes one more worker-side recursive sub-decision into typed DSPy code:
 
 - `PlanRecursiveRepair` in `src/fleet_rlm/runtime/agent/signatures.py`
 - `PlanRecursiveRepairModule` in `src/fleet_rlm/runtime/agent/recursive_repair.py`
@@ -65,6 +65,6 @@ These boundaries remain unchanged:
 - Daytona still owns sandbox creation, process execution, interpreter state, and durable memory
 - GEPA still stays out of the live websocket request path
 
-## Next phase
+## Phase 18
 
-The next phase should keep the same worker/orchestration/transport boundaries and improve how bounded repair execution feeds back into later recursive verification/reflection, rather than widening orchestration or websocket ownership.
+Phase 18 should keep the same worker/orchestration/transport boundaries and improve how bounded repair execution feeds back into later recursive verification/reflection, rather than widening orchestration or websocket ownership.
