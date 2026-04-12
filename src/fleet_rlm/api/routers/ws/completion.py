@@ -18,6 +18,12 @@ def _as_text(value: Any) -> str | None:
     return None
 
 
+def _normalize_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in (_as_text(entry) for entry in value) if item is not None]
+
+
 def final_event_failed(payload: dict[str, Any]) -> bool:
     runtime = _as_record(payload.get("runtime"))
     runtime_degraded = bool(
@@ -34,32 +40,28 @@ def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | N
     raw = _as_record(payload.get("human_review"))
     if raw:
         required = raw.get("required")
-        repair_steps = raw.get("repair_steps")
         if required is False:
             return None
         return {
             "required": True,
-            "reason": _as_text(raw.get("reason")),
+            "reason": _as_text(raw.get("reason"))
+            or "Recursive repair requested human review before continuing.",
             "repair_mode": _as_text(raw.get("repair_mode")),
             "repair_target": _as_text(raw.get("repair_target")),
-            "repair_steps": repair_steps if isinstance(repair_steps, list) else [],
+            "repair_steps": _normalize_text_list(raw.get("repair_steps")),
         }
 
     recursive_repair = _as_record(payload.get("recursive_repair"))
     if _as_text(recursive_repair.get("repair_mode")) != "needs_human_review":
         return None
 
-    repair_steps = recursive_repair.get("repair_steps")
-    normalized_steps = [
-        item
-        for item in (_as_text(entry) for entry in repair_steps or [])
-        if item is not None
-    ]
+    normalized_steps = _normalize_text_list(recursive_repair.get("repair_steps"))
     return {
         "required": True,
         "reason": _as_text(payload.get("final_reasoning"))
         or _as_text(recursive_repair.get("repair_rationale"))
-        or _as_text(recursive_repair.get("repair_target")),
+        or _as_text(recursive_repair.get("repair_target"))
+        or "Recursive repair requested human review before continuing.",
         "repair_mode": "needs_human_review",
         "repair_target": _as_text(recursive_repair.get("repair_target")),
         "repair_steps": normalized_steps,
@@ -101,10 +103,11 @@ def _build_minimum_summary(
     summary_payload: dict[str, Any],
     warnings: list[Any],
     human_review: dict[str, Any] | None,
+    termination_reason: str,
 ) -> dict[str, Any]:
     error_text = event.text if event.kind == "error" else None
     summary = {
-        "termination_reason": summary_payload.get("termination_reason") or event.kind,
+        "termination_reason": termination_reason,
         "duration_ms": summary_payload.get("duration_ms"),
         "warnings": warnings,
         "error": error_text,
@@ -161,6 +164,12 @@ def build_execution_completion_summary(
         payload,
         human_review_required=human_review is not None,
     )
+    resolved_termination_reason = _resolve_termination_reason(
+        existing_reason=run_result.get("termination_reason")
+        or summary_payload.get("termination_reason"),
+        event_kind=event.kind,
+        human_review_required=human_review is not None,
+    )
     warnings = list(
         summary_payload.get("warnings") or payload.get("guardrail_warnings") or []
     )
@@ -169,6 +178,7 @@ def build_execution_completion_summary(
         summary_payload=summary_payload,
         warnings=warnings,
         human_review=human_review,
+        termination_reason=resolved_termination_reason,
     )
 
     if run_result:
@@ -182,18 +192,14 @@ def build_execution_completion_summary(
             existing_status=run_result.get("status"),
             terminal_status=terminal_status,
         )
-        normalized["termination_reason"] = _resolve_termination_reason(
-            existing_reason=run_result.get("termination_reason")
-            or summary_payload.get("termination_reason"),
-            event_kind=event.kind,
-            human_review_required=human_review is not None,
-        )
+        normalized["termination_reason"] = resolved_termination_reason
         normalized.setdefault("duration_ms", summary_payload.get("duration_ms"))
         normalized.setdefault("warnings", warnings)
         nested_summary = _as_record(normalized.get("summary"))
         nested_summary = {**minimum_summary, **nested_summary}
         if summary_payload:
             nested_summary = {**nested_summary, **summary_payload}
+        nested_summary["termination_reason"] = resolved_termination_reason
         if warnings and not nested_summary.get("warnings"):
             nested_summary["warnings"] = warnings
         if human_review is not None:
@@ -213,11 +219,7 @@ def build_execution_completion_summary(
         "runtime_mode": runtime_mode,
         "task": request_message,
         "status": terminal_status,
-        "termination_reason": _resolve_termination_reason(
-            existing_reason=summary_payload.get("termination_reason"),
-            event_kind=event.kind,
-            human_review_required=human_review is not None,
-        ),
+        "termination_reason": resolved_termination_reason,
         "duration_ms": summary_payload.get("duration_ms"),
         "iterations": [],
         "callbacks": [],
@@ -228,5 +230,5 @@ def build_execution_completion_summary(
         "final_artifact": final_artifact,
         "summary": minimum_summary,
         "warnings": warnings,
-        "human_review": human_review,
+        **({"human_review": human_review} if human_review is not None else {}),
     }
