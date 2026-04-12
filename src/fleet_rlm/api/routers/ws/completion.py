@@ -34,6 +34,7 @@ def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | N
     raw = _as_record(payload.get("human_review"))
     if raw:
         required = raw.get("required")
+        repair_steps = raw.get("repair_steps")
         if required is False:
             return None
         return {
@@ -41,7 +42,7 @@ def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | N
             "reason": _as_text(raw.get("reason")),
             "repair_mode": _as_text(raw.get("repair_mode")),
             "repair_target": _as_text(raw.get("repair_target")),
-            "repair_steps": list(raw.get("repair_steps") or []),
+            "repair_steps": repair_steps if isinstance(repair_steps, list) else [],
         }
 
     recursive_repair = _as_record(payload.get("recursive_repair"))

@@ -505,8 +505,9 @@ function normalizeHumanReview(raw: unknown): HumanReviewSummary | undefined {
   const repairSteps = asArray(record.repair_steps ?? record.repairSteps)
     .map((item) => asText(item))
     .filter((item): item is string => Boolean(item));
+  const required = typeof record.required === "boolean" ? record.required : true;
   return {
-    required: record.required !== false,
+    required,
     reason: asText(record.reason),
     repairMode: asText(record.repair_mode ?? record.repairMode),
     repairTarget: asText(record.repair_target ?? record.repairTarget),
