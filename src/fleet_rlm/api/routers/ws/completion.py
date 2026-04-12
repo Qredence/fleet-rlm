@@ -50,7 +50,9 @@ def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | N
 
     repair_steps = recursive_repair.get("repair_steps")
     normalized_steps = [
-        item for item in (_as_text(entry) for entry in repair_steps or []) if item is not None
+        item
+        for item in (_as_text(entry) for entry in repair_steps or [])
+        if item is not None
     ]
     return {
         "required": True,

@@ -522,7 +522,9 @@ def _build_human_review_payload(
     if not repair_steps:
         raw_steps = recursive_repair.get("repair_steps")
         if isinstance(raw_steps, list):
-            repair_steps = [item for item in (_as_text(entry) for entry in raw_steps) if item]
+            repair_steps = [
+                item for item in (_as_text(entry) for entry in raw_steps) if item
+            ]
 
     reason = (
         _prediction_text(final_prediction, "final_reasoning")

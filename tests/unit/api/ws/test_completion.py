@@ -164,4 +164,7 @@ def test_build_execution_completion_summary_surfaces_human_review_terminal_state
         summary["summary"]["human_review"]["reason"]
         == "Recursive repair requested a human review checkpoint."
     )
-    assert summary["human_review"]["repair_target"] == "Review the risky filesystem mutation."
+    assert (
+        summary["human_review"]["repair_target"]
+        == "Review the risky filesystem mutation."
+    )
