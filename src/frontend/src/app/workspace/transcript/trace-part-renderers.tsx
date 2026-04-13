@@ -405,9 +405,14 @@ function renderCompactStatusAlert(
 
 export function ChatMessageLoadingState() {
   return (
-    <div>
+    <div className="flex items-center gap-2.5 py-1">
+      <div className="flex gap-1">
+        <span className="size-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]" />
+        <span className="size-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]" />
+        <span className="size-1.5 rounded-full bg-primary/60 animate-bounce" />
+      </div>
       <TextShimmer as="span" className="text-sm text-muted-foreground">
-        Thinking...
+        Setting up your workspace…
       </TextShimmer>
     </div>
   );

@@ -126,9 +126,11 @@ describe("WorkspaceScreen runtime warning", () => {
   it("renders warning banner when runtime status is unhealthy", () => {
     const html = renderScreen();
     expect(html).toContain('data-slot="alert"');
-    expect(html).toContain("Daytona setup required");
-    expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
-    expect(html).toContain("Open Runtime Settings");
+    // Updated warning title for Phase 19
+    expect(html).toContain("Sandbox configuration needed");
+    // Guidance is now shown in a list format
+    expect(html).toContain("Run Runtime tests from Settings");
+    expect(html).toContain("Configure Sandbox");
   });
 
   it("omits warning banner when runtime status is healthy", () => {
@@ -140,7 +142,7 @@ describe("WorkspaceScreen runtime warning", () => {
       },
     };
     const html = renderScreen();
-    expect(html).not.toContain("Daytona setup required");
+    expect(html).not.toContain("Sandbox configuration needed");
   });
 
   it("renders Daytona guidance when Daytona mode is selected", () => {
@@ -158,7 +160,8 @@ describe("WorkspaceScreen runtime warning", () => {
 
     const html = renderScreen();
 
-    expect(html).toContain("Daytona setup required");
+    // Updated warning title for Phase 19
+    expect(html).toContain("Sandbox configuration needed");
     expect(html).toContain("Missing DAYTONA_API_KEY");
   });
 });

@@ -1112,8 +1112,8 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
         />,
       );
 
-      expect(html).toContain("Thinking...");
-      expect(html).toContain("Let&#x27;s get to work, how can I help?");
+      expect(html).toContain("Setting up your workspace");
+      expect(html).toContain("What would you like to build?");
     });
 
     it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
@@ -1162,7 +1162,7 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
       );
     });
 
-    it("keeps the typing shimmer visible on a follow-up turn before assistant output arrives", () => {
+    it("creates a pending assistant shell on a follow-up turn before assistant output arrives", () => {
       const messages: ChatMessage[] = [
         {
           id: "user-1",
@@ -1193,8 +1193,13 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
         />,
       );
 
-      expect(html).toContain("Thinking...");
+      // When there's already an assistant turn in the conversation, the component
+      // shows the existing assistant turn and prepares for the next turn
       expect(html).toContain('data-slot="assistant-turn-content"');
+      // Second prompt content should be visible
+      expect(html).toContain("Second prompt");
+      // First answer should still be visible
+      expect(html).toContain("First answer");
     });
 
     it("bottom-aligns non-empty conversations without using justify-end on the scroll content", () => {

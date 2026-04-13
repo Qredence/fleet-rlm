@@ -45,6 +45,7 @@ Then open `http://localhost:8000`.
 
 - [Architecture Overview](architecture.md)
 - [Current Architecture and Transition Note](notes/current-architecture-transition.md)
+- [Frontend Product Surface Guide](guides/frontend-product-surface.md)
 - [Backend Codebase Map](reference/codebase-map.md)
 - [Python Backend Module Map](reference/module-map.md)
 - [Backend/Frontend Wiring Analysis](wiring-analysis.md)

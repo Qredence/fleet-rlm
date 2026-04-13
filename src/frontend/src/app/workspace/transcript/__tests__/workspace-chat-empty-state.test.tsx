@@ -23,36 +23,49 @@ describe("WorkspaceChatEmptyState", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders the workspace title block and prompt chips from the Figma empty state", () => {
+  it("renders the workspace title block and prompt chips for Daytona-backed execution", () => {
     const html = renderToStaticMarkup(
       <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} />,
     );
-    expect(html).toContain("Let&#x27;s get to work, how can I help?");
-    expect(html).toContain("Start with a task or jump into a saved session");
-    expect(html).toContain("Help me write");
-    expect(html).toContain("Summarize text");
-    expect(html).toContain("Analyze image");
-    expect(html).toContain("More");
+    // Updated copy for Phase 19 frontend improvements
+    expect(html).toContain("What would you like to build?");
+    expect(html).toContain("help you plan");
+    expect(html).toContain("sandbox");
+    // Updated suggestions aligned with coding/execution tasks
+    expect(html).toContain("Build a feature");
+    expect(html).toContain("Debug an issue");
+    expect(html).toContain("Review changes");
+    expect(html).toContain("Explore ideas");
   });
 
   it("routes suggestion interactions through feature callbacks", () => {
     const onSuggestionClick = vi.fn();
     const { container, root } = mountEmptyState({ onSuggestionClick });
 
-    const helpMeWriteButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Help me write"),
+    const buildFeatureButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Build a feature"),
     );
 
-    expect(helpMeWriteButton).not.toBeUndefined();
+    expect(buildFeatureButton).not.toBeUndefined();
 
     act(() => {
-      helpMeWriteButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      buildFeatureButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onSuggestionClick).toHaveBeenCalledWith("Help me write");
+    expect(onSuggestionClick).toHaveBeenCalledWith("Help me build a new feature for my project");
 
     act(() => {
       root.unmount();
     });
+  });
+
+  it("shows mobile-appropriate layout when isMobile is true", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceChatEmptyState isMobile={true} onSuggestionClick={() => {}} />,
+    );
+    // Mobile should still show the core content
+    expect(html).toContain("What would you like to build?");
+    // Mobile uses smaller text sizes (text-2xl vs text-3xl)
+    expect(html).toContain("text-2xl");
   });
 });
