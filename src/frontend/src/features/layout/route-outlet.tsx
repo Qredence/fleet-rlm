@@ -2,8 +2,8 @@ import { Suspense } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
-import { ErrorBoundary } from "@/components/patterns/error-boundary";
-import { PageSkeleton } from "@/components/patterns/page-skeleton";
+import { ErrorBoundary } from "@/components/product/error-boundary";
+import { PageSkeleton } from "@/components/product/page-skeleton";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { fades } from "@/lib/utils/motion";
 

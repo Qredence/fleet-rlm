@@ -2,8 +2,8 @@ import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
-  ChainOfThoughtStep,
 } from "@/features/workspace/ui/chain-of-thought";
+import { TimelineStep } from "@/components/product/timeline";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Streamdown } from "@/components/ui/streamdown";
 import { mapTaskStatus } from "@/lib/utils/prompt-kit-state";
@@ -119,7 +119,7 @@ export function TrajectoryTimeline({
             <ChainOfThoughtContent>
               <div className="divide-y divide-border-subtle">
                 {trajectory.items.map((item) => (
-                  <ChainOfThoughtStep
+                  <TimelineStep
                     key={item.id}
                     label={item.title}
                     status={mapTaskStatus(
@@ -147,7 +147,7 @@ export function TrajectoryTimeline({
                         </div>
                       ) : null}
                     </div>
-                  </ChainOfThoughtStep>
+                  </TimelineStep>
                 ))}
               </div>
             </ChainOfThoughtContent>

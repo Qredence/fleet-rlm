@@ -1,12 +1,13 @@
-import type { LucideIcon } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 
 import { useControllableState } from "@/hooks/use-controllable-state";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { BrainIcon, ChevronDownIcon, DotIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { createContext, memo, useContext, useMemo } from "react";
+import { TimelineStep } from "@/components/product/timeline";
+import type { TimelineStepProps } from "@/components/product/timeline";
 
 interface ChainOfThoughtContextValue {
   isOpen: boolean;
@@ -82,50 +83,14 @@ export const ChainOfThoughtHeader = memo(
   },
 );
 
-export type ChainOfThoughtStepProps = ComponentProps<"div"> & {
-  icon?: LucideIcon;
-  label: ReactNode;
-  description?: ReactNode;
-  status?: "complete" | "active" | "pending";
-};
+export type ChainOfThoughtStepProps = TimelineStepProps;
 
-const stepStatusStyles = {
-  active: "text-foreground",
-  complete: "text-muted-foreground",
-  pending: "text-muted-foreground/50",
-};
-
-export const ChainOfThoughtStep = memo(
-  ({
-    className,
-    icon: Icon = DotIcon,
-    label,
-    description,
-    status = "complete",
-    children,
-    ...props
-  }: ChainOfThoughtStepProps) => (
-    <div
-      className={cn(
-        "flex gap-2 text-sm",
-        stepStatusStyles[status],
-        "fade-in-0 slide-in-from-top-2 animate-in",
-        className,
-      )}
-      {...props}
-    >
-      <div className="relative mt-0.5">
-        <Icon className="size-4" />
-        <div className="absolute top-7 bottom-0 left-1/2 -mx-px w-px bg-border" />
-      </div>
-      <div className="flex-1 flex flex-col gap-2 overflow-hidden">
-        <div>{label}</div>
-        {description && <div className="text-muted-foreground text-xs">{description}</div>}
-        {children}
-      </div>
-    </div>
-  ),
-);
+/**
+ * ChainOfThoughtStep — re-exported alias of `TimelineStep` from product primitives.
+ * Kept here for backwards compatibility within the workspace feature.
+ */
+export const ChainOfThoughtStep = TimelineStep;
+ChainOfThoughtStep.displayName = "ChainOfThoughtStep";
 
 export type ChainOfThoughtSearchResultsProps = ComponentProps<"div">;
 
@@ -189,7 +154,6 @@ export const ChainOfThoughtImage = memo(
 
 ChainOfThought.displayName = "ChainOfThought";
 ChainOfThoughtHeader.displayName = "ChainOfThoughtHeader";
-ChainOfThoughtStep.displayName = "ChainOfThoughtStep";
 ChainOfThoughtSearchResults.displayName = "ChainOfThoughtSearchResults";
 ChainOfThoughtSearchResult.displayName = "ChainOfThoughtSearchResult";
 ChainOfThoughtContent.displayName = "ChainOfThoughtContent";

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { EmptyPanel } from "@/components/patterns/empty-panel";
+import { EmptyPanel } from "@/components/product/empty-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { RunWorkbench } from "@/features/workspace/ui/workbench/run-workbench";

@@ -24,7 +24,7 @@ vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/components/patterns/error-boundary", () => ({
+vi.mock("@/components/product/error-boundary", () => ({
   ErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 

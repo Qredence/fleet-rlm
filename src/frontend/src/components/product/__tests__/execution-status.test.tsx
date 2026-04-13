@@ -6,7 +6,7 @@ import {
   StatusMessage,
   ExecutionProgress,
   STATUS_LABELS,
-} from "@/components/patterns/execution-status";
+} from "@/components/product/execution-status";
 import type { RunStatus } from "@/lib/workspace/workspace-types";
 
 describe("StatusBadge", () => {
