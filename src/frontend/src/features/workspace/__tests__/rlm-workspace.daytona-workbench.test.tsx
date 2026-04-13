@@ -73,11 +73,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/app/workspace/transcript/workspace-message-list", () => ({
+vi.mock("@/features/workspace/ui/transcript/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div data-testid="chat-message-list">WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/app/workspace/workspace-composer", () => ({
+vi.mock("@/features/workspace/ui/workspace-composer", () => ({
   WorkspaceComposer: ({
     value,
     canSubmit,

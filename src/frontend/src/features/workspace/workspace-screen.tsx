@@ -7,9 +7,9 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { WorkspaceComposer, type AttachedFile } from "@/app/workspace/workspace-composer";
-import { WorkspaceChatEmptyState } from "@/app/workspace/transcript/workspace-chat-empty-state";
-import { WorkspaceMessageList } from "@/app/workspace/transcript/workspace-message-list";
+import { WorkspaceComposer, type AttachedFile } from "@/features/workspace/ui/workspace-composer";
+import { WorkspaceChatEmptyState } from "@/features/workspace/ui/transcript/workspace-chat-empty-state";
+import { WorkspaceMessageList } from "@/features/workspace/ui/transcript/workspace-message-list";
 import {
   useChatHistoryStore,
   useChatStore,

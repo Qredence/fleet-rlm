@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { EmptyPanel } from "@/components/patterns/empty-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { RunWorkbench } from "@/app/workspace/workbench/run-workbench";
-import { MessageInspectorPanel } from "@/app/workspace/inspector/message-inspector-panel";
+import { RunWorkbench } from "@/features/workspace/ui/workbench/run-workbench";
+import { MessageInspectorPanel } from "@/features/workspace/ui/inspector/message-inspector-panel";
 import { useRunWorkbenchStore, useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 
 export function useWorkspaceCanvasTitle() {
