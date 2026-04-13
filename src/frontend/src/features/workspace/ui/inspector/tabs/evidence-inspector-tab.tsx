@@ -52,9 +52,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
                     >
                       <AccordionTrigger>Show excerpt</AccordionTrigger>
                       <AccordionContent>
-                        <div className={cn(inspectorInsetClass(), "text-sm")}>
-                          {citation.quote}
-                        </div>
+                        <div className={cn(inspectorInsetClass(), "text-sm")}>{citation.quote}</div>
                       </AccordionContent>
                     </AccordionItem>
                   </Accordion>

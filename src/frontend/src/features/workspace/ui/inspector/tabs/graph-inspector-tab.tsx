@@ -44,9 +44,7 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardDescription>Steps</CardDescription>
-            <CardTitle className="text-xl font-semibold text-foreground">
-              {steps.length}
-            </CardTitle>
+            <CardTitle className="text-xl font-semibold text-foreground">{steps.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card className={inspectorStyles.card.root}>
@@ -96,10 +94,7 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
           <CardContent className={inspectorStyles.card.contentStack}>
             <div className="text-sm text-foreground">{summarizeArtifactStep(selectedStep)}</div>
             <div className={inspectorStyles.badge.row}>
-              <Badge
-                variant="secondary"
-                className={cn(inspectorStyles.badge.meta, "capitalize")}
-              >
+              <Badge variant="secondary" className={cn(inspectorStyles.badge.meta, "capitalize")}>
                 {selectedStep.type}
               </Badge>
               {selectedStep.actor_kind ? (

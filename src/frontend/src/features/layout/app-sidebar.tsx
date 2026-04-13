@@ -165,8 +165,8 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="overflow-hidden px-2">
-        <SidebarGroup className="pt-0">
+      <SidebarContent className="overflow-hidden px-1">
+        <SidebarGroup className="px-1 pt-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               <SidebarActionItem label="New session" icon={Plus} onClick={handleNewSession} />
@@ -209,7 +209,7 @@ export function AppSidebar() {
 
         <SidebarSeparator className="mx-2 mt-2 mb-1 bg-sidebar-border/70" />
 
-        <SidebarGroup className="min-h-0 flex-1 gap-1 overflow-hidden pt-1 group-data-[collapsible=icon]:hidden">
+        <SidebarGroup className="min-h-0 flex-1 gap-1 overflow-hidden px-1 pt-1 group-data-[collapsible=icon]:hidden">
           <SidebarGroupLabel className="h-auto px-2.5 pt-1 pb-2 text-[14px] font-normal normal-case tracking-[-0.18px] text-sidebar-foreground/58">
             Chats
           </SidebarGroupLabel>
@@ -218,7 +218,7 @@ export function AppSidebar() {
               <SidebarMenu className="gap-0.5 pb-2">
                 {sortedConversations.length === 0 ? (
                   <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
-                    <div className="px-2.5 py-2 text-sm leading-6 text-sidebar-foreground/45">
+                    <div className="px-2 py-2 text-sm leading-6 text-sidebar-foreground/45">
                       No chats yet. Start a new session to populate this list.
                     </div>
                   </SidebarMenuItem>
@@ -250,7 +250,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="px-2 pb-3 pt-3">
+      <SidebarFooter className="px-1 pb-3 pt-3">
         <div className={cn("rounded-[14px] p-1", sidebarState === "collapsed" && "hidden")}>
           <SidebarMenu className="gap-0.5">
             <SidebarMenuItem>

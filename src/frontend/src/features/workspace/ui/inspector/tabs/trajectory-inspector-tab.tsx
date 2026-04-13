@@ -68,9 +68,7 @@ export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
                   <div>
                     <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
                     {item.body ? (
-                      <CardDescription>
-                        Full reasoning for this trajectory step.
-                      </CardDescription>
+                      <CardDescription>Full reasoning for this trajectory step.</CardDescription>
                     ) : null}
                   </div>
                   <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
