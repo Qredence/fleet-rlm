@@ -29,3 +29,33 @@ test-results/
 .tmp-bun
 .factory/
 src/frontend/.tanstack/
+
+# Agent skill symlinks (installed per-agent by `npx skills add`)
+# Only .agents/skills/ (canonical) and skills-lock.json are tracked.
+.adal/
+.augment/
+.bob/
+.codebuddy/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.goose/
+.iflow/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+skills/

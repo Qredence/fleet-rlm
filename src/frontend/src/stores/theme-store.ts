@@ -23,6 +23,12 @@ function applyThemeToDocument(isDark: boolean) {
   root.dataset.theme = isDark ? "dark" : "light";
   root.classList.toggle("dark", isDark);
   root.style.colorScheme = isDark ? "dark" : "light";
+
+  // Sync <meta name="theme-color"> so the browser chrome matches the page
+  const themeColor = isDark ? "#212121" : "#ffffff";
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    meta.content = themeColor;
+  }
 }
 
 function toPersistedTheme(value: unknown): StorageValue<ThemePersistedState> | null {
