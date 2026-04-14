@@ -75,7 +75,7 @@ export function WorkspaceChatMessageItem({
               />
             ))}
             {message.type === "assistant" && message.content ? (
-              <div className="max-w-content rounded-bubble border border-border-subtle/60 bg-card/60 px-4 py-3.5 shadow-sm transition-colors md:px-5 md:py-4">
+              <div className="max-w-content rounded-bubble px-4 py-3.5 transition-colors md:px-5 md:py-4">
                 <MessageResponse>{message.content}</MessageResponse>
               </div>
             ) : null}

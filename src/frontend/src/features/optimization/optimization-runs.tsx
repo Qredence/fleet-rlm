@@ -25,6 +25,18 @@ import {
   type OptimizationRunSummary,
 } from "@/lib/rlm-api/optimization";
 
+const PHASE_LABELS: Record<string, string> = {
+  loading: "Loading…",
+  compiling: "Optimizing…",
+  saving: "Saving…",
+  done: "Complete",
+  failed: "Failed",
+};
+
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase] ?? phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case "running":
@@ -41,6 +53,10 @@ function StatusBadge({ status }: { status: string }) {
       );
     case "failed":
       return <Badge variant="destructive">Failed</Badge>;
+    case "queued":
+      return <Badge variant="secondary">Queued</Badge>;
+    case "cancelled":
+      return <Badge variant="outline">Cancelled</Badge>;
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
@@ -132,7 +148,7 @@ function RunDetailPanel({ run }: { run: OptimizationRunSummary }) {
             <ScoreBadge score={run.validation_score} />
           </ResultRow>
         ) : null}
-        {run.phase ? <ResultRow label="Phase">{run.phase}</ResultRow> : null}
+        {run.phase ? <ResultRow label="Phase">{phaseLabel(run.phase)}</ResultRow> : null}
         <ResultRow label="Started">{formatRelativeTime(run.started_at)}</ResultRow>
         <ResultRow label="Duration">
           {formatDuration(run.started_at, run.completed_at)}
@@ -188,7 +204,7 @@ function RunListItem({
           {run.status === "running" && run.phase ? (
             <>
               <span>·</span>
-              <span className="italic">{run.phase}</span>
+              <span className="italic">{phaseLabel(run.phase)}</span>
             </>
           ) : null}
         </div>

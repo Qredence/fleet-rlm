@@ -86,7 +86,7 @@ export const inspectorStyles = {
 
   /** Graph tab specifics. */
   graph: {
-    canvas: "h-105 overflow-hidden rounded-2xl border border-border-subtle/80 bg-muted/15",
+    canvas: "h-105 overflow-hidden rounded-xl border border-border-subtle/80 bg-card/30",
     statsGrid: "grid gap-3 md:grid-cols-3",
   },
 } as const;

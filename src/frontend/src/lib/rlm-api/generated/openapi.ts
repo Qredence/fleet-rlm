@@ -32,6 +32,39 @@ export interface paths {
      */
     get: operations["list_session_state_api_v1_sessions_state_get"];
   };
+  "/api/v1/sessions": {
+    /**
+     * List session history
+     * @description Paginated list of durable session transcripts with search and status filters.
+     */
+    get: operations["list_sessions_endpoint_api_v1_sessions_get"];
+  };
+  "/api/v1/sessions/{session_id}": {
+    /**
+     * Get session detail
+     * @description Return session metadata and turn count for a specific session.
+     */
+    get: operations["get_session_detail_api_v1_sessions__session_id__get"];
+    /**
+     * Archive session
+     * @description Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.
+     */
+    delete: operations["delete_session_endpoint_api_v1_sessions__session_id__delete"];
+  };
+  "/api/v1/sessions/{session_id}/turns": {
+    /**
+     * Get session turns
+     * @description Paginated turn-by-turn transcript for a session.
+     */
+    get: operations["get_session_turns_api_v1_sessions__session_id__turns_get"];
+  };
+  "/api/v1/sessions/{session_id}/export": {
+    /**
+     * Export session as GEPA dataset
+     * @description Convert a session's turn history into a JSONL dataset suitable for GEPA optimization. Requires a target module slug to determine the column mapping.
+     */
+    post: operations["export_session_endpoint_api_v1_sessions__session_id__export_post"];
+  };
   "/api/v1/runtime/settings": {
     /**
      * Get Runtime Settings
@@ -115,12 +148,52 @@ export interface paths {
      */
     post: operations["create_optimization_run_api_v1_optimization_runs_post"];
   };
+  "/api/v1/optimization/datasets/from-transcript": {
+    /**
+     * Create Dataset From Transcript
+     * @description Convert transcript turns into a GEPA dataset.
+     */
+    post: operations["create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post"];
+  };
+  "/api/v1/optimization/runs/compare": {
+    /**
+     * Compare Runs
+     * @description Compare prompt diffs and scores across optimization runs.
+     */
+    get: operations["compare_runs_api_v1_optimization_runs_compare_get"];
+  };
   "/api/v1/optimization/runs/{run_id}": {
     /**
      * Get Run
      * @description Get a single optimization run by ID.
      */
     get: operations["get_run_api_v1_optimization_runs__run_id__get"];
+  };
+  "/api/v1/optimization/datasets": {
+    /**
+     * List Datasets Endpoint
+     * @description List registered datasets with optional module filter.
+     */
+    get: operations["list_datasets_endpoint_api_v1_optimization_datasets_get"];
+    /**
+     * Upload Dataset
+     * @description Upload and register a dataset file (.json or .jsonl).
+     */
+    post: operations["upload_dataset_api_v1_optimization_datasets_post"];
+  };
+  "/api/v1/optimization/datasets/{dataset_id}": {
+    /**
+     * Get Dataset Detail
+     * @description Return dataset metadata with the first 10 rows as preview.
+     */
+    get: operations["get_dataset_detail_api_v1_optimization_datasets__dataset_id__get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/results": {
+    /**
+     * Get Run Results
+     * @description Return per-example evaluation results for an optimization run.
+     */
+    get: operations["get_run_results_api_v1_optimization_runs__run_id__results_get"];
   };
   "/api/v1/traces/feedback": {
     /**
@@ -171,6 +244,201 @@ export interface components {
        */
       user_id?: string | null;
     };
+    /** Body_upload_dataset_api_v1_optimization_datasets_post */
+    Body_upload_dataset_api_v1_optimization_datasets_post: {
+      /**
+       * File
+       * @description Dataset file to upload in JSON or JSONL format.
+       */
+      file: string;
+      /**
+       * Module Slug
+       * @description Optional module slug used to validate required dataset keys.
+       */
+      module_slug?: string | null;
+    };
+    /**
+     * DatasetDetailResponse
+     * @description Dataset metadata with sample rows and URI.
+     */
+    DatasetDetailResponse: {
+      /**
+       * Id
+       * @description Unique dataset identifier.
+       */
+      id: number;
+      /**
+       * Name
+       * @description Human-readable dataset name.
+       */
+      name: string;
+      /**
+       * Row Count
+       * @description Number of rows/examples in the dataset.
+       */
+      row_count: number;
+      /**
+       * Format
+       * @description File format (json or jsonl).
+       */
+      format: string;
+      /**
+       * Module Slug
+       * @description Associated module slug, when provided.
+       */
+      module_slug?: string | null;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+      /**
+       * Sample Rows
+       * @description First rows from the dataset as preview.
+       */
+      sample_rows: {
+        [key: string]: unknown;
+      }[];
+      /**
+       * Uri
+       * @description Filesystem path to the dataset file.
+       */
+      uri: string;
+    };
+    /**
+     * DatasetListResponse
+     * @description Paginated dataset listing.
+     */
+    DatasetListResponse: {
+      /**
+       * Items
+       * @description Dataset list items.
+       */
+      items: components["schemas"]["DatasetResponse"][];
+      /**
+       * Total
+       * @description Total matching datasets.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether more results exist beyond this page.
+       */
+      has_more: boolean;
+    };
+    /**
+     * DatasetResponse
+     * @description Metadata for a registered dataset.
+     */
+    DatasetResponse: {
+      /**
+       * Id
+       * @description Unique dataset identifier.
+       */
+      id: number;
+      /**
+       * Name
+       * @description Human-readable dataset name.
+       */
+      name: string;
+      /**
+       * Row Count
+       * @description Number of rows/examples in the dataset.
+       */
+      row_count: number;
+      /**
+       * Format
+       * @description File format (json or jsonl).
+       */
+      format: string;
+      /**
+       * Module Slug
+       * @description Associated module slug, when provided.
+       */
+      module_slug?: string | null;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+    };
+    /**
+     * EvaluationResultItem
+     * @description A single per-example evaluation result.
+     */
+    EvaluationResultItem: {
+      /**
+       * Id
+       * @description Unique evaluation result identifier.
+       */
+      id: number;
+      /**
+       * Example Index
+       * @description Zero-based index in the dataset.
+       */
+      example_index: number;
+      /**
+       * Input Data
+       * @description JSON-serialized input fields.
+       */
+      input_data: string;
+      /**
+       * Expected Output
+       * @description Expected/gold output.
+       */
+      expected_output?: string | null;
+      /**
+       * Predicted Output
+       * @description Model predicted output.
+       */
+      predicted_output?: string | null;
+      /**
+       * Score
+       * @description Score for this example (0.0-1.0).
+       */
+      score: number;
+    };
+    /**
+     * EvaluationResultsResponse
+     * @description Paginated evaluation results for a run.
+     */
+    EvaluationResultsResponse: {
+      /**
+       * Items
+       * @description Evaluation result items.
+       */
+      items: components["schemas"]["EvaluationResultItem"][];
+      /**
+       * Total
+       * @description Total evaluation results for the run.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether more results exist beyond this page.
+       */
+      has_more: boolean;
+    };
     /**
      * GEPAModuleInfo
      * @description Metadata for a registered optimizable DSPy module.
@@ -186,6 +454,12 @@ export interface components {
        * @description Human-readable module label.
        */
       label: string;
+      /**
+       * Description
+       * @description Human-readable description of what this module optimizes.
+       * @default
+       */
+      description?: string;
       /**
        * Program Spec
        * @description DSPy program specification string.
@@ -204,9 +478,14 @@ export interface components {
     GEPAOptimizationRequest: {
       /**
        * Dataset Path
-       * @description Path to the exported MLflow trace dataset (JSON).
+       * @description Relative filesystem path to the dataset file.
        */
-      dataset_path: string;
+      dataset_path?: string | null;
+      /**
+       * Dataset Id
+       * @description Registered dataset identifier to optimize against.
+       */
+      dataset_id?: number | null;
       /**
        * Program Spec
        * @description DSPy program specification string to optimize in module:attr form. Required when module_slug is not provided.
@@ -458,6 +737,27 @@ export interface components {
       completed_at?: string | null;
     };
     /**
+     * PromptSnapshotItem
+     * @description A before or after prompt snapshot for a predictor.
+     */
+    PromptSnapshotItem: {
+      /**
+       * Predictor Name
+       * @description Predictor name from named_predictors().
+       */
+      predictor_name: string;
+      /**
+       * Prompt Type
+       * @description Snapshot type: 'before' or 'after'.
+       */
+      prompt_type: string;
+      /**
+       * Prompt Text
+       * @description Full prompt/instruction text.
+       */
+      prompt_text: string;
+    };
+    /**
      * ReadyResponse
      * @description Response body for the readiness endpoint.
      */
@@ -494,6 +794,43 @@ export interface components {
        * @description Active sandbox backend selected for runtime execution.
        */
       sandbox_provider: string;
+    };
+    /**
+     * RunComparisonItem
+     * @description Summary of a single run for cross-run comparison.
+     */
+    RunComparisonItem: {
+      /**
+       * Run Id
+       * @description Optimization run identifier.
+       */
+      run_id: number;
+      /**
+       * Program Spec
+       * @description DSPy program specification optimized.
+       */
+      program_spec: string;
+      /**
+       * Validation Score
+       * @description Validation score from the run.
+       */
+      validation_score?: number | null;
+      /**
+       * Prompt Snapshots
+       * @description Before/after prompt snapshots for this run.
+       */
+      prompt_snapshots: components["schemas"]["PromptSnapshotItem"][];
+    };
+    /**
+     * RunComparisonResponse
+     * @description Cross-run comparison payload.
+     */
+    RunComparisonResponse: {
+      /**
+       * Runs
+       * @description Compared run summaries.
+       */
+      runs: components["schemas"]["RunComparisonItem"][];
     };
     /**
      * RuntimeActiveModels
@@ -701,6 +1038,152 @@ export interface components {
       daytona?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
     };
     /**
+     * SessionDeleteResponse
+     * @description Result payload after archiving a session.
+     */
+    SessionDeleteResponse: {
+      /**
+       * Ok
+       * @description Whether the session was archived successfully.
+       * @default true
+       */
+      ok?: boolean;
+    };
+    /**
+     * SessionDetailResponse
+     * @description Full session detail with turn count.
+     */
+    SessionDetailResponse: {
+      /**
+       * Id
+       * @description Local store primary key.
+       */
+      id: number;
+      /**
+       * Title
+       * @description Human-readable session title.
+       */
+      title: string;
+      /**
+       * Status
+       * @description Session status (active, archived).
+       */
+      status: string;
+      /**
+       * Model Name
+       * @description Model used in session.
+       */
+      model_name?: string | null;
+      /**
+       * External Session Id
+       * @description Canonical runtime session identifier.
+       */
+      external_session_id?: string | null;
+      /**
+       * Workspace Id
+       * @description Workspace context.
+       */
+      workspace_id?: string | null;
+      /**
+       * Turn Count
+       * @description Total number of turns in this session.
+       */
+      turn_count: number;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * @description ISO-8601 last-update timestamp.
+       */
+      updated_at: string;
+    };
+    /**
+     * SessionExportRequest
+     * @description Request body for exporting a session's turns as a GEPA training dataset.
+     */
+    SessionExportRequest: {
+      /**
+       * Module Slug
+       * @description Target GEPA module slug whose dataset keys determine the export column mapping.
+       */
+      module_slug: string;
+    };
+    /**
+     * SessionListItem
+     * @description Lightweight session summary for list views.
+     */
+    SessionListItem: {
+      /**
+       * Id
+       * @description Local store primary key.
+       */
+      id: number;
+      /**
+       * Title
+       * @description Human-readable session title.
+       */
+      title: string;
+      /**
+       * Status
+       * @description Session status (active, archived).
+       */
+      status: string;
+      /**
+       * Model Name
+       * @description Model used in session.
+       */
+      model_name?: string | null;
+      /**
+       * External Session Id
+       * @description Canonical runtime session identifier.
+       */
+      external_session_id?: string | null;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * @description ISO-8601 last-update timestamp.
+       */
+      updated_at: string;
+    };
+    /**
+     * SessionListResponse
+     * @description Paginated session list.
+     */
+    SessionListResponse: {
+      /**
+       * Items
+       * @description Session list items.
+       */
+      items: components["schemas"]["SessionListItem"][];
+      /**
+       * Total
+       * @description Total matching sessions.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether more results exist beyond this page.
+       */
+      has_more: boolean;
+    };
+    /**
      * SessionStateResponse
      * @description Response body for the session-state summary endpoint.
      */
@@ -842,6 +1325,105 @@ export interface components {
        * @default false
        */
       expectation_logged?: boolean;
+    };
+    /**
+     * TranscriptDatasetRequest
+     * @description Request body for converting transcript turns into a GEPA dataset.
+     */
+    TranscriptDatasetRequest: {
+      /**
+       * Module Slug
+       * @description Target GEPA module slug whose dataset keys determine row mapping.
+       */
+      module_slug: string;
+      /**
+       * Title
+       * @description Optional human-readable transcript title used for dataset naming.
+       */
+      title?: string | null;
+      /**
+       * Turns
+       * @description Transcript turns to convert into dataset rows.
+       */
+      turns: components["schemas"]["TranscriptTurnInput"][];
+    };
+    /**
+     * TranscriptTurnInput
+     * @description Single transcript turn used to build a GEPA dataset.
+     */
+    TranscriptTurnInput: {
+      /**
+       * User Message
+       * @description User prompt/content for the turn.
+       */
+      user_message?: string | null;
+      /**
+       * Assistant Message
+       * @description Assistant response/content for the turn.
+       */
+      assistant_message?: string | null;
+    };
+    /**
+     * TurnItem
+     * @description Single turn in a session transcript.
+     */
+    TurnItem: {
+      /**
+       * Id
+       * @description Turn primary key.
+       */
+      id: number;
+      /**
+       * Turn Index
+       * @description Zero-based turn position.
+       */
+      turn_index: number;
+      /**
+       * User Message
+       * @description User message text.
+       */
+      user_message: string;
+      /**
+       * Assistant Message
+       * @description Assistant response text.
+       */
+      assistant_message?: string | null;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+    };
+    /**
+     * TurnListResponse
+     * @description Paginated turn list.
+     */
+    TurnListResponse: {
+      /**
+       * Items
+       * @description Turn list items.
+       */
+      items: components["schemas"]["TurnItem"][];
+      /**
+       * Total
+       * @description Total turns in session.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether more turns exist beyond this page.
+       */
+      has_more: boolean;
     };
     /** ValidationError */
     ValidationError: {
@@ -1090,6 +1672,153 @@ export interface operations {
       /** @description Session state is unavailable because server startup is incomplete. */
       503: {
         content: never;
+      };
+    };
+  };
+  /**
+   * List session history
+   * @description Paginated list of durable session transcripts with search and status filters.
+   */
+  list_sessions_endpoint_api_v1_sessions_get: {
+    parameters: {
+      query?: {
+        /** @description Full-text search on title */
+        search?: string | null;
+        /** @description Filter by status (active, archived) */
+        status?: string | null;
+        /** @description Page size */
+        limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get session detail
+   * @description Return session metadata and turn count for a specific session.
+   */
+  get_session_detail_api_v1_sessions__session_id__get: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session to inspect. */
+        session_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionDetailResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Archive session
+   * @description Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.
+   */
+  delete_session_endpoint_api_v1_sessions__session_id__delete: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session to archive. */
+        session_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionDeleteResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get session turns
+   * @description Paginated turn-by-turn transcript for a session.
+   */
+  get_session_turns_api_v1_sessions__session_id__turns_get: {
+    parameters: {
+      query?: {
+        /** @description Page size */
+        limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the session whose turns to list. */
+        session_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TurnListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Export session as GEPA dataset
+   * @description Convert a session's turn history into a JSONL dataset suitable for GEPA optimization. Requires a target module slug to determine the column mapping.
+   */
+  export_session_endpoint_api_v1_sessions__session_id__export_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session to export as a dataset. */
+        session_id: number;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionExportRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };
@@ -1408,7 +2137,9 @@ export interface operations {
       query?: {
         /** @description Filter by status: running, completed, failed */
         status?: string | null;
+        /** @description Maximum number of runs to return. */
         limit?: number;
+        /** @description Pagination offset into the run list. */
         offset?: number;
       };
     };
@@ -1472,12 +2203,80 @@ export interface operations {
     };
   };
   /**
+   * Create Dataset From Transcript
+   * @description Convert transcript turns into a GEPA dataset.
+   */
+  create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranscriptDatasetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Invalid transcript dataset payload. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Compare Runs
+   * @description Compare prompt diffs and scores across optimization runs.
+   */
+  compare_runs_api_v1_optimization_runs_compare_get: {
+    parameters: {
+      query: {
+        /** @description Comma-separated run IDs to compare (max 5). */
+        run_ids: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RunComparisonResponse"];
+        };
+      };
+      /** @description Invalid run_ids parameter. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Get Run
    * @description Get a single optimization run by ID.
    */
   get_run_api_v1_optimization_runs__run_id__get: {
     parameters: {
       path: {
+        /** @description Identifier of the optimization run to fetch. */
         run_id: number;
       };
     };
@@ -1486,6 +2285,147 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["OptimizationRunResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * List Datasets Endpoint
+   * @description List registered datasets with optional module filter.
+   */
+  list_datasets_endpoint_api_v1_optimization_datasets_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by module slug */
+        module_slug?: string | null;
+        /** @description Maximum number of datasets to return. */
+        limit?: number;
+        /** @description Pagination offset into the dataset list. */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload Dataset
+   * @description Upload and register a dataset file (.json or .jsonl).
+   */
+  upload_dataset_api_v1_optimization_datasets_post: {
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_dataset_api_v1_optimization_datasets_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Invalid dataset file. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Dataset Detail
+   * @description Return dataset metadata with the first 10 rows as preview.
+   */
+  get_dataset_detail_api_v1_optimization_datasets__dataset_id__get: {
+    parameters: {
+      path: {
+        /** @description Identifier of the dataset to inspect. */
+        dataset_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetDetailResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Dataset not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Run Results
+   * @description Return per-example evaluation results for an optimization run.
+   */
+  get_run_results_api_v1_optimization_runs__run_id__results_get: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of evaluation rows to return. */
+        limit?: number;
+        /** @description Pagination offset into the evaluation results. */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the optimization run whose results to list. */
+        run_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationResultsResponse"];
         };
       };
       /** @description Authentication is required or the provided token is invalid. */

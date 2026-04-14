@@ -1,15 +1,27 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { Layers, Database, Play, GitCompare } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { PageHeader } from "@/components/product/page-header";
-import { OptimizationForm } from "@/features/optimization/optimization-form";
-import { OptimizationRuns } from "@/features/optimization/optimization-runs";
+import { ModulesTab } from "@/features/optimization/modules-tab";
+import { DatasetsTab } from "@/features/optimization/datasets-tab";
+import { RunsTab } from "@/features/optimization/runs-tab";
+import { CompareTab } from "@/features/optimization/compare-tab";
 import { cn } from "@/lib/utils";
 
 export function OptimizationScreen() {
   const isMobile = useIsMobile();
-  const [activeTab, setActiveTab] = useState("new-run");
+  const [activeTab, setActiveTab] = useState("modules");
+  const [compareRunIds, setCompareRunIds] = useState<number[] | undefined>();
+
+  const handleCompare = useCallback(
+    (runIds: number[]) => {
+      setCompareRunIds(runIds);
+      setActiveTab("compare");
+    },
+    [],
+  );
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
@@ -32,15 +44,35 @@ export function OptimizationScreen() {
 
         <div className={cn("mx-auto w-full max-w-200 py-4", isMobile ? "px-4" : "px-6")}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList>
-              <TabsTrigger value="new-run">New Run</TabsTrigger>
-              <TabsTrigger value="history">Run History</TabsTrigger>
+            <TabsList variant="line" className="mb-2">
+              <TabsTrigger value="modules" className="gap-1.5">
+                <Layers className="size-3.5" />
+                Modules
+              </TabsTrigger>
+              <TabsTrigger value="datasets" className="gap-1.5">
+                <Database className="size-3.5" />
+                Datasets
+              </TabsTrigger>
+              <TabsTrigger value="runs" className="gap-1.5">
+                <Play className="size-3.5" />
+                Runs
+              </TabsTrigger>
+              <TabsTrigger value="compare" className="gap-1.5">
+                <GitCompare className="size-3.5" />
+                Compare
+              </TabsTrigger>
             </TabsList>
-            <TabsContent value="new-run" className="pt-4">
-              <OptimizationForm onRunCreated={() => setActiveTab("history")} />
+            <TabsContent value="modules" className="pt-4">
+              <ModulesTab onNavigateToRuns={() => setActiveTab("runs")} />
             </TabsContent>
-            <TabsContent value="history" className="pt-4">
-              <OptimizationRuns />
+            <TabsContent value="datasets" className="pt-4">
+              <DatasetsTab onNavigateToRuns={() => setActiveTab("runs")} />
+            </TabsContent>
+            <TabsContent value="runs" className="pt-4">
+              <RunsTab onCompare={handleCompare} />
+            </TabsContent>
+            <TabsContent value="compare" className="pt-4">
+              <CompareTab initialRunIds={compareRunIds} />
             </TabsContent>
           </Tabs>
         </div>

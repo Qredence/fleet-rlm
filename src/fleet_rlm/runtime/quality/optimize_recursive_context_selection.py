@@ -272,6 +272,7 @@ _MODULE_SPEC = ModuleOptimizationSpec(
     row_converter=rows_to_recursive_context_selection_examples,
     metric_builder=build_recursive_context_selection_feedback_metric,
     metric_name="recursive_context_relevance_and_boundedness",
+    description="Improves context selection for recursive workspace tasks by evolving instructions for retrieving relevant, bounded context without over-fetching.",
 )
 
 register_module(_MODULE_SPEC)

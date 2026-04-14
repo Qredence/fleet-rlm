@@ -9,6 +9,7 @@ commands:
   runtime_contract: uv run pytest -q tests/ui/ws/test_chat_stream.py tests/unit/runtime/agent/test_chat_agent_runtime.py -m "not live_llm and not live_daytona and not benchmark"
   runtime_settings_contract: uv run pytest -q tests/ui/server/test_router_runtime.py tests/ui/server/test_api_contract_routes.py -m "not live_llm and not live_daytona and not benchmark"
   optimization_contract: uv run pytest -q tests/unit/runtime/quality/test_dspy_evaluation.py tests/unit/runtime/quality/test_workspace_metrics.py tests/ui/server/test_api_contract_routes.py -m "not live_llm and not live_daytona and not benchmark"
+  sessions_contract: uv run pytest -q tests/unit/integrations/test_local_store.py tests/ui/server/test_api_contract_routes.py -m "not live_llm and not live_daytona and not benchmark"
   frontend_contract: cd src/frontend && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build
   openapi_check: uv run python scripts/openapi_tools.py generate && uv run python scripts/openapi_tools.py validate && (cd src/frontend && pnpm run api:check)
   readme_check: test -f README.md
@@ -27,3 +28,10 @@ services:
     healthcheck: curl -sf http://127.0.0.1:8000/health
     port: 8000
     depends_on: [mlflow]
+
+  frontend:
+    start: cd src/frontend && pnpm install --frozen-lockfile && pnpm run dev -- --port 5173
+    stop: lsof -ti :5173 | xargs kill
+    healthcheck: curl -sf http://127.0.0.1:5173
+    port: 5173
+    depends_on: [api]

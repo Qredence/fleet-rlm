@@ -5,7 +5,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.terminal as ws_terminal
-import fleet_rlm.orchestration_app.terminal_flow as terminal_flow
+import fleet_rlm.agent_host.terminal_flow as terminal_flow
 from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
@@ -209,7 +209,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     asyncio.run(scenario())
 
 
-def test_handle_terminal_stream_event_delegates_to_orchestration_app(
+def test_handle_terminal_stream_event_delegates_to_terminal_flow(
     monkeypatch,
 ) -> None:
     async def scenario() -> None:

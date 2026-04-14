@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
+import { VisualJson, TreeView, type JsonValue } from "@visual-json/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RuntimeContext } from "@/features/workspace/use-workspace";
 import type {
@@ -43,6 +44,16 @@ export function stringifyValue(value: unknown): string {
     return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
+  }
+}
+
+function tryParseJson(value: string): JsonValue | null {
+  const trimmed = value.trimStart();
+  if (trimmed[0] !== "{" && trimmed[0] !== "[") return null;
+  try {
+    return JSON.parse(value) as JsonValue;
+  } catch {
+    return null;
   }
 }
 
@@ -173,12 +184,21 @@ export function DetailBlock({
   tone?: "default" | "error";
 }) {
   if (!value) return null;
+  const parsed = tryParseJson(value);
   return (
     <div className="flex flex-col gap-1.5">
       <div className={inspectorStyles.heading.detail}>{label}</div>
-      <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
-        <Streamdown content={value} streaming={false} />
-      </div>
+      {parsed !== null ? (
+        <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
+          <VisualJson value={parsed} onChange={() => {}}>
+            <TreeView className="text-xs" />
+          </VisualJson>
+        </div>
+      ) : (
+        <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
+          <Streamdown content={value} streaming={false} />
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@ const NAV_TO_PATH: Record<NavItem, string> = {
   workspace: "/app/workspace",
   volumes: "/app/volumes",
   optimization: "/app/optimization",
+  history: "/app/history",
   settings: "/app/settings",
 };
 
@@ -36,6 +37,7 @@ export function pathToNav(pathname: string): NavItem | null {
     workspace: "workspace",
     volumes: "volumes",
     optimization: "optimization",
+    history: "history",
     settings: "settings",
   };
   return PATH_TO_NAV[section] ?? null;

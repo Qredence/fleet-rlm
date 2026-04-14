@@ -1,15 +1,8 @@
 import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { Tabs as BaseTabs } from "@base-ui/react";
 
 import { cn } from "@/lib/utils";
-
-type TabsListVariant = "segmented" | "surface" | "underline";
-
-const TabsStyleContext = React.createContext<{
-  variant: TabsListVariant;
-}>({
-  variant: "segmented",
-});
 
 function Tabs({
   className,
@@ -18,35 +11,48 @@ function Tabs({
 }: React.ComponentPropsWithoutRef<typeof BaseTabs.Root> & {
   ref?: React.ComponentPropsWithRef<typeof BaseTabs.Root>["ref"];
 }) {
-  return <BaseTabs.Root ref={ref} data-slot="tabs" className={className} {...props} />;
+  return (
+    <BaseTabs.Root
+      ref={ref}
+      data-slot="tabs"
+      className={cn("group/tabs flex gap-2 flex-col", className)}
+      {...props}
+    />
+  );
 }
+
+const tabsListVariants = cva(
+  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground h-9 data-[variant=line]:rounded-none",
+  {
+    variants: {
+      variant: {
+        default: "bg-muted",
+        line: "gap-1 bg-transparent",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  },
+);
 
 function TabsList({
   className,
-  variant = "segmented",
+  variant = "default",
   ref,
   ...props
-}: React.ComponentPropsWithoutRef<typeof BaseTabs.List> & {
-  variant?: TabsListVariant;
-  ref?: React.ComponentPropsWithRef<typeof BaseTabs.List>["ref"];
-}) {
+}: React.ComponentPropsWithoutRef<typeof BaseTabs.List> &
+  VariantProps<typeof tabsListVariants> & {
+    ref?: React.ComponentPropsWithRef<typeof BaseTabs.List>["ref"];
+  }) {
   return (
-    <TabsStyleContext.Provider value={{ variant }}>
-      <BaseTabs.List
-        ref={ref}
-        data-slot="tabs-list"
-        data-variant={variant}
-        className={cn(
-          variant === "underline"
-            ? "inline-flex h-10 items-center gap-0 rounded-none border-0 bg-transparent p-0"
-            : variant === "surface"
-              ? "inline-flex h-10 items-center justify-center rounded-lg border border-border-subtle/70 bg-muted/40 p-1 text-muted-foreground"
-              : "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
-          className,
-        )}
-        {...props}
-      />
-    </TabsStyleContext.Provider>
+    <BaseTabs.List
+      ref={ref}
+      data-slot="tabs-list"
+      data-variant={variant}
+      className={cn(tabsListVariants({ variant }), className)}
+      {...props}
+    />
   );
 }
 
@@ -57,17 +63,16 @@ function TabsTrigger({
 }: React.ComponentPropsWithoutRef<typeof BaseTabs.Tab> & {
   ref?: React.ComponentPropsWithRef<typeof BaseTabs.Tab>["ref"];
 }) {
-  const { variant } = React.useContext(TabsStyleContext);
-
   return (
     <BaseTabs.Tab
       ref={ref}
       data-slot="tabs-trigger"
-      data-variant={variant}
       className={cn(
-        variant === "underline"
-          ? "inline-flex items-center justify-center whitespace-nowrap rounded-none border-b-2 border-transparent px-3 pb-2 pt-2.5 text-xs font-medium text-muted-foreground ring-offset-background transition-[color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[active]:border-foreground data-[active]:bg-transparent data-[active]:text-foreground data-[active]:shadow-none"
-          : "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[active]:bg-background data-[active]:text-foreground data-[active]:shadow-sm",
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[active]:bg-transparent dark:group-data-[variant=line]/tabs-list:data-[active]:border-transparent dark:group-data-[variant=line]/tabs-list:data-[active]:bg-transparent",
+        "data-[active]:bg-background data-[active]:text-foreground dark:data-[active]:border-input dark:data-[active]:bg-input/30 dark:data-[active]:text-foreground",
+        "group-data-[variant=default]/tabs-list:data-[active]:shadow-sm group-data-[variant=line]/tabs-list:data-[active]:shadow-none",
+        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity after:inset-x-0 after:bottom-[-5px] after:h-0.5 group-data-[variant=line]/tabs-list:data-[active]:after:opacity-100",
         className,
       )}
       {...props}
@@ -86,14 +91,11 @@ function TabsContent({
     <BaseTabs.Panel
       ref={ref}
       data-slot="tabs-content"
-      className={cn(
-        "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        className,
-      )}
+      className={cn("w-full flex-1 outline-none", className)}
       keepMounted
       {...props}
     />
   );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent };
+export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants };

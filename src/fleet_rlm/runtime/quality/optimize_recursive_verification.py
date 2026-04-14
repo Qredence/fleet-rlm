@@ -287,6 +287,7 @@ _MODULE_SPEC = ModuleOptimizationSpec(
     row_converter=rows_to_recursive_verification_examples,
     metric_builder=build_recursive_verification_feedback_metric,
     metric_name="recursive_verification_quality_and_boundedness",
+    description="Improves output verification by evolving instructions for checking task completion criteria and detecting partial or incorrect results before finalizing.",
 )
 
 register_module(_MODULE_SPEC)

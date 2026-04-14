@@ -32,6 +32,7 @@ class ModuleOptimizationSpec:
     metric_builder: Callable[[], Any]
 
     metric_name: str = ""
+    description: str = ""
 
 
 # -- Module registry --------------------------------------------------------
@@ -66,6 +67,7 @@ def list_module_metadata() -> list[dict[str, Any]]:
         {
             "slug": spec.module_slug,
             "label": spec.label,
+            "description": spec.description,
             "program_spec": spec.program_spec,
             "required_dataset_keys": spec.required_dataset_keys,
         }

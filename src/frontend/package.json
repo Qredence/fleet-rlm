@@ -47,6 +47,8 @@
     "@tanstack/react-router": "^1.167.1",
     "@tanstack/router-devtools": "^1.166.8",
     "@tanstack/router-plugin": "^1.166.10",
+    "@visual-json/core": "^0.4.0",
+    "@visual-json/react": "^0.4.0",
     "@xyflow/react": "^12.10.1",
     "agentation": "^3.0.2",
     "agentation-mcp": "^1.2.0",

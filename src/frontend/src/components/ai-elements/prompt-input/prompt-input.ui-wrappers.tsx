@@ -32,7 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { CornerDownLeftIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
 
-const PROMPT_INPUT_MENU_CONTENT_CLASSNAME = "prompt-composer-menu rounded-2xl p-1.5";
+const PROMPT_INPUT_MENU_CONTENT_CLASSNAME = "prompt-composer-menu rounded-xl p-1";
 const PROMPT_INPUT_MENU_ITEM_CLASSNAME =
   "prompt-composer-menu-item cursor-pointer gap-3 rounded-xl px-3 py-2.5";
 

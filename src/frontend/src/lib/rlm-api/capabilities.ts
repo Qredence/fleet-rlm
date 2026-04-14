@@ -7,6 +7,7 @@ export const SUPPORTED_SECTIONS = new Set<NavItem>([
   "settings",
   "volumes",
   "optimization",
+  "history",
 ]);
 
 export const UNSUPPORTED_SECTION_REASON =

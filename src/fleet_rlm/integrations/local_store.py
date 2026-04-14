@@ -9,7 +9,9 @@ best-effort persistence.
 from __future__ import annotations
 
 import enum
+import json
 import os
+import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +66,78 @@ def _migrate_optimization_runs(engine: Any) -> None:
         conn.commit()
 
 
+def _migrate_chat_sessions(engine: Any) -> None:
+    """Best-effort migration for ownership + external ID columns on chat_sessions."""
+    new_columns = [
+        ("external_session_id", "VARCHAR(255)"),
+        ("owner_tenant", "VARCHAR(255)"),
+        ("owner_user", "VARCHAR(255)"),
+        ("workspace_id", "VARCHAR(255)"),
+    ]
+    with engine.connect() as conn:
+        for col_name, col_type in new_columns:
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}")
+                )
+            except Exception:
+                pass  # column already exists
+        # Best-effort index for ownership queries
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_chat_sessions_owner "
+                    "ON chat_sessions (owner_tenant, owner_user, updated_at DESC)"
+                )
+            )
+        except Exception:
+            pass
+        conn.commit()
+
+
+def _migrate_dataset_columns(engine: Any) -> None:
+    """Best-effort migration for new columns on the datasets table."""
+    new_columns = [
+        ("format", "VARCHAR(16)"),
+        ("module_slug", "VARCHAR(128)"),
+    ]
+    with engine.connect() as conn:
+        for col_name, col_type in new_columns:
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}")
+                )
+            except Exception:
+                pass  # column already exists
+        conn.commit()
+
+
+def _migrate_evaluation_tables(engine: Any) -> None:
+    """Best-effort index creation for evaluation_results and prompt_snapshots.
+
+    Tables are created by ``create_all``; this adds any post-creation indexes.
+    """
+    indexes = [
+        (
+            "ix_evaluation_results_run_index",
+            "CREATE INDEX IF NOT EXISTS ix_evaluation_results_run_index "
+            "ON evaluation_results (run_id, example_index)",
+        ),
+        (
+            "ix_prompt_snapshots_run_type",
+            "CREATE INDEX IF NOT EXISTS ix_prompt_snapshots_run_type "
+            "ON prompt_snapshots (run_id, prompt_type)",
+        ),
+    ]
+    with engine.connect() as conn:
+        for _name, ddl in indexes:
+            try:
+                conn.execute(text(ddl))
+            except Exception:
+                pass
+        conn.commit()
+
+
 def get_engine(db_path: str | None = None):
     """Return a cached SQLite engine, creating the DB file + tables on first call."""
     url = _resolve_db_url(db_path)
@@ -74,6 +148,9 @@ def get_engine(db_path: str | None = None):
     engine = create_engine(url, echo=False)
     SQLModel.metadata.create_all(engine)
     _migrate_optimization_runs(engine)
+    _migrate_chat_sessions(engine)
+    _migrate_dataset_columns(engine)
+    _migrate_evaluation_tables(engine)
     _engines[url] = engine
     return engine
 
@@ -110,6 +187,10 @@ class ChatSession(SQLModel, table=True):
     title: str = Field(default="New Session", max_length=255)
     status: SessionStatus = Field(default=SessionStatus.ACTIVE)
     model_name: str | None = Field(default=None, max_length=255)
+    external_session_id: str | None = Field(default=None, max_length=255, index=True)
+    owner_tenant: str | None = Field(default=None, max_length=255)
+    owner_user: str | None = Field(default=None, max_length=255)
+    workspace_id: str | None = Field(default=None, max_length=255)
     monotonic_turn_counter: int = Field(
         default=0,
         sa_column=Column("_monotonic_turn_counter", Integer, default=0, nullable=False),
@@ -139,8 +220,40 @@ class Dataset(SQLModel, table=True):
     name: str = Field(max_length=255, index=True)
     uri: str
     row_count: int | None = None
+    format: str | None = Field(default=None, max_length=16)
+    module_slug: str | None = Field(default=None, max_length=128)
     input_keys: str | None = None
     output_key: str = Field(default="assistant_response", max_length=128)
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
+class EvaluationResult(SQLModel, table=True):
+    __tablename__ = "evaluation_results"
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="optimization_runs.id", index=True)
+    example_index: int = Field(description="Zero-based index in the evaluation dataset")
+    input_data: str = Field(description="JSON-serialized input fields for this example")
+    expected_output: str | None = Field(
+        default=None, description="Expected/gold output"
+    )
+    predicted_output: str | None = Field(
+        default=None, description="Model predicted output"
+    )
+    score: float = Field(description="Score for this individual example (0.0-1.0)")
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
+class PromptSnapshot(SQLModel, table=True):
+    __tablename__ = "prompt_snapshots"
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="optimization_runs.id", index=True)
+    predictor_name: str = Field(
+        max_length=255, description="Name from named_predictors()"
+    )
+    prompt_type: str = Field(max_length=16, description="'before' or 'after'")
+    prompt_text: str = Field(description="Full prompt/instruction text")
     created_at: datetime = Field(default_factory=_utc_now)
 
 
@@ -169,10 +282,23 @@ class OptimizationRun(SQLModel, table=True):
 
 
 def create_session(
-    *, title: str = "New Session", model_name: str | None = None
+    *,
+    title: str = "New Session",
+    model_name: str | None = None,
+    external_session_id: str | None = None,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+    workspace_id: str | None = None,
 ) -> ChatSession:
     with get_session() as db:
-        row = ChatSession(title=title, model_name=model_name)
+        row = ChatSession(
+            title=title,
+            model_name=model_name,
+            external_session_id=external_session_id,
+            owner_tenant=owner_tenant,
+            owner_user=owner_user,
+            workspace_id=workspace_id,
+        )
         db.add(row)
         db.commit()
         db.refresh(row)
@@ -360,3 +486,376 @@ def recover_stale_optimization_runs() -> int:
         if stale:
             db.commit()
         return len(stale)
+
+
+# ---------------------------------------------------------------------------
+# Session history queries
+# ---------------------------------------------------------------------------
+
+
+def list_sessions(
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+    search: str | None = None,
+    status: SessionStatus | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[ChatSession], int]:
+    """Return (items, total_count) for paginated session listing.
+
+    Filters by owner when provided, with full-text search on title and
+    external_session_id.
+    """
+    with get_session() as db:
+        base = select(ChatSession)
+        if owner_tenant is not None:
+            base = base.where(ChatSession.owner_tenant == owner_tenant)
+        if owner_user is not None:
+            base = base.where(ChatSession.owner_user == owner_user)
+        if status is not None:
+            base = base.where(ChatSession.status == status)
+        else:
+            base = base.where(ChatSession.status == SessionStatus.ACTIVE)
+        if search:
+            like_pat = f"%{search}%"
+            base = base.where(
+                (ChatSession.title.contains(search))  # type: ignore
+                | (ChatSession.external_session_id.like(like_pat))  # type: ignore
+            )
+
+        from sqlalchemy import func
+
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = db.exec(count_stmt).one()
+
+        items_stmt = (
+            base.order_by(ChatSession.updated_at.desc()).offset(offset).limit(limit)  # type: ignore
+        )
+        items = list(db.exec(items_stmt).all())
+        return items, total
+
+
+def get_chat_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> ChatSession | None:
+    """Return a session by ID with ownership check.
+
+    Returns None if the session does not exist or does not belong to the caller.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return None
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return None
+        if owner_user is not None and row.owner_user != owner_user:
+            return None
+        return row
+
+
+def archive_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> bool:
+    """Soft-delete a session by setting status to ARCHIVED.
+
+    Returns True if the session was found and archived, False otherwise.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return False
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return False
+        if owner_user is not None and row.owner_user != owner_user:
+            return False
+        row.status = SessionStatus.ARCHIVED
+        row.updated_at = _utc_now()
+        db.add(row)
+        db.commit()
+        return True
+
+
+def get_turns_paginated(
+    session_id: int,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[ChatTurn], int]:
+    """Return (items, total_count) for paginated turn listing."""
+    with get_session() as db:
+        from sqlalchemy import func
+
+        count_stmt = select(func.count()).where(ChatTurn.session_id == session_id)
+        total = db.exec(count_stmt).one()
+
+        items_stmt = (
+            select(ChatTurn)
+            .where(ChatTurn.session_id == session_id)
+            .order_by(text("turn_index"))
+            .offset(offset)
+            .limit(limit)
+        )
+        items = list(db.exec(items_stmt).all())
+        return items, total
+
+
+# ---------------------------------------------------------------------------
+# Evaluation result + prompt snapshot persistence
+# ---------------------------------------------------------------------------
+
+
+def save_evaluation_results(
+    run_id: int,
+    results: list[dict],
+) -> list[EvaluationResult]:
+    """Bulk save per-example evaluation results for an optimization run."""
+    with get_session() as db:
+        rows: list[EvaluationResult] = []
+        for r in results:
+            row = EvaluationResult(
+                run_id=run_id,
+                example_index=r["example_index"],
+                input_data=r["input_data"],
+                expected_output=r.get("expected_output"),
+                predicted_output=r.get("predicted_output"),
+                score=r["score"],
+            )
+            db.add(row)
+            rows.append(row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+
+
+def get_evaluation_results(
+    run_id: int,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[EvaluationResult], int]:
+    """Return (items, total_count) for paginated evaluation results."""
+    with get_session() as db:
+        from sqlalchemy import func
+
+        count_stmt = select(func.count()).where(EvaluationResult.run_id == run_id)
+        total = db.exec(count_stmt).one()
+
+        items_stmt = (
+            select(EvaluationResult)
+            .where(EvaluationResult.run_id == run_id)
+            .order_by(EvaluationResult.example_index)  # type: ignore
+            .offset(offset)
+            .limit(limit)
+        )
+        items = list(db.exec(items_stmt).all())
+        return items, total
+
+
+def save_prompt_snapshots(
+    run_id: int,
+    snapshots: list[dict],
+) -> list[PromptSnapshot]:
+    """Bulk save before/after prompt snapshots for an optimization run."""
+    with get_session() as db:
+        rows: list[PromptSnapshot] = []
+        for s in snapshots:
+            row = PromptSnapshot(
+                run_id=run_id,
+                predictor_name=s["predictor_name"],
+                prompt_type=s["prompt_type"],
+                prompt_text=s["prompt_text"],
+            )
+            db.add(row)
+            rows.append(row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+
+
+def get_prompt_snapshots(
+    run_id: int,
+) -> list[PromptSnapshot]:
+    """Return all prompt snapshots for a run (typically small: 2 per predictor)."""
+    with get_session() as db:
+        stmt = (
+            select(PromptSnapshot)
+            .where(PromptSnapshot.run_id == run_id)
+            .order_by(PromptSnapshot.predictor_name, PromptSnapshot.prompt_type)
+        )
+        return list(db.exec(stmt).all())
+
+
+# ---------------------------------------------------------------------------
+# Dataset CRUD
+# ---------------------------------------------------------------------------
+
+
+def get_dataset_root() -> Path:
+    """Return the dataset storage root directory, creating it if needed."""
+    env = os.environ.get("FLEET_RLM_DATASET_ROOT")
+    if env:
+        root = Path(env).resolve()
+    else:
+        root = (_DEFAULT_DB_DIR / "datasets").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def create_dataset(
+    *,
+    name: str,
+    row_count: int,
+    format: str,
+    uri: str,
+    module_slug: str | None = None,
+) -> Dataset:
+    """Create a new dataset record."""
+    with get_session() as db:
+        row = Dataset(
+            name=name,
+            row_count=row_count,
+            format=format,
+            uri=uri,
+            module_slug=module_slug,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
+def list_datasets(
+    *,
+    module_slug: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Dataset], int]:
+    """Paginated dataset listing with optional module filter."""
+    with get_session() as db:
+        from sqlalchemy import func
+
+        base = select(Dataset)
+        if module_slug is not None:
+            base = base.where(Dataset.module_slug == module_slug)
+
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = db.exec(count_stmt).one()
+
+        items_stmt = (
+            base.order_by(Dataset.created_at.desc())  # type: ignore
+            .offset(offset)
+            .limit(limit)
+        )
+        items = list(db.exec(items_stmt).all())
+        return items, total
+
+
+def get_dataset(dataset_id: int) -> Dataset | None:
+    """Return a single dataset by ID."""
+    with get_session() as db:
+        return db.get(Dataset, dataset_id)
+
+
+def _build_transcript_dataset_rows(
+    *,
+    module_slug: str,
+    turns: list[tuple[str | None, str | None]],
+) -> tuple[list[dict[str, str]], str]:
+    """Map transcript turns into module-specific dataset rows."""
+    from fleet_rlm.runtime.quality.module_registry import get_module_spec
+
+    spec = get_module_spec(module_slug)
+    if spec is None:
+        raise ValueError(f"Unknown module slug: {module_slug!r}")
+
+    keys = spec.required_dataset_keys
+    if len(keys) < 2:
+        raise ValueError(
+            f"Module {module_slug!r} requires fewer than 2 dataset keys — "
+            "cannot map transcript turns."
+        )
+    input_key, output_key = keys[0], keys[1]
+
+    rows: list[dict[str, str]] = []
+    for user_message, assistant_message in turns:
+        if not user_message or not assistant_message:
+            continue
+        rows.append({input_key: user_message, output_key: assistant_message})
+
+    if not rows:
+        raise ValueError(
+            "Transcript has no usable turns "
+            "(both user and assistant messages required)."
+        )
+
+    return rows, spec.label
+
+
+def _persist_transcript_dataset(
+    *,
+    rows: list[dict[str, str]],
+    module_slug: str,
+    dataset_name: str,
+    filename_stem: str,
+) -> Dataset:
+    """Write transcript-derived rows to JSONL and register a dataset."""
+    safe_stem = (
+        re.sub(r"[^A-Za-z0-9._-]+", "-", filename_stem).strip("-") or "transcript"
+    )
+    root = get_dataset_root()
+    dest = root / f"{safe_stem}-{module_slug}.jsonl"
+    suffix = 1
+    while dest.exists():
+        dest = root / f"{safe_stem}-{module_slug}-{suffix}.jsonl"
+        suffix += 1
+
+    with open(dest, "w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    return create_dataset(
+        name=dataset_name,
+        row_count=len(rows),
+        format="jsonl",
+        uri=str(dest),
+        module_slug=module_slug,
+    )
+
+
+def create_transcript_dataset(
+    *,
+    module_slug: str,
+    turns: list[tuple[str | None, str | None]],
+    title: str | None = None,
+) -> Dataset:
+    """Convert transcript turns into a JSONL dataset for GEPA optimization."""
+    rows, label = _build_transcript_dataset_rows(
+        module_slug=module_slug,
+        turns=turns,
+    )
+    transcript_title = title.strip() if title else "Transcript"
+    return _persist_transcript_dataset(
+        rows=rows,
+        module_slug=module_slug,
+        dataset_name=f"{transcript_title} ({label})",
+        filename_stem=transcript_title,
+    )
+
+
+def export_session_as_dataset(session_id: int, module_slug: str) -> Dataset:
+    """Convert a session's turns into a JSONL dataset for GEPA optimization."""
+    turns = get_turns(session_id)
+    return create_transcript_dataset(
+        module_slug=module_slug,
+        turns=[(turn.user_message, turn.assistant_message) for turn in turns],
+        title=f"Session {session_id}",
+    )

@@ -218,6 +218,7 @@ _MODULE_SPEC = ModuleOptimizationSpec(
     row_converter=rows_to_reflection_examples,
     metric_builder=build_reflection_feedback_metric,
     metric_name="reflection_decision_quality",
+    description="Improves the recursive reflect-and-revise loop by evolving instructions for when to continue refining versus when the answer is good enough.",
 )
 
 register_module(_MODULE_SPEC)

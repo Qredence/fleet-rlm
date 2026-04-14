@@ -70,6 +70,12 @@ importers:
       '@tanstack/router-plugin':
         specifier: ^1.166.10
         version: 1.166.10(@tanstack/react-router@1.167.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(@voidzero-dev/vite-plus-core@0.1.11(@types/node@24.7.2)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(typescript@5.9.3))
+      '@visual-json/core':
+        specifier: ^0.4.0
+        version: 0.4.0
+      '@visual-json/react':
+        specifier: ^0.4.0
+        version: 0.4.0(react@19.2.4)
       '@xyflow/react':
         specifier: ^12.10.1
         version: 12.10.1(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -2046,6 +2052,14 @@ packages:
   '@vercel/oidc@3.1.0':
     resolution: {integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==}
     engines: {node: '>= 20'}
+
+  '@visual-json/core@0.4.0':
+    resolution: {integrity: sha512-T/HvRIp7r6SehxVnO+akV72NLv2OMBEoQdYTFbpwMi6uU2TaXQOpIOHBG4r9XBz7OqC2e8aedOwal/NtqtzyCg==}
+
+  '@visual-json/react@0.4.0':
+    resolution: {integrity: sha512-qiDrXI7wu9VoTE0TaLoJp7kwRj8SQTpkS/wkts5sBPA8078zdrIKc+0u0Y8wAXGYd3udw9dNfD4kmpO48OEwXQ==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
 
   '@vitejs/plugin-react@6.0.1':
     resolution: {integrity: sha512-l9X/E3cDb+xY3SWzlG1MOGt2usfEHGMNIaegaUGFsLkb3RCn/k8/TOXBcab+OndDI4TBtktT8/9BwwW8Vi9KUQ==}
@@ -6963,6 +6977,13 @@ snapshots:
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
   '@vercel/oidc@3.1.0': {}
+
+  '@visual-json/core@0.4.0': {}
+
+  '@visual-json/react@0.4.0(react@19.2.4)':
+    dependencies:
+      '@visual-json/core': 0.4.0
+      react: 19.2.4
 
   '@vitejs/plugin-react@6.0.1(@voidzero-dev/vite-plus-core@0.1.11(@types/node@24.7.2)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(typescript@5.9.3))':
     dependencies:

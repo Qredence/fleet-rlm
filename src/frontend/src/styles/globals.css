@@ -189,7 +189,7 @@
 }
 
 @utility prompt-composer-shell {
-  background-color: color-mix(in srgb, var(--color-surface) 92%, var(--color-text) 8%);
+  background-color: var(--color-surface-secondary);
   color: var(--color-text);
   border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.22);

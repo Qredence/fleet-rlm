@@ -271,6 +271,7 @@ _MODULE_SPEC = ModuleOptimizationSpec(
     row_converter=rows_to_recursive_repair_examples,
     metric_builder=build_recursive_repair_feedback_metric,
     metric_name="recursive_repair_usefulness_and_boundedness",
+    description="Improves repair plan quality by evolving instructions for diagnosing failures and generating targeted, minimal fixes that don't introduce regressions.",
 )
 
 register_module(_MODULE_SPEC)

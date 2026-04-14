@@ -20,9 +20,7 @@ from typing_extensions import Never
 
 from .hitl_flow import checkpoint_hitl_request
 from .sessions import OrchestrationSessionContext
-from fleet_rlm.orchestration_app import (
-    stream_orchestrated_workspace_task,
-)
+import fleet_rlm.worker as worker_boundary
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
 _WORKSPACE_HOST_EXECUTOR_ID = "orchestration_app_worker_path"
@@ -89,9 +87,8 @@ class OrchestrationAppWorkflowExecutor(Executor):
         ctx: WorkflowContext[Never, WorkspaceEvent],
     ) -> None:
         task_state = resolve_hosted_workspace_task(host_input.task_id)
-        async for event in stream_orchestrated_workspace_task(
-            request=task_state.request,
-            session=task_state.session,
+        async for event in worker_boundary.stream_workspace_task(
+            task_state.request,
         ):
             event = checkpoint_hitl_request(event=event, session=task_state.session)
             if task_state.output_queue is not None:
@@ -110,7 +107,7 @@ def build_workspace_host_workflow() -> Workflow:
     return WorkflowBuilder(
         name="workspace-orchestration-host",
         description=(
-            "Microsoft Agent Framework host around orchestration_app and the "
+            "Microsoft Agent Framework host around the "
             "fleet_rlm.worker execution seam, including hosted HITL policy."
         ),
         start_executor=executor,

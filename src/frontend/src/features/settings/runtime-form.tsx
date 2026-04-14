@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircleIcon, BadgeCheckIcon, Clock3Icon } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,11 +12,9 @@ import {
 } from "@/components/ui/card";
 import {
   Field,
-  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldTitle,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,7 +29,11 @@ import {
   type RuntimeEditableKey,
   type RuntimeSecretEditableKey,
 } from "./use-runtime-settings";
-import type { RuntimeConnectivityTestResponse, RuntimeStatusResponse } from "@/lib/rlm-api";
+import type { RuntimeStatusResponse } from "@/lib/rlm-api";
+import { RuntimeStatusPanel, shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
+import { RuntimeConnectivityPanel } from "./runtime-connectivity-panel";
+
+export { shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
 
 type RuntimeField = {
   key: RuntimeEditableKey;
@@ -92,37 +92,6 @@ function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditab
   return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
 }
 
-function formatCheckLabel(key: string): string {
-  return key
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function testSummary(test: RuntimeConnectivityTestResponse | null | undefined) {
-  if (!test) return "Not run yet";
-  if (test.ok) return "Pass";
-  if (!test.preflight_ok) return "Preflight failed";
-  return "Failed";
-}
-
-function testVariant(test: RuntimeConnectivityTestResponse | null | undefined) {
-  if (!test) return "outline" as const;
-  return test.ok ? ("default" as const) : ("destructive" as const);
-}
-
-function testLabel(test: RuntimeConnectivityTestResponse | null | undefined) {
-  if (!test) return "Not run";
-  return testSummary(test);
-}
-
-function formatCheckedAt(checkedAt: string | null | undefined) {
-  if (!checkedAt) return null;
-  return new Date(checkedAt).toLocaleString();
-}
-
-const SETTINGS_FIELD_CLASSNAME = "border-b border-border-subtle py-4 last:border-b-0";
-
 export function RuntimeForm() {
   const {
     settingsQuery,
@@ -167,7 +136,6 @@ export function RuntimeForm() {
   const status = statusQuery.data;
   const daytonaTest = status?.tests?.daytona;
   const lmTest = status?.tests?.lm;
-  const activeModels = status?.active_models;
 
   useEffect(() => {
     const snapshot = settingsQuery.data;
@@ -332,47 +300,7 @@ export function RuntimeForm() {
   return (
     <div>
       <FieldGroup className="gap-0">
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>Runtime Status</FieldTitle>
-            <FieldDescription>
-              {status
-                ? `Environment: ${status.app_env}. Runtime readiness is ${
-                    status.ready ? "healthy" : "degraded"
-                  }.`
-                : "Loading runtime status…"}
-            </FieldDescription>
-          </FieldContent>
-          <Badge variant={status?.ready ? "default" : "secondary"}>
-            {status?.ready ? "Ready" : "Needs Attention"}
-          </Badge>
-        </Field>
-
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>Active Models</FieldTitle>
-            <FieldDescription>
-              Resolved runtime model identifiers currently used for planner/delegate execution.
-            </FieldDescription>
-          </FieldContent>
-          <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
-            <div>Planner: {activeModels?.planner || "not set"}</div>
-            <div>Delegate: {activeModels?.delegate || "not set"}</div>
-            <div>Delegate small: {activeModels?.delegate_small || "not set"}</div>
-          </div>
-        </Field>
-
-        {status?.write_enabled === false ? (
-          <Field orientation="responsive" className="py-4">
-            <FieldContent>
-              <FieldTitle>Write Protection</FieldTitle>
-              <FieldDescription>
-                Runtime settings updates are disabled because APP_ENV is not local.
-              </FieldDescription>
-            </FieldContent>
-            <Badge variant="destructive">Read-only</Badge>
-          </Field>
-        ) : null}
+        <RuntimeStatusPanel status={status} />
       </FieldGroup>
 
       <Card className="gap-0 rounded-xl border-border-subtle/70 shadow-none">
@@ -456,160 +384,20 @@ export function RuntimeForm() {
         </CardFooter>
       </Card>
 
-      <Card className="mt-4 gap-0 rounded-xl border-border-subtle/70 shadow-none">
-        <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
-          <CardDescription className="max-w-xl text-sm">
-            Runs preflight credential checks plus live Daytona and LM connectivity smoke tests.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2.5">
-              <Button
-                variant="outline"
-                size="lg"
-                className="rounded-lg"
-                onClick={handleTestLm}
-                disabled={testLmConnection.isPending}
-              >
-                {testLmConnection.isPending ? "Testing LM…" : "Test LM"}
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="rounded-lg"
-                onClick={handleTestDaytona}
-                disabled={testDaytonaConnection.isPending}
-              >
-                {testDaytonaConnection.isPending ? "Testing Daytona…" : "Test Daytona"}
-              </Button>
-              <Button
-                variant="secondary"
-                size="lg"
-                className="rounded-lg"
-                onClick={handleTestAll}
-                disabled={testLmConnection.isPending || testDaytonaConnection.isPending}
-              >
-                Test All Connections
-              </Button>
-            </div>
-            {hasUnsavedRuntimeChanges ? (
-              <p className="text-xs leading-5 text-muted-foreground">
-                Save runtime settings first so tests run against your latest credentials and
-                provider configuration.
-              </p>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-
-      <FieldGroup className="gap-0">
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>Daytona Smoke</FieldTitle>
-            <FieldDescription>{`Last result: ${testSummary(daytonaTest)}`}</FieldDescription>
-          </FieldContent>
-          <div className="flex min-w-0 flex-col items-end gap-1 text-right">
-            <Badge variant={testVariant(daytonaTest)}>
-              {daytonaTest?.checked_at ? (
-                daytonaTest.ok ? (
-                  <BadgeCheckIcon />
-                ) : (
-                  <AlertCircleIcon />
-                )
-              ) : (
-                <Clock3Icon />
-              )}
-              {testLabel(daytonaTest)}
-            </Badge>
-            {daytonaTest?.checked_at ? (
-              <span className="text-xs text-muted-foreground">
-                {formatCheckedAt(daytonaTest.checked_at)}
-              </span>
-            ) : null}
-          </div>
-        </Field>
-
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>LM Smoke</FieldTitle>
-            <FieldDescription>{`Last result: ${testSummary(lmTest)}`}</FieldDescription>
-          </FieldContent>
-          <div className="flex min-w-0 flex-col items-end gap-1 text-right">
-            <Badge variant={testVariant(lmTest)}>
-              {lmTest?.checked_at ? (
-                lmTest.ok ? (
-                  <BadgeCheckIcon />
-                ) : (
-                  <AlertCircleIcon />
-                )
-              ) : (
-                <Clock3Icon />
-              )}
-              {testLabel(lmTest)}
-            </Badge>
-            {lmTest?.checked_at ? (
-              <span className="text-xs text-muted-foreground">
-                {formatCheckedAt(lmTest.checked_at)}
-              </span>
-            ) : null}
-          </div>
-        </Field>
-
-        <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
-          <FieldContent>
-            <FieldTitle>Preflight Checks</FieldTitle>
-            <FieldDescription>Credential and provider availability.</FieldDescription>
-          </FieldContent>
-          <div className="flex max-w-xl flex-wrap justify-end gap-2">
-            {llmChecks.map(([key, ok]) => (
-              <Badge
-                key={`llm-${key}`}
-                variant={ok ? "outline" : "destructive"}
-                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
-              >
-                {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
-                LM {formatCheckLabel(key)}
-              </Badge>
-            ))}
-            {daytonaChecks.map(([key, ok]) => (
-              <Badge
-                key={`daytona-${key}`}
-                variant={ok ? "outline" : "destructive"}
-                className={ok ? "border-chart-3/30 bg-chart-3/10 text-chart-3" : undefined}
-              >
-                {ok ? <BadgeCheckIcon /> : <AlertCircleIcon />}
-                Daytona {formatCheckLabel(key)}
-              </Badge>
-            ))}
-          </div>
-        </Field>
-
-        <Field orientation="responsive" className="py-4">
-          <FieldContent>
-            <FieldTitle>Guidance</FieldTitle>
-            <FieldDescription>Actionable runtime recommendations.</FieldDescription>
-          </FieldContent>
-          <ul className="flex list-disc flex-col gap-1 pl-5 text-right text-xs text-muted-foreground">
-            {runtimeGuidance.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </Field>
-      </FieldGroup>
+      <RuntimeConnectivityPanel
+        hasUnsavedRuntimeChanges={hasUnsavedRuntimeChanges}
+        writeEnabled={status?.write_enabled !== false}
+        daytonaTest={daytonaTest}
+        lmTest={lmTest}
+        llmChecks={llmChecks}
+        daytonaChecks={daytonaChecks}
+        runtimeGuidance={runtimeGuidance}
+        onTestLm={handleTestLm}
+        onTestDaytona={handleTestDaytona}
+        onTestAll={handleTestAll}
+        testLmPending={testLmConnection.isPending}
+        testDaytonaPending={testDaytonaConnection.isPending}
+      />
     </div>
   );
-}
-
-export function shouldHydrateRuntimeForm(
-  snapshot: { values?: Record<string, string> } | undefined,
-  hasUnsavedRuntimeChanges: boolean,
-): boolean {
-  return Boolean(snapshot) && !hasUnsavedRuntimeChanges;
-}
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Unexpected error";
 }

@@ -48,7 +48,7 @@ async def handle_terminal_stream_event(
     not restored a resumable session record yet; when present, the outer layer
     updates authoritative workflow/continuation state before persistence.
     """
-    from fleet_rlm.orchestration_app.terminal_flow import apply_terminal_event_policy
+    from fleet_rlm.agent_host.terminal_flow import apply_terminal_event_policy
 
     if not await apply_terminal_event_policy(
         lifecycle=lifecycle,

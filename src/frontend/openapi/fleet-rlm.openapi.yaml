@@ -79,6 +79,224 @@ paths:
           description: Session state is unavailable because server startup is incomplete.
       security:
         - HTTPBearer: []
+  /api/v1/sessions:
+    get:
+      tags:
+        - sessions
+      summary: List session history
+      description: Paginated list of durable session transcripts with search and status
+        filters.
+      operationId: list_sessions_endpoint_api_v1_sessions_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Full-text search on title
+            title: Search
+          description: Full-text search on title
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Filter by status (active, archived)
+            title: Status
+          description: Filter by status (active, archived)
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            description: Page size
+            default: 20
+            title: Limit
+          description: Page size
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset
+            default: 0
+            title: Offset
+          description: Pagination offset
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}:
+    get:
+      tags:
+        - sessions
+      summary: Get session detail
+      description: Return session metadata and turn count for a specific session.
+      operationId: get_session_detail_api_v1_sessions__session_id__get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the session to inspect.
+            title: Session Id
+          description: Identifier of the session to inspect.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetailResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - sessions
+      summary: Archive session
+      description: Soft-delete (archive) a session. Returns success when archived,
+        404 if not found or not owned.
+      operationId: delete_session_endpoint_api_v1_sessions__session_id__delete
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the session to archive.
+            title: Session Id
+          description: Identifier of the session to archive.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDeleteResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/turns:
+    get:
+      tags:
+        - sessions
+      summary: Get session turns
+      description: Paginated turn-by-turn transcript for a session.
+      operationId: get_session_turns_api_v1_sessions__session_id__turns_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the session whose turns to list.
+            title: Session Id
+          description: Identifier of the session whose turns to list.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            description: Page size
+            default: 50
+            title: Limit
+          description: Page size
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset
+            default: 0
+            title: Offset
+          description: Pagination offset
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TurnListResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/export:
+    post:
+      tags:
+        - sessions
+      summary: Export session as GEPA dataset
+      description: Convert a session's turn history into a JSONL dataset suitable
+        for GEPA optimization. Requires a target module slug to determine the column
+        mapping.
+      operationId: export_session_endpoint_api_v1_sessions__session_id__export_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the session to export as a dataset.
+            title: Session Id
+          description: Identifier of the session to export as a dataset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionExportRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/runtime/settings:
     get:
       tags:
@@ -484,16 +702,20 @@ paths:
             type: integer
             maximum: 200
             minimum: 1
+            description: Maximum number of runs to return.
             default: 50
             title: Limit
+          description: Maximum number of runs to return.
         - name: offset
           in: query
           required: false
           schema:
             type: integer
             minimum: 0
+            description: Pagination offset into the run list.
             default: 0
             title: Offset
+          description: Pagination offset into the run list.
       responses:
         "200":
           description: Successful Response
@@ -506,6 +728,73 @@ paths:
                 title: Response List Runs Api V1 Optimization Runs Get
         "401":
           description: Authentication is required or the provided token is invalid.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/datasets/from-transcript:
+    post:
+      tags:
+        - optimization
+      summary: Create Dataset From Transcript
+      description: Convert transcript turns into a GEPA dataset.
+      operationId: create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranscriptDatasetRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "400":
+          description: Invalid transcript dataset payload.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - HTTPBearer: []
+  /api/v1/optimization/runs/compare:
+    get:
+      tags:
+        - optimization
+      summary: Compare Runs
+      description: Compare prompt diffs and scores across optimization runs.
+      operationId: compare_runs_api_v1_optimization_runs_compare_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_ids
+          in: query
+          required: true
+          schema:
+            type: string
+            description: Comma-separated run IDs to compare (max 5).
+            title: Run Ids
+          description: Comma-separated run IDs to compare (max 5).
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunComparisonResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "400":
+          description: Invalid run_ids parameter.
         "422":
           description: Validation Error
           content:
@@ -527,7 +816,9 @@ paths:
           required: true
           schema:
             type: integer
+            description: Identifier of the optimization run to fetch.
             title: Run Id
+          description: Identifier of the optimization run to fetch.
       responses:
         "200":
           description: Successful Response
@@ -535,6 +826,184 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OptimizationRunResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/datasets:
+    post:
+      tags:
+        - optimization
+      summary: Upload Dataset
+      description: Upload and register a dataset file (.json or .jsonl).
+      operationId: upload_dataset_api_v1_optimization_datasets_post
+      security:
+        - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_upload_dataset_api_v1_optimization_datasets_post"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "400":
+          description: Invalid dataset file.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - optimization
+      summary: List Datasets Endpoint
+      description: List registered datasets with optional module filter.
+      operationId: list_datasets_endpoint_api_v1_optimization_datasets_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: module_slug
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Filter by module slug
+            title: Module Slug
+          description: Filter by module slug
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            description: Maximum number of datasets to return.
+            default: 50
+            title: Limit
+          description: Maximum number of datasets to return.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset into the dataset list.
+            default: 0
+            title: Offset
+          description: Pagination offset into the dataset list.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetListResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/datasets/{dataset_id}:
+    get:
+      tags:
+        - optimization
+      summary: Get Dataset Detail
+      description: Return dataset metadata with the first 10 rows as preview.
+      operationId: get_dataset_detail_api_v1_optimization_datasets__dataset_id__get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the dataset to inspect.
+            title: Dataset Id
+          description: Identifier of the dataset to inspect.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetDetailResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Dataset not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/results:
+    get:
+      tags:
+        - optimization
+      summary: Get Run Results
+      description: Return per-example evaluation results for an optimization run.
+      operationId: get_run_results_api_v1_optimization_runs__run_id__results_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            description: Identifier of the optimization run whose results to list.
+            title: Run Id
+          description: Identifier of the optimization run whose results to list.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 500
+            minimum: 1
+            description: Maximum number of evaluation rows to return.
+            default: 100
+            title: Limit
+          description: Maximum number of evaluation rows to return.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset into the evaluation results.
+            default: 0
+            title: Offset
+          description: Pagination offset into the evaluation results.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationResultsResponse"
         "401":
           description: Authentication is required or the provided token is invalid.
         "404":
@@ -627,6 +1096,214 @@ components:
         - user_claim
       title: AuthMeResponse
       description: Resolved identity payload returned to authenticated clients.
+    Body_upload_dataset_api_v1_optimization_datasets_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+          description: Dataset file to upload in JSON or JSONL format.
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Optional module slug used to validate required dataset keys.
+      type: object
+      required:
+        - file
+      title: Body_upload_dataset_api_v1_optimization_datasets_post
+    DatasetDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Unique dataset identifier.
+        name:
+          type: string
+          title: Name
+          description: Human-readable dataset name.
+        row_count:
+          type: integer
+          title: Row Count
+          description: Number of rows/examples in the dataset.
+        format:
+          type: string
+          title: Format
+          description: File format (json or jsonl).
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Associated module slug, when provided.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+        sample_rows:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Sample Rows
+          description: First rows from the dataset as preview.
+        uri:
+          type: string
+          title: Uri
+          description: Filesystem path to the dataset file.
+      type: object
+      required:
+        - id
+        - name
+        - row_count
+        - format
+        - created_at
+        - sample_rows
+        - uri
+      title: DatasetDetailResponse
+      description: Dataset metadata with sample rows and URI.
+    DatasetListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DatasetResponse"
+          type: array
+          title: Items
+          description: Dataset list items.
+        total:
+          type: integer
+          title: Total
+          description: Total matching datasets.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more results exist beyond this page.
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - has_more
+      title: DatasetListResponse
+      description: Paginated dataset listing.
+    DatasetResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Unique dataset identifier.
+        name:
+          type: string
+          title: Name
+          description: Human-readable dataset name.
+        row_count:
+          type: integer
+          title: Row Count
+          description: Number of rows/examples in the dataset.
+        format:
+          type: string
+          title: Format
+          description: File format (json or jsonl).
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Associated module slug, when provided.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+        - id
+        - name
+        - row_count
+        - format
+        - created_at
+      title: DatasetResponse
+      description: Metadata for a registered dataset.
+    EvaluationResultItem:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Unique evaluation result identifier.
+        example_index:
+          type: integer
+          title: Example Index
+          description: Zero-based index in the dataset.
+        input_data:
+          type: string
+          title: Input Data
+          description: JSON-serialized input fields.
+        expected_output:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expected Output
+          description: Expected/gold output.
+        predicted_output:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Predicted Output
+          description: Model predicted output.
+        score:
+          type: number
+          title: Score
+          description: Score for this example (0.0-1.0).
+      type: object
+      required:
+        - id
+        - example_index
+        - input_data
+        - score
+      title: EvaluationResultItem
+      description: A single per-example evaluation result.
+    EvaluationResultsResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/EvaluationResultItem"
+          type: array
+          title: Items
+          description: Evaluation result items.
+        total:
+          type: integer
+          title: Total
+          description: Total evaluation results for the run.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more results exist beyond this page.
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - has_more
+      title: EvaluationResultsResponse
+      description: Paginated evaluation results for a run.
     GEPAModuleInfo:
       properties:
         slug:
@@ -637,6 +1314,11 @@ components:
           type: string
           title: Label
           description: Human-readable module label.
+        description:
+          type: string
+          title: Description
+          description: Human-readable description of what this module optimizes.
+          default: ""
         program_spec:
           type: string
           title: Program Spec
@@ -658,9 +1340,17 @@ components:
     GEPAOptimizationRequest:
       properties:
         dataset_path:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Dataset Path
-          description: Path to the exported MLflow trace dataset (JSON).
+          description: Relative filesystem path to the dataset file.
+        dataset_id:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Dataset Id
+          description: Registered dataset identifier to optimize against.
         program_spec:
           type: string
           title: Program Spec
@@ -696,8 +1386,6 @@ components:
             validation).
           default: 0.8
       type: object
-      required:
-        - dataset_path
       title: GEPAOptimizationRequest
       description: Request body for triggering a GEPA prompt optimization run.
     GEPAOptimizationResponse:
@@ -933,6 +1621,27 @@ components:
         - started_at
       title: OptimizationRunResponse
       description: A single optimization run record.
+    PromptSnapshotItem:
+      properties:
+        predictor_name:
+          type: string
+          title: Predictor Name
+          description: Predictor name from named_predictors().
+        prompt_type:
+          type: string
+          title: Prompt Type
+          description: "Snapshot type: 'before' or 'after'."
+        prompt_text:
+          type: string
+          title: Prompt Text
+          description: Full prompt/instruction text.
+      type: object
+      required:
+        - predictor_name
+        - prompt_type
+        - prompt_text
+      title: PromptSnapshotItem
+      description: A before or after prompt snapshot for a predictor.
     ReadyResponse:
       properties:
         ready:
@@ -978,6 +1687,48 @@ components:
         - sandbox_provider
       title: ReadyResponse
       description: Response body for the readiness endpoint.
+    RunComparisonItem:
+      properties:
+        run_id:
+          type: integer
+          title: Run Id
+          description: Optimization run identifier.
+        program_spec:
+          type: string
+          title: Program Spec
+          description: DSPy program specification optimized.
+        validation_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Validation Score
+          description: Validation score from the run.
+        prompt_snapshots:
+          items:
+            $ref: "#/components/schemas/PromptSnapshotItem"
+          type: array
+          title: Prompt Snapshots
+          description: Before/after prompt snapshots for this run.
+      type: object
+      required:
+        - run_id
+        - program_spec
+        - prompt_snapshots
+      title: RunComparisonItem
+      description: Summary of a single run for cross-run comparison.
+    RunComparisonResponse:
+      properties:
+        runs:
+          items:
+            $ref: "#/components/schemas/RunComparisonItem"
+          type: array
+          title: Runs
+          description: Compared run summaries.
+      type: object
+      required:
+        - runs
+      title: RunComparisonResponse
+      description: Cross-run comparison payload.
     RuntimeActiveModels:
       properties:
         planner:
@@ -1191,6 +1942,159 @@ components:
       type: object
       title: RuntimeTestCache
       description: Cached runtime test results included in the runtime status payload.
+    SessionDeleteResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the session was archived successfully.
+          default: true
+      type: object
+      title: SessionDeleteResponse
+      description: Result payload after archiving a session.
+    SessionDetailResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Local store primary key.
+        title:
+          type: string
+          title: Title
+          description: Human-readable session title.
+        status:
+          type: string
+          title: Status
+          description: Session status (active, archived).
+        model_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Model Name
+          description: Model used in session.
+        external_session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: External Session Id
+          description: Canonical runtime session identifier.
+        workspace_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Workspace Id
+          description: Workspace context.
+        turn_count:
+          type: integer
+          title: Turn Count
+          description: Total number of turns in this session.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+        updated_at:
+          type: string
+          title: Updated At
+          description: ISO-8601 last-update timestamp.
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - turn_count
+        - created_at
+        - updated_at
+      title: SessionDetailResponse
+      description: Full session detail with turn count.
+    SessionExportRequest:
+      properties:
+        module_slug:
+          type: string
+          title: Module Slug
+          description: Target GEPA module slug whose dataset keys determine the export
+            column mapping.
+      type: object
+      required:
+        - module_slug
+      title: SessionExportRequest
+      description: Request body for exporting a session's turns as a GEPA training
+        dataset.
+    SessionListItem:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Local store primary key.
+        title:
+          type: string
+          title: Title
+          description: Human-readable session title.
+        status:
+          type: string
+          title: Status
+          description: Session status (active, archived).
+        model_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Model Name
+          description: Model used in session.
+        external_session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: External Session Id
+          description: Canonical runtime session identifier.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+        updated_at:
+          type: string
+          title: Updated At
+          description: ISO-8601 last-update timestamp.
+      type: object
+      required:
+        - id
+        - title
+        - status
+        - created_at
+        - updated_at
+      title: SessionListItem
+      description: Lightweight session summary for list views.
+    SessionListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SessionListItem"
+          type: array
+          title: Items
+          description: Session list items.
+        total:
+          type: integer
+          title: Total
+          description: Total matching sessions.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more results exist beyond this page.
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - has_more
+      title: SessionListResponse
+      description: Paginated session list.
     SessionStateResponse:
       properties:
         ok:
@@ -1338,6 +2242,112 @@ components:
         - trace_id
       title: TraceFeedbackResponse
       description: Result payload after MLflow feedback has been recorded.
+    TranscriptDatasetRequest:
+      properties:
+        module_slug:
+          type: string
+          title: Module Slug
+          description: Target GEPA module slug whose dataset keys determine row mapping.
+        title:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Title
+          description: Optional human-readable transcript title used for dataset naming.
+        turns:
+          items:
+            $ref: "#/components/schemas/TranscriptTurnInput"
+          type: array
+          title: Turns
+          description: Transcript turns to convert into dataset rows.
+      type: object
+      required:
+        - module_slug
+        - turns
+      title: TranscriptDatasetRequest
+      description: Request body for converting transcript turns into a GEPA dataset.
+    TranscriptTurnInput:
+      properties:
+        user_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: User Message
+          description: User prompt/content for the turn.
+        assistant_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Assistant Message
+          description: Assistant response/content for the turn.
+      type: object
+      title: TranscriptTurnInput
+      description: Single transcript turn used to build a GEPA dataset.
+    TurnItem:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Turn primary key.
+        turn_index:
+          type: integer
+          title: Turn Index
+          description: Zero-based turn position.
+        user_message:
+          type: string
+          title: User Message
+          description: User message text.
+        assistant_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Assistant Message
+          description: Assistant response text.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+        - id
+        - turn_index
+        - user_message
+        - created_at
+      title: TurnItem
+      description: Single turn in a session transcript.
+    TurnListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/TurnItem"
+          type: array
+          title: Items
+          description: Turn list items.
+        total:
+          type: integer
+          title: Total
+          description: Total turns in session.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more turns exist beyond this page.
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - has_more
+      title: TurnListResponse
+      description: Paginated turn list.
     ValidationError:
       properties:
         loc:

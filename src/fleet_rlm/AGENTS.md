@@ -47,9 +47,8 @@ Artifacts and areas to treat carefully:
 
 Active top-level areas under `src/fleet_rlm/`:
 
-- `agent_host/`: narrow but real Microsoft Agent Framework outer host that wraps the worker seam and hosted policy
+- `agent_host/`: Microsoft Agent Framework outer host that wraps the worker seam, hosted policy, terminal flow, and HITL checkpointing
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities
-- `orchestration_app/`: transitional orchestration bridge that still carries compatibility seams beneath `agent_host/`
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, observability, MCP, and external-system integrations
@@ -85,6 +84,10 @@ Canonical HTTP and websocket surfaces:
 - `/ready`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/sessions/state`
+- `GET /api/v1/sessions` — paginated session history with search/status filters
+- `GET /api/v1/sessions/{id}` — session detail with turn count
+- `GET /api/v1/sessions/{id}/turns` — paginated turn transcript
+- `DELETE /api/v1/sessions/{id}` — archive (soft-delete) session
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
@@ -93,6 +96,15 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/runtime/volume/file`
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
+- `GET /api/v1/optimization/modules`
+- `POST /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs/{run_id}`
+- `GET /api/v1/optimization/runs/{run_id}/results`
+- `GET /api/v1/optimization/runs/compare`
+- `POST /api/v1/optimization/datasets`
+- `GET /api/v1/optimization/datasets`
+- `GET /api/v1/optimization/datasets/{dataset_id}`
 - `POST /api/v1/traces/feedback`
 - `/api/v1/ws/execution`
 - `/api/v1/ws/execution/events`
@@ -119,9 +131,8 @@ Auth, persistence, and observability constraints:
 
 Layering rules:
 
-- Keep Agent Framework outer-host orchestration in `agent_host/`; it is real hosted policy, but it should stay narrow and sit around the worker seam
+- Keep Agent Framework outer-host orchestration in `agent_host/`; it owns hosted policy, terminal flow, HITL checkpointing, and the worker seam
 - Keep transport logic in `api/` only
-- Treat `orchestration_app/` and `api/orchestration/` as transitional compatibility layers rather than destinations for new core logic
 - Keep recursive business/runtime behavior in `worker/`, `runtime/`, or `integrations/daytona/`
 - Keep runtime config imports lightweight; config/package-root modules must not import DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks as import-time side effects
 - Reuse existing helpers before introducing new compatibility wrappers

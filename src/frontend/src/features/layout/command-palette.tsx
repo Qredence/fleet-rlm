@@ -4,7 +4,7 @@
  * Mirrors the current product shell: Workbench, Volumes, Optimization, and Settings.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Zap, HardDrive, Plus, Moon, Sun, Settings, Sparkles } from "lucide-react";
+import { Zap, HardDrive, Plus, Moon, Sun, Settings, Sparkles, Clock3 } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -38,6 +38,7 @@ const pages: PageItem[] = [
   { key: "workspace", label: "Workbench", icon: Zap },
   { key: "volumes", label: "Volumes", icon: HardDrive },
   { key: "optimization", label: "Optimization", icon: Sparkles },
+  { key: "history", label: "History", icon: Clock3 },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 

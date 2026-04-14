@@ -1,14 +1,22 @@
 import { useEffect, useState, memo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { GitBranch } from "lucide-react";
+import { GitBranch, Maximize2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Streamdown } from "@/components/ui/streamdown";
 import { ArtifactGraph } from "@/features/workspace/ui/inspector/artifact-graph";
 import { summarizeArtifactStep } from "@/features/workspace/ui/inspector/parsers/artifact-payload-summaries";
 import type { ExecutionStep } from "@/features/workspace/use-workspace";
 import { inspectorStyles } from "@/features/workspace/ui/inspector/inspector-styles";
 import { DetailBlock, stringifyValue } from "../ui/inspector-ui";
 import { InspectorTabPanel } from "../inspector-tab-panel";
+import {
+  MorphingDialog,
+  MorphingDialogClose,
+  MorphingDialogContainer,
+  MorphingDialogContent,
+  MorphingDialogTrigger,
+} from "@/components/ui/morphing-dialog";
 
 export const GraphInspectorTab = memo(function GraphInspectorTab({
   steps,
@@ -73,14 +81,47 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
             Parent-child lineage, actor lanes, and delegated branches for this turn.
           </CardDescription>
         </CardHeader>
-        <CardContent className={inspectorStyles.card.content}>
-          <div className={inspectorStyles.graph.canvas}>
+        <CardContent className="p-0">
+          <div className={cn(inspectorStyles.graph.canvas, "relative")}>
             <ArtifactGraph
               steps={steps}
               activeStepId={activeStepId}
               onSelectStep={(stepId) => setActiveStepId(stepId)}
               isVisible
             />
+
+            <MorphingDialog
+              transition={{ type: "spring", bounce: 0, duration: 0.35 }}
+            >
+              <MorphingDialogTrigger
+                className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full border border-border-subtle/80 bg-background/80 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
+                aria-label="Expand graph"
+              >
+                <Maximize2 className="size-3" />
+                Expand
+              </MorphingDialogTrigger>
+
+              <MorphingDialogContainer>
+                <MorphingDialogContent className="relative flex h-[80vh] w-[80vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
+                  <ArtifactGraph
+                    steps={steps}
+                    activeStepId={activeStepId}
+                    onSelectStep={(stepId) => setActiveStepId(stepId)}
+                    isVisible
+                  />
+                  <MorphingDialogClose
+                    className="absolute top-3 right-3 z-10 flex size-7 items-center justify-center rounded-lg border border-border-subtle/80 bg-background/80 text-muted-foreground backdrop-blur-sm transition-colors hover:border-border hover:text-foreground"
+                    variants={{
+                      initial: { opacity: 0, scale: 0.8 },
+                      animate: { opacity: 1, scale: 1 },
+                      exit: { opacity: 0, scale: 0.8 },
+                    }}
+                  >
+                    <X className="size-3.5" />
+                  </MorphingDialogClose>
+                </MorphingDialogContent>
+              </MorphingDialogContainer>
+            </MorphingDialog>
           </div>
         </CardContent>
       </Card>
@@ -92,7 +133,11 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
             <CardDescription>{selectedStep.label}</CardDescription>
           </CardHeader>
           <CardContent className={inspectorStyles.card.contentStack}>
-            <div className="text-sm text-foreground">{summarizeArtifactStep(selectedStep)}</div>
+            <Streamdown
+              content={summarizeArtifactStep(selectedStep)}
+              streaming={false}
+              className="text-sm text-foreground"
+            />
             <div className={inspectorStyles.badge.row}>
               <Badge variant="secondary" className={cn(inspectorStyles.badge.meta, "capitalize")}>
                 {selectedStep.type}

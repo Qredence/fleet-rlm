@@ -46,8 +46,8 @@ def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
         session_record=session_record,
     )
 
-    async def _fake_stream_orchestrated_workspace_task(*, request, session):
-        _ = (request, session)
+    async def _fake_stream_workspace_task(request):
+        _ = request
         yield WorkspaceEvent(
             kind="hitl_request",
             text="Approve deployment?",
@@ -59,8 +59,8 @@ def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.agent_host.workflow.stream_orchestrated_workspace_task",
-        _fake_stream_orchestrated_workspace_task,
+        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
+        _fake_stream_workspace_task,
     )
 
     async def _collect() -> list[WorkspaceEvent]:
@@ -108,7 +108,7 @@ def test_stream_hosted_workspace_task_preserves_worker_boundary(
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.orchestration_app.coordinator.worker_boundary.stream_workspace_task",
+        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
         _fake_stream_workspace_task,
     )
 
@@ -136,13 +136,13 @@ def test_stream_hosted_workspace_task_owns_bridge_lifecycle(monkeypatch) -> None
     request = WorkspaceTaskRequest(agent=_AgentStub(), message="run code")
     bridge = _BridgeStub()
 
-    async def _fake_stream_orchestrated_workspace_task(*, request, session):
-        _ = (request, session)
+    async def _fake_stream_workspace_task(request):
+        _ = request
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.agent_host.workflow.stream_orchestrated_workspace_task",
-        _fake_stream_orchestrated_workspace_task,
+        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
+        _fake_stream_workspace_task,
     )
 
     async def _collect() -> list[WorkspaceEvent]:

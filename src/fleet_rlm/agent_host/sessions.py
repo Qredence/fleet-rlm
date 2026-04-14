@@ -376,7 +376,13 @@ async def switch_orchestration_session(
         try:
             from fleet_rlm.integrations.local_store import create_session as _db_create
 
-            cached["db_session_id"] = _db_create(title=sess_id).id
+            cached["db_session_id"] = _db_create(
+                title=sess_id,
+                external_session_id=sess_id,
+                owner_tenant=owner_tenant_claim,
+                owner_user=owner_user_claim,
+                workspace_id=workspace_id,
+            ).id
         except Exception:
             # Best-effort DB linkage only; continue with in-memory session state if unavailable.
             pass

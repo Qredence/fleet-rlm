@@ -48,7 +48,7 @@ export function LayoutHeader() {
               className={cn(
                 isMobile
                   ? "rounded-xl"
-                  : "h-11 flex-shrink justify-start gap-3 rounded-2xl border-border-subtle/80 px-3.5 text-foreground/82 shadow-xs",
+                  : "h-11 flex-shrink justify-start gap-3 rounded-2xl border-border-subtle/80 bg-background px-2 text-foreground/82 shadow-xs",
               )}
               onClick={toggleCanvas}
             >

@@ -1,1 +1,1 @@
-export type NavItem = "workspace" | "volumes" | "optimization" | "settings";
+export type NavItem = "workspace" | "volumes" | "optimization" | "history" | "settings";

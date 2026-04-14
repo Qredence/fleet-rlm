@@ -67,10 +67,9 @@ export function AssistantTurnContent({
       <MessageContent className="w-full flex flex-col gap-2.5">
         <div
           className={cn(
-            "max-w-content rounded-bubble px-4 py-3.5 shadow-sm md:px-5 md:py-4",
-            "border transition-colors",
-            selected && "border-accent/20 bg-accent/5",
-            !selected && "border-border-subtle/60 bg-card/60",
+            "max-w-content rounded-bubble px-4 py-3.5 md:px-5 md:py-4",
+            "transition-colors",
+            selected && "border border-accent/20 bg-accent/5",
           )}
           data-slot="assistant-turn-content"
           role={onOpenTab ? "button" : undefined}

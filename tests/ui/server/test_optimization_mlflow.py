@@ -1,0 +1,229 @@
+"""Tests for MLflow autologging wiring in the optimization background runner."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.fixture()
+def _stub_local_store(monkeypatch: pytest.MonkeyPatch):
+    """Stub out the local-store helpers used by the background runner."""
+    import fleet_rlm.api.routers.optimization as mod
+
+    monkeypatch.setattr(
+        mod,
+        "_run_optimization_background",
+        mod._run_optimization_background,
+    )
+
+    # We patch at import-site inside the function via the module path
+    noop = MagicMock()
+    with (
+        patch(
+            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+            noop,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.complete_optimization_run",
+            noop,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.fail_optimization_run",
+            noop,
+        ),
+    ):
+        yield
+
+
+def _make_runner_kwargs(tmp_path: Path) -> dict:
+    dataset = tmp_path / "data.jsonl"
+    dataset.write_text('{"question": "hi", "answer": "hello"}\n')
+    return {
+        "run_id": 1,
+        "module_slug": "test-mod",
+        "dataset_path": dataset,
+        "program_spec": "QA",
+        "output_path": None,
+        "default_output_root": tmp_path,
+        "auto": "light",
+        "train_ratio": 0.8,
+    }
+
+
+class TestBackgroundRunnerMlflowAvailable:
+    """When MLflow is available, initialize + start_run are invoked."""
+
+    def test_mlflow_init_and_start_run_called(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fleet_rlm.api.routers.optimization import _run_optimization_background
+
+        init_mock = MagicMock(return_value=True)
+        ctx_mock = MagicMock()
+        ctx_mock.__enter__ = MagicMock(return_value=ctx_mock)
+        ctx_mock.__exit__ = MagicMock(return_value=False)
+        start_run_mock = MagicMock(return_value=ctx_mock)
+        log_metric_mock = MagicMock()
+
+        fake_result = {
+            "train_examples": 4,
+            "validation_examples": 1,
+            "validation_score": 0.85,
+            "output_path": None,
+            "manifest_path": None,
+        }
+        run_mod_mock = MagicMock(return_value=fake_result)
+        spec_mock = MagicMock()
+
+        with (
+            patch(
+                "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+                init_mock,
+            ),
+            patch("mlflow.start_run", start_run_mock, create=True),
+            patch("mlflow.log_metric", log_metric_mock, create=True),
+            patch(
+                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                return_value=spec_mock,
+            ),
+            patch(
+                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                run_mod_mock,
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+                MagicMock(),
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.complete_optimization_run",
+                MagicMock(),
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.fail_optimization_run",
+                MagicMock(),
+            ),
+        ):
+            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+
+        init_mock.assert_called_once()
+        start_run_mock.assert_called_once()
+        assert "GEPA::test-mod" in str(start_run_mock.call_args)
+        log_metric_mock.assert_called_once_with("gepa_validation_score", 0.85)
+        ctx_mock.__exit__.assert_called_once()
+
+
+class TestBackgroundRunnerMlflowUnavailable:
+    """When MLflow is unavailable, the optimization still succeeds."""
+
+    def test_optimization_succeeds_without_mlflow(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fleet_rlm.api.routers.optimization import _run_optimization_background
+
+        init_mock = MagicMock(return_value=False)
+        complete_mock = MagicMock()
+
+        fake_result = {
+            "train_examples": 4,
+            "validation_examples": 1,
+            "validation_score": 0.9,
+            "output_path": None,
+            "manifest_path": None,
+        }
+        run_mod_mock = MagicMock(return_value=fake_result)
+        spec_mock = MagicMock()
+
+        with (
+            patch(
+                "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+                init_mock,
+            ),
+            patch(
+                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                return_value=spec_mock,
+            ),
+            patch(
+                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                run_mod_mock,
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+                MagicMock(),
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.complete_optimization_run",
+                complete_mock,
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.fail_optimization_run",
+                MagicMock(),
+            ),
+        ):
+            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+
+        run_mod_mock.assert_called_once()
+        complete_mock.assert_called_once()
+        assert complete_mock.call_args.kwargs.get("validation_score") == 0.9
+
+    def test_mlflow_import_error_does_not_block(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Even if mlflow import itself raises, the run proceeds."""
+        from fleet_rlm.api.routers.optimization import _run_optimization_background
+
+        complete_mock = MagicMock()
+        fake_result = {
+            "train_examples": 2,
+            "validation_examples": 1,
+            "output_path": None,
+            "manifest_path": None,
+        }
+        run_mod_mock = MagicMock(return_value=fake_result)
+        spec_mock = MagicMock()
+
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
+
+        def _fail_mlflow(name, *args, **kwargs):
+            if name == "mlflow":
+                raise ImportError("no mlflow")
+            return original_import(name, *args, **kwargs)
+
+        with (
+            patch("builtins.__import__", side_effect=_fail_mlflow),
+            patch(
+                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                return_value=spec_mock,
+            ),
+            patch(
+                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                run_mod_mock,
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+                MagicMock(),
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.complete_optimization_run",
+                complete_mock,
+            ),
+            patch(
+                "fleet_rlm.integrations.local_store.fail_optimization_run",
+                MagicMock(),
+            ),
+        ):
+            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+
+        complete_mock.assert_called_once()
