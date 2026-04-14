@@ -24,14 +24,14 @@ services:
 
   api:
     start: env MLFLOW_AUTO_START=false uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000
-    stop: lsof -ti :8000 | xargs kill
+    stop: lsof -ti :8000 | xargs kill || true
     healthcheck: curl -sf http://127.0.0.1:8000/health
     port: 8000
     depends_on: [mlflow]
 
   frontend:
     start: cd src/frontend && pnpm install --frozen-lockfile && pnpm run dev -- --port 5173
-    stop: lsof -ti :5173 | xargs kill
+    stop: lsof -ti :5173 | xargs kill || true
     healthcheck: curl -sf http://127.0.0.1:5173
     port: 5173
     depends_on: [api]
