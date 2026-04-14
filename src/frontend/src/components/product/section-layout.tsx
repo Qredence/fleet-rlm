@@ -134,26 +134,17 @@ export function SectionCard({
   className,
   onClick,
 }: SectionCardProps) {
-  return (
-    <div
-      className={cn(sectionCardVariants({ variant, interactive }), className)}
-      onClick={onClick}
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={
-        onClick
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-                e.preventDefault();
-                onClick();
-              }
-            }
-          : undefined
-      }
-    >
-      {children}
-    </div>
-  );
+  const classes = cn(sectionCardVariants({ variant, interactive }), className);
+
+  if (onClick) {
+    return (
+      <button type="button" className={classes} onClick={onClick}>
+        {children}
+      </button>
+    );
+  }
+
+  return <div className={classes}>{children}</div>;
 }
 
 /* -------------------------------------------------------------------------- */
