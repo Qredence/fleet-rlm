@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  datasetEndpoints,
   optimizationEndpoints,
   optimizationKeys,
   type GEPAModuleInfo,
@@ -35,10 +36,12 @@ function ModuleCard({
   mod,
   onQuickRun,
   isRunning,
+  isDisabled,
 }: {
   mod: GEPAModuleInfo;
   onQuickRun: (mod: GEPAModuleInfo) => void;
   isRunning: boolean;
+  isDisabled?: boolean;
 }) {
   const displayDescription = mod.description || humanizeSlug(mod.slug);
 
@@ -56,7 +59,8 @@ function ModuleCard({
           variant="outline"
           size="sm"
           className="shrink-0 gap-1.5"
-          disabled={isRunning}
+          disabled={isRunning || isDisabled}
+          title={isDisabled ? "Upload a dataset first to enable Quick Run" : undefined}
           onClick={() => onQuickRun(mod)}
         >
           <Play className="size-3" />
@@ -90,6 +94,12 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     staleTime: 60_000,
   });
 
+  const datasetsQuery = useQuery({
+    queryKey: optimizationKeys.datasetList(),
+    queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
+    staleTime: 30_000,
+  });
+
   const quickRunMutation = useMutation({
     mutationFn: (input: GEPAOptimizationRequest) => optimizationEndpoints.createRun(input),
     onSuccess: (result) => {
@@ -107,8 +117,13 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
   });
 
   const handleQuickRun = (mod: GEPAModuleInfo) => {
+    const datasets = datasetsQuery.data?.items ?? [];
+    // Prefer a dataset associated with this module; fall back to the most recent one.
+    const dataset =
+      datasets.find((d) => d.module_slug === mod.slug) ?? datasets[0] ?? null;
+    if (!dataset) return;
     quickRunMutation.mutate({
-      dataset_path: "traces.json",
+      dataset_id: dataset.id,
       program_spec: mod.program_spec,
       auto: "light",
       train_ratio: 0.8,
@@ -140,6 +155,7 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
   }
 
   const modules = modulesQuery.data ?? [];
+  const hasDatasets = (datasetsQuery.data?.items.length ?? 0) > 0;
 
   if (modules.length === 0) {
     return (
@@ -158,6 +174,7 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
           mod={mod}
           onQuickRun={handleQuickRun}
           isRunning={quickRunMutation.isPending}
+          isDisabled={!hasDatasets}
         />
       ))}
     </ItemGroup>

@@ -123,6 +123,19 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._evaluate_per_example",
+        lambda _module, valset, _metric: [
+            {
+                "example_index": i,
+                "input_data": "{}",
+                "expected_output": "",
+                "predicted_output": "",
+                "score": 1.0,
+            }
+            for i in range(len(valset))
+        ],
+    )
 
     result = optimize_recursive_context_selection_module(
         dataset_path=dataset_path,
@@ -138,7 +151,7 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
     assert manifest["optimizer"] == "GEPA"
     assert manifest["metric"] == "recursive_context_relevance_and_boundedness"
     assert result["output_path"] == str(output_path)
-    assert result["validation_score"] is not None
+    assert result["validation_score"] == 1.0
     assert result["program_spec"].endswith("AssembleRecursiveWorkspaceContextModule")
     assert captured["auto"] == "medium"
     assert captured["trainset"]

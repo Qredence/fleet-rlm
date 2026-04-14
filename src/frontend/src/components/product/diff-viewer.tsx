@@ -45,10 +45,41 @@ interface DiffLine {
 /**
  * Naive line-by-line diff using a longest-common-subsequence approach.
  * Sufficient for prompt / config comparisons without a heavy library.
+ * Falls back to a simple sequential comparison when either input exceeds
+ * MAX_DIFF_LINES to avoid O(m×n) memory and CPU cost in the browser.
  */
+
+const MAX_DIFF_LINES = 500;
+
+/** Simple sequential fallback for large inputs. */
+function computeSimpleDiff(a: string[], b: string[]): DiffLine[] {
+  const result: DiffLine[] = [];
+  const limit = Math.max(a.length, b.length);
+  for (let i = 0; i < limit; i++) {
+    if (i < a.length && i < b.length) {
+      if (a[i] === b[i]) {
+        result.push({ type: "unchanged", text: a[i]!, lineNo: i + 1 });
+      } else {
+        result.push({ type: "removed", text: a[i]!, lineNo: i + 1 });
+        result.push({ type: "added", text: b[i]!, lineNo: i + 1 });
+      }
+    } else if (i < a.length) {
+      result.push({ type: "removed", text: a[i]!, lineNo: i + 1 });
+    } else {
+      result.push({ type: "added", text: b[i]!, lineNo: i + 1 });
+    }
+  }
+  return result;
+}
+
 function computeDiff(before: string, after: string): DiffLine[] {
   const a = before.split("\n");
   const b = after.split("\n");
+
+  // Guard: fall back to simple diff for large inputs to avoid O(m×n) cost.
+  if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) {
+    return computeSimpleDiff(a, b);
+  }
 
   // Build LCS length table
   const m = a.length;

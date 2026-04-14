@@ -139,7 +139,7 @@ def _evaluate_per_example(
             results.append(
                 {
                     "example_index": idx,
-                    "input_data": json.dumps(dict(example.inputs())),
+                    "input_data": json.dumps(dict(example.inputs()), default=str),
                     "expected_output": str(
                         getattr(example, "answer", None)
                         or getattr(example, "output", None)
@@ -149,16 +149,24 @@ def _evaluate_per_example(
                     "score": score,
                 }
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Per-example evaluation failed for example %d: %s",
+                idx,
+                exc,
+                exc_info=True,
+            )
             results.append(
                 {
                     "example_index": idx,
                     "input_data": json.dumps(
-                        dict(example.inputs()) if hasattr(example, "inputs") else {}
+                        dict(example.inputs()) if hasattr(example, "inputs") else {},
+                        default=str,
                     ),
                     "expected_output": "",
                     "predicted_output": "",
                     "score": 0.0,
+                    "error": str(exc),
                 }
             )
     return results

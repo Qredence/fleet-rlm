@@ -8,35 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-@pytest.fixture()
-def _stub_local_store(monkeypatch: pytest.MonkeyPatch):
-    """Stub out the local-store helpers used by the background runner."""
-    import fleet_rlm.api.routers.optimization as mod
-
-    monkeypatch.setattr(
-        mod,
-        "_run_optimization_background",
-        mod._run_optimization_background,
-    )
-
-    # We patch at import-site inside the function via the module path
-    noop = MagicMock()
-    with (
-        patch(
-            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-            noop,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.complete_optimization_run",
-            noop,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.fail_optimization_run",
-            noop,
-        ),
-    ):
-        yield
-
 
 def _make_runner_kwargs(tmp_path: Path) -> dict:
     dataset = tmp_path / "data.jsonl"

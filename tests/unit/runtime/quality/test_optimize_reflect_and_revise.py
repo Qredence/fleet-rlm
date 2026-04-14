@@ -112,6 +112,19 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._evaluate_per_example",
+        lambda _module, valset, _metric: [
+            {
+                "example_index": i,
+                "input_data": "{}",
+                "expected_output": "",
+                "predicted_output": "",
+                "score": 1.0,
+            }
+            for i in range(len(valset))
+        ],
+    )
 
     result = optimize_reflect_and_revise_module(
         dataset_path=dataset_path,
@@ -126,7 +139,7 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
     assert manifest["dataset_path"] == str(dataset_path)
     assert manifest["optimizer"] == "GEPA"
     assert result["output_path"] == str(output_path)
-    assert result["validation_score"] is not None
+    assert result["validation_score"] == 1.0
     assert result["program_spec"].endswith("ReflectAndReviseWorkspaceStepModule")
     assert captured["auto"] == "medium"
     assert captured["trainset"]

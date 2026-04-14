@@ -17,7 +17,9 @@ interface SessionDetailProps {
 }
 
 function formatDate(iso: string): string {
-  const normalized = iso.endsWith("Z") ? iso : `${iso}Z`;
+  // Pass the ISO string directly to Date; only append Z for truly naive timestamps
+  // (no timezone indicator) so that strings with UTC offsets (e.g. +00:00) remain valid.
+  const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : `${iso}Z`;
   return new Date(normalized).toLocaleString();
 }
 

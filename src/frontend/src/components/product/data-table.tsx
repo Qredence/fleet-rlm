@@ -97,14 +97,34 @@ export function DataTable<T extends Record<string, unknown>>({
   const [internalPage, setInternalPage] = useState(0);
   const currentPage = controlledPage ?? internalPage;
   const paginationEnabled = pageSize > 0;
-  const totalPages = paginationEnabled ? Math.max(1, Math.ceil(data.length / pageSize)) : 1;
+
+  /* ----- client-side sorting (when onSort is not provided externally) ----- */
+  const sortedData = useMemo(() => {
+    if (!internalSort) return data;
+    const { column, direction } = internalSort;
+    return [...data].sort((a, b) => {
+      const av = a[column];
+      const bv = b[column];
+      if (av == null && bv == null) return 0;
+      if (av == null) return direction === "asc" ? -1 : 1;
+      if (bv == null) return direction === "asc" ? 1 : -1;
+      if (typeof av === "number" && typeof bv === "number") {
+        return direction === "asc" ? av - bv : bv - av;
+      }
+      const as = String(av);
+      const bs = String(bv);
+      return direction === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
+    });
+  }, [data, internalSort]);
+
+  const totalPages = paginationEnabled ? Math.max(1, Math.ceil(sortedData.length / pageSize)) : 1;
   const safePage = Math.min(currentPage, totalPages - 1);
 
   const visibleRows = useMemo(() => {
-    if (!paginationEnabled) return data;
+    if (!paginationEnabled) return sortedData;
     const start = safePage * pageSize;
-    return data.slice(start, start + pageSize);
-  }, [data, safePage, pageSize, paginationEnabled]);
+    return sortedData.slice(start, start + pageSize);
+  }, [sortedData, safePage, pageSize, paginationEnabled]);
 
   const goToPage = useCallback(
     (p: number) => {
