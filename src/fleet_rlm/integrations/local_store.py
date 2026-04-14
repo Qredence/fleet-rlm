@@ -811,11 +811,24 @@ def _persist_transcript_dataset(
     safe_stem = (
         re.sub(r"[^A-Za-z0-9._-]+", "-", filename_stem).strip("-") or "transcript"
     )
+    safe_module_slug = (
+        re.sub(r"[^A-Za-z0-9._-]+", "-", module_slug).strip("-") or "module"
+    )
     root = get_dataset_root()
-    dest = root / f"{safe_stem}-{module_slug}.jsonl"
+    root_resolved = root.resolve()
+    dest = root / f"{safe_stem}-{safe_module_slug}.jsonl"
+    try:
+        dest.resolve().relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError("Invalid dataset path derived from module slug.") from exc
+
     suffix = 1
     while dest.exists():
-        dest = root / f"{safe_stem}-{module_slug}-{suffix}.jsonl"
+        dest = root / f"{safe_stem}-{safe_module_slug}-{suffix}.jsonl"
+        try:
+            dest.resolve().relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError("Invalid dataset path derived from module slug.") from exc
         suffix += 1
 
     with open(dest, "w", encoding="utf-8") as fh:
