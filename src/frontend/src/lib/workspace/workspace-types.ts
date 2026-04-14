@@ -7,7 +7,7 @@ export type PromptFeature = "library" | "contextMemory" | "capabilities" | "webS
 
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
-export type InspectorTab = "trajectory" | "execution" | "evidence" | "graph";
+export type InspectorTab = "message" | "execution" | "graph";
 
 export interface ChatMessage {
   id: string;
