@@ -119,33 +119,42 @@ describe("RunWorkbench", () => {
   it("renders the analyst-oriented tabs and hides legacy tree framing", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);
 
-    expect(html).toContain("Inspect tracing architecture");
+    expect(html).toContain("Analysis warnings");
+    expect(html).toContain("One callback result was truncated before rendering.");
     expect(html).toContain("Iterations");
     expect(html).toContain("Context");
     expect(html).toContain("Output");
     expect(html).not.toContain(">Callbacks<");
     expect(html).not.toContain(">Prompts<");
-    expect(html).toContain("1 iterations");
+    expect(html).toContain("Iteration 1");
+    expect(html).toContain("iter 1");
     expect(html).toContain("1 callbacks");
-    expect(html).toContain("1 prompts");
+    expect(html).toContain("Staged corpus");
+    expect(html).toContain("Referenced sources");
     expect(html).not.toContain("Timeline");
     expect(html).not.toContain("Node");
     expect(html).not.toContain("Run tree");
   });
 
-  it("renders the full task text without truncating long prompts", () => {
-    const originalTask = mockedWorkbenchStore.task;
+  it("renders the full iteration summary text without truncating long prompts", () => {
+    const originalSummary = mockedWorkbenchStore.iterations[0]?.summary ?? "";
     const longTask =
       "Inspect the tracing architecture, explain how runtime events flow through the adapters, and call out any places where the workbench can lose provenance when a prompt spans multiple clauses or source references.";
 
-    mockedWorkbenchStore.task = longTask;
+    mockedWorkbenchStore.iterations[0] = {
+      ...mockedWorkbenchStore.iterations[0]!,
+      summary: longTask,
+    };
 
     const html = renderToStaticMarkup(<RunWorkbench />);
 
     expect(html).toContain(longTask);
     expect(html).not.toContain(`${longTask.slice(0, 120).trimEnd()}…`);
 
-    mockedWorkbenchStore.task = originalTask;
+    mockedWorkbenchStore.iterations[0] = {
+      ...mockedWorkbenchStore.iterations[0]!,
+      summary: originalSummary,
+    };
   });
 
   it("renders extracted markdown text instead of raw artifact wrapper JSON", () => {
@@ -183,7 +192,8 @@ describe("RunWorkbench", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);
 
     expect(html).toContain("Human review needed");
+    expect(html).toContain("Recursive repair requested a human review checkpoint.");
     expect(html).toContain("Review the risky workspace mutation.");
-    expect(html).toContain("needs human review");
+    expect(html).toContain("Approve or reject the risky mutation.");
   });
 });

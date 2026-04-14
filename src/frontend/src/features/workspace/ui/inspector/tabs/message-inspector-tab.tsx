@@ -5,7 +5,6 @@ import type { AssistantContentModel } from "@/features/workspace/ui/assistant-co
 import { inspectorStyles } from "@/features/workspace/ui/inspector/inspector-styles";
 import { renderBadges, statusTone } from "../ui/inspector-ui";
 import { InspectorTabPanel } from "../inspector-tab-panel";
-import { EvidenceInspectorContent } from "./evidence-inspector-tab";
 import { TrajectoryInspectorContent } from "./trajectory-inspector-tab";
 
 export const MessageInspectorTab = memo(function MessageInspectorTab({
@@ -71,7 +70,6 @@ export const MessageInspectorTab = memo(function MessageInspectorTab({
       </Card>
 
       <TrajectoryInspectorContent model={model} showEmptyState={false} />
-      <EvidenceInspectorContent model={model} showEmptyState={false} />
     </InspectorTabPanel>
   );
 });

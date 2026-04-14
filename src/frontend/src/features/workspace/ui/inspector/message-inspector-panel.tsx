@@ -152,7 +152,7 @@ export function MessageInspectorPanel() {
         className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
       >
         <div className="px-4 py-2">
-          <TabsList variant="segmented" className="border border-border-subtle/70 bg-muted/40">
+          <TabsList variant="default" className="border border-border-subtle/70 bg-muted/40">
             {tabs.map((tab) => (
               <TabsTrigger key={tab.id} value={tab.id}>
                 {tab.label}

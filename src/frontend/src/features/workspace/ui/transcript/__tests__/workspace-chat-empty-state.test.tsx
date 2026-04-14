@@ -27,10 +27,10 @@ describe("WorkspaceChatEmptyState", () => {
     const html = renderToStaticMarkup(
       <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={() => {}} />,
     );
-    // Updated copy for Phase 19 frontend improvements
-    expect(html).toContain("What would you like to build?");
-    expect(html).toContain("help you plan");
-    expect(html).toContain("sandbox");
+    // StateNotice header with icon + title + description
+    expect(html).toContain("Start a conversation");
+    expect(html).toContain("Type a message below");
+    expect(html).toContain("begin working with the AI assistant");
     // Updated suggestions aligned with coding/execution tasks
     expect(html).toContain("Build a feature");
     expect(html).toContain("Debug an issue");
@@ -63,9 +63,8 @@ describe("WorkspaceChatEmptyState", () => {
     const html = renderToStaticMarkup(
       <WorkspaceChatEmptyState isMobile={true} onSuggestionClick={() => {}} />,
     );
-    // Mobile should still show the core content
-    expect(html).toContain("What would you like to build?");
-    // Mobile uses smaller text sizes (text-2xl vs text-3xl)
-    expect(html).toContain("text-2xl");
+    // Mobile should still show the core content via StateNotice
+    expect(html).toContain("Start a conversation");
+    expect(html).toContain("Type a message below");
   });
 });

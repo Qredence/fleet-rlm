@@ -86,26 +86,26 @@ describe("Tabs refs", () => {
     });
   });
 
-  it("supports shared segmented and underline variants", () => {
-    const segmentedHtml = renderToStaticMarkup(
+  it("supports shared default and line variants", () => {
+    const defaultHtml = renderToStaticMarkup(
       <Tabs value="turn">
-        <TabsList variant="segmented" className="border border-border-subtle/70">
+        <TabsList variant="default" className="border border-border-subtle/70">
           <TabsTrigger value="turn">Turn</TabsTrigger>
         </TabsList>
       </Tabs>,
     );
 
-    const underlineHtml = renderToStaticMarkup(
+    const lineHtml = renderToStaticMarkup(
       <Tabs value="turn">
-        <TabsList variant="underline">
+        <TabsList variant="line">
           <TabsTrigger value="turn">Turn</TabsTrigger>
         </TabsList>
       </Tabs>,
     );
 
-    expect(segmentedHtml).toContain('data-variant="segmented"');
-    expect(segmentedHtml).toContain("border-border-subtle/70");
-    expect(underlineHtml).toContain('data-variant="underline"');
-    expect(underlineHtml).toContain("border-b-2");
+    expect(defaultHtml).toContain('data-variant="default"');
+    expect(defaultHtml).toContain("border-border-subtle/70");
+    expect(lineHtml).toContain('data-variant="line"');
+    expect(lineHtml).toContain("bg-transparent");
   });
 });

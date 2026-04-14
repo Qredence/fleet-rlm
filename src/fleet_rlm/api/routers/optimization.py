@@ -2,23 +2,44 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, TypeAlias, cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Path as ApiPath,
+    Query,
+    UploadFile,
+)
+from fastapi.params import Form
 
 from ..dependencies import HTTPIdentityDep, require_http_identity
 from ..runtime_services.common import run_blocking
 from ..schemas.core import (
+    DatasetDetailResponse,
+    DatasetListResponse,
+    DatasetResponse,
+    EvaluationResultItem,
+    EvaluationResultsResponse,
     GEPAModuleInfo,
     GEPAOptimizationRequest,
     GEPAOptimizationResponse,
     GEPAStatusResponse,
     OptimizationRunCreatedResponse,
     OptimizationRunResponse,
+    PromptSnapshotItem,
+    RunComparisonItem,
+    RunComparisonResponse,
+    TranscriptDatasetRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +66,40 @@ OPTIMIZATION_DATA_ROOT = Path(
 ).resolve()
 
 
+def _resolve_relative_dataset_lookup(relative_path: str) -> str:
+    """Normalize a user-provided dataset lookup into a safe relative key."""
+    normalized = PurePosixPath(relative_path.replace("\\", "/"))
+    if normalized.is_absolute():
+        raise HTTPException(
+            status_code=400,
+            detail="Absolute paths are not allowed. Use a relative path.",
+        )
+
+    parts = normalized.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(
+            status_code=400, detail="Path escapes the allowed data directory."
+        )
+    return normalized.as_posix()
+
+
+def _find_dataset_under_root(root: Path, relative_path: str) -> Path | None:
+    """Return a dataset file under ``root`` that matches the relative lookup key."""
+    root_resolved = root.resolve()
+    for candidate in root.rglob("*"):
+        if not candidate.is_file():
+            continue
+        try:
+            candidate_relative = candidate.relative_to(root).as_posix()
+            resolved_candidate = candidate.resolve(strict=True)
+            resolved_candidate.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if candidate_relative == relative_path:
+            return resolved_candidate
+    return None
+
+
 def _check_gepa_available() -> bool:
     """Return True if the GEPA teleprompt module is importable."""
     try:
@@ -69,6 +124,37 @@ def _get_mlflow_status() -> tuple[bool, bool]:
         return True, initialize_mlflow(config)
     except Exception:
         return False, False
+
+
+def _resolve_dataset_request(
+    request: GEPAOptimizationRequest,
+) -> tuple[Path, str]:
+    """Resolve a dataset request into an executable path and stored reference."""
+    from fleet_rlm.integrations.local_store import get_dataset
+
+    if request.dataset_id is not None:
+        dataset_row = get_dataset(request.dataset_id)
+        if dataset_row is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset {request.dataset_id} not found.",
+            )
+        dataset = Path(dataset_row.uri).resolve()
+        if not dataset.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset file not found for dataset {request.dataset_id}.",
+            )
+        return dataset, str(dataset)
+
+    dataset_path = (request.dataset_path or "").strip()
+    dataset_lookup = _resolve_relative_dataset_lookup(dataset_path)
+    dataset = _find_dataset_under_root(OPTIMIZATION_DATA_ROOT, dataset_lookup)
+    if dataset is None:
+        raise HTTPException(
+            status_code=400, detail=f"Dataset file not found: {dataset_path}"
+        )
+    return dataset, dataset_lookup
 
 
 @router.get(
@@ -164,6 +250,7 @@ def _run_module_optimization(
     default_output_root: Path | None,
     auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
+    run_id: int | None = None,
 ) -> dict:
     """Blocking wrapper for registry-based module optimization."""
     from fleet_rlm.runtime.quality.module_registry import get_module_spec
@@ -180,6 +267,7 @@ def _run_module_optimization(
             default_output_root=default_output_root,
             train_ratio=train_ratio,
             auto=auto,
+            run_id=run_id,
         )
     )
 
@@ -239,25 +327,9 @@ async def run_optimization(
             detail="Either module_slug or program_spec must be provided.",
         )
 
+    dataset, dataset_ref = _resolve_dataset_request(request)
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
-
-    if os.path.isabs(request.dataset_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Absolute paths are not allowed. Use a relative path.",
-        )
-    dataset = os.path.realpath(os.path.join(safe_root, request.dataset_path))
-    if not dataset.startswith(safe_root):
-        raise HTTPException(
-            status_code=400,
-            detail="Path escapes the allowed data directory.",
-        )
-    if not os.path.exists(dataset):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Dataset file not found: {request.dataset_path}",
-        )
 
     output_path: Path | None = None
     if request.output_path:
@@ -284,6 +356,9 @@ async def run_optimization(
             program_spec=effective_program_spec,
             auto=request.auto,
             train_ratio=request.train_ratio,
+            module_slug=request.module_slug,
+            dataset_id=request.dataset_id,
+            dataset_path=dataset_ref,
         ).id
     except Exception as exc:
         logger.exception(
@@ -296,11 +371,12 @@ async def run_optimization(
                 partial(
                     _run_module_optimization,
                     module_slug=request.module_slug,
-                    dataset_path=Path(dataset),
+                    dataset_path=dataset,
                     output_path=output_path,
                     default_output_root=OPTIMIZATION_DATA_ROOT,
                     auto=request.auto,
                     train_ratio=request.train_ratio,
+                    run_id=db_run_id,
                 ),
                 timeout=OPTIMIZATION_TIMEOUT_SECONDS,
             )
@@ -308,7 +384,7 @@ async def run_optimization(
             result = await run_blocking(
                 partial(
                     _run_gepa_optimization,
-                    dataset_path=Path(dataset),
+                    dataset_path=dataset,
                     program_spec=effective_program_spec,
                     output_path=output_path,
                     auto=request.auto,
@@ -423,6 +499,43 @@ def _run_optimization_background(
         except Exception:
             logger.debug("Failed to update phase for run %s", run_id)
 
+    # -- MLflow autologging (best-effort, never blocks the run) -----------
+    mlflow_ctx: Any = None
+    _mlflow_log_metric: Any = None
+    try:
+        import mlflow
+    except ImportError:
+        logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
+    else:
+        from fleet_rlm.integrations.observability.config import MlflowConfig
+        from fleet_rlm.integrations.observability.mlflow_runtime import (
+            initialize_mlflow,
+        )
+
+        try:
+            resolved_cfg = MlflowConfig.from_env().model_copy(
+                update={
+                    "dspy_log_compiles": True,
+                    "dspy_log_evals": True,
+                    "dspy_log_traces_from_compile": True,
+                    "dspy_log_traces_from_eval": True,
+                }
+            )
+            if initialize_mlflow(resolved_cfg):
+                start_run = getattr(mlflow, "start_run", None)
+                _mlflow_log_metric = getattr(mlflow, "log_metric", None)
+                run_label = f"GEPA::{module_slug or program_spec}"
+                if start_run is not None:
+                    mlflow_ctx = cast(Any, start_run)(run_name=run_label)
+                    mlflow_ctx.__enter__()
+            else:
+                logger.debug(
+                    "MLflow unavailable for run %s — proceeding without tracking",
+                    run_id,
+                )
+        except Exception:
+            logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
+
     try:
         _on_phase("loading")
 
@@ -444,6 +557,7 @@ def _run_optimization_background(
                     default_output_root=default_output_root,
                     train_ratio=train_ratio,
                     auto=auto,
+                    run_id=run_id,
                 )
             )
         else:
@@ -460,6 +574,14 @@ def _run_optimization_background(
                 train_ratio=train_ratio,
             )
 
+        # Log validation score to MLflow when available
+        try:
+            val_score = result.get("validation_score")
+            if val_score is not None and _mlflow_log_metric is not None:
+                cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
+        except Exception:
+            logger.debug("Failed to log validation score to MLflow for run %s", run_id)
+
         _on_phase("saving")
         complete_optimization_run(
             run_id,
@@ -475,6 +597,13 @@ def _run_optimization_background(
             fail_optimization_run(run_id, error=str(exc))
         except Exception:
             logger.exception("Failed to mark run %s as failed", run_id)
+    finally:
+        # Clean up the MLflow run context if one was opened
+        if mlflow_ctx is not None:
+            try:
+                mlflow_ctx.__exit__(None, None, None)
+            except Exception:
+                logger.debug("Failed to close MLflow run for run %s", run_id)
 
 
 @router.post(
@@ -533,23 +662,9 @@ async def create_optimization_run(
         )
 
     # Path validation
+    dataset, dataset_ref = _resolve_dataset_request(request)
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
-
-    if os.path.isabs(request.dataset_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Absolute paths are not allowed. Use a relative path.",
-        )
-    dataset = os.path.realpath(os.path.join(safe_root, request.dataset_path))
-    if not dataset.startswith(safe_root):
-        raise HTTPException(
-            status_code=400, detail="Path escapes the allowed data directory."
-        )
-    if not os.path.exists(dataset):
-        raise HTTPException(
-            status_code=400, detail=f"Dataset file not found: {request.dataset_path}"
-        )
 
     output_path: Path | None = None
     if request.output_path:
@@ -559,7 +674,13 @@ async def create_optimization_run(
                 detail="Absolute paths are not allowed. Use a relative path.",
             )
         resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
-        if not resolved_output.startswith(safe_root):
+        try:
+            stays_under_data_root = (
+                os.path.commonpath([base_root, resolved_output]) == base_root
+            )
+        except ValueError:
+            stays_under_data_root = False
+        if not stays_under_data_root:
             raise HTTPException(
                 status_code=400, detail="Path escapes the allowed data directory."
             )
@@ -575,7 +696,8 @@ async def create_optimization_run(
         auto=request.auto,
         train_ratio=request.train_ratio,
         module_slug=request.module_slug,
-        dataset_path=request.dataset_path,
+        dataset_id=request.dataset_id,
+        dataset_path=dataset_ref,
     )
 
     # Spawn background task — db_row.id is always set after a successful insert
@@ -584,7 +706,7 @@ async def create_optimization_run(
         _run_optimization_background,
         run_id=run_id,
         module_slug=request.module_slug,
-        dataset_path=Path(dataset),
+        dataset_path=dataset,
         program_spec=effective_program_spec,
         output_path=output_path,
         default_output_root=OPTIMIZATION_DATA_ROOT,
@@ -593,6 +715,51 @@ async def create_optimization_run(
     )
 
     return OptimizationRunCreatedResponse(run_id=db_row.id or 0, status="running")
+
+
+@router.post(
+    "/transcript-datasets",
+    response_model=DatasetResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid transcript dataset payload."},
+        },
+    ),
+)
+@router.post(
+    "/datasets/from-transcript",
+    response_model=DatasetResponse,
+    include_in_schema=False,
+)
+async def create_dataset_from_transcript(
+    request: TranscriptDatasetRequest,
+    identity: HTTPIdentityDep,
+) -> DatasetResponse:
+    """Convert transcript turns into a GEPA dataset."""
+    _ = identity
+    from fleet_rlm.integrations.local_store import create_transcript_dataset
+
+    try:
+        dataset = create_transcript_dataset(
+            module_slug=request.module_slug,
+            turns=[
+                (turn.user_message, turn.assistant_message) for turn in request.turns
+            ],
+            title=request.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DatasetResponse(
+        id=dataset.id or 0,
+        name=dataset.name,
+        row_count=dataset.row_count or 0,
+        format=dataset.format or "jsonl",
+        module_slug=dataset.module_slug,
+        created_at=dataset.created_at.isoformat(),
+    )
 
 
 @router.get(
@@ -605,8 +772,12 @@ async def list_runs(
     status: str | None = Query(
         default=None, description="Filter by status: running, completed, failed"
     ),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=50, ge=1, le=200, description="Maximum number of runs to return."
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Pagination offset into the run list."
+    ),
 ) -> list[OptimizationRunResponse]:
     """List optimization runs, most recent first."""
     _ = identity
@@ -629,6 +800,69 @@ async def list_runs(
 
 
 @router.get(
+    "/runs/compare",
+    response_model=RunComparisonResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid run_ids parameter."},
+        },
+    ),
+)
+async def compare_runs(
+    identity: HTTPIdentityDep,
+    run_ids: str = Query(description="Comma-separated run IDs to compare (max 5)."),
+) -> RunComparisonResponse:
+    """Compare prompt diffs and scores across optimization runs."""
+    _ = identity
+
+    raw_ids = [s.strip() for s in run_ids.split(",") if s.strip()]
+    if not raw_ids:
+        raise HTTPException(status_code=400, detail="run_ids is required.")
+    if len(raw_ids) > 5:
+        raise HTTPException(
+            status_code=400, detail="Maximum 5 runs can be compared at once."
+        )
+
+    try:
+        id_list = [int(x) for x in raw_ids]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="run_ids must be comma-separated integers."
+        )
+
+    from fleet_rlm.integrations.local_store import (
+        get_optimization_run,
+        get_prompt_snapshots,
+    )
+
+    comparison_items: list[RunComparisonItem] = []
+    for rid in id_list:
+        run_row = get_optimization_run(rid)
+        if run_row is None:
+            raise HTTPException(status_code=400, detail=f"Run {rid} not found.")
+        snapshots = get_prompt_snapshots(rid)
+        comparison_items.append(
+            RunComparisonItem(
+                run_id=run_row.id or 0,
+                program_spec=run_row.program_spec,
+                validation_score=run_row.validation_score,
+                prompt_snapshots=[
+                    PromptSnapshotItem(
+                        predictor_name=s.predictor_name,
+                        prompt_type=s.prompt_type,
+                        prompt_text=s.prompt_text,
+                    )
+                    for s in snapshots
+                ],
+            )
+        )
+
+    return RunComparisonResponse(runs=comparison_items)
+
+
+@router.get(
     "/runs/{run_id}",
     response_model=OptimizationRunResponse,
     responses=cast(
@@ -640,8 +874,8 @@ async def list_runs(
     ),
 )
 async def get_run(
-    run_id: int,
     identity: HTTPIdentityDep,
+    run_id: int = ApiPath(description="Identifier of the optimization run to fetch."),
 ) -> OptimizationRunResponse:
     """Get a single optimization run by ID."""
     _ = identity
@@ -653,3 +887,279 @@ async def get_run(
             status_code=404, detail=f"Optimization run {run_id} not found."
         )
     return _db_run_to_response(row)
+
+
+# ── Dataset endpoints ────────────────────────────────────────────────
+
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+_SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_\-]")
+
+
+def _sanitize_filename(name: str) -> str:
+    """Return a filesystem-safe version of *name*."""
+    stem = Path(name).stem
+    return _SAFE_NAME_RE.sub("_", stem)[:120]
+
+
+def _parse_rows(content: bytes, fmt: str) -> list[dict]:
+    """Parse uploaded file content into a list of dicts."""
+    text = content.decode("utf-8")
+    if fmt == "jsonl":
+        rows: list[dict] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            rows.append(json.loads(stripped))
+        return rows
+    else:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+        raise ValueError("JSON file must contain a top-level array of objects")
+
+
+@router.post(
+    "/datasets",
+    response_model=DatasetResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid dataset file."},
+        },
+    ),
+)
+async def upload_dataset(
+    identity: HTTPIdentityDep,
+    file: UploadFile = File(
+        description="Dataset file to upload in JSON or JSONL format."
+    ),
+    module_slug: str | None = Form(  # type: ignore
+        default=None,
+        description="Optional module slug used to validate required dataset keys.",
+    ),
+) -> DatasetResponse:
+    """Upload and register a dataset file (.json or .jsonl)."""
+    _ = identity
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".json", ".jsonl"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format '{ext}'. Allowed: .json, .jsonl",
+        )
+
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+        )
+
+    fmt = ext.lstrip(".")  # "json" or "jsonl"
+    try:
+        rows = _parse_rows(content, fmt)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse dataset: {exc}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="Dataset is empty.")
+
+    # Validate first row keys against module requirements if module_slug given
+    if module_slug:
+        from fleet_rlm.runtime.quality.module_registry import get_module_spec
+
+        spec = get_module_spec(module_slug)
+        if spec is None:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown module slug: {module_slug!r}"
+            )
+        first_keys = set(rows[0].keys()) if isinstance(rows[0], dict) else set()
+        missing = set(spec.required_dataset_keys) - first_keys
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset is missing required keys for module "
+                f"'{module_slug}': {sorted(missing)}",
+            )
+
+    # Save file to dataset root
+    from fleet_rlm.integrations.local_store import create_dataset, get_dataset_root
+
+    ds_root = get_dataset_root()
+    # Generate a temp ID from timestamp for the filename
+    import time
+
+    ts_id = int(time.time() * 1000) % 10_000_000
+    safe_name = _sanitize_filename(file.filename)
+    dest = ds_root / f"{ts_id}_{safe_name}.{fmt}"
+    dest.write_bytes(content)
+
+    ds = create_dataset(
+        name=Path(file.filename).stem,
+        row_count=len(rows),
+        format=fmt,
+        uri=str(dest),
+        module_slug=module_slug,
+    )
+
+    return DatasetResponse(
+        id=ds.id or 0,
+        name=ds.name,
+        row_count=ds.row_count or 0,
+        format=ds.format or fmt,
+        module_slug=ds.module_slug,
+        created_at=ds.created_at.isoformat(),
+    )
+
+
+@router.get(
+    "/datasets",
+    response_model=DatasetListResponse,
+    responses=AUTH_ERROR_RESPONSES,
+)
+async def list_datasets_endpoint(
+    identity: HTTPIdentityDep,
+    module_slug: str | None = Query(default=None, description="Filter by module slug"),
+    limit: int = Query(
+        default=50, ge=1, le=200, description="Maximum number of datasets to return."
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Pagination offset into the dataset list."
+    ),
+) -> DatasetListResponse:
+    """List registered datasets with optional module filter."""
+    _ = identity
+    from fleet_rlm.integrations.local_store import list_datasets
+
+    items, total = list_datasets(module_slug=module_slug, limit=limit, offset=offset)
+    return DatasetListResponse(
+        items=[
+            DatasetResponse(
+                id=d.id or 0,
+                name=d.name,
+                row_count=d.row_count or 0,
+                format=d.format or "",
+                module_slug=d.module_slug,
+                created_at=d.created_at.isoformat(),
+            )
+            for d in items
+        ],
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=(offset + limit) < total,
+    )
+
+
+@router.get(
+    "/datasets/{dataset_id}",
+    response_model=DatasetDetailResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Dataset not found."},
+        },
+    ),
+)
+async def get_dataset_detail(
+    identity: HTTPIdentityDep,
+    dataset_id: int = ApiPath(description="Identifier of the dataset to inspect."),
+) -> DatasetDetailResponse:
+    """Return dataset metadata with the first 10 rows as preview."""
+    _ = identity
+    from fleet_rlm.integrations.local_store import get_dataset
+
+    ds = get_dataset(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found.")
+
+    # Read sample rows from the file
+    sample_rows: list[dict] = []
+    uri_path = Path(ds.uri)
+    if uri_path.is_file():
+        try:
+            fmt = ds.format or ("jsonl" if uri_path.suffix == ".jsonl" else "json")
+            raw = uri_path.read_bytes()
+            all_rows = _parse_rows(raw, fmt)
+            sample_rows = all_rows[:10]
+        except Exception:
+            logger.debug("Failed to read sample rows from %s", ds.uri)
+
+    return DatasetDetailResponse(
+        id=ds.id or 0,
+        name=ds.name,
+        row_count=ds.row_count or 0,
+        format=ds.format or "",
+        module_slug=ds.module_slug,
+        created_at=ds.created_at.isoformat(),
+        sample_rows=sample_rows,
+        uri=ds.uri,
+    )
+
+
+# ── Evaluation result + run comparison endpoints ─────────────────────
+
+
+@router.get(
+    "/runs/{run_id}/results",
+    response_model=EvaluationResultsResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Run not found."},
+        },
+    ),
+)
+async def get_run_results(
+    identity: HTTPIdentityDep,
+    run_id: int = ApiPath(
+        description="Identifier of the optimization run whose results to list."
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum number of evaluation rows to return.",
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Pagination offset into the evaluation results."
+    ),
+) -> EvaluationResultsResponse:
+    """Return per-example evaluation results for an optimization run."""
+    _ = identity
+    from fleet_rlm.integrations.local_store import (
+        get_evaluation_results,
+        get_optimization_run,
+    )
+
+    if get_optimization_run(run_id) is None:
+        raise HTTPException(
+            status_code=404, detail=f"Optimization run {run_id} not found."
+        )
+
+    items, total = get_evaluation_results(run_id, limit=limit, offset=offset)
+    return EvaluationResultsResponse(
+        items=[
+            EvaluationResultItem(
+                id=r.id or 0,
+                example_index=r.example_index,
+                input_data=r.input_data,
+                expected_output=r.expected_output,
+                predicted_output=r.predicted_output,
+                score=r.score,
+            )
+            for r in items
+        ],
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=(offset + limit) < total,
+    )

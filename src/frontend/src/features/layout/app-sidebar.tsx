@@ -1,13 +1,14 @@
 import { type MouseEvent, useMemo } from "react";
 import {
+  Clock3,
   Database,
   LogIn,
-  MessageCircle,
   PanelLeftIcon,
   Plus,
   Search,
   Settings,
   Sparkles,
+  Terminal,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -89,6 +90,8 @@ export function AppSidebar() {
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
   const isOptimization = location.pathname.startsWith("/app/optimization");
+  const isHistory = location.pathname.startsWith("/app/history");
+  const isSettings = location.pathname.startsWith("/app/settings");
   const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
   const handleOpenSettings = (event: MouseEvent<HTMLButtonElement>) => {
@@ -177,7 +180,7 @@ export function AppSidebar() {
               />
               <SidebarActionItem
                 label="Workbench"
-                icon={MessageCircle}
+                icon={Terminal}
                 onClick={() => navigateTo("workspace")}
                 isActive={isWorkspace}
               />
@@ -193,16 +196,12 @@ export function AppSidebar() {
                 onClick={() => navigateTo("optimization")}
                 isActive={isOptimization}
               />
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  tooltip="Sign in"
-                  onClick={handleOpenLogin}
-                  className={sidebarActionButtonClassName}
-                >
-                  <LogIn />
-                  <span>Sign in</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <SidebarActionItem
+                label="History"
+                icon={Clock3}
+                onClick={() => navigateTo("history")}
+                isActive={isHistory}
+              />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -255,8 +254,19 @@ export function AppSidebar() {
           <SidebarMenu className="gap-0.5">
             <SidebarMenuItem>
               <SidebarMenuButton
+                tooltip="Sign in"
+                onClick={handleOpenLogin}
+                className={sidebarActionButtonClassName}
+              >
+                <LogIn />
+                <span>Sign in</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 onClick={handleOpenSettings}
                 tooltip="Settings"
+                isActive={isSettings}
                 className={sidebarActionButtonClassName}
               >
                 <Settings />

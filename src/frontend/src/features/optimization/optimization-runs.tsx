@@ -3,13 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -19,11 +13,24 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseIsoTimestamp } from "@/lib/date";
 import {
   optimizationEndpoints,
   optimizationKeys,
   type OptimizationRunSummary,
 } from "@/lib/rlm-api/optimization";
+
+const PHASE_LABELS: Record<string, string> = {
+  loading: "Loading…",
+  compiling: "Optimizing…",
+  saving: "Saving…",
+  done: "Complete",
+  failed: "Failed",
+};
+
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase] ?? phase.charAt(0).toUpperCase() + phase.slice(1);
+}
 
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -41,6 +48,10 @@ function StatusBadge({ status }: { status: string }) {
       );
     case "failed":
       return <Badge variant="destructive">Failed</Badge>;
+    case "queued":
+      return <Badge variant="secondary">Queued</Badge>;
+    case "cancelled":
+      return <Badge variant="outline">Cancelled</Badge>;
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
@@ -48,11 +59,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function ScoreBadge({ score }: { score: number }) {
   const colorClass =
-    score >= 0.7
-      ? "bg-success/15 text-success"
-      : score >= 0.4
-        ? "bg-warning/15 text-warning"
-        : "";
+    score >= 0.7 ? "bg-success/15 text-success" : score >= 0.4 ? "bg-warning/15 text-warning" : "";
   return (
     <Badge variant={score >= 0.7 ? "secondary" : "destructive"} className={colorClass}>
       {score.toFixed(4)}
@@ -61,8 +68,7 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 function formatRelativeTime(isoString: string): string {
-  const normalized = isoString.endsWith("Z") ? isoString : `${isoString}Z`;
-  const date = new Date(normalized);
+  const date = parseIsoTimestamp(isoString);
   const now = Date.now();
   const diffMs = now - date.getTime();
   const diffSec = Math.max(0, Math.floor(diffMs / 1000));
@@ -77,9 +83,8 @@ function formatRelativeTime(isoString: string): string {
 
 function formatDuration(startedAt: string, completedAt: string | null): string {
   if (!completedAt) return "—";
-  const normalizeTs = (s: string) => (s.endsWith("Z") ? s : `${s}Z`);
-  const start = new Date(normalizeTs(startedAt)).getTime();
-  const end = new Date(normalizeTs(completedAt)).getTime();
+  const start = parseIsoTimestamp(startedAt).getTime();
+  const end = parseIsoTimestamp(completedAt).getTime();
   const sec = Math.max(0, Math.floor((end - start) / 1000));
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -132,11 +137,9 @@ function RunDetailPanel({ run }: { run: OptimizationRunSummary }) {
             <ScoreBadge score={run.validation_score} />
           </ResultRow>
         ) : null}
-        {run.phase ? <ResultRow label="Phase">{run.phase}</ResultRow> : null}
+        {run.phase ? <ResultRow label="Phase">{phaseLabel(run.phase)}</ResultRow> : null}
         <ResultRow label="Started">{formatRelativeTime(run.started_at)}</ResultRow>
-        <ResultRow label="Duration">
-          {formatDuration(run.started_at, run.completed_at)}
-        </ResultRow>
+        <ResultRow label="Duration">{formatDuration(run.started_at, run.completed_at)}</ResultRow>
         {run.output_path ? (
           <ResultRow label="Output">
             <code className="text-xs">{run.output_path}</code>
@@ -188,7 +191,7 @@ function RunListItem({
           {run.status === "running" && run.phase ? (
             <>
               <span>·</span>
-              <span className="italic">{run.phase}</span>
+              <span className="italic">{phaseLabel(run.phase)}</span>
             </>
           ) : null}
         </div>
@@ -267,7 +270,8 @@ export function OptimizationRuns() {
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
-              Failed to load runs: {runsQuery.error instanceof Error ? runsQuery.error.message : "Unknown error"}
+              Failed to load runs:{" "}
+              {runsQuery.error instanceof Error ? runsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>

@@ -37,7 +37,7 @@ function RouteSync() {
 
     if (section === "volumes") {
       openCanvas();
-    } else if (section === "settings" || section === "optimization") {
+    } else if (section === "settings" || section === "optimization" || section === "history") {
       closeCanvas();
     } else if (prevSection === "volumes") {
       clearSelectedFile();

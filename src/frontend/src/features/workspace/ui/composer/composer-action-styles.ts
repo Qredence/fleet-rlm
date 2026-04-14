@@ -22,4 +22,4 @@ export const PROMPT_INPUT_ICON_BUTTON_CLASSNAME =
 export const PROMPT_INPUT_MENUBAR_CLASSNAME =
   "h-auto gap-0 border-0 bg-transparent p-0 shadow-none";
 
-export const PROMPT_INPUT_MENU_CONTENT_CLASSNAME = "prompt-composer-menu rounded-2xl p-1.5";
+export const PROMPT_INPUT_MENU_CONTENT_CLASSNAME = "prompt-composer-menu rounded-xl p-1";

@@ -267,6 +267,7 @@ _MODULE_SPEC = ModuleOptimizationSpec(
     row_converter=rows_to_recursive_decomposition_examples,
     metric_builder=build_recursive_decomposition_feedback_metric,
     metric_name="recursive_decomposition_quality_and_boundedness",
+    description="Improves task decomposition by evolving instructions for breaking complex workspace tasks into focused, non-overlapping subtasks with clear boundaries.",
 )
 
 register_module(_MODULE_SPEC)

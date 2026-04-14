@@ -42,7 +42,7 @@ export function WorkspaceCanvasPanel() {
       className="flex h-full min-h-0 flex-col gap-0 overflow-hidden"
     >
       <div className="border-b border-border-subtle/70 px-3 py-2">
-        <TabsList variant="segmented" className="border border-border-subtle/70 bg-muted/40">
+        <TabsList variant="default" className="border border-border-subtle/70 bg-muted/40">
           <TabsTrigger value="turn">Message</TabsTrigger>
           {hasRunContent ? <TabsTrigger value="run">Workbench</TabsTrigger> : null}
         </TabsList>

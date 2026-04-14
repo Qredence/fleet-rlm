@@ -225,6 +225,82 @@ class SessionStateResponse(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# Session history (durable transcript store)
+# ---------------------------------------------------------------------------
+
+
+class SessionListItem(BaseModel):
+    """Lightweight session summary for list views."""
+
+    id: int = Field(description="Local store primary key.")
+    title: str = Field(description="Human-readable session title.")
+    status: str = Field(description="Session status (active, archived).")
+    model_name: str | None = Field(default=None, description="Model used in session.")
+    external_session_id: str | None = Field(
+        default=None, description="Canonical runtime session identifier."
+    )
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+    updated_at: str = Field(description="ISO-8601 last-update timestamp.")
+
+
+class SessionListResponse(BaseModel):
+    """Paginated session list."""
+
+    items: list[SessionListItem] = Field(description="Session list items.")
+    total: int = Field(description="Total matching sessions.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more results exist beyond this page.")
+
+
+class SessionDetailResponse(BaseModel):
+    """Full session detail with turn count."""
+
+    id: int = Field(description="Local store primary key.")
+    title: str = Field(description="Human-readable session title.")
+    status: str = Field(description="Session status (active, archived).")
+    model_name: str | None = Field(default=None, description="Model used in session.")
+    external_session_id: str | None = Field(
+        default=None, description="Canonical runtime session identifier."
+    )
+    workspace_id: str | None = Field(default=None, description="Workspace context.")
+    turn_count: int = Field(description="Total number of turns in this session.")
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+    updated_at: str = Field(description="ISO-8601 last-update timestamp.")
+
+
+class TurnItem(BaseModel):
+    """Single turn in a session transcript."""
+
+    id: int = Field(description="Turn primary key.")
+    turn_index: int = Field(description="Zero-based turn position.")
+    user_message: str = Field(description="User message text.")
+    assistant_message: str | None = Field(
+        default=None, description="Assistant response text."
+    )
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+
+
+class TurnListResponse(BaseModel):
+    """Paginated turn list."""
+
+    items: list[TurnItem] = Field(description="Turn list items.")
+    total: int = Field(description="Total turns in session.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more turns exist beyond this page.")
+
+
+class SessionDeleteResponse(BaseModel):
+    """Result payload after archiving a session."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the session was archived successfully.",
+    )
+
+
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 
@@ -446,8 +522,13 @@ class VolumeFileContentResponse(BaseModel):
 class GEPAOptimizationRequest(BaseModel):
     """Request body for triggering a GEPA prompt optimization run."""
 
-    dataset_path: str = Field(
-        description="Path to the exported MLflow trace dataset (JSON)."
+    dataset_path: str | None = Field(
+        default=None,
+        description="Relative filesystem path to the dataset file.",
+    )
+    dataset_id: int | None = Field(
+        default=None,
+        description="Registered dataset identifier to optimize against.",
     )
     program_spec: str = Field(
         default="",
@@ -471,6 +552,12 @@ class GEPAOptimizationRequest(BaseModel):
         default=0.8,
         description="Fraction of examples to use for training (remainder used for validation).",
     )
+
+    @model_validator(mode="after")
+    def validate_dataset_target(self) -> GEPAOptimizationRequest:
+        if self.dataset_id is not None or (self.dataset_path or "").strip():
+            return self
+        raise ValueError("dataset_id or dataset_path is required")
 
 
 class GEPAOptimizationResponse(BaseModel):
@@ -520,6 +607,10 @@ class GEPAModuleInfo(BaseModel):
 
     slug: str = Field(description="Unique module identifier slug.")
     label: str = Field(description="Human-readable module label.")
+    description: str = Field(
+        default="",
+        description="Human-readable description of what this module optimizes.",
+    )
     program_spec: str = Field(description="DSPy program specification string.")
     required_dataset_keys: list[str] = Field(
         description="Dataset keys required for this module's examples."
@@ -648,4 +739,130 @@ class TraceFeedbackResponse(BaseModel):
     expectation_logged: bool = Field(
         default=False,
         description="Whether an expected-response correction was successfully logged.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dataset + evaluation result + run comparison schemas
+# ---------------------------------------------------------------------------
+
+
+class DatasetResponse(BaseModel):
+    """Metadata for a registered dataset."""
+
+    id: int = Field(description="Unique dataset identifier.")
+    name: str = Field(description="Human-readable dataset name.")
+    row_count: int = Field(description="Number of rows/examples in the dataset.")
+    format: str = Field(description="File format (json or jsonl).")
+    module_slug: str | None = Field(
+        default=None, description="Associated module slug, when provided."
+    )
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+
+
+class DatasetListResponse(BaseModel):
+    """Paginated dataset listing."""
+
+    items: list[DatasetResponse] = Field(description="Dataset list items.")
+    total: int = Field(description="Total matching datasets.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more results exist beyond this page.")
+
+
+class DatasetDetailResponse(DatasetResponse):
+    """Dataset metadata with sample rows and URI."""
+
+    sample_rows: list[dict[str, Any]] = Field(
+        description="First rows from the dataset as preview."
+    )
+    uri: str = Field(description="Filesystem path to the dataset file.")
+
+
+class EvaluationResultItem(BaseModel):
+    """A single per-example evaluation result."""
+
+    id: int = Field(description="Unique evaluation result identifier.")
+    example_index: int = Field(description="Zero-based index in the dataset.")
+    input_data: str = Field(description="JSON-serialized input fields.")
+    expected_output: str | None = Field(
+        default=None, description="Expected/gold output."
+    )
+    predicted_output: str | None = Field(
+        default=None, description="Model predicted output."
+    )
+    score: float = Field(description="Score for this example (0.0-1.0).")
+
+
+class EvaluationResultsResponse(BaseModel):
+    """Paginated evaluation results for a run."""
+
+    items: list[EvaluationResultItem] = Field(description="Evaluation result items.")
+    total: int = Field(description="Total evaluation results for the run.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more results exist beyond this page.")
+
+
+class PromptSnapshotItem(BaseModel):
+    """A before or after prompt snapshot for a predictor."""
+
+    predictor_name: str = Field(description="Predictor name from named_predictors().")
+    prompt_type: str = Field(description="Snapshot type: 'before' or 'after'.")
+    prompt_text: str = Field(description="Full prompt/instruction text.")
+
+
+class RunComparisonItem(BaseModel):
+    """Summary of a single run for cross-run comparison."""
+
+    run_id: int = Field(description="Optimization run identifier.")
+    program_spec: str = Field(description="DSPy program specification optimized.")
+    validation_score: float | None = Field(
+        default=None, description="Validation score from the run."
+    )
+    prompt_snapshots: list[PromptSnapshotItem] = Field(
+        description="Before/after prompt snapshots for this run."
+    )
+
+
+class RunComparisonResponse(BaseModel):
+    """Cross-run comparison payload."""
+
+    runs: list[RunComparisonItem] = Field(description="Compared run summaries.")
+
+
+class SessionExportRequest(BaseModel):
+    """Request body for exporting a session's turns as a GEPA training dataset."""
+
+    module_slug: str = Field(
+        description="Target GEPA module slug whose dataset keys "
+        "determine the export column mapping."
+    )
+
+
+class TranscriptTurnInput(BaseModel):
+    """Single transcript turn used to build a GEPA dataset."""
+
+    user_message: str | None = Field(
+        default=None,
+        description="User prompt/content for the turn.",
+    )
+    assistant_message: str | None = Field(
+        default=None,
+        description="Assistant response/content for the turn.",
+    )
+
+
+class TranscriptDatasetRequest(BaseModel):
+    """Request body for converting transcript turns into a GEPA dataset."""
+
+    module_slug: str = Field(
+        description="Target GEPA module slug whose dataset keys determine row mapping."
+    )
+    title: str | None = Field(
+        default=None,
+        description="Optional human-readable transcript title used for dataset naming.",
+    )
+    turns: list[TranscriptTurnInput] = Field(
+        description="Transcript turns to convert into dataset rows.",
     )

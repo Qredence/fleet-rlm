@@ -20,10 +20,7 @@ from typing_extensions import Never
 
 from .hitl_flow import checkpoint_hitl_request
 from .sessions import OrchestrationSessionContext
-from fleet_rlm.orchestration_app import (
-    stream_orchestrated_workspace_task,
-)
-from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
+import fleet_rlm.worker as worker_boundary
 
 _WORKSPACE_HOST_EXECUTOR_ID = "orchestration_app_worker_path"
 _HOSTED_TASK_REGISTRY: dict[str, "HostedWorkspaceTaskState"] = {}
@@ -41,9 +38,9 @@ class HostedWorkspaceTaskInput:
 class HostedWorkspaceTaskState:
     """Process-local request state kept outside Agent Framework event copying."""
 
-    request: WorkspaceTaskRequest
+    request: worker_boundary.WorkspaceTaskRequest
     session: OrchestrationSessionContext | None = None
-    output_queue: asyncio.Queue[WorkspaceEvent | None] | None = None
+    output_queue: asyncio.Queue[worker_boundary.WorkspaceEvent | None] | None = None
 
 
 def resolve_hosted_workspace_task(task_id: str) -> HostedWorkspaceTaskState:
@@ -59,9 +56,9 @@ def resolve_hosted_workspace_task(task_id: str) -> HostedWorkspaceTaskState:
 @contextmanager
 def register_hosted_workspace_task(
     *,
-    request: WorkspaceTaskRequest,
+    request: worker_boundary.WorkspaceTaskRequest,
     session: OrchestrationSessionContext | None = None,
-    output_queue: asyncio.Queue[WorkspaceEvent | None] | None = None,
+    output_queue: asyncio.Queue[worker_boundary.WorkspaceEvent | None] | None = None,
 ):
     """Register non-copyable request state for one Agent Framework workflow run."""
 
@@ -86,12 +83,11 @@ class OrchestrationAppWorkflowExecutor(Executor):
     async def run(
         self,
         host_input: HostedWorkspaceTaskInput,
-        ctx: WorkflowContext[Never, WorkspaceEvent],
+        ctx: WorkflowContext[Never, worker_boundary.WorkspaceEvent],
     ) -> None:
         task_state = resolve_hosted_workspace_task(host_input.task_id)
-        async for event in stream_orchestrated_workspace_task(
-            request=task_state.request,
-            session=task_state.session,
+        async for event in worker_boundary.stream_workspace_task(
+            task_state.request,
         ):
             event = checkpoint_hitl_request(event=event, session=task_state.session)
             if task_state.output_queue is not None:
@@ -110,7 +106,7 @@ def build_workspace_host_workflow() -> Workflow:
     return WorkflowBuilder(
         name="workspace-orchestration-host",
         description=(
-            "Microsoft Agent Framework host around orchestration_app and the "
+            "Microsoft Agent Framework host around the "
             "fleet_rlm.worker execution seam, including hosted HITL policy."
         ),
         start_executor=executor,

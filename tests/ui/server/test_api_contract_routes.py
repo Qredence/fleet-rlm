@@ -396,6 +396,82 @@ def test_runtime_contract_endpoints_remain_available(
     assert lm.status_code == 200
 
 
+def test_optimization_transcript_dataset_endpoint_creates_dataset(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    local_store._engines.clear()
+
+    response = default_client.post(
+        "/api/v1/optimization/transcript-datasets",
+        headers=auth_headers,
+        json={
+            "module_slug": "reflect-and-revise",
+            "title": "Recovered chat",
+            "turns": [
+                {
+                    "user_message": "What is 2+2?",
+                    "assistant_message": "4",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["module_slug"] == "reflect-and-revise"
+    assert payload["row_count"] == 1
+    assert payload["name"].startswith("Recovered chat")
+
+
+def test_async_optimization_run_accepts_dataset_id(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    local_store._engines.clear()
+
+    dataset = local_store.create_transcript_dataset(
+        module_slug="reflect-and-revise",
+        title="Recovered chat",
+        turns=[("What is 2+2?", "4")],
+    )
+
+    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, True))
+
+    response = default_client.post(
+        "/api/v1/optimization/runs",
+        headers=auth_headers,
+        json={
+            "dataset_id": dataset.id,
+            "program_spec": "",
+            "module_slug": "reflect-and-revise",
+            "auto": "light",
+            "train_ratio": 0.8,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "running"
+    assert isinstance(payload["run_id"], int)
+
+
 def test_openapi_excludes_legacy_one_shot_and_task_schemas(
     local_client: TestClient,
 ) -> None:

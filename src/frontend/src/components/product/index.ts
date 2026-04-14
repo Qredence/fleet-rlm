@@ -21,3 +21,17 @@ export {
 } from "./section-layout";
 export { TimelineStep } from "./timeline";
 export type { TimelineStepProps, TimelineStepStatus } from "./timeline";
+export { DataTable } from "./data-table";
+export type { ColumnDef, SortState, SortDirection, DataTableProps } from "./data-table";
+export { DetailDrawer } from "./detail-drawer";
+export type { DetailDrawerProps } from "./detail-drawer";
+export { ScoreBadge } from "./score-badge";
+export type { ScoreBadgeProps } from "./score-badge";
+export { DiffViewer } from "./diff-viewer";
+export type { DiffMode, DiffViewerProps } from "./diff-viewer";
+export { FilePreview } from "./file-preview";
+export type { FilePreviewProps } from "./file-preview";
+export { ChartSparkline } from "./chart-sparkline";
+export type { ChartSparklineProps } from "./chart-sparkline";
+export { StateNotice } from "./state-notice";
+export { KeyValueGrid } from "./key-value-grid";

@@ -241,7 +241,7 @@ export function WorkspaceScreen() {
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
       {showDesktopLandingState ? (
-        <div className="flex min-h-0 flex-1 items-start justify-center px-6 pt-16 pb-8 lg:pt-24">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
           <div
             data-slot="workspace-landing-state"
             className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
@@ -281,7 +281,7 @@ export function WorkspaceScreen() {
 
             <div
               data-slot="workspace-landing-composer"
-              className="w-full rounded-3xl border border-border/60 bg-card/50 p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
+              className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
             >
               {composer}
             </div>
@@ -303,13 +303,7 @@ export function WorkspaceScreen() {
           </div>
 
           {/* Composer footer */}
-          <div
-            data-slot="workspace-composer"
-            className={cn(
-              "shrink-0 border-t border-border/30 bg-gradient-to-t from-background via-background/95 to-background/80 px-4 pb-6 pt-4 md:px-6",
-              "backdrop-blur-sm",
-            )}
-          >
+          <div data-slot="workspace-composer" className={cn("shrink-0 px-4 pb-6 pt-4 md:px-6")}>
             <div className="mx-auto w-full max-w-200">
               <div className="flex flex-col gap-3">
                 {showRuntimeWarning ? (

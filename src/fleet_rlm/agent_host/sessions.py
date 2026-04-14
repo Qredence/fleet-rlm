@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from typing import TYPE_CHECKING, Any
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..api.dependencies import ServerState, session_key
 from ..api.server_utils import owner_fingerprint
@@ -17,6 +20,8 @@ from .checkpoints import (
 
 if TYPE_CHECKING:
     from ..api.routers.ws.types import ChatAgentProtocol, LocalPersistFn
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -375,11 +380,19 @@ async def switch_orchestration_session(
         }
         try:
             from fleet_rlm.integrations.local_store import create_session as _db_create
-
-            cached["db_session_id"] = _db_create(title=sess_id).id
-        except Exception:
-            # Best-effort DB linkage only; continue with in-memory session state if unavailable.
-            pass
+        except ImportError:
+            logger.debug("Local session store unavailable", exc_info=True)
+        else:
+            try:
+                cached["db_session_id"] = _db_create(
+                    title=sess_id,
+                    external_session_id=sess_id,
+                    owner_tenant=owner_tenant_claim,
+                    owner_user=owner_user_claim,
+                    workspace_id=workspace_id,
+                ).id
+            except SQLAlchemyError:
+                logger.warning("Best-effort DB session linkage failed", exc_info=True)
 
     cached["session_id"] = sess_id
     cached["workspace_id"] = workspace_id

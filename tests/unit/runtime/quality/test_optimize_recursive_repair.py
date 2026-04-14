@@ -69,6 +69,9 @@ def test_optimize_recursive_repair_module_runs_gepa_and_persists_artifacts(
         def save(self, path: str) -> None:
             Path(path).write_text('{"optimized": true}\n', encoding="utf-8")
 
+        def forward(self, **kwargs: Any) -> Any:
+            return MagicMock()
+
     class _FakeGEPA:
         def __init__(
             self,
@@ -93,22 +96,9 @@ def test_optimize_recursive_repair_module_runs_gepa_and_persists_artifacts(
             captured["valset"] = valset
             return _FakeOptimizedProgram()
 
-    class _FakeEvaluate:
-        def __init__(self, *, devset: list[Any], metric: Any) -> None:
-            captured["devset"] = devset
-            captured["eval_metric"] = metric
-
-        def __call__(self, program: dspy.Module) -> float:
-            captured["evaluated_program"] = program
-            return 86.0
-
     monkeypatch.setattr(
         "dspy.teleprompt.GEPA",
         _FakeGEPA,
-    )
-    monkeypatch.setattr(
-        "dspy.Evaluate",
-        _FakeEvaluate,
     )
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
@@ -118,6 +108,15 @@ def test_optimize_recursive_repair_module_runs_gepa_and_persists_artifacts(
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
+    per_example_scores = [{"example_index": 0, "input_data": "{}", "score": 0.86}]
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._evaluate_per_example",
+        lambda *_args, **_kwargs: per_example_scores,
+    )
+    evaluate_mock = MagicMock(
+        side_effect=AssertionError("Aggregate fallback should not run")
+    )
+    monkeypatch.setattr("dspy.Evaluate", evaluate_mock)
 
     result = optimize_recursive_repair_module(
         dataset_path=dataset_path,
@@ -133,11 +132,12 @@ def test_optimize_recursive_repair_module_runs_gepa_and_persists_artifacts(
     assert manifest["optimizer"] == "GEPA"
     assert manifest["metric"] == "recursive_repair_usefulness_and_boundedness"
     assert result["output_path"] == str(output_path)
-    assert result["validation_score"] == 86.0
+    assert result["validation_score"] == 0.86
     assert result["program_spec"].endswith("PlanRecursiveRepairModule")
     assert captured["auto"] == "medium"
     assert captured["trainset"]
     assert captured["valset"]
+    evaluate_mock.assert_not_called()
 
 
 def test_recursive_repair_feedback_metric_scores_usefulness_and_boundedness() -> None:

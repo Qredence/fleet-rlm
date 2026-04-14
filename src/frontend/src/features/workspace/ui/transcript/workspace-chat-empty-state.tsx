@@ -1,8 +1,9 @@
-import { Code2, FileSearch, GitBranch, Lightbulb, type LucideIcon } from "lucide-react";
+import { Code2, FileSearch, GitBranch, Lightbulb, Terminal, type LucideIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { ConversationEmptyState } from "@/components/ai-elements/conversation";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import { StateNotice } from "@/components/product";
 import { cn } from "@/lib/utils";
 
 type WorkspaceSuggestion = {
@@ -71,26 +72,15 @@ export function WorkspaceChatEmptyState({
         initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={prefersReduced ? { duration: 0.01 } : { duration: 0.28, ease: "easeOut" }}
-        className="flex w-full max-w-3xl flex-col items-center gap-4"
+        className="flex w-full max-w-3xl flex-col items-center gap-4 pb-[41px]"
       >
-        <div className="flex w-full flex-col items-center gap-1.5">
-          <h2
-            className={cn(
-              "font-semibold tracking-[-0.02em] text-foreground",
-              isMobile ? "text-2xl leading-tight" : "text-3xl leading-tight",
-            )}
-          >
-            What would you like to build?
-          </h2>
-          <p
-            className={cn(
-              "text-muted-foreground max-w-md",
-              isMobile ? "text-sm leading-relaxed" : "text-base leading-relaxed",
-            )}
-          >
-            Describe a task and I&apos;ll help you plan, code, and execute it in a secure sandbox
-          </p>
-        </div>
+        <StateNotice
+          icon={<Terminal className="size-10 text-muted-foreground/40" />}
+          title="Start a conversation"
+          description="Type a message below to begin working with the AI assistant"
+          className="w-full py-0"
+          titleClassName="text-[3rem] font-medium leading-[1.2] tracking-[-0.05em]"
+        />
 
         <Suggestions
           wrap
@@ -108,10 +98,6 @@ export function WorkspaceChatEmptyState({
             />
           ))}
         </Suggestions>
-
-        <p className="text-xs text-muted-foreground/70 mt-2">
-          Sessions run in isolated Daytona sandboxes with persistent storage
-        </p>
       </motion.div>
     </ConversationEmptyState>
   );
@@ -145,7 +131,7 @@ function AnimatedSuggestion({
         onClick={onClick}
         size="default"
         className={cn(
-          "group inline-flex h-auto flex-col items-start gap-0.5 rounded-xl border border-border/50 bg-card/50 px-4 py-3 text-left whitespace-normal transition-all duration-200",
+          "group inline-flex h-auto flex-col items-start gap-0.5 rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal transition-all duration-200",
           "hover:border-border hover:bg-card hover:shadow-sm",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         )}

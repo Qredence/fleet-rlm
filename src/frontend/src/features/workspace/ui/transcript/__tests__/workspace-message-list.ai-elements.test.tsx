@@ -1113,7 +1113,7 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
       );
 
       expect(html).toContain("Setting up your workspace");
-      expect(html).toContain("What would you like to build?");
+      expect(html).toContain("Start a conversation");
     });
 
     it("renders a pending assistant shell with live trajectory while the turn is still typing", () => {
