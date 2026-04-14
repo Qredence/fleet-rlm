@@ -164,6 +164,7 @@ def _run_module_optimization(
     default_output_root: Path | None,
     auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
+    run_id: int | None = None,
 ) -> dict:
     """Blocking wrapper for registry-based module optimization."""
     from fleet_rlm.runtime.quality.module_registry import get_module_spec
@@ -180,6 +181,7 @@ def _run_module_optimization(
             default_output_root=default_output_root,
             train_ratio=train_ratio,
             auto=auto,
+            run_id=run_id,
         )
     )
 
@@ -301,6 +303,7 @@ async def run_optimization(
                     default_output_root=OPTIMIZATION_DATA_ROOT,
                     auto=request.auto,
                     train_ratio=request.train_ratio,
+                    run_id=db_run_id,
                 ),
                 timeout=OPTIMIZATION_TIMEOUT_SECONDS,
             )
@@ -444,6 +447,7 @@ def _run_optimization_background(
                     default_output_root=default_output_root,
                     train_ratio=train_ratio,
                     auto=auto,
+                    run_id=run_id,
                 )
             )
         else:
