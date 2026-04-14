@@ -25,7 +25,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable, type ColumnDef } from "@/components/product/data-table";
 import { StateNotice } from "@/components/product";
-import { useWorkspaceLayoutHistory, type Conversation } from "@/features/workspace/workspace-layout-contract";
+import {
+  useWorkspaceLayoutHistory,
+  type Conversation,
+} from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
 import {
   datasetEndpoints,
@@ -35,11 +38,7 @@ import {
   type GEPAModuleInfo,
   type TranscriptTurnInput,
 } from "@/lib/rlm-api/optimization";
-import {
-  sessionEndpoints,
-  sessionKeys,
-  type SessionListItem,
-} from "@/lib/rlm-api/sessions";
+import { sessionEndpoints, sessionKeys, type SessionListItem } from "@/lib/rlm-api/sessions";
 
 function formatDate(iso: string): string {
   const normalized = iso.endsWith("Z") ? iso : `${iso}Z`;
@@ -167,8 +166,7 @@ function SessionRow({
     },
     onError: (error) => {
       toast.error("GEPA launch failed", {
-        description:
-          error instanceof Error ? error.message : "Unexpected error",
+        description: error instanceof Error ? error.message : "Unexpected error",
       });
     },
   });
@@ -179,9 +177,7 @@ function SessionRow({
     <Item variant="outline" size="sm">
       <ItemContent>
         <ItemTitle>{session.title}</ItemTitle>
-        <ItemDescription>
-          {formatDate(session.created_at)}
-        </ItemDescription>
+        <ItemDescription>{formatDate(session.created_at)}</ItemDescription>
       </ItemContent>
       <ItemActions>
         {conversation ? <Badge variant="secondary">Local history</Badge> : null}
@@ -234,8 +230,7 @@ function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }
 
   const sessionsQuery = useQuery({
     queryKey: sessionKeys.list(listParams),
-    queryFn: ({ signal }) =>
-      sessionEndpoints.listSessions(listParams, signal),
+    queryFn: ({ signal }) => sessionEndpoints.listSessions(listParams, signal),
     staleTime: 30_000,
   });
 
@@ -300,28 +295,20 @@ function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
               Failed to load sessions:{" "}
-              {sessionsQuery.error instanceof Error
-                ? sessionsQuery.error.message
-                : "Unknown error"}
+              {sessionsQuery.error instanceof Error ? sessionsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>
       ) : sessions.length === 0 ? (
         <StateNotice
-          icon={
-            <MessageSquare className="size-10 text-muted-foreground/40" />
-          }
+          icon={<MessageSquare className="size-10 text-muted-foreground/40" />}
           title="No sessions yet"
           description="Start a conversation in the Workbench to create sessions you can export as training datasets."
         />
       ) : (
         <ItemGroup>
           {sessions.map((session) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              onNavigateToRuns={onNavigateToRuns}
-            />
+            <SessionRow key={session.id} session={session} onNavigateToRuns={onNavigateToRuns} />
           ))}
         </ItemGroup>
       )}
@@ -358,7 +345,8 @@ export function DatasetsTab({
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => datasetEndpoints.upload(file, moduleFilter !== "all" ? moduleFilter : undefined),
+    mutationFn: (file: File) =>
+      datasetEndpoints.upload(file, moduleFilter !== "all" ? moduleFilter : undefined),
     onSuccess: (result) => {
       toast.success("Dataset uploaded", {
         description: `"${result.name}" — ${result.row_count} rows.`,
@@ -396,7 +384,7 @@ export function DatasetsTab({
   const filterLabel =
     moduleFilter === "all"
       ? "All modules"
-      : modules.find((m) => m.slug === moduleFilter)?.label ?? moduleFilter;
+      : (modules.find((m) => m.slug === moduleFilter)?.label ?? moduleFilter);
 
   return (
     <div className="flex flex-col gap-6">
@@ -479,9 +467,7 @@ export function DatasetsTab({
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
               Failed to load datasets:{" "}
-              {datasetsQuery.error instanceof Error
-                ? datasetsQuery.error.message
-                : "Unknown error"}
+              {datasetsQuery.error instanceof Error ? datasetsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>

@@ -51,17 +51,11 @@ export const sessionEndpoints = {
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
     const qs = searchParams.toString();
-    return rlmApiClient.get<SessionListResponse>(
-      `/api/v1/sessions${qs ? `?${qs}` : ""}`,
-      signal,
-    );
+    return rlmApiClient.get<SessionListResponse>(`/api/v1/sessions${qs ? `?${qs}` : ""}`, signal);
   },
 
   getSession(id: number, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionDetailResponse>(
-      `/api/v1/sessions/${id}`,
-      signal,
-    );
+    return rlmApiClient.get<SessionDetailResponse>(`/api/v1/sessions/${id}`, signal);
   },
 
   getSessionTurns(id: number, params?: TurnListParams, signal?: AbortSignal) {

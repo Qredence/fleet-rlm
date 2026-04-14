@@ -70,9 +70,7 @@ export function ChartSparkline({
   }, [data, width, height]);
 
   if (data.length === 0) {
-    return (
-      <span className={cn("inline-block text-xs text-muted-foreground", className)}>—</span>
-    );
+    return <span className={cn("inline-block text-xs text-muted-foreground", className)}>—</span>;
   }
 
   return (
@@ -91,9 +89,7 @@ export function ChartSparkline({
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {showEndDot && lastPoint && (
-        <circle cx={lastPoint.x} cy={lastPoint.y} r={2} fill={color} />
-      )}
+      {showEndDot && lastPoint && <circle cx={lastPoint.x} cy={lastPoint.y} r={2} fill={color} />}
     </svg>
   );
 }

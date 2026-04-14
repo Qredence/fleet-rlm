@@ -61,7 +61,7 @@ class TestBackgroundRunnerMlflowAvailable:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from fleet_rlm.api.routers.optimization import _run_optimization_background
+        import fleet_rlm.api.routers.optimization as mod
 
         init_mock = MagicMock(return_value=True)
         ctx_mock = MagicMock()
@@ -108,7 +108,7 @@ class TestBackgroundRunnerMlflowAvailable:
                 MagicMock(),
             ),
         ):
-            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
 
         init_mock.assert_called_once()
         start_run_mock.assert_called_once()
@@ -125,7 +125,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from fleet_rlm.api.routers.optimization import _run_optimization_background
+        import fleet_rlm.api.routers.optimization as mod
 
         init_mock = MagicMock(return_value=False)
         complete_mock = MagicMock()
@@ -166,7 +166,7 @@ class TestBackgroundRunnerMlflowUnavailable:
                 MagicMock(),
             ),
         ):
-            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
 
         run_mod_mock.assert_called_once()
         complete_mock.assert_called_once()
@@ -178,7 +178,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Even if mlflow import itself raises, the run proceeds."""
-        from fleet_rlm.api.routers.optimization import _run_optimization_background
+        import fleet_rlm.api.routers.optimization as mod
 
         complete_mock = MagicMock()
         fake_result = {
@@ -224,6 +224,49 @@ class TestBackgroundRunnerMlflowUnavailable:
                 MagicMock(),
             ),
         ):
-            _run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
 
         complete_mock.assert_called_once()
+
+
+def test_resolve_dataset_request_accepts_relative_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.api.routers.optimization as mod
+
+    data_root = tmp_path / "optimization-data"
+    dataset = data_root / "nested" / "examples.jsonl"
+    dataset.parent.mkdir(parents=True)
+    dataset.write_text('{"question": "hi", "answer": "hello"}\n', encoding="utf-8")
+    monkeypatch.setattr(mod, "OPTIMIZATION_DATA_ROOT", data_root.resolve())
+
+    request = mod.GEPAOptimizationRequest(
+        dataset_path="nested/examples.jsonl",
+        program_spec="qa",
+    )
+
+    resolved, dataset_ref = mod._resolve_dataset_request(request)
+
+    assert resolved == dataset.resolve()
+    assert dataset_ref == "nested/examples.jsonl"
+
+
+def test_resolve_dataset_request_rejects_path_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.api.routers.optimization as mod
+    from fastapi import HTTPException
+
+    data_root = tmp_path / "optimization-data"
+    data_root.mkdir(parents=True)
+    monkeypatch.setattr(mod, "OPTIMIZATION_DATA_ROOT", data_root.resolve())
+
+    request = mod.GEPAOptimizationRequest(
+        dataset_path="../secrets.jsonl",
+        program_spec="qa",
+    )
+
+    with pytest.raises(HTTPException, match="Path escapes the allowed data directory."):
+        mod._resolve_dataset_request(request)

@@ -142,11 +142,7 @@ export function DiffViewer({
     <div className={cn("flex flex-col gap-2", className)}>
       {/* Header */}
       <div className="flex items-center justify-between">
-        {title ? (
-          <h3 className="text-sm font-medium text-foreground">{title}</h3>
-        ) : (
-          <span />
-        )}
+        {title ? <h3 className="text-sm font-medium text-foreground">{title}</h3> : <span />}
         <Button variant="outline" size="xs" onClick={toggleMode}>
           {mode === "unified" ? "Side-by-side" : "Unified"}
         </Button>

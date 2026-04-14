@@ -7,7 +7,7 @@ import logging
 import os
 import re
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, TypeAlias, cast
 
 from fastapi import (
@@ -66,6 +66,40 @@ OPTIMIZATION_DATA_ROOT = Path(
 ).resolve()
 
 
+def _resolve_relative_dataset_lookup(relative_path: str) -> str:
+    """Normalize a user-provided dataset lookup into a safe relative key."""
+    normalized = PurePosixPath(relative_path.replace("\\", "/"))
+    if normalized.is_absolute():
+        raise HTTPException(
+            status_code=400,
+            detail="Absolute paths are not allowed. Use a relative path.",
+        )
+
+    parts = normalized.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(
+            status_code=400, detail="Path escapes the allowed data directory."
+        )
+    return normalized.as_posix()
+
+
+def _find_dataset_under_root(root: Path, relative_path: str) -> Path | None:
+    """Return a dataset file under ``root`` that matches the relative lookup key."""
+    root_resolved = root.resolve()
+    for candidate in root.rglob("*"):
+        if not candidate.is_file():
+            continue
+        try:
+            candidate_relative = candidate.relative_to(root).as_posix()
+            resolved_candidate = candidate.resolve(strict=True)
+            resolved_candidate.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if candidate_relative == relative_path:
+            return resolved_candidate
+    return None
+
+
 def _check_gepa_available() -> bool:
     """Return True if the GEPA teleprompt module is importable."""
     try:
@@ -114,24 +148,13 @@ def _resolve_dataset_request(
         return dataset, str(dataset)
 
     dataset_path = (request.dataset_path or "").strip()
-    base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
-    safe_root = os.path.join(base_root, "")
-
-    if os.path.isabs(dataset_path):
-        raise HTTPException(
-            status_code=400,
-            detail="Absolute paths are not allowed. Use a relative path.",
-        )
-    dataset = os.path.realpath(os.path.join(safe_root, dataset_path))
-    if not dataset.startswith(safe_root):
-        raise HTTPException(
-            status_code=400, detail="Path escapes the allowed data directory."
-        )
-    if not os.path.exists(dataset):
+    dataset_lookup = _resolve_relative_dataset_lookup(dataset_path)
+    dataset = _find_dataset_under_root(OPTIMIZATION_DATA_ROOT, dataset_lookup)
+    if dataset is None:
         raise HTTPException(
             status_code=400, detail=f"Dataset file not found: {dataset_path}"
         )
-    return Path(dataset), dataset_path
+    return dataset, dataset_lookup
 
 
 @router.get(
@@ -481,33 +504,37 @@ def _run_optimization_background(
     _mlflow_log_metric: Any = None
     try:
         import mlflow
-
-        from fleet_rlm.integrations.observability.config import MlflowConfig
-        from fleet_rlm.integrations.observability.mlflow_runtime import (
-            initialize_mlflow,
-        )
-
-        resolved_cfg = MlflowConfig.from_env().model_copy(
-            update={
-                "dspy_log_compiles": True,
-                "dspy_log_evals": True,
-                "dspy_log_traces_from_compile": True,
-                "dspy_log_traces_from_eval": True,
-            }
-        )
-        if initialize_mlflow(resolved_cfg):
-            start_run = getattr(mlflow, "start_run", None)
-            _mlflow_log_metric = getattr(mlflow, "log_metric", None)
-            run_label = f"GEPA::{module_slug or program_spec}"
-            if start_run is not None:
-                mlflow_ctx = cast(Any, start_run)(run_name=run_label)
-                mlflow_ctx.__enter__()
-        else:
-            logger.debug(
-                "MLflow unavailable for run %s — proceeding without tracking", run_id
+    except ImportError:
+        logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
+    else:
+        try:
+            from fleet_rlm.integrations.observability.config import MlflowConfig
+            from fleet_rlm.integrations.observability.mlflow_runtime import (
+                initialize_mlflow,
             )
-    except Exception:
-        logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
+
+            resolved_cfg = MlflowConfig.from_env().model_copy(
+                update={
+                    "dspy_log_compiles": True,
+                    "dspy_log_evals": True,
+                    "dspy_log_traces_from_compile": True,
+                    "dspy_log_traces_from_eval": True,
+                }
+            )
+            if initialize_mlflow(resolved_cfg):
+                start_run = getattr(mlflow, "start_run", None)
+                _mlflow_log_metric = getattr(mlflow, "log_metric", None)
+                run_label = f"GEPA::{module_slug or program_spec}"
+                if start_run is not None:
+                    mlflow_ctx = cast(Any, start_run)(run_name=run_label)
+                    mlflow_ctx.__enter__()
+            else:
+                logger.debug(
+                    "MLflow unavailable for run %s — proceeding without tracking",
+                    run_id,
+                )
+        except Exception:
+            logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
         _on_phase("loading")
@@ -647,7 +674,13 @@ async def create_optimization_run(
                 detail="Absolute paths are not allowed. Use a relative path.",
             )
         resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
-        if not resolved_output.startswith(safe_root):
+        try:
+            stays_under_data_root = (
+                os.path.commonpath([base_root, resolved_output]) == base_root
+            )
+        except ValueError:
+            stays_under_data_root = False
+        if not stays_under_data_root:
             raise HTTPException(
                 status_code=400, detail="Path escapes the allowed data directory."
             )

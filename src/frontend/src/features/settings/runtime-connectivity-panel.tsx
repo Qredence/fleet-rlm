@@ -2,19 +2,8 @@ import { AlertCircleIcon, BadgeCheckIcon, Clock3Icon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldTitle,
-} from "@/components/ui/field";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import { FieldGroup } from "@/components/ui/field";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
 import { formatCheckLabel } from "./runtime-status-panel";

@@ -61,9 +61,9 @@ async def stream_hosted_workspace_task(
             host_task = asyncio.create_task(_run_host(host_input))
             try:
                 async for event in iter_workspace_host_queue(output_queue):
-                    if _is_terminal_host_event(event):
-                        pass
                     yield event
+                    if _is_terminal_host_event(event):
+                        break
             finally:
                 if not host_task.done():
                     host_task.cancel()

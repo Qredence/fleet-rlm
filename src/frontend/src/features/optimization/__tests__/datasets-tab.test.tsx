@@ -33,11 +33,7 @@ const queryClientState = {
 };
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({
-    queryKey,
-  }: {
-    queryKey: readonly unknown[];
-  }) => {
+  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "sessions") {
       return {
         data: undefined,
@@ -101,9 +97,8 @@ vi.mock("@/lib/rlm-api/optimization", async () => {
 });
 
 vi.mock("@/lib/rlm-api/sessions", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/rlm-api/sessions")>(
-    "@/lib/rlm-api/sessions",
-  );
+  const actual =
+    await vi.importActual<typeof import("@/lib/rlm-api/sessions")>("@/lib/rlm-api/sessions");
 
   return {
     ...actual,
@@ -207,8 +202,8 @@ describe("DatasetsTab sessions fallback", () => {
       root.render(<DatasetsTab />);
     });
 
-    const selectTrigger = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.getAttribute("aria-label") === "Pick module",
+    const selectTrigger = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.getAttribute("aria-label") === "Pick module",
     );
     expect(selectTrigger).toBeTruthy();
 

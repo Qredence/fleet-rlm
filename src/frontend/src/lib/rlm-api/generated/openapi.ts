@@ -148,12 +148,12 @@ export interface paths {
      */
     post: operations["create_optimization_run_api_v1_optimization_runs_post"];
   };
-  "/api/v1/optimization/datasets/from-transcript": {
+  "/api/v1/optimization/transcript-datasets": {
     /**
      * Create Dataset From Transcript
      * @description Convert transcript turns into a GEPA dataset.
      */
-    post: operations["create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post"];
+    post: operations["create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post"];
   };
   "/api/v1/optimization/runs/compare": {
     /**
@@ -2206,7 +2206,7 @@ export interface operations {
    * Create Dataset From Transcript
    * @description Convert transcript turns into a GEPA dataset.
    */
-  create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post: {
+  create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["TranscriptDatasetRequest"];

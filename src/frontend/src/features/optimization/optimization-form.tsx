@@ -81,17 +81,15 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
   const modules: GEPAModuleInfo[] = modulesQuery.data ?? [];
   const activeModuleInfo =
     selectedModule !== CUSTOM_MODULE_VALUE
-      ? modules.find((m) => m.slug === selectedModule) ?? null
+      ? (modules.find((m) => m.slug === selectedModule) ?? null)
       : null;
 
-  const moduleDisplayLabel = activeModuleInfo
-    ? activeModuleInfo.label
-    : "Custom";
+  const moduleDisplayLabel = activeModuleInfo ? activeModuleInfo.label : "Custom";
 
   const isCustomRatio = trainRatioPreset === CUSTOM_RATIO_VALUE;
   const ratioDisplayLabel = isCustomRatio
     ? "Custom…"
-    : TRAIN_RATIO_PRESETS.find((p) => p.value === trainRatioPreset)?.label ?? trainRatioPreset;
+    : (TRAIN_RATIO_PRESETS.find((p) => p.value === trainRatioPreset)?.label ?? trainRatioPreset);
   const trainRatioStr = isCustomRatio ? customTrainRatio : trainRatioPreset;
   const ratio = Number.parseFloat(trainRatioStr);
   const validRatio = !Number.isNaN(ratio) && ratio > 0 && ratio < 1;
@@ -102,8 +100,7 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
 
   const status = statusQuery.data;
   const available = status?.available ?? false;
-  const canRun =
-    available && datasetPath.trim() !== "" && resolvedProgramSpec !== "" && validRatio;
+  const canRun = available && datasetPath.trim() !== "" && resolvedProgramSpec !== "" && validRatio;
 
   const runOptimization = useMutation({
     mutationFn: (input: GEPAOptimizationRequest) => {
@@ -142,8 +139,7 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
   };
 
   const datasetInvalid = touched.datasetPath && datasetPath.trim() === "";
-  const specInvalid =
-    touched.programSpec && !activeModuleInfo && customProgramSpec.trim() === "";
+  const specInvalid = touched.programSpec && !activeModuleInfo && customProgramSpec.trim() === "";
   const ratioInvalid = touched.trainRatio && isCustomRatio && !validRatio;
 
   return (

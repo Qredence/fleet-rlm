@@ -84,10 +84,7 @@ import {
 } from "@/features/workspace/ui/queue";
 import { Streamdown } from "@/components/ui/streamdown";
 import { TextShimmer } from "@/components/effects/text-shimmer";
-import type {
-  ChatRenderPart,
-  RuntimeContext,
-} from "@/features/workspace/use-workspace";
+import type { ChatRenderPart, RuntimeContext } from "@/features/workspace/use-workspace";
 import { cn } from "@/lib/utils";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import { RuntimeContextBadge } from "@/features/workspace/ui/assistant-content/model";

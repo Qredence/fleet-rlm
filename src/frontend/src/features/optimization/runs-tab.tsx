@@ -142,9 +142,7 @@ function RunCard({
 
         <ItemDescription className="flex items-center gap-3">
           <span>{formatRelativeTime(run.started_at)}</span>
-          {sparkData.length > 0 ? (
-            <ChartSparkline data={sparkData} width={60} height={18} />
-          ) : null}
+          {sparkData.length > 0 ? <ChartSparkline data={sparkData} width={60} height={18} /> : null}
         </ItemDescription>
 
         {run.status === "running" ? (
@@ -171,11 +169,7 @@ function RunCard({
   );
 }
 
-export function RunsTab({
-  onCompare,
-}: {
-  onCompare?: (runIds: number[]) => void;
-}) {
+export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [drawerRunId, setDrawerRunId] = useState<number | null>(null);
@@ -269,18 +263,14 @@ export function RunsTab({
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
               Failed to load runs:{" "}
-              {runsQuery.error instanceof Error
-                ? runsQuery.error.message
-                : "Unknown error"}
+              {runsQuery.error instanceof Error ? runsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>
       ) : !runsQuery.data?.length ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
           <p className="text-sm text-muted-foreground">No optimization runs yet.</p>
-          <p className="text-xs text-muted-foreground">
-            Start a new run from the Modules tab.
-          </p>
+          <p className="text-xs text-muted-foreground">Start a new run from the Modules tab.</p>
         </div>
       ) : (
         <ItemGroup className="gap-2">

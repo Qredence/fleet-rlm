@@ -9,7 +9,9 @@ export function humanizeKind(kind: string): string {
     .replace(/\brepl\b/gi, "REPL");
 }
 
-export function statusBadgeVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
+export function statusBadgeVariant(
+  status: string,
+): "default" | "secondary" | "outline" | "destructive" {
   if (status === "completed") return "default";
   if (status === "needs_human_review") return "outline";
   if (status === "error") return "destructive";

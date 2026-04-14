@@ -49,9 +49,7 @@ const scoreDeltaColumns: ColumnDef<ScoreDeltaRow>[] = [
   },
   {
     header: "Program",
-    accessor: (row) => (
-      <code className="text-xs">{row.programSpec}</code>
-    ),
+    accessor: (row) => <code className="text-xs">{row.programSpec}</code>,
   },
   {
     header: "Score",
@@ -70,7 +68,12 @@ const scoreDeltaColumns: ColumnDef<ScoreDeltaRow>[] = [
       if (row.delta === 0) return <span className="tabular-nums text-muted-foreground">0.00</span>;
       const sign = row.delta > 0 ? "+" : "";
       const color = row.delta > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive";
-      return <span className={`tabular-nums font-medium ${color}`}>{sign}{row.delta.toFixed(2)}</span>;
+      return (
+        <span className={`tabular-nums font-medium ${color}`}>
+          {sign}
+          {row.delta.toFixed(2)}
+        </span>
+      );
     },
     className: "w-24",
   },
@@ -149,7 +152,12 @@ const exampleScoreColumns: ColumnDef<ExampleScoreRow>[] = [
       if (row.delta === 0) return <span className="tabular-nums text-muted-foreground">0.00</span>;
       const sign = row.delta > 0 ? "+" : "";
       const color = row.delta > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive";
-      return <span className={`tabular-nums font-medium ${color}`}>{sign}{row.delta.toFixed(2)}</span>;
+      return (
+        <span className={`tabular-nums font-medium ${color}`}>
+          {sign}
+          {row.delta.toFixed(2)}
+        </span>
+      );
     },
     className: "w-24",
   },
@@ -181,11 +189,14 @@ function ScoreDeltaSummary({ runs }: { runs: RunComparisonItem[] }) {
       <CardContent className="flex flex-wrap items-center gap-3 py-4">
         <span className="text-sm text-muted-foreground">Run #{first.run_id}:</span>
         <ScoreBadge score={scoreA} format="decimal" />
-        <span className="text-muted-foreground" aria-hidden>→</span>
+        <span className="text-muted-foreground" aria-hidden>
+          →
+        </span>
         <span className="text-sm text-muted-foreground">Run #{last.run_id}:</span>
         <ScoreBadge score={scoreB} format="decimal" />
         <span className={`ml-1 text-lg font-semibold tabular-nums ${deltaColor}`}>
-          ({sign}{delta.toFixed(2)})
+          ({sign}
+          {delta.toFixed(2)})
         </span>
       </CardContent>
     </Card>
@@ -248,12 +259,8 @@ function groupByPredictor(diffs: PromptDiff[]): Map<string, PromptDiff[]> {
 /* -------------------------------------------------------------------------- */
 
 export function CompareTab({ initialRunIds }: { initialRunIds?: number[] }) {
-  const [runIdsInput, setRunIdsInput] = useState(
-    initialRunIds?.join(", ") ?? "",
-  );
-  const [activeRunIds, setActiveRunIds] = useState<number[]>(
-    initialRunIds ?? [],
-  );
+  const [runIdsInput, setRunIdsInput] = useState(initialRunIds?.join(", ") ?? "");
+  const [activeRunIds, setActiveRunIds] = useState<number[]>(initialRunIds ?? []);
 
   const comparisonQuery = useQuery({
     queryKey: optimizationKeys.runComparison(activeRunIds),

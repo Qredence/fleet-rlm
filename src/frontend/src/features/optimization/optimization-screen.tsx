@@ -15,13 +15,10 @@ export function OptimizationScreen() {
   const [activeTab, setActiveTab] = useState("modules");
   const [compareRunIds, setCompareRunIds] = useState<number[] | undefined>();
 
-  const handleCompare = useCallback(
-    (runIds: number[]) => {
-      setCompareRunIds(runIds);
-      setActiveTab("compare");
-    },
-    [],
-  );
+  const handleCompare = useCallback((runIds: number[]) => {
+    setCompareRunIds(runIds);
+    setActiveTab("compare");
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">

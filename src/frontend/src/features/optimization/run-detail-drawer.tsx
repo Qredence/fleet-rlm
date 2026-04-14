@@ -111,9 +111,7 @@ export function RunDetailDrawer({
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
               Failed to load results:{" "}
-              {resultsQuery.error instanceof Error
-                ? resultsQuery.error.message
-                : "Unknown error"}
+              {resultsQuery.error instanceof Error ? resultsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>

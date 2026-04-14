@@ -34,10 +34,7 @@ export function HistoryScreen() {
         ) : null}
 
         <div className={cn("mx-auto w-full max-w-200 py-4", isMobile ? "px-4" : "px-6")}>
-          <SessionList
-            selectedSession={selectedSession}
-            onSelect={setSelectedSession}
-          />
+          <SessionList selectedSession={selectedSession} onSelect={setSelectedSession} />
         </div>
       </ScrollArea>
 
@@ -45,7 +42,7 @@ export function HistoryScreen() {
       {selectedSession != null ? (
         <SessionDetail
           selectedSession={selectedSession}
-          open={selectedSession != null}
+          open={true}
           onOpenChange={(open) => {
             if (!open) setSelectedSession(null);
           }}

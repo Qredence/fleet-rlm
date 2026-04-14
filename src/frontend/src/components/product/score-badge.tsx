@@ -59,10 +59,7 @@ const scoreBadgeVariants = cva(
 
 export function ScoreBadge({ score, format = "percent", className }: ScoreBadgeProps) {
   const tone = scoreTone(score);
-  const display =
-    format === "percent"
-      ? `${Math.round(score * 100)}%`
-      : score.toFixed(2);
+  const display = format === "percent" ? `${Math.round(score * 100)}%` : score.toFixed(2);
 
   return (
     <span className={cn(scoreBadgeVariants({ tone }), className)} aria-label={`Score: ${display}`}>

@@ -29,14 +29,19 @@ interface StateNoticeProps {
   titleClassName?: string;
 }
 
-export function StateNotice({ icon, title, description, action, className, titleClassName }: StateNoticeProps) {
+export function StateNotice({
+  icon,
+  title,
+  description,
+  action,
+  className,
+  titleClassName,
+}: StateNoticeProps) {
   return (
     <div className={cn("flex flex-col items-center gap-2 py-12 text-center", className)}>
       {icon ? <div className="mb-1">{icon}</div> : null}
       <p className={cn("text-sm font-medium", titleClassName)}>{title}</p>
-      {description ? (
-        <p className="text-xs text-muted-foreground">{description}</p>
-      ) : null}
+      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
       {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );

@@ -3,11 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Conversation } from "@/features/workspace/workspace-layout-contract";
-import {
-  sessionEndpoints,
-  sessionKeys,
-  type TurnItem,
-} from "@/lib/rlm-api/sessions";
+import { sessionEndpoints, sessionKeys, type TurnItem } from "@/lib/rlm-api/sessions";
 
 const PAGE_SIZE = 20;
 
@@ -107,7 +103,7 @@ function SessionReplayApi({ sessionId }: { sessionId: number }) {
         ))}
       </div>
 
-      {(hasPrev || hasNext) ? (
+      {hasPrev || hasNext ? (
         <div className="flex items-center justify-between pt-2">
           <Button
             variant="outline"
@@ -137,9 +133,7 @@ function SessionReplayApi({ sessionId }: { sessionId: number }) {
 function SessionReplayLocal({ conversation }: { conversation: Conversation }) {
   const messages = conversation.messages.filter(
     (message) =>
-      (message.type === "user" ||
-        message.type === "assistant" ||
-        message.type === "system") &&
+      (message.type === "user" || message.type === "assistant" || message.type === "system") &&
       message.content.trim().length > 0,
   );
 

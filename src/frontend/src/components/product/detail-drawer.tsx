@@ -61,10 +61,7 @@ export function DetailDrawer({
 }: DetailDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className={cn("flex flex-col sm:max-w-md md:max-w-lg", className)}
-      >
+      <SheetContent side="right" className={cn("flex flex-col sm:max-w-md md:max-w-lg", className)}>
         <SheetHeader className="flex flex-row items-start justify-between gap-4 pr-10">
           <div className="flex flex-col gap-1.5">
             <SheetTitle>{title}</SheetTitle>

@@ -3,13 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -64,11 +58,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function ScoreBadge({ score }: { score: number }) {
   const colorClass =
-    score >= 0.7
-      ? "bg-success/15 text-success"
-      : score >= 0.4
-        ? "bg-warning/15 text-warning"
-        : "";
+    score >= 0.7 ? "bg-success/15 text-success" : score >= 0.4 ? "bg-warning/15 text-warning" : "";
   return (
     <Badge variant={score >= 0.7 ? "secondary" : "destructive"} className={colorClass}>
       {score.toFixed(4)}
@@ -150,9 +140,7 @@ function RunDetailPanel({ run }: { run: OptimizationRunSummary }) {
         ) : null}
         {run.phase ? <ResultRow label="Phase">{phaseLabel(run.phase)}</ResultRow> : null}
         <ResultRow label="Started">{formatRelativeTime(run.started_at)}</ResultRow>
-        <ResultRow label="Duration">
-          {formatDuration(run.started_at, run.completed_at)}
-        </ResultRow>
+        <ResultRow label="Duration">{formatDuration(run.started_at, run.completed_at)}</ResultRow>
         {run.output_path ? (
           <ResultRow label="Output">
             <code className="text-xs">{run.output_path}</code>
@@ -283,7 +271,8 @@ export function OptimizationRuns() {
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="py-4">
             <p className="text-sm text-destructive">
-              Failed to load runs: {runsQuery.error instanceof Error ? runsQuery.error.message : "Unknown error"}
+              Failed to load runs:{" "}
+              {runsQuery.error instanceof Error ? runsQuery.error.message : "Unknown error"}
             </p>
           </CardContent>
         </Card>

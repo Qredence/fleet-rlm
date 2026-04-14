@@ -734,13 +734,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
-  /api/v1/optimization/datasets/from-transcript:
+  /api/v1/optimization/transcript-datasets:
     post:
       tags:
         - optimization
       summary: Create Dataset From Transcript
       description: Convert transcript turns into a GEPA dataset.
-      operationId: create_dataset_from_transcript_api_v1_optimization_datasets_from_transcript_post
+      operationId: create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post
       requestBody:
         content:
           application/json:

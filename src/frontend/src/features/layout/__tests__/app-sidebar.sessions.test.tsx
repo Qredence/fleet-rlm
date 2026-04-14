@@ -50,7 +50,9 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@/lib/rlm-api/sessions", () => ({
   sessionKeys: { list: (params: Record<string, unknown>) => ["sessions", "list", params] },
-  sessionEndpoints: { listSessions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }) },
+  sessionEndpoints: {
+    listSessions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }),
+  },
 }));
 
 vi.mock("@/components/ui/button", () => ({

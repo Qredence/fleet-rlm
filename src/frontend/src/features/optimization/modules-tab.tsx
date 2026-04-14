@@ -91,8 +91,7 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
   });
 
   const quickRunMutation = useMutation({
-    mutationFn: (input: GEPAOptimizationRequest) =>
-      optimizationEndpoints.createRun(input),
+    mutationFn: (input: GEPAOptimizationRequest) => optimizationEndpoints.createRun(input),
     onSuccess: (result) => {
       toast.success("Optimization run started", {
         description: `Run #${result.run_id} is in progress.`,
@@ -133,9 +132,7 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
         <CardContent className="py-4">
           <p className="text-sm text-destructive">
             Failed to load modules:{" "}
-            {modulesQuery.error instanceof Error
-              ? modulesQuery.error.message
-              : "Unknown error"}
+            {modulesQuery.error instanceof Error ? modulesQuery.error.message : "Unknown error"}
           </p>
         </CardContent>
       </Card>
@@ -148,9 +145,7 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     return (
       <div className="flex flex-col items-center gap-2 py-12 text-center">
         <p className="text-sm text-muted-foreground">No optimization modules registered.</p>
-        <p className="text-xs text-muted-foreground">
-          Register DSPy modules to see them here.
-        </p>
+        <p className="text-xs text-muted-foreground">Register DSPy modules to see them here.</p>
       </div>
     );
   }

@@ -26,8 +26,9 @@ export function SessionDetail({ selectedSession, open, onOpenChange }: SessionDe
   const localConversations = useWorkspaceLayoutHistory();
   const localConversation =
     selectedSession.source === "local"
-      ? localConversations.find((conversation) => conversation.id === selectedSession.conversationId) ??
-        null
+      ? (localConversations.find(
+          (conversation) => conversation.id === selectedSession.conversationId,
+        ) ?? null)
       : null;
   const sessionId = selectedSession.source === "api" ? selectedSession.sessionId : null;
 
@@ -105,9 +106,7 @@ export function SessionDetail({ selectedSession, open, onOpenChange }: SessionDe
           </PropertyGroup>
         </div>
       ) : detailQuery.isError ? (
-        <p className="py-4 text-sm text-destructive">
-          Failed to load session details.
-        </p>
+        <p className="py-4 text-sm text-destructive">Failed to load session details.</p>
       ) : session ? (
         <div className="flex flex-col gap-6">
           <PropertyGroup title="Metadata">

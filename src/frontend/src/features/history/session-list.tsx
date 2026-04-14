@@ -14,7 +14,10 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
-import { useWorkspaceLayoutHistory, type Conversation } from "@/features/workspace/workspace-layout-contract";
+import {
+  useWorkspaceLayoutHistory,
+  type Conversation,
+} from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
 import { cn } from "@/lib/utils";
 import {
@@ -84,8 +87,8 @@ function SessionRow({
           <StatusBadge status={session.status} />
         </ItemTitle>
         <ItemDescription className="text-xs">
-          Created {formatRelativeTime(session.created_at)} ·{" "}
-          Updated {formatRelativeTime(session.updated_at)}
+          Created {formatRelativeTime(session.created_at)} · Updated{" "}
+          {formatRelativeTime(session.updated_at)}
         </ItemDescription>
       </ItemContent>
     </Item>
@@ -116,11 +119,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
   const [offset, setOffset] = useState(0);
 
   const filterLabel =
-    statusFilter === "all"
-      ? "All"
-      : statusFilter === "active"
-        ? "Active"
-        : "Archived";
+    statusFilter === "all" ? "All" : statusFilter === "active" ? "Active" : "Archived";
 
   const params: SessionListParams = {
     search: deferredSearch || undefined,
@@ -214,9 +213,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
                 }}
                 isSelected={isSelected}
                 onSelect={() =>
-                  onSelect(
-                    isSelected ? null : { source: "local", conversationId: conversation.id },
-                  )
+                  onSelect(isSelected ? null : { source: "local", conversationId: conversation.id })
                 }
               />
             );
@@ -282,7 +279,11 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
             title="No sessions yet"
             description="Your conversation history will appear here"
             action={
-              <Button variant="ghost" size="sm" onClick={() => window.location.assign("/app/workspace")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => window.location.assign("/app/workspace")}
+              >
                 Open Workbench
               </Button>
             }
@@ -313,7 +314,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
         />
       ))}
 
-      {(hasPrev || hasNext) ? (
+      {hasPrev || hasNext ? (
         <div className="flex items-center justify-between pt-2">
           <Button
             variant="outline"

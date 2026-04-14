@@ -84,7 +84,8 @@ export function DataTable<T extends Record<string, unknown>>({
       const key = col.accessor;
       const next: SortState<T> = {
         column: key,
-        direction: internalSort?.column === key && internalSort.direction === "asc" ? "desc" : "asc",
+        direction:
+          internalSort?.column === key && internalSort.direction === "asc" ? "desc" : "asc",
       };
       setInternalSort(next);
       onSort?.(next);

@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import json
 import os
-import re
+import tempfile
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,6 +91,8 @@ def _migrate_chat_sessions(engine: Any) -> None:
                 )
             )
         except Exception:
+            # This index is an opportunistic local-store optimization; startup should
+            # not fail if a legacy SQLite version or partial schema cannot create it.
             pass
         conn.commit()
 
@@ -134,6 +136,8 @@ def _migrate_evaluation_tables(engine: Any) -> None:
             try:
                 conn.execute(text(ddl))
             except Exception:
+                # Evaluation tables are best-effort local developer persistence; index
+                # creation failure should not block the app from serving requests.
                 pass
         conn.commit()
 
@@ -808,32 +812,19 @@ def _persist_transcript_dataset(
     filename_stem: str,
 ) -> Dataset:
     """Write transcript-derived rows to JSONL and register a dataset."""
-    safe_stem = (
-        re.sub(r"[^A-Za-z0-9._-]+", "-", filename_stem).strip("-") or "transcript"
-    )
-    safe_module_slug = (
-        re.sub(r"[^A-Za-z0-9._-]+", "-", module_slug).strip("-") or "module"
-    )
-    root = get_dataset_root()
-    root_resolved = root.resolve()
-    dest = root / f"{safe_stem}-{safe_module_slug}.jsonl"
-    try:
-        dest.resolve().relative_to(root_resolved)
-    except ValueError as exc:
-        raise ValueError("Invalid dataset path derived from module slug.") from exc
-
-    suffix = 1
-    while dest.exists():
-        dest = root / f"{safe_stem}-{safe_module_slug}-{suffix}.jsonl"
-        try:
-            dest.resolve().relative_to(root_resolved)
-        except ValueError as exc:
-            raise ValueError("Invalid dataset path derived from module slug.") from exc
-        suffix += 1
-
-    with open(dest, "w", encoding="utf-8") as fh:
+    _ = filename_stem  # Human-readable naming stays in dataset metadata, not file paths.
+    root = get_dataset_root().resolve()
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=root,
+        prefix="transcript-",
+        suffix=".jsonl",
+        delete=False,
+    ) as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        dest = Path(fh.name)
 
     return create_dataset(
         name=dataset_name,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -297,7 +299,10 @@ def test_export_session_skips_partial_turns(tmp_path, monkeypatch):
 def test_create_transcript_dataset_basic(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
 
-    from fleet_rlm.integrations.local_store import create_transcript_dataset
+    from fleet_rlm.integrations.local_store import (
+        create_transcript_dataset,
+        get_dataset_root,
+    )
 
     dataset = create_transcript_dataset(
         module_slug="reflect-and-revise",
@@ -313,6 +318,10 @@ def test_create_transcript_dataset_basic(tmp_path, monkeypatch):
     assert dataset.format == "jsonl"
     assert dataset.module_slug == "reflect-and-revise"
     assert dataset.name.startswith("Recovered history")
+    dataset_path = Path(dataset.uri)
+    assert dataset_path.parent == get_dataset_root()
+    assert dataset_path.name.startswith("transcript-")
+    assert dataset_path.suffix == ".jsonl"
 
 
 def test_create_transcript_dataset_requires_usable_turns():

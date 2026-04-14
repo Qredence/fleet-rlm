@@ -30,7 +30,7 @@ describe("WorkspaceChatEmptyState", () => {
     // StateNotice header with icon + title + description
     expect(html).toContain("Start a conversation");
     expect(html).toContain("Type a message below");
-    expect(html).toContain("Daytona sandboxes");
+    expect(html).toContain("begin working with the AI assistant");
     // Updated suggestions aligned with coding/execution tasks
     expect(html).toContain("Build a feature");
     expect(html).toContain("Debug an issue");

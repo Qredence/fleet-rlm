@@ -303,12 +303,7 @@ export function WorkspaceScreen() {
           </div>
 
           {/* Composer footer */}
-          <div
-            data-slot="workspace-composer"
-            className={cn(
-              "shrink-0 px-4 pb-6 pt-4 md:px-6",
-            )}
-          >
+          <div data-slot="workspace-composer" className={cn("shrink-0 px-4 pb-6 pt-4 md:px-6")}>
             <div className="mx-auto w-full max-w-200">
               <div className="flex flex-col gap-3">
                 {showRuntimeWarning ? (

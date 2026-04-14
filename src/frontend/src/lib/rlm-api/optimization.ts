@@ -1,6 +1,4 @@
-import { RlmApiError, rlmApiClient } from "@/lib/rlm-api/client";
-import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { getAccessToken } from "@/lib/auth/token-store";
+import { rlmApiClient } from "@/lib/rlm-api/client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 // ── Generated-type aliases ──────────────────────────────────────────
@@ -87,13 +85,6 @@ export interface OptimizationRunSummary {
   completed_at: string | null;
 }
 
-// ── Helper: build absolute URL (mirrors client.ts logic) ────────────
-function buildUrl(path: string): string {
-  if (/^https?:\/\//.test(path)) return path;
-  if (!rlmApiConfig.baseUrl) return path;
-  return new URL(path, rlmApiConfig.baseUrl).toString();
-}
-
 // ── Existing optimization endpoints ─────────────────────────────────
 
 export const optimizationEndpoints = {
@@ -116,11 +107,7 @@ export const optimizationEndpoints = {
   },
 
   createRun(input: GEPAOptimizationRequest, signal?: AbortSignal) {
-    return rlmApiClient.post<OptimizationRunCreated>(
-      "/api/v1/optimization/runs",
-      input,
-      signal,
-    );
+    return rlmApiClient.post<OptimizationRunCreated>("/api/v1/optimization/runs", input, signal);
   },
 
   listRuns(params?: { status?: string; limit?: number; offset?: number }, signal?: AbortSignal) {
@@ -136,10 +123,7 @@ export const optimizationEndpoints = {
   },
 
   getRun(runId: number, signal?: AbortSignal) {
-    return rlmApiClient.get<OptimizationRunSummary>(
-      `/api/v1/optimization/runs/${runId}`,
-      signal,
-    );
+    return rlmApiClient.get<OptimizationRunSummary>(`/api/v1/optimization/runs/${runId}`, signal);
   },
 };
 
@@ -147,39 +131,22 @@ export const optimizationEndpoints = {
 
 export const datasetEndpoints = {
   /** Upload a dataset file (.json/.jsonl) with optional module association. */
-  async upload(file: File, moduleSlug?: string | null, signal?: AbortSignal): Promise<DatasetResponse> {
+  async upload(
+    file: File,
+    moduleSlug?: string | null,
+    signal?: AbortSignal,
+  ): Promise<DatasetResponse> {
     const formData = new FormData();
     formData.append("file", file);
     if (moduleSlug) {
       formData.append("module_slug", moduleSlug);
     }
 
-    const accessToken = getAccessToken();
-    const response = await fetch(buildUrl("/api/v1/optimization/datasets"), {
-      method: "POST",
+    return rlmApiClient.postForm<DatasetResponse>(
+      "/api/v1/optimization/datasets",
+      formData,
       signal,
-      headers: {
-        Accept: "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      let detail = `HTTP ${response.status}`;
-      try {
-        const parsed = (await response.json()) as { detail?: unknown };
-        if (typeof parsed.detail === "string" && parsed.detail.trim()) {
-          detail = parsed.detail;
-        }
-      } catch {
-        const text = await response.text().catch(() => "");
-        if (text.trim()) detail = text;
-      }
-      throw new RlmApiError(response.status, detail);
-    }
-
-    return (await response.json()) as DatasetResponse;
+    );
   },
 
   /** List registered datasets with optional module filter. */
@@ -254,8 +221,7 @@ export const optimizationKeys = {
   runDetail: (id: number) => [...optimizationKeys.runs(), "detail", id] as const,
   runResults: (runId: number, params?: { limit?: number; offset?: number }) =>
     [...optimizationKeys.runs(), "results", runId, params ?? {}] as const,
-  runComparison: (runIds: number[]) =>
-    [...optimizationKeys.runs(), "compare", ...runIds] as const,
+  runComparison: (runIds: number[]) => [...optimizationKeys.runs(), "compare", ...runIds] as const,
   datasets: () => [...optimizationKeys.all, "datasets"] as const,
   datasetList: (params?: { module_slug?: string }) =>
     [...optimizationKeys.datasets(), "list", params ?? {}] as const,

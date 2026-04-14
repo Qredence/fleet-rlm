@@ -119,10 +119,20 @@ export function ArtifactViewer({ open, onOpenChange, artifact }: ArtifactViewerP
 
   const headerActions = (
     <>
-      <Button variant="ghost" size="icon-xs" onClick={copyToClipboard} aria-label="Copy to clipboard">
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        onClick={copyToClipboard}
+        aria-label="Copy to clipboard"
+      >
         <Copy className="size-3.5" />
       </Button>
-      <Button variant="ghost" size="icon-xs" onClick={downloadArtifact} aria-label="Download artifact">
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        onClick={downloadArtifact}
+        aria-label="Download artifact"
+      >
         <Download className="size-3.5" />
       </Button>
     </>

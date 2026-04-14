@@ -1,10 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldTitle,
-} from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import type { RuntimeStatusResponse } from "@/lib/rlm-api";
 
 export function formatCheckLabel(key: string): string {

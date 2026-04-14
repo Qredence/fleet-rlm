@@ -166,8 +166,8 @@ export function LiteLlmForm({ showAllSections, section }: LiteLlmFormProps) {
             <FieldTitle>LiteLLM integration</FieldTitle>
             <FieldDescription>
               Configure a custom LiteLLM-compatible endpoint and API key for planner/provider
-              routing. These values are saved through the runtime settings API when local writes
-              are enabled.
+              routing. These values are saved through the runtime settings API when local writes are
+              enabled.
             </FieldDescription>
           </FieldContent>
         </Field>
@@ -256,8 +256,7 @@ export function LiteLlmForm({ showAllSections, section }: LiteLlmFormProps) {
           <FieldContent>
             <FieldTitle>API key</FieldTitle>
             <FieldDescription>
-              Provider or proxy key used for LM requests. Leave unchanged to keep the current
-              value.
+              Provider or proxy key used for LM requests. Leave unchanged to keep the current value.
             </FieldDescription>
           </FieldContent>
           <div className="flex w-full flex-col gap-2">
