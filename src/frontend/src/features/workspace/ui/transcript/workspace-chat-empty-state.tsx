@@ -143,8 +143,9 @@ function AnimatedSuggestion({
       <Suggestion
         suggestion={suggestion.prompt}
         onClick={onClick}
+        size="default"
         className={cn(
-          "group inline-flex flex-col items-start gap-0.5 rounded-xl border border-border/50 bg-card/50 px-4 py-3 text-left transition-all duration-200",
+          "group inline-flex h-auto flex-col items-start gap-0.5 rounded-xl border border-border/50 bg-card/50 px-4 py-3 text-left whitespace-normal transition-all duration-200",
           "hover:border-border hover:bg-card hover:shadow-sm",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         )}
