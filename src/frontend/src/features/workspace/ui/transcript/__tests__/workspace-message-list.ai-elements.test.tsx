@@ -51,7 +51,7 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
       });
       useWorkspaceUiStore.setState({
         selectedAssistantTurnId: null,
-        activeInspectorTab: "trajectory",
+        activeInspectorTab: "message",
       });
     });
 
@@ -652,14 +652,14 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
       act(() => {
         evidencePreview?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
-      expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("evidence");
+      expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("message");
 
       const refreshedTurnCard = container.querySelector('[data-slot="assistant-turn-content"]');
 
       act(() => {
         refreshedTurnCard?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
-      expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("trajectory");
+      expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("message");
       expect(refreshedTurnCard?.className).toContain("border-accent/20");
 
       act(() => {

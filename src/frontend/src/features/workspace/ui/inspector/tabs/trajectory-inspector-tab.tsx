@@ -9,16 +9,22 @@ import {
   inspectorInsetClass,
 } from "@/features/workspace/ui/inspector/inspector-styles";
 import { renderBadges, statusTone } from "../ui/inspector-ui";
-import { InspectorTabPanel } from "../inspector-tab-panel";
 
-export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
+export const TrajectoryInspectorContent = memo(function TrajectoryInspectorContent({
   model,
+  showEmptyState = true,
 }: {
   model: AssistantContentModel;
+  showEmptyState?: boolean;
 }) {
   const items = model.trajectory.items;
+
+  if (!model.trajectory.overview && items.length === 0 && !showEmptyState) {
+    return null;
+  }
+
   return (
-    <InspectorTabPanel value="trajectory">
+    <>
       {model.trajectory.overview ? (
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
@@ -44,14 +50,16 @@ export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
       ) : null}
 
       {items.length === 0 ? (
-        <Card className={inspectorStyles.card.root}>
-          <CardHeader className={inspectorStyles.card.header}>
-            <CardTitle className="text-sm font-medium">No trajectory recorded</CardTitle>
-            <CardDescription>
-              This turn does not include structured reasoning steps.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        showEmptyState ? (
+          <Card className={inspectorStyles.card.root}>
+            <CardHeader className={inspectorStyles.card.header}>
+              <CardTitle className="text-sm font-medium">No trajectory recorded</CardTitle>
+              <CardDescription>
+                This turn does not include structured reasoning steps.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : null
       ) : (
         items.map((item) => {
           const tone = statusTone(item.status);
@@ -102,6 +110,6 @@ export const TrajectoryInspectorTab = memo(function TrajectoryInspectorTab({
           );
         })
       )}
-    </InspectorTabPanel>
+    </>
   );
 });

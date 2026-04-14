@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
 import {
@@ -12,13 +11,11 @@ import type { ExecutionStep } from "@/features/workspace/use-workspace";
 import { useChatStore } from "@/features/workspace/use-workspace";
 import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import type { InspectorTab } from "@/features/workspace/use-workspace";
-import { inspectorStyles } from "@/features/workspace/ui/inspector/inspector-styles";
-import { executionSectionState, renderBadges, statusTone } from "./ui/inspector-ui";
+import { executionSectionState } from "./ui/inspector-ui";
 
-import { TrajectoryInspectorTab } from "./tabs/trajectory-inspector-tab";
 import { ExecutionInspectorTab } from "./tabs/execution-inspector-tab";
-import { EvidenceInspectorTab } from "./tabs/evidence-inspector-tab";
 import { GraphInspectorTab } from "./tabs/graph-inspector-tab";
+import { MessageInspectorTab } from "./tabs/message-inspector-tab";
 
 type TabOption = {
   id: InspectorTab;
@@ -33,7 +30,7 @@ function EmptyInspectorState({ hasAssistantTurns }: { hasAssistantTurns: boolean
           <CardTitle>Message Inspector</CardTitle>
           <CardDescription>
             {hasAssistantTurns
-              ? "Select an assistant response in the chat to inspect its trajectory, execution details, evidence, and relationships."
+              ? "Select an assistant response in the chat to inspect its message details, execution details, and relationships."
               : "Send a message to populate the inspector with assistant-turn details."}
           </CardDescription>
         </CardHeader>
@@ -127,12 +124,9 @@ export function MessageInspectorPanel() {
   const tabs = useMemo<TabOption[]>(() => {
     if (!model) return [];
     return [
-      { id: "trajectory", label: "Trajectory" },
+      { id: "message", label: "Message" },
       ...(model.execution.hasContent
         ? ([{ id: "execution", label: "Execution" }] as TabOption[])
-        : []),
-      ...(model.evidence.hasContent
-        ? ([{ id: "evidence", label: "Examples" }] as TabOption[])
         : []),
       ...(showGraph ? ([{ id: "graph", label: "Graph" }] as TabOption[]) : []),
     ];
@@ -140,7 +134,7 @@ export function MessageInspectorPanel() {
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.id === activeInspectorTab)) {
-      setInspectorTab("trajectory");
+      setInspectorTab("message");
     }
   }, [activeInspectorTab, setInspectorTab, tabs]);
 
@@ -148,51 +142,10 @@ export function MessageInspectorPanel() {
     return <EmptyInspectorState hasAssistantTurns={hasAssistantTurns} />;
   }
 
-  const currentTab = tabs.find((tab) => tab.id === activeInspectorTab)?.id ?? "trajectory";
-  const turnStatus = statusTone(selectedTurnStatus(model));
-  const summaryBadges = [
-    ...model.summary.runtimeBadges,
-    ...(model.summary.sandboxActive ? ["sandbox active"] : []),
-  ];
+  const currentTab = tabs.find((tab) => tab.id === activeInspectorTab)?.id ?? "message";
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="border-b border-border-subtle/70 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-sm font-medium text-foreground">Assistant turn</div>
-          <Badge variant={turnStatus.variant} className={inspectorStyles.badge.status}>
-            {turnStatus.label}
-          </Badge>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {model.summary.trajectoryCount > 0 ? (
-            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-              {model.summary.trajectoryCount} trajector
-              {model.summary.trajectoryCount === 1 ? "y" : "ies"}
-            </Badge>
-          ) : null}
-          {model.summary.toolSessionCount > 0 ? (
-            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-              {model.summary.toolSessionCount} tool session
-              {model.summary.toolSessionCount === 1 ? "" : "s"}
-            </Badge>
-          ) : null}
-          {model.summary.sourceCount > 0 ? (
-            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-              {model.summary.sourceCount} source
-              {model.summary.sourceCount === 1 ? "" : "s"}
-            </Badge>
-          ) : null}
-          {model.summary.attachmentCount > 0 ? (
-            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-              {model.summary.attachmentCount} attachment
-              {model.summary.attachmentCount === 1 ? "" : "s"}
-            </Badge>
-          ) : null}
-          {summaryBadges.length > 0 ? renderBadges(summaryBadges, "secondary") : null}
-        </div>
-      </div>
-
       <Tabs
         value={currentTab}
         onValueChange={(value) => setInspectorTab(value as InspectorTab)}
@@ -210,9 +163,8 @@ export function MessageInspectorPanel() {
 
         <Separator className="bg-border-subtle/70" />
 
-        <TrajectoryInspectorTab model={model} />
+        <MessageInspectorTab model={model} status={selectedTurnStatus(model)} />
         {model.execution.hasContent ? <ExecutionInspectorTab model={model} /> : null}
-        {model.evidence.hasContent ? <EvidenceInspectorTab model={model} /> : null}
         {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
       </Tabs>
     </div>

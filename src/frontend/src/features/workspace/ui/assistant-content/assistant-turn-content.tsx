@@ -43,15 +43,15 @@ export function AssistantTurnContent({
   const hasRichSections =
     model.trajectory.hasContent || model.execution.hasChatHighlights || model.evidence.hasContent;
 
-  const handleOpenTrajectory = () => {
-    onOpenTab?.("trajectory");
+  const handleOpenMessage = () => {
+    onOpenTab?.("message");
   };
 
   const handleContainerClick = (event: MouseEvent<HTMLDivElement>) => {
     if (!onOpenTab || isInteractiveTarget(event.target, event.currentTarget)) {
       return;
     }
-    handleOpenTrajectory();
+    handleOpenMessage();
   };
 
   const handleContainerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -59,7 +59,7 @@ export function AssistantTurnContent({
     if (event.key !== "Enter" && event.key !== " ") return;
     if (isInteractiveTarget(event.target, event.currentTarget)) return;
     event.preventDefault();
-    handleOpenTrajectory();
+    handleOpenMessage();
   };
 
   return (

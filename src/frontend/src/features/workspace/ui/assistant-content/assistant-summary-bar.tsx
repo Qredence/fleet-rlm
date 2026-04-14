@@ -14,7 +14,7 @@ function summaryPills(summary: AssistantContentModel["summary"]) {
     pills.push({
       key: "trajectory",
       label: `${summary.trajectoryCount} trajector${summary.trajectoryCount === 1 ? "y" : "ies"}`,
-      tab: "trajectory",
+      tab: "message",
     });
   }
   if (summary.toolSessionCount > 0) {
@@ -28,14 +28,14 @@ function summaryPills(summary: AssistantContentModel["summary"]) {
     pills.push({
       key: "evidence-sources",
       label: `${summary.sourceCount} source${summary.sourceCount === 1 ? "" : "s"}`,
-      tab: "evidence",
+      tab: "message",
     });
   }
   if (summary.attachmentCount > 0) {
     pills.push({
       key: "evidence-attachments",
       label: `${summary.attachmentCount} attachment${summary.attachmentCount === 1 ? "" : "s"}`,
-      tab: "evidence",
+      tab: "message",
     });
   }
   if (summary.sandboxActive) {

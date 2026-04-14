@@ -104,7 +104,7 @@ describe("WorkspaceScreen requested conversation loading", () => {
     });
     useWorkspaceUiStore.setState({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
       creationPhase: "idle",
       sessionRevision: 0,
       requestedConversationId: null,

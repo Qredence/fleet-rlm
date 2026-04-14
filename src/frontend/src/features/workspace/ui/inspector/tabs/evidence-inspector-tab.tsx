@@ -14,16 +14,22 @@ import {
   inspectorInsetClass,
 } from "@/features/workspace/ui/inspector/inspector-styles";
 import { ExternalAnchor } from "../ui/inspector-ui";
-import { InspectorTabPanel } from "../inspector-tab-panel";
 
-export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
+export const EvidenceInspectorContent = memo(function EvidenceInspectorContent({
   model,
+  showEmptyState = true,
 }: {
   model: AssistantContentModel;
+  showEmptyState?: boolean;
 }) {
   const { evidence } = model;
+
+  if (!evidence.hasContent && !showEmptyState) {
+    return null;
+  }
+
   return (
-    <InspectorTabPanel value="evidence">
+    <>
       {evidence.citations.length > 0 ? (
         <section className={inspectorStyles.stack.section}>
           <div className={inspectorStyles.heading.section}>Citations</div>
@@ -154,7 +160,7 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
         </section>
       ) : null}
 
-      {!evidence.hasContent ? (
+      {!evidence.hasContent && showEmptyState ? (
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardTitle className="text-sm font-medium">No evidence attached</CardTitle>
@@ -164,6 +170,6 @@ export const EvidenceInspectorTab = memo(function EvidenceInspectorTab({
           </CardHeader>
         </Card>
       ) : null}
-    </InspectorTabPanel>
+    </>
   );
 });

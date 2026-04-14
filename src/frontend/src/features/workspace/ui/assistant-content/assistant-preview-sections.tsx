@@ -80,7 +80,7 @@ export function EvidencePreview({
             label={item.label}
             description={item.description ? summarizeText(item.description) : undefined}
             iconLabel={item.badge}
-            onClick={() => onOpenTab("evidence")}
+            onClick={() => onOpenTab("message")}
           />
         ))}
       </div>

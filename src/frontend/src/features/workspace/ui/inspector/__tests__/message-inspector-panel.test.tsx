@@ -28,7 +28,7 @@ function mountInspector() {
 function setInspectorState(options: {
   messages: ChatMessage[];
   selectedAssistantTurnId?: string | null;
-  activeInspectorTab?: "trajectory" | "execution" | "evidence" | "graph";
+  activeInspectorTab?: "message" | "execution" | "graph";
   turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
 }) {
   useChatStore.setState({
@@ -40,7 +40,7 @@ function setInspectorState(options: {
 
   useWorkspaceUiStore.setState({
     selectedAssistantTurnId: options.selectedAssistantTurnId ?? null,
-    activeInspectorTab: options.activeInspectorTab ?? "trajectory",
+    activeInspectorTab: options.activeInspectorTab ?? "message",
   });
 }
 
@@ -112,7 +112,7 @@ describe("MessageInspectorPanel", () => {
     });
     useWorkspaceUiStore.setState({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
     });
   });
 
@@ -137,7 +137,7 @@ describe("MessageInspectorPanel", () => {
 
     expect(container.textContent).toContain("Message Inspector");
     expect(container.textContent).toContain(
-      "Select an assistant response in the chat to inspect its trajectory, execution details, evidence, and relationships.",
+      "Select an assistant response in the chat to inspect its message details, execution details, and relationships.",
     );
 
     act(() => {
@@ -145,7 +145,7 @@ describe("MessageInspectorPanel", () => {
     });
   });
 
-  it("hides the graph tab for linear turns and falls back to trajectory", () => {
+  it("hides the graph tab for linear turns and falls back to message", () => {
     setInspectorState({
       messages: [
         {
@@ -167,9 +167,9 @@ describe("MessageInspectorPanel", () => {
       tab.textContent?.trim(),
     );
 
-    expect(tabs).toEqual(["Trajectory"]);
+    expect(tabs).toEqual(["Message"]);
     expect(container.textContent).not.toContain("Graph");
-    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("trajectory");
+    expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("message");
 
     act(() => {
       root.unmount();
@@ -293,7 +293,7 @@ describe("MessageInspectorPanel", () => {
     const tabList = container.querySelector('[role="tablist"]');
     const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
-    expect(tabs).toEqual(["Trajectory", "Execution", "Examples", "Graph"]);
+    expect(tabs).toEqual(["Message", "Execution", "Graph"]);
     expect(tabsRoot?.classList.contains("flex")).toBe(true);
     expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");
