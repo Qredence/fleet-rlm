@@ -25,7 +25,7 @@ Frontend source-of-truth files:
 - `src/frontend/src/features/workspace/*`, `src/frontend/src/features/volumes/*`, `src/frontend/src/features/settings/*`, and `src/frontend/src/features/optimization/*` for canonical surface ownership as each migration completes
 - `src/frontend/src/components/ui/*` for canonical shadcn/Base UI source components
 - `src/frontend/src/components/ai-elements/*` for canonical AI Elements source components
-- `src/frontend/src/components/patterns/*` for app-owned reusable composition built from registry layers
+- `src/frontend/src/components/product/*` for app-owned reusable composition built from registry layers
 - `src/frontend/src/lib/rlm-api/*` for REST and websocket integration
 - `src/frontend/src/styles/globals.css` for the Tailwind v4 theme baseline and tokens
 - `src/frontend/components.json` for the shadcn registry/style baseline
@@ -84,7 +84,7 @@ Registry-aligned component layers:
 
 - `src/components/ui/*` for shadcn/Base UI primitives and thin local extensions
 - `src/components/ai-elements/*` for AI Elements registry components
-- `src/components/patterns/*` for app-owned reusable compositions built from `ui` and `ai-elements`
+- `src/components/product/*` for app-owned reusable compositions built from `ui` and `ai-elements`
 - `src/features/layout/*` for canonical app-chrome entrypoints and implementation ownership
 - `src/features/workspace/*`, `src/features/volumes/*`, `src/features/settings/*`, and `src/features/optimization/*` for canonical product surface ownership
 - `src/components/` root for a very small set of global compatibility exports such as `brand-mark.tsx`
@@ -93,7 +93,7 @@ Rules for those layers:
 
 - Keep `components/ui` thin, semantic, and free of feature/runtime imports
 - Keep `components/ai-elements` composable and registry-aligned; do not collapse them into feature-specific monoliths
-- Use `components/patterns` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
+- Use `components/product` for reusable product composition such as empty states, route skeletons, panel shells, and form/panel structures
 - Route app-chrome consumers through `features/layout/*`, which is the canonical owner of layout implementation
 - Route surface consumers through `features/<surface>/*` as each surface is migrated
 - For the remaining surfaces, do **not** keep `screens/<surface>/` wrappers after migration; delete those directories
@@ -111,24 +111,24 @@ Current surface ownership:
 
 - `src/features/layout/` owns canonical app-chrome public entrypoints, implementation, and compatibility exports
 - `src/features/workspace/`, `src/features/volumes/`, `src/features/settings/`, and `src/features/optimization/` own the canonical surface entrypoints after the migration away from `src/screens/*`
-- `src/app/workspace/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
+- `src/features/workspace/ui/` owns workspace UI internals such as transcript, composer, inspector, workbench, and queue helpers
 - `src/lib/workspace/` owns backend event adapters, run-workbench adapters, chat stores, and normalized runtime/frame shaping
 - `src/lib/rlm-api/` owns REST and websocket clients plus generated API types
 - `src/stores/` owns cross-app shell/layout and navigation state
 
 Important boundaries to preserve:
 
-- Keep `src/screens/*` thin while they still exist; move reusable feature logic into `src/features/*`, `src/app/*`, `src/lib/*`, or `src/components/patterns/*`
+- Keep `src/screens/*` thin while they still exist; move reusable feature logic into `src/features/*`, `src/lib/*`, or `src/components/product/*`
 - Keep external layout/app-chrome imports pointed at `src/features/layout/*`
 - After migrating workspace and volumes, layout implementation should consume them through `src/features/workspace/*` and `src/features/volumes/*`, not `src/screens/*`
-- Assistant transcript/content modeling belongs under `src/app/workspace/assistant-content/model/`
+- Assistant transcript/content modeling belongs under `src/features/workspace/ui/assistant-content/model/`
 - Do not recreate a screen-layer `workspace-adapter.ts`; workspace adapter logic belongs in `src/lib/workspace/`
 - The Volumes provider switcher is page-scoped and must not become a global runtime setting
 - Settings should consume the shared optimization form from `features/optimization/optimization-form`
 
 Import-boundary rules enforced in `src/frontend/vite.config.ts`:
 
-- `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/patterns/*` must not import from `src/screens/*`
+- `src/components/ui/*`, `src/components/ai-elements/*`, and `src/components/product/*` must not import from `src/screens/*`
 - Workspace runtime/state modules in `src/lib/workspace/*` must not depend on workspace UI modules
 - `src/features/layout/*` must consume workspace and volumes through their feature entrypoints or explicitly allowed public contracts
 - Keep `@/lib/utils` as the canonical `cn()` import path
@@ -142,7 +142,7 @@ Design and styling rules:
 - Use semantic tokens and shared variants instead of arbitrary colors or local token layers
 - Keep typography, spacing, and layering aligned with the shared shadcn/Base UI baseline
 - Preserve the shell/layout root stacking context so portaled overlays layer correctly
-- Shared visual recipes should become `components/patterns/*`, not duplicated feature-local wrappers
+- Shared visual recipes should become `components/product/*`, not duplicated feature-local wrappers
 
 React/runtime rules:
 
@@ -157,7 +157,7 @@ Naming and file-layout rules:
 - Prefer `kebab-case` for new handwritten feature files, while preserving existing local conventions and required framework exceptions such as `App.tsx`, `__root.tsx`, and `$.tsx`
 - Keep React component symbols in `PascalCase` and hooks in `useThing` form
 - Keep tests colocated with the owning module under `__tests__/` when practical
-- Tests for `src/lib/workspace/*` and `src/app/workspace/*` should import those owners directly, not via screen compatibility barrels
+- Tests for `src/lib/workspace/*` and `src/features/workspace/ui/*` should import those owners directly, not via screen compatibility barrels
 - Prefer `layout` / `workspace` / `volumes` / `settings` / `optimization` feature naming over legacy `screen` ownership when creating new architecture surfaces
 
 ## Environment and Contract Sync

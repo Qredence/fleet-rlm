@@ -163,6 +163,7 @@ export function VolumesBrowser() {
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
       {!isMobile ? (
         <PageHeader
+          isMobile={false}
           title="Volume Browser"
           description={`Browse the ${providerLabel.toLowerCase()} mounted durable volume for this workspace.`}
         >
@@ -173,6 +174,7 @@ export function VolumesBrowser() {
       <ScrollArea className="min-h-0 flex-1">
         {isMobile ? (
           <PageHeader
+            isMobile
             title="Volume Browser"
             description={`Browse the ${providerLabel.toLowerCase()} mounted durable volume for this workspace.`}
           >

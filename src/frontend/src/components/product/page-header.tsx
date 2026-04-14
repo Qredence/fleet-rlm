@@ -4,8 +4,9 @@
  * Provides a consistent top-of-page heading with title, description, and
  * optional children (e.g. search bars, action buttons).
  *
- * Adapts automatically for mobile vs desktop layout, matching the existing
- * header patterns in Volumes and Optimization screens.
+ * Renders either the compact mobile or desktop layout selected by the caller.
+ * Callers should pass through their existing mobile breakpoint state to avoid
+ * an extra client-only layout flip after mount.
  *
  * ```tsx
  * <PageHeader title="Volume Browser" description="Browse mounted volumes.">
@@ -15,13 +16,13 @@
  */
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { useIsMobile } from "@/hooks/use-is-mobile";
 
 interface PageHeaderProps {
   title: string;
   description?: string;
   children?: ReactNode;
   className?: string;
+  isMobile?: boolean;
   /** Maximum content width (matches Tailwind max-w-*). Defaults to max-w-200. */
   maxWidth?: string;
 }
@@ -31,10 +32,9 @@ export function PageHeader({
   description,
   children,
   className,
+  isMobile = false,
   maxWidth = "max-w-200",
 }: PageHeaderProps) {
-  const isMobile = useIsMobile();
-
   if (isMobile) {
     return (
       <div className={cn("w-full px-4 pb-4 pt-2", className)}>

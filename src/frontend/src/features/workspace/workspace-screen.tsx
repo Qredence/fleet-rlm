@@ -317,19 +317,29 @@ export function WorkspaceScreen() {
                     <TriangleAlert className="text-amber-500 size-4" />
                     <AlertTitle className="text-sm font-medium">{runtimeWarningTitle}</AlertTitle>
                     <AlertDescription>
-                      <div className="flex items-center justify-between gap-4 mt-1">
-                        <p className="text-xs text-muted-foreground">
-                          Sandbox connection required for code execution
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0 rounded-lg gap-1.5 text-xs h-7"
-                          onClick={handleOpenRuntimeSettings}
-                        >
-                          <Settings2 className="size-3" />
-                          Configure
-                        </Button>
+                      <div className="mt-1 flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            Connect to a Daytona sandbox to enable secure code execution. Your code
+                            runs in an isolated environment with persistent storage.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+                            onClick={handleOpenRuntimeSettings}
+                          >
+                            <Settings2 className="size-3" />
+                            Configure
+                          </Button>
+                        </div>
+                        {warningGuidance.length > 0 ? (
+                          <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground/80">
+                            {warningGuidance.map((msg) => (
+                              <li key={msg}>{msg}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                     </AlertDescription>
                   </Alert>
