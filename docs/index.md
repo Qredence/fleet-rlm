@@ -7,6 +7,7 @@ Welcome to the `fleet-rlm` documentation. The docs are organized roughly around 
 | Category | Description |
 |----------|-------------|
 | [Adaptive RLM Product Spec](explanation/product-spec.md) | User-facing product definition and capability model |
+| [Frontend Feature Spec](reference/frontend-feature-spec.md) | Page-level information architecture and component contracts |
 | [Architecture](architecture.md) | Current architecture overview and layer ownership |
 | [Current Architecture and Transition Note](notes/current-architecture-transition.md) | Migration status and cleanup guidance for transitional layers |
 | [Codebase Map](reference/codebase-map.md) | Focused backend ownership map |
@@ -45,6 +46,8 @@ Then open `http://localhost:8000`.
 
 - [Architecture Overview](architecture.md)
 - [Current Architecture and Transition Note](notes/current-architecture-transition.md)
+- [Frontend Feature Spec &amp; Information Architecture](reference/frontend-feature-spec.md)
+- [Frontend Product Surface Guide](guides/frontend-product-surface.md)
 - [Backend Codebase Map](reference/codebase-map.md)
 - [Python Backend Module Map](reference/module-map.md)
 - [Backend/Frontend Wiring Analysis](wiring-analysis.md)

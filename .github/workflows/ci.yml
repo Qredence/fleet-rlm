@@ -111,7 +111,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
       - name: Run UI tests
-        run: uv run pytest -q tests/ui -m "not live_llm and not benchmark"
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
+        run: >
+          uv run pytest -q tests/ui
+          -p pytest_asyncio.plugin
+          -p pytest_timeout
+          --timeout=120
+          --timeout-method=thread
+          -m "not live_llm and not benchmark"
 
   test-integration:
     name: Test Integration

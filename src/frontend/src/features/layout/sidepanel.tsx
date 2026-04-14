@@ -1,5 +1,5 @@
-import { EmptyPanel } from "@/components/patterns/empty-panel";
-import { ErrorBoundary } from "@/components/patterns/error-boundary";
+import { EmptyPanel } from "@/components/product/empty-panel";
+import { ErrorBoundary } from "@/components/product/error-boundary";
 import { isRlmCoreEnabled, isSectionSupported, UNSUPPORTED_SECTION_REASON } from "@/lib/rlm-api";
 import { useNavigationStore } from "@/stores/navigation-store";
 import { VolumesCanvasPanel } from "@/features/volumes/volumes-canvas-panel";

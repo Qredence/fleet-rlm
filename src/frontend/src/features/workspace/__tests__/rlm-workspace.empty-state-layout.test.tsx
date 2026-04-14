@@ -105,11 +105,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/app/workspace/transcript/workspace-message-list", () => ({
+vi.mock("@/features/workspace/ui/transcript/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/app/workspace/workspace-composer", () => ({
+vi.mock("@/features/workspace/ui/workspace-composer", () => ({
   WorkspaceComposer: () => <div>WorkspaceComposer</div>,
 }));
 
@@ -145,11 +145,12 @@ describe("WorkspaceScreen empty-state layout", () => {
     const html = renderScreen();
 
     expect(html).toContain('data-slot="workspace-landing-state"');
-    expect(html).toContain("Let&#x27;s get to work, how can I help?");
-    expect(html).toContain("Help me write");
-    expect(html).toContain("Summarize text");
-    expect(html).toContain("Analyze image");
-    expect(html).toContain("More");
+    expect(html).toContain("What would you like to build?");
+    // Updated suggestions for Phase 19 Daytona-aligned execution tasks
+    expect(html).toContain("Build a feature");
+    expect(html).toContain("Debug an issue");
+    expect(html).toContain("Review changes");
+    expect(html).toContain("Explore ideas");
     expect(html).toContain("WorkspaceComposer");
     expect(html).not.toContain("WorkspaceMessageList");
   });
@@ -168,14 +169,15 @@ describe("WorkspaceScreen empty-state layout", () => {
 
     const html = renderScreen();
 
-    const titleIndex = html.indexOf("Let&#x27;s get to work, how can I help?");
-    const warningIndex = html.indexOf("Daytona setup required");
+    const titleIndex = html.indexOf("What would you like to build?");
+    // Updated warning title for Phase 19
+    const warningIndex = html.indexOf("Sandbox configuration needed");
     const composerIndex = html.indexOf("WorkspaceComposer");
 
     expect(titleIndex).toBeGreaterThanOrEqual(0);
     expect(warningIndex).toBeGreaterThan(titleIndex);
     expect(composerIndex).toBeGreaterThan(warningIndex);
-    expect(html).toContain("Open Runtime Settings");
+    expect(html).toContain("Configure Sandbox");
   });
 
   it("falls back to the conversation layout as soon as the first turn is in flight", () => {
@@ -186,7 +188,7 @@ describe("WorkspaceScreen empty-state layout", () => {
     expect(html).toContain("WorkspaceMessageList");
     expect(html).toContain("WorkspaceComposer");
     expect(html).not.toContain('data-slot="workspace-landing-state"');
-    expect(html).not.toContain("Let&#x27;s get to work, how can I help?");
+    expect(html).not.toContain("What would you like to build?");
   });
 
   it("keeps the mobile zero-message path on the existing conversation layout", () => {
@@ -197,6 +199,6 @@ describe("WorkspaceScreen empty-state layout", () => {
     expect(html).toContain("WorkspaceMessageList");
     expect(html).toContain("WorkspaceComposer");
     expect(html).not.toContain('data-slot="workspace-landing-state"');
-    expect(html).not.toContain("Let&#x27;s get to work, how can I help?");
+    expect(html).not.toContain("What would you like to build?");
   });
 });

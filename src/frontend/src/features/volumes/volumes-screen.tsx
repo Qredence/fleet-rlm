@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PageHeader } from "@/components/product/page-header";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
 import {
@@ -161,24 +162,24 @@ export function VolumesBrowser() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
       {!isMobile ? (
-        <div className="mx-auto w-full max-w-200 shrink-0 border-b border-border-subtle px-6 pb-4 pt-4 md:pt-6">
-          <h2 className="mb-1 text-balance text-foreground typo-h3">Volume Browser</h2>
-          <p className="mb-3 text-muted-foreground typo-helper">
-            Browse the {providerLabel.toLowerCase()} mounted durable volume for this workspace.
-          </p>
+        <PageHeader
+          isMobile={false}
+          title="Volume Browser"
+          description={`Browse the ${providerLabel.toLowerCase()} mounted durable volume for this workspace.`}
+        >
           {headerChildren}
-        </div>
+        </PageHeader>
       ) : null}
 
       <ScrollArea className="min-h-0 flex-1">
         {isMobile ? (
-          <div className="w-full px-4 pb-4 pt-2">
-            <h2 className="mb-3 text-balance text-foreground typo-h2">Volume Browser</h2>
-            <p className="mb-3 text-muted-foreground typo-helper">
-              Browse the {providerLabel.toLowerCase()} mounted durable volume for this workspace.
-            </p>
+          <PageHeader
+            isMobile
+            title="Volume Browser"
+            description={`Browse the ${providerLabel.toLowerCase()} mounted durable volume for this workspace.`}
+          >
             {headerChildren}
-          </div>
+          </PageHeader>
         ) : null}
 
         <div className="mx-auto w-full max-w-[800px] py-2">

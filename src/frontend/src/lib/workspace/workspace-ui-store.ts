@@ -25,7 +25,7 @@ function openShellCanvas() {
 
 export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   selectedAssistantTurnId: null,
-  activeInspectorTab: "trajectory",
+  activeInspectorTab: "message",
   creationPhase: "idle",
   sessionRevision: 0,
   requestedConversationId: null,
@@ -33,14 +33,14 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
     set({
       creationPhase: "idle",
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
       requestedConversationId: null,
       sessionRevision: get().sessionRevision + 1,
     }),
   requestConversationLoad: (conversationId) =>
     set({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
       requestedConversationId: conversationId,
     }),
   clearRequestedConversation: () => set({ requestedConversationId: null }),
@@ -62,7 +62,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   clearInspectorSelection: () =>
     set({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
     }),
   setCreationPhase: (creationPhase) => set({ creationPhase }),
 }));

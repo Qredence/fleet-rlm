@@ -9,6 +9,7 @@ Authoritative contracts, interfaces, and implementation-facing facts.
 - [Python API](python-api.md)
 - [Source Layout](source-layout.md)
 - [Frontend Architecture](frontend-architecture.md)
+- [Frontend Feature Spec &amp; Information Architecture](frontend-feature-spec.md)
 - [Frontend ↔ Backend Integration](frontend-backend-integration.md)
 
 ## Platform and Runtime

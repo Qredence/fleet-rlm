@@ -74,11 +74,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/app/workspace/transcript/workspace-message-list", () => ({
+vi.mock("@/features/workspace/ui/transcript/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/app/workspace/workspace-composer", () => ({
+vi.mock("@/features/workspace/ui/workspace-composer", () => ({
   WorkspaceComposer: () => <div>WorkspaceComposer</div>,
 }));
 
@@ -104,7 +104,7 @@ describe("WorkspaceScreen requested conversation loading", () => {
     });
     useWorkspaceUiStore.setState({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "trajectory",
+      activeInspectorTab: "message",
       creationPhase: "idle",
       sessionRevision: 0,
       requestedConversationId: null,

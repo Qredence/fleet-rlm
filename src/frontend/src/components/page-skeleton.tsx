@@ -1,1 +1,1 @@
-export { PageSkeleton, PanelSkeleton } from "@/components/patterns/page-skeleton";
+export { PageSkeleton, PanelSkeleton } from "@/components/product/page-skeleton";
