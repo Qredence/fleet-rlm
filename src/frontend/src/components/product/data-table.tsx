@@ -88,6 +88,7 @@ export function DataTable<T extends Record<string, unknown>>({
           internalSort?.column === key && internalSort.direction === "asc" ? "desc" : "asc",
       };
       setInternalSort(next);
+      setInternalPage(0);
       onSort?.(next);
     },
     [internalSort, onSort],
@@ -97,34 +98,42 @@ export function DataTable<T extends Record<string, unknown>>({
   const [internalPage, setInternalPage] = useState(0);
   const currentPage = controlledPage ?? internalPage;
   const paginationEnabled = pageSize > 0;
+  const totalPages = paginationEnabled ? Math.max(1, Math.ceil(data.length / pageSize)) : 1;
+  const safePage = Math.min(currentPage, totalPages - 1);
 
-  /* ----- client-side sorting (when onSort is not provided externally) ----- */
-  const sortedData = useMemo(() => {
-    if (!internalSort) return data;
-    const { column, direction } = internalSort;
-    return [...data].sort((a, b) => {
-      const av = a[column];
-      const bv = b[column];
-      if (av == null && bv == null) return 0;
-      if (av == null) return direction === "asc" ? -1 : 1;
-      if (bv == null) return direction === "asc" ? 1 : -1;
-      if (typeof av === "number" && typeof bv === "number") {
-        return direction === "asc" ? av - bv : bv - av;
+  const sortedRows = useMemo(() => {
+    if (internalSort == null) return data;
+
+    const direction = internalSort.direction === "asc" ? 1 : -1;
+    return [...data].sort((left, right) => {
+      const leftValue = left[internalSort.column];
+      const rightValue = right[internalSort.column];
+
+      if (leftValue == null && rightValue == null) return 0;
+      if (leftValue == null) return 1;
+      if (rightValue == null) return -1;
+
+      if (typeof leftValue === "number" && typeof rightValue === "number") {
+        return (leftValue - rightValue) * direction;
       }
-      const as = String(av);
-      const bs = String(bv);
-      return direction === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
+      if (typeof leftValue === "boolean" && typeof rightValue === "boolean") {
+        return (Number(leftValue) - Number(rightValue)) * direction;
+      }
+
+      return (
+        String(leftValue).localeCompare(String(rightValue), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) * direction
+      );
     });
   }, [data, internalSort]);
 
-  const totalPages = paginationEnabled ? Math.max(1, Math.ceil(sortedData.length / pageSize)) : 1;
-  const safePage = Math.min(currentPage, totalPages - 1);
-
   const visibleRows = useMemo(() => {
-    if (!paginationEnabled) return sortedData;
+    if (!paginationEnabled) return sortedRows;
     const start = safePage * pageSize;
-    return sortedData.slice(start, start + pageSize);
-  }, [sortedData, safePage, pageSize, paginationEnabled]);
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, safePage, pageSize, paginationEnabled]);
 
   const goToPage = useCallback(
     (p: number) => {

@@ -30,6 +30,7 @@ import {
   type Conversation,
 } from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
+import { parseIsoTimestamp } from "@/lib/date";
 import {
   datasetEndpoints,
   optimizationEndpoints,
@@ -41,8 +42,7 @@ import {
 import { sessionEndpoints, sessionKeys, type SessionListItem } from "@/lib/rlm-api/sessions";
 
 function formatDate(iso: string): string {
-  const normalized = iso.endsWith("Z") ? iso : `${iso}Z`;
-  return new Date(normalized).toLocaleDateString(undefined, {
+  return parseIsoTimestamp(iso).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -54,7 +54,6 @@ const datasetColumns: ColumnDef<DatasetResponse>[] = [
   {
     header: "Rows",
     accessor: (row) => row.row_count.toLocaleString(),
-    sortable: true,
     className: "text-right tabular-nums",
   },
   { header: "Format", accessor: "format" },
@@ -72,7 +71,6 @@ const datasetColumns: ColumnDef<DatasetResponse>[] = [
   {
     header: "Created",
     accessor: (row) => formatDate(row.created_at),
-    sortable: true,
   },
 ];
 

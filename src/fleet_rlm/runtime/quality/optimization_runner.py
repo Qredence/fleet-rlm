@@ -129,6 +129,12 @@ def _evaluate_per_example(
     Each example is evaluated in isolation so that a single failure does not
     prevent scoring the remaining examples.
     """
+
+    def _serialize_inputs(example: Any) -> str:
+        if not hasattr(example, "inputs"):
+            return "{}"
+        return json.dumps(dict(example.inputs()), default=str)
+
     results: list[dict[str, Any]] = []
     for idx, example in enumerate(validation_set):
         try:
@@ -139,7 +145,7 @@ def _evaluate_per_example(
             results.append(
                 {
                     "example_index": idx,
-                    "input_data": json.dumps(dict(example.inputs()), default=str),
+                    "input_data": _serialize_inputs(example),
                     "expected_output": str(
                         getattr(example, "answer", None)
                         or getattr(example, "output", None)
@@ -151,22 +157,22 @@ def _evaluate_per_example(
             )
         except Exception as exc:
             logger.warning(
-                "Per-example evaluation failed for example %d: %s",
+                "Per-example evaluation failed for validation example %s",
                 idx,
-                exc,
                 exc_info=True,
+            )
+            expected_output = (
+                getattr(example, "answer", None)
+                or getattr(example, "output", None)
+                or ""
             )
             results.append(
                 {
                     "example_index": idx,
-                    "input_data": json.dumps(
-                        dict(example.inputs()) if hasattr(example, "inputs") else {},
-                        default=str,
-                    ),
-                    "expected_output": "",
-                    "predicted_output": "",
+                    "input_data": _serialize_inputs(example),
+                    "expected_output": str(expected_output),
+                    "predicted_output": f"{exc.__class__.__name__}: {exc}",
                     "score": 0.0,
-                    "error": str(exc),
                 }
             )
     return results

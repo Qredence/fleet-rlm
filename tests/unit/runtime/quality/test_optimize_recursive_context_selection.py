@@ -98,22 +98,9 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
             captured["valset"] = valset
             return _FakeOptimizedProgram()
 
-    class _FakeEvaluate:
-        def __init__(self, *, devset: list[Any], metric: Any) -> None:
-            captured["devset"] = devset
-            captured["eval_metric"] = metric
-
-        def __call__(self, program: dspy.Module) -> float:
-            captured["evaluated_program"] = program
-            return 91.0
-
     monkeypatch.setattr(
         "dspy.teleprompt.GEPA",
         _FakeGEPA,
-    )
-    monkeypatch.setattr(
-        "dspy.Evaluate",
-        _FakeEvaluate,
     )
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
@@ -123,19 +110,15 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
+    per_example_scores = [{"example_index": 0, "input_data": "{}", "score": 0.91}]
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._evaluate_per_example",
-        lambda _module, valset, _metric: [
-            {
-                "example_index": i,
-                "input_data": "{}",
-                "expected_output": "",
-                "predicted_output": "",
-                "score": 1.0,
-            }
-            for i in range(len(valset))
-        ],
+        lambda *_args, **_kwargs: per_example_scores,
     )
+    evaluate_mock = MagicMock(
+        side_effect=AssertionError("Aggregate fallback should not run")
+    )
+    monkeypatch.setattr("dspy.Evaluate", evaluate_mock)
 
     result = optimize_recursive_context_selection_module(
         dataset_path=dataset_path,
@@ -151,11 +134,12 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
     assert manifest["optimizer"] == "GEPA"
     assert manifest["metric"] == "recursive_context_relevance_and_boundedness"
     assert result["output_path"] == str(output_path)
-    assert result["validation_score"] == 1.0
+    assert result["validation_score"] == 0.91
     assert result["program_spec"].endswith("AssembleRecursiveWorkspaceContextModule")
     assert captured["auto"] == "medium"
     assert captured["trainset"]
     assert captured["valset"]
+    evaluate_mock.assert_not_called()
 
 
 def test_optimize_recursive_context_selection_module_uses_none_for_empty_valset(

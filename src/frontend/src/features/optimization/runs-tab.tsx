@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ChartSparkline } from "@/components/product/chart-sparkline";
 import { ScoreBadge } from "@/components/product/score-badge";
 import { TimelineStep, type TimelineStepStatus } from "@/components/product/timeline";
+import { parseIsoTimestamp } from "@/lib/date";
 import { RunDetailDrawer } from "./run-detail-drawer";
 import {
   optimizationEndpoints,
@@ -69,8 +70,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function formatRelativeTime(isoString: string): string {
-  const normalized = isoString.endsWith("Z") ? isoString : `${isoString}Z`;
-  const diffMs = Date.now() - new Date(normalized).getTime();
+  const diffMs = Date.now() - parseIsoTimestamp(isoString).getTime();
   const diffSec = Math.max(0, Math.floor(diffMs / 1000));
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);

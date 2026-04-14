@@ -6,6 +6,7 @@ import { DetailDrawer } from "@/components/product/detail-drawer";
 import { DataTable, type ColumnDef } from "@/components/product/data-table";
 import { KeyValueGrid } from "@/components/product";
 import { ScoreBadge } from "@/components/product/score-badge";
+import { parseIsoTimestamp } from "@/lib/date";
 import {
   evaluationEndpoints,
   optimizationEndpoints,
@@ -50,7 +51,6 @@ const resultColumns: ColumnDef<EvaluationResultItem>[] = [
   {
     header: "Score",
     accessor: (row) => <ScoreBadge score={row.score} format="decimal" />,
-    sortable: true,
     className: "w-20",
   },
 ];
@@ -142,7 +142,7 @@ function formatDuration(startedAt: string, completedAt: string | null | undefine
 }
 
 function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleString();
+  return parseIsoTimestamp(iso).toLocaleString();
 }
 
 function buildConfigItems(run: OptimizationRunSummary) {

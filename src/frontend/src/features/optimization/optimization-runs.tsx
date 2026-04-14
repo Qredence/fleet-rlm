@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseIsoTimestamp } from "@/lib/date";
 import {
   optimizationEndpoints,
   optimizationKeys,
@@ -67,8 +68,7 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 function formatRelativeTime(isoString: string): string {
-  const normalized = isoString.endsWith("Z") ? isoString : `${isoString}Z`;
-  const date = new Date(normalized);
+  const date = parseIsoTimestamp(isoString);
   const now = Date.now();
   const diffMs = now - date.getTime();
   const diffSec = Math.max(0, Math.floor(diffMs / 1000));
@@ -83,9 +83,8 @@ function formatRelativeTime(isoString: string): string {
 
 function formatDuration(startedAt: string, completedAt: string | null): string {
   if (!completedAt) return "—";
-  const normalizeTs = (s: string) => (s.endsWith("Z") ? s : `${s}Z`);
-  const start = new Date(normalizeTs(startedAt)).getTime();
-  const end = new Date(normalizeTs(completedAt)).getTime();
+  const start = parseIsoTimestamp(startedAt).getTime();
+  const end = parseIsoTimestamp(completedAt).getTime();
   const sec = Math.max(0, Math.floor((end - start) / 1000));
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);

@@ -19,6 +19,7 @@ import {
   type Conversation,
 } from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
+import { parseIsoTimestamp } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import {
   sessionEndpoints,
@@ -48,8 +49,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function formatRelativeTime(isoString: string): string {
-  const normalized = isoString.endsWith("Z") ? isoString : `${isoString}Z`;
-  const date = new Date(normalized);
+  const date = parseIsoTimestamp(isoString);
   const now = Date.now();
   const diffMs = now - date.getTime();
   const diffSec = Math.max(0, Math.floor(diffMs / 1000));

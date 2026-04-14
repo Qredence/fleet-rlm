@@ -507,12 +507,12 @@ def _run_optimization_background(
     except ImportError:
         logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
     else:
-        try:
-            from fleet_rlm.integrations.observability.config import MlflowConfig
-            from fleet_rlm.integrations.observability.mlflow_runtime import (
-                initialize_mlflow,
-            )
+        from fleet_rlm.integrations.observability.config import MlflowConfig
+        from fleet_rlm.integrations.observability.mlflow_runtime import (
+            initialize_mlflow,
+        )
 
+        try:
             resolved_cfg = MlflowConfig.from_env().model_copy(
                 update={
                     "dspy_log_compiles": True,

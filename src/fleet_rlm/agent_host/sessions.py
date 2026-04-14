@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 import logging
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from ..api.dependencies import ServerState, session_key
 from ..api.server_utils import owner_fingerprint
 from ..api.server_utils import sanitize_id as _sanitize_id
@@ -389,8 +391,8 @@ async def switch_orchestration_session(
                     owner_user=owner_user_claim,
                     workspace_id=workspace_id,
                 ).id
-            except Exception:
-                logger.debug("Best-effort DB session linkage failed", exc_info=True)
+            except SQLAlchemyError:
+                logger.warning("Best-effort DB session linkage failed", exc_info=True)
 
     cached["session_id"] = sess_id
     cached["workspace_id"] = workspace_id

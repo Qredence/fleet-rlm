@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Play } from "lucide-react";
@@ -19,6 +20,7 @@ import {
   datasetEndpoints,
   optimizationEndpoints,
   optimizationKeys,
+  type DatasetResponse,
   type GEPAModuleInfo,
   type GEPAOptimizationRequest,
 } from "@/lib/rlm-api/optimization";
@@ -35,13 +37,13 @@ function humanizeSlug(slug: string): string {
 function ModuleCard({
   mod,
   onQuickRun,
+  dataset,
   isRunning,
-  isDisabled,
 }: {
   mod: GEPAModuleInfo;
   onQuickRun: (mod: GEPAModuleInfo) => void;
+  dataset: DatasetResponse | null;
   isRunning: boolean;
-  isDisabled?: boolean;
 }) {
   const displayDescription = mod.description || humanizeSlug(mod.slug);
 
@@ -59,12 +61,11 @@ function ModuleCard({
           variant="outline"
           size="sm"
           className="shrink-0 gap-1.5"
-          disabled={isRunning || isDisabled}
-          title={isDisabled ? "Upload a dataset first to enable Quick Run" : undefined}
+          disabled={isRunning || dataset == null}
           onClick={() => onQuickRun(mod)}
         >
           <Play className="size-3" />
-          {isRunning ? "Starting…" : "Quick Run"}
+          {isRunning ? "Starting…" : dataset == null ? "Dataset required" : "Quick Run"}
         </Button>
       </ItemActions>
       {mod.required_dataset_keys.length > 0 ? (
@@ -93,11 +94,10 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
     staleTime: 60_000,
   });
-
   const datasetsQuery = useQuery({
-    queryKey: optimizationKeys.datasetList(),
+    queryKey: [...optimizationKeys.datasets(), "list", { limit: 100 }],
     queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
 
   const quickRunMutation = useMutation({
@@ -116,12 +116,25 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     },
   });
 
-  const handleQuickRun = (mod: GEPAModuleInfo) => {
+  const latestDatasetByModule = useMemo(() => {
     const datasets = datasetsQuery.data?.items ?? [];
-    // Prefer a dataset associated with this module; fall back to the most recent one.
-    const dataset =
-      datasets.find((d) => d.module_slug === mod.slug) ?? datasets[0] ?? null;
-    if (!dataset) return;
+    return datasets.reduce<Map<string, DatasetResponse>>((acc, dataset) => {
+      if (!dataset.module_slug || acc.has(dataset.module_slug)) {
+        return acc;
+      }
+      acc.set(dataset.module_slug, dataset);
+      return acc;
+    }, new Map());
+  }, [datasetsQuery.data]);
+
+  const handleQuickRun = (mod: GEPAModuleInfo) => {
+    const dataset = latestDatasetByModule.get(mod.slug);
+    if (dataset == null) {
+      toast.error("Quick Run requires a dataset", {
+        description: `Upload or create a ${mod.label} dataset first.`,
+      });
+      return;
+    }
     quickRunMutation.mutate({
       dataset_id: dataset.id,
       program_spec: mod.program_spec,
@@ -155,7 +168,6 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
   }
 
   const modules = modulesQuery.data ?? [];
-  const hasDatasets = (datasetsQuery.data?.items.length ?? 0) > 0;
 
   if (modules.length === 0) {
     return (
@@ -173,8 +185,8 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
           key={mod.slug}
           mod={mod}
           onQuickRun={handleQuickRun}
+          dataset={latestDatasetByModule.get(mod.slug) ?? null}
           isRunning={quickRunMutation.isPending}
-          isDisabled={!hasDatasets}
         />
       ))}
     </ItemGroup>

@@ -6,6 +6,7 @@ import { PropertyList, PropertyItem, PropertyGroup } from "@/components/product/
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
 import { useWorkspaceLayoutHistory } from "@/features/workspace/workspace-layout-contract";
+import { parseIsoTimestamp } from "@/lib/date";
 import { sessionEndpoints, sessionKeys } from "@/lib/rlm-api/sessions";
 import type { HistorySelection } from "./history-screen";
 import { SessionReplay } from "./session-replay";
@@ -17,10 +18,7 @@ interface SessionDetailProps {
 }
 
 function formatDate(iso: string): string {
-  // Pass the ISO string directly to Date; only append Z for truly naive timestamps
-  // (no timezone indicator) so that strings with UTC offsets (e.g. +00:00) remain valid.
-  const normalized = /[Zz]$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : `${iso}Z`;
-  return new Date(normalized).toLocaleString();
+  return parseIsoTimestamp(iso).toLocaleString();
 }
 
 export function SessionDetail({ selectedSession, open, onOpenChange }: SessionDetailProps) {

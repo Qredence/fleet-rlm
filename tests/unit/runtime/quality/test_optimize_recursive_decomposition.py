@@ -90,22 +90,9 @@ def test_optimize_recursive_decomposition_module_runs_gepa_and_persists_artifact
             captured["valset"] = valset
             return _FakeOptimizedProgram()
 
-    class _FakeEvaluate:
-        def __init__(self, *, devset: list[Any], metric: Any) -> None:
-            captured["devset"] = devset
-            captured["eval_metric"] = metric
-
-        def __call__(self, program: dspy.Module) -> float:
-            captured["evaluated_program"] = program
-            return 88.0
-
     monkeypatch.setattr(
         "dspy.teleprompt.GEPA",
         _FakeGEPA,
-    )
-    monkeypatch.setattr(
-        "dspy.Evaluate",
-        _FakeEvaluate,
     )
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
@@ -115,19 +102,15 @@ def test_optimize_recursive_decomposition_module_runs_gepa_and_persists_artifact
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
+    per_example_scores = [{"example_index": 0, "input_data": "{}", "score": 0.88}]
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._evaluate_per_example",
-        lambda _module, valset, _metric: [
-            {
-                "example_index": i,
-                "input_data": "{}",
-                "expected_output": "",
-                "predicted_output": "",
-                "score": 1.0,
-            }
-            for i in range(len(valset))
-        ],
+        lambda *_args, **_kwargs: per_example_scores,
     )
+    evaluate_mock = MagicMock(
+        side_effect=AssertionError("Aggregate fallback should not run")
+    )
+    monkeypatch.setattr("dspy.Evaluate", evaluate_mock)
 
     result = optimize_recursive_decomposition_module(
         dataset_path=dataset_path,
@@ -143,11 +126,12 @@ def test_optimize_recursive_decomposition_module_runs_gepa_and_persists_artifact
     assert manifest["optimizer"] == "GEPA"
     assert manifest["metric"] == "recursive_decomposition_quality_and_boundedness"
     assert result["output_path"] == str(output_path)
-    assert result["validation_score"] == 1.0
+    assert result["validation_score"] == 0.88
     assert result["program_spec"].endswith("PlanRecursiveSubqueriesModule")
     assert captured["auto"] == "medium"
     assert captured["trainset"]
     assert captured["valset"]
+    evaluate_mock.assert_not_called()
 
 
 def test_recursive_decomposition_feedback_metric_scores_quality_and_boundedness() -> (

@@ -38,15 +38,19 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 
 async function parseError(response: Response): Promise<never> {
   let detail = `HTTP ${response.status}`;
+  const text = await response.text().catch(() => "");
 
-  try {
-    const parsed = (await response.json()) as { detail?: unknown };
-    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
-      detail = parsed.detail;
+  if (text.trim()) {
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+        detail = parsed.detail;
+      } else {
+        detail = text;
+      }
+    } catch {
+      detail = text;
     }
-  } catch {
-    const text = await response.text().catch(() => "");
-    if (text.trim()) detail = text;
   }
 
   throw new RlmApiError(response.status, detail);

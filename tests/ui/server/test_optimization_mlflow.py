@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-
 def _make_runner_kwargs(tmp_path: Path) -> dict:
     dataset = tmp_path / "data.jsonl"
     dataset.write_text('{"question": "hi", "answer": "hello"}\n')
