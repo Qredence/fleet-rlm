@@ -450,7 +450,14 @@ class GEPAOptimizationRequest(BaseModel):
         description="Path to the exported MLflow trace dataset (JSON)."
     )
     program_spec: str = Field(
-        description="DSPy program specification string to optimize in module:attr form.",
+        default="",
+        description="DSPy program specification string to optimize in module:attr form. "
+        "Required when module_slug is not provided.",
+    )
+    module_slug: str | None = Field(
+        default=None,
+        description="Registered module slug for server-side dispatch. "
+        "When provided, program_spec is auto-resolved from the module registry.",
     )
     output_path: str | None = Field(
         default=None,
@@ -494,9 +501,28 @@ class GEPAOptimizationResponse(BaseModel):
         default=None,
         description="Filesystem path where the optimized program was saved.",
     )
+    manifest_path: str | None = Field(
+        default=None,
+        description="Filesystem path to the optimization manifest, when available.",
+    )
+    module_slug: str | None = Field(
+        default=None,
+        description="Module slug used for this optimization run, when server-side dispatch was used.",
+    )
     error: str | None = Field(
         default=None,
         description="Error message when the optimization run failed.",
+    )
+
+
+class GEPAModuleInfo(BaseModel):
+    """Metadata for a registered optimizable DSPy module."""
+
+    slug: str = Field(description="Unique module identifier slug.")
+    label: str = Field(description="Human-readable module label.")
+    program_spec: str = Field(description="DSPy program specification string.")
+    required_dataset_keys: list[str] = Field(
+        description="Dataset keys required for this module's examples."
     )
 
 
@@ -516,6 +542,60 @@ class GEPAStatusResponse(BaseModel):
         default_factory=list,
         description="Human-readable guidance when GEPA is not fully available.",
     )
+
+
+class OptimizationRunResponse(BaseModel):
+    """A single optimization run record."""
+
+    id: int = Field(description="Unique run identifier.")
+    status: str = Field(description="Run status: running, completed, or failed.")
+    module_slug: str | None = Field(
+        default=None, description="Module slug when server-side dispatch was used."
+    )
+    program_spec: str = Field(
+        description="DSPy program specification that was optimized."
+    )
+    optimizer: str = Field(description="Optimizer backend that was used.")
+    auto: str | None = Field(
+        default="light", description="Optimization intensity level."
+    )
+    train_ratio: float = Field(default=0.8, description="Train/validation split ratio.")
+    dataset_path: str | None = Field(
+        default=None, description="Path to the dataset used."
+    )
+    train_examples: int | None = Field(
+        default=None, description="Number of training examples used."
+    )
+    validation_examples: int | None = Field(
+        default=None, description="Number of validation examples used."
+    )
+    validation_score: float | None = Field(
+        default=None, description="Validation score from the optimized program."
+    )
+    output_path: str | None = Field(
+        default=None,
+        description="Filesystem path where the optimized program was saved.",
+    )
+    manifest_path: str | None = Field(
+        default=None, description="Filesystem path to the optimization manifest."
+    )
+    error: str | None = Field(
+        default=None, description="Error message when the run failed."
+    )
+    phase: str | None = Field(
+        default=None, description="Current phase of the optimization run."
+    )
+    started_at: str = Field(description="ISO timestamp when the run started.")
+    completed_at: str | None = Field(
+        default=None, description="ISO timestamp when the run completed."
+    )
+
+
+class OptimizationRunCreatedResponse(BaseModel):
+    """Response when an async optimization run is created."""
+
+    run_id: int = Field(description="Unique identifier for the created run.")
+    status: str = Field(default="running", description="Initial run status.")
 
 
 class TraceFeedbackRequest(BaseModel):

@@ -25,7 +25,12 @@ from typing import Any, Callable, cast
 
 import typer
 
-from .commands import init_command, serve_api_command, serve_mcp_command
+from .commands import (
+    init_command,
+    optimize_command,
+    serve_api_command,
+    serve_mcp_command,
+)
 from .config import (
     initialize_app_config,
     require_current_app_config,
@@ -67,6 +72,7 @@ def _require_config(*, error_message: str | None = None) -> Any:
 _register_command("init", init_command)
 _register_command("serve-api", serve_api_command)
 _register_command("serve-mcp", serve_mcp_command)
+_register_command("optimize", optimize_command)
 
 
 # --- Chat commands (remain inline for simplicity) ---

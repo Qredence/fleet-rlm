@@ -38,6 +38,32 @@ def _resolve_db_url(db_path: str | None = None) -> str:
     return f"sqlite:///{path.resolve()}"
 
 
+def _migrate_optimization_runs(engine: Any) -> None:
+    """Best-effort migration for new columns on the optimization_runs table.
+
+    SQLite ``CREATE TABLE IF NOT EXISTS`` (via ``create_all``) does not add
+    columns to an existing table.  We use ``ALTER TABLE ADD COLUMN`` wrapped
+    in try/except so it is safe to run repeatedly.
+    """
+    new_columns = [
+        ("module_slug", "VARCHAR(128)"),
+        ("dataset_path", "TEXT"),
+        ("manifest_path", "TEXT"),
+        ("phase", "VARCHAR(64)"),
+    ]
+    with engine.connect() as conn:
+        for col_name, col_type in new_columns:
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE optimization_runs ADD COLUMN {col_name} {col_type}"
+                    )
+                )
+            except Exception:
+                pass  # column already exists
+        conn.commit()
+
+
 def get_engine(db_path: str | None = None):
     """Return a cached SQLite engine, creating the DB file + tables on first call."""
     url = _resolve_db_url(db_path)
@@ -47,6 +73,7 @@ def get_engine(db_path: str | None = None):
 
     engine = create_engine(url, echo=False)
     SQLModel.metadata.create_all(engine)
+    _migrate_optimization_runs(engine)
     _engines[url] = engine
     return engine
 
@@ -132,6 +159,10 @@ class OptimizationRun(SQLModel, table=True):
     validation_examples: int | None = None
     validation_score: float | None = None
     error: str | None = None
+    module_slug: str | None = Field(default=None, max_length=128)
+    dataset_path: str | None = None
+    manifest_path: str | None = None
+    phase: str | None = Field(default=None, max_length=64)
     started_at: datetime = Field(default_factory=_utc_now)
     completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utc_now)
@@ -215,6 +246,8 @@ def create_optimization_run(
     dataset_id: int | None = None,
     auto: str = "light",
     train_ratio: float = 0.8,
+    module_slug: str | None = None,
+    dataset_path: str | None = None,
 ) -> OptimizationRun:
     with get_session() as db:
         row = OptimizationRun(
@@ -223,6 +256,8 @@ def create_optimization_run(
             dataset_id=dataset_id,
             auto=auto,
             train_ratio=train_ratio,
+            module_slug=module_slug,
+            dataset_path=dataset_path,
         )
         db.add(row)
         db.commit()
@@ -237,6 +272,7 @@ def complete_optimization_run(
     validation_examples: int,
     validation_score: float | None = None,
     output_path: str | None = None,
+    manifest_path: str | None = None,
 ) -> OptimizationRun | None:
     with get_session() as db:
         row = db.get(OptimizationRun, run_id)
@@ -247,6 +283,8 @@ def complete_optimization_run(
         row.validation_examples = validation_examples
         row.validation_score = validation_score
         row.output_path = output_path
+        row.manifest_path = manifest_path
+        row.phase = "completed"
         row.completed_at = _utc_now()
         db.add(row)
         db.commit()
@@ -261,8 +299,64 @@ def fail_optimization_run(run_id: int, *, error: str) -> OptimizationRun | None:
             return None
         row.status = RunStatus.FAILED
         row.error = error
+        row.phase = "failed"
         row.completed_at = _utc_now()
         db.add(row)
         db.commit()
         db.refresh(row)
         return row
+
+
+def get_optimization_run(run_id: int) -> OptimizationRun | None:
+    """Return a single optimization run by primary key."""
+    with get_session() as db:
+        return db.get(OptimizationRun, run_id)
+
+
+def list_optimization_runs(
+    *,
+    status: RunStatus | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[OptimizationRun]:
+    """Return optimization runs ordered by most-recent first."""
+    with get_session() as db:
+        stmt = select(OptimizationRun).order_by(
+            OptimizationRun.created_at.desc()  # type: ignore
+        )
+        if status is not None:
+            stmt = stmt.where(OptimizationRun.status == status)
+        stmt = stmt.offset(offset).limit(limit)
+        return list(db.exec(stmt).all())
+
+
+def update_optimization_run_phase(run_id: int, *, phase: str) -> None:
+    """Update the current phase of a running optimization."""
+    with get_session() as db:
+        row = db.get(OptimizationRun, run_id)
+        if row is None:
+            return
+        row.phase = phase
+        db.add(row)
+        db.commit()
+
+
+def recover_stale_optimization_runs() -> int:
+    """Mark any RUNNING rows as FAILED on startup (server restart recovery).
+
+    Returns the number of rows recovered.
+    """
+    with get_session() as db:
+        stmt = select(OptimizationRun).where(
+            OptimizationRun.status == RunStatus.RUNNING
+        )
+        stale = list(db.exec(stmt).all())
+        for row in stale:
+            row.status = RunStatus.FAILED
+            row.error = "Server restarted while optimization was in progress"
+            row.phase = "failed"
+            row.completed_at = _utc_now()
+            db.add(row)
+        if stale:
+            db.commit()
+        return len(stale)

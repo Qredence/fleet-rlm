@@ -19,9 +19,11 @@ from typing import Any, Literal, cast
 import dspy
 from dspy import Example, Prediction
 from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
+from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
 from fleet_rlm.integrations.observability.config import MlflowConfig
+from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
+
 from .dspy_evaluation import _metric_supports_trace
 from .mlflow_evaluation import load_trace_rows
 from .mlflow_optimization import (
@@ -29,7 +31,6 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
-from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
 from .workspace_metrics import workspace_feedback_metric
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,18 @@ def optimize_program_with_gepa(
     )
     program = build_program(program_spec)
 
-    optimizer = GEPA(metric=feedback_metric, auto=auto)
+    from fleet_rlm.runtime.config import (
+        get_delegate_lm_from_env,
+        get_planner_lm_from_env,
+    )
+
+    reflection_lm = get_delegate_lm_from_env() or get_planner_lm_from_env()
+    if reflection_lm is None:
+        raise RuntimeError(
+            "No DSPy LM configured for GEPA reflection. "
+            "Set DSPY_LM_MODEL (and DSPY_LLM_API_KEY) or DSPY_DELEGATE_LM_MODEL."
+        )
+    optimizer = GEPA(metric=feedback_metric, auto=auto, reflection_lm=reflection_lm)
     resolved_run_name = run_name or f"GEPA::{program_spec}"
     start_run = getattr(mlflow, "start_run", None)
     log_metric = getattr(mlflow, "log_metric", None)

@@ -59,10 +59,14 @@ async function requestJson<T>(
     body?: unknown;
     signal?: AbortSignal;
     headers?: Record<string, string>;
+    timeoutMs?: number;
   },
 ): Promise<T> {
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), rlmApiConfig.timeoutMs);
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    options?.timeoutMs ?? rlmApiConfig.timeoutMs,
+  );
 
   const signal = options?.signal
     ? anySignal([options.signal, timeoutController.signal])
@@ -101,8 +105,8 @@ export const rlmApiClient = {
     return requestJson<T>("GET", path, { signal });
   },
 
-  post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    return requestJson<T>("POST", path, { body, signal });
+  post<T>(path: string, body?: unknown, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
+    return requestJson<T>("POST", path, { body, signal, timeoutMs });
   },
 
   patch<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {

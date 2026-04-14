@@ -1,5 +1,36 @@
 """DSPy-native evaluation, optimization, and scoring helpers."""
 
+# -- Shared infrastructure (new) --------------------------------------------
+from .artifacts import (
+    DAYTONA_QUALITY_ROOT,
+    LOCAL_QUALITY_ROOT,
+    build_manifest,
+    resolve_artifact_path,
+    write_manifest,
+)
+from .datasets import (
+    DatasetRow,
+    load_dataset_rows,
+    split_examples as split_dataset_examples,
+    validate_required_keys,
+)
+from .module_registry import (
+    ModuleOptimizationSpec,
+    get_module_spec,
+    list_module_metadata,
+    list_module_slugs,
+    register_module,
+)
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    action_match_score,
+    boundedness_score,
+    set_overlap_score,
+    text_presence_score,
+)
+
+# -- Existing infrastructure -------------------------------------------------
 from .dspy_evaluation import evaluate_program, evaluate_program_from_dataset
 from .gepa_optimization import build_gepa_feedback_metric, optimize_program_with_gepa
 from .mlflow_evaluation import (
@@ -19,6 +50,8 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
+
+# -- Per-module entrypoints --------------------------------------------------
 from .optimize_reflect_and_revise import (
     build_reflection_feedback_metric,
     load_reflection_rows,
@@ -67,14 +100,32 @@ from .workspace_metrics import (
 )
 
 __all__ = [
+    # Shared infrastructure
+    "DAYTONA_QUALITY_ROOT",
+    "DatasetRow",
+    "LOCAL_QUALITY_ROOT",
+    "ModuleOptimizationSpec",
+    "OptimizationResult",
+    "ScoreFeedbackBuilder",
+    "action_match_score",
+    "boundedness_score",
+    "build_manifest",
+    "get_module_spec",
+    "list_module_metadata",
+    "list_module_slugs",
+    "load_dataset_rows",
+    "register_module",
+    "resolve_artifact_path",
+    "run_module_optimization",
+    "set_overlap_score",
+    "split_dataset_examples",
+    "text_presence_score",
+    "validate_required_keys",
+    "write_manifest",
+    # Existing infrastructure
     "build_default_scorers",
     "build_exact_match_metric",
-    "build_recursive_decomposition_feedback_metric",
     "build_gepa_feedback_metric",
-    "build_recursive_context_selection_feedback_metric",
-    "build_recursive_verification_feedback_metric",
-    "build_recursive_repair_feedback_metric",
-    "build_reflection_feedback_metric",
     "build_program",
     "build_rlm_scorers",
     "completeness_feedback_metric",
@@ -86,29 +137,9 @@ __all__ = [
     "get_default_judge_model",
     "load_symbol",
     "load_trace_rows",
-    "load_recursive_decomposition_rows",
-    "load_recursive_context_selection_rows",
-    "load_recursive_repair_rows",
-    "load_recursive_verification_rows",
-    "load_reflection_rows",
     "optimize_program_with_gepa",
-    "optimize_recursive_decomposition_module",
-    "optimize_recursive_context_selection_module",
-    "optimize_recursive_repair_module",
-    "optimize_recursive_verification_module",
-    "optimize_reflect_and_revise_module",
     "optimize_program_with_mipro",
-    "resolve_recursive_context_selection_output_path",
-    "resolve_recursive_repair_output_path",
-    "resolve_recursive_verification_output_path",
-    "resolve_reflection_output_path",
     "reasoning_quality_scorer",
-    "resolve_recursive_decomposition_output_path",
-    "rows_to_reflection_examples",
-    "rows_to_recursive_decomposition_examples",
-    "rows_to_recursive_context_selection_examples",
-    "rows_to_recursive_repair_examples",
-    "rows_to_recursive_verification_examples",
     "rows_to_examples",
     "rows_with_expected_responses",
     "save_evaluation_result",
@@ -116,4 +147,30 @@ __all__ = [
     "split_examples",
     "workspace_feedback_metric",
     "workspace_score_metric",
+    # Per-module entrypoints
+    "build_recursive_context_selection_feedback_metric",
+    "build_recursive_decomposition_feedback_metric",
+    "build_recursive_repair_feedback_metric",
+    "build_recursive_verification_feedback_metric",
+    "build_reflection_feedback_metric",
+    "load_recursive_context_selection_rows",
+    "load_recursive_decomposition_rows",
+    "load_recursive_repair_rows",
+    "load_recursive_verification_rows",
+    "load_reflection_rows",
+    "optimize_recursive_context_selection_module",
+    "optimize_recursive_decomposition_module",
+    "optimize_recursive_repair_module",
+    "optimize_recursive_verification_module",
+    "optimize_reflect_and_revise_module",
+    "resolve_recursive_context_selection_output_path",
+    "resolve_recursive_decomposition_output_path",
+    "resolve_recursive_repair_output_path",
+    "resolve_recursive_verification_output_path",
+    "resolve_reflection_output_path",
+    "rows_to_recursive_context_selection_examples",
+    "rows_to_recursive_decomposition_examples",
+    "rows_to_recursive_repair_examples",
+    "rows_to_recursive_verification_examples",
+    "rows_to_reflection_examples",
 ]

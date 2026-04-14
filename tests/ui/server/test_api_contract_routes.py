@@ -14,7 +14,10 @@ from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
 
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
+    "/api/v1/optimization/modules",
     "/api/v1/optimization/run",
+    "/api/v1/optimization/runs",
+    "/api/v1/optimization/runs/{run_id}",
     "/api/v1/optimization/status",
     "/api/v1/runtime/settings",
     "/api/v1/runtime/tests/daytona",

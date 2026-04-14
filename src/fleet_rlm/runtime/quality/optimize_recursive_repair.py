@@ -8,13 +8,21 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dspy
-from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from fleet_rlm.runtime.agent.recursive_repair import PlanRecursiveRepairModule
-from fleet_rlm.runtime.agent.signatures import PlanRecursiveRepair
 
-from .mlflow_optimization import split_examples
+from .artifacts import resolve_artifact_path
+from .datasets import load_dataset_rows, validate_required_keys
+from .module_registry import ModuleOptimizationSpec, register_module
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    action_match_score,
+    set_overlap_score,
+    text_presence_score,
+)
+
+# -- Module-specific constants -----------------------------------------------
 
 RecursiveRepairRow = dict[str, Any]
 _INPUT_KEYS = [
@@ -25,37 +33,27 @@ _INPUT_KEYS = [
     "latest_failure_signals",
     "repair_budget",
 ]
-_DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/recursive-repair")
-_DAYTONA_ARTIFACT_ROOT = Path("/home/daytona/memory/artifacts/quality/recursive-repair")
+_REQUIRED_DATASET_KEYS = [*_INPUT_KEYS, "repair_mode"]
+_MODULE_SLUG = "repair"
+_ARTIFACT_FILENAME = "plan_recursive_repair.json"
+_PROGRAM_SPEC = "fleet_rlm.runtime.agent.recursive_repair:PlanRecursiveRepairModule"
+
+
+# -- Dataset conversion (module-specific) ------------------------------------
 
 
 def load_recursive_repair_rows(dataset_path: Path) -> list[RecursiveRepairRow]:
     """Load a JSON or JSONL dataset of representative recursive repair traces."""
-
-    text = dataset_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("Recursive repair dataset is empty.")
-    if dataset_path.suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    payload = json.loads(text)
-    if isinstance(payload, list):
-        return payload
-    raise ValueError(
-        "Expected a JSON array or JSONL file of recursive repair examples."
-    )
+    return load_dataset_rows(dataset_path)
 
 
 def rows_to_recursive_repair_examples(
     rows: list[RecursiveRepairRow],
 ) -> list[dspy.Example]:
     """Convert representative repair traces into DSPy examples."""
-
+    valid = validate_required_keys(rows, _REQUIRED_DATASET_KEYS, "Repair")
     examples: list[dspy.Example] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if any(key not in row for key in (*_INPUT_KEYS, "repair_mode")):
-            continue
+    for row in valid:
         examples.append(
             dspy.Example(
                 user_request=str(row.get("user_request", "") or ""),
@@ -86,8 +84,12 @@ def rows_to_recursive_repair_examples(
     return examples
 
 
+# -- Metric (module-specific) ------------------------------------------------
+
+
 def build_recursive_repair_feedback_metric() -> Any:
     """Build a GEPA metric for repair usefulness, boundedness, and success potential."""
+    from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
     def metric(
         gold: Any,
@@ -107,88 +109,89 @@ def build_recursive_repair_feedback_metric() -> Any:
         repair_target = str(getattr(pred, "repair_target", "") or "").strip()
         repair_rationale = str(getattr(pred, "repair_rationale", "") or "").strip()
 
-        score = 0.0
-        feedback: list[str] = []
+        builder = ScoreFeedbackBuilder()
 
-        if actual_mode == expected_mode:
-            score += 0.35
-            feedback.append("Repair mode matches the representative trace.")
-        else:
-            feedback.append(
-                f"Expected repair_mode={expected_mode!r} but received {actual_mode!r}."
-            )
+        # Mode match (0.35 weight)
+        builder.add(
+            0.35,
+            action_match_score(expected_mode, actual_mode),
+            "Repair mode matches the representative trace."
+            if actual_mode == expected_mode
+            else f"Expected repair_mode={expected_mode!r} but received {actual_mode!r}.",
+        )
 
+        # Step overlap (0.2 weight)
         if expected_steps:
-            step_overlap = len(expected_steps & actual_steps) / len(expected_steps)
-            score += 0.2 * step_overlap
-            feedback.append(
+            step_overlap = set_overlap_score(expected_steps, actual_steps)
+            builder.add(
+                0.2,
+                step_overlap,
                 "Repair steps preserve the representative bounded repair sequence."
                 if step_overlap >= 0.75
-                else "Repair steps missed important representative repair actions."
+                else "Repair steps missed important representative repair actions.",
             )
         elif not actual_steps:
-            score += 0.2
-            feedback.append("No repair steps were expected or introduced.")
+            builder.add(0.2, 1.0, "No repair steps were expected or introduced.")
 
+        # Subquery overlap (0.15 weight)
         if expected_subqueries:
-            subquery_overlap = len(expected_subqueries & actual_subqueries) / len(
-                expected_subqueries
-            )
-            score += 0.15 * subquery_overlap
-            feedback.append(
+            subquery_overlap = set_overlap_score(expected_subqueries, actual_subqueries)
+            builder.add(
+                0.15,
+                subquery_overlap,
                 "Repair subqueries preserve the representative bounded delegation plan."
                 if subquery_overlap >= 0.75
-                else "Repair subqueries missed important representative delegated checks."
+                else "Repair subqueries missed important representative delegated checks.",
             )
         elif not actual_subqueries:
-            score += 0.15
-            feedback.append("No repair subqueries were expected or introduced.")
+            builder.add(0.15, 1.0, "No repair subqueries were expected or introduced.")
 
+        # Budget boundedness (0.15 weight)
         bounded_count = max(len(actual_steps), len(actual_subqueries))
         if bounded_count > 0:
-            if repair_budget > 0 and bounded_count <= max(1, repair_budget + 1):
-                score += 0.15
-                feedback.append(
-                    "Repair plan stays within the requested bounded budget."
-                )
-            else:
-                feedback.append("Repair plan exceeded the requested bounded budget.")
-        else:
-            feedback.append("Repair plan is empty.")
-
-        if repair_target:
-            score += 0.1
-            feedback.append("Repair target is present.")
-        else:
-            feedback.append("Repair target is empty.")
-
-        if repair_rationale:
-            score += 0.05
-            feedback.append(
-                "Repair rationale explains why the plan should stay narrow."
+            budget_limit = (
+                max(1, repair_budget + 1) if repair_budget > 0 else bounded_count
+            )
+            builder.add(
+                0.15,
+                1.0 if bounded_count <= budget_limit else 0.0,
+                "Repair plan stays within the requested bounded budget."
+                if bounded_count <= budget_limit
+                else "Repair plan exceeded the requested bounded budget.",
             )
         else:
-            feedback.append("Repair rationale is empty.")
+            builder.add(0.0, 0.0, "Repair plan is empty.")
 
-        return ScoreWithFeedback(
-            score=max(0.0, min(1.0, score)),
-            feedback=" ".join(feedback),
+        # Repair target (0.1 weight)
+        builder.add(
+            0.1,
+            text_presence_score(repair_target),
+            "Repair target is present." if repair_target else "Repair target is empty.",
         )
+
+        # Rationale (0.05 weight)
+        builder.add(
+            0.05,
+            text_presence_score(repair_rationale),
+            "Repair rationale explains why the plan should stay narrow."
+            if repair_rationale
+            else "Repair rationale is empty.",
+        )
+
+        return builder.build()
 
     return metric
 
 
+# -- Artifact path (backward compat) ----------------------------------------
+
+
 def resolve_recursive_repair_output_path(output_path: Path | None = None) -> Path:
     """Resolve the default artifact path for optimized recursive repair prompts."""
+    return resolve_artifact_path(_MODULE_SLUG, _ARTIFACT_FILENAME, output_path)
 
-    if output_path is not None:
-        return output_path
-    root = (
-        _DAYTONA_ARTIFACT_ROOT
-        if _DAYTONA_ARTIFACT_ROOT.exists()
-        else _DEFAULT_ARTIFACT_ROOT
-    )
-    return root / "plan_recursive_repair.json"
+
+# -- Optimization entrypoint -------------------------------------------------
 
 
 def optimize_recursive_repair_module(
@@ -197,53 +200,18 @@ def optimize_recursive_repair_module(
     output_path: Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
-) -> dict[str, Any]:
+) -> OptimizationResult:
     """Run GEPA offline against the recursive repair module."""
-
-    examples = rows_to_recursive_repair_examples(
-        load_recursive_repair_rows(dataset_path)
+    return run_module_optimization(
+        _MODULE_SPEC,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        train_ratio=train_ratio,
+        auto=auto,
     )
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
-    metric = build_recursive_repair_feedback_metric()
-    program = PlanRecursiveRepairModule()
-    optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
 
-    validation_score = None
-    if valset:
-        validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
 
-    resolved_output_path = resolve_recursive_repair_output_path(output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_output_path))
-
-    manifest_path = resolved_output_path.with_suffix(".manifest.json")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "dataset_path": str(dataset_path),
-                "module": f"{PlanRecursiveRepair.__module__}:{PlanRecursiveRepair.__name__}",
-                "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "validation_score": validation_score,
-                "optimizer": "GEPA",
-                "metric": "recursive_repair_usefulness_and_boundedness",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "train_examples": len(trainset),
-        "validation_examples": len(valset),
-        "validation_score": validation_score,
-        "output_path": str(resolved_output_path),
-        "manifest_path": str(manifest_path),
-        "optimizer": "GEPA",
-        "program_spec": "fleet_rlm.runtime.agent.recursive_repair:PlanRecursiveRepairModule",
-    }
+# -- CLI ---------------------------------------------------------------------
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -288,3 +256,21 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -- Registry registration ---------------------------------------------------
+
+_MODULE_SPEC = ModuleOptimizationSpec(
+    module_slug=_MODULE_SLUG,
+    label="Repair",
+    program_spec=_PROGRAM_SPEC,
+    artifact_filename=_ARTIFACT_FILENAME,
+    input_keys=list(_INPUT_KEYS),
+    required_dataset_keys=list(_REQUIRED_DATASET_KEYS),
+    module_factory=PlanRecursiveRepairModule,
+    row_converter=rows_to_recursive_repair_examples,
+    metric_builder=build_recursive_repair_feedback_metric,
+    metric_name="recursive_repair_usefulness_and_boundedness",
+)
+
+register_module(_MODULE_SPEC)

@@ -8,15 +8,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dspy
-from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from fleet_rlm.runtime.agent.recursive_decomposition import (
     PlanRecursiveSubqueriesModule,
 )
-from fleet_rlm.runtime.agent.signatures import PlanRecursiveSubqueries
 
-from .mlflow_optimization import split_examples
+from .artifacts import resolve_artifact_path
+from .datasets import load_dataset_rows, validate_required_keys
+from .module_registry import ModuleOptimizationSpec, register_module
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    action_match_score,
+    boundedness_score,
+    set_overlap_score,
+    text_presence_score,
+)
+
+# -- Module-specific constants -----------------------------------------------
 
 RecursiveDecompositionRow = dict[str, Any]
 _DECOMPOSITION_INPUT_KEYS = [
@@ -27,48 +36,35 @@ _DECOMPOSITION_INPUT_KEYS = [
     "latest_sandbox_evidence",
     "subquery_budget",
 ]
-_DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/recursive-decomposition")
-_DAYTONA_ARTIFACT_ROOT = Path(
-    "/home/daytona/memory/artifacts/quality/recursive-decomposition"
+_REQUIRED_DATASET_KEYS = [
+    *_DECOMPOSITION_INPUT_KEYS,
+    "decomposition_mode",
+    "subqueries",
+]
+_MODULE_SLUG = "decomposition"
+_ARTIFACT_FILENAME = "plan_recursive_subqueries.json"
+_PROGRAM_SPEC = (
+    "fleet_rlm.runtime.agent.recursive_decomposition:PlanRecursiveSubqueriesModule"
 )
+
+
+# -- Dataset conversion (module-specific) ------------------------------------
 
 
 def load_recursive_decomposition_rows(
     dataset_path: Path,
 ) -> list[RecursiveDecompositionRow]:
     """Load a JSON or JSONL dataset of representative recursive decomposition traces."""
-
-    text = dataset_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("Recursive decomposition dataset is empty.")
-    if dataset_path.suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    payload = json.loads(text)
-    if isinstance(payload, list):
-        return payload
-    raise ValueError(
-        "Expected a JSON array or JSONL file of recursive decomposition examples."
-    )
+    return load_dataset_rows(dataset_path)
 
 
 def rows_to_recursive_decomposition_examples(
     rows: list[RecursiveDecompositionRow],
 ) -> list[dspy.Example]:
     """Convert representative recursive decomposition traces into DSPy examples."""
-
+    valid = validate_required_keys(rows, _REQUIRED_DATASET_KEYS, "Decomposition")
     examples: list[dspy.Example] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if any(
-            key not in row
-            for key in (
-                *_DECOMPOSITION_INPUT_KEYS,
-                "decomposition_mode",
-                "subqueries",
-            )
-        ):
-            continue
+    for row in valid:
         example = dspy.Example(
             user_request=str(row.get("user_request", "")),
             assembled_recursive_context=str(row.get("assembled_recursive_context", "")),
@@ -90,8 +86,12 @@ def rows_to_recursive_decomposition_examples(
     return examples
 
 
+# -- Metric (module-specific) ------------------------------------------------
+
+
 def build_recursive_decomposition_feedback_metric() -> Any:
     """Build a GEPA metric for decomposition quality, boundedness, and usefulness."""
+    from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
     def metric(
         gold: Any,
@@ -113,75 +113,81 @@ def build_recursive_decomposition_feedback_metric() -> Any:
         aggregation_plan = str(getattr(pred, "aggregation_plan", "")).strip()
         rationale = str(getattr(pred, "decomposition_rationale", "")).strip()
 
-        score = 0.0
-        feedback: list[str] = []
+        builder = ScoreFeedbackBuilder()
 
-        if actual_mode == expected_mode:
-            score += 0.3
-            feedback.append("Decomposition mode matches the representative trace.")
-        else:
-            feedback.append(
-                f"Expected decomposition_mode={expected_mode!r} but received {actual_mode!r}."
-            )
-
-        if expected_subqueries:
-            overlap = len(set(expected_subqueries) & set(actual_subqueries)) / len(
-                expected_subqueries
-            )
-            score += 0.35 * overlap
-            if overlap >= 0.75:
-                feedback.append("Subqueries preserve the representative decomposition.")
-            else:
-                feedback.append(
-                    "Subqueries missed relevant bounded subproblems from the trace."
-                )
-
-        if actual_subqueries:
-            score += 0.15
-            feedback.append("At least one bounded subquery is present.")
-            if subquery_budget > 0 and len(actual_subqueries) <= subquery_budget:
-                score += 0.1
-                feedback.append("Subqueries stay within the requested bounded budget.")
-            elif subquery_budget > 0:
-                feedback.append(
-                    f"Subqueries exceeded the requested budget of {subquery_budget}."
-                )
-        else:
-            feedback.append("Subqueries are empty.")
-
-        if aggregation_plan:
-            score += 0.05
-            feedback.append("Aggregation plan is present for Python/runtime execution.")
-        else:
-            feedback.append("Aggregation plan is empty.")
-
-        if rationale:
-            score += 0.05
-            feedback.append("Decomposition rationale explains the semantic split.")
-        else:
-            feedback.append("Decomposition rationale is empty.")
-
-        return ScoreWithFeedback(
-            score=max(0.0, min(1.0, score)),
-            feedback=" ".join(feedback),
+        # Mode match (0.3 weight)
+        builder.add(
+            0.3,
+            action_match_score(expected_mode, actual_mode),
+            "Decomposition mode matches the representative trace."
+            if actual_mode == expected_mode
+            else f"Expected decomposition_mode={expected_mode!r} but received {actual_mode!r}.",
         )
 
+        # Subquery overlap (0.35 weight)
+        if expected_subqueries:
+            overlap = set_overlap_score(
+                set(expected_subqueries), set(actual_subqueries)
+            )
+            builder.add(
+                0.35,
+                overlap,
+                "Subqueries preserve the representative decomposition."
+                if overlap >= 0.75
+                else "Subqueries missed relevant bounded subproblems from the trace.",
+            )
+
+        # Subquery presence + boundedness (0.25 weight)
+        if actual_subqueries:
+            builder.add(
+                0.15,
+                1.0,
+                "At least one bounded subquery is present.",
+            )
+            builder.add(
+                0.1,
+                boundedness_score(len(actual_subqueries), subquery_budget),
+                "Subqueries stay within the requested bounded budget."
+                if subquery_budget <= 0 or len(actual_subqueries) <= subquery_budget
+                else f"Subqueries exceeded the requested budget of {subquery_budget}.",
+            )
+        else:
+            builder.add(0.15, 0.0, "Subqueries are empty.")
+
+        # Aggregation plan (0.05 weight)
+        builder.add(
+            0.05,
+            text_presence_score(aggregation_plan),
+            "Aggregation plan is present for Python/runtime execution."
+            if aggregation_plan
+            else "Aggregation plan is empty.",
+        )
+
+        # Rationale (0.05 weight)
+        builder.add(
+            0.05,
+            text_presence_score(rationale),
+            "Decomposition rationale explains the semantic split."
+            if rationale
+            else "Decomposition rationale is empty.",
+        )
+
+        return builder.build()
+
     return metric
+
+
+# -- Artifact path (backward compat) ----------------------------------------
 
 
 def resolve_recursive_decomposition_output_path(
     output_path: Path | None = None,
 ) -> Path:
     """Resolve the default artifact path for optimized recursive decomposition prompts."""
+    return resolve_artifact_path(_MODULE_SLUG, _ARTIFACT_FILENAME, output_path)
 
-    if output_path is not None:
-        return output_path
-    root = (
-        _DAYTONA_ARTIFACT_ROOT
-        if _DAYTONA_ARTIFACT_ROOT.exists()
-        else _DEFAULT_ARTIFACT_ROOT
-    )
-    return root / "plan_recursive_subqueries.json"
+
+# -- Optimization entrypoint -------------------------------------------------
 
 
 def optimize_recursive_decomposition_module(
@@ -190,57 +196,18 @@ def optimize_recursive_decomposition_module(
     output_path: Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
-) -> dict[str, Any]:
+) -> OptimizationResult:
     """Run GEPA offline against the recursive decomposition module."""
-
-    examples = rows_to_recursive_decomposition_examples(
-        load_recursive_decomposition_rows(dataset_path)
+    return run_module_optimization(
+        _MODULE_SPEC,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        train_ratio=train_ratio,
+        auto=auto,
     )
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
-    metric = build_recursive_decomposition_feedback_metric()
-    program = PlanRecursiveSubqueriesModule()
-    optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
 
-    validation_score = None
-    if valset:
-        validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
 
-    resolved_output_path = resolve_recursive_decomposition_output_path(output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_output_path))
-
-    manifest_path = resolved_output_path.with_suffix(".manifest.json")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "dataset_path": str(dataset_path),
-                "module": f"{PlanRecursiveSubqueries.__module__}:"
-                f"{PlanRecursiveSubqueries.__name__}",
-                "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "validation_score": validation_score,
-                "optimizer": "GEPA",
-                "metric": "recursive_decomposition_quality_and_boundedness",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "train_examples": len(trainset),
-        "validation_examples": len(valset),
-        "validation_score": validation_score,
-        "output_path": str(resolved_output_path),
-        "manifest_path": str(manifest_path),
-        "optimizer": "GEPA",
-        "program_spec": (
-            "fleet_rlm.runtime.agent.recursive_decomposition:"
-            "PlanRecursiveSubqueriesModule"
-        ),
-    }
+# -- CLI ---------------------------------------------------------------------
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -285,3 +252,21 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -- Registry registration ---------------------------------------------------
+
+_MODULE_SPEC = ModuleOptimizationSpec(
+    module_slug=_MODULE_SLUG,
+    label="Decomposition",
+    program_spec=_PROGRAM_SPEC,
+    artifact_filename=_ARTIFACT_FILENAME,
+    input_keys=list(_DECOMPOSITION_INPUT_KEYS),
+    required_dataset_keys=list(_REQUIRED_DATASET_KEYS),
+    module_factory=PlanRecursiveSubqueriesModule,
+    row_converter=rows_to_recursive_decomposition_examples,
+    metric_builder=build_recursive_decomposition_feedback_metric,
+    metric_name="recursive_decomposition_quality_and_boundedness",
+)
+
+register_module(_MODULE_SPEC)

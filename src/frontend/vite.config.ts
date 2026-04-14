@@ -216,6 +216,8 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
         ws: true,
+        // GEPA optimization runs can take 15+ minutes
+        timeout: 20 * 60 * 1000,
       },
     },
     warmup: {

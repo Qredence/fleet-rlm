@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import dspy
 
@@ -60,7 +61,14 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
             Path(path).write_text('{"optimized": true}\n', encoding="utf-8")
 
     class _FakeGEPA:
-        def __init__(self, *, metric: Any, auto: str | None) -> None:
+        def __init__(
+            self,
+            *,
+            metric: Any,
+            auto: str | None,
+            reflection_lm: Any = None,
+            **kwargs: Any,
+        ) -> None:
             captured["metric"] = metric
             captured["auto"] = auto
 
@@ -86,12 +94,20 @@ def test_optimize_reflect_and_revise_module_runs_gepa_and_persists_artifacts(
             return 88.0
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimize_reflect_and_revise.GEPA",
+        "dspy.teleprompt.GEPA",
         _FakeGEPA,
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimize_reflect_and_revise.dspy.Evaluate",
+        "dspy.Evaluate",
         _FakeEvaluate,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
+        lambda: None,
     )
 
     result = optimize_reflect_and_revise_module(

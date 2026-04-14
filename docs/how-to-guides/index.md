@@ -14,6 +14,7 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 ## DSPy Integration
 
 - [DSPy Integration Guide](dspy-integration.md) - Signatures, modules, and RLM runtime configuration
+- [DSPy Optimization and Evaluation](dspy-optimization-and-evaluation.md) - GEPA optimization, metrics, datasets, and evaluation workflows
 
 ## Running and Integration
 

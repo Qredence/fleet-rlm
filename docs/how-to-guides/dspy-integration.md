@@ -536,6 +536,7 @@ agent = RLMReActChatAgent(max_depth=4)
 
 ## Related Documentation
 
+- [DSPy Optimization and Evaluation](dspy-optimization-and-evaluation.md) - GEPA optimization, metrics, datasets, and evaluation workflows
 - [mlflow-workflows.md](mlflow-workflows.md) - MLflow tracing and optimization
 - [../reference/daytona-runtime-architecture.md](../reference/daytona-runtime-architecture.md) - Daytona runtime configuration
 - [runtime-settings.md](runtime-settings.md) - Server runtime settings

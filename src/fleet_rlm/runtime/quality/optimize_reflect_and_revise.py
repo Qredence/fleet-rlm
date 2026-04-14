@@ -8,14 +8,22 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dspy
-from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from fleet_rlm.runtime.agent.recursive_reflection import (
     ReflectAndReviseWorkspaceStepModule,
 )
-from fleet_rlm.runtime.agent.signatures import ReflectAndReviseWorkspaceStep
-from .mlflow_optimization import split_examples
+
+from .artifacts import resolve_artifact_path
+from .datasets import load_dataset_rows, validate_required_keys
+from .module_registry import ModuleOptimizationSpec, register_module
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    action_match_score,
+    text_presence_score,
+)
+
+# -- Module-specific constants -----------------------------------------------
 
 ReflectionOptimizationRow = dict[str, Any]
 _INPUT_KEYS = [
@@ -26,37 +34,29 @@ _INPUT_KEYS = [
     "latest_tool_or_code_result",
     "loop_state",
 ]
-_DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/reflect-and-revise")
-_DAYTONA_ARTIFACT_ROOT = Path(
-    "/home/daytona/memory/artifacts/quality/reflect-and-revise"
+_REQUIRED_DATASET_KEYS = [*_INPUT_KEYS, "next_action"]
+_MODULE_SLUG = "reflect-and-revise"
+_ARTIFACT_FILENAME = "reflect_and_revise_workspace_step.json"
+_PROGRAM_SPEC = (
+    "fleet_rlm.runtime.agent.recursive_reflection:ReflectAndReviseWorkspaceStepModule"
 )
+
+
+# -- Dataset conversion (module-specific) ------------------------------------
 
 
 def load_reflection_rows(dataset_path: Path) -> list[ReflectionOptimizationRow]:
     """Load a JSON or JSONL dataset of representative recursive reflection traces."""
-
-    text = dataset_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("Reflection dataset is empty.")
-    if dataset_path.suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    payload = json.loads(text)
-    if isinstance(payload, list):
-        return payload
-    raise ValueError("Expected a JSON array or JSONL file of reflection examples.")
+    return load_dataset_rows(dataset_path)
 
 
 def rows_to_reflection_examples(
     rows: list[ReflectionOptimizationRow],
 ) -> list[dspy.Example]:
     """Convert representative reflection traces into DSPy examples."""
-
+    valid = validate_required_keys(rows, _REQUIRED_DATASET_KEYS, "Reflection")
     examples: list[dspy.Example] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if any(key not in row for key in (*_INPUT_KEYS, "next_action")):
-            continue
+    for row in valid:
         example = dspy.Example(
             **{key: str(row.get(key, "") or "") for key in _INPUT_KEYS},
             next_action=str(row.get("next_action", "finalize") or "finalize"),
@@ -70,8 +70,12 @@ def rows_to_reflection_examples(
     return examples
 
 
+# -- Metric (module-specific) ------------------------------------------------
+
+
 def build_reflection_feedback_metric() -> Any:
     """Build a GEPA metric for recursive revise/recurse/finalize decisions."""
+    from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
     def metric(
         gold: Any,
@@ -87,55 +91,54 @@ def build_reflection_feedback_metric() -> Any:
         actual_plan = str(getattr(pred, "revised_plan", "") or "").strip().lower()
         rationale = str(getattr(pred, "rationale", "") or "").strip()
 
-        score = 0.0
-        feedback: list[str] = []
-        if actual_action == expected_action:
-            score += 0.7
-            feedback.append("Next action matches the representative recursive trace.")
-        else:
-            feedback.append(
-                f"Expected next_action={expected_action!r} but received {actual_action!r}."
-            )
+        builder = ScoreFeedbackBuilder()
 
+        # Action match (0.7 weight)
+        builder.add(
+            0.7,
+            action_match_score(expected_action, actual_action),
+            "Next action matches the representative recursive trace."
+            if actual_action == expected_action
+            else f"Expected next_action={expected_action!r} but received {actual_action!r}.",
+        )
+
+        # Plan overlap (0.2 weight)
         if expected_plan:
             overlap = sum(token in actual_plan for token in expected_plan.split())
             plan_score = overlap / max(1, len(expected_plan.split()))
-            score += 0.2 * min(1.0, plan_score)
-            if plan_score >= 0.5:
-                feedback.append("Revised plan preserves key repair/recurse guidance.")
-            else:
-                feedback.append(
-                    "Revised plan misses important guidance from the trace."
-                )
+            builder.add(
+                0.2,
+                min(1.0, plan_score),
+                "Revised plan preserves key repair/recurse guidance."
+                if plan_score >= 0.5
+                else "Revised plan misses important guidance from the trace.",
+            )
         elif actual_plan:
-            score += 0.1
-            feedback.append("Revised plan is present for an open-ended trace.")
+            builder.add(0.1, 1.0, "Revised plan is present for an open-ended trace.")
 
-        if rationale:
-            score += 0.1
-            feedback.append("Rationale is present for operator review.")
-        else:
-            feedback.append("Rationale is empty; explain why the worker should branch.")
-
-        return ScoreWithFeedback(
-            score=max(0.0, min(1.0, score)),
-            feedback=" ".join(feedback),
+        # Rationale presence (0.1 weight)
+        builder.add(
+            0.1,
+            text_presence_score(rationale),
+            "Rationale is present for operator review."
+            if rationale
+            else "Rationale is empty; explain why the worker should branch.",
         )
+
+        return builder.build()
 
     return metric
 
 
+# -- Artifact path (backward compat) ----------------------------------------
+
+
 def resolve_reflection_output_path(output_path: Path | None = None) -> Path:
     """Resolve the default artifact path for optimized recursive reflection prompts."""
+    return resolve_artifact_path(_MODULE_SLUG, _ARTIFACT_FILENAME, output_path)
 
-    if output_path is not None:
-        return output_path
-    root = (
-        _DAYTONA_ARTIFACT_ROOT
-        if _DAYTONA_ARTIFACT_ROOT.exists()
-        else _DEFAULT_ARTIFACT_ROOT
-    )
-    return root / "reflect_and_revise_workspace_step.json"
+
+# -- Optimization entrypoint -------------------------------------------------
 
 
 def optimize_reflect_and_revise_module(
@@ -144,54 +147,18 @@ def optimize_reflect_and_revise_module(
     output_path: Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
-) -> dict[str, Any]:
+) -> OptimizationResult:
     """Run GEPA offline against the recursive reflection module."""
-
-    examples = rows_to_reflection_examples(load_reflection_rows(dataset_path))
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
-    metric = build_reflection_feedback_metric()
-    program = ReflectAndReviseWorkspaceStepModule()
-    optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
-
-    validation_score = None
-    if valset:
-        validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
-
-    resolved_output_path = resolve_reflection_output_path(output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_output_path))
-
-    manifest_path = resolved_output_path.with_suffix(".manifest.json")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "dataset_path": str(dataset_path),
-                "module": f"{ReflectAndReviseWorkspaceStep.__module__}:"
-                f"{ReflectAndReviseWorkspaceStep.__name__}",
-                "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "validation_score": validation_score,
-                "optimizer": "GEPA",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    return run_module_optimization(
+        _MODULE_SPEC,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        train_ratio=train_ratio,
+        auto=auto,
     )
-    return {
-        "train_examples": len(trainset),
-        "validation_examples": len(valset),
-        "validation_score": validation_score,
-        "output_path": str(resolved_output_path),
-        "manifest_path": str(manifest_path),
-        "optimizer": "GEPA",
-        "program_spec": (
-            "fleet_rlm.runtime.agent.recursive_reflection:"
-            "ReflectAndReviseWorkspaceStepModule"
-        ),
-    }
+
+
+# -- CLI ---------------------------------------------------------------------
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -236,3 +203,21 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -- Registry registration ---------------------------------------------------
+
+_MODULE_SPEC = ModuleOptimizationSpec(
+    module_slug=_MODULE_SLUG,
+    label="Reflect & Revise",
+    program_spec=_PROGRAM_SPEC,
+    artifact_filename=_ARTIFACT_FILENAME,
+    input_keys=list(_INPUT_KEYS),
+    required_dataset_keys=list(_REQUIRED_DATASET_KEYS),
+    module_factory=ReflectAndReviseWorkspaceStepModule,
+    row_converter=rows_to_reflection_examples,
+    metric_builder=build_reflection_feedback_metric,
+    metric_name="reflection_decision_quality",
+)
+
+register_module(_MODULE_SPEC)

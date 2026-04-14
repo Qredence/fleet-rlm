@@ -8,15 +8,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dspy
-from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from fleet_rlm.runtime.agent.recursive_verification import (
     VerifyRecursiveAggregationModule,
 )
-from fleet_rlm.runtime.agent.signatures import VerifyRecursiveAggregation
 
-from .mlflow_optimization import split_examples
+from .artifacts import resolve_artifact_path
+from .datasets import load_dataset_rows, validate_required_keys
+from .module_registry import ModuleOptimizationSpec, register_module
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    action_match_score,
+    set_overlap_score,
+    text_presence_score,
+)
+
+# -- Module-specific constants -----------------------------------------------
 
 RecursiveVerificationRow = dict[str, Any]
 _INPUT_KEYS = [
@@ -26,41 +34,31 @@ _INPUT_KEYS = [
     "collected_subquery_outputs",
     "latest_sandbox_evidence",
 ]
-_DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/recursive-verification")
-_DAYTONA_ARTIFACT_ROOT = Path(
-    "/home/daytona/memory/artifacts/quality/recursive-verification"
+_REQUIRED_DATASET_KEYS = [*_INPUT_KEYS, "verification_status"]
+_MODULE_SLUG = "verification"
+_ARTIFACT_FILENAME = "verify_recursive_aggregation.json"
+_PROGRAM_SPEC = (
+    "fleet_rlm.runtime.agent.recursive_verification:VerifyRecursiveAggregationModule"
 )
+
+
+# -- Dataset conversion (module-specific) ------------------------------------
 
 
 def load_recursive_verification_rows(
     dataset_path: Path,
 ) -> list[RecursiveVerificationRow]:
     """Load a JSON or JSONL dataset of representative recursive verification traces."""
-
-    text = dataset_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("Recursive verification dataset is empty.")
-    if dataset_path.suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    payload = json.loads(text)
-    if isinstance(payload, list):
-        return payload
-    raise ValueError(
-        "Expected a JSON array or JSONL file of recursive verification examples."
-    )
+    return load_dataset_rows(dataset_path)
 
 
 def rows_to_recursive_verification_examples(
     rows: list[RecursiveVerificationRow],
 ) -> list[dspy.Example]:
     """Convert representative verification traces into DSPy examples."""
-
+    valid = validate_required_keys(rows, _REQUIRED_DATASET_KEYS, "Verification")
     examples: list[dspy.Example] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if any(key not in row for key in (*_INPUT_KEYS, "verification_status")):
-            continue
+    for row in valid:
         example = dspy.Example(
             user_request=str(row.get("user_request", "") or ""),
             assembled_recursive_context=str(
@@ -94,8 +92,12 @@ def rows_to_recursive_verification_examples(
     return examples
 
 
+# -- Metric (module-specific) ------------------------------------------------
+
+
 def build_recursive_verification_feedback_metric() -> Any:
     """Build a GEPA metric for verification quality, boundedness, and usefulness."""
+    from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
     def metric(
         gold: Any,
@@ -121,94 +123,91 @@ def build_recursive_verification_feedback_metric() -> Any:
         ).strip()
         bounded_outputs = list(getattr(gold, "collected_subquery_outputs", []) or [])
 
-        score = 0.0
-        feedback: list[str] = []
+        builder = ScoreFeedbackBuilder()
 
-        if actual_status == expected_status:
-            score += 0.35
-            feedback.append("Verification status matches the representative trace.")
-        else:
-            feedback.append(
-                f"Expected verification_status={expected_status!r} but received {actual_status!r}."
-            )
+        # Status match (0.35 weight)
+        builder.add(
+            0.35,
+            action_match_score(expected_status, actual_status),
+            "Verification status matches the representative trace."
+            if actual_status == expected_status
+            else f"Expected verification_status={expected_status!r} but received {actual_status!r}.",
+        )
 
+        # Missing evidence overlap (0.2 weight)
         if expected_missing:
-            missing_overlap = len(expected_missing & actual_missing) / len(
-                expected_missing
-            )
-            score += 0.2 * missing_overlap
-            feedback.append(
+            missing_overlap = set_overlap_score(expected_missing, actual_missing)
+            builder.add(
+                0.2,
+                missing_overlap,
                 "Missing-evidence selection preserves the representative gaps."
                 if missing_overlap >= 0.75
-                else "Missing-evidence selection missed important representative gaps."
+                else "Missing-evidence selection missed important representative gaps.",
             )
         elif not actual_missing:
-            score += 0.2
-            feedback.append("No missing evidence was expected or introduced.")
+            builder.add(0.2, 1.0, "No missing evidence was expected or introduced.")
 
+        # Contradiction overlap (0.2 weight)
         if expected_contradictions:
-            contradiction_overlap = len(
-                expected_contradictions & actual_contradictions
-            ) / len(expected_contradictions)
-            score += 0.2 * contradiction_overlap
-            feedback.append(
+            contradiction_overlap = set_overlap_score(
+                expected_contradictions, actual_contradictions
+            )
+            builder.add(
+                0.2,
+                contradiction_overlap,
                 "Contradictions match the representative verification trace."
                 if contradiction_overlap >= 0.75
-                else "Contradictions missed important representative conflicts."
+                else "Contradictions missed important representative conflicts.",
             )
         elif not actual_contradictions:
-            score += 0.2
-            feedback.append("No contradictions were expected or introduced.")
+            builder.add(0.2, 1.0, "No contradictions were expected or introduced.")
 
+        # Verified summary presence + boundedness (0.2 weight)
         if verified_summary:
-            score += 0.15
-            feedback.append("Verified summary is present.")
+            builder.add(0.15, 1.0, "Verified summary is present.")
             longest_input = max(
                 (len(str(item or "")) for item in bounded_outputs), default=0
             )
             if longest_input <= 0 or len(verified_summary) <= max(
                 240, longest_input * 2
             ):
-                score += 0.05
-                feedback.append(
-                    "Verified summary stays bounded relative to the inputs."
+                builder.add(
+                    0.05,
+                    1.0,
+                    "Verified summary stays bounded relative to the inputs.",
                 )
             else:
-                feedback.append(
-                    "Verified summary is too verbose for bounded recursive handoff."
+                builder.add(
+                    0.05,
+                    0.0,
+                    "Verified summary is too verbose for bounded recursive handoff.",
                 )
         else:
-            feedback.append("Verified summary is empty.")
+            builder.add(0.15, 0.0, "Verified summary is empty.")
 
-        if verification_rationale:
-            score += 0.05
-            feedback.append(
-                "Verification rationale explains the recursive decision signal."
-            )
-        else:
-            feedback.append(
-                "Verification rationale is empty; explain why the aggregate is or is not sufficient."
-            )
-
-        return ScoreWithFeedback(
-            score=max(0.0, min(1.0, score)),
-            feedback=" ".join(feedback),
+        # Rationale (0.05 weight)
+        builder.add(
+            0.05,
+            text_presence_score(verification_rationale),
+            "Verification rationale explains the recursive decision signal."
+            if verification_rationale
+            else "Verification rationale is empty; explain why the aggregate is or is not sufficient.",
         )
+
+        return builder.build()
 
     return metric
 
 
+# -- Artifact path (backward compat) ----------------------------------------
+
+
 def resolve_recursive_verification_output_path(output_path: Path | None = None) -> Path:
     """Resolve the default artifact path for optimized recursive verification prompts."""
+    return resolve_artifact_path(_MODULE_SLUG, _ARTIFACT_FILENAME, output_path)
 
-    if output_path is not None:
-        return output_path
-    root = (
-        _DAYTONA_ARTIFACT_ROOT
-        if _DAYTONA_ARTIFACT_ROOT.exists()
-        else _DEFAULT_ARTIFACT_ROOT
-    )
-    return root / "verify_recursive_aggregation.json"
+
+# -- Optimization entrypoint -------------------------------------------------
 
 
 def optimize_recursive_verification_module(
@@ -217,57 +216,18 @@ def optimize_recursive_verification_module(
     output_path: Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
-) -> dict[str, Any]:
+) -> OptimizationResult:
     """Run GEPA offline against the recursive verification module."""
-
-    examples = rows_to_recursive_verification_examples(
-        load_recursive_verification_rows(dataset_path)
+    return run_module_optimization(
+        _MODULE_SPEC,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        train_ratio=train_ratio,
+        auto=auto,
     )
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
-    metric = build_recursive_verification_feedback_metric()
-    program = VerifyRecursiveAggregationModule()
-    optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
 
-    validation_score = None
-    if valset:
-        validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
 
-    resolved_output_path = resolve_recursive_verification_output_path(output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_output_path))
-
-    manifest_path = resolved_output_path.with_suffix(".manifest.json")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "dataset_path": str(dataset_path),
-                "module": f"{VerifyRecursiveAggregation.__module__}:"
-                f"{VerifyRecursiveAggregation.__name__}",
-                "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "validation_score": validation_score,
-                "optimizer": "GEPA",
-                "metric": "recursive_verification_quality_and_boundedness",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "train_examples": len(trainset),
-        "validation_examples": len(valset),
-        "validation_score": validation_score,
-        "output_path": str(resolved_output_path),
-        "manifest_path": str(manifest_path),
-        "optimizer": "GEPA",
-        "program_spec": (
-            "fleet_rlm.runtime.agent.recursive_verification:"
-            "VerifyRecursiveAggregationModule"
-        ),
-    }
+# -- CLI ---------------------------------------------------------------------
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -312,3 +272,21 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -- Registry registration ---------------------------------------------------
+
+_MODULE_SPEC = ModuleOptimizationSpec(
+    module_slug=_MODULE_SLUG,
+    label="Verification",
+    program_spec=_PROGRAM_SPEC,
+    artifact_filename=_ARTIFACT_FILENAME,
+    input_keys=list(_INPUT_KEYS),
+    required_dataset_keys=list(_REQUIRED_DATASET_KEYS),
+    module_factory=VerifyRecursiveAggregationModule,
+    row_converter=rows_to_recursive_verification_examples,
+    metric_builder=build_recursive_verification_feedback_metric,
+    metric_name="recursive_verification_quality_and_boundedness",
+)
+
+register_module(_MODULE_SPEC)

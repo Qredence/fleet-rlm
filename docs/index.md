@@ -55,6 +55,10 @@ Then open `http://localhost:8000`.
 - [Historical Snapshots](historical/index.md)
 - [Phase-by-phase migration notes](historical/index.md#architecture-and-migration-history)
 
+### Product Specs
+
+- [Optimization Page Spec](specs/optimization-page.md)
+
 ### Contribute
 
 - [Contributing Guide](../CONTRIBUTING.md)

@@ -63,6 +63,12 @@ def test_daytona_smoke_help_exposes_repo_and_ref_options():
     assert "--ref" in help_text
 
 
+def test_optimize_list_does_not_require_dataset():
+    result = runner.invoke(app, ["optimize", "list"])
+    assert result.exit_code == 0
+    assert "Available modules:" in result.stdout
+
+
 def test_init_default_installs_all_categories(tmp_path: Path):
     target = tmp_path / "claude"
     result = runner.invoke(app, ["init", "--target", str(target)])

@@ -86,12 +86,41 @@ export interface paths {
      */
     get: operations["get_optimization_status_api_v1_optimization_status_get"];
   };
+  "/api/v1/optimization/modules": {
+    /**
+     * List Optimization Modules
+     * @description Return the list of registered optimizable DSPy modules.
+     */
+    get: operations["list_optimization_modules_api_v1_optimization_modules_get"];
+  };
   "/api/v1/optimization/run": {
     /**
      * Run Optimization
      * @description Trigger a GEPA prompt optimization run.
      */
     post: operations["run_optimization_api_v1_optimization_run_post"];
+  };
+  "/api/v1/optimization/runs": {
+    /**
+     * List Runs
+     * @description List optimization runs, most recent first.
+     */
+    get: operations["list_runs_api_v1_optimization_runs_get"];
+    /**
+     * Create Optimization Run
+     * @description Create a non-blocking GEPA optimization run.
+     *
+     * Returns immediately with the run_id.  The optimization executes as a
+     * background task.  Poll ``GET /runs/{run_id}`` for progress and results.
+     */
+    post: operations["create_optimization_run_api_v1_optimization_runs_post"];
+  };
+  "/api/v1/optimization/runs/{run_id}": {
+    /**
+     * Get Run
+     * @description Get a single optimization run by ID.
+     */
+    get: operations["get_run_api_v1_optimization_runs__run_id__get"];
   };
   "/api/v1/traces/feedback": {
     /**
@@ -143,6 +172,32 @@ export interface components {
       user_id?: string | null;
     };
     /**
+     * GEPAModuleInfo
+     * @description Metadata for a registered optimizable DSPy module.
+     */
+    GEPAModuleInfo: {
+      /**
+       * Slug
+       * @description Unique module identifier slug.
+       */
+      slug: string;
+      /**
+       * Label
+       * @description Human-readable module label.
+       */
+      label: string;
+      /**
+       * Program Spec
+       * @description DSPy program specification string.
+       */
+      program_spec: string;
+      /**
+       * Required Dataset Keys
+       * @description Dataset keys required for this module's examples.
+       */
+      required_dataset_keys: string[];
+    };
+    /**
      * GEPAOptimizationRequest
      * @description Request body for triggering a GEPA prompt optimization run.
      */
@@ -154,9 +209,15 @@ export interface components {
       dataset_path: string;
       /**
        * Program Spec
-       * @description DSPy program specification string to optimize in module:attr form.
+       * @description DSPy program specification string to optimize in module:attr form. Required when module_slug is not provided.
+       * @default
        */
-      program_spec: string;
+      program_spec?: string;
+      /**
+       * Module Slug
+       * @description Registered module slug for server-side dispatch. When provided, program_spec is auto-resolved from the module registry.
+       */
+      module_slug?: string | null;
       /**
        * Output Path
        * @description Optional filesystem path to save the optimized program.
@@ -219,6 +280,16 @@ export interface components {
        */
       output_path?: string | null;
       /**
+       * Manifest Path
+       * @description Filesystem path to the optimization manifest, when available.
+       */
+      manifest_path?: string | null;
+      /**
+       * Module Slug
+       * @description Module slug used for this optimization run, when server-side dispatch was used.
+       */
+      module_slug?: string | null;
+      /**
        * Error
        * @description Error message when the optimization run failed.
        */
@@ -275,6 +346,116 @@ export interface components {
        * @default 0.5.0
        */
       version?: string;
+    };
+    /**
+     * OptimizationRunCreatedResponse
+     * @description Response when an async optimization run is created.
+     */
+    OptimizationRunCreatedResponse: {
+      /**
+       * Run Id
+       * @description Unique identifier for the created run.
+       */
+      run_id: number;
+      /**
+       * Status
+       * @description Initial run status.
+       * @default running
+       */
+      status?: string;
+    };
+    /**
+     * OptimizationRunResponse
+     * @description A single optimization run record.
+     */
+    OptimizationRunResponse: {
+      /**
+       * Id
+       * @description Unique run identifier.
+       */
+      id: number;
+      /**
+       * Status
+       * @description Run status: running, completed, or failed.
+       */
+      status: string;
+      /**
+       * Module Slug
+       * @description Module slug when server-side dispatch was used.
+       */
+      module_slug?: string | null;
+      /**
+       * Program Spec
+       * @description DSPy program specification that was optimized.
+       */
+      program_spec: string;
+      /**
+       * Optimizer
+       * @description Optimizer backend that was used.
+       */
+      optimizer: string;
+      /**
+       * Auto
+       * @description Optimization intensity level.
+       * @default light
+       */
+      auto?: string | null;
+      /**
+       * Train Ratio
+       * @description Train/validation split ratio.
+       * @default 0.8
+       */
+      train_ratio?: number;
+      /**
+       * Dataset Path
+       * @description Path to the dataset used.
+       */
+      dataset_path?: string | null;
+      /**
+       * Train Examples
+       * @description Number of training examples used.
+       */
+      train_examples?: number | null;
+      /**
+       * Validation Examples
+       * @description Number of validation examples used.
+       */
+      validation_examples?: number | null;
+      /**
+       * Validation Score
+       * @description Validation score from the optimized program.
+       */
+      validation_score?: number | null;
+      /**
+       * Output Path
+       * @description Filesystem path where the optimized program was saved.
+       */
+      output_path?: string | null;
+      /**
+       * Manifest Path
+       * @description Filesystem path to the optimization manifest.
+       */
+      manifest_path?: string | null;
+      /**
+       * Error
+       * @description Error message when the run failed.
+       */
+      error?: string | null;
+      /**
+       * Phase
+       * @description Current phase of the optimization run.
+       */
+      phase?: string | null;
+      /**
+       * Started At
+       * @description ISO timestamp when the run started.
+       */
+      started_at: string;
+      /**
+       * Completed At
+       * @description ISO timestamp when the run completed.
+       */
+      completed_at?: string | null;
     };
     /**
      * ReadyResponse
@@ -1164,6 +1345,24 @@ export interface operations {
     };
   };
   /**
+   * List Optimization Modules
+   * @description Return the list of registered optimizable DSPy modules.
+   */
+  list_optimization_modules_api_v1_optimization_modules_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GEPAModuleInfo"][];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
    * Run Optimization
    * @description Trigger a GEPA prompt optimization run.
    */
@@ -1197,6 +1396,111 @@ export interface operations {
       /** @description GEPA optimization is unavailable in this environment. */
       503: {
         content: never;
+      };
+    };
+  };
+  /**
+   * List Runs
+   * @description List optimization runs, most recent first.
+   */
+  list_runs_api_v1_optimization_runs_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by status: running, completed, failed */
+        status?: string | null;
+        limit?: number;
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunResponse"][];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Optimization Run
+   * @description Create a non-blocking GEPA optimization run.
+   *
+   * Returns immediately with the run_id.  The optimization executes as a
+   * background task.  Poll ``GET /runs/{run_id}`` for progress and results.
+   */
+  create_optimization_run_api_v1_optimization_runs_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GEPAOptimizationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunCreatedResponse"];
+        };
+      };
+      /** @description Invalid optimization parameters. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description GEPA optimization is unavailable in this environment. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Run
+   * @description Get a single optimization run by ID.
+   */
+  get_run_api_v1_optimization_runs__run_id__get: {
+    parameters: {
+      path: {
+        run_id: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

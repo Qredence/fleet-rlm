@@ -107,6 +107,10 @@ Canonical shared endpoints:
 - `POST /api/v1/traces/feedback`
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
+- `GET /api/v1/optimization/modules`
+- `POST /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs/{run_id}`
 - `/api/v1/ws/execution`
 - `/api/v1/ws/execution/events`
 

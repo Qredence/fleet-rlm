@@ -363,6 +363,28 @@ paths:
           description: Authentication is required or the provided token is invalid.
       security:
         - HTTPBearer: []
+  /api/v1/optimization/modules:
+    get:
+      tags:
+        - optimization
+      summary: List Optimization Modules
+      description: Return the list of registered optimizable DSPy modules.
+      operationId: list_optimization_modules_api_v1_optimization_modules_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/GEPAModuleInfo"
+                type: array
+                title: Response List Optimization Modules Api V1 Optimization Modules
+                  Get
+        "401":
+          description: Authentication is required or the provided token is invalid.
+      security:
+        - HTTPBearer: []
   /api/v1/optimization/run:
     post:
       tags:
@@ -397,6 +419,132 @@ paths:
                 $ref: "#/components/schemas/HTTPValidationError"
       security:
         - HTTPBearer: []
+  /api/v1/optimization/runs:
+    post:
+      tags:
+        - optimization
+      summary: Create Optimization Run
+      description: "Create a non-blocking GEPA optimization run.
+
+
+        Returns immediately with the run_id.  The optimization executes as a
+
+        background task.  Poll ``GET /runs/{run_id}`` for progress and results."
+      operationId: create_optimization_run_api_v1_optimization_runs_post
+      security:
+        - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GEPAOptimizationRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationRunCreatedResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "400":
+          description: Invalid optimization parameters.
+        "503":
+          description: GEPA optimization is unavailable in this environment.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - optimization
+      summary: List Runs
+      description: List optimization runs, most recent first.
+      operationId: list_runs_api_v1_optimization_runs_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: "Filter by status: running, completed, failed"
+            title: Status
+          description: "Filter by status: running, completed, failed"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+            title: Offset
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OptimizationRunResponse"
+                title: Response List Runs Api V1 Optimization Runs Get
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}:
+    get:
+      tags:
+        - optimization
+      summary: Get Run
+      description: Get a single optimization run by ID.
+      operationId: get_run_api_v1_optimization_runs__run_id__get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Run Id
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationRunResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/traces/feedback:
     post:
       tags:
@@ -479,6 +627,34 @@ components:
         - user_claim
       title: AuthMeResponse
       description: Resolved identity payload returned to authenticated clients.
+    GEPAModuleInfo:
+      properties:
+        slug:
+          type: string
+          title: Slug
+          description: Unique module identifier slug.
+        label:
+          type: string
+          title: Label
+          description: Human-readable module label.
+        program_spec:
+          type: string
+          title: Program Spec
+          description: DSPy program specification string.
+        required_dataset_keys:
+          items:
+            type: string
+          type: array
+          title: Required Dataset Keys
+          description: Dataset keys required for this module's examples.
+      type: object
+      required:
+        - slug
+        - label
+        - program_spec
+        - required_dataset_keys
+      title: GEPAModuleInfo
+      description: Metadata for a registered optimizable DSPy module.
     GEPAOptimizationRequest:
       properties:
         dataset_path:
@@ -489,7 +665,15 @@ components:
           type: string
           title: Program Spec
           description: DSPy program specification string to optimize in module:attr
-            form.
+            form. Required when module_slug is not provided.
+          default: ""
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Registered module slug for server-side dispatch. When provided,
+            program_spec is auto-resolved from the module registry.
         output_path:
           anyOf:
             - type: string
@@ -514,7 +698,6 @@ components:
       type: object
       required:
         - dataset_path
-        - program_spec
       title: GEPAOptimizationRequest
       description: Request body for triggering a GEPA prompt optimization run.
     GEPAOptimizationResponse:
@@ -553,6 +736,19 @@ components:
             - type: "null"
           title: Output Path
           description: Filesystem path where the optimized program was saved.
+        manifest_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Manifest Path
+          description: Filesystem path to the optimization manifest, when available.
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Module slug used for this optimization run, when server-side
+            dispatch was used.
         error:
           anyOf:
             - type: string
@@ -618,6 +814,125 @@ components:
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
+    OptimizationRunCreatedResponse:
+      properties:
+        run_id:
+          type: integer
+          title: Run Id
+          description: Unique identifier for the created run.
+        status:
+          type: string
+          title: Status
+          description: Initial run status.
+          default: running
+      type: object
+      required:
+        - run_id
+      title: OptimizationRunCreatedResponse
+      description: Response when an async optimization run is created.
+    OptimizationRunResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+          description: Unique run identifier.
+        status:
+          type: string
+          title: Status
+          description: "Run status: running, completed, or failed."
+        module_slug:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Module Slug
+          description: Module slug when server-side dispatch was used.
+        program_spec:
+          type: string
+          title: Program Spec
+          description: DSPy program specification that was optimized.
+        optimizer:
+          type: string
+          title: Optimizer
+          description: Optimizer backend that was used.
+        auto:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Auto
+          description: Optimization intensity level.
+          default: light
+        train_ratio:
+          type: number
+          title: Train Ratio
+          description: Train/validation split ratio.
+          default: 0.8
+        dataset_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Dataset Path
+          description: Path to the dataset used.
+        train_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Train Examples
+          description: Number of training examples used.
+        validation_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Validation Examples
+          description: Number of validation examples used.
+        validation_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Validation Score
+          description: Validation score from the optimized program.
+        output_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Output Path
+          description: Filesystem path where the optimized program was saved.
+        manifest_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Manifest Path
+          description: Filesystem path to the optimization manifest.
+        error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error
+          description: Error message when the run failed.
+        phase:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phase
+          description: Current phase of the optimization run.
+        started_at:
+          type: string
+          title: Started At
+          description: ISO timestamp when the run started.
+        completed_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Completed At
+          description: ISO timestamp when the run completed.
+      type: object
+      required:
+        - id
+        - status
+        - program_spec
+        - optimizer
+        - started_at
+      title: OptimizationRunResponse
+      description: A single optimization run record.
     ReadyResponse:
       properties:
         ready:

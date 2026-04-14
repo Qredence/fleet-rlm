@@ -8,14 +8,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dspy
-from dspy.teleprompt import GEPA
-from dspy.teleprompt.gepa.gepa import ScoreWithFeedback
 
 from fleet_rlm.runtime.agent.recursive_context_selection import (
     AssembleRecursiveWorkspaceContextModule,
 )
-from fleet_rlm.runtime.agent.signatures import AssembleRecursiveWorkspaceContext
-from .mlflow_optimization import split_examples
+
+from .artifacts import resolve_artifact_path
+from .datasets import load_dataset_rows, validate_required_keys
+from .module_registry import ModuleOptimizationSpec, register_module
+from .optimization_runner import OptimizationResult, run_module_optimization
+from .scoring_helpers import (
+    ScoreFeedbackBuilder,
+    boundedness_score,
+    set_overlap_score,
+    text_presence_score,
+)
+
+# -- Module-specific constants -----------------------------------------------
 
 RecursiveContextSelectionRow = dict[str, Any]
 _INPUT_KEYS = [
@@ -27,48 +36,36 @@ _INPUT_KEYS = [
     "latest_tool_or_code_result",
     "context_budget",
 ]
-_DEFAULT_ARTIFACT_ROOT = Path(".data/quality-artifacts/recursive-context-selection")
-_DAYTONA_ARTIFACT_ROOT = Path(
-    "/home/daytona/memory/artifacts/quality/recursive-context-selection"
+_REQUIRED_DATASET_KEYS = [
+    *_INPUT_KEYS,
+    "selected_memory_handles",
+    "selected_evidence_ids",
+]
+_MODULE_SLUG = "context-selection"
+_ARTIFACT_FILENAME = "assemble_recursive_workspace_context.json"
+_PROGRAM_SPEC = (
+    "fleet_rlm.runtime.agent.recursive_context_selection:"
+    "AssembleRecursiveWorkspaceContextModule"
 )
+
+
+# -- Dataset conversion (module-specific) ------------------------------------
 
 
 def load_recursive_context_selection_rows(
     dataset_path: Path,
 ) -> list[RecursiveContextSelectionRow]:
     """Load a JSON or JSONL dataset of representative recursive context traces."""
-
-    text = dataset_path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError("Recursive context selection dataset is empty.")
-    if dataset_path.suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    payload = json.loads(text)
-    if isinstance(payload, list):
-        return payload
-    raise ValueError(
-        "Expected a JSON array or JSONL file of recursive context selection examples."
-    )
+    return load_dataset_rows(dataset_path)
 
 
 def rows_to_recursive_context_selection_examples(
     rows: list[RecursiveContextSelectionRow],
 ) -> list[dspy.Example]:
     """Convert representative recursive context traces into DSPy examples."""
-
+    valid = validate_required_keys(rows, _REQUIRED_DATASET_KEYS, "Context selection")
     examples: list[dspy.Example] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if any(
-            key not in row
-            for key in (
-                *_INPUT_KEYS,
-                "selected_memory_handles",
-                "selected_evidence_ids",
-            )
-        ):
-            continue
+    for row in valid:
         example = dspy.Example(
             user_request=str(row.get("user_request", "") or ""),
             current_plan=str(row.get("current_plan", "") or ""),
@@ -103,8 +100,12 @@ def rows_to_recursive_context_selection_examples(
     return examples
 
 
+# -- Metric (module-specific) ------------------------------------------------
+
+
 def build_recursive_context_selection_feedback_metric() -> Any:
     """Build a GEPA metric for recursive context relevance and boundedness."""
+    from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
     def metric(
         gold: Any,
@@ -124,75 +125,74 @@ def build_recursive_context_selection_feedback_metric() -> Any:
         expected_budget = int(getattr(gold, "context_budget", 0) or 0)
         omission_rationale = str(getattr(pred, "omission_rationale", "") or "").strip()
 
-        score = 0.0
-        feedback: list[str] = []
+        builder = ScoreFeedbackBuilder()
 
+        # Memory handle overlap (0.35 weight)
         if expected_memory:
-            memory_overlap = len(expected_memory & actual_memory) / len(expected_memory)
-            score += 0.35 * memory_overlap
-            if memory_overlap >= 0.75:
-                feedback.append(
-                    "Selected memory handles match the representative trace."
-                )
-            else:
-                feedback.append(
-                    "Memory-handle selection missed relevant Daytona-backed state."
-                )
+            mem_overlap = set_overlap_score(expected_memory, actual_memory)
+            builder.add(
+                0.35,
+                mem_overlap,
+                "Selected memory handles match the representative trace."
+                if mem_overlap >= 0.75
+                else "Memory-handle selection missed relevant Daytona-backed state.",
+            )
 
+        # Evidence overlap (0.35 weight)
         if expected_evidence:
-            evidence_overlap = len(expected_evidence & actual_evidence) / len(
-                expected_evidence
-            )
-            score += 0.35 * evidence_overlap
-            if evidence_overlap >= 0.75:
-                feedback.append("Selected evidence ids match the representative trace.")
-            else:
-                feedback.append(
-                    "Evidence selection missed relevant recent sandbox/code results."
-                )
-
-        if actual_summary:
-            score += 0.15
-            feedback.append("Assembled context summary is present.")
-            if expected_budget > 0 and len(actual_summary) <= expected_budget:
-                score += 0.1
-                feedback.append("Summary stays within the requested context budget.")
-            elif expected_budget > 0:
-                feedback.append(
-                    f"Summary exceeded the requested context budget of {expected_budget} characters."
-                )
-        else:
-            feedback.append("Assembled context summary is empty.")
-
-        if omission_rationale:
-            score += 0.05
-            feedback.append("Omission rationale explains what was left out.")
-        else:
-            feedback.append(
-                "Omission rationale is empty; explain how context size was controlled."
+            ev_overlap = set_overlap_score(expected_evidence, actual_evidence)
+            builder.add(
+                0.35,
+                ev_overlap,
+                "Selected evidence ids match the representative trace."
+                if ev_overlap >= 0.75
+                else "Evidence selection missed relevant recent sandbox/code results.",
             )
 
-        return ScoreWithFeedback(
-            score=max(0.0, min(1.0, score)),
-            feedback=" ".join(feedback),
+        # Summary presence (0.15 weight)
+        builder.add(
+            0.15,
+            text_presence_score(actual_summary),
+            "Assembled context summary is present."
+            if actual_summary
+            else "Assembled context summary is empty.",
         )
 
+        # Budget boundedness (0.1 weight)
+        if actual_summary and expected_budget > 0:
+            builder.add(
+                0.1,
+                boundedness_score(len(actual_summary), expected_budget),
+                "Summary stays within the requested context budget."
+                if len(actual_summary) <= expected_budget
+                else f"Summary exceeded the requested context budget of {expected_budget} characters.",
+            )
+
+        # Omission rationale (0.05 weight)
+        builder.add(
+            0.05,
+            text_presence_score(omission_rationale),
+            "Omission rationale explains what was left out."
+            if omission_rationale
+            else "Omission rationale is empty; explain how context size was controlled.",
+        )
+
+        return builder.build()
+
     return metric
+
+
+# -- Artifact path (backward compat) ----------------------------------------
 
 
 def resolve_recursive_context_selection_output_path(
     output_path: Path | None = None,
 ) -> Path:
     """Resolve the default artifact path for optimized recursive context prompts."""
+    return resolve_artifact_path(_MODULE_SLUG, _ARTIFACT_FILENAME, output_path)
 
-    if output_path is not None:
-        return output_path
-    root = (
-        _DAYTONA_ARTIFACT_ROOT
-        if _DAYTONA_ARTIFACT_ROOT.exists()
-        else _DEFAULT_ARTIFACT_ROOT
-    )
-    return root / "assemble_recursive_workspace_context.json"
+
+# -- Optimization entrypoint -------------------------------------------------
 
 
 def optimize_recursive_context_selection_module(
@@ -201,57 +201,18 @@ def optimize_recursive_context_selection_module(
     output_path: Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
-) -> dict[str, Any]:
+) -> OptimizationResult:
     """Run GEPA offline against the recursive context-selection module."""
-
-    examples = rows_to_recursive_context_selection_examples(
-        load_recursive_context_selection_rows(dataset_path)
+    return run_module_optimization(
+        _MODULE_SPEC,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        train_ratio=train_ratio,
+        auto=auto,
     )
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
-    metric = build_recursive_context_selection_feedback_metric()
-    program = AssembleRecursiveWorkspaceContextModule()
-    optimizer = GEPA(metric=metric, auto=auto)
-    optimized = optimizer.compile(program, trainset=trainset, valset=valset or None)
 
-    validation_score = None
-    if valset:
-        validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
 
-    resolved_output_path = resolve_recursive_context_selection_output_path(output_path)
-    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_output_path))
-
-    manifest_path = resolved_output_path.with_suffix(".manifest.json")
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "dataset_path": str(dataset_path),
-                "module": f"{AssembleRecursiveWorkspaceContext.__module__}:"
-                f"{AssembleRecursiveWorkspaceContext.__name__}",
-                "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "validation_score": validation_score,
-                "optimizer": "GEPA",
-                "metric": "recursive_context_relevance_and_boundedness",
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "train_examples": len(trainset),
-        "validation_examples": len(valset),
-        "validation_score": validation_score,
-        "output_path": str(resolved_output_path),
-        "manifest_path": str(manifest_path),
-        "optimizer": "GEPA",
-        "program_spec": (
-            "fleet_rlm.runtime.agent.recursive_context_selection:"
-            "AssembleRecursiveWorkspaceContextModule"
-        ),
-    }
+# -- CLI ---------------------------------------------------------------------
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -296,3 +257,21 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -- Registry registration ---------------------------------------------------
+
+_MODULE_SPEC = ModuleOptimizationSpec(
+    module_slug=_MODULE_SLUG,
+    label="Context Selection",
+    program_spec=_PROGRAM_SPEC,
+    artifact_filename=_ARTIFACT_FILENAME,
+    input_keys=list(_INPUT_KEYS),
+    required_dataset_keys=list(_REQUIRED_DATASET_KEYS),
+    module_factory=AssembleRecursiveWorkspaceContextModule,
+    row_converter=rows_to_recursive_context_selection_examples,
+    metric_builder=build_recursive_context_selection_feedback_metric,
+    metric_name="recursive_context_relevance_and_boundedness",
+)
+
+register_module(_MODULE_SPEC)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import dspy
 
@@ -71,7 +72,14 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
             Path(path).write_text('{"optimized": true}\n', encoding="utf-8")
 
     class _FakeGEPA:
-        def __init__(self, *, metric: Any, auto: str | None) -> None:
+        def __init__(
+            self,
+            *,
+            metric: Any,
+            auto: str | None,
+            reflection_lm: Any = None,
+            **kwargs: Any,
+        ) -> None:
             captured["metric"] = metric
             captured["auto"] = auto
 
@@ -97,12 +105,20 @@ def test_optimize_recursive_context_selection_module_runs_gepa_and_persists_arti
             return 91.0
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimize_recursive_context_selection.GEPA",
+        "dspy.teleprompt.GEPA",
         _FakeGEPA,
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimize_recursive_context_selection.dspy.Evaluate",
+        "dspy.Evaluate",
         _FakeEvaluate,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
+        lambda: None,
     )
 
     result = optimize_recursive_context_selection_module(
@@ -141,7 +157,14 @@ def test_optimize_recursive_context_selection_module_uses_none_for_empty_valset(
             Path(path).write_text('{"optimized": true}\n', encoding="utf-8")
 
     class _FakeGEPA:
-        def __init__(self, *, metric: Any, auto: str | None) -> None:
+        def __init__(
+            self,
+            *,
+            metric: Any,
+            auto: str | None,
+            reflection_lm: Any = None,
+            **kwargs: Any,
+        ) -> None:
             _ = metric, auto
 
         def compile(
@@ -156,8 +179,16 @@ def test_optimize_recursive_context_selection_module_uses_none_for_empty_valset(
             return _FakeOptimizedProgram()
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimize_recursive_context_selection.GEPA",
+        "dspy.teleprompt.GEPA",
         _FakeGEPA,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
+        lambda: None,
     )
 
     result = optimize_recursive_context_selection_module(

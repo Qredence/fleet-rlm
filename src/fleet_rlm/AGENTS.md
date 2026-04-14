@@ -135,6 +135,10 @@ Runtime ownership:
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
+- Keep shared evaluation infrastructure in `runtime/quality/datasets.py`, `runtime/quality/scoring_helpers.py`, `runtime/quality/artifacts.py`, `runtime/quality/module_registry.py`, and `runtime/quality/optimization_runner.py`
+- Keep per-module optimization entrypoints in `runtime/quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
+- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend
+- GEPA runs offline only — never in the live request path
 - Keep grouped tool helpers under:
   - `runtime/tools/content/*`
   - `runtime/tools/sandbox/*`
