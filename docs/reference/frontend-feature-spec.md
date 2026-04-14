@@ -468,14 +468,14 @@ This prevents each page from inventing its own interpretation. Status is managed
 
 | Component | Module | Purpose |
 |-----------|--------|---------|
-| `WorkspaceComposer` | `app/workspace/workspace-composer.tsx` | Task input area |
-| `WorkspaceMessageList` | `app/workspace/transcript/workspace-message-list.tsx` | Execution stream |
-| `RunWorkbench` | `app/workspace/workbench/run-workbench.tsx` | Execution detail panel |
-| `MessageInspectorPanel` | `app/workspace/inspector/message-inspector-panel.tsx` | Turn inspector |
-| `ArtifactGraph` | `app/workspace/inspector/artifact-graph.tsx` | Step dependency graph |
-| `ClarificationCard` | `app/workspace/clarification-card.tsx` | Clarification prompt |
-| `ChainOfThought` | `app/workspace/chain-of-thought.tsx` | Step timeline |
-| `Sandbox` | `app/workspace/sandbox.tsx` | Code execution display |
+| `WorkspaceComposer` | `features/workspace/ui/workspace-composer.tsx` | Task input area |
+| `WorkspaceMessageList` | `features/workspace/ui/transcript/workspace-message-list.tsx` | Execution stream |
+| `RunWorkbench` | `features/workspace/ui/workbench/run-workbench.tsx` | Execution detail panel |
+| `MessageInspectorPanel` | `features/workspace/ui/inspector/message-inspector-panel.tsx` | Turn inspector |
+| `ArtifactGraph` | `features/workspace/ui/inspector/artifact-graph.tsx` | Step dependency graph |
+| `ClarificationCard` | `features/workspace/ui/clarification-card.tsx` | Clarification prompt |
+| `ChainOfThought` | `features/workspace/ui/chain-of-thought.tsx` | Step timeline |
+| `Sandbox` | `features/workspace/ui/sandbox.tsx` | Code execution display |
 
 ### Recommended Future Components
 

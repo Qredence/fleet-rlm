@@ -49,7 +49,7 @@ src/
 ├── components/       # Reusable UI primitives
 │   ├── ui/          # shadcn/Base UI components
 │   ├── ai-elements/ # AI-specific components (conversation, message)
-│   └── patterns/    # App-owned composition patterns
+│   └── product/     # App-owned composition patterns
 └── lib/             # Business logic and integrations
     ├── workspace/   # State stores and event adapters
     └── rlm-api/     # REST and websocket clients
@@ -140,7 +140,7 @@ Events from the backend websocket (`WsEventKind`):
 
 1. Add the event kind to `WsEventKind` in `lib/rlm-api/ws-types.ts`
 2. Update `applyWsFrameToMessages()` in `lib/workspace/backend-chat-event-adapter.ts`
-3. Add rendering in `app/workspace/transcript/trace-part-renderers.tsx`
+3. Add rendering in `src/features/workspace/ui/transcript/trace-part-renderers.tsx`
 4. Update display item building in `lib/workspace/chat-display-items.ts` if needed
 
 ## Component Patterns
@@ -150,7 +150,7 @@ Events from the backend websocket (`WsEventKind`):
 Use the execution status pattern components for consistent state display:
 
 ```tsx
-import { StatusBadge, StatusIndicator, StatusMessage } from "@/components/patterns/execution-status";
+import { StatusBadge, StatusIndicator, StatusMessage } from "@/components/product/execution-status";
 
 <StatusBadge status="running" />
 <StatusIndicator status="completed" />
@@ -164,7 +164,7 @@ import { StatusBadge, StatusIndicator, StatusMessage } from "@/components/patter
 Use section layout components for consistent spacing and structure:
 
 ```tsx
-import { Section, SectionHeader, SectionContent } from "@/components/patterns/section-layout";
+import { Section, SectionHeader, SectionContent } from "@/components/product/section-layout";
 
 <Section spacing="default">
   <SectionHeader title="Execution Trace" />
@@ -179,7 +179,7 @@ import { Section, SectionHeader, SectionContent } from "@/components/patterns/se
 The empty state pattern shows contextual guidance:
 
 ```tsx
-import { EmptyPanel } from "@/components/patterns/empty-panel";
+import { EmptyPanel } from "@/components/product/empty-panel";
 
 <EmptyPanel
   title="No results yet"

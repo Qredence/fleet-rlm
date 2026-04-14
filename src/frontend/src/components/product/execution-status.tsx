@@ -4,6 +4,7 @@
  * Reusable status indicators for workspace execution states.
  * Maps backend execution states to polished UI representations.
  */
+import type React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
   CheckCircle2,
