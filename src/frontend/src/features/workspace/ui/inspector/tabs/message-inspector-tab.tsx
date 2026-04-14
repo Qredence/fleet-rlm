@@ -43,8 +43,7 @@ export const MessageInspectorTab = memo(function MessageInspectorTab({
             <div className={inspectorStyles.badge.row}>
               {model.summary.trajectoryCount > 0 ? (
                 <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                  {model.summary.trajectoryCount} trajector
-                  {model.summary.trajectoryCount === 1 ? "y" : "ies"}
+                  {`${model.summary.trajectoryCount} ${model.summary.trajectoryCount === 1 ? "trajectory" : "trajectories"}`}
                 </Badge>
               ) : null}
               {model.summary.toolSessionCount > 0 ? (

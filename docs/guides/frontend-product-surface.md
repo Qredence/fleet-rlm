@@ -35,17 +35,16 @@ src/
 ├── routes/           # File-based routing (TanStack Router)
 ├── features/         # Product surface entry points
 │   ├── workspace/    # Main workbench surface
+│   │   └── ui/       # Workspace UI components
+│   │       ├── transcript/       # Message list and rendering
+│   │       ├── assistant-content/ # Turn display components
+│   │       ├── composer/         # Input area controls
+│   │       ├── inspector/        # Side panel details
+│   │       └── workbench/        # Execution trace display
 │   ├── volumes/      # Durable storage browser
 │   ├── optimization/ # DSPy optimization UI
 │   ├── settings/     # Configuration screens
 │   └── layout/       # App chrome and shell
-├── app/              # Feature implementation internals
-│   └── workspace/    # Workspace UI components
-│       ├── transcript/       # Message list and rendering
-│       ├── assistant-content/ # Turn display components
-│       ├── composer/         # Input area controls
-│       ├── inspector/        # Side panel details
-│       └── workbench/        # Execution trace display
 ├── components/       # Reusable UI primitives
 │   ├── ui/          # shadcn/Base UI components
 │   ├── ai-elements/ # AI-specific components (conversation, message)
@@ -57,7 +56,7 @@ src/
 
 ### Key Component Boundaries
 
-**Feature entry points** (`features/*`) are thin wrappers that compose implementation from `app/*` and `lib/*`:
+**Feature entry points** (`features/*`) are thin wrappers that compose implementation from `features/*/ui/*` and `lib/*`:
 
 ```tsx
 // features/workspace/workspace-screen.tsx
@@ -65,17 +64,17 @@ export function WorkspaceScreen() {
   const runtime = useWorkspace(); // from lib/workspace
   return (
     <div>
-      <WorkspaceMessageList {...} /> {/* from app/workspace */}
+      <WorkspaceMessageList {...} /> {/* from features/workspace/ui */}
       <WorkspaceComposer {...} />
     </div>
   );
 }
 ```
 
-**Implementation components** (`app/workspace/*`) handle rendering and user interaction but don't own business logic:
+**Implementation components** (`features/workspace/ui/*`) handle rendering and user interaction but don't own business logic:
 
 ```tsx
-// app/workspace/transcript/workspace-message-list.tsx
+// features/workspace/ui/transcript/workspace-message-list.tsx
 export function WorkspaceMessageList({ messages, isTyping, ... }) {
   // Pure rendering logic, receives props from parent
 }
@@ -261,7 +260,7 @@ The workspace adapts at these breakpoints:
 Tests are colocated with their modules under `__tests__/`:
 
 ```
-app/workspace/transcript/__tests__/
+features/workspace/ui/transcript/__tests__/
   workspace-message-list.ai-elements.test.tsx
   workspace-chat-empty-state.test.tsx
 ```

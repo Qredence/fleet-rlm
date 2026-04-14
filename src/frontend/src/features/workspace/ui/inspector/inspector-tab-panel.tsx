@@ -1,8 +1,7 @@
 /**
  * InspectorTabPanel — shared scroll + padding wrapper for inspector tab content.
  *
- * All four inspector tabs (evidence, execution, trajectory, graph) use the
- * same outer structure:
+ * All inspector tabs (message, execution, graph) use the same outer structure:
  *
  *   TabsContent (min-h-0 flex-1)
  *     ScrollArea (h-full)
@@ -14,10 +13,11 @@
 import type { ReactNode } from "react";
 import { TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { InspectorTab } from "@/lib/workspace/workspace-types";
 import { inspectorStyles } from "./inspector-styles";
 
 interface InspectorTabPanelProps {
-  value: string;
+  value: InspectorTab;
   children: ReactNode;
 }
 
