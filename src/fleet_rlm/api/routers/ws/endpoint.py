@@ -21,10 +21,18 @@ from fleet_rlm.integrations.observability.trace_context import (
 )
 from fleet_rlm.runtime.config import build_dspy_context
 
-from ...dependencies import get_server_state_from_websocket
+from ...auth import NormalizedIdentity
+from ...dependencies import ServerState, get_server_state_from_websocket
 from ...events import ExecutionSubscription
 from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
+)
+from ...runtime_services.chat_runtime import (
+    PreparedChatRuntime as _PreparedChatRuntime,
+    build_chat_agent_context as _build_chat_agent_context,
+    new_chat_session_state as _new_chat_session_state,
+    prepare_chat_runtime as _prepare_chat_runtime_service,
+    set_interpreter_default_profile as _set_interpreter_default_profile,
 )
 from ...server_utils import sanitize_id as _sanitize_id
 from .execution_support import get_execution_emitter
@@ -37,18 +45,39 @@ from .helpers import (
     _try_send_json,
 )
 from .messages import parse_ws_message_or_send_error
-from .runtime import (
-    _build_chat_agent_context,
-    _new_chat_session_state,
-    _prepare_chat_runtime,
-    _set_interpreter_default_profile,
-)
 from .stream import _chat_message_loop
 from .terminal import build_stream_event_dict
 
 router = APIRouter(tags=["websocket"])
 
 logger = logging.getLogger(__name__)
+
+
+async def _prepare_chat_runtime(
+    *,
+    websocket: WebSocket,
+    state: ServerState,
+    identity: NormalizedIdentity,
+) -> _PreparedChatRuntime | None:
+    async def _send_error(
+        target: WebSocket,
+        *,
+        code: str,
+        message: str,
+    ) -> bool:
+        return await _try_send_json(
+            target,
+            _error_envelope(code=code, message=message),
+        )
+
+    return await _prepare_chat_runtime_service(
+        websocket=websocket,
+        state=state,
+        identity=identity,
+        send_error=_send_error,
+        close_websocket=_close_websocket_safely,
+    )
+
 
 _EXECUTION_STARTUP_STATUS_DELAY_SECONDS = 0.25
 

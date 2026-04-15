@@ -19,7 +19,7 @@ from fleet_rlm.integrations.observability.trace_context import (
 
 from ...events import ExecutionStepBuilder
 from .errors import handle_stream_error
-from .lifecycle import ExecutionLifecycleManager
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .task_control import enqueue_latest_nonblocking, should_reload_docs_path
 from .turn_persistence import _emit_stream_event, complete_run_if_needed
 from .turn_setup import PreparedStreamingTurn

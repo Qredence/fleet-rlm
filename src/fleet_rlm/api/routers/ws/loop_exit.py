@@ -11,7 +11,7 @@ from fleet_rlm.integrations.database import RunStatus
 
 from .failures import PersistenceRequiredError, classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
-from .lifecycle import ExecutionLifecycleManager
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .task_control import cancel_task
 from .types import LocalPersistFn
 

@@ -15,7 +15,7 @@ from ..api.routers.ws.completion import (
     build_execution_completion_summary,
     final_event_failed,
 )
-from ..api.routers.ws.lifecycle import ExecutionLifecycleManager
+from ..api.runtime_services.chat_persistence import ExecutionLifecycleManager
 from ..api.routers.ws.types import LocalPersistFn, StreamEventLike
 
 logger = logging.getLogger(__name__)

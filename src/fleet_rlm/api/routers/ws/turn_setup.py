@@ -8,11 +8,14 @@ from typing import Any
 from fastapi import WebSocket
 
 from ...runtime_services.chat_persistence import initialize_turn_lifecycle
+from ...runtime_services.chat_runtime import (
+    ChatSessionState as _ChatSessionState,
+    PreparedChatRuntime as _PreparedChatRuntime,
+)
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .helpers import _try_send_json
-from .lifecycle import ExecutionLifecycleManager
-from .runtime import _ChatSessionState, _PreparedChatRuntime
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .types import (
     ChatAgentProtocol,
     DaytonaChatRequestOptions,

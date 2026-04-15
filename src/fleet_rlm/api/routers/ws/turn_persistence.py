@@ -15,7 +15,7 @@ from fleet_rlm.worker import WorkspaceEvent
 
 from ...events import ExecutionStepBuilder
 from .helpers import _try_send_json
-from .lifecycle import ExecutionLifecycleManager
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
 from .types import LocalPersistFn, StreamEventLike
 
