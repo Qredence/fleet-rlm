@@ -1768,6 +1768,7 @@ server = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest-timeout" },
+    { name = "ty" },
 ]
 
 [package.metadata]
@@ -1842,7 +1843,10 @@ requires-dist = [
 provides-extras = ["dev", "mcp", "server", "full"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest-timeout", specifier = ">=2.4.0" }]
+dev = [
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "ty", specifier = ">=0.0.29" },
+]
 
 [[package]]
 name = "fonttools"
