@@ -77,9 +77,7 @@ def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
     assert events[0].kind == "hitl_request"
     assert isinstance(events[0].payload["message_id"], str)
     assert events[1].kind == "final"
-    assert (
-        session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
-    )
+    assert session_record["orchestration"]["workflow_stage"] == "awaiting_hitl"
 
 
 def test_stream_hosted_workspace_task_preserves_worker_boundary(
@@ -127,9 +125,7 @@ def test_stream_hosted_workspace_task_preserves_worker_boundary(
     assert events[0].kind == "hitl_request"
     assert events[1].kind == "final"
     assert isinstance(events[0].payload["message_id"], str)
-    assert (
-        session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
-    )
+    assert session_record["orchestration"]["workflow_stage"] == "awaiting_hitl"
 
 
 def test_stream_hosted_workspace_task_owns_bridge_lifecycle(monkeypatch) -> None:

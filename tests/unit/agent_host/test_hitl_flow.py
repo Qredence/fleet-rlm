@@ -31,9 +31,7 @@ def test_checkpoint_hitl_request_updates_session_state_and_payload() -> None:
 
     assert event.kind == "hitl_request"
     assert isinstance(event.payload["message_id"], str)
-    assert (
-        session_record["orchestration"]["workflow_stage"] == "awaiting_hitl_resolution"
-    )
+    assert session_record["orchestration"]["workflow_stage"] == "awaiting_hitl"
     assert (
         session_record["orchestration"]["pending_approval"]["message_id"]
         == (event.payload["message_id"])
@@ -77,16 +75,16 @@ def test_resolve_hitl_continuation_updates_checkpoint_state() -> None:
         "message_id": "hitl-123",
         "resolution": "Approve",
     }
-    assert session_record["orchestration"]["workflow_stage"] == "continued"
+    assert session_record["orchestration"]["workflow_stage"] == "hitl_resolved"
     assert session_record["orchestration"]["continuation"]["continuation_token"] == (
         "token-123"
     )
     assert session_record["orchestration"]["continuation"]["resolution"] == "Approve"
     assert (
         session_record["manifest"]["metadata"]["orchestration"]["workflow_stage"]
-        == "continued"
+        == "hitl_resolved"
     )
-    assert session.workflow_stage == "continued"
+    assert session.workflow_stage == "hitl_resolved"
     assert session.continuation_token == "token-123"
     assert session.continuation is not None
     assert session.continuation.resolution == "Approve"

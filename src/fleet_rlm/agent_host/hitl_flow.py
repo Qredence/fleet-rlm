@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from datetime import datetime, timedelta, timezone
+
 from fleet_rlm.worker import WorkspaceEvent
 
 from .checkpoints import (
@@ -102,6 +104,7 @@ def checkpoint_hitl_request(
     *,
     event: WorkspaceEvent,
     session: OrchestrationSessionContext | None,
+    timeout_seconds: int | None = None,
 ) -> WorkspaceEvent:
     """Attach continuation state to HITL worker events inside the host layer."""
 
@@ -117,6 +120,14 @@ def checkpoint_hitl_request(
     if isinstance(payload.get("hitl"), dict):
         payload["hitl"] = {**payload["hitl"], "message_id": message_id}
     if session is not None:
+        timeout_at: str | None = None
+        if timeout_seconds is not None:
+            requested_at_dt = datetime.now(timezone.utc)
+            timeout_at = (
+                (requested_at_dt + timedelta(seconds=timeout_seconds))
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
         session.save_checkpoint_state(
             checkpoint_for_hitl_request(
                 message_id=message_id,
@@ -128,6 +139,7 @@ def checkpoint_hitl_request(
                 ),
                 source=str(checkpoint_payload.get("source", "")).strip() or None,
                 action_labels=_extract_action_labels(checkpoint_payload),
+                timeout_at=timeout_at,
             )
         )
     return WorkspaceEvent(
@@ -185,7 +197,7 @@ def resolve_hitl_continuation(
             continuation.resolution = action_label
             session.save_checkpoint_state(
                 OrchestrationCheckpointState(
-                    workflow_stage="continued",
+                    workflow_stage="hitl_resolved",
                     continuation=continuation,
                 )
             )
