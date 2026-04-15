@@ -4,50 +4,35 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.agent_host import (
-    OrchestrationSessionContext,
-    ReplHookBridge,
+    OrchestrationSessionContext,  # noqa: F401 — re-exported for backwards compat
+    ReplHookBridge,  # noqa: F401 — re-exported for backwards compat
     build_orchestration_session_context,
-    stream_hosted_workspace_task,
 )
-from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.integrations.observability.mlflow_context import (
-    merge_trace_result_metadata as _merge_trace_result_metadata,
-)
-from fleet_rlm.integrations.observability.trace_context import (
-    runtime_telemetry_enabled_context,
-)
-from fleet_rlm.worker import WorkspaceEvent
 
 from ...dependencies import ServerState
-from ...events import ExecutionEventEmitter, ExecutionStepBuilder
+from ...events import ExecutionEventEmitter
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
 from .execution_support import get_execution_emitter
-from .errors import handle_stream_error
 from .helpers import _try_send_json
-from .lifecycle import ExecutionLifecycleManager
+from .lifecycle import ExecutionLifecycleManager  # noqa: F401 — re-exported for compat
 from .loop_exit import handle_chat_disconnect, handle_chat_loop_exception
 from .messages import parse_ws_message_or_send_error, resolve_session_identity
 from .runtime import _ChatSessionState, _PreparedChatRuntime
-from .session import (
-    switch_session_if_needed,
-)
-from .task_control import (
-    cancelled_event_payload,
-    enqueue_latest_nonblocking,
-    should_reload_docs_path,
-)
-from .terminal import build_stream_event_dict, handle_terminal_stream_event
-from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
-from .types import ChatAgentProtocol, LocalPersistFn, StreamEventLike
-from .worker_request import build_workspace_task_request
+from .session import switch_session_if_needed
+from .task_control import cancelled_event_payload, enqueue_latest_nonblocking  # noqa: F401
+from .turn_persistence import _emit_stream_event  # noqa: F401 — re-exported for backwards compat
+from .turn_persistence import _is_terminal_transport_event  # noqa: F401 — re-exported for backwards compat
+from .turn_persistence import _runtime_trace_metadata  # noqa: F401 — re-exported for backwards compat
+from .turn_persistence import merge_trace_result_metadata  # noqa: F401 — re-exported for backwards compat
+from .turn_runner import run_streaming_turn
+from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn  # noqa: F401
+from .types import ChatAgentProtocol, LocalPersistFn, StreamEventLike  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -57,284 +42,6 @@ class _ResolvedSessionTarget:
     workspace_id: str
     user_id: str
     sess_id: str
-
-
-def merge_trace_result_metadata(
-    payload: dict[str, Any] | None,
-    *,
-    response_preview: str | None = None,
-    trace_metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Compatibility shim for MLflow final-event metadata enrichment."""
-    return _merge_trace_result_metadata(
-        payload,
-        response_preview=response_preview,
-        trace_metadata=trace_metadata,
-    )
-
-
-def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-
-    runtime_payload = payload.get("runtime")
-    runtime = runtime_payload if isinstance(runtime_payload, dict) else {}
-
-    metadata: dict[str, Any] = {}
-    for key in (
-        "runtime_degraded",
-        "runtime_failure_category",
-        "runtime_failure_phase",
-        "runtime_fallback_used",
-    ):
-        value = payload.get(key, runtime.get(key))
-        if value in (None, "", False):
-            if key in {"runtime_degraded", "runtime_fallback_used"} and value is False:
-                metadata[key] = False
-            continue
-        metadata[key] = value
-    return metadata
-
-
-def _is_terminal_transport_event(event: StreamEventLike) -> bool:
-    """Return websocket-terminal semantics for worker and legacy runtime events."""
-
-    return bool(getattr(event, "terminal", False)) or event.kind in {
-        "final",
-        "cancelled",
-        "error",
-    }
-
-
-async def run_streaming_turn(
-    *,
-    websocket: WebSocket,
-    agent: ChatAgentProtocol,
-    prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
-    cancel_check: Callable[[], bool],
-    interpreter: object | None,
-    persist_session_state: LocalPersistFn,
-) -> str | None:
-    """Execute one streaming turn, emitting events and persisting lifecycle steps."""
-
-    lifecycle = prepared_turn.lifecycle
-    step_builder = prepared_turn.step_builder
-    await lifecycle.emit_started()
-    ws_loop = asyncio.get_running_loop()
-    repl_hook_bridge = ReplHookBridge(
-        ws_loop=ws_loop,
-        lifecycle=lifecycle,
-        step_builder=step_builder,
-        interpreter=interpreter,
-        enqueue_nonblocking=enqueue_latest_nonblocking,
-    )
-
-    last_loaded_docs_path = prepared_turn.last_loaded_docs_path
-    if should_reload_docs_path(last_loaded_docs_path, prepared_turn.docs_path):
-        agent.load_document(str(prepared_turn.docs_path))
-        last_loaded_docs_path = str(prepared_turn.docs_path).strip()
-
-    try:
-
-        async def _stream_body() -> None:
-            await _stream_agent_events(
-                websocket=websocket,
-                agent=agent,
-                prepared_turn=prepared_turn,
-                orchestration_session=orchestration_session,
-                cancel_check=cancel_check,
-                lifecycle=lifecycle,
-                hosted_repl_bridge=repl_hook_bridge,
-                step_builder=step_builder,
-                analytics_enabled=prepared_turn.analytics_enabled,
-                persist_session_state=persist_session_state,
-            )
-
-        await _run_prepared_stream(
-            mlflow_trace_context=prepared_turn.mlflow_trace_context,
-            stream_body=_stream_body,
-        )
-    except WebSocketDisconnect:
-        raise
-    except Exception as exc:
-        await handle_stream_error(
-            websocket=websocket,
-            lifecycle=lifecycle,
-            step_builder=step_builder,
-            exc=exc,
-            request_message=prepared_turn.message,
-        )
-
-    return last_loaded_docs_path
-
-
-async def _run_prepared_stream(
-    *,
-    mlflow_trace_context: Any | None,
-    stream_body: Callable[[], Awaitable[None]],
-) -> None:
-    if mlflow_trace_context is None:
-        await stream_body()
-        return
-
-    from fleet_rlm.integrations.observability.mlflow_runtime import (
-        mlflow_request_context,
-    )
-
-    with mlflow_request_context(mlflow_trace_context):
-        await stream_body()
-
-
-async def _stream_agent_events(
-    *,
-    websocket: WebSocket,
-    agent: ChatAgentProtocol,
-    prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
-    cancel_check: Callable[[], bool],
-    lifecycle: ExecutionLifecycleManager,
-    hosted_repl_bridge: ReplHookBridge | None,
-    step_builder: ExecutionStepBuilder,
-    analytics_enabled: bool | None,
-    persist_session_state: LocalPersistFn,
-) -> None:
-    worker_request = build_workspace_task_request(
-        agent=agent,
-        prepared_turn=prepared_turn,
-        cancel_check=cancel_check,
-    )
-
-    with runtime_telemetry_enabled_context(analytics_enabled):
-        # The Agent Framework outer host owns hosted HITL plus hosted
-        # continuation/session policy while still preserving the worker seam.
-        async for worker_event in stream_hosted_workspace_task(
-            request=worker_request,
-            session=orchestration_session,
-            hosted_repl_bridge=hosted_repl_bridge,
-        ):
-            await _emit_stream_event(
-                websocket=websocket,
-                lifecycle=lifecycle,
-                step_builder=step_builder,
-                event=worker_event,
-                orchestration_session=orchestration_session,
-                persist_session_state=persist_session_state,
-                request_message=prepared_turn.message,
-            )
-
-    if not lifecycle.run_completed:
-        lifecycle.raise_if_persistence_error()
-        await lifecycle.complete_run(RunStatus.COMPLETED)
-
-
-async def _emit_stream_event(
-    *,
-    websocket: WebSocket,
-    lifecycle: ExecutionLifecycleManager,
-    step_builder: ExecutionStepBuilder,
-    event: WorkspaceEvent | StreamEventLike,
-    orchestration_session: OrchestrationSessionContext | None = None,
-    persist_session_state: LocalPersistFn,
-    request_message: str,
-) -> None:
-    lifecycle.raise_if_persistence_error()
-    payload = event.payload
-    if event.kind == "final":
-        payload = merge_trace_result_metadata(
-            payload if isinstance(payload, dict) else None,
-            response_preview=event.text,
-            trace_metadata=_runtime_trace_metadata(
-                payload if isinstance(payload, dict) else None
-            ),
-        )
-    event_dict = build_stream_event_dict(event=event, payload=payload)
-    is_terminal_event = _is_terminal_transport_event(event)
-    if not is_terminal_event:
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
-
-    event_timestamp = event.timestamp.timestamp()
-    step = step_builder.from_stream_event(
-        kind=event.kind,
-        text=event.text,
-        payload=payload,
-        timestamp=event_timestamp,
-    )
-    if step is not None:
-        await lifecycle.emit_step(step)
-        await lifecycle.persist_step(step)
-        lifecycle.raise_if_persistence_error()
-
-    if is_terminal_event:
-        await handle_terminal_stream_event(
-            websocket=websocket,
-            lifecycle=lifecycle,
-            event=event,
-            event_dict=event_dict,
-            step=step,
-            orchestration_session=orchestration_session,
-            persist_session_state=persist_session_state,
-            request_message=request_message,
-        )
-        return
-
-
-async def _process_chat_message(
-    *,
-    websocket: WebSocket,
-    msg: WSMessage,
-    agent: ChatAgentProtocol,
-    interpreter: object | None,
-    session: _ChatSessionState,
-    local_persist: LocalPersistFn,
-    runtime: _PreparedChatRuntime,
-    workspace_id: str,
-    user_id: str,
-    sess_id: str,
-    execution_emitter: ExecutionEventEmitter,
-) -> str | None:
-    """Process one ``message`` payload and return the loaded docs path."""
-    prepared_turn = await prepare_chat_message_turn(
-        websocket=websocket,
-        msg=msg,
-        agent=agent,
-        session=session,
-        local_persist=local_persist,
-        runtime=runtime,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sess_id=sess_id,
-        execution_emitter=execution_emitter,
-    )
-    if prepared_turn is None:
-        return session.last_loaded_docs_path
-
-    def cancel_check() -> bool:
-        return session.cancel_flag["cancelled"]
-
-    orchestration_session = (
-        session.orchestration_session
-        or build_orchestration_session_context(
-            session_record=session.session_record,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            session_id=sess_id,
-            key=session.active_key,
-            manifest_path=session.active_manifest_path,
-        )
-    )
-    session.orchestration_session = orchestration_session
-
-    return await run_streaming_turn(
-        websocket=websocket,
-        agent=agent,
-        prepared_turn=prepared_turn,
-        orchestration_session=orchestration_session,
-        cancel_check=cancel_check,
-        interpreter=interpreter,
-        persist_session_state=local_persist,
-    )
 
 
 def _ensure_pending_receive_task(
@@ -521,6 +228,63 @@ async def _resolve_session_target(
         workspace_id=workspace_id,
         user_id=user_id,
         sess_id=sess_id,
+    )
+
+
+async def _process_chat_message(
+    *,
+    websocket: WebSocket,
+    msg: WSMessage,
+    agent: ChatAgentProtocol,
+    interpreter: object | None,
+    session: _ChatSessionState,
+    local_persist: LocalPersistFn,
+    runtime: _PreparedChatRuntime,
+    workspace_id: str,
+    user_id: str,
+    sess_id: str,
+    execution_emitter: ExecutionEventEmitter,
+) -> str | None:
+    """Process one ``message`` payload and return the loaded docs path."""
+    prepared_turn = await prepare_chat_message_turn(
+        websocket=websocket,
+        msg=msg,
+        agent=agent,
+        session=session,
+        local_persist=local_persist,
+        runtime=runtime,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        sess_id=sess_id,
+        execution_emitter=execution_emitter,
+    )
+    if prepared_turn is None:
+        return session.last_loaded_docs_path
+
+    def cancel_check() -> bool:
+        return session.cancel_flag["cancelled"]
+
+    orchestration_session = (
+        session.orchestration_session
+        or build_orchestration_session_context(
+            session_record=session.session_record,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=sess_id,
+            key=session.active_key,
+            manifest_path=session.active_manifest_path,
+        )
+    )
+    session.orchestration_session = orchestration_session
+
+    return await run_streaming_turn(
+        websocket=websocket,
+        agent=agent,
+        prepared_turn=prepared_turn,
+        orchestration_session=orchestration_session,
+        cancel_check=cancel_check,
+        interpreter=interpreter,
+        persist_session_state=local_persist,
     )
 
 
