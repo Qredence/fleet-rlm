@@ -10,9 +10,9 @@ from fastapi import WebSocket
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from .artifacts import track_command_artifact_if_needed
-from .helpers import _sanitize_for_log
 from .hitl import handle_resolve_hitl
 from .types import ChatAgentProtocol
 

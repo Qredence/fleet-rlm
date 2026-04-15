@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+
 from ...auth import AuthError
 from ...dependencies import ServerState, build_unauthenticated_identity
 
@@ -17,11 +18,6 @@ _WEBSOCKET_CLOSED_ERROR_FRAGMENTS = (
     "response already completed",
     "once a close message has been sent",
 )
-
-
-def _sanitize_for_log(value: object) -> str:
-    """Normalize untrusted values to a single log line."""
-    return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
 
 def _is_closed_websocket_runtime_error(exc: RuntimeError) -> bool:

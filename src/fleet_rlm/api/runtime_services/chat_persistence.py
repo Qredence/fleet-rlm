@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import logging
 import uuid
 from typing import Any
@@ -15,6 +14,8 @@ from fleet_rlm.api.events import (
     ExecutionStepBuilder,
 )
 from fleet_rlm.api.server_utils import parse_model_identity, resolve_sandbox_provider
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
+from fleet_rlm.utils.time import now_iso
 from fleet_rlm.integrations.database import (
     FleetRepository,
     MemoryKind,
@@ -43,18 +44,10 @@ _EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
 }
 
 
-def _sanitize_for_log(value: object) -> str:
-    return str(value).replace("\r", "\\r").replace("\n", "\\n")
-
-
 def _new_persistence_required_error(code: str, message: str) -> RuntimeError:
     from ..routers.ws.failures import PersistenceRequiredError
 
     return PersistenceRequiredError(code, message)
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:

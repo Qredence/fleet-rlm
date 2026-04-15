@@ -11,10 +11,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
+
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .events import ExecutionEventEmitter
-from .server_utils import owner_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -164,14 +164,3 @@ def get_request_identity(request: Request) -> NormalizedIdentity | None:
     if isinstance(identity, NormalizedIdentity):
         return identity
     return None
-
-
-def session_key(
-    tenant_claim: str,
-    user_claim: str,
-    session_id: str | None = None,
-) -> str:
-    """Build a stable in-memory key for a stateful user/workspace session."""
-    resolved_session_id = (session_id or "").strip() or "__default__"
-    owner_id = owner_fingerprint(tenant_claim, user_claim)
-    return f"owner:{owner_id}:{resolved_session_id}"

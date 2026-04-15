@@ -8,9 +8,13 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from ..api.dependencies import ServerState, session_key
-from ..api.server_utils import owner_fingerprint
-from ..api.server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import (
+    owner_fingerprint,
+    sanitize_id as _sanitize_id,
+    session_key,
+)
+
+from ..api.dependencies import ServerState
 from .checkpoints import (
     ContinuationCheckpoint,
     OrchestrationCheckpointState,

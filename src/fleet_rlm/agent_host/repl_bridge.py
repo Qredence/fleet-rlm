@@ -7,6 +7,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
+
 from .execution_events import (
     HostedExecutionEventRouter,
     HostedExecutionStepBuilder,
@@ -17,10 +19,6 @@ from .execution_events import (
 logger = logging.getLogger(__name__)
 
 _REPL_HOOK_STEP_QUEUE_MAX = 128
-
-
-def _sanitize_for_log(value: object) -> str:
-    return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
 
 class ReplHookBridge:
