@@ -8,7 +8,6 @@ from importlib.metadata import version
 import pytest
 
 import fleet_rlm
-import fleet_rlm.agent_host.terminal_flow as agent_host_terminal_flow
 from fleet_rlm.integrations import database
 
 
@@ -38,9 +37,6 @@ def test_database_models_facade_module_is_removed() -> None:
         importlib.import_module("fleet_rlm.integrations.database.models")
 
 
-def test_legacy_orchestration_terminal_flow_import_resolves() -> None:
-    module = importlib.import_module("fleet_rlm.orchestration_app.terminal_flow")
-
-    assert module.apply_terminal_event_policy is (
-        agent_host_terminal_flow.apply_terminal_event_policy
-    )
+def test_legacy_orchestration_app_module_is_removed() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("fleet_rlm.orchestration_app.terminal_flow")
