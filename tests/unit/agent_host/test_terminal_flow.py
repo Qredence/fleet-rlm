@@ -146,7 +146,7 @@ def test_apply_terminal_event_policy_error_preserves_pending_continuation() -> N
 
         assert sent is True
         assert operations == ["send", "persist:True", "complete"]
-        assert session.workflow_stage == "awaiting_hitl_resolution"
+        assert session.workflow_stage == "awaiting_hitl"
         assert session.pending_approval is not None
         assert session.pending_approval.continuation_token == "token-123"
         assert session.continuation is not None
