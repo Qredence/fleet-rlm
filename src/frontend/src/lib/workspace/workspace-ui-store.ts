@@ -9,6 +9,7 @@ export interface WorkspaceUiState {
   creationPhase: CreationPhase;
   sessionRevision: number;
   requestedConversationId: string | null;
+  pendingHitlMessageId: string | null;
   newSession: () => void;
   requestConversationLoad: (conversationId: string) => void;
   clearRequestedConversation: () => void;
@@ -17,6 +18,7 @@ export interface WorkspaceUiState {
   setInspectorTab: (tab: InspectorTab) => void;
   clearInspectorSelection: () => void;
   setCreationPhase: (phase: CreationPhase) => void;
+  setPendingHitlMessageId: (id: string | null) => void;
 }
 
 function openShellCanvas() {
@@ -29,6 +31,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   creationPhase: "idle",
   sessionRevision: 0,
   requestedConversationId: null,
+  pendingHitlMessageId: null,
   newSession: () =>
     set({
       creationPhase: "idle",
@@ -65,6 +68,7 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
       activeInspectorTab: "message",
     }),
   setCreationPhase: (creationPhase) => set({ creationPhase }),
+  setPendingHitlMessageId: (pendingHitlMessageId) => set({ pendingHitlMessageId }),
 }));
 
 export const useSelectedAssistantTurnId = () =>

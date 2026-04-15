@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/features/workspace/ui/workspace-composer";
 import { WorkspaceChatEmptyState } from "@/features/workspace/ui/transcript/workspace-chat-empty-state";
 import { WorkspaceMessageList } from "@/features/workspace/ui/transcript/workspace-message-list";
+import { HitlApprovalModal } from "@/features/workspace/ui/hitl-approval-modal";
 import {
   useChatHistoryStore,
   useChatStore,
@@ -125,7 +126,7 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const { sessionRevision, requestedConversationId, clearRequestedConversation } =
+  const { sessionRevision, requestedConversationId, clearRequestedConversation, pendingHitlMessageId } =
     useWorkspaceUiStore();
 
   // Chat history
@@ -213,8 +214,13 @@ export function WorkspaceScreen() {
   const runtimeWarningTitle = "Sandbox configuration needed";
   const hasMessages = messages.length > 0;
   const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
-  const composerDisabled = isTyping || !backendEnabled;
+  const hitlPending = pendingHitlMessageId != null;
+  const composerDisabled = isTyping || !backendEnabled || hitlPending;
   const isReceivingResponse = backendEnabled && isTyping;
+  const pendingHitlMessage =
+    pendingHitlMessageId != null
+      ? (messages.find((m) => m.id === pendingHitlMessageId) ?? null)
+      : null;
 
   const composerPlaceholder = getComposerPlaceholder({
     backendEnabled,
@@ -240,6 +246,7 @@ export function WorkspaceScreen() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
+      <HitlApprovalModal message={pendingHitlMessage} onResolveHitl={resolveHitl} />
       {showDesktopLandingState ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
           <div
