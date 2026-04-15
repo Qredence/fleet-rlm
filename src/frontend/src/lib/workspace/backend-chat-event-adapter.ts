@@ -13,6 +13,7 @@ import {
   asRecord,
   parseRuntimeContext,
 } from "@/lib/workspace/backend-chat-event-payload";
+import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import { attachFinalReferences } from "@/lib/workspace/backend-chat-event-references";
 import {
   normalizeTrajectorySteps,
@@ -824,5 +825,12 @@ export function applyWsFrameToMessages(
     const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
+
+  const payload = asRecord(frame.data.payload);
+  const ctx = parseRuntimeContext(payload);
+  if (ctx != null) {
+    useWorkspaceUiStore.getState().setRuntimeContext(ctx);
+  }
+
   return applyEvent(messages, frame, queryClient);
 }

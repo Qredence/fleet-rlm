@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import { springs } from "@/lib/utils/motion";
-import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
+import type { RuntimeContext } from "@/lib/workspace/workspace-types";
 
 // ── Depth pill ───────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ function ModePill({ mode }: ModePillProps) {
 // ── Status bar ───────────────────────────────────────────────────────
 
 interface ExecutionStatusBarInnerProps {
-  ctx: WsRuntimeContext;
+  ctx: RuntimeContext;
 }
 
 function ExecutionStatusBarInner({ ctx }: ExecutionStatusBarInnerProps) {
@@ -110,9 +110,9 @@ function ExecutionStatusBarInner({ ctx }: ExecutionStatusBarInnerProps) {
       className="flex h-8 items-center gap-2 px-2 py-1"
       aria-label="Execution status"
     >
-      <DepthPill depth={ctx.depth} maxDepth={ctx.max_depth} />
-      <SandboxPill active={ctx.sandbox_active} transition={ctx.sandbox_transition} />
-      {ctx.execution_mode ? <ModePill mode={ctx.execution_mode} /> : null}
+      <DepthPill depth={ctx.depth} maxDepth={ctx.maxDepth} />
+      <SandboxPill active={ctx.sandboxActive} transition={ctx.sandboxTransition} />
+      {ctx.executionMode ? <ModePill mode={ctx.executionMode} /> : null}
     </div>
   );
 }

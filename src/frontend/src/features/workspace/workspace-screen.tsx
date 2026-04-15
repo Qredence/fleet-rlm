@@ -8,6 +8,7 @@ import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/features/workspace/ui/workspace-composer";
+import { ExecutionStatusBar } from "@/features/workspace/ui/execution-status-bar";
 import { WorkspaceChatEmptyState } from "@/features/workspace/ui/transcript/workspace-chat-empty-state";
 import { WorkspaceMessageList } from "@/features/workspace/ui/transcript/workspace-message-list";
 import { HitlApprovalModal } from "@/features/workspace/ui/hitl-approval-modal";
@@ -314,11 +315,16 @@ export function WorkspaceScreen() {
                     </AlertDescription>
                   </Alert>
                 ) : null}
+<<<<<<< HEAD
 
                 <div
                   data-slot="workspace-landing-composer"
                   className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
                 >
+=======
+                <div className="mx-auto w-full max-w-175">
+                  <ExecutionStatusBar />
+>>>>>>> 412898c9 (feat: add execution depth gauge and sandbox status bar)
                   {composer}
                 </div>
               </div>
