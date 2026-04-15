@@ -2,33 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
-
 from fleet_rlm.integrations.database import SandboxProvider
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 
-
-def sanitize_id(value: str, default_value: str) -> str:
-    """Restrict IDs to a safe path/key character subset (alphanumeric, ``_``, ``.``, ``-``).
-
-    Consecutive dots (e.g. ``..``) are collapsed to ``-`` to prevent directory
-    traversal when the result is embedded in a file path.
-    """
-    candidate = (value or "").strip()
-    if not candidate:
-        return default_value
-    cleaned = re.sub(r"[^a-zA-Z0-9_.-]", "-", candidate)
-    cleaned = re.sub(r"\.{2,}", "-", cleaned)
-    cleaned = cleaned.strip(".")
-    if not re.search(r"[A-Za-z0-9]", cleaned):
-        return default_value
-    return cleaned[:128] or default_value
-
-
-def owner_fingerprint(tenant_claim: str, user_claim: str) -> str:
-    """Return a collision-resistant owner fingerprint for session scoping."""
-    payload = f"{tenant_claim}\0{user_claim}".encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+__all__ = [
+    "owner_fingerprint",
+    "parse_model_identity",
+    "resolve_sandbox_provider",
+    "sanitize_id",
+]
 
 
 def parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:

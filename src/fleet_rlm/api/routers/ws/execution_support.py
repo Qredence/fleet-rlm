@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fleet_rlm.integrations.database import RunStepType
@@ -22,10 +21,6 @@ EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
     "memory": RunStepType.MEMORY,
     "output": RunStepType.OUTPUT,
 }
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def build_execution_event(

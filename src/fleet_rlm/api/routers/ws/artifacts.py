@@ -13,9 +13,10 @@ from fleet_rlm.integrations.database.types import (
     IdentityUpsertResult,
 )
 
-from .execution_support import now_iso
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
+from fleet_rlm.utils.time import now_iso
+
 from .failures import PersistenceRequiredError
-from .helpers import _sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
