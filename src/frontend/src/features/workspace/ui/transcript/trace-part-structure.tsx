@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
 import {
   Attachment,
   AttachmentInfo,
@@ -66,6 +65,7 @@ import {
   Tool,
   ToolContent,
   ToolHeader,
+  ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -259,91 +259,6 @@ export function ChatMessageLoadingState() {
   );
 }
 
-function formatLatency(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function ToolIOPreview({
-  label,
-  value,
-}: {
-  label: string;
-  value: unknown;
-}): ReactNode {
-  const [expanded, setExpanded] = useState(false);
-
-  const fullText = stringifyValue(value);
-  const preview = fullText.length > 80 ? `${fullText.slice(0, 80)}…` : fullText;
-
-  if (!fullText) return null;
-
-  return (
-    <div className="flex flex-col gap-1">
-      <button
-        type="button"
-        className="flex items-center gap-1 text-left"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          {label}
-        </span>
-        <span className="ml-1 text-[10px] text-muted-foreground/60">
-          {expanded ? "▲" : "▼"}
-        </span>
-      </button>
-      {expanded ? (
-        <div className="w-full">
-          <Streamdown content={fullText} streaming={false} />
-        </div>
-      ) : (
-        <div className="truncate font-mono text-xs text-muted-foreground">{preview}</div>
-      )}
-    </div>
-  );
-}
-
-interface BatchGroupProps {
-  groupId: string;
-  steps: Extract<ChatRenderPart, { kind: "chain_of_thought" }>["steps"];
-  mapStatus: (s: "pending" | "in_progress" | "completed" | "error") => ReturnType<typeof mapTaskStatus>;
-}
-
-function BatchGroup({ groupId, steps, mapStatus }: BatchGroupProps): ReactNode {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="border-l-2 border-border-subtle/50 pl-2">
-      <button
-        type="button"
-        className="flex items-center gap-1 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <span>batch ({steps.length})</span>
-        <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
-      </button>
-      {expanded ? (
-        <div className="divide-y divide-border-subtle">
-          {steps.map((step) => (
-            <ChainOfThoughtStep
-              key={`${groupId}-${step.id}`}
-              label={step.label}
-              status={mapStatus(
-                step.status as "pending" | "in_progress" | "completed" | "error",
-              )}
-            >
-              {step.details?.map((detail, index) => (
-                <div key={`${step.id}-detail-${index}`}>{detail}</div>
-              ))}
-            </ChainOfThoughtStep>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 interface WorkspaceTracePartProps {
   part: ChatRenderPart;
   partKey: string;
@@ -353,68 +268,29 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
   switch (part.kind) {
     case "reasoning":
       return renderReasoningPart(part);
-    case "chain_of_thought": {
-      // Group steps by batchGroupId: consecutive steps with the same groupId
-      // are collapsed under a "batch (N)" header.
-      type StepNode =
-        | { kind: "step"; step: (typeof part.steps)[number] }
-        | {
-            kind: "batch";
-            groupId: string;
-            steps: (typeof part.steps)[number][];
-          };
-
-      const nodes: StepNode[] = [];
-      for (const step of part.steps) {
-        const batchGroupId = step.batchGroupId;
-        if (batchGroupId) {
-          const last = nodes[nodes.length - 1];
-          if (last?.kind === "batch" && last.groupId === batchGroupId) {
-            last.steps.push(step);
-          } else {
-            nodes.push({ kind: "batch", groupId: batchGroupId, steps: [step] });
-          }
-        } else {
-          nodes.push({ kind: "step", step });
-        }
-      }
-
+    case "chain_of_thought":
       return (
         <ChainOfThought defaultOpen={false}>
           <ChainOfThoughtHeader>{part.title ?? "Execution trace"}</ChainOfThoughtHeader>
           <ChainOfThoughtContent>
             <div className="divide-y divide-border-subtle">
-              {nodes.map((node, nodeIndex) => {
-                if (node.kind === "batch") {
-                  return (
-                    <BatchGroup
-                      key={`batch-${node.groupId}-${nodeIndex}`}
-                      groupId={node.groupId}
-                      steps={node.steps}
-                      mapStatus={mapTaskStatus}
-                    />
-                  );
-                }
-                const { step } = node;
-                return (
-                  <ChainOfThoughtStep
-                    key={step.id}
-                    label={step.label}
-                    status={mapTaskStatus(
-                      step.status as "pending" | "in_progress" | "completed" | "error",
-                    )}
-                  >
-                    {step.details?.map((detail, index) => (
-                      <div key={`${step.id}-detail-${index}`}>{detail}</div>
-                    ))}
-                  </ChainOfThoughtStep>
-                );
-              })}
+              {part.steps.map((step) => (
+                <ChainOfThoughtStep
+                  key={step.id}
+                  label={step.label}
+                  status={mapTaskStatus(
+                    step.status as "pending" | "in_progress" | "completed" | "error",
+                  )}
+                >
+                  {step.details?.map((detail, index) => (
+                    <div key={`${step.id}-detail-${index}`}>{detail}</div>
+                  ))}
+                </ChainOfThoughtStep>
+              ))}
             </div>
           </ChainOfThoughtContent>
         </ChainOfThought>
       );
-    }
     case "queue":
       return (
         <Queue>
@@ -463,26 +339,29 @@ export function WorkspaceTracePart({ part, partKey }: WorkspaceTracePartProps) {
         </Task>
       );
     case "tool": {
-      const toolTitle = part.title || part.toolType;
-      const displayTitle =
-        part.latencyMs != null ? `${toolTitle} · ${formatLatency(part.latencyMs)}` : toolTitle;
+      const outputText = stringifyValue(part.output);
       return (
         <Tool defaultOpen={shouldOpenToolRow(part.state)}>
           <ToolHeader
             type={`tool-${part.toolType}`}
             state={mapToolState(part.state)}
-            title={displayTitle}
+            title={part.title || part.toolType}
           />
           <ToolContent>
             <RuntimeContextBadge ctx={part.runtimeContext} />
-            {part.input != null ? (
-              <ToolIOPreview label="Input" value={part.input} />
-            ) : null}
-            {part.errorText ? (
-              <ToolOutput errorText={part.errorText} output={undefined} />
-            ) : part.output != null ? (
-              <ToolIOPreview label="Output" value={part.output} />
-            ) : null}
+            {part.input != null ? <ToolInput input={part.input} /> : null}
+            <ToolOutput
+              errorText={part.errorText}
+              output={
+                part.errorText ? undefined : outputText ? (
+                  <div className="w-full">
+                    <Streamdown content={outputText} streaming={false} />
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">No output</span>
+                )
+              }
+            />
           </ToolContent>
         </Tool>
       );

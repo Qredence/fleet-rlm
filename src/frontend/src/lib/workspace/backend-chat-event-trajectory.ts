@@ -4,15 +4,6 @@ import {
   asRecord,
 } from "@/lib/workspace/backend-chat-event-payload";
 
-function resolveEventParentId(payload?: Record<string, unknown>): string | undefined {
-  return (
-    asOptionalText(payload?.parent_id) ??
-    asOptionalText(payload?.parentId) ??
-    asOptionalText(payload?.batch_id) ??
-    asOptionalText(payload?.batchId)
-  );
-}
-
 export interface NormalizedTrajectoryStep {
   index: number;
   thought?: string;
@@ -21,8 +12,6 @@ export interface NormalizedTrajectoryStep {
   toolInput?: unknown;
   toolOutput?: unknown;
   label: string;
-  /** Group ID shared by consecutive steps that share the same parent_id. */
-  batchGroupId?: string;
 }
 
 function trajectoryStepData(
@@ -141,14 +130,11 @@ export function normalizeTrajectorySteps(
     }
   }
 
-  const batchGroupId = resolveEventParentId(payload);
-
   const sorted = [...stepsByIndex.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([index, raw], position) => {
-      const step = normalizeTrajectoryStep(raw, index, position === 0 ? text : undefined);
-      return batchGroupId ? { ...step, batchGroupId } : step;
-    });
+    .map(([index, raw], position) =>
+      normalizeTrajectoryStep(raw, index, position === 0 ? text : undefined),
+    );
 
   if (sorted.length > 0) {
     return sorted;
@@ -157,12 +143,13 @@ export function normalizeTrajectorySteps(
   const fallback = text.trim();
   if (!fallback) return [];
   const fallbackIndex = parseTrajectoryStepIndex(payload, stepData);
-  const fallbackStep: NormalizedTrajectoryStep = {
-    index: fallbackIndex,
-    thought: fallback,
-    label: `Step ${fallbackIndex + 1}`,
-  };
-  return batchGroupId ? [{ ...fallbackStep, batchGroupId }] : [fallbackStep];
+  return [
+    {
+      index: fallbackIndex,
+      thought: fallback,
+      label: `Step ${fallbackIndex + 1}`,
+    },
+  ];
 }
 
 export function normalizeTrajectoryStepsFromFinalPayload(

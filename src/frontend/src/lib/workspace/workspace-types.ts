@@ -61,8 +61,6 @@ export interface ChatTraceStep {
   body?: string;
   status: "pending" | "active" | "complete" | "error";
   details?: string[];
-  /** Group ID shared by consecutive steps that originate from the same parent trajectory batch. */
-  batchGroupId?: string;
 }
 
 export interface ChatQueueItem {
@@ -173,10 +171,6 @@ export type ChatRenderPart =
       output?: unknown;
       errorText?: string;
       runtimeContext?: RuntimeContext;
-      /** Milliseconds elapsed between tool call and tool result. */
-      latencyMs?: number;
-      /** Internal: wall-clock timestamp (ms) when the tool call was issued. */
-      callTimestampMs?: number;
     }
   | {
       kind: "sandbox";

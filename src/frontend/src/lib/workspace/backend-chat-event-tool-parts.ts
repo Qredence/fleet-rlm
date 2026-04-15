@@ -218,19 +218,11 @@ function toolFromPayload(
   kind: "tool_call" | "tool_result",
   text: string,
   payload?: Record<string, unknown>,
-  eventTimestampMs?: number,
-  callTimestampMs?: number,
 ): ChatRenderPart {
   const state = inferToolState(kind, text, payload);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
   const outputValue = payload?.tool_output ?? payload?.output ?? text;
-
-  const latencyMs =
-    kind === "tool_result" && callTimestampMs != null && eventTimestampMs != null
-      ? Math.max(0, eventTimestampMs - callTimestampMs)
-      : undefined;
-
   return {
     kind: "tool",
     title: String(payload?.tool_name ?? (text || "Tool")),
@@ -244,32 +236,7 @@ function toolFromPayload(
         ? (stringifyUnknown(outputValue) ?? text ?? "Tool error")
         : undefined,
     ...(runtimeContext ? { runtimeContext } : {}),
-    ...(kind === "tool_call" && eventTimestampMs != null
-      ? { callTimestampMs: eventTimestampMs }
-      : {}),
-    ...(latencyMs != null ? { latencyMs } : {}),
   };
-}
-
-function findMatchingCallTimestampMs(
-  messages: ChatMessage[],
-  stepIndex: number | undefined,
-): number | undefined {
-  if (stepIndex == null) return undefined;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg?.renderParts) continue;
-    for (const part of msg.renderParts) {
-      if (
-        part.kind === "tool" &&
-        part.stepIndex === stepIndex &&
-        part.callTimestampMs != null
-      ) {
-        return part.callTimestampMs;
-      }
-    }
-  }
-  return undefined;
 }
 
 export function appendToolLikePart(
@@ -283,7 +250,7 @@ export function appendToolLikePart(
     content?: string,
     traceSource?: ChatMessage["traceSource"],
   ) => ChatMessage[],
-  options?: { traceSource?: ChatMessage["traceSource"]; eventTimestampMs?: number },
+  options?: { traceSource?: ChatMessage["traceSource"] },
 ): ChatMessage[] {
   const envVars = parseEnvVariablesFromPayload(payload);
   if (envVars && kind === "tool_result") {
@@ -299,13 +266,9 @@ export function appendToolLikePart(
     );
   }
 
-  const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
-  const callTimestampMs =
-    kind === "tool_result" ? findMatchingCallTimestampMs(messages, stepIndex) : undefined;
-
   const part = isSandboxPayload(payload)
     ? sandboxFromPayload(kind, text, payload)
-    : toolFromPayload(kind, text, payload, options?.eventTimestampMs, callTimestampMs);
+    : toolFromPayload(kind, text, payload);
 
   return appendTracePart(messages, part, text, options?.traceSource ?? "live");
 }
