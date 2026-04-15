@@ -357,6 +357,7 @@ function upsertChainOfThought(
     body: step.thought,
     status: "active",
     details: trajectoryStepDetails(step),
+    ...(step.batchGroupId ? { batchGroupId: step.batchGroupId } : {}),
   };
 
   const idx = latestTraceIndex(messages, (part) => part.kind === "chain_of_thought");
@@ -521,12 +522,23 @@ function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): Ch
   return changed ? next : messages;
 }
 
+function resolveEventTimestampMs(ts: string | number | undefined): number | undefined {
+  if (ts == null) return undefined;
+  if (typeof ts === "number") {
+    // Epoch seconds (Unix) — values before year 2001 in ms would be < 1e9; guard heuristically
+    return ts < 1e10 ? Math.round(ts * 1000) : ts;
+  }
+  const parsed = Date.parse(ts);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function applyEvent(
   messages: ChatMessage[],
   frame: WsServerEvent,
   queryClient?: QueryClient,
 ): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
+  const eventTimestampMs = resolveEventTimestampMs(frame.data.timestamp);
 
   switch (kind) {
     case "assistant_token": {
@@ -574,14 +586,18 @@ function applyEvent(
     }
     case "tool_call": {
       return {
-        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart),
+        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart, {
+          eventTimestampMs,
+        }),
         terminal: false,
         errored: false,
       };
     }
     case "tool_result": {
       return {
-        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart),
+        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart, {
+          eventTimestampMs,
+        }),
         terminal: false,
         errored: false,
       };
