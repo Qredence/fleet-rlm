@@ -26,7 +26,6 @@ import {
   inferStatusTone,
   sandboxProgressPartFromStatus,
 } from "@/lib/workspace/backend-chat-event-tool-parts";
-import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 
 const DEFAULT_PHASE = 1 as const;
 interface ApplyFrameResult {
