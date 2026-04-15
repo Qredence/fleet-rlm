@@ -25,6 +25,7 @@ import {
   inferStatusTone,
   sandboxProgressPartFromStatus,
 } from "@/lib/workspace/backend-chat-event-tool-parts";
+import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 
 const DEFAULT_PHASE = 1 as const;
 interface ApplyFrameResult {
@@ -631,6 +632,16 @@ function applyEvent(
         text || "Updating memory...",
       );
 
+      if (text.trim()) {
+        useWorkspaceUiStore.getState().addMemoryEntry({
+          content: text.trim(),
+          timestamp:
+            typeof frame.data.timestamp === "string"
+              ? frame.data.timestamp
+              : new Date().toISOString(),
+        });
+      }
+
       if (queryClient) {
         queryClient.invalidateQueries({ queryKey: ["memory"] });
       }
@@ -661,6 +672,7 @@ function applyEvent(
             )
         : [];
 
+      useWorkspaceUiStore.getState().setPendingHitlMessageId(messageId);
       return {
         messages: [
           ...messages,
@@ -690,6 +702,8 @@ function applyEvent(
       const resolution =
         asOptionalText(payload?.resolution) ?? asOptionalText(payload?.label) ?? text.trim();
       if (!resolution) return { messages, terminal: false, errored: false };
+
+      useWorkspaceUiStore.getState().setPendingHitlMessageId(null);
 
       if (messageId) {
         return {
@@ -724,6 +738,7 @@ function applyEvent(
       let next = messages;
       if (command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);
+        useWorkspaceUiStore.getState().setPendingHitlMessageId(null);
       }
       return {
         messages: appendTracePart(
