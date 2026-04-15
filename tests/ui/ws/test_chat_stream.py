@@ -789,7 +789,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
         ]
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.stream.merge_trace_result_metadata",
+        "fleet_rlm.api.routers.ws.turn_persistence.merge_trace_result_metadata",
         lambda payload, response_preview=None, trace_metadata=None: {
             **(payload or {}),
             "mlflow_trace_id": "trace-123",
@@ -835,7 +835,7 @@ def test_websocket_final_event_forwards_runtime_degradation_metadata_to_mlflow(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.stream.merge_trace_result_metadata",
+        "fleet_rlm.api.routers.ws.turn_persistence.merge_trace_result_metadata",
         lambda payload, response_preview=None, trace_metadata=None: (
             captured.update(
                 {
