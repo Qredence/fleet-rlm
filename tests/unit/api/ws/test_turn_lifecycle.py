@@ -8,7 +8,7 @@ import uuid
 import pytest
 
 from fleet_rlm.api.routers.ws.failures import PersistenceRequiredError
-from fleet_rlm.api.routers.ws.turn_lifecycle import initialize_turn_lifecycle
+from fleet_rlm.api.runtime_services.chat_persistence import initialize_turn_lifecycle
 
 
 class _RepositoryStub:

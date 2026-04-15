@@ -14,7 +14,7 @@ from ...events import ExecutionStepBuilder
 from .completion import build_execution_completion_summary
 from .failures import classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
-from .lifecycle import ExecutionLifecycleManager
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 
 logger = logging.getLogger(__name__)
 

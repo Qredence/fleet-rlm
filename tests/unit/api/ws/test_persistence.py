@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from fleet_rlm.api.routers.ws import persistence as ws_persistence
+from fleet_rlm.api.runtime_services import chat_persistence as ws_persistence
 from fleet_rlm.api.runtime_services import chat_persistence as persistence_service
 from tests.ui.fixtures_ui import FakeChatAgent
 

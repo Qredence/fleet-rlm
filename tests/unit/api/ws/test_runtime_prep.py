@@ -4,11 +4,11 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from fleet_rlm.api.routers.ws.runtime import (
-    _PreparedChatRuntime,
-    _build_chat_agent_context,
-    _new_chat_session_state,
-    _prepare_chat_runtime,
+from fleet_rlm.api.routers.ws.endpoint import _prepare_chat_runtime
+from fleet_rlm.api.runtime_services.chat_runtime import (
+    PreparedChatRuntime as _PreparedChatRuntime,
+    build_chat_agent_context as _build_chat_agent_context,
+    new_chat_session_state as _new_chat_session_state,
 )
 
 

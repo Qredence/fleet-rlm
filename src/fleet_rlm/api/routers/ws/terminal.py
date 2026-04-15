@@ -11,7 +11,7 @@ from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 
 from ...events import ExecutionStep
 from .helpers import _try_send_json
-from .lifecycle import ExecutionLifecycleManager
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .types import LocalPersistFn, StreamEventLike
 
 

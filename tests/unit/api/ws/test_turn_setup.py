@@ -6,7 +6,9 @@ from typing import Any, cast
 from unittest.mock import patch
 import uuid
 
-from fleet_rlm.api.routers.ws.runtime import _ChatSessionState
+from fleet_rlm.api.runtime_services.chat_runtime import (
+    ChatSessionState as _ChatSessionState,
+)
 from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
 from fleet_rlm.api.routers.ws.worker_request import build_workspace_task_request
 from fleet_rlm.api.schemas import WSMessage
