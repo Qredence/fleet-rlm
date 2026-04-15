@@ -126,8 +126,12 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const { sessionRevision, requestedConversationId, clearRequestedConversation, pendingHitlMessageId } =
-    useWorkspaceUiStore();
+  const {
+    sessionRevision,
+    requestedConversationId,
+    clearRequestedConversation,
+    pendingHitlMessageId,
+  } = useWorkspaceUiStore();
 
   // Chat history
   const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
