@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelRight, Settings2, TriangleAlert } from "lucide-react";
+import { Settings2, TriangleAlert } from "lucide-react";
 
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/features/workspace/ui/workspace-composer";
 import { WorkspaceChatEmptyState } from "@/features/workspace/ui/transcript/workspace-chat-empty-state";
 import { WorkspaceMessageList } from "@/features/workspace/ui/transcript/workspace-message-list";
-import { SessionSidebar } from "@/features/workspace/ui/session-sidebar";
+import { HitlApprovalModal } from "@/features/workspace/ui/hitl-approval-modal";
 import {
   useChatHistoryStore,
   useChatStore,
@@ -130,8 +130,7 @@ export function WorkspaceScreen() {
     sessionRevision,
     requestedConversationId,
     clearRequestedConversation,
-    sidebarOpen,
-    toggleSidebar,
+    pendingHitlMessageId,
   } = useWorkspaceUiStore();
 
   // Chat history
@@ -219,8 +218,13 @@ export function WorkspaceScreen() {
   const runtimeWarningTitle = "Sandbox configuration needed";
   const hasMessages = messages.length > 0;
   const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
-  const composerDisabled = isTyping || !backendEnabled;
+  const hitlPending = pendingHitlMessageId != null;
+  const composerDisabled = isTyping || !backendEnabled || hitlPending;
   const isReceivingResponse = backendEnabled && isTyping;
+  const pendingHitlMessage =
+    pendingHitlMessageId != null
+      ? (messages.find((m) => m.id === pendingHitlMessageId) ?? null)
+      : null;
 
   const composerPlaceholder = getComposerPlaceholder({
     backendEnabled,
@@ -246,139 +250,111 @@ export function WorkspaceScreen() {
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      {/* Context toggle button — fixed to top-right corner of the workspace */}
-      {!isMobile && (
-        <div className="absolute top-2 right-3 z-10">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-7 gap-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground",
-              sidebarOpen && "bg-muted text-foreground",
-            )}
-            onClick={toggleSidebar}
-            aria-pressed={sidebarOpen}
+      <HitlApprovalModal message={pendingHitlMessage} onResolveHitl={resolveHitl} />
+      {showDesktopLandingState ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
+          <div
+            data-slot="workspace-landing-state"
+            className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
           >
-            <PanelRight className="size-3.5" />
-            Context
-          </Button>
+            <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
+
+            {showRuntimeWarning ? (
+              <Alert className="w-full border-amber-500/25 bg-amber-500/5 text-foreground rounded-xl">
+                <TriangleAlert className="text-amber-500" />
+                <AlertTitle className="text-sm font-medium">{runtimeWarningTitle}</AlertTitle>
+                <AlertDescription>
+                  <div className="flex flex-col gap-3 mt-1.5">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Connect to a Daytona sandbox to enable secure code execution. Your code runs
+                      in an isolated environment with persistent storage.
+                    </p>
+                    {warningGuidance.length > 0 && (
+                      <ul className="text-xs text-muted-foreground/80 space-y-1 pl-4 list-disc">
+                        {warningGuidance.map((msg) => (
+                          <li key={msg}>{msg}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-fit rounded-lg gap-2"
+                      onClick={handleOpenRuntimeSettings}
+                    >
+                      <Settings2 className="size-3.5" />
+                      Configure Sandbox
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div
+              data-slot="workspace-landing-composer"
+              className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
+            >
+              {composer}
+            </div>
+          </div>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Transcript area */}
+          <div className="flex-1 min-h-0" data-slot="workspace-transcript">
+            <WorkspaceMessageList
+              messages={messages}
+              isTyping={isTyping}
+              isMobile={isMobile}
+              showEmptyState={isMobile}
+              onSuggestionClick={setInputValue}
+              onResolveHitl={resolveHitl}
+              onResolveClarification={resolveClarification}
+            />
+          </div>
 
-      <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
-        {/* Main chat column */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          {showDesktopLandingState ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
-              <div
-                data-slot="workspace-landing-state"
-                className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
-              >
-                <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
-
+          {/* Composer footer */}
+          <div data-slot="workspace-composer" className={cn("shrink-0 px-4 pb-6 pt-4 md:px-6")}>
+            <div className="mx-auto w-full max-w-200">
+              <div className="flex flex-col gap-3">
                 {showRuntimeWarning ? (
-                  <Alert className="w-full border-amber-500/25 bg-amber-500/5 text-foreground rounded-xl">
-                    <TriangleAlert className="text-amber-500" />
+                  <Alert className="border-amber-500/25 bg-amber-500/5 text-foreground rounded-lg">
+                    <TriangleAlert className="text-amber-500 size-4" />
                     <AlertTitle className="text-sm font-medium">{runtimeWarningTitle}</AlertTitle>
                     <AlertDescription>
-                      <div className="flex flex-col gap-3 mt-1.5">
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          Connect to a Daytona sandbox to enable secure code execution. Your code
-                          runs in an isolated environment with persistent storage.
-                        </p>
-                        {warningGuidance.length > 0 && (
-                          <ul className="text-xs text-muted-foreground/80 space-y-1 pl-4 list-disc">
+                      <div className="mt-1 flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            Connect to a Daytona sandbox to enable secure code execution. Your code
+                            runs in an isolated environment with persistent storage.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+                            onClick={handleOpenRuntimeSettings}
+                          >
+                            <Settings2 className="size-3" />
+                            Configure
+                          </Button>
+                        </div>
+                        {warningGuidance.length > 0 ? (
+                          <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground/80">
                             {warningGuidance.map((msg) => (
                               <li key={msg}>{msg}</li>
                             ))}
                           </ul>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-fit rounded-lg gap-2"
-                          onClick={handleOpenRuntimeSettings}
-                        >
-                          <Settings2 className="size-3.5" />
-                          Configure Sandbox
-                        </Button>
+                        ) : null}
                       </div>
                     </AlertDescription>
                   </Alert>
                 ) : null}
-
-                <div
-                  data-slot="workspace-landing-composer"
-                  className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
-                >
-                  {composer}
-                </div>
+                <div className="mx-auto w-full max-w-175">{composer}</div>
               </div>
             </div>
-          ) : (
-            <>
-              {/* Transcript area */}
-              <div className="flex-1 min-h-0" data-slot="workspace-transcript">
-                <WorkspaceMessageList
-                  messages={messages}
-                  isTyping={isTyping}
-                  isMobile={isMobile}
-                  showEmptyState={isMobile}
-                  onSuggestionClick={setInputValue}
-                  onResolveHitl={resolveHitl}
-                  onResolveClarification={resolveClarification}
-                />
-              </div>
-
-              {/* Composer footer */}
-              <div data-slot="workspace-composer" className={cn("shrink-0 px-4 pb-6 pt-4 md:px-6")}>
-                <div className="mx-auto w-full max-w-200">
-                  <div className="flex flex-col gap-3">
-                    {showRuntimeWarning ? (
-                      <Alert className="border-amber-500/25 bg-amber-500/5 text-foreground rounded-lg">
-                        <TriangleAlert className="text-amber-500 size-4" />
-                        <AlertTitle className="text-sm font-medium">
-                          {runtimeWarningTitle}
-                        </AlertTitle>
-                        <AlertDescription>
-                          <div className="mt-1 flex flex-col gap-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <p className="text-xs text-muted-foreground leading-relaxed">
-                                Connect to a Daytona sandbox to enable secure code execution. Your
-                                code runs in an isolated environment with persistent storage.
-                              </p>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
-                                onClick={handleOpenRuntimeSettings}
-                              >
-                                <Settings2 className="size-3" />
-                                Configure
-                              </Button>
-                            </div>
-                            {warningGuidance.length > 0 ? (
-                              <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground/80">
-                                {warningGuidance.map((msg) => (
-                                  <li key={msg}>{msg}</li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
-                        </AlertDescription>
-                      </Alert>
-                    ) : null}
-                    <div className="mx-auto w-full max-w-175">{composer}</div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Session sidebar */}
-        {sidebarOpen && !isMobile && <SessionSidebar messages={messages} />}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
