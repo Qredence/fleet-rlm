@@ -5,6 +5,7 @@ import type {
   ChatTraceStep,
 } from "@/lib/workspace/workspace-types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
+import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
 import {
@@ -826,9 +827,9 @@ export function applyWsFrameToMessages(
   }
 
   const payload = asRecord(frame.data.payload);
-  const ctx = parseRuntimeContext(payload);
-  if (ctx != null) {
-    useWorkspaceUiStore.getState().setRuntimeContext(ctx);
+  const rawCtx = asRecord(payload?.runtime) ?? payload;
+  if (rawCtx != null && typeof rawCtx.depth === "number" && typeof rawCtx.max_depth === "number") {
+    useWorkspaceUiStore.getState().setRuntimeContext(rawCtx as unknown as WsRuntimeContext);
   }
 
   return applyEvent(messages, frame, queryClient);

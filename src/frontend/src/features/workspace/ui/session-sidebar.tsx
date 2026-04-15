@@ -114,17 +114,17 @@ function ContextTab() {
   }
 
   const rows: { label: string; value: string | undefined }[] = [
-    { label: "Volume", value: runtimeContext.volumeName },
-    { label: "Workspace", value: runtimeContext.workspacePath },
-    { label: "Sandbox ID", value: runtimeContext.sandboxId },
-    { label: "Execution mode", value: runtimeContext.executionMode },
-    { label: "Runtime mode", value: runtimeContext.runtimeMode },
-    { label: "Profile", value: runtimeContext.executionProfile },
+    { label: "Volume", value: runtimeContext.volume_name },
+    { label: "Workspace", value: runtimeContext.workspace_path },
+    { label: "Sandbox ID", value: runtimeContext.sandbox_id },
+    { label: "Execution mode", value: runtimeContext.execution_mode },
+    { label: "Runtime mode", value: runtimeContext.runtime_mode },
+    { label: "Profile", value: runtimeContext.execution_profile },
     {
       label: "Depth",
       value:
         runtimeContext.depth !== undefined
-          ? `${runtimeContext.depth} / ${runtimeContext.maxDepth}`
+          ? `${runtimeContext.depth} / ${runtimeContext.max_depth}`
           : undefined,
     },
   ].filter((r): r is { label: string; value: string } => r.value != null && r.value !== "");

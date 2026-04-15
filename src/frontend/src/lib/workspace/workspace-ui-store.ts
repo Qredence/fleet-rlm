@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-import type { CreationPhase, InspectorTab, RuntimeContext } from "@/lib/workspace/workspace-types";
+import type { CreationPhase, InspectorTab } from "@/lib/workspace/workspace-types";
+import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 export type SidebarTab = "documents" | "memory" | "context" | "checkpoint";
@@ -34,7 +35,7 @@ export interface WorkspaceUiState {
   sessionRevision: number;
   requestedConversationId: string | null;
   pendingHitlMessageId: string | null;
-  runtimeContext: RuntimeContext | null;
+  runtimeContext: WsRuntimeContext | null;
   sidebarOpen: boolean;
   sidebarTab: SidebarTab;
   memoryEntries: MemoryEntry[];
@@ -47,7 +48,7 @@ export interface WorkspaceUiState {
   clearInspectorSelection: () => void;
   setCreationPhase: (phase: CreationPhase) => void;
   setPendingHitlMessageId: (id: string | null) => void;
-  setRuntimeContext: (ctx: RuntimeContext | null) => void;
+  setRuntimeContext: (ctx: WsRuntimeContext | null) => void;
   toggleSidebar: () => void;
   setSidebarTab: (tab: SidebarTab) => void;
   addMemoryEntry: (entry: { content: string; timestamp: string }) => void;
