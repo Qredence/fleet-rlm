@@ -118,7 +118,10 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = ["pytest-timeout>=2.4.0"]
+dev = [
+    "pytest-timeout>=2.4.0",
+    "ty>=0.0.29",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }

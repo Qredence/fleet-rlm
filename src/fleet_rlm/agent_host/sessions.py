@@ -8,13 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from fleet_rlm.utils.identity import (
-    owner_fingerprint,
-    sanitize_id as _sanitize_id,
-    session_key,
-)
-
-from ..api.dependencies import ServerState
+from fleet_rlm.utils.identity import owner_fingerprint
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import session_key
+from .types import SessionStoreProtocol
 from .checkpoints import (
     ContinuationCheckpoint,
     OrchestrationCheckpointState,
@@ -320,7 +317,7 @@ def build_orchestration_session_context(
 
 async def switch_orchestration_session(
     *,
-    state: ServerState,
+    state: SessionStoreProtocol,
     agent: ChatAgentProtocol,
     interpreter: object | None,
     workspace_id: str,
