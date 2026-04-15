@@ -632,6 +632,16 @@ function applyEvent(
         text || "Updating memory...",
       );
 
+      if (text.trim()) {
+        useWorkspaceUiStore.getState().addMemoryEntry({
+          content: text.trim(),
+          timestamp:
+            typeof frame.data.timestamp === "string"
+              ? frame.data.timestamp
+              : new Date().toISOString(),
+        });
+      }
+
       if (queryClient) {
         queryClient.invalidateQueries({ queryKey: ["memory"] });
       }
