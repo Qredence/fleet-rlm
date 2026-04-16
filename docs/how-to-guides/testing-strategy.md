@@ -17,6 +17,7 @@ fleet-rlm uses pytest markers to categorize tests by scope and runtime requireme
 | `e2e`         | End-to-end workflow smoke tests                | Seconds to minutes             |
 | `benchmark`   | Performance/throughput benchmark tests         | Variable                       |
 | `live_llm`    | Tests requiring live Daytona + configured LLM  | Variable, requires credentials |
+| `live_daytona` | Tests requiring an explicitly enabled live Daytona backend | Variable, requires credentials |
 
 ### Marker Usage
 
@@ -56,7 +57,7 @@ Live LLM tests require Daytona connectivity and configured LLM credentials:
 
 ```bash
 # Validate Daytona connectivity first
-uv run python scripts/validate_env.py daytona
+uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 
 # Run live LLM tests
 uv run pytest -q -m "live_llm"
@@ -193,11 +194,12 @@ pnpm run test:watch
 
 ```text
 src/frontend/src/
-├── app/                  # Shell and workspace internals
-├── routes/               # File-based routes and /404 handling
-├── screens/              # Top-level workspace, volumes, settings, and shell surfaces
-├── lib/                  # API, workspace adapters, and shared helpers
-├── stores/               # Shared Zustand state
+├── app/                  # Bootstrap and provider composition
+├── routes/               # File-based route tree
+├── features/             # Product-surface entrypoints and UI ownership
+├── components/           # ui/, ai-elements/, and product compositions
+├── lib/                  # API clients, workspace adapters, and shared helpers
+├── stores/               # Shared Zustand shell state
 └── ...
 ```
 

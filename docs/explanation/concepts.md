@@ -1,8 +1,7 @@
 # fleet-rlm Concepts
 
 `fleet-rlm` combines a ReAct chat orchestrator with recursive long-context
-execution over shared interpreter backends. Daytona is the primary backend
-today, while Modal remains supported.
+execution over a shared Daytona-backed interpreter runtime.
 
 ## Core Concepts
 
@@ -38,9 +37,9 @@ Benefits:
 
 Current backend shape:
 
-- Daytona is the primary workspace/runtime backend
-- Modal remains available for compatible flows
-- both backends feed the same ReAct + recursive `dspy.RLM` runtime
+- Daytona is the maintained workspace/runtime backend
+- the public product/runtime contract is Daytona-only
+- the same ReAct + recursive `dspy.RLM` runtime serves the CLI, API, and web app
 
 ## 4. Runtime Surfaces
 
@@ -55,7 +54,7 @@ All surfaces converge on shared orchestration/runtime modules.
 The system emits:
 
 - chat stream events (`/api/v1/ws/execution`)
-- execution graph events (`/api/v1/ws/execution`)
+- execution graph events (`/api/v1/ws/execution/events`)
 
 Persistence model:
 

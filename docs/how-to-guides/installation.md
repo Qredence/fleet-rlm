@@ -164,7 +164,7 @@ The `.env.example` file contains all configurable environment variables. Key cat
 | `POSTHOG_ENABLED` | Enable PostHog analytics | `false`                    |
 | `POSTHOG_HOST`    | PostHog host URL         | `https://eu.i.posthog.com` |
 
-> **Security Note:** Never commit your `.env` file with real secrets. Use Modal's secret management for team setups.
+> **Security Note:** Never commit your `.env` file with real secrets. Use your normal team secret-management workflow instead of storing shared credentials in the repo.
 
 ## Frontend Development Commands
 

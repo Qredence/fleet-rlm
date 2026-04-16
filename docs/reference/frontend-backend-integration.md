@@ -1,306 +1,213 @@
-# Frontend ↔ Backend Integration
+# Frontend Back-end Integration
 
-This document captures the current integration contract between:
+This document captures the current integration contract between the frontend
+SPA and the backend API.
 
-- Frontend SPA: `src/frontend`
-- Backend API: `src/fleet_rlm/api`
+The important rule is simple: the frontend talks to the backend through a
+small REST surface, a conversational websocket, and a separate passive
+execution subscription websocket. There is no SSE path in the current frontend
+contract.
 
-## Supported Frontend Product Surfaces
+## Supported Product Surfaces
 
-The live frontend shell supports only:
+The live shell supports:
 
 - `/app/workspace`
 - `/app/volumes`
+- `/app/history`
 - `/app/optimization`
 - `/app/settings`
 
-Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics`
-paths are no longer compatibility entrypoints; the frontend should route them
-through the not-found flow instead of redirecting them into active product
-surfaces.
+Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are not supported
+entrypoints.
 
-## API Base and Routing
+## REST Surfaces Used By The Frontend
 
-Backend serves:
+The frontend consumes the following backend surfaces:
 
-- Health: `/health`, `/ready`
-- Versioned API: `/api/v1/*`
-- WebSockets: `/api/v1/ws/execution`, `/api/v1/ws/execution/events`
-
-## Backend Surfaces Used by Frontend
-
-Primary interactive/chat surfaces:
-
-- Canonical: `WS /api/v1/ws/execution`
-- Passive execution subscriptions: `WS /api/v1/ws/execution/events`
-
-Runtime setup surfaces:
-
+- `GET /health`
+- `GET /ready`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/runtime/settings`
-- `PATCH /api/v1/runtime/settings` (local-only writes)
+- `PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/lm`
 - `POST /api/v1/runtime/tests/daytona`
 - `GET /api/v1/runtime/status`
+- `GET /api/v1/sessions/state`
+- `GET /api/v1/sessions`
+- `GET /api/v1/sessions/{id}`
+- `GET /api/v1/sessions/{id}/turns`
+- `DELETE /api/v1/sessions/{id}`
+- `POST /api/v1/traces/feedback`
 
-Runtime settings behavior:
+The history surface uses the sessions endpoints. The settings surface uses the
+runtime settings and runtime status endpoints. The workspace surface uses
+`/api/v1/auth/me` and runtime status to gate the composer and warnings.
 
-- `PATCH /api/v1/runtime/settings` writes are local-only (`APP_ENV=local`).
-- frontend runtime secret inputs are write-only; secrets are sent only when explicitly rotated or explicitly cleared.
-- runtime model changes are hot-applied in-process and can be verified via:
-  - `GET /api/v1/runtime/status`
-  - `active_models.planner`
-  - `active_models.delegate`
-  - `active_models.delegate_small`
-- `execution_mode` remains part of the Daytona-backed request state.
-- Daytona-specific source controls are `repo_url`, `repo_ref`,
-  `context_paths`, and `batch_concurrency`.
+## Websocket Split
 
-Daytona SDK and volume behavior:
+The client derives two websocket URLs from the API base:
 
-- The backend Daytona integration is implemented on the official Daytona Python SDK.
-- `DAYTONA_TARGET` is treated as Daytona SDK config only; it is not used as a workspace id,
-  sandbox id, or persistent volume name.
-- The Daytona Volumes page path browses a workspace-scoped persistent Daytona volume whose name is
-  derived from the authenticated workspace/tenant claim.
-- That persistent volume is attached to temporary Daytona sandboxes through the Python SDK
-  `volume.get(..., create=True)` + `VolumeMount(...)` flow.
+- `wsUrl` -> `/api/v1/ws/execution`
+- `wsExecutionUrl` -> `/api/v1/ws/execution/events`
 
-Deprecated/planned surfaces removed from backend:
-
-- `/api/v1/chat`
-- `/api/v1/tasks*`
-- `/api/v1/sessions*` CRUD (state summary endpoint remains)
-- `/api/v1/taxonomy*`
-- `/api/v1/analytics*`
-- `/api/v1/search`
-- `/api/v1/memory*`
-- `/api/v1/sandbox*`
-
-## Auth Contract
-
-- Frontend SPA auth uses Microsoft Entra via MSAL Browser.
-- Browser token storage uses the canonical `fleet-rlm:access-token` key only.
-  The legacy `fleet_access_token` localStorage migration path is no longer
-  supported.
-- Default frontend authority is `https://login.microsoftonline.com/organizations`.
-- Frontend login/logout callback path is `/login`.
-- The SPA requests `api://<api-app-client-id>/access_as_user`.
-- The same acquired access token is reused for:
-  - `Authorization: Bearer ...` on HTTP requests
-  - `access_token` bootstrap on websocket clients where the server supports query-token compatibility; prefer this only when a header cannot be forwarded
-- `GET /api/v1/auth/me` is the frontend’s canonical identity bootstrap endpoint.
-- In Entra mode, backend tenant admission is enforced against the Neon `tenants` table before runtime persistence starts.
-
-## WebSocket Behavior
+`VITE_FLEET_WS_URL` can override the base websocket host. If it is unset, the
+frontend derives both websocket URLs from `VITE_FLEET_API_URL`.
 
 ### `/api/v1/ws/execution`
 
-- Accepts `message`, `cancel`, and `command` payloads.
-- Emits `event`, `command_result`, and `error` envelopes.
-- Canonical purpose: conversational turn streaming.
-- Auth claims are canonical tenant/user authority.
-- `session_id` remains the authoritative client-controlled selector for chat-session restore/continue on message and command payloads.
-- `workspace_id` and `user_id` are unsupported on websocket payloads and should be rejected immediately.
-- Query `session_id` is intentionally unsupported on this route.
-- `daytona_pilot` is the public runtime label for the shared workbench runtime.
-- Daytona `message` frames may also carry `repo_url`, `repo_ref`,
-  `context_paths`, and `batch_concurrency`.
-- Daytona requests reject request-side `max_depth`, and `repo_ref` requires
-  `repo_url`.
-- Canonical event kinds:
-  - `assistant_token`
-  - `reasoning_step`
-  - `trajectory_step`
-  - `status`
-  - `warning`
-  - `tool_call`
-  - `tool_result`
-  - `plan_update`
-  - `rlm_executing`
-  - `memory_update`
-  - `hitl_request`
-  - `hitl_resolved`
-  - `command_ack`
-  - `command_reject`
-  - terminal: `final`, `cancelled`, `error`
-- Every chat event payload should carry normalized runtime metadata under `payload.runtime` when
-  runtime state is known. The stable keys are:
-  - `execution_mode`
-  - `depth`
-  - `max_depth`
-  - `execution_profile`
-  - `sandbox_active`
-  - `sandbox_id`
-  - `effective_max_iters`
-  - optional `volume_name`
-  - optional `run_id`
-- For Daytona, `payload.runtime.volume_name` refers to the workspace-scoped persistent Daytona
-  volume when that volume is in use for the run.
-- `final` is transcript-oriented. It may include the final assistant text, reasoning summary,
-  citations/sources, attachments, and terminal runtime metadata, but it is no longer the canonical
-  workbench hydration source for Daytona.
-- During the current compatibility window, chat-final payloads may still include legacy
-  `run_result` / `final_artifact` data.
-- Frontend workbench state may use chat-final only to backfill missing `summary` and
-  `final_artifact` after the turn; it must not hydrate rich analyst sections from chat-final.
+This is the conversational websocket. It handles:
 
-### Chat Trace Render Contract
+- `message`
+- `cancel`
+- `command`
 
-Frontend chat trace rendering uses AI Elements components with a live-first
-chronological policy:
+The frontend sends the first user turn here, including:
 
-- primary trace order:
-  - websocket arrival order for live events
-  - typical sequence: `Reasoning` -> `Tool`/`Sandbox` -> `Reasoning` -> ...
-- primary row mapping:
-  - `reasoning_step` -> `Reasoning`
-  - `tool_call` / `tool_result` -> `Tool` (or `Sandbox` for REPL-like payloads)
-  - `plan_update` / `rlm_executing` / `memory_update` -> `Task`
-  - `status` -> low-emphasis status note row
-- secondary summaries:
-  - `ChainOfThought` and `Queue` are summary surfaces only (non-primary)
-  - summaries never replace or reorder primary chronological rows
+- `content`
+- `trace`
+- `trace_mode`
+- `execution_mode`
+- `repo_url`
+- `repo_ref`
+- `context_paths`
+- `batch_concurrency`
+- `analytics_enabled`
+- `session_id`
 
-Trajectory payload handling:
+Important rules:
 
-- trajectory data is fallback/summary-oriented
-- trajectory-derived interleaving is only used when live reasoning/tool events
-  are absent for the turn
+- `session_id` is carried on the message and command payloads.
+- `workspace_id` and `user_id` are not supported on websocket payloads.
+- Query-string `session_id` is intentionally not part of this route.
+- `resolve_hitl` is the command currently used by the workspace HITL flow.
 
-### `/api/v1/ws/execution`
+Common event kinds on this stream:
 
-- Dedicated execution/workbench stream for artifact, step, and run-summary visualization.
-- Filters by auth-derived identity plus query `session_id`.
-- `workspace_id` and `user_id` query params are unsupported and should be rejected immediately.
-- Emits `execution_started`, `execution_step`, `execution_completed`.
-- `execution_completed.summary` is the canonical canvas/workbench summary for the Daytona-backed
-  runtime. Frontend workbench state should hydrate from this summary rather than scraping data from
-  transcript-final payloads.
-- `execution_step.step` now carries additive actor metadata:
-  - `depth` (optional)
-  - `actor_kind` (`root_rlm | sub_agent | delegate | unknown`, optional)
-  - `actor_id` (optional)
-  - `lane_key` (optional)
-- Minimum required top-level fields:
-  - `run_id`
-  - `task`
-  - `final_artifact`
-  - `summary`
-- `summary` should carry the final termination/error/warnings/duration metadata the workbench needs.
-- Richer completion sections remain allowed but optional in this phase:
-  - `status`
-  - `termination_reason`
-  - `duration_ms`
-  - `iterations`
-  - `callbacks`
-  - `prompt_handles` / `prompts`
-  - `context_sources`
-  - `sources`
-  - `attachments`
-  - `warnings`
-- `execution_step.step.type` remains runtime-agnostic with the current `llm | tool | repl | memory
-  | output` lane model.
-- `execution_step.step.timestamp` is emitted as numeric Unix epoch seconds by the backend; the frontend may normalize it for display, but should not require ISO strings on the wire.
+- `assistant_token`
+- `reasoning_step`
+- `trajectory_step`
+- `status`
+- `warning`
+- `tool_call`
+- `tool_result`
+- `plan_update`
+- `rlm_executing`
+- `memory_update`
+- `hitl_request`
+- `hitl_resolved`
+- `command_ack`
+- `command_reject`
+- `final`
+- `cancelled`
+- `error`
 
 ### `/api/v1/ws/execution/events`
 
-- Dedicated passive execution/workbench subscription stream.
-- Requires query `session_id`.
-- Accepts no message, cancel, or command frames.
-- Emits `execution_started`, `execution_step`, and `execution_completed`.
+This is the passive execution subscription stream.
 
-### Unified Workspace Canvas Contract
+Important rules:
 
-- Frontend transcript state and workbench state should reduce into a canonical per-turn record keyed
-  by assistant turn / session / run identity.
-- The chat transcript remains compact:
-  - user message
-  - assistant streaming/final answer
-  - lightweight trace/status/tool summaries
-- The canvas is the primary place for verbose execution detail:
-  - `Answer`
-  - `Reasoning`
-  - `Plan / Trajectory`
-  - `Tools / Execution`
-  - `Evidence`
-  - `Artifacts`
-- Daytona-specific iteration/callback/prompt detail is additive inside the canvas. It is not the
-  primary cross-runtime reasoning model.
-- Daytona live trace should expose the guide-relevant milestones in realtime:
-  iteration start, planner/reasoning preview, extracted code preview, sandbox observation, recursive
-  child spawn / child synthesis, and terminal completion or failure.
-- Daytona sandbox/debug transcript cards are driven by `status` frames whose payload carries
-  `phase="sandbox_output"` plus stream text metadata. Treat that wire shape as part of the
-  transcript rendering contract while it remains in use.
+- `session_id` is required as a query parameter.
+- The stream is subscription-only.
+- It does not accept `message`, `cancel`, or `command` frames.
+- It emits execution lifecycle frames for the workbench canvas.
 
-### Execution Graph Semantics
+## Runtime And Workbench Contract
 
-Artifact graph rendering maps execution steps into actor swimlanes:
+The workspace runtime is Daytona-backed and the UI treats `daytona_pilot` as
+the public runtime label.
 
-- `Root RLM` lane: root planner/orchestrator execution.
-- `Sub-agent` lanes: recursive/delegated agent depth contexts.
-- `Delegate` lanes: delegate profile execution contexts.
-- `Unknown` lane: fallback when actor hints are unavailable.
+The frontend keeps the following runtime controls aligned with backend requests:
 
-Ordering and edge rules:
+- `execution_mode`
+- `repo_url`
+- `repo_ref`
+- `context_paths`
+- `batch_concurrency`
 
-- Step order is deterministic by `sequence`, with `(timestamp, id)` as fallback.
-- Parent-child edges are causal (primary).
-- Chronological edges are dashed temporal hints (secondary).
+The backend enriches frames with runtime context. The frontend treats these keys
+as stable when present:
 
-Content policy:
+- `depth`
+- `max_depth`
+- `execution_profile`
+- `sandbox_active`
+- `effective_max_iters`
+- `volume_name`
+- `execution_mode`
+- `runtime_mode`
+- `sandbox_id`
+- `workspace_path`
+- `sandbox_transition`
 
-- Graph, Timeline, and Preview surfaces do not intentionally truncate artifact
-  text content.
-- Large payloads may be shown in scrollable regions, but full text remains
-  accessible in-place.
+### Transcript Stream
 
-## Environment Variables
+`/api/v1/ws/execution` feeds the live transcript.
 
-Frontend connectivity is typically driven by:
+The frontend reduces frames into:
 
-- `VITE_FLEET_API_URL`
-- `VITE_FLEET_WS_URL`
-- `VITE_FLEET_TRACE`
+- user and assistant messages
+- reasoning and trajectory rows
+- tool and sandbox cards
+- HITL / clarification cards
+- summary rows and warnings
 
-Execution stream payload-size controls (backend):
+The adapter stack is:
 
-- `WS_EXECUTION_MAX_TEXT_CHARS` (default `65536`)
-- `WS_EXECUTION_MAX_COLLECTION_ITEMS` (default `500`)
-- `WS_EXECUTION_MAX_RECURSION_DEPTH` (default `12`)
+1. `ws-frame-parser.ts` normalizes raw websocket frames.
+2. `backend-chat-event-adapter.ts` turns chat frames into transcript rows.
+3. `backend-artifact-event-adapter.ts` turns execution steps into artifact rows.
+4. `chat-display-items.ts` groups rows into assistant turns.
 
-## Validation Checklist
+### Workbench Hydration
 
-From repo root:
+The workbench panel is summary-driven.
 
-```bash
-uv run fleet-rlm serve-api --port 8000
-uv run python scripts/openapi_tools.py generate
-rg -n "^  /" openapi.yaml
-rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
-```
+The canonical hydration path is:
 
-From `src/frontend` (optional frontend validation):
+1. `ws-frame-parser.ts` converts `execution_completed` frames into a normalized
+   event envelope.
+2. `run-workbench-hydration.ts` merges `summary`, `final_artifact`, run
+   metadata, prompts, iterations, callbacks, sources, and attachments into the
+   workbench state.
+3. `run-workbench-store.ts` keeps the canonical run panel state in Zustand.
 
-```bash
-pnpm install --frozen-lockfile
-pnpm run api:check
-pnpm run type-check
-pnpm run lint:robustness
-pnpm run test:unit
-pnpm run build
-```
+Rules:
 
-## Change Policy
+- `execution_completed.summary` is the primary completion source.
+- `final_artifact` is the primary artifact source.
+- Chat-final `run_result` is only a narrow compatibility backfill path.
+- The workbench should not depend on transcript scraping for its canonical
+  completion state.
 
-If backend routes or payload shapes change, update this file in the same PR as the code change.
+## Session And History Contract
 
-## Frontend API Layer Policy
+The history surface uses both backend sessions and local conversation state.
 
-- Canonical backend contracts for runtime/chat/auth should use `src/frontend/src/lib/rlm-api/*`.
-- Legacy `src/frontend/src/lib/api` auth/chat endpoint helpers have been removed. Do not reintroduce auth/chat contracts in that layer.
-- Canonical frontend feature ownership now lives in:
-  - `src/frontend/src/screens/workspace/*` for the live chat/runtime surface
-  - `src/frontend/src/screens/volumes/*` for the volumes browser
-  - `src/frontend/src/screens/shell/*` for composed shell navigation widgets
+Backend session data supports:
+
+- session list
+- session detail
+- session turns
+- session deletion
+
+The local conversation store remains a UI-level feature for saved workspace
+sessions and does not replace the backend session history.
+
+## Settings Contract
+
+Runtime settings writes are local-only in the current frontend contract.
+
+The settings feature treats these operations as current:
+
+- read current runtime settings
+- save runtime settings
+- test LM connectivity
+- test Daytona connectivity
+- refresh runtime status
+
+The runtime and LiteLLM forms use the backend runtime settings API. The
+optimization section reuses the optimization feature form rather than duplicating
+its own settings implementation.
+

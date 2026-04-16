@@ -10,7 +10,7 @@ This guide walks through setting up a complete local development environment for
 | uv            | Latest  | Package and dependency management |
 | pnpm          | Latest  | Frontend development              |
 | Git           | 2.x     | Version control                   |
-| Modal Account | -       | Sandbox execution                 |
+| Daytona Account | -     | Sandbox execution                 |
 
 ## 1. Install Python
 
@@ -166,7 +166,7 @@ MLFLOW_EXPERIMENT=fleet-rlm
 POSTHOG_ENABLED=false
 ```
 
-> **Security:** Never commit your `.env` file. It is already in `.gitignore`. For team setups, use Modal secrets for shared API keys.
+> **Security:** Never commit your `.env` file. It is already in `.gitignore`. For team setups, use your normal secret-management flow instead of checking shared credentials into the repo.
 
 > **MLflow note:** The local MLflow default is `http://127.0.0.1:5001`, which
 > matches `make mlflow-server`. In local development, the API will auto-start that

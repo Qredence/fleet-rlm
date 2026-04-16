@@ -119,7 +119,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/traces/feedback \
     "client_request_id": "chat-abc123",
     "is_correct": false,
     "comment": "The answer skipped the root cause.",
-    "expected_response": "The root cause was an expired Modal secret."
+    "expected_response": "The root cause was an expired Daytona credential."
   }'
 ```
 

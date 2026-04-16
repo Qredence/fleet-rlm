@@ -107,7 +107,7 @@ $ fleet --docs-path README.md --trace-mode compact
 [trace: analyzing structure...]
 
 The Fleet-RLM project uses a modular architecture with:
-- Core execution layer (Modal sandbox)
+- Core execution layer (Daytona sandbox)
 - ReAct agent orchestration (DSPy)
 - WebSocket streaming for real-time updates
 
@@ -119,7 +119,7 @@ The Fleet-RLM project uses a modular architecture with:
 
 [trace: searching documentation...]
 
-The sandbox uses Modal for isolated Python execution...
+The sandbox uses Daytona for isolated Python execution...
 ```
 
 ## Starting the Web UI
@@ -155,7 +155,7 @@ fleet --trace-mode off
 
 > What is Fleet-RLM?
 
-> How do I configure Modal?
+> How do I configure Daytona?
 ```
 
 ### Debugging Session

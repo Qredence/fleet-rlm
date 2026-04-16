@@ -1,111 +1,111 @@
-# User Interaction Flows
+# Frontend User Flows
 
-Visualizing the key sequence of events during user interactions with `fleet-rlm`.
+This document describes the current frontend runtime and navigation flows for
+`fleet-rlm`. It reflects the live React/TanStack Router/Zustand shell and the
+Daytona-backed workspace runtime.
 
-## 1. Standard Chat Turn
+## Shell And Routing
 
-Simple question and answer flow without tools.
+The URL is the source of truth. TanStack Router owns route selection, while the
+shell stores the active nav item and canvas state in Zustand.
+
+```mermaid
+flowchart LR
+  A["/"] --> B["/app/workspace"]
+  B --> C["/app/volumes"]
+  B --> D["/app/optimization"]
+  B --> E["/app/history"]
+  B --> F["/app/settings"]
+
+  B --> G["RootLayout"]
+  C --> G
+  D --> G
+  E --> G
+  F --> G
+
+  G --> H["RouteSync"]
+  G --> I["Sidebar / Header / Canvas"]
+
+  H --> J["NavigationStore"]
+  J --> B
+  J --> C
+  J --> D
+  J --> E
+  J --> F
+```
+
+Key behavior:
+
+- `/` and `/app/` redirect to `/app/workspace`.
+- `RootLayout` renders the sidebar, header, main content, and optional canvas.
+- `RouteSync` reads the URL and updates shell state. The reverse direction is
+  handled by navigation helpers and route transitions.
+- The canvas opens automatically on Volumes, closes on Optimization, History,
+  and Settings, and stays available on Workbench.
+- Mobile uses a bottom tab bar and a bottom sheet for the canvas. Desktop uses a
+  split panel layout.
+
+## Workbench Turn
+
+The workspace is the primary execution flow. The composer submits a task, the
+frontend opens a websocket stream, and the transcript plus workbench state are
+updated from backend frames.
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant WebSocket
-    participant Agent
-    participant LLM
+  actor User
+  participant UI as "WorkspaceScreen"
+  participant RT as "useWorkspaceRuntime"
+  participant WS as "/api/v1/ws/execution"
+  participant CH as "chat store + adapters"
+  participant WB as "run-workbench store"
+  participant EVT as "/api/v1/ws/execution/events"
 
-    User->>WebSocket: "Hello, who are you?"
-    WebSocket->>Agent: Receive Message
-    Agent->>LLM: Prompt (History + User Request)
-    LLM-->>Agent: "I am fleet-rlm, an AI agent..."
-    Agent->>WebSocket: Stream Response
-    WebSocket-->>User: "I am fleet-rlm, an AI agent..."
+  User->>UI: Enter prompt and send
+  UI->>RT: handleSubmit()
+  RT->>WS: message payload with session_id and runtime controls
+  WS-->>CH: live chat / reasoning / tool / final frames
+  CH-->>WB: hydrate transcript and workbench state
+  WS-->>EVT: execution_started / execution_step / execution_completed
+  EVT-->>WB: canonical summary + final artifact hydration
+  WB-->>UI: stable inspector and run panel state
 ```
 
-## 2. Tool-Assisted Chat Turn
+The important rules are:
 
-User asks for information requiring a tool (e.g., read a file).
+- `WorkspaceScreen` owns local task entry, runtime mode initialization, session
+  persistence, and follow-up UX.
+- `useWorkspace()` owns the runtime lifecycle: submit, stream, cancel, HITL
+  resolution, and conversation loading.
+- `useChatStore` stores the live transcript state.
+- `useRunWorkbenchStore` stores the execution summary, artifacts, iterations,
+  callbacks, sources, and completion metadata.
+- `run-workbench-hydration.ts` is the canonical reducer for the run panel.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant WebSocket
-    participant Agent
-    participant Tools
-    participant LLM
+## Secondary Flows
 
-    User->>WebSocket: "What's in README.md?"
-    WebSocket->>Agent: Receive Message
-    Agent->>LLM: Prompt (History + Request)
-    LLM-->>Agent: Thought: "I need to read README.md"
-    LLM-->>Agent: Action: load_document("README.md")
+### Volumes
 
-    Agent->>Tools: load_document("README.md")
-    Tools->>Tools: Read File Content
-    Tools-->>Agent: "File loaded successfully. Content: # Project..."
+- `VolumesScreen` browses the mounted Daytona volume tree.
+- Selecting a file opens the canvas preview.
+- Leaving Volumes clears the selected file via `RouteSync`.
 
-    Agent->>LLM: Prompt (Observation: File Content)
-    LLM-->>Agent: Thought: "I have the content now."
-    LLM-->>Agent: "The README says this project is..."
+### History
 
-    Agent->>WebSocket: Stream Response
-    WebSocket-->>User: "The README says this project is..."
-```
+- `HistoryScreen` is a first-class route at `/app/history`.
+- It shows backend session history and local conversation history.
+- Selecting a session opens the detail drawer without leaving the shell.
 
-## 3. RLM Delegation Flow
+### Optimization
 
-User requests complex analysis requiring the Recursive Language Model.
+- `OptimizationScreen` exposes modules, datasets, runs, and compare tabs.
+- It is a separate product surface, not part of the live workbench turn flow.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Agent
-    participant RLM
-    participant Sandbox
-    participant LLM
+### Settings
 
-    User->>Agent: "Analyze the deployment logs for errors."
-    Agent->>LLM: Prompt
-    LLM-->>Agent: Action: extract_from_logs()
+- `SettingsScreen` opens as a dialog first and falls back to the routed page.
+- Sections are `appearance`, `telemetry`, `litellm`, `runtime`, and
+  `optimization`.
+- Runtime settings and connectivity checks are handled in the settings feature
+  tree, not in the workspace runtime.
 
-    rect rgb(240, 240, 240)
-        note right of Agent: Delegation to RLM
-        Agent->>RLM: Start RLM Pipeline
-
-        loop RLM Reasoning
-            RLM->>LLM: "How do I extract errors?"
-            LLM-->>RLM: Code: "grep 'ERROR' logs.txt"
-            RLM->>Sandbox: Execute Code
-            Sandbox-->>RLM: "Found 5 errors..."
-            RLM->>RLM: Refine / Iterate
-        end
-
-        RLM-->>Agent: Structured Result (JSON)
-    end
-
-    Agent->>LLM: Prompt (Observation: Analysis Result)
-    LLM-->>Agent: "I found 5 critical errors..."
-    Agent->>User: Final Response
-```
-
-## 4. Sandbox Code Editing
-
-User asks to modify a file, triggering sandbox interaction.
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant Agent
-    participant Sandbox
-    participant FileSystem
-
-    User->>Agent: "Change 'port=80' to 'port=8080' in config.py"
-    Agent->>Sandbox: edit_file("config.py", "port=80", "port=8080")
-
-    note right of Sandbox: Robust Edit Logic
-    Sandbox->>FileSystem: Read config.py
-    Sandbox->>Sandbox: Verify snippet uniqueness
-    Sandbox->>FileSystem: Write updated content
-
-    Sandbox-->>Agent: "Success: File updated."
-    Agent-->>User: "I've updated the port to 8080."
-```
