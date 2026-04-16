@@ -42,6 +42,61 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Large-document RLM routing
+# ---------------------------------------------------------------------------
+
+
+def _rlm_fetch_large_url(agent: Any, url: str, alias: str) -> dict[str, Any]:
+    """Route an oversized URL through variable-mode RLM with session context.
+
+    The URL is passed as the ``prompt`` REPL variable and the conversation
+    history as the ``history`` REPL variable (per ``RLMLargeDocSignature``).
+    The LLM sees only metadata for each and writes Python to stream-fetch
+    the document, chunk it, and call ``sub_rlm()`` per chunk.
+
+    References:
+        - dspy.RLM variable handling: https://dspy.ai/api/modules/RLM/
+        - Algorithm 1, arXiv 2512.24601v2
+    """
+    import logging
+
+    from fleet_rlm.runtime.agent.signatures import RLMLargeDocSignature
+    from fleet_rlm.runtime.models.builders import build_variable_mode_rlm
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "Document at %s exceeds size limit — routing to variable-mode RLM", url
+    )
+
+    interp = agent.interpreter
+    task = (
+        "A document at the URL below is too large to fetch in one shot. "
+        "Review the session history to understand what the user needs, then "
+        "write Python to stream-fetch the URL in manageable chunks and use "
+        "sub_rlm() to process each chunk. Synthesize a final answer."
+    )
+
+    module = build_variable_mode_rlm(
+        signature=RLMLargeDocSignature,
+        interpreter=interp,
+        max_iterations=20,
+        max_llm_calls=50,
+        verbose=bool(getattr(agent, "verbose", False)),
+        sub_lm=getattr(interp, "sub_lm", None),
+    )
+    prediction = module(task=task, prompt=url, history=agent.history)
+    answer = str(getattr(prediction, "answer", "") or "")
+    return {
+        "status": "ok",
+        "alias": alias,
+        "path": url,
+        "rlm_routed": True,
+        "answer": answer,
+        "char_count": len(answer),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
 
@@ -64,9 +119,14 @@ def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
         """Shared implementation for loading local or URL-backed documents."""
         ctx = _SandboxToolContext(agent=agent)
         if is_http_url(path):
-            content, metadata = fetch_url_document_content(
-                path, read_document_content=_read_document_content
-            )
+            try:
+                content, metadata = fetch_url_document_content(
+                    path, read_document_content=_read_document_content
+                )
+            except ValueError as exc:
+                if "exceeds size limit" not in str(exc):
+                    raise
+                return _rlm_fetch_large_url(agent, path, alias=alias)
             return _document_load_result(
                 ctx,
                 alias=alias,
