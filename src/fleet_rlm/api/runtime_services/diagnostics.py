@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from functools import partial
 from typing import Any, Literal
 
@@ -311,6 +312,7 @@ async def run_daytona_connection_test(
     )
 
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
+        client = None
         try:
             from daytona import Daytona, DaytonaConfig
 
@@ -339,6 +341,12 @@ async def run_daytona_connection_test(
             return True, output_preview, None
         except ImportError:
             return False, None, "Daytona SDK is not installed."
+        finally:
+            if client is not None:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    with suppress(Exception):
+                        await run_blocking(close, timeout=5)
 
     return await run_connectivity_test(
         state=state,
