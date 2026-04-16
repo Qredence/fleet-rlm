@@ -41,7 +41,7 @@ class _FakeSandbox:
         return SimpleNamespace(url=f"https://preview.daytona.test/{port}", token="tok")
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_daytona_bridge_awaits_async_preview_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -59,7 +59,7 @@ async def test_daytona_bridge_awaits_async_preview_link(
     assert bridge._broker_session_id is not None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_daytona_bridge_retries_on_health_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -92,7 +92,7 @@ async def test_daytona_bridge_retries_on_health_failure(
     assert len(sandbox.process.deleted_sessions) == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_daytona_bridge_resets_state_after_all_retries_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
