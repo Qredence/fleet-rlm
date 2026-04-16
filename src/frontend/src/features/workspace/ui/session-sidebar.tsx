@@ -119,7 +119,6 @@ function ContextTab() {
     { label: "Sandbox ID", value: runtimeContext.sandbox_id },
     { label: "Execution mode", value: runtimeContext.execution_mode },
     { label: "Runtime mode", value: runtimeContext.runtime_mode },
-    { label: "Daytona mode", value: runtimeContext.daytona_mode },
     { label: "Profile", value: runtimeContext.execution_profile },
     {
       label: "Depth",

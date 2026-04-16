@@ -13,6 +13,7 @@ import {
   asRecord,
   parseRuntimeContext,
 } from "@/lib/workspace/backend-chat-event-payload";
+import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import { attachFinalReferences } from "@/lib/workspace/backend-chat-event-references";
 import {
   normalizeTrajectorySteps,
@@ -25,7 +26,6 @@ import {
   inferStatusTone,
   sandboxProgressPartFromStatus,
 } from "@/lib/workspace/backend-chat-event-tool-parts";
-import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 
 const DEFAULT_PHASE = 1 as const;
 interface ApplyFrameResult {
@@ -824,5 +824,6 @@ export function applyWsFrameToMessages(
     const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
+
   return applyEvent(messages, frame, queryClient);
 }

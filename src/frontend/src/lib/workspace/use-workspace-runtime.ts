@@ -6,6 +6,8 @@ import { sendCommandOverWs, subscribeToExecutionStream, type WsServerMessage } f
 import { useArtifactStore } from "@/lib/workspace/artifact-store";
 import { applyWsFrameToArtifacts } from "@/lib/workspace/backend-artifact-event-adapter";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
+import { asRecord } from "@/lib/workspace/backend-chat-event-payload";
+import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { useChatStore } from "@/lib/workspace/chat-store";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
 import { useRunWorkbenchStore } from "@/lib/workspace/run-workbench-store";
@@ -181,6 +183,21 @@ export function useWorkspace(): ChatRuntime {
   const onFrame = useCallback(
     (frame: WsServerMessage) => {
       setIsTyping(false);
+
+      // Update or clear runtime context for the status bar
+      if (isTerminalFrame(frame)) {
+        useWorkspaceUiStore.getState().setRuntimeContext(null);
+      } else if (frame.type === "event") {
+        const payload = asRecord(frame.data.payload);
+        const rawCtx = asRecord(payload?.runtime) ?? payload;
+        if (
+          rawCtx != null &&
+          typeof rawCtx.depth === "number" &&
+          typeof rawCtx.max_depth === "number"
+        ) {
+          useWorkspaceUiStore.getState().setRuntimeContext(rawCtx as unknown as WsRuntimeContext);
+        }
+      }
 
       if (isTerminalFrame(frame)) {
         useRunWorkbenchStore.getState().applyFrame(frame);

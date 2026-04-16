@@ -8,6 +8,7 @@ import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WorkspaceComposer, type AttachedFile } from "@/features/workspace/ui/workspace-composer";
+import { ExecutionStatusBar } from "@/features/workspace/ui/execution-status-bar";
 import { WorkspaceChatEmptyState } from "@/features/workspace/ui/transcript/workspace-chat-empty-state";
 import { WorkspaceMessageList } from "@/features/workspace/ui/transcript/workspace-message-list";
 import { HitlApprovalModal } from "@/features/workspace/ui/hitl-approval-modal";
@@ -376,7 +377,10 @@ export function WorkspaceScreen() {
                         </AlertDescription>
                       </Alert>
                     ) : null}
-                    <div className="mx-auto w-full max-w-175">{composer}</div>
+                    <div className="mx-auto w-full max-w-175">
+                      <ExecutionStatusBar />
+                      {composer}
+                    </div>
                   </div>
                 </div>
               </div>
