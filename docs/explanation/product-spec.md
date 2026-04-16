@@ -1,74 +1,26 @@
-# Adaptive RLM Product Spec
+# fleet-rlm Product Spec
 
-This document describes `fleet-rlm` from a user-product perspective.
-
-The goal is not to describe every internal module. The goal is to define what
-the system is for, what a user can expect from it, and what the maintained
-product contract is.
+This document describes the maintained product contract from the user point of view. It intentionally avoids internal implementation detail except where that detail is part of the public runtime contract.
 
 ## Product Statement
 
-`fleet-rlm` is an adaptive workspace for recursive AI task execution.
+`fleet-rlm` is a persistent Daytona-backed recursive DSPy workbench.
 
-Users provide a goal and optional context. The system uses recursive language
-models, structured DSPy programs, tools, and a Daytona sandbox to choose an
-appropriate reasoning and execution strategy for the task.
+Users give the system a task and optional context. The maintained runtime uses a shared `daytona_pilot` path to decide whether to answer directly, recurse, call tools, or execute inside a Daytona sandbox.
 
-The product is centered on adaptable capability, not on repository analysis as
-the primary experience.
+Repository analysis is one supported use case, not the product identity. The product is the workbench.
 
-Repositories are one supported source of context. They are not the product's
-identity.
+## Maintained Surfaces
 
-## Product Goals
-
-The product exists to let a user:
-
-- express a task in natural language
-- attach useful context in whatever form they have it
-- let the runtime adapt its reasoning depth and execution strategy
-- inspect what the system did and why
-- keep useful outputs and state over time
-
-The product should feel like a single intelligent workspace rather than a
-collection of separate tools.
-
-## Who It Is For
-
-Primary users:
-
-- developers solving code, document, and systems tasks
-- technical operators who need inspectable task execution
-- advanced users who want a programmable AI workspace rather than a one-shot chat
-
-Typical tasks:
-
-- analyze a codebase or a subset of files
-- reason over local documents or notes
-- combine URLs, staged files, and instructions into one task
-- execute code or transformations in a safe environment
-- iterate on a task over multiple turns with persistent context
-- evaluate or optimize DSPy programs
-
-## Core User Model
-
-The intended user model is:
-
-1. I give the system a task.
-2. I optionally attach sources, files, or constraints.
-3. The system decides how much reasoning and execution the task needs.
-4. I can watch the process, inspect the outputs, and continue the session.
-
-Users should not need to think in terms of runtime backends or provider modes.
-
-## Supported Product Surfaces
-
-The maintained surfaces are:
+The current shell exposes five surfaces:
 
 - `Workbench`
 - `Volumes`
 - `Optimization`
 - `Settings`
+- `History`
+
+The first four are the primary maintained product surfaces. `History` is the supporting session browsing and replay surface.
 
 ### Workbench
 
@@ -77,10 +29,10 @@ The maintained surfaces are:
 It is where a user:
 
 - starts or resumes a session
-- sends tasks to the adaptive agent
-- stages optional sources such as files, URLs, or repositories
-- watches live reasoning and execution events
-- inspects final answers, artifacts, evidence, and run summaries
+- sends a task to the runtime
+- attaches optional context such as files, URLs, or repo refs
+- watches reasoning, tool use, sandbox activity, and HITL state
+- inspects the final answer, summary, artifacts, and evidence
 
 ### Volumes
 
@@ -90,17 +42,17 @@ It is where a user:
 
 - inspects persisted files
 - retrieves generated artifacts
-- understands what survived beyond the live execution session
+- understands what survived beyond the live turn
 
 ### Optimization
 
-`Optimization` is the DSPy quality surface.
+`Optimization` is the offline DSPy quality surface.
 
 It is where a user:
 
 - runs evaluation workflows
-- triggers optimization or compilation paths
-- measures and improves the quality of DSPy programs
+- launches optimization or compilation paths
+- compares results across modules or datasets
 
 ### Settings
 
@@ -108,14 +60,25 @@ It is where a user:
 
 It is where a user:
 
-- validates language-model connectivity
+- validates model connectivity
 - validates Daytona connectivity
 - inspects runtime health and readiness
 - adjusts allowed local runtime settings
 
-## Inputs and Sources
+### History
 
-The system should accept tasks that start from any of these:
+`History` is the session browsing and replay surface.
+
+It is where a user:
+
+- reviews prior sessions
+- opens the turn transcript for a session
+- replays or inspects session output
+- exports session history into durable datasets
+
+## Inputs and Context
+
+The system accepts tasks that begin from:
 
 - plain-language instructions
 - local files
@@ -125,90 +88,67 @@ The system should accept tasks that start from any of these:
 - repository URLs and refs
 - existing session history
 
-The maintained product stance is:
+The maintained stance is:
 
+- the task itself is the primary input
 - repos are optional context sources
 - documents are optional context sources
 - URLs are optional context sources
-- the task itself is always the primary input
 
-## Capability Model
+## Runtime Contract
 
-The runtime is designed to adapt to the task.
+The current backend is Daytona-only and is exposed through FastAPI.
 
-Depending on the task, the system may:
+Public network surfaces include:
 
-- answer directly
-- decompose the task into subproblems
-- recurse through child reasoning steps
-- use tools
-- read or stage documents
-- inspect or modify files
-- execute code in a sandbox
-- persist outputs for later reuse
-- recover and continue a previous session
+- `/health`
+- `/ready`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/sessions/state`
+- `GET /api/v1/sessions`
+- `GET /api/v1/sessions/{id}`
+- `GET /api/v1/sessions/{id}/turns`
+- `DELETE /api/v1/sessions/{id}`
+- `GET /api/v1/runtime/status`
+- `GET/PATCH /api/v1/runtime/settings`
+- `POST /api/v1/runtime/tests/lm`
+- `POST /api/v1/runtime/tests/daytona`
+- `GET /api/v1/runtime/volume/tree`
+- `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/optimization/status`
+- `POST /api/v1/optimization/run`
+- `GET /api/v1/optimization/modules`
+- `POST /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs/{run_id}`
+- `GET /api/v1/optimization/runs/{run_id}/results`
+- `GET /api/v1/optimization/runs/compare`
+- `POST /api/v1/optimization/datasets`
+- `GET /api/v1/optimization/datasets`
+- `GET /api/v1/optimization/datasets/{dataset_id}`
+- `POST /api/v1/traces/feedback`
+- `/api/v1/ws/execution`
+- `/api/v1/ws/execution/events`
 
-This adaptive behavior is the main product value.
+## WebSocket Model
 
-## Technical Capability Contract
+The websocket contract is split by purpose:
 
-The current stack is:
+- `/api/v1/ws/execution` is the canonical conversational turn stream
+- `/api/v1/ws/execution/events` is the passive execution/workbench event stream
 
-- FastAPI as the transport and product backend
-- DSPy as the program and reasoning framework
-- Daytona as the sandboxed execution backend
+Current rules:
 
-### FastAPI
+- identity comes from auth, not client-supplied `workspace_id` or `user_id`
+- `session_id` is message-scoped on `/api/v1/ws/execution`
+- query `session_id` is required on `/api/v1/ws/execution/events`
+- `execution_completed.summary` is the canonical workbench hydration payload
+- `execution_mode` is a per-turn hint for the Daytona-backed runtime
+- `repo_url`, `repo_ref`, `context_paths`, and `batch_concurrency` are the Daytona request controls
 
-FastAPI owns:
+## Durable State
 
-- HTTP routes
-- websocket transport
-- auth integration
-- runtime settings and diagnostics
-- app startup and lifecycle wiring
-
-### DSPy
-
-DSPy owns:
-
-- task contracts through `Signature`
-- program composition through `Module`
-- tool-using task execution through `ReAct`
-- recursive reasoning through `dspy.RLM`
-- optimization and evaluation through DSPy-native optimizers and evaluators
-
-The maintained implementation direction is to use DSPy-native classes as much as
-possible rather than building parallel custom abstractions.
-
-### Daytona
-
-Daytona owns:
-
-- sandbox creation and recovery
-- mounted durable storage
-- sandbox file operations
-- code-interpreter contexts
-- idle stop/archive lifecycle
-- recoverable execution sessions
-
-The maintained implementation direction is to stay close to the Daytona SDK
-instead of building a parallel runtime model above it.
-
-## Session Model
-
-The product distinguishes between live session state and durable workspace state.
-
-### Live State
-
-Live state includes:
-
-- current websocket turn execution
-- current sandbox/session binding
-- active interpreter context
-- in-flight reasoning and tool activity
-
-### Durable State
+Live state includes the current websocket turn, sandbox binding, and in-flight reasoning/tool activity.
 
 Durable state includes:
 
@@ -224,25 +164,24 @@ The durable mounted roots are:
 - `buffers/`
 - `meta/`
 
-Users should expect durable files to survive runtime sleep/recovery, while raw
-in-memory interpreter state is less authoritative than persisted state.
+Session manifests on durable storage live under:
 
-## Adaptive Execution Model
+`meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`
 
-The product should choose execution style based on the task.
+Users should expect durable files to survive runtime sleep or recovery, while in-memory interpreter state is less authoritative than persisted state.
+
+## Runtime Behavior
+
+The runtime adapts to the task.
 
 Examples:
 
-- a short conceptual question may only need direct DSPy reasoning
-- a long document question may require document loading and chunking
-- a code or filesystem task may require Daytona sandbox execution
-- a broader task may require recursive delegation and multiple tool steps
+- a short conceptual task may only need direct reasoning
+- a long document task may require loading and chunking
+- a filesystem task may require Daytona sandbox execution
+- a broader task may require recursion and multiple tool steps
 
-The system should make these choices with as little user friction as possible.
-
-## Runtime Lifecycle and Cost Model
-
-The maintained backend is Daytona-only and is designed to avoid wasted compute.
+The maintained runtime should keep those choices inspectable instead of hiding them behind a black box.
 
 The runtime lifecycle should behave like this:
 
@@ -252,42 +191,14 @@ The runtime lifecycle should behave like this:
 - reconnecting recovers the sandbox when possible
 - persistent state is rehydrated from durable sources
 
-This gives users a persistent workspace model without forcing every session to
-stay fully hot forever.
+Daytona idle lifecycle uses provider-minute timers:
 
-## User-Facing Contract
+- `auto_stop_interval=30`
+- `auto_archive_interval=60`
 
-### Main Entry Point
+## What Users Can Observe
 
-The main product command is:
-
-```bash
-# from a uv-managed environment
-uv run fleet web
-```
-
-### Main Network Surfaces
-
-The user-facing backend contract centers on:
-
-- `/health`
-- `/ready`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/state`
-- `/api/v1/runtime/*`
-- `POST /api/v1/traces/feedback`
-- `GET /api/v1/optimization/status`
-- `POST /api/v1/optimization/run`
-- `/api/v1/ws/execution`
-
-`/api/v1/ws/execution` is the canonical live stream for both conversational
-turns and execution/workbench events.
-
-## What the User Should Be Able to Observe
-
-The product should remain inspectable.
-
-A user should be able to observe:
+Users should be able to observe:
 
 - current runtime status
 - reasoning and trajectory steps
@@ -296,39 +207,34 @@ A user should be able to observe:
 - final answers
 - persisted artifacts and evidence
 
-The system is not intended to be a black box.
-
 ## Non-Goals
 
 The product is not primarily:
 
 - a repository browser
-- a stateless chat application
+- a stateless chat app
 - a multi-backend runtime platform
-- a generic framework shell that exposes provider choice as a user concern
+- a generic framework shell that exposes provider choice to users
 
-Those capabilities may exist internally or as optional inputs, but they are not
-the core product promise.
+Those capabilities may exist internally or as optional inputs, but they are not the core product promise.
 
 ## Product Promise
 
-The product promise is:
-
-Give the system a goal and optional context, and it will adapt its reasoning,
-tool use, and sandboxed execution strategy to complete the task in an
-inspectable and persistent workspace.
+Give the system a task and optional context, and it will adapt its reasoning, tool use, and sandboxed execution strategy to complete the task in an inspectable and persistent workspace.
 
 ## User Flow
 
 ```mermaid
 flowchart LR
-    User["User goal"] --> Context["Optional context<br/>files / urls / repo / history"]
-    Context --> Workbench["Workbench"]
-    Workbench --> Agent["DSPy ReAct + dspy.RLM"]
-    Agent --> Decide["Choose strategy<br/>reason / tool / recurse / execute"]
-    Decide --> Daytona["Daytona sandbox when needed"]
-    Decide --> Result["Answer + artifacts + trace"]
-    Daytona --> Result
-    Result --> Volumes["Durable outputs in Volumes"]
-    Result --> Next["Next turn or follow-up task"]
+  User["Task + optional context"] --> Workbench["Workbench"]
+  Workbench --> WS["/api/v1/ws/execution"]
+  WS --> Host["agent_host workflow"]
+  Host --> Runtime["worker + recursive DSPy runtime"]
+  Runtime --> Daytona["Daytona sandbox"]
+  Runtime --> Summary["execution_completed.summary"]
+  Summary --> Workbench
+  Summary --> Volumes["Volumes"]
+  Summary --> History["History"]
+  Workbench --> Optimize["Optimization"]
+  Workbench --> Settings["Settings"]
 ```

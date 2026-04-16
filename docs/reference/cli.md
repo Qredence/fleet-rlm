@@ -243,7 +243,7 @@ Both `fleet` and `fleet-rlm serve-api` support Hydra-style configuration overrid
 # Example: override runtime settings
 uv run fleet web dspy_lm_model=gpt-4
 
-# Example: override Modal settings
+# Example: override runtime settings
 uv run fleet volume_name=my-custom-volume
 ```
 

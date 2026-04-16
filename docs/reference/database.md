@@ -110,7 +110,7 @@ Associates users with tenants and defines their role.
 
 #### SandboxSession
 
-Represents a sandbox execution environment session (Modal, Daytona, etc.).
+Represents a sandbox execution environment session tracked by the persistence layer.
 
 | Field | Type | Description |
 |-------|------|-------------|

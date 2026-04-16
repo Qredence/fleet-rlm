@@ -1,107 +1,153 @@
 # Frontend Architecture
 
-This document describes the maintained architecture of the frontend under
+This document describes the maintained frontend architecture under
 `src/frontend/src/`.
 
-The frontend is a React 19 + TypeScript + Vite app using TanStack Router for
-routing, TanStack Query for backend-backed state, and Zustand for client-side
-session/UI state.
+The frontend is a React 19 + TypeScript + TanStack Router + TanStack Query +
+Zustand application. The current codebase is organized around route files,
+feature modules, and shared `lib/` state adapters.
 
-## Current Directory Structure
+## Architecture Stack
+
+```mermaid
+flowchart TB
+  A["routes/"] --> B["features/layout/"]
+  A --> C["features/workspace/"]
+  A --> D["features/volumes/"]
+  A --> E["features/history/"]
+  A --> F["features/optimization/"]
+  A --> G["features/settings/"]
+
+  C --> H["lib/workspace/"]
+  C --> I["lib/rlm-api/"]
+  D --> I
+  F --> I
+  G --> I
+
+  B --> J["stores/navigation-store"]
+  C --> J
+```
+
+## Current Source Ownership
 
 ```text
 src/frontend/src/
-├── app/                         # App bootstrap and root composition
-├── routes/                      # File-based TanStack Router surfaces
-├── screens/                     # Product slices and route-level screen modules
-│   ├── shell/                   # App shell, navigation, auth/error screens
-│   ├── workspace/               # Chat, transcript, workbench, inspector, artifacts
-│   ├── volumes/                 # Volumes browser and file preview flows
-│   └── settings/                # Runtime and app settings
-├── components/
-│   ├── ui/                      # Shared UI primitives
-│   ├── prompt-kit/              # Prompt/message rendering components
-│   └── shared/                  # Shared app-specific utilities/components
+├── routes/              # TanStack Router file tree and not-found/login/logout/signup routes
+├── features/
+│   ├── layout/          # Shell chrome, route sync, sidebar, header, dialogs, canvas host
+│   ├── workspace/       # Chat-first execution workbench, transcript, inspector, run panel
+│   ├── volumes/         # Mounted Daytona volume browser and file preview flow
+│   ├── history/         # Session history list/detail and replay views
+│   ├── optimization/    # GEPA prompt optimization UI
+│   └── settings/        # Settings dialog/page and runtime settings forms
 ├── lib/
-│   └── rlm-api/                 # REST/WebSocket client contract and generated API types
-├── stores/                      # Cross-app Zustand stores
-└── styles.css                   # Theme tokens and global styles
+│   ├── workspace/       # Zustand stores, adapters, runtime hydration, transcript shaping
+│   └── rlm-api/         # REST and websocket clients plus generated API types
+├── stores/              # Shell/navigation state shared across the app
+├── components/ui/       # shadcn/Base UI primitives and thin local extensions
+├── components/ai-elements/  # AI Elements rendering primitives
+├── components/product/  # App-owned reusable composition built from registry layers
+└── app/                 # App bootstrap/providers
 ```
 
-## Supported Product Surfaces
+Route wrappers should point at `features/*` modules directly.
 
-The live frontend shell supports only:
+## Route Tree
 
-- `/app/workspace`
-- `/app/volumes`
-- `/app/optimization`
-- `/app/settings`
+The live route tree is intentionally small and explicit:
 
-Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer
-supported compatibility entrypoints; unknown legacy paths now fall through to
-the not-found flow.
+- `/` redirects to `/app/workspace`
+- `/app` mounts the shell layout
+- `/app/workspace` is the main workbench
+- `/app/volumes` is the mounted storage browser
+- `/app/history` is the session history surface
+- `/app/optimization` is the optimization surface
+- `/app/settings` is the settings dialog/page fallback
+- `/login`, `/logout`, `/signup`, and `/404` remain standalone routes
+- `src/routes/$.tsx` is the catchall for unsupported paths
 
-## Routing and Screen Composition
+The shell route files are thin wrappers only:
 
-- `src/router.tsx` owns the router instance.
-- `src/routes/*` contains the file-based route tree.
-- `src/routeTree.gen.ts` is generated and should not be edited by hand.
-- Thin route wrappers should render screen modules from `src/screens/*` rather than
-  introducing page-layer duplication.
+- `src/routes/app.tsx` mounts `RootLayout`
+- `src/routes/app/workspace.tsx` lazy-loads `features/workspace/workspace-screen`
+- `src/routes/app/volumes.tsx` lazy-loads `features/volumes/volumes-screen`
+- `src/routes/app/history.tsx` lazy-loads `features/history/history-screen`
+- `src/routes/app/optimization.tsx` lazy-loads `features/optimization/optimization-screen`
+- `src/routes/app/settings.tsx` lazy-loads `features/settings/settings-screen`
 
-The main frontend slices are:
+## Shell And Layout Behavior
 
-- `src/screens/workspace/` for the dominant chat/runtime/workbench surface
-- `src/screens/volumes/` for volumes browsing
-- `src/screens/settings/` for runtime/app settings
-- `src/screens/shell/` for shell chrome, navigation, and standalone auth/error screens
+`RootLayout` in `features/layout/root-layout.tsx` owns:
 
-## State and Runtime Contract
+- `AppProviders`
+- the sidebar, header, and route outlet
+- the desktop resizable split between content and canvas
+- the mobile bottom sheet canvas
+- login and settings dialogs
+- the command palette
+- the toast host
 
-- TanStack Query handles backend-backed reads and settings/status queries.
-- Zustand holds local session, navigation, transcript, workbench, and shell state.
-- `src/screens/workspace/model/chat-store.ts` remains part of the live streaming
-  contract with the backend.
-- `src/screens/workspace/model/run-workbench-store.ts` and
-  `src/screens/workspace/model/run-workbench-adapter.ts` own workbench hydration.
-- `src/screens/workspace/model/backend-chat-event-adapter.ts` reduces chat frames
-  into transcript state.
-- `src/screens/workspace/model/backend-artifact-event-adapter.ts` reduces execution
-  steps into the artifact/graph view.
+`RouteSync` is the URL-to-state bridge. It keeps the shell state in sync with
+the current route, and it clears the selected volume file when leaving Volumes.
+The reverse direction is handled by navigation helpers and route-triggered
+actions.
 
-Runtime expectations:
+Important shell behavior:
 
-- `/api/v1/ws/execution` is the canonical conversational websocket stream.
-- `/api/v1/ws/execution/events` is the passive execution/workbench stream.
-- `daytona_pilot` is the public runtime path and sends `execution_mode`, `repo_url`, `repo_ref`,
-  `context_paths`, and `batch_concurrency`.
-- Frontend workbench state should hydrate from `execution_completed.summary`, not
-  from legacy chat-final scraping.
+- Workbench keeps the inspector/canvas available.
+- Volumes opens the canvas automatically so the file preview stays adjacent to
+  the browser.
+- Optimization, History, and Settings close the canvas.
+- Mobile and desktop share the same route ownership, but the canvas is rendered
+  as a bottom sheet on mobile.
 
-## Backend Integration
+## State And Runtime Model
 
-- `src/lib/rlm-api/client.ts` owns REST calls.
-- `src/lib/rlm-api/wsClient.ts` owns chat/execution WebSocket setup.
-- `src/lib/rlm-api/generated/openapi.ts` is generated from `openapi.yaml`.
-- `src/lib/rlm-api/config.ts` derives REST/WS URLs from frontend env vars.
+The frontend uses three main state layers:
 
-The frontend and backend contract is documented in
-`docs/reference/frontend-backend-integration.md`. Treat that document and
-`src/frontend/AGENTS.md` as the primary references when changing runtime labels,
-request shapes, or websocket payload expectations.
+1. TanStack Router for route selection and route params.
+2. Zustand for local session, navigation, shell, transcript, and workbench
+   state.
+3. TanStack Query for backend-backed reads, settings, and status queries.
 
-## Validation
+Key stores and adapters:
 
-From `src/frontend/`:
+- `src/stores/navigation-store.ts` owns active nav and canvas state.
+- `src/features/workspace/use-workspace.ts` owns workspace session history,
+  backend streaming, and runtime orchestration.
+- `src/lib/workspace/chat-store.ts` owns the live transcript and session id.
+- `src/lib/workspace/run-workbench-store.ts` owns execution summary state and
+  artifact hydration.
+- `src/lib/workspace/backend-chat-event-adapter.ts` turns websocket chat frames
+  into transcript rows.
+- `src/lib/workspace/backend-artifact-event-adapter.ts` turns execution steps
+  into artifact graph state.
+- `src/lib/workspace/run-workbench-hydration.ts` normalizes execution summaries
+  and final artifacts into the canonical run panel state.
+
+## Frontend File Ownership Rules
+
+- Keep route files thin. They should only connect TanStack Router to the owning
+  feature module.
+- Keep shell behavior in `features/layout/*`.
+- Keep workbench logic in `features/workspace/*` and `lib/workspace/*`.
+- Keep mounted-storage behavior in `features/volumes/*`.
+- Keep session history in `features/history/*`.
+- Keep optimization and settings logic in their own feature trees.
+- Keep websocket and REST transport details in `lib/rlm-api/*`.
+- Keep generated API files and router output out of hand-edited docs and code.
+
+## Validation And Change Discipline
+
+When frontend route, shell, runtime, or API contract changes, validate against
+the current contracts rather than the old screen-based architecture.
+
+Useful checks from `src/frontend/`:
 
 - `pnpm install --frozen-lockfile`
 - `pnpm run api:check`
 - `pnpm run type-check`
-- `pnpm run lint`
+- `pnpm run lint:robustness`
 - `pnpm run test:unit`
 - `pnpm run build`
 - `pnpm run check`
-
-If browser-level behavior changed, also run:
-
-- `pnpm run test:e2e`

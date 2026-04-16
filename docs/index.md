@@ -1,79 +1,48 @@
-# Fleet-RLM Documentation
+# Documentation Home
 
-Welcome to the `fleet-rlm` documentation. The docs are organized roughly around the [Diataxis framework](https://diataxis.fr/) and describe the maintained product: a Daytona-backed recursive DSPy workspace with a thin FastAPI/WebSocket transport and a narrow Agent Framework host around it.
+`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product path is the live workspace runtime, the durable volume browser, the optimization surface, runtime settings and diagnostics, and the session history and replay view. Historical audits and migration notes are kept separate so the current docs stay readable.
 
-## Quick Links
+## Start Here
 
-| Category | Description |
-|----------|-------------|
-| [Adaptive RLM Product Spec](explanation/product-spec.md) | User-facing product definition and capability model |
-| [Frontend Feature Spec](reference/frontend-feature-spec.md) | Page-level information architecture and component contracts |
-| [Architecture](architecture.md) | Current architecture overview and layer ownership |
-| [Current Architecture and Transition Note](notes/current-architecture-transition.md) | Migration status and cleanup guidance for transitional layers |
-| [Codebase Map](reference/codebase-map.md) | Focused backend ownership map |
-| [Module Map](reference/module-map.md) | Current backend module relationships |
-| [Tutorials](tutorials/index.md) | Learning-oriented guides for getting started |
-| [How-to Guides](how-to-guides/index.md) | Task-oriented guides for specific goals |
-| [Reference](reference/index.md) | Information-oriented technical documentation |
-| [Explanation](explanation/index.md) | Understanding-oriented conceptual guides |
+- [README](README.md) for the top-level docs landing page
+- [Product Spec](explanation/product-spec.md) for the user-facing product contract
+- [Architecture Overview](architecture.md) for the current layer ownership model
+- [Reference Index](reference/index.md) for implementation-facing contracts
+- [Explanation Index](explanation/index.md) for conceptual docs
+- [Current Architecture and Transition Note](notes/current-architecture-transition.md) for the active migration boundary
 
-## Quick Start
+## Current Docs
 
-```bash
-uv init
-uv add fleet-rlm
-uv run fleet web
-```
-
-Then open `http://localhost:8000`.
-
-## Choose Your Path
-
-### Use the Product
-
-- [Installation Guide](how-to-guides/installation.md)
-- [Adaptive RLM Product Spec](explanation/product-spec.md)
-- [Runtime Settings](how-to-guides/runtime-settings.md)
-- [Troubleshooting](how-to-guides/troubleshooting.md)
-
-### Build Integrations
-
-- [HTTP and WebSocket API](reference/http-api.md)
-- [CLI Reference](reference/cli.md)
-- [MCP Server Integration](how-to-guides/using-mcp-server.md)
-
-### Understand the System
-
-- [Architecture Overview](architecture.md)
-- [Current Architecture and Transition Note](notes/current-architecture-transition.md)
-- [Frontend Feature Spec &amp; Information Architecture](reference/frontend-feature-spec.md)
+- [Tutorials](tutorials/index.md)
+- [How-to Guides](how-to-guides/index.md)
+- [Reference](reference/index.md)
+- [Explanation](explanation/index.md)
 - [Frontend Product Surface Guide](guides/frontend-product-surface.md)
-- [Backend Codebase Map](reference/codebase-map.md)
-- [Python Backend Module Map](reference/module-map.md)
-- [Backend/Frontend Wiring Analysis](wiring-analysis.md)
-- [Concepts](explanation/concepts.md)
-- [Historical Snapshots](historical/index.md)
-- [Phase-by-phase migration notes](historical/index.md#architecture-and-migration-history)
-
-### Product Specs
-
 - [Optimization Page Spec](specs/optimization-page.md)
+- [Wiring Analysis](wiring-analysis.md)
 
-### Contribute
+## Current Product Surfaces
 
-- [Contributing Guide](../CONTRIBUTING.md)
-- [Developer setup](how-to-guides/developer-setup.md)
-- [CLI reference](reference/cli.md)
+- [Workbench](explanation/product-spec.md)
+- [Volumes](explanation/product-spec.md)
+- [Optimization](explanation/product-spec.md)
+- [Settings](explanation/product-spec.md)
+- [History](reference/frontend-backend-integration.md)
 
-## Source-of-Truth Policy
+## Historical Notes
 
-When documentation conflicts with implementation, treat these as authoritative:
+- [Historical Snapshots](historical/index.md)
+- [Architecture and migration history](historical/index.md#architecture-and-migration-history)
 
-- **CLI truth**: `uv run fleet-rlm --help` and `uv run fleet --help`
-- **API truth**: `openapi.yaml`
-- **WebSocket truth**: `src/fleet_rlm/api/routers/ws/endpoint.py` and adjacent helpers in `src/fleet_rlm/api/routers/ws/`
-- **Runtime core truth**: `src/fleet_rlm/runtime/agent/chat_agent.py`, `src/fleet_rlm/runtime/agent/recursive_runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`
+## Complete Table Of Contents
 
----
+- [SUMMARY.md](SUMMARY.md)
 
-For a complete table of contents, see [SUMMARY.md](SUMMARY.md).
+## Source of Truth
+
+When docs disagree with the code, trust the code and generated contracts:
+
+- backend routes and websocket behavior in `src/fleet_rlm/api/`
+- outer host policy in `src/fleet_rlm/agent_host/`
+- runtime and Daytona execution in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
+- frontend route and workspace behavior in `src/frontend/src/`

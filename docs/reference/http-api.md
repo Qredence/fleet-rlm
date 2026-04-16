@@ -644,7 +644,7 @@ Sent when an error occurs that doesn't fit the event stream model.
 | `planner_missing` | No planner LLM configured |
 | `llm_timeout` | LLM call timed out |
 | `llm_rate_limited` | Rate limit from LLM provider |
-| `sandbox_unavailable` | Modal sandbox unreachable |
+| `sandbox_unavailable` | Daytona sandbox unavailable |
 | `auth_failed` | Authentication failed |
 | `auth_provider_missing` | Auth required but no provider |
 | `internal_error` | Unhandled exception |
