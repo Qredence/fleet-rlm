@@ -110,7 +110,24 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
     }),
   setCreationPhase: (creationPhase) => set({ creationPhase }),
   setPendingHitlMessageId: (pendingHitlMessageId) => set({ pendingHitlMessageId }),
-  setRuntimeContext: (runtimeContext) => set({ runtimeContext }),
+  setRuntimeContext: (next) =>
+    set((state) => {
+      const cur = state.runtimeContext;
+      if (
+        cur === next ||
+        (cur != null &&
+          next != null &&
+          cur.depth === next.depth &&
+          cur.max_depth === next.max_depth &&
+          cur.sandbox_active === next.sandbox_active &&
+          cur.sandbox_transition === next.sandbox_transition &&
+          cur.execution_mode === next.execution_mode &&
+          cur.execution_profile === next.execution_profile)
+      ) {
+        return state;
+      }
+      return { runtimeContext: next };
+    }),
   toggleSidebar: () =>
     set((state) => {
       const next = !state.sidebarOpen;

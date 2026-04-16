@@ -315,16 +315,11 @@ export function WorkspaceScreen() {
                     </AlertDescription>
                   </Alert>
                 ) : null}
-<<<<<<< HEAD
 
                 <div
                   data-slot="workspace-landing-composer"
                   className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
                 >
-=======
-                <div className="mx-auto w-full max-w-175">
-                  <ExecutionStatusBar />
->>>>>>> 412898c9 (feat: add execution depth gauge and sandbox status bar)
                   {composer}
                 </div>
               </div>
@@ -382,7 +377,10 @@ export function WorkspaceScreen() {
                         </AlertDescription>
                       </Alert>
                     ) : null}
-                    <div className="mx-auto w-full max-w-175">{composer}</div>
+                    <div className="mx-auto w-full max-w-175">
+                      <ExecutionStatusBar />
+                      {composer}
+                    </div>
                   </div>
                 </div>
               </div>

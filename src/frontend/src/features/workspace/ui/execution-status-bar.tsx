@@ -55,9 +55,18 @@ interface SandboxPillProps {
   transition?: string;
 }
 
+const _STARTING_TRANSITIONS = new Set([
+  "starting",
+  "provisioning",
+  "booting",
+  "created",
+  "recreated",
+  "resumed",
+  "reused",
+]);
+
 function SandboxPill({ active, transition }: SandboxPillProps) {
-  const isStarting =
-    transition === "starting" || transition === "provisioning" || transition === "booting";
+  const isStarting = transition != null && _STARTING_TRANSITIONS.has(transition);
 
   const indicator = active ? "●" : isStarting ? "○" : "◌";
   const indicatorColor = active

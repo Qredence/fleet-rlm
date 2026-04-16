@@ -5,7 +5,6 @@ import type {
   ChatTraceStep,
 } from "@/lib/workspace/workspace-types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
-import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
 import {
@@ -824,12 +823,6 @@ export function applyWsFrameToMessages(
   if (frame.type === "error") {
     const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
-  }
-
-  const payload = asRecord(frame.data.payload);
-  const rawCtx = asRecord(payload?.runtime) ?? payload;
-  if (rawCtx != null && typeof rawCtx.depth === "number" && typeof rawCtx.max_depth === "number") {
-    useWorkspaceUiStore.getState().setRuntimeContext(rawCtx as unknown as WsRuntimeContext);
   }
 
   return applyEvent(messages, frame, queryClient);
