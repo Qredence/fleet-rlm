@@ -116,7 +116,12 @@ export const runtimeEndpoints = {
   },
 
   testLm(signal?: AbortSignal) {
-    return runRuntimeConnectionTest("/api/v1/runtime/tests/lm", "LM", () => getMockLmTest(), signal);
+    return runRuntimeConnectionTest(
+      "/api/v1/runtime/tests/lm",
+      "LM",
+      () => getMockLmTest(),
+      signal,
+    );
   },
 
   testDaytona(signal?: AbortSignal) {

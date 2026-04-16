@@ -151,8 +151,12 @@ export default defineConfig({
                 {
                   group: [
                     "@/app/workspace/**",
-                    "@/features/workspace/workspace-canvas-panel",
-                    "@/features/workspace/workspace-screen",
+                    "@/features/workspace/screen/**",
+                    "@/features/workspace/conversation/**",
+                    "@/features/workspace/composer/**",
+                    "@/features/workspace/inspection/**",
+                    "@/features/workspace/session/**",
+                    "@/features/workspace/workbench/**",
                   ],
                   message:
                     "Workspace runtime/state modules must not depend on workspace UI modules.",
@@ -173,7 +177,7 @@ export default defineConfig({
                   group: [
                     "@/features/workspace/**",
                     "@/features/volumes/**",
-                    "!@/features/workspace/workspace-canvas-panel",
+                    "!@/features/workspace/screen/workspace-canvas-panel",
                     "!@/features/workspace/workspace-layout-contract",
                     "!@/features/volumes/volumes-canvas-panel",
                     "!@/features/volumes/volumes-layout-contract",
@@ -224,9 +228,9 @@ export default defineConfig({
       clientFiles: [
         "src/app/app.tsx",
         "src/features/layout/root-layout.tsx",
-        "src/features/workspace/workspace-screen.tsx",
-        "src/features/workspace/ui/transcript/workspace-message-list.tsx",
-        "src/features/workspace/ui/workspace-composer.tsx",
+        "src/features/workspace/screen/workspace-screen.tsx",
+        "src/features/workspace/conversation/transcript/workspace-message-list.tsx",
+        "src/features/workspace/composer/workspace-composer.tsx",
         "src/features/settings/settings-screen.tsx",
         "src/features/settings/runtime-form.tsx",
         "src/features/volumes/volumes-screen.tsx",

@@ -20,6 +20,7 @@
 - [Frontend Product Surface Guide](guides/frontend-product-surface.md)
 - [Optimization Page Spec](specs/optimization-page.md)
 - [Wiring Analysis](wiring-analysis.md)
+- [Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)
 
 ## Current Product Surfaces
 

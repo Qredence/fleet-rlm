@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -216,7 +217,7 @@ def test_resolve_dataset_request_accepts_relative_path(
         program_spec="qa",
     )
 
-    resolved, dataset_ref = mod._resolve_dataset_request(request)
+    resolved, dataset_ref = asyncio.run(mod._resolve_dataset_request(request))
 
     assert resolved == dataset.resolve()
     assert dataset_ref == "nested/examples.jsonl"
@@ -239,4 +240,4 @@ def test_resolve_dataset_request_rejects_path_escape(
     )
 
     with pytest.raises(HTTPException, match="Path escapes the allowed data directory."):
-        mod._resolve_dataset_request(request)
+        asyncio.run(mod._resolve_dataset_request(request))

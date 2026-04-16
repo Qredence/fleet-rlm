@@ -1,0 +1,48 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { WorkspaceComposer } from "@/features/workspace/composer/workspace-composer";
+
+vi.mock("@/hooks/use-app-navigate", () => ({
+  useAppNavigate: () => ({
+    navigate: vi.fn(),
+  }),
+}));
+
+describe("WorkspaceComposer", () => {
+  const baseProps = {
+    onChange: () => {},
+    onSend: () => {},
+    executionMode: "auto" as const,
+    onExecutionModeChange: () => {},
+  };
+
+  it("disables submit when the composer is empty", () => {
+    const html = renderToStaticMarkup(<WorkspaceComposer value="   " {...baseProps} />);
+
+    expect(html).toContain("disabled");
+    expect(html).toContain('aria-label="Submit"');
+    expect(html).toContain('aria-label="Message"');
+  });
+
+  it("shows loading feedback while a response is in flight", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceComposer value="hello" isLoading isReceiving {...baseProps} />,
+    );
+
+    expect(html).toContain('aria-label="Sending message"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("animate-spin");
+  });
+
+  it("keeps the composer generic even in Daytona mode", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceComposer value="summarize this repo" {...baseProps} />,
+    );
+
+    expect(html).not.toContain("Experimental Daytona runtime");
+    expect(html).not.toContain('aria-label="Daytona repository URL"');
+    expect(html).not.toContain("Tools only");
+    expect(html).toContain("Auto");
+  });
+});

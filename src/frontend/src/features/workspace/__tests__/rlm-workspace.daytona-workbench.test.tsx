@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { WorkspaceScreen } from "@/features/workspace/workspace-screen";
+import { WorkspaceScreen } from "@/features/workspace/screen/workspace-screen";
 
 const chatStoreState = {
   runtimeMode: "daytona_pilot" as const,
@@ -73,11 +73,11 @@ vi.mock("@/lib/rlm-api", () => ({
   createBackendSessionId: vi.fn(() => "test-session-id"),
 }));
 
-vi.mock("@/features/workspace/ui/transcript/workspace-message-list", () => ({
+vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", () => ({
   WorkspaceMessageList: () => <div data-testid="chat-message-list">WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/features/workspace/ui/workspace-composer", () => ({
+vi.mock("@/features/workspace/composer/workspace-composer", () => ({
   WorkspaceComposer: ({
     value,
     canSubmit,

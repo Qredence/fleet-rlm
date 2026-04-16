@@ -493,12 +493,8 @@ class RLMLargeDocSignature(dspy.Signature):
     context so the LLM can target extraction at what the user actually needs.
     """
 
-    task: str = dspy.InputField(
-        desc="Instruction for how to process the document"
-    )
-    prompt: str = dspy.InputField(
-        desc="The URL to fetch (stored as REPL variable)"
-    )
+    task: str = dspy.InputField(desc="Instruction for how to process the document")
+    prompt: str = dspy.InputField(desc="The URL to fetch (stored as REPL variable)")
     history: dspy.History = dspy.InputField(
         desc="Prior chat turns for user intent context (keys: user_request, assistant_response)"
     )
