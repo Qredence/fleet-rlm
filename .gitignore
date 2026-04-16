@@ -35,6 +35,8 @@ venv/
 *.tmp
 .tmp*
 tmp/
+.remember/
+
 **/tmp/
 **/.tmp*/
 results/

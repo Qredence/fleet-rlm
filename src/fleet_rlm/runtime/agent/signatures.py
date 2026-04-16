@@ -484,6 +484,29 @@ class RLMVariableSignature(dspy.Signature):
     )
 
 
+class RLMLargeDocSignature(dspy.Signature):
+    """Fetch and process an oversized URL document using the REPL.
+
+    All input fields are stored as REPL variables — the LLM sees only
+    metadata and writes Python to stream-fetch the URL, chunk it, and call
+    ``sub_rlm()`` per chunk.  The ``history`` variable provides session
+    context so the LLM can target extraction at what the user actually needs.
+    """
+
+    task: str = dspy.InputField(
+        desc="Instruction for how to process the document"
+    )
+    prompt: str = dspy.InputField(
+        desc="The URL to fetch (stored as REPL variable)"
+    )
+    history: dspy.History = dspy.InputField(
+        desc="Prior chat turns for user intent context (keys: user_request, assistant_response)"
+    )
+    answer: str = dspy.OutputField(
+        desc="Final answer (call SUBMIT(answer=...) in REPL)"
+    )
+
+
 __all__ = [
     "ClarificationQuestionSignature",
     "CodeChangePlan",
@@ -500,6 +523,7 @@ __all__ = [
     "MemoryStructureAuditSignature",
     "MemoryStructureMigrationPlanSignature",
     "ReflectAndReviseWorkspaceStep",
+    "RLMLargeDocSignature",
     "RLMReActChatSignature",
     "RLMVariableSignature",
     "RecursiveSubQuerySignature",
