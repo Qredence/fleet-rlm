@@ -4,8 +4,10 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from fleet_rlm.api.events import ExecutionStep
 from fleet_rlm.api.runtime_services import chat_persistence as ws_persistence
 from fleet_rlm.api.runtime_services import chat_persistence as persistence_service
+from fleet_rlm.integrations.database import RunStatus
 from tests.ui.fixtures_ui import FakeChatAgent
 
 
@@ -125,3 +127,94 @@ def test_persist_session_state_updates_cache_and_saves_manifest(monkeypatch) -> 
             "persistence_required": False,
         }
     ]
+
+
+def test_complete_run_drains_batched_steps_before_shutdown() -> None:
+    class _RecordingRepository:
+        def __init__(self) -> None:
+            self.step_requests: list[Any] = []
+            self.status_updates: list[dict[str, Any]] = []
+
+        async def append_step(self, request: Any) -> Any:
+            self.step_requests.append(request)
+            return SimpleNamespace(id=len(self.step_requests))
+
+        async def update_run_status(
+            self,
+            *,
+            tenant_id: str,
+            run_id: int,
+            status: RunStatus,
+            error_json: dict[str, Any] | None,
+        ) -> None:
+            self.status_updates.append(
+                {
+                    "tenant_id": tenant_id,
+                    "run_id": run_id,
+                    "status": status,
+                    "error_json": error_json,
+                }
+            )
+
+    class _RecordingEmitter:
+        def __init__(self) -> None:
+            self.events: list[Any] = []
+
+        async def emit(self, event: Any) -> None:
+            self.events.append(event)
+
+    async def scenario() -> None:
+        repository = _RecordingRepository()
+        emitter = _RecordingEmitter()
+        lifecycle = ws_persistence.ExecutionLifecycleManager(
+            run_id="run-1",
+            workspace_id="workspace-1",
+            user_id="user-1",
+            session_id="session-1",
+            execution_emitter=emitter,
+            step_builder=SimpleNamespace(),
+            repository=repository,
+            identity_rows=SimpleNamespace(tenant_id="tenant-1"),
+            active_run_db_id=7,
+            strict_persistence=False,
+            session_record={},
+        )
+        lifecycle._persist_queue = asyncio.Queue(maxsize=512)
+        await lifecycle._persist_queue.put(
+            ExecutionStep(
+                id="step-1",
+                type="tool",
+                label="step 1",
+                timestamp=1.0,
+            )
+        )
+        await lifecycle._persist_queue.put(
+            ExecutionStep(
+                id="step-2",
+                type="tool",
+                label="step 2",
+                timestamp=2.0,
+            )
+        )
+        await lifecycle._persist_queue.put(None)
+        lifecycle._persist_worker_task = asyncio.create_task(
+            lifecycle._persist_worker()
+        )
+
+        await asyncio.wait_for(lifecycle.complete_run(RunStatus.COMPLETED), timeout=1.0)
+
+        assert [request.step_index for request in repository.step_requests] == [1, 2]
+        assert [request.run_id for request in repository.step_requests] == [7, 7]
+        assert lifecycle._persist_worker_task is None
+        assert lifecycle._persist_queue is None
+        assert repository.status_updates == [
+            {
+                "tenant_id": "tenant-1",
+                "run_id": 7,
+                "status": RunStatus.COMPLETED,
+                "error_json": None,
+            }
+        ]
+        assert emitter.events[-1].type == "execution_completed"
+
+    asyncio.run(scenario())

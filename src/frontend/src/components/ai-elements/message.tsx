@@ -9,9 +9,9 @@ import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
+import { Streamdown } from "streamdown";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Streamdown } from "streamdown";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -272,8 +272,9 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 const streamdownPlugins = { cjk, code, math, mermaid };
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({ className, children, ...props }: MessageResponseProps) => (
     <Streamdown
+      key={typeof children === "string" ? children : undefined}
       className={cn(
         "space-y-4 whitespace-normal text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         // Body text
@@ -299,7 +300,9 @@ export const MessageResponse = memo(
       )}
       plugins={streamdownPlugins}
       {...props}
-    />
+    >
+      {children}
+    </Streamdown>
   ),
   (prevProps, nextProps) => prevProps.children === nextProps.children,
 );

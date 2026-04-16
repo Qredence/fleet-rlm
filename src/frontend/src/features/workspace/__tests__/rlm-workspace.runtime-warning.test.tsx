@@ -3,16 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/features/workspace/workspace-screen";
+import type { RuntimeStatusResponse } from "@/lib/rlm-api";
 
 let runtimeStatusMock: {
-  data?: {
-    ready: boolean;
-    guidance?: string[];
-    daytona?: {
-      configured?: boolean;
-      guidance?: string[];
-    };
-  };
+  data?: Partial<RuntimeStatusResponse>;
 } = {
   data: {
     ready: false,
@@ -126,11 +120,9 @@ describe("WorkspaceScreen runtime warning", () => {
   it("renders warning banner when runtime status is unhealthy", () => {
     const html = renderScreen();
     expect(html).toContain('data-slot="alert"');
-    // Updated warning title for Phase 19
-    expect(html).toContain("Sandbox configuration needed");
-    // Guidance is now shown in a list format
+    expect(html).toContain("Runtime configuration required");
     expect(html).toContain("Run Runtime tests from Settings");
-    expect(html).toContain("Configure Sandbox");
+    expect(html).toContain("Open Runtime Settings");
   });
 
   it("omits warning banner when runtime status is healthy", () => {
@@ -142,7 +134,7 @@ describe("WorkspaceScreen runtime warning", () => {
       },
     };
     const html = renderScreen();
-    expect(html).not.toContain("Sandbox configuration needed");
+    expect(html).not.toContain("Runtime configuration required");
   });
 
   it("renders Daytona guidance when Daytona mode is selected", () => {
@@ -160,8 +152,30 @@ describe("WorkspaceScreen runtime warning", () => {
 
     const html = renderScreen();
 
-    // Updated warning title for Phase 19
-    expect(html).toContain("Sandbox configuration needed");
+    expect(html).toContain("Runtime configuration required");
     expect(html).toContain("Missing DAYTONA_API_KEY");
+  });
+
+  it("renders warning banner when LM preflight is missing even if Daytona is configured", () => {
+    runtimeStatusMock = {
+      data: {
+        ready: false,
+        guidance: ["DSPY_LLM_API_KEY (or DSPY_LM_API_KEY) is not set."],
+        daytona: {
+          configured: true,
+          guidance: [],
+        },
+        llm: {
+          model_set: true,
+          api_key_set: false,
+          planner_configured: false,
+        },
+      },
+    };
+
+    const html = renderScreen();
+
+    expect(html).toContain("Runtime configuration required");
+    expect(html).toContain("DSPY_LLM_API_KEY (or DSPY_LM_API_KEY) is not set.");
   });
 });

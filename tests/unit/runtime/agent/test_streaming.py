@@ -6,6 +6,7 @@ and fallback-to-non-streaming error resilience.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import Mock
 
 import dspy
@@ -16,6 +17,7 @@ from fleet_rlm.runtime.agent import RLMReActChatAgent
 from fleet_rlm.runtime.execution.streaming import (
     _build_final_payload,
     _normalize_trajectory,
+    _persist_streaming_turn_best_effort,
     build_cancelled_stream_event,
     build_final_stream_event,
     prepare_streaming_turn,
@@ -344,6 +346,36 @@ def test_build_cancelled_stream_event_logs_local_store_failure(monkeypatch):
     )
 
 
+def test_build_cancelled_stream_event_persists_without_running_loop(monkeypatch):
+    from fleet_rlm.integrations import local_store
+
+    recorded_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        local_store,
+        "add_turn",
+        lambda *args, **kwargs: recorded_calls.append((args, kwargs)),
+    )
+
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
+    prepared = prepare_streaming_turn(agent, message="please", trace=False)
+    agent._db_session_id = 123
+
+    event = build_cancelled_stream_event(
+        agent=agent,
+        message="please",
+        assistant_chunks=["partial"],
+        ctx=prepared.ctx,
+    )
+
+    assert event.kind == "cancelled"
+    assert recorded_calls == [
+        (
+            (123, 0, "please", "partial\n\n[cancelled]"),
+            {},
+        )
+    ]
+
+
 def test_build_final_stream_event_logs_local_store_failure(monkeypatch):
     from fleet_rlm.integrations import local_store
     from fleet_rlm.runtime.execution import streaming as streaming_module
@@ -373,6 +405,75 @@ def test_build_final_stream_event_logs_local_store_failure(monkeypatch):
     assert event.kind == "final"
     assert event.text == "world"
     log_exception.assert_called_once()
+    assert (
+        "Failed to persist final streaming turn to local_store"
+        in log_exception.call_args.args[0]
+    )
+
+
+def test_build_final_stream_event_persists_without_running_loop(monkeypatch):
+    from fleet_rlm.integrations import local_store
+
+    recorded_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        local_store,
+        "add_turn",
+        lambda *args, **kwargs: recorded_calls.append((args, kwargs)),
+    )
+
+    agent = RLMReActChatAgent(interpreter=FakeInterpreter())
+    prepared = prepare_streaming_turn(agent, message="hello", trace=False)
+    agent._db_session_id = 123
+
+    event = build_final_stream_event(
+        agent=agent,
+        message="hello",
+        final_prediction=dspy.Prediction(
+            assistant_response="world",
+            trajectory={"tool_name_0": "finish"},
+        ),
+        assistant_chunks=["world"],
+        ctx=prepared.ctx,
+    )
+
+    assert event.kind == "final"
+    assert recorded_calls == [
+        (
+            (123, 0, "hello", "world"),
+            {},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_persist_streaming_turn_best_effort_logs_async_failures(monkeypatch):
+    from fleet_rlm.integrations import local_store
+    from fleet_rlm.runtime.execution import streaming as streaming_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("db offline")
+
+    log_exception = Mock()
+    monkeypatch.setattr(local_store, "add_turn", _boom)
+    monkeypatch.setattr(streaming_module.logger, "exception", log_exception)
+
+    _persist_streaming_turn_best_effort(
+        db_session_id=123,
+        user_message="hello",
+        assistant_message="world",
+        error_log_message=(
+            "Failed to persist final streaming turn to local_store (session_id=%r)"
+        ),
+        error_log_args=(123,),
+    )
+
+    deadline = asyncio.get_running_loop().time() + 1.0
+    while (
+        log_exception.call_count == 0 and asyncio.get_running_loop().time() < deadline
+    ):
+        await asyncio.sleep(0.01)
+
+    assert log_exception.call_count == 1
     assert (
         "Failed to persist final streaming turn to local_store"
         in log_exception.call_args.args[0]

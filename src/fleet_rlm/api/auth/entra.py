@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 
@@ -36,15 +37,15 @@ class EntraAuthProvider:
         )
 
     async def authenticate_http(self, request: Request) -> NormalizedIdentity:
-        return self._authenticate(dict(request.headers))
+        return await self._authenticate(dict(request.headers))
 
     async def authenticate_websocket(self, websocket: WebSocket) -> NormalizedIdentity:
-        return self._authenticate(
+        return await self._authenticate(
             dict(websocket.headers),
             query_params=dict(websocket.query_params),
         )
 
-    def _authenticate(
+    async def _authenticate(
         self,
         headers: Mapping[str, str],
         *,
@@ -58,12 +59,12 @@ class EntraAuthProvider:
             token = authorization.split(" ", 1)[1].strip()
             if not token:
                 raise AuthError("Empty bearer token", status_code=401)
-            return self._decode_token(token)
+            return await self._decode_token(token)
 
         if query_params is not None:
             access_token = str(query_params.get("access_token", "")).strip()
             if access_token and self._allow_query_auth_tokens:
-                return self._decode_token(access_token)
+                return await self._decode_token(access_token)
             if access_token and not self._allow_query_auth_tokens:
                 raise AuthError(
                     "Query auth tokens are disabled for Entra authentication.",
@@ -106,7 +107,7 @@ class EntraAuthProvider:
                 status_code=503,
             )
 
-    def _decode_token(self, token: str) -> NormalizedIdentity:
+    async def _decode_token(self, token: str) -> NormalizedIdentity:
         assert self._jwk_client is not None
         assert self.issuer_template is not None
         assert self.audience is not None
@@ -126,7 +127,9 @@ class EntraAuthProvider:
             if not tenant_claim:
                 raise AuthError("Missing tid claim", status_code=401)
             expected_issuer = self.issuer_template.replace("{tenantid}", tenant_claim)
-            signing_key = self._jwk_client.get_signing_key_from_jwt(token)
+            signing_key = await asyncio.to_thread(
+                self._jwk_client.get_signing_key_from_jwt, token
+            )
             claims = jwt.decode(
                 token,
                 signing_key.key,

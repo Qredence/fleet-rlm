@@ -37,6 +37,7 @@ async function loadRuntimeModule(configOverride?: Partial<RlmApiConfig>) {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.doUnmock("@/lib/rlm-api/config");
+  vi.doUnmock("@/lib/rlm-api/client");
   vi.restoreAllMocks();
 });
 
@@ -103,6 +104,48 @@ describe("runtimeEndpoints", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/status");
+  });
+
+  it("uses a focused timeout for runtime connectivity smoke tests", async () => {
+    const postMock = vi.fn().mockResolvedValue({
+      kind: "lm",
+      ok: true,
+      preflight_ok: true,
+      checked_at: "2026-04-16T10:00:00Z",
+      checks: {},
+      guidance: [],
+    });
+
+    vi.doMock("@/lib/rlm-api/client", () => ({
+      RlmApiError,
+      rlmApiClient: {
+        get: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+        postForm: vi.fn(),
+        post: postMock,
+      },
+    }));
+
+    const { runtimeEndpoints } = await loadRuntimeModule();
+
+    await runtimeEndpoints.testLm();
+    await runtimeEndpoints.testDaytona();
+
+    expect(postMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/runtime/tests/lm",
+      undefined,
+      undefined,
+      10_000,
+    );
+    expect(postMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/runtime/tests/daytona",
+      undefined,
+      undefined,
+      10_000,
+    );
   });
 
   it("uses fallback data in explicit mock mode when runtime endpoints are unavailable", async () => {

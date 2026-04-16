@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Callable
@@ -721,21 +722,34 @@ async def spawn_delegate_sub_agent_async(
                     batch_index=batch_index,
                     total_batches=len(batched_subqueries),
                 )
-                for subquery in batch:
+
+                async def _run_one_subquery(
+                    idx: int,
+                    subquery: str,
+                ) -> dict[str, Any]:
                     subquery_result = await _run_prediction(
                         task_prompt=subquery,
                         task_context=subquery_context,
                         decomposition_progress_message=(
                             "Recursive decomposition executing "
-                            f"{len(collected_results) + 1}/{len(decomposition_decision.subqueries)}"
+                            f"{idx + 1}/{len(decomposition_decision.subqueries)}"
                         ),
                     )
-                    collected_results.append(
-                        {
-                            "subquery": subquery,
-                            **subquery_result,
-                        }
-                    )
+                    return {
+                        "subquery": subquery,
+                        **subquery_result,
+                    }
+
+                base_idx = sum(
+                    len(batched_subqueries[i]) for i in range(batch_index - 1)
+                )
+                batch_results = await asyncio.gather(
+                    *[
+                        _run_one_subquery(base_idx + idx, subquery)
+                        for idx, subquery in enumerate(batch)
+                    ]
+                )
+                collected_results.extend(batch_results)
             aggregated_result = _aggregate_decomposition_results(
                 decision=decomposition_decision,
                 results=collected_results,
@@ -984,15 +998,20 @@ async def spawn_delegate_sub_agent_async(
                             assembled_recursive_context=repair_inputs.assembled_recursive_context,
                             decision=repair_decision,
                         )
+                        repair_tasks_results = await asyncio.gather(
+                            *[
+                                spawn_delegate_sub_agent_async(
+                                    agent,
+                                    prompt=task_prompt,
+                                    context=repair_context,
+                                    stream_event_callback=stream_event_callback,
+                                    _reflection_passes=_reflection_passes + 1,
+                                )
+                                for task_prompt in repair_tasks
+                            ]
+                        )
                         repair_results: list[dict[str, Any]] = []
-                        for task_prompt in repair_tasks:
-                            task_result = await spawn_delegate_sub_agent_async(
-                                agent,
-                                prompt=task_prompt,
-                                context=repair_context,
-                                stream_event_callback=stream_event_callback,
-                                _reflection_passes=_reflection_passes + 1,
-                            )
+                        for task_result in repair_tasks_results:
                             repair_results.append(task_result)
                             if str(task_result.get("status", "ok") or "ok") == "error":
                                 break

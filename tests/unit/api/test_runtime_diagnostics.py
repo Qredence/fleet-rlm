@@ -125,3 +125,63 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
         state.runtime_test_results["daytona"]["error"]
         == "Daytona SDK is not installed."
     )
+
+
+def test_build_runtime_status_response_includes_cached_test_failures_in_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "resolve_mlflow_auto_start_enabled",
+        lambda **_: False,
+    )
+
+    state = SimpleNamespace(
+        is_ready=True,
+        config=SimpleNamespace(
+            app_env="local",
+            sandbox_provider="daytona",
+            agent_model="openai/gpt-4.1-mini",
+            agent_delegate_model="openai/gpt-4.1-mini",
+            agent_delegate_small_model="openai/gpt-4.1-mini",
+        ),
+        planner_lm=object(),
+        optional_service_status={},
+        optional_service_errors={},
+        runtime_test_results={
+            "lm": {
+                "kind": "lm",
+                "ok": False,
+                "preflight_ok": True,
+                "checked_at": "2026-04-16T10:00:00Z",
+                "checks": {},
+                "guidance": ["Check API connectivity and credentials."],
+                "error": "LM test timed out after 20s.",
+            },
+            "daytona": {
+                "kind": "daytona",
+                "ok": True,
+                "preflight_ok": True,
+                "checked_at": "2026-04-16T10:00:10Z",
+                "checks": {},
+                "guidance": [],
+                "output_preview": "OK",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        diagnostics,
+        "lm_preflight",
+        lambda: ({"model_set": True, "api_key_set": True}, []),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "daytona_preflight",
+        lambda sandbox_provider=None: ({"configured": True}, []),
+    )
+
+    status = diagnostics.build_runtime_status_response(state=state)
+
+    assert "LM test timed out after 20s." in status.guidance
+    assert "Check API connectivity and credentials." in status.guidance

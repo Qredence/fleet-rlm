@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from threading import RLock
+from asyncio import Lock as AsyncLock
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import WebSocket
@@ -93,7 +93,7 @@ class ExecutionEventEmitter:
         self._max_queue = max(1, int(max_queue))
         self._drop_policy = drop_policy
         self._connections: dict[WebSocket, ExecutionEventEmitter._ConnectionState] = {}
-        self._lock = RLock()
+        self._lock = AsyncLock()
 
     async def connect(
         self, websocket: WebSocket, subscription: ExecutionSubscription
@@ -108,12 +108,12 @@ class ExecutionEventEmitter:
             queue=queue,
             sender_task=sender_task,
         )
-        with self._lock:
+        async with self._lock:
             self._connections[websocket] = state
 
     async def disconnect(self, websocket: WebSocket) -> None:
         state: ExecutionEventEmitter._ConnectionState | None = None
-        with self._lock:
+        async with self._lock:
             state = self._connections.pop(websocket, None)
         if state is None:
             return
@@ -145,7 +145,7 @@ class ExecutionEventEmitter:
     async def _sender_loop(self, websocket: WebSocket) -> None:
         state: ExecutionEventEmitter._ConnectionState | None = None
         while True:
-            with self._lock:
+            async with self._lock:
                 state = self._connections.get(websocket)
             if state is None:
                 return
@@ -190,7 +190,7 @@ class ExecutionEventEmitter:
 
     async def emit(self, event: ExecutionEvent) -> None:
         payload = event.model_dump(mode="json")
-        with self._lock:
+        async with self._lock:
             targets = [
                 state
                 for state in self._connections.values()
@@ -199,8 +199,8 @@ class ExecutionEventEmitter:
         for state in targets:
             self._enqueue_payload(state, payload)
 
-    def dropped_event_count(self) -> int:
-        with self._lock:
+    async def dropped_event_count(self) -> int:
+        async with self._lock:
             return sum(state.dropped_events for state in self._connections.values())
 
 

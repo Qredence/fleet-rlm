@@ -385,12 +385,24 @@ def build_runtime_status_response(
         guidance.append(
             "Run Runtime connection tests to validate live provider connectivity."
         )
+    for runtime_test in (lm_test, daytona_test):
+        if runtime_test is None or runtime_test.ok:
+            continue
+        if runtime_test.error:
+            guidance.append(runtime_test.error)
+        guidance.extend(runtime_test.guidance)
     if mlflow_cfg.enabled and mlflow_startup_status == "degraded":
         guidance.append(
             "MLflow startup is degraded. Verify MLFLOW_TRACKING_URI reachability/auth, "
             "set MLFLOW_AUTO_START=false to keep MLflow manual in local dev, or set "
             "MLFLOW_ENABLED=false for this environment."
         )
+
+    deduped_guidance: list[str] = []
+    for item in guidance:
+        normalized = item.strip()
+        if normalized and normalized not in deduped_guidance:
+            deduped_guidance.append(normalized)
 
     mlflow_auto_start_enabled = resolve_mlflow_auto_start_enabled(
         app_env=state.config.app_env,
@@ -433,5 +445,5 @@ def build_runtime_status_response(
             "guidance": daytona_guidance,
         },
         tests=RuntimeTestCache(lm=lm_test, daytona=daytona_test),
-        guidance=guidance,
+        guidance=deduped_guidance,
     )

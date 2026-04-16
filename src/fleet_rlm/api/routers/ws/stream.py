@@ -265,8 +265,10 @@ async def _emit_stream_event(
         timestamp=event_timestamp,
     )
     if step is not None:
-        await lifecycle.emit_step(step)
-        await lifecycle.persist_step(step)
+        await asyncio.gather(
+            lifecycle.emit_step(step),
+            lifecycle.persist_step(step),
+        )
         lifecycle.raise_if_persistence_error()
 
     if is_terminal_event:

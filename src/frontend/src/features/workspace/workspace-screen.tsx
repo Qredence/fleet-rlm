@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelRight, Settings2, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
 
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
@@ -19,6 +20,7 @@ import {
   useWorkspace,
   useWorkspaceUiStore,
 } from "@/features/workspace/use-workspace";
+import { getWorkspaceRuntimeGuard } from "@/features/workspace/runtime-guard";
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
@@ -92,9 +94,31 @@ export function WorkspaceScreen() {
     setRuntimeMode("daytona_pilot");
   }, [setRuntimeMode]);
 
+  const handleOpenRuntimeSettings = useCallback(() => {
+    const wasHandledByDialog = requestSettingsDialogOpen({
+      section: "runtime",
+    });
+    if (!wasHandledByDialog) {
+      navigate({ to: "/settings", search: { section: "runtime" } });
+    }
+  }, [navigate]);
+
   // Wrap handleSubmit to capture chat session start event on first message
   const handleSubmit = useCallback(
     (attachments: AttachedFile[]) => {
+      const runtimeGuard = getWorkspaceRuntimeGuard(runtimeStatus.data);
+      if (backendEnabled && runtimeGuard.blocked) {
+        if (inputValue.trim()) {
+          toast.error(runtimeGuard.title, {
+            description:
+              runtimeGuard.guidance[0] ??
+              "Fix runtime credentials or connectivity before starting a Workbench run.",
+          });
+        }
+        handleOpenRuntimeSettings();
+        return;
+      }
+
       const inferredRepoContext = detectRepoContext(inputValue);
       const inferredContextPaths = detectContextPaths(inputValue);
 
@@ -125,6 +149,9 @@ export function WorkspaceScreen() {
       originalHandleSubmit,
       executionMode,
       runtimeMode,
+      runtimeStatus.data,
+      backendEnabled,
+      handleOpenRuntimeSettings,
     ],
   );
 
@@ -196,34 +223,14 @@ export function WorkspaceScreen() {
     saveConversation,
   ]);
 
-  const handleOpenRuntimeSettings = useCallback(() => {
-    const wasHandledByDialog = requestSettingsDialogOpen({
-      section: "runtime",
-    });
-    if (!wasHandledByDialog) {
-      navigate({ to: "/settings", search: { section: "runtime" } });
-    }
-  }, [navigate]);
-
-  const runtimeGuidance = runtimeStatus.data?.guidance ?? [];
-  const daytonaStatus = runtimeStatus.data?.daytona as
-    | {
-        configured?: boolean;
-        guidance?: string[];
-      }
-    | undefined;
-  const daytonaGuidance = Array.isArray(daytonaStatus?.guidance) ? daytonaStatus.guidance : [];
-  const warningGuidance = daytonaGuidance.length > 0 ? daytonaGuidance : runtimeGuidance;
-  const showRuntimeWarning =
-    backendEnabled &&
-    runtimeStatus.data != null &&
-    daytonaStatus?.configured === false &&
-    warningGuidance.length > 0;
-  const runtimeWarningTitle = "Sandbox configuration needed";
+  const runtimeGuard = getWorkspaceRuntimeGuard(runtimeStatus.data);
+  const warningGuidance = runtimeGuard.guidance;
+  const showRuntimeWarning = backendEnabled && runtimeGuard.showWarning;
+  const runtimeWarningTitle = runtimeGuard.title;
   const hasMessages = messages.length > 0;
   const showDesktopLandingState = !isMobile && !hasMessages && phase === "idle" && !isTyping;
   const hitlPending = pendingHitlMessageId != null;
-  const composerDisabled = isTyping || !backendEnabled || hitlPending;
+  const composerCanSubmit = backendEnabled && !hitlPending && !isTyping;
   const isReceivingResponse = backendEnabled && isTyping;
   const pendingHitlMessage =
     pendingHitlMessageId != null
@@ -244,10 +251,11 @@ export function WorkspaceScreen() {
       onStop={stopStreaming}
       attachmentsEnabled={false}
       placeholder={composerPlaceholder}
-      isLoading={composerDisabled}
+      isLoading={isTyping}
       isReceiving={isReceivingResponse}
       executionMode={executionMode}
       onExecutionModeChange={setExecutionMode}
+      canSubmit={composerCanSubmit}
       className="w-full"
     />
   );
@@ -292,8 +300,7 @@ export function WorkspaceScreen() {
                     <AlertDescription>
                       <div className="flex flex-col gap-3 mt-1.5">
                         <p className="text-sm text-muted-foreground leading-relaxed">
-                          Connect to a Daytona sandbox to enable secure code execution. Your code
-                          runs in an isolated environment with persistent storage.
+                          {runtimeGuard.description}
                         </p>
                         {warningGuidance.length > 0 && (
                           <ul className="text-xs text-muted-foreground/80 space-y-1 pl-4 list-disc">
@@ -309,7 +316,7 @@ export function WorkspaceScreen() {
                           onClick={handleOpenRuntimeSettings}
                         >
                           <Settings2 className="size-3.5" />
-                          Configure Sandbox
+                          Open Runtime Settings
                         </Button>
                       </div>
                     </AlertDescription>
@@ -353,8 +360,7 @@ export function WorkspaceScreen() {
                           <div className="mt-1 flex flex-col gap-3">
                             <div className="flex items-start justify-between gap-4">
                               <p className="text-xs text-muted-foreground leading-relaxed">
-                                Connect to a Daytona sandbox to enable secure code execution. Your
-                                code runs in an isolated environment with persistent storage.
+                                {runtimeGuard.description}
                               </p>
                               <Button
                                 variant="outline"
@@ -363,7 +369,7 @@ export function WorkspaceScreen() {
                                 onClick={handleOpenRuntimeSettings}
                               >
                                 <Settings2 className="size-3" />
-                                Configure
+                                Settings
                               </Button>
                             </div>
                             {warningGuidance.length > 0 ? (

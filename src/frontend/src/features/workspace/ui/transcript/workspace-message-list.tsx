@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   Conversation,
@@ -77,9 +77,13 @@ export function WorkspaceMessageList({
           .reverse()
           .find((message) => message.type === "assistant")?.id ?? null)
       : null;
-  const displayItems = buildChatDisplayItems(messages, {
-    showPendingAssistantShell: isTyping,
-  });
+  const displayItems = useMemo(
+    () =>
+      buildChatDisplayItems(messages, {
+        showPendingAssistantShell: isTyping,
+      }),
+    [messages, isTyping],
+  );
   const hasVisibleAssistantTurn = displayItems.some((item) => item.kind === "assistant_turn");
   const showTypingShimmer = isTyping && !hasStreamingAssistant && !hasVisibleAssistantTurn;
 

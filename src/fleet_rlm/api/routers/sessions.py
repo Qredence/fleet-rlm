@@ -1,5 +1,6 @@
 """Router for session state management."""
 
+import asyncio
 from collections.abc import Mapping
 
 from fastapi import APIRouter, HTTPException, Path, Query
@@ -163,7 +164,8 @@ async def list_sessions_endpoint(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
-    items, total = list_sessions(
+    items, total = await asyncio.to_thread(
+        list_sessions,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
         search=search,
@@ -204,7 +206,8 @@ async def get_session_detail(
     """Return full session detail with turn count."""
     from fleet_rlm.integrations.local_store import get_chat_session, get_turns_paginated
 
-    session = get_chat_session(
+    session = await asyncio.to_thread(
+        get_chat_session,
         session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
@@ -212,7 +215,9 @@ async def get_session_detail(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    _turns, turn_count = get_turns_paginated(session_id, limit=0, offset=0)
+    _turns, turn_count = await asyncio.to_thread(
+        get_turns_paginated, session_id, limit=0, offset=0
+    )
     return SessionDetailResponse(
         id=session.id,  # type: ignore
         title=session.title,
@@ -245,7 +250,8 @@ async def get_session_turns(
     """Return paginated turns for a session."""
     from fleet_rlm.integrations.local_store import get_chat_session, get_turns_paginated
 
-    session = get_chat_session(
+    session = await asyncio.to_thread(
+        get_chat_session,
         session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
@@ -253,7 +259,9 @@ async def get_session_turns(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    items, total = get_turns_paginated(session_id, limit=limit, offset=offset)
+    items, total = await asyncio.to_thread(
+        get_turns_paginated, session_id, limit=limit, offset=offset
+    )
     return TurnListResponse(
         items=[
             TurnItem(
@@ -285,7 +293,8 @@ async def delete_session_endpoint(
     """Archive a session (soft delete)."""
     from fleet_rlm.integrations.local_store import archive_session
 
-    archived = archive_session(
+    archived = await asyncio.to_thread(
+        archive_session,
         session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
@@ -318,7 +327,8 @@ async def export_session_endpoint(
         get_chat_session,
     )
 
-    session = get_chat_session(
+    session = await asyncio.to_thread(
+        get_chat_session,
         session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
@@ -327,7 +337,9 @@ async def export_session_endpoint(
         raise HTTPException(status_code=404, detail="Session not found")
 
     try:
-        dataset = export_session_as_dataset(session_id, body.module_slug)
+        dataset = await asyncio.to_thread(
+            export_session_as_dataset, session_id, body.module_slug
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

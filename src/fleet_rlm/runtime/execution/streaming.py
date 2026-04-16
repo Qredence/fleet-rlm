@@ -14,6 +14,7 @@ Both are re-exported here for backwards compatibility.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -50,6 +51,41 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"final", "cancelled", "error"})
+
+
+def _persist_streaming_turn_best_effort(
+    *,
+    db_session_id: Any | None,
+    user_message: str,
+    assistant_message: str,
+    error_log_message: str,
+    error_log_args: tuple[Any, ...],
+) -> None:
+    """Persist a streaming turn without assuming sync or async execution."""
+    if db_session_id is None:
+        return
+
+    from fleet_rlm.integrations.local_store import add_turn
+
+    def _write_turn() -> None:
+        add_turn(db_session_id, 0, user_message, assistant_message)
+
+    async def _write_turn_async() -> None:
+        try:
+            await asyncio.to_thread(_write_turn)
+        except Exception:
+            logger.exception(error_log_message, *error_log_args)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            _write_turn()
+        except Exception:
+            logger.exception(error_log_message, *error_log_args)
+        return
+
+    asyncio.create_task(_write_turn_async())
 
 
 @dataclass(slots=True)
@@ -109,20 +145,17 @@ def build_cancelled_stream_event(
     partial = "".join(assistant_chunks).strip()
     marked_partial = f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
     agent._append_history(message, marked_partial)
-    try:
-        _db_sid = getattr(agent, "_db_session_id", None)
-        if _db_sid is not None:
-            from fleet_rlm.integrations.local_store import add_turn
-
-            add_turn(_db_sid, 0, message, marked_partial)
-    except Exception:
-        # Best-effort persistence should never block a cancelled stream response.
-        logger.exception(
+    _db_sid = getattr(agent, "_db_session_id", None)
+    _persist_streaming_turn_best_effort(
+        db_session_id=_db_sid,
+        user_message=message,
+        assistant_message=marked_partial,
+        error_log_message=(
             "Failed to persist cancelled streaming turn to local_store "
-            "(session_id=%r, marked_partial=%r)",
-            _db_sid,
-            marked_partial,
-        )
+            "(session_id=%r, marked_partial=%r)"
+        ),
+        error_log_args=(_db_sid, marked_partial),
+    )
     return StreamEvent(
         kind="cancelled",
         text=marked_partial,
@@ -183,18 +216,16 @@ def build_final_stream_event(
         trajectory=trajectory,
     )
     agent._append_history(message, assistant_response)
-    try:
-        _db_sid = getattr(agent, "_db_session_id", None)
-        if _db_sid is not None:
-            from fleet_rlm.integrations.local_store import add_turn
-
-            add_turn(_db_sid, 0, message, assistant_response)
-    except Exception:
-        # Best-effort persistence should never block a completed stream response.
-        logger.exception(
-            "Failed to persist final streaming turn to local_store (session_id=%r)",
-            _db_sid,
-        )
+    _db_sid = getattr(agent, "_db_session_id", None)
+    _persist_streaming_turn_best_effort(
+        db_session_id=_db_sid,
+        user_message=message,
+        assistant_message=assistant_response,
+        error_log_message=(
+            "Failed to persist final streaming turn to local_store (session_id=%r)"
+        ),
+        error_log_args=(_db_sid,),
+    )
     return StreamEvent(
         kind="final",
         flush_tokens=True,

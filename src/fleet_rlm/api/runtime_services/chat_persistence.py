@@ -173,37 +173,57 @@ class ExecutionLifecycleManager:
             step = await self._persist_queue.get()
             if step is None:
                 break
-            self._step_index += 1
-            try:
-                persisted = await self.repository.append_step(
-                    RunStepCreateRequest(
-                        tenant_id=self.identity_rows.tenant_id,
-                        run_id=self.active_run_db_id,
-                        step_index=self._step_index,
-                        step_type=_map_execution_step_type(step.type),
-                        input_json=step.input
-                        if isinstance(step.input, dict)
-                        else {"value": step.input}
-                        if step.input is not None
-                        else None,
-                        output_json=step.output
-                        if isinstance(step.output, dict)
-                        else {"value": step.output}
-                        if step.output is not None
-                        else None,
-                    )
-                )
-                self._last_step_db_id = persisted.id
-                if self._session_record is not None:
-                    self._session_record["last_step_db_id"] = str(persisted.id)
-            except Exception as exc:
-                self._persistence_error = exc
-                logger.warning(
-                    "Failed to persist run step: %s",
-                    _sanitize_for_log(exc),
-                )
-                if self.strict_persistence:
+
+            # Coalesce additional steps already in the queue to reduce
+            # per-item overhead and database round-trips.
+            batch: list[ExecutionStep] = [step]
+            shutdown_requested = False
+            while len(batch) < 32:
+                try:
+                    extra = self._persist_queue.get_nowait()
+                except asyncio.QueueEmpty:
                     break
+                if extra is None:
+                    shutdown_requested = True
+                    break
+                batch.append(extra)
+
+            for batch_step in batch:
+                self._step_index += 1
+                try:
+                    persisted = await self.repository.append_step(
+                        RunStepCreateRequest(
+                            tenant_id=self.identity_rows.tenant_id,
+                            run_id=self.active_run_db_id,
+                            step_index=self._step_index,
+                            step_type=_map_execution_step_type(batch_step.type),
+                            input_json=batch_step.input
+                            if isinstance(batch_step.input, dict)
+                            else {"value": batch_step.input}
+                            if batch_step.input is not None
+                            else None,
+                            output_json=batch_step.output
+                            if isinstance(batch_step.output, dict)
+                            else {"value": batch_step.output}
+                            if batch_step.output is not None
+                            else None,
+                        )
+                    )
+                    self._last_step_db_id = persisted.id
+                    if self._session_record is not None:
+                        self._session_record["last_step_db_id"] = str(persisted.id)
+                except Exception as exc:
+                    self._persistence_error = exc
+                    logger.warning(
+                        "Failed to persist run step: %s",
+                        _sanitize_for_log(exc),
+                    )
+                    if self.strict_persistence:
+                        break
+            if self.strict_persistence and self._persistence_error is not None:
+                break
+            if shutdown_requested:
+                break
 
     async def _ensure_persist_worker(self) -> None:
         if not self._can_persist:

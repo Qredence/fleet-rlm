@@ -117,11 +117,13 @@ class LLMQueryMixin:
                 return str(item)
             return str(response)
 
-        # Reuse a single-worker executor to avoid creating unbounded background
-        # threads when repeated calls time out.
+        # Reuse an executor with modest concurrency to avoid creating unbounded
+        # threads when repeated calls time out, while not serializing all calls.
         with self._sub_lm_executor_lock:
             if self._sub_lm_executor is None:
-                self._sub_lm_executor = ThreadPoolExecutor(max_workers=1)
+                self._sub_lm_executor = ThreadPoolExecutor(
+                    max_workers=min(8, max(1, self.max_llm_calls))
+                )
             executor = self._sub_lm_executor
 
         ctx = contextvars.copy_context()

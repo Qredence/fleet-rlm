@@ -19,6 +19,7 @@ export interface RuntimeSettingsPatchInput {
 }
 
 const localLoopbackHosts = new Set(["127.0.0.1", "localhost"]);
+const RUNTIME_CONNECTION_TEST_TIMEOUT_MS = 10_000;
 
 function hasLocalBackendBaseUrl(): boolean {
   if (!rlmApiConfig.baseUrl) return false;
@@ -68,6 +69,31 @@ async function withRuntimeFallback<T>(
   }
 }
 
+async function runRuntimeConnectionTest(
+  path: "/api/v1/runtime/tests/lm" | "/api/v1/runtime/tests/daytona",
+  label: "LM" | "Daytona",
+  fallback: () => RuntimeConnectivityTestResponse,
+  signal?: AbortSignal,
+) {
+  return withRuntimeFallback(async () => {
+    try {
+      return await rlmApiClient.post<RuntimeConnectivityTestResponse>(
+        path,
+        undefined,
+        signal,
+        RUNTIME_CONNECTION_TEST_TIMEOUT_MS,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(
+          `${label} test request timed out after ${Math.ceil(RUNTIME_CONNECTION_TEST_TIMEOUT_MS / 1000)} seconds.`,
+        );
+      }
+      throw error;
+    }
+  }, fallback);
+}
+
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
     return withRuntimeFallback(
@@ -90,26 +116,15 @@ export const runtimeEndpoints = {
   },
 
   testLm(signal?: AbortSignal) {
-    return withRuntimeFallback(
-      () =>
-        rlmApiClient.post<RuntimeConnectivityTestResponse>(
-          "/api/v1/runtime/tests/lm",
-          undefined,
-          signal,
-        ),
-      () => getMockLmTest(),
-    );
+    return runRuntimeConnectionTest("/api/v1/runtime/tests/lm", "LM", () => getMockLmTest(), signal);
   },
 
   testDaytona(signal?: AbortSignal) {
-    return withRuntimeFallback(
-      () =>
-        rlmApiClient.post<RuntimeConnectivityTestResponse>(
-          "/api/v1/runtime/tests/daytona",
-          undefined,
-          signal,
-        ),
+    return runRuntimeConnectionTest(
+      "/api/v1/runtime/tests/daytona",
+      "Daytona",
       () => getMockDaytonaTest(),
+      signal,
     );
   },
 

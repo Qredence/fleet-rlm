@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WorkspaceScreen } from "@/features/workspace/workspace-screen";
+import type { RuntimeStatusResponse } from "@/lib/rlm-api";
 
 const backendRuntimeState = {
   messages: [] as Array<{
@@ -29,14 +30,7 @@ const chatStoreMockState = {
 
 let isMobileMock = false;
 let runtimeStatusMock: {
-  data?: {
-    ready: boolean;
-    guidance?: string[];
-    daytona?: {
-      configured?: boolean;
-      guidance?: string[];
-    };
-  };
+  data?: Partial<RuntimeStatusResponse>;
 } = {
   data: {
     ready: true,
@@ -170,14 +164,13 @@ describe("WorkspaceScreen empty-state layout", () => {
     const html = renderScreen();
 
     const titleIndex = html.indexOf("Start a conversation");
-    // Updated warning title for Phase 19
-    const warningIndex = html.indexOf("Sandbox configuration needed");
+    const warningIndex = html.indexOf("Runtime configuration required");
     const composerIndex = html.indexOf("WorkspaceComposer");
 
     expect(titleIndex).toBeGreaterThanOrEqual(0);
     expect(warningIndex).toBeGreaterThan(titleIndex);
     expect(composerIndex).toBeGreaterThan(warningIndex);
-    expect(html).toContain("Configure Sandbox");
+    expect(html).toContain("Open Runtime Settings");
   });
 
   it("falls back to the conversation layout as soon as the first turn is in flight", () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import logging
 from typing import TYPE_CHECKING, Any
@@ -385,12 +386,15 @@ async def switch_orchestration_session(
             logger.debug("Local session store unavailable", exc_info=True)
         else:
             try:
-                cached["db_session_id"] = _db_create(
-                    title=sess_id,
-                    external_session_id=sess_id,
-                    owner_tenant=owner_tenant_claim,
-                    owner_user=owner_user_claim,
-                    workspace_id=workspace_id,
+                cached["db_session_id"] = (
+                    await asyncio.to_thread(
+                        _db_create,
+                        title=sess_id,
+                        external_session_id=sess_id,
+                        owner_tenant=owner_tenant_claim,
+                        owner_user=owner_user_claim,
+                        workspace_id=workspace_id,
+                    )
                 ).id
             except SQLAlchemyError:
                 logger.warning("Best-effort DB session linkage failed", exc_info=True)

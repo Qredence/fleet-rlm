@@ -113,6 +113,13 @@ export async function createReconnectingWs(
           clearTimeout(firstFrameTimer);
           firstFrameTimer = null;
         }
+        if (signal) {
+          signal.removeEventListener("abort", abortHandler);
+        }
+        socket.removeEventListener("open", onOpen);
+        socket.removeEventListener("message", onMessage);
+        socket.removeEventListener("error", onError);
+        socket.removeEventListener("close", onClose);
         fn();
       };
 
@@ -151,7 +158,7 @@ export async function createReconnectingWs(
         signal.addEventListener("abort", abortHandler, { once: true });
       }
 
-      socket.addEventListener("open", () => {
+      const onOpen = () => {
         updateStatus("connected");
         if (message) {
           socket.send(JSON.stringify(message));
@@ -175,9 +182,9 @@ export async function createReconnectingWs(
             }, firstFrameTimeoutMs);
           }
         }
-      });
+      };
 
-      socket.addEventListener("message", (event) => {
+      const onMessage = (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
           const frame = parseWsServerFrame(parsed);
@@ -214,14 +221,14 @@ export async function createReconnectingWs(
         } catch {
           // Ignore malformed frames to avoid taking down the stream.
         }
-      });
+      };
 
-      socket.addEventListener("error", () => {
+      const onError = () => {
         safeClose();
         // Don't reject here - let the close handler deal with reconnection
-      });
+      };
 
-      socket.addEventListener("close", async (event) => {
+      const onClose = async (event: CloseEvent) => {
         if (settled) return;
 
         if (completed || retryState.aborted || event.code === 1000) {
@@ -254,7 +261,12 @@ export async function createReconnectingWs(
         } catch (err) {
           finish(() => reject(err));
         }
-      });
+      };
+
+      socket.addEventListener("open", onOpen);
+      socket.addEventListener("message", onMessage);
+      socket.addEventListener("error", onError);
+      socket.addEventListener("close", onClose);
     });
   };
 

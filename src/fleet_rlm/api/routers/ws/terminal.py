@@ -27,7 +27,7 @@ def build_stream_event_dict(
         "payload": payload,
         "timestamp": event.timestamp.isoformat(),
         "version": 2,
-        "event_id": str(uuid.uuid4()),
+        "event_id": uuid.uuid4().hex,
     }
 
 

@@ -73,6 +73,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
         ("owner_tenant", "VARCHAR(255)"),
         ("owner_user", "VARCHAR(255)"),
         ("workspace_id", "VARCHAR(255)"),
+        ("_monotonic_turn_counter", "INTEGER DEFAULT 0 NOT NULL"),
     ]
     with engine.connect() as conn:
         for col_name, col_type in new_columns:

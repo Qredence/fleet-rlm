@@ -59,6 +59,60 @@ describe.each([{ label: "AI Elements render parts" }, { label: "prompt-kit rende
       document.body.innerHTML = "";
     });
 
+    it("rerenders assistant content when the last message id stays the same", () => {
+      const { container, root } = mountChatMessageList([
+        {
+          id: "trace-1",
+          type: "trace",
+          content: "trace",
+          renderParts: [
+            {
+              kind: "task",
+              title: "alpha",
+              status: "in_progress",
+              items: [{ id: "task-1", text: "Working" }],
+            },
+          ],
+        },
+      ]);
+
+      expect(container.textContent).toContain("alpha");
+
+      act(() => {
+        root.render(
+          <WorkspaceMessageList
+            messages={[
+              {
+                id: "trace-1",
+                type: "trace",
+                content: "trace",
+                renderParts: [
+                  {
+                    kind: "task",
+                    title: "omega",
+                    status: "in_progress",
+                    items: [{ id: "task-1", text: "Working" }],
+                  },
+                ],
+              },
+            ]}
+            isTyping={false}
+            isMobile={false}
+            onSuggestionClick={() => {}}
+            onResolveHitl={() => {}}
+            onResolveClarification={() => {}}
+          />,
+        );
+      });
+
+      expect(container.textContent).toContain("omega");
+      expect(container.textContent).not.toContain("alpha");
+
+      act(() => {
+        root.unmount();
+      });
+    });
+
     it("renders assistant zones, standalone trace rows, confirmation, and evidence in the new composition layout", () => {
       const messages: ChatMessage[] = [
         {

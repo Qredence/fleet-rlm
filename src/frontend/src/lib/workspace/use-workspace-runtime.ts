@@ -9,7 +9,6 @@ import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapt
 import { asRecord } from "@/lib/workspace/backend-chat-event-payload";
 import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { useChatStore } from "@/lib/workspace/chat-store";
-import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
 import { useRunWorkbenchStore } from "@/lib/workspace/run-workbench-store";
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import type {
@@ -50,11 +49,9 @@ function toUserMessage(content: string): ChatMessage {
 }
 
 function latestAssistantTurnId(messages: ChatMessage[]): string | null {
-  const displayItems = buildChatDisplayItems(messages);
-  for (let index = displayItems.length - 1; index >= 0; index -= 1) {
-    const item = displayItems[index];
-    if (item?.kind !== "assistant_turn" || !item.message) continue;
-    return item.turnId;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.type === "assistant") return msg.id;
   }
   return null;
 }

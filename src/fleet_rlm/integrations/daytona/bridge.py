@@ -467,7 +467,7 @@ class DaytonaToolBridge:
                 if await asyncio.to_thread(self._check_health, broker_url):
                     return
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
                 continue
         raise CodeInterpreterError("Broker server failed to start within timeout")
 
@@ -576,18 +576,18 @@ class DaytonaToolBridge:
 
             if code_task.done():
                 if inflight:
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.005)
                 continue
 
             capacity = self.max_concurrent_tool_calls - len(inflight)
             if capacity <= 0:
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.01)
                 continue
 
             try:
                 pending_items = await asyncio.to_thread(_fetch_pending, capacity)
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.01)
                 continue
 
             for pending in pending_items:
@@ -596,7 +596,7 @@ class DaytonaToolBridge:
                     continue
                 inflight[call_id] = asyncio.create_task(_execute_one(pending))
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.01)
 
         return callback_count
 

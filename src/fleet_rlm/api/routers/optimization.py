@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -126,14 +127,14 @@ def _get_mlflow_status() -> tuple[bool, bool]:
         return False, False
 
 
-def _resolve_dataset_request(
+async def _resolve_dataset_request(
     request: GEPAOptimizationRequest,
 ) -> tuple[Path, str]:
     """Resolve a dataset request into an executable path and stored reference."""
     from fleet_rlm.integrations.local_store import get_dataset
 
     if request.dataset_id is not None:
-        dataset_row = get_dataset(request.dataset_id)
+        dataset_row = await asyncio.to_thread(get_dataset, request.dataset_id)
         if dataset_row is None:
             raise HTTPException(
                 status_code=400,
@@ -327,7 +328,7 @@ async def run_optimization(
             detail="Either module_slug or program_spec must be provided.",
         )
 
-    dataset, dataset_ref = _resolve_dataset_request(request)
+    dataset, dataset_ref = await _resolve_dataset_request(request)
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
 
@@ -352,13 +353,16 @@ async def run_optimization(
             create_optimization_run as _db_create_run,
         )
 
-        db_run_id = _db_create_run(
-            program_spec=effective_program_spec,
-            auto=request.auto,
-            train_ratio=request.train_ratio,
-            module_slug=request.module_slug,
-            dataset_id=request.dataset_id,
-            dataset_path=dataset_ref,
+        db_run_id = (
+            await asyncio.to_thread(
+                _db_create_run,
+                program_spec=effective_program_spec,
+                auto=request.auto,
+                train_ratio=request.train_ratio,
+                module_slug=request.module_slug,
+                dataset_id=request.dataset_id,
+                dataset_path=dataset_ref,
+            )
         ).id
     except Exception as exc:
         logger.exception(
@@ -400,7 +404,9 @@ async def run_optimization(
                     fail_optimization_run,
                 )
 
-                fail_optimization_run(db_run_id, error=str(exc))
+                await asyncio.to_thread(
+                    fail_optimization_run, db_run_id, error=str(exc)
+                )
             except Exception:
                 logger.exception(
                     "Failed to mark GEPA optimization run %s as failed in database",
@@ -421,7 +427,8 @@ async def run_optimization(
                 complete_optimization_run,
             )
 
-            complete_optimization_run(
+            await asyncio.to_thread(
+                complete_optimization_run,
                 db_run_id,
                 train_examples=result.get("train_examples", 0),
                 validation_examples=result.get("validation_examples", 0),
@@ -662,7 +669,7 @@ async def create_optimization_run(
         )
 
     # Path validation
-    dataset, dataset_ref = _resolve_dataset_request(request)
+    dataset, dataset_ref = await _resolve_dataset_request(request)
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
 
@@ -691,7 +698,8 @@ async def create_optimization_run(
         create_optimization_run as _db_create_run,
     )
 
-    db_row = _db_create_run(
+    db_row = await asyncio.to_thread(
+        _db_create_run,
         program_spec=effective_program_spec,
         auto=request.auto,
         train_ratio=request.train_ratio,
@@ -742,7 +750,8 @@ async def create_dataset_from_transcript(
     from fleet_rlm.integrations.local_store import create_transcript_dataset
 
     try:
-        dataset = create_transcript_dataset(
+        dataset = await asyncio.to_thread(
+            create_transcript_dataset,
             module_slug=request.module_slug,
             turns=[
                 (turn.user_message, turn.assistant_message) for turn in request.turns
@@ -795,7 +804,9 @@ async def list_runs(
                 status_code=400, detail=f"Invalid status filter: {status!r}"
             )
 
-    runs = list_optimization_runs(status=status_filter, limit=limit, offset=offset)
+    runs = await asyncio.to_thread(
+        list_optimization_runs, status=status_filter, limit=limit, offset=offset
+    )
     return [_db_run_to_response(r) for r in runs]
 
 
@@ -837,28 +848,33 @@ async def compare_runs(
         get_prompt_snapshots,
     )
 
-    comparison_items: list[RunComparisonItem] = []
-    for rid in id_list:
-        run_row = get_optimization_run(rid)
-        if run_row is None:
-            raise HTTPException(status_code=400, detail=f"Run {rid} not found.")
-        snapshots = get_prompt_snapshots(rid)
-        comparison_items.append(
-            RunComparisonItem(
-                run_id=run_row.id or 0,
-                program_spec=run_row.program_spec,
-                validation_score=run_row.validation_score,
-                prompt_snapshots=[
-                    PromptSnapshotItem(
-                        predictor_name=s.predictor_name,
-                        prompt_type=s.prompt_type,
-                        prompt_text=s.prompt_text,
-                    )
-                    for s in snapshots
-                ],
+    def _build_comparison_items(
+        run_ids: list[int],
+    ) -> list[RunComparisonItem]:
+        items: list[RunComparisonItem] = []
+        for rid in run_ids:
+            run_row = get_optimization_run(rid)
+            if run_row is None:
+                raise HTTPException(status_code=400, detail=f"Run {rid} not found.")
+            snapshots = get_prompt_snapshots(rid)
+            items.append(
+                RunComparisonItem(
+                    run_id=run_row.id or 0,
+                    program_spec=run_row.program_spec,
+                    validation_score=run_row.validation_score,
+                    prompt_snapshots=[
+                        PromptSnapshotItem(
+                            predictor_name=s.predictor_name,
+                            prompt_type=s.prompt_type,
+                            prompt_text=s.prompt_text,
+                        )
+                        for s in snapshots
+                    ],
+                )
             )
-        )
+        return items
 
+    comparison_items = await asyncio.to_thread(_build_comparison_items, id_list)
     return RunComparisonResponse(runs=comparison_items)
 
 
@@ -881,7 +897,7 @@ async def get_run(
     _ = identity
     from fleet_rlm.integrations.local_store import get_optimization_run
 
-    row = get_optimization_run(run_id)
+    row = await asyncio.to_thread(get_optimization_run, run_id)
     if row is None:
         raise HTTPException(
             status_code=404, detail=f"Optimization run {run_id} not found."
@@ -998,9 +1014,10 @@ async def upload_dataset(
     ts_id = int(time.time() * 1000) % 10_000_000
     safe_name = _sanitize_filename(file.filename)
     dest = ds_root / f"{ts_id}_{safe_name}.{fmt}"
-    dest.write_bytes(content)
+    await asyncio.to_thread(dest.write_bytes, content)
 
-    ds = create_dataset(
+    ds = await asyncio.to_thread(
+        create_dataset,
         name=Path(file.filename).stem,
         row_count=len(rows),
         format=fmt,
@@ -1037,7 +1054,9 @@ async def list_datasets_endpoint(
     _ = identity
     from fleet_rlm.integrations.local_store import list_datasets
 
-    items, total = list_datasets(module_slug=module_slug, limit=limit, offset=offset)
+    items, total = await asyncio.to_thread(
+        list_datasets, module_slug=module_slug, limit=limit, offset=offset
+    )
     return DatasetListResponse(
         items=[
             DatasetResponse(
@@ -1076,17 +1095,17 @@ async def get_dataset_detail(
     _ = identity
     from fleet_rlm.integrations.local_store import get_dataset
 
-    ds = get_dataset(dataset_id)
+    ds = await asyncio.to_thread(get_dataset, dataset_id)
     if ds is None:
         raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found.")
 
     # Read sample rows from the file
     sample_rows: list[dict] = []
     uri_path = Path(ds.uri)
-    if uri_path.is_file():
+    if await asyncio.to_thread(uri_path.is_file):
         try:
             fmt = ds.format or ("jsonl" if uri_path.suffix == ".jsonl" else "json")
-            raw = uri_path.read_bytes()
+            raw = await asyncio.to_thread(uri_path.read_bytes)
             all_rows = _parse_rows(raw, fmt)
             sample_rows = all_rows[:10]
         except Exception:
@@ -1140,12 +1159,14 @@ async def get_run_results(
         get_optimization_run,
     )
 
-    if get_optimization_run(run_id) is None:
+    if await asyncio.to_thread(get_optimization_run, run_id) is None:
         raise HTTPException(
             status_code=404, detail=f"Optimization run {run_id} not found."
         )
 
-    items, total = get_evaluation_results(run_id, limit=limit, offset=offset)
+    items, total = await asyncio.to_thread(
+        get_evaluation_results, run_id, limit=limit, offset=offset
+    )
     return EvaluationResultsResponse(
         items=[
             EvaluationResultItem(
