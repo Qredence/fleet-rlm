@@ -40,7 +40,7 @@ function hasBlockingPreflightFailure(status: RuntimeStatusResponse): boolean {
 function hasBlockingConnectivityFailure(status: RuntimeStatusResponse): boolean {
   return Boolean(
     (status.tests?.lm != null && !status.tests.lm.ok) ||
-      (status.tests?.daytona != null && !status.tests.daytona.ok),
+    (status.tests?.daytona != null && !status.tests.daytona.ok),
   );
 }
 
@@ -62,9 +62,7 @@ export function getWorkspaceRuntimeGuard(
     pushUniqueGuidance(guidance, item);
   }
   const daytonaGuidance =
-    status.daytona != null &&
-    "guidance" in status.daytona &&
-    Array.isArray(status.daytona.guidance)
+    status.daytona != null && "guidance" in status.daytona && Array.isArray(status.daytona.guidance)
       ? status.daytona.guidance
       : [];
   for (const item of daytonaGuidance) {
