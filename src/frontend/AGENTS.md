@@ -159,7 +159,7 @@ Naming and file-layout rules:
 - Keep React component symbols in `PascalCase` and hooks in `useThing` form
 - Keep tests colocated with the owning module under `__tests__/` when practical
 - Tests for `src/lib/workspace/*` and `src/features/workspace/{conversation,composer,inspection,screen,session,workbench}/*` should import those owners directly, not via route wrappers or compatibility barrels
-- Prefer responsibility folders such as `screen`, `conversation`, `composer`, `inspection`, `workbench`, and `session` inside `features/workspace/` rather than a generic feature-local `ui` bucket
+- Prefer responsibility folders such as `screen`, `conversation`, `composer`, `inspection`, `workbench`, and `session` inside `src/features/workspace/` rather than a generic feature-local `ui` bucket
 
 ## Environment and Contract Sync
 
