@@ -4,7 +4,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from "react";
-import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { FileUIPart, SourceDocumentUIPart, ToolUIPart } from "ai";
 import {
   BrainIcon,
@@ -619,8 +619,17 @@ export function EnvironmentVariableCopyButton({
   copyFormat?: "name" | "value" | "export";
 }) {
   const [isCopied, setIsCopied] = useState(false);
-  const timeoutRef = useRef<number>(0);
+  const timeoutRef = useRef<number | null>(null);
   const { name, value } = useContext(EnvironmentVariableContext);
+
+  const clearCopyTimeout = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearCopyTimeout, [clearCopyTimeout]);
 
   const getTextToCopy = useCallback(() => {
     if (copyFormat === "name") return name;
@@ -638,11 +647,15 @@ export function EnvironmentVariableCopyButton({
       await navigator.clipboard.writeText(getTextToCopy());
       setIsCopied(true);
       onCopy?.();
-      timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);
+      clearCopyTimeout();
+      timeoutRef.current = window.setTimeout(() => {
+        setIsCopied(false);
+        timeoutRef.current = null;
+      }, timeout);
     } catch (error) {
       onError?.(error as Error);
     }
-  }, [getTextToCopy, onCopy, onError, timeout]);
+  }, [clearCopyTimeout, getTextToCopy, onCopy, onError, timeout]);
 
   return (
     <Button
