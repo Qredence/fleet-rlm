@@ -64,9 +64,7 @@ def _rlm_fetch_large_url(agent: Any, url: str, alias: str) -> dict[str, Any]:
     from fleet_rlm.runtime.models.builders import build_variable_mode_rlm
 
     logger = logging.getLogger(__name__)
-    logger.info(
-        "Document at %s exceeds size limit — routing to variable-mode RLM", url
-    )
+    logger.info("Document at %s exceeds size limit — routing to variable-mode RLM", url)
 
     interp = agent.interpreter
     task = (
