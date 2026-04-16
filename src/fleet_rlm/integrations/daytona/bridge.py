@@ -293,15 +293,23 @@ class DaytonaToolBridge:
         context: Any,
         max_concurrent_tool_calls: int = 32,
         tool_claim_lease_seconds: float = 60.0,
+        broker_health_timeout: float = 60.0,
+        broker_start_retries: int = 1,
     ) -> None:
         if max_concurrent_tool_calls < 1:
             raise ValueError("max_concurrent_tool_calls must be >= 1")
         if tool_claim_lease_seconds < 1:
             raise ValueError("tool_claim_lease_seconds must be >= 1")
+        if broker_health_timeout < 1:
+            raise ValueError("broker_health_timeout must be >= 1")
+        if broker_start_retries < 0:
+            raise ValueError("broker_start_retries must be >= 0")
         self.sandbox = sandbox
         self.context = context
         self.max_concurrent_tool_calls = max_concurrent_tool_calls
         self.tool_claim_lease_seconds = float(tool_claim_lease_seconds)
+        self.broker_health_timeout = float(broker_health_timeout)
+        self.broker_start_retries = int(broker_start_retries)
         self._broker_url: str | None = None
         self._broker_token: str | None = None
         self._broker_session_id: str | None = None
@@ -321,22 +329,50 @@ class DaytonaToolBridge:
         )
         from daytona import SessionExecuteRequest
 
-        session_id = f"broker-{uuid.uuid4().hex[:8]}"
-        await _await_if_needed(self.sandbox.process.create_session(session_id))
-        await _await_if_needed(
-            self.sandbox.process.execute_session_command(
-                session_id,
-                SessionExecuteRequest(
-                    command=_BROKER_SESSION_COMMAND,
-                    run_async=True,
-                ),
-            )
+        last_error: Exception | None = None
+        for attempt in range(self.broker_start_retries + 1):
+            session_id = f"broker-{uuid.uuid4().hex[:8]}"
+            try:
+                await _await_if_needed(self.sandbox.process.create_session(session_id))
+                await _await_if_needed(
+                    self.sandbox.process.execute_session_command(
+                        session_id,
+                        SessionExecuteRequest(
+                            command=_BROKER_SESSION_COMMAND,
+                            run_async=True,
+                        ),
+                    )
+                )
+                preview = await _await_if_needed(
+                    self.sandbox.get_preview_link(_BROKER_PORT)
+                )
+                self._broker_session_id = session_id
+                self._broker_url = str(preview.url).rstrip("/")
+                self._broker_token = str(getattr(preview, "token", "") or "")
+                await self._await_health(timeout=self.broker_health_timeout)
+                return
+            except Exception as exc:
+                last_error = exc
+                # Clean up the failed session attempt and reset state so
+                # the next attempt (or the next aensure_started call) starts
+                # from scratch instead of caching a broken broker.
+                self._broker_url = None
+                self._broker_token = None
+                self._broker_session_id = None
+                try:
+                    await _await_if_needed(
+                        self.sandbox.process.delete_session(session_id)
+                    )
+                except Exception:
+                    pass
+                if attempt < self.broker_start_retries:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+        raise CodeInterpreterError(
+            f"Broker server failed to start within timeout "
+            f"({self.broker_health_timeout}s after {self.broker_start_retries + 1} attempt(s)): "
+            f"{last_error}"
         )
-        preview = await _await_if_needed(self.sandbox.get_preview_link(_BROKER_PORT))
-        self._broker_session_id = session_id
-        self._broker_url = str(preview.url).rstrip("/")
-        self._broker_token = str(getattr(preview, "token", "") or "")
-        await self._await_health()
 
     def ensure_started(self) -> None:
         _run_async_compat(self.aensure_started)

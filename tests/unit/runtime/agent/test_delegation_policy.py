@@ -117,3 +117,41 @@ def test_normalize_delegate_result_truncates_and_tracks_counter() -> None:
     assert payload["answer"].endswith("[truncated delegate output]")
     assert payload["assistant_response"] == payload["answer"]
     assert agent._turn_delegation_state.delegate_result_truncated_count_turn == 1
+
+
+def test_invoke_runtime_module_fallback_catches_second_failure(monkeypatch) -> None:
+    """When both delegate_lm and parent_lm fail, return an error instead of raising."""
+    import dspy
+
+    agent = RLMReActChatAgent(
+        interpreter=FakeInterpreter(),
+        delegate_max_calls_per_turn=2,
+    )
+    agent._prepare_turn("inspect runtime module")
+    agent.delegate_lm = object()
+
+    call_count = 0
+
+    def _failing_module(**_kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("broker timeout")
+
+    agent.get_runtime_module = lambda _name: _failing_module  # type: ignore[method-assign]
+
+    # Ensure parent_lm exists so fallback path is taken.
+    monkeypatch.setattr(dspy.settings, "lm", object())
+
+    result = invoke_runtime_module(
+        RuntimeModuleExecutionRequest(
+            agent=agent,
+            module_name="summarize_long_document",
+            module_kwargs={"document": "doc", "query": "q"},
+        )
+    )
+
+    assert call_count == 2  # primary + fallback
+    assert result.error is not None
+    assert result.prediction is None
+    assert "broker timeout" in result.error["error"]
+    assert agent._turn_delegation_state.delegate_fallback_count_turn == 1

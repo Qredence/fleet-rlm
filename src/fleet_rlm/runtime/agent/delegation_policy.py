@@ -204,6 +204,7 @@ def invoke_runtime_module(
         fallback_used = True
         record_delegate_fallback(request.agent)
 
+    exc_to_report: Exception | None = None
     try:
         if delegate_lm is not None:
             lm_context = build_dspy_context(
@@ -221,6 +222,7 @@ def invoke_runtime_module(
         with lm_context:
             prediction = module(**request.module_kwargs)
     except Exception as exc:
+        exc_to_report = exc
         runtime_failure_category = (
             str(getattr(exc, "category", "") or "").strip() or None
         )
@@ -228,14 +230,30 @@ def invoke_runtime_module(
         if delegate_lm is not None and parent_lm is not None:
             record_delegate_fallback(request.agent)
             fallback_used = True
-            with build_dspy_context(lm=parent_lm, module_name=request.module_name):
-                prediction = module(**request.module_kwargs)
-        else:
+            try:
+                with build_dspy_context(lm=parent_lm, module_name=request.module_name):
+                    prediction = module(**request.module_kwargs)
+            except Exception as fallback_exc:
+                exc_to_report = fallback_exc
+                runtime_failure_category = (
+                    str(getattr(fallback_exc, "category", "") or "").strip()
+                    or runtime_failure_category
+                    or None
+                )
+                runtime_failure_phase = (
+                    str(getattr(fallback_exc, "phase", "") or "").strip()
+                    or runtime_failure_phase
+                    or None
+                )
+            else:
+                exc_to_report = None
+
+        if exc_to_report is not None:
             error_payload: dict[str, Any] = {
                 "status": "error",
                 "error": (
                     f"Runtime module '{request.module_name}' failed: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"{type(exc_to_report).__name__}: {exc_to_report}"
                 ),
             }
             if runtime_failure_category:
