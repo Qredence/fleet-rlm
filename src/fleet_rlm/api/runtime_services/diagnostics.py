@@ -314,26 +314,17 @@ async def run_daytona_connection_test(
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
         client = None
         try:
-            from daytona import Daytona, DaytonaConfig
-
-            from fleet_rlm.integrations.daytona import (
-                resolve_daytona_config,
+            from fleet_rlm.integrations.daytona import resolve_daytona_config
+            from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
+            from fleet_rlm.integrations.daytona.runtime_helpers import (
+                _build_daytona_client,
             )
 
             config = resolve_daytona_config()
-            client = Daytona(
-                DaytonaConfig(
-                    api_key=config.api_key,
-                    api_url=config.api_url.rstrip("/"),
-                    target=config.target,
-                )
-            )
+            client = _build_daytona_client(config)
 
-            def _fetch() -> Any:
-                return client.list(limit=1)
-
-            response = await run_blocking(
-                _fetch,
+            response = await asyncio.wait_for(
+                _await_if_needed(client.list(limit=1)),
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
             items = getattr(response, "items", [])
@@ -346,7 +337,7 @@ async def run_daytona_connection_test(
                 close = getattr(client, "close", None)
                 if callable(close):
                     with suppress(Exception):
-                        await run_blocking(close, timeout=5)
+                        await _await_if_needed(close())
 
     return await run_connectivity_test(
         state=state,

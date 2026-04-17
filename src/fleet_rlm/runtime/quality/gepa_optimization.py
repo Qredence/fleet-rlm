@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "build_gepa_feedback_metric",
+    "log_gepa_mlflow_run_metadata",
     "optimize_program_with_gepa",
 ]
 
@@ -100,6 +101,40 @@ def build_gepa_feedback_metric(
 # ---------------------------------------------------------------------------
 
 
+def log_gepa_mlflow_run_metadata(
+    *,
+    dataset_path: Path,
+    program_spec: str,
+    auto: Literal["light", "medium", "heavy"] | None,
+    train_ratio: float,
+    module_slug: str | None = None,
+    source: str,
+    log_params: Callable[[dict[str, Any]], Any] | None = None,
+    set_tags: Callable[[dict[str, str]], Any] | None = None,
+) -> None:
+    """Attach consistent GEPA metadata to the active MLflow run."""
+
+    if log_params is not None:
+        cast(Any, log_params)(
+            {
+                "gepa.auto": auto or "none",
+                "gepa.train_ratio": train_ratio,
+                "gepa.dataset_name": dataset_path.name,
+            }
+        )
+
+    tags = {
+        "fleet.optimizer": "GEPA",
+        "fleet.optimization_source": source,
+        "fleet.program_spec": program_spec,
+    }
+    if module_slug:
+        tags["fleet.module_slug"] = module_slug
+
+    if set_tags is not None:
+        cast(Any, set_tags)(tags)
+
+
 def optimize_program_with_gepa(
     *,
     dataset_path: Path,
@@ -110,6 +145,7 @@ def optimize_program_with_gepa(
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
     run_name: str | None = None,
+    source: str = "offline",
     config: MlflowConfig | None = None,
     score_fn: Callable[..., float | tuple[float, str]] | None = None,
 ) -> dict[str, Any]:
@@ -165,17 +201,30 @@ def optimize_program_with_gepa(
     resolved_run_name = run_name or f"GEPA::{program_spec}"
     start_run = getattr(mlflow, "start_run", None)
     log_metric = getattr(mlflow, "log_metric", None)
+    log_params = getattr(mlflow, "log_params", None)
+    set_tags = getattr(mlflow, "set_tags", None)
     if start_run is None or log_metric is None:
         raise RuntimeError(
             "MLflow tracking helpers are unavailable in this environment."
         )
 
     with cast(Any, start_run)(run_name=resolved_run_name):
+        log_gepa_mlflow_run_metadata(
+            dataset_path=dataset_path,
+            program_spec=program_spec,
+            auto=auto,
+            train_ratio=train_ratio,
+            source=source,
+            log_params=cast(Any, log_params),
+            set_tags=cast(Any, set_tags),
+        )
         optimized = optimizer.compile(
             program,
             trainset=trainset,
             valset=valset or None,
         )
+        cast(Any, log_metric)("gepa_train_examples", len(trainset))
+        cast(Any, log_metric)("gepa_validation_examples", len(valset))
         validation_score = None
         if valset:
             evaluator = dspy.Evaluate(devset=valset, metric=feedback_metric)

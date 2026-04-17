@@ -6,33 +6,67 @@ import asyncio
 import dataclasses
 import datetime
 import logging
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-import threading
 from typing import Any
 
+from .async_compat import (
+    _await_if_needed,
+    _run_async_compat,
+)
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
-from .types import ContextSource, SandboxSpec
-from .runtime_helpers import (
-    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
-    _abuild_workspace_path,
+from .repo import (
     _aclone_repo,
-    _aensure_daytona_volume_layout,
-    _aensure_workspace_root,
     _areconcile_repo_checkout,
     _aresolve_clone_ref,
-    _astage_context_paths,
-    _await_if_needed,
+)
+from .runtime_helpers import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    _aensure_daytona_volume_layout,
     _await_volume_ready,
     _build_daytona_client,
     _daytona_import_error,
-    _run_async_compat,
+)
+from .snapshots import (
+    DEFAULT_SNAPSHOT_NAME,
+    DEFAULT_SNAPSHOT_PACKAGES,
+    acreate_snapshot,
+    aget_snapshot,
+    alist_snapshots,
+    aresolve_snapshot,
+)
+from .types import ContextSource, SandboxSpec
+from .workspace import (
+    _abuild_workspace_path,
+    _aensure_workspace_root,
+    _astage_context_paths,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _experimental_call(
+    sandbox: Any,
+    method_name: str,
+    *args: Any,
+    category: str = "sandbox_experimental_error",
+    phase: str = "sandbox_experimental",
+    **kwargs: Any,
+) -> Any:
+    """Safely invoke an experimental Daytona SDK method on *sandbox*."""
+    try:
+        method = getattr(sandbox, method_name)
+        return await _await_if_needed(method(*args, **kwargs))
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"Daytona {method_name} failure: {exc}",
+            category=category,
+            phase=phase,
+        ) from exc
 
 
 def _current_async_owner() -> tuple[int, int]:
@@ -131,6 +165,9 @@ class DaytonaSandboxSession:
     def close_driver(self) -> None:
         _run_async_compat(self.aclose_driver)
 
+    def list_files(self, path: str) -> list[Any]:
+        return _run_async_compat(self.alist_files, path)
+
     async def adelete_context(self) -> None:
         context = self._context
         self._context = None
@@ -160,7 +197,20 @@ class DaytonaSandboxSession:
             return str(candidate)
         return str(PurePosixPath(self.workspace_path) / candidate)
 
+    async def _arebind_sandbox_if_needed(self) -> None:
+        if self.matches_current_async_owner() or self._runtime_ref is None:
+            return
+        sandbox_id = self.sandbox_id
+        if not sandbox_id:
+            return
+        with suppress(Exception):
+            self.sandbox = await self._runtime_ref._aget_sandbox(
+                sandbox_id, recover=False
+            )
+            self.bind_current_async_owner()
+
     async def aread_file(self, path: str) -> str:
+        await self._arebind_sandbox_if_needed()
         raw = await _await_if_needed(
             self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
         )
@@ -174,14 +224,7 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.aread_file, path)
 
     async def awrite_file(self, path: str, content: str) -> str:
-        if not self.matches_current_async_owner() and self._runtime_ref is not None:
-            sandbox_id = self.sandbox_id
-            if sandbox_id:
-                with suppress(Exception):
-                    self.sandbox = await self._runtime_ref._aget_sandbox(
-                        sandbox_id, recover=False
-                    )
-                    self.bind_current_async_owner()
+        await self._arebind_sandbox_if_needed()
         resolved_path = self._resolve_sandbox_path(path)
         payload = content.encode("utf-8")
         callback = getattr(self, "execution_event_callback", None)
@@ -220,13 +263,11 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.awrite_file, path, content)
 
     async def alist_files(self, path: str) -> list[Any]:
+        await self._arebind_sandbox_if_needed()
         entries = await _await_if_needed(
             self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
         )
         return list(entries)
-
-    def list_files(self, path: str) -> list[Any]:
-        return _run_async_compat(self.alist_files, path)
 
     async def adelete(self) -> None:
         await self.adelete_context()
@@ -296,14 +337,20 @@ class DaytonaSandboxRuntime:
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
-        self._client: Any | None = _build_daytona_client(resolved)
+        self._client: Any | None = None
         self._client_owner: tuple[int, int] | None = None
+        self._closed = False
 
     async def _aget_client(self) -> Any:
+        if self._closed:
+            raise RuntimeError("Daytona runtime client is closed")
         owner = (threading.get_ident(), id(asyncio.get_running_loop()))
         client = self._client
         if client is None:
-            raise RuntimeError("Daytona runtime client is closed")
+            client = _build_daytona_client(self._resolved_config)
+            self._client = client
+            self._client_owner = owner
+            return client
         if self._client_owner is None:
             self._client_owner = owner
             return client
@@ -319,6 +366,7 @@ class DaytonaSandboxRuntime:
         return rebuilt
 
     async def aclose(self) -> None:
+        self._closed = True
         client = self._client
         self._client = None
         self._client_owner = None
@@ -623,7 +671,7 @@ class DaytonaSandboxRuntime:
                 sandbox=sandbox,
                 repo_url=repo_url,
                 resolved_ref=resolved_ref,
-                volume_name=volume_name,
+                volume_name=effective_volume,
                 workspace_path=workspace_path,
                 context_sources=context_sources,
                 timings=timings,
@@ -706,6 +754,89 @@ class DaytonaSandboxRuntime:
             context_id=context_id,
         )
 
+    async def afork_sandbox(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str | None = None,
+        timeout: float = 60.0,
+    ) -> DaytonaSandboxSession:
+        """Fork a sandbox session, creating a copy-on-write clone.
+
+        Wraps the Daytona SDK's experimental ``_experimental_fork`` method.
+        """
+        forked = await _experimental_call(
+            session.sandbox,
+            "_experimental_fork",
+            name=name,
+            timeout=timeout,
+            category="sandbox_fork_error",
+            phase="sandbox_fork",
+        )
+        return self._build_workspace_session(
+            sandbox=forked,
+            repo_url=session.repo_url,
+            resolved_ref=session.ref,
+            volume_name=session.volume_name,
+            workspace_path=session.workspace_path,
+            context_sources=list(session.context_sources),
+            timings={"sandbox_fork": 0},
+        )
+
+    def fork_sandbox(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str | None = None,
+        timeout: float = 60.0,
+    ) -> DaytonaSandboxSession:
+        return _run_async_compat(
+            self.afork_sandbox,
+            session,
+            name=name,
+            timeout=timeout,
+        )
+
+    async def acreate_sandbox_snapshot(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """Create a snapshot from the current state of a sandbox session.
+
+        Wraps the Daytona SDK's experimental ``_experimental_create_snapshot``
+        method.
+        """
+        await _experimental_call(
+            session.sandbox,
+            "_experimental_create_snapshot",
+            name=name,
+            timeout=timeout,
+            category="sandbox_snapshot_error",
+            phase="sandbox_snapshot",
+        )
+        return {
+            "name": name,
+            "sandbox_id": session.sandbox_id,
+            "status": "created",
+        }
+
+    def create_sandbox_snapshot(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        return _run_async_compat(
+            self.acreate_sandbox_snapshot,
+            session,
+            name=name,
+            timeout=timeout,
+        )
+
     async def areconcile_workspace_session(
         self,
         session: DaytonaSandboxSession,
@@ -762,120 +893,6 @@ class DaytonaSandboxRuntime:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot management helpers (folded from snapshots.py)
-# ---------------------------------------------------------------------------
-
-# Default pip packages every fleet-rlm sandbox needs.
-DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
-    "dspy-ai",
-    "numpy",
-    "pandas",
-    "httpx",
-    "pydantic",
-]
-
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
-
-
-async def alist_snapshots(
-    config: ResolvedDaytonaConfig | None = None,
-) -> list[dict[str, Any]]:
-    """Return a lightweight list of available snapshots.
-
-    Each dict contains ``name``, ``id``, ``state``, and ``image_name``.
-    """
-    cfg = config or resolve_daytona_config()
-    client = _build_daytona_client(cfg)
-    try:
-        result = await _await_if_needed(client.snapshot.list())
-        return [
-            {
-                "name": s.name,
-                "id": s.id,
-                "state": str(getattr(s, "state", "unknown")),
-                "image_name": getattr(s, "image_name", None),
-            }
-            for s in (result.items if hasattr(result, "items") else result)
-        ]
-    finally:
-        await _await_if_needed(client.close())
-
-
-async def aget_snapshot(
-    name: str,
-    *,
-    config: ResolvedDaytonaConfig | None = None,
-) -> dict[str, Any] | None:
-    """Look up a snapshot by *name*, returning a summary dict or ``None``."""
-    cfg = config or resolve_daytona_config()
-    client = _build_daytona_client(cfg)
-    try:
-        snap = await _await_if_needed(client.snapshot.get(name))
-        return {
-            "name": snap.name,
-            "id": snap.id,
-            "state": str(getattr(snap, "state", "unknown")),
-            "image_name": getattr(snap, "image_name", None),
-        }
-    except Exception:
-        logger.debug("snapshot_lookup_failed", extra={"name": name}, exc_info=True)
-        return None
-    finally:
-        await _await_if_needed(client.close())
-
-
-async def acreate_snapshot(
-    name: str = DEFAULT_SNAPSHOT_NAME,
-    *,
-    base_image: str = "python:3.12-slim",
-    packages: list[str] | None = None,
-    config: ResolvedDaytonaConfig | None = None,
-    on_logs: Any | None = None,
-) -> dict[str, Any]:
-    """Create a new Daytona snapshot with pre-installed packages.
-
-    Returns a summary dict with the snapshot ``name``, ``id``, and ``state``.
-    """
-    from daytona import Image as DaytonaImage
-    from daytona.common.snapshot import CreateSnapshotParams
-
-    pkgs = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
-
-    image = DaytonaImage.base(base_image)
-    image = image.run_commands("pip install uv")
-    if pkgs:
-        image = image.run_commands(f"uv pip install --system {' '.join(pkgs)}")
-
-    params = CreateSnapshotParams(name=name, image=image)
-    cfg = config or resolve_daytona_config()
-    client = _build_daytona_client(cfg)
-    try:
-        snap = await _await_if_needed(
-            client.snapshot.create(params, on_logs=on_logs, timeout=0)
-        )
-        logger.info("Snapshot '%s' created (id=%s)", snap.name, snap.id)
-        return {
-            "name": snap.name,
-            "id": snap.id,
-            "state": str(getattr(snap, "state", "unknown")),
-            "image_name": getattr(snap, "image_name", None),
-        }
-    finally:
-        await _await_if_needed(client.close())
-
-
-async def aresolve_snapshot(
-    preferred_name: str = DEFAULT_SNAPSHOT_NAME,
-    *,
-    config: ResolvedDaytonaConfig | None = None,
-) -> str | None:
-    """Return the snapshot name if it exists and is ``ACTIVE``, else ``None``."""
-    info = await aget_snapshot(preferred_name, config=config)
-    if info and info.get("state", "").upper() in ("ACTIVE", "SnapshotState.ACTIVE"):
-        return info["name"]
-    return None
-
-
 __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "DEFAULT_SNAPSHOT_NAME",

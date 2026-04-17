@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fleet_rlm.cli import runners
 from fleet_rlm.runtime.config import get_delegate_lm_from_env
@@ -106,7 +107,8 @@ def _run_with_chat_agent(
 
 def create_mcp_server(*, config: MCPRuntimeConfig | None = None):
     """Create a FastMCP server with chat-oriented tools."""
-    from fastmcp import FastMCP
+    fastmcp = cast(Any, import_module("fastmcp"))
+    FastMCP = fastmcp.FastMCP
 
     cfg = config or MCPRuntimeConfig()
     server = FastMCP(name="fleet-rlm")

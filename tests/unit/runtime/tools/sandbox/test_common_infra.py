@@ -70,7 +70,7 @@ def test_snapshot_list_serializes_success_path(monkeypatch) -> None:
         _fake_list_snapshots,
     )
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.runtime_helpers._run_async_compat",
+        "fleet_rlm.integrations.daytona.async_compat._run_async_compat",
         lambda fn, *args: asyncio.run(fn(*args)),
     )
 
@@ -117,7 +117,7 @@ def test_lsp_tools_serialize_success_paths(monkeypatch) -> None:
             return self.server
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.runtime_helpers._run_async_compat",
+        "fleet_rlm.integrations.daytona.async_compat._run_async_compat",
         lambda fn, *args: asyncio.run(fn(*args)),
     )
 

@@ -95,6 +95,7 @@ When MLflow is enabled:
 - WebSocket chat turns generate one `mlflow_client_request_id` per turn.
 - Non-chat runner entry points generate one `mlflow_client_request_id` per invocation.
 - Final/result payloads include `mlflow_trace_id` and `mlflow_client_request_id` when a trace was captured.
+- The frontend workbench runtime preserves those identifiers from final websocket payloads so feedback/debugging flows can reuse them later.
 - The trace metadata includes `mlflow.trace.session`, `mlflow.trace.user`, and `app_env`, plus any configured `MLFLOW_ACTIVE_MODEL_ID`.
 
 ## 3. Run the App
@@ -129,6 +130,8 @@ The endpoint accepts either:
 - `client_request_id`
 
 At least one is required.
+
+For live websocket-driven runs, use the `mlflow_trace_id` or `mlflow_client_request_id` returned in the final payload when available.
 
 ## 5. Export Annotated Traces
 
@@ -181,7 +184,30 @@ uv run python scripts/mlflow_cli.py evaluate \
   --guideline "The answer must stay concise."
 ```
 
-## 7. Optimize a DSPy Program with MIPROv2
+## 7. Run GEPA from the Frontend Optimization Surface
+
+For this repo, **GEPA is the canonical user-facing optimizer**. The main end-to-end
+workflow lives in the web app under **Optimization**:
+
+1. Open the **Optimization** surface.
+2. Start from **Modules** if you already know the module you want to optimize, or
+   start from **Datasets** if you need to upload JSON/JSONL data or export a
+   session/transcript into a dataset first.
+3. Use **Create** to review the GEPA run configuration:
+   - selected module / resolved `program_spec`
+   - uploaded or exported dataset
+   - optimization intensity (`auto`)
+   - train ratio
+   - optional output path
+4. Submit the run and monitor it in **Runs**.
+5. Use **Compare** to inspect score deltas, prompt diffs, and per-example changes
+   across completed GEPA runs.
+
+Under the hood, GEPA runs keep MLflow DSPy compile/eval autologging enabled and
+record consistent run metadata so the MLflow experiment reflects the same
+workflow the frontend exposes.
+
+## 8. Use the Offline MIPROv2 Helper
 
 Exported trace datasets can also drive offline DSPy optimization.
 
@@ -205,7 +231,10 @@ Notes:
   - a `dspy.Module` subclass
   - a callable that returns a `dspy.Module`
 
-## 8. Use the MLflow MCP Server
+This remains a secondary offline helper. The repo's primary product workflow is
+the GEPA path exposed in the frontend and `/api/v1/optimization/*`.
+
+## 9. Use the MLflow MCP Server
 
 Install and run the MLflow MCP server with `uv`:
 

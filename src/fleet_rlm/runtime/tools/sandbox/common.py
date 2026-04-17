@@ -323,9 +323,7 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
             limit: Maximum number of snapshots to return (default 20).
         """
         from fleet_rlm.integrations.daytona.runtime import alist_snapshots
-        from fleet_rlm.integrations.daytona.runtime_helpers import (
-            _run_async_compat,
-        )
+        from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 
         try:
             items = _run_async_compat(alist_snapshots)
@@ -343,9 +341,7 @@ def build_snapshot_tools(agent: RLMReActChatAgent) -> list[Any]:
             The snapshot name if active, or an explanation if unavailable.
         """
         from fleet_rlm.integrations.daytona.runtime import aresolve_snapshot
-        from fleet_rlm.integrations.daytona.runtime_helpers import (
-            _run_async_compat,
-        )
+        from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 
         try:
             result = _run_async_compat(aresolve_snapshot, name)
@@ -388,9 +384,7 @@ def build_lsp_tools(agent: RLMReActChatAgent) -> list[Any]:
             line: Zero-based line number.
             character: Zero-based character offset.
         """
-        from fleet_rlm.integrations.daytona.runtime_helpers import (
-            _run_async_compat,
-        )
+        from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 
         async def _get_completions() -> str:
             session = getattr(agent, "_session", None) or getattr(
@@ -428,9 +422,7 @@ def build_lsp_tools(agent: RLMReActChatAgent) -> list[Any]:
         Args:
             file_path: Path to the file in the sandbox workspace.
         """
-        from fleet_rlm.integrations.daytona.runtime_helpers import (
-            _run_async_compat,
-        )
+        from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 
         async def _get_symbols() -> str:
             session = getattr(agent, "_session", None) or getattr(

@@ -103,6 +103,8 @@ describe("useRunWorkbenchStore", () => {
         event_id: "evt-compat-final",
         payload: {
           runtime_mode: "daytona_pilot",
+          mlflow_trace_id: "trace-123",
+          mlflow_client_request_id: "chat-123",
           run_result: {
             run_id: "run-123",
             task: "Inspect the repo",
@@ -131,6 +133,8 @@ describe("useRunWorkbenchStore", () => {
       summary: "Compatibility summary",
     });
     expect(state.summary?.warnings).toEqual(["late execution summary"]);
+    expect(state.summary?.mlflowTraceId).toBe("trace-123");
+    expect(state.summary?.mlflowClientRequestId).toBe("chat-123");
     expect(state.iterations).toEqual([]);
     expect(state.compatBackfillCount).toBe(1);
     expect(state.lastCompatBackfill).toMatchObject({

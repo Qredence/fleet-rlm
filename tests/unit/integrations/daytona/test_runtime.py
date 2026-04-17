@@ -10,9 +10,8 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.runtime_helpers import (
-    _areconcile_repo_checkout,
-)
+from fleet_rlm.integrations.daytona.types import ContextSource, SandboxSpec
+from fleet_rlm.integrations.daytona.repo import _areconcile_repo_checkout
 
 
 class _FakeProcessExecResult:
@@ -28,18 +27,31 @@ class _FakeProcessExecResult:
         self.stderr = stderr
         self.result = stdout if result is None else result
         self.exit_code = exit_code
+        self.artifacts = SimpleNamespace(stdout=self.result, charts=[])
 
 
 class _FakeFs:
     def __init__(self) -> None:
         self.created: list[tuple[str, str]] = []
         self.uploads: dict[str, bytes] = {}
+        self.downloads: list[str] = []
+        self.list_calls: list[str] = []
+        self.files: dict[str, bytes | str] = {}
+        self.listings: dict[str, list[object]] = {}
 
     def create_folder(self, path: str, mode: str) -> None:
         self.created.append((path, mode))
 
     def upload_file(self, data: bytes, path: str) -> None:
         self.uploads[path] = bytes(data)
+
+    def download_file(self, path: str) -> bytes | str:
+        self.downloads.append(path)
+        return self.files.get(path, b"")
+
+    def list_files(self, path: str) -> list[object]:
+        self.list_calls.append(path)
+        return list(self.listings.get(path, []))
 
 
 class _FakeGit:
@@ -61,6 +73,8 @@ class _FakeSandbox:
             code_run_calls=[],
             code_run=self._code_run,
         )
+        self.fork_calls: list[tuple[str | None, float]] = []
+        self.snapshot_calls: list[tuple[str, float]] = []
 
     async def get_work_dir(self) -> str:
         return "/workspace"
@@ -78,9 +92,22 @@ class _FakeSandbox:
         self.process.exec_calls.append(command)
         return _FakeProcessExecResult()
 
-    def _code_run(self, code: str):
+    def _code_run(self, code: str, params=None, timeout=None):
         self.process.code_run_calls.append(code)
         return _FakeProcessExecResult()
+
+    async def _experimental_fork(
+        self, *, name: str | None = None, timeout: float | None = 60
+    ) -> "_FakeSandbox":
+        self.fork_calls.append((name, timeout))
+        forked = _FakeSandbox()
+        forked.id = f"{self.id}-fork"
+        return forked
+
+    async def _experimental_create_snapshot(
+        self, *, name: str, timeout: float | None = 60
+    ) -> None:
+        self.snapshot_calls.append((name, timeout))
 
 
 class _FakeVolumeService:
@@ -217,6 +244,28 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
     assert any(path.endswith("manifest.json") for path in upload_paths)
 
 
+def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        spec=SandboxSpec(volume_name="tenant-spec"),
+    )
+
+    assert fake_client.volume.calls == [("tenant-spec", True)]
+    assert session.volume_name == "tenant-spec"
+
+
 def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
@@ -292,6 +341,8 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
             api_key="key", api_url="https://api.daytona.test", target=None
         )
     )
+    # Client is created lazily; trigger creation before closing.
+    asyncio.run(runtime._aget_client())
     runtime.close()
     runtime.close()
 
@@ -459,7 +510,7 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
         text=True,
     )
 
-    def _code_run(code: str):
+    def _code_run(code: str, params=None, timeout=None):
         completed = subprocess.run(
             ["python3", "-c", code],
             check=False,
@@ -656,6 +707,76 @@ def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
     assert replacement_sandbox.fs.uploads == {"/workspace/repo/notes.txt": b"hello"}
 
 
+def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
+    replacement_sandbox = _FakeSandbox()
+    replacement_sandbox.fs.files["/workspace/repo/notes.txt"] = b"hello"
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def _aget_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return replacement_sandbox
+
+    runtime_ref = _RuntimeRef()
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+    session.owner_loop_id = -1
+
+    text = asyncio.run(session.aread_file("notes.txt"))
+
+    assert text == "hello"
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert sandbox.fs.downloads == []
+    assert replacement_sandbox.fs.downloads == ["/workspace/repo/notes.txt"]
+
+
+def test_daytona_session_list_files_rebinds_sandbox_on_loop_change() -> None:
+    replacement_sandbox = _FakeSandbox()
+    replacement_sandbox.fs.listings["/workspace/repo"] = [
+        SimpleNamespace(name="notes.txt", is_dir=False)
+    ]
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def _aget_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return replacement_sandbox
+
+    runtime_ref = _RuntimeRef()
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+    session.owner_loop_id = -1
+
+    entries = asyncio.run(session.alist_files("/workspace/repo"))
+
+    assert [entry.name for entry in entries] == ["notes.txt"]
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert sandbox.fs.list_calls == []
+    assert replacement_sandbox.fs.list_calls == ["/workspace/repo"]
+
+
 def test_daytona_session_write_file_emits_progress_events() -> None:
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
@@ -677,3 +798,67 @@ def test_daytona_session_write_file_emits_progress_events() -> None:
         "durable_write_completed",
     ]
     assert events[-1]["bytes_written"] == 5
+
+
+def test_runtime_fork_sandbox_creates_session() -> None:
+    """``fork_sandbox`` clones the sandbox and returns a new session."""
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url="https://github.com/example/repo",
+        ref="main",
+        volume_name="vol-1",
+        workspace_path="/workspace/repo",
+        context_sources=[
+            ContextSource(
+                source_id="ctx-1",
+                kind="file",
+                host_path="/host/file.txt",
+                staged_path="/workspace/repo/file.txt",
+            )
+        ],
+    )
+
+    forked = runtime.fork_sandbox(session, name="my-fork", timeout=30.0)
+
+    assert sandbox.fork_calls == [("my-fork", 30.0)]
+    assert forked.sandbox_id == "sbx-123-fork"
+    assert forked.repo_url == session.repo_url
+    assert forked.ref == session.ref
+    assert forked.volume_name == session.volume_name
+    assert forked.workspace_path == session.workspace_path
+    assert len(forked.context_sources) == len(session.context_sources)
+
+
+def test_runtime_create_sandbox_snapshot_returns_summary() -> None:
+    """``create_sandbox_snapshot`` triggers snapshot creation and returns metadata."""
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+
+    result = runtime.create_sandbox_snapshot(session, name="my-snapshot", timeout=45.0)
+
+    assert sandbox.snapshot_calls == [("my-snapshot", 45.0)]
+    assert result["name"] == "my-snapshot"
+    assert result["sandbox_id"] == "sbx-123"
+    assert result["status"] == "created"

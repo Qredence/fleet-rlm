@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.integrations.daytona.runtime_helpers import _run_async_compat
+from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 
 
 @pytest.mark.asyncio

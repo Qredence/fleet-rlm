@@ -14,7 +14,10 @@ from dspy.primitives.code_interpreter import CodeInterpreterError
 from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
-from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+from fleet_rlm.integrations.daytona.runtime import (
+    DaytonaSandboxRuntime,
+    DaytonaSandboxSession,
+)
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
@@ -57,9 +60,10 @@ class _FakeCodeInterpreter:
         context: Any | None = None,
         on_stdout=None,
         on_stderr=None,
+        envs: dict[str, str] | None = None,
         timeout: int | None = None,
     ) -> _FakeExecutionResult:
-        del context, timeout
+        del context, envs, timeout
         self.run_calls.append(code)
         if "def SUBMIT(**kwargs)" in code:
             self.submit_mode = "generic"
@@ -620,6 +624,19 @@ def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     assert runtime.closed == 1
 
 
+def test_daytona_interpreter_does_not_recreate_open_owned_runtime() -> None:
+    runtime = object.__new__(DaytonaSandboxRuntime)
+    runtime._resolved_config = SimpleNamespace()
+    runtime._client = None
+
+    interpreter = DaytonaInterpreter(runtime=runtime, owns_runtime=True)
+
+    interpreter._ensure_runtime_available()
+
+    assert interpreter.runtime is runtime
+    assert interpreter._runtime_closed is False
+
+
 def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> (
     None
 ):
@@ -663,3 +680,18 @@ def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_san
     assert delete_context_calls == 1
     assert close_driver_calls == 0
     assert delete_calls == 0
+
+
+def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter._session = runtime.session
+    parent_sandbox = runtime.session.sandbox
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert isinstance(child, DaytonaInterpreter)
+    assert child is not interpreter
+    assert child._session is not None
+    assert child._session.sandbox is parent_sandbox
+    assert child._session.context_id is None

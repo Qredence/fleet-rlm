@@ -12,11 +12,10 @@ from typing import Any
 from fleet_rlm.utils.volume_tree import entry_name, stable_tree_id
 
 from .config import resolve_daytona_config
+from .async_compat import _await_if_needed, _run_async_compat
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
-    _await_if_needed,
     _build_daytona_client,
-    _run_async_compat,
 )
 from .runtime_helpers import _aensure_daytona_volume_layout, _await_volume_ready
 
