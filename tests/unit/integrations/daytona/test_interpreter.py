@@ -57,9 +57,10 @@ class _FakeCodeInterpreter:
         context: Any | None = None,
         on_stdout=None,
         on_stderr=None,
+        envs: dict[str, str] | None = None,
         timeout: int | None = None,
     ) -> _FakeExecutionResult:
-        del context, timeout
+        del context, envs, timeout
         self.run_calls.append(code)
         if "def SUBMIT(**kwargs)" in code:
             self.submit_mode = "generic"
