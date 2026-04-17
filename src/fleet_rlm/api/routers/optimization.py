@@ -499,9 +499,16 @@ def _run_optimization_background(
         fail_optimization_run,
         update_optimization_run_phase,
     )
+    from fleet_rlm.runtime.config import configure_planner_from_env
     from fleet_rlm.runtime.quality.gepa_optimization import (
         log_gepa_mlflow_run_metadata,
     )
+
+    # Ensure DSPy is configured in this worker thread before any MLflow
+    # setup.  MLflow's dspy.autolog() calls dspy.settings.configure(), which
+    # enforces a single-owner-thread policy — the worker thread must be the
+    # owner, not the main thread that configured DSPy at app startup.
+    configure_planner_from_env()
 
     def _on_phase(phase: str) -> None:
         try:
