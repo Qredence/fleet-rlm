@@ -377,6 +377,8 @@ export interface RunSummary {
   terminationReason?: string;
   error?: string | null;
   warnings?: string[];
+  mlflowTraceId?: string;
+  mlflowClientRequestId?: string;
   humanReview?: HumanReviewSummary;
 }
 

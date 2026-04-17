@@ -149,4 +149,3 @@ Rules:
   visibility.
 - `layout` owns the shell UX; product surfaces own their own internal logic.
 - route files stay thin and should not acquire page-level business logic.
-

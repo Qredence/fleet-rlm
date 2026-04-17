@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from dspy.primitives import CodeInterpreterError
 
-from .runtime_helpers import _await_if_needed, _run_async_compat
+from .async_compat import _await_if_needed, _run_async_compat
 
 # ---------------------------------------------------------------------------
 # Embedded broker assets

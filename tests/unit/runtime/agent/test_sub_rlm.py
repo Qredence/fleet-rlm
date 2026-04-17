@@ -179,9 +179,7 @@ def test_child_depth_incremented() -> None:
 
 
 def test_bridge_tools_includes_sub_rlm() -> None:
-    from fleet_rlm.integrations.daytona.interpreter_execution import (
-        bridge_tools,
-    )
+    from fleet_rlm.integrations.daytona.interpreter import bridge_tools
 
     interp = _StubInterpreter()
     interp._tools = {}  # type: ignore[attr-defined]
@@ -196,7 +194,7 @@ def test_bridge_tools_includes_sub_rlm() -> None:
 
 
 def test_rlm_query_still_blocked_in_sandbox_code() -> None:
-    from fleet_rlm.integrations.daytona.interpreter_execution import (
+    from fleet_rlm.integrations.daytona.interpreter import (
         reject_unsupported_recursive_callbacks,
     )
 
@@ -215,9 +213,7 @@ def test_rlm_query_still_blocked_in_sandbox_code() -> None:
 
 def test_build_delegate_child_reuses_parent_sandbox() -> None:
     """When parent has active session, child shares sandbox via fresh context."""
-    from fleet_rlm.integrations.daytona.interpreter_execution import (
-        build_delegate_child,
-    )
+    from fleet_rlm.integrations.daytona.interpreter import build_delegate_child
     from fleet_rlm.integrations.daytona.runtime import (
         DaytonaSandboxSession,
     )
@@ -255,6 +251,7 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
     parent._sub_rlm_depth = 0
     parent._sub_rlm_max_depth = 2
     parent._session = parent_session
+    parent._parent_session_for_child.return_value = parent_session
 
     child = build_delegate_child(parent, remaining_llm_budget=10)
 
@@ -268,9 +265,7 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
 
 def test_build_delegate_child_fallback_no_session() -> None:
     """When parent has no session, child creates new sandbox."""
-    from fleet_rlm.integrations.daytona.interpreter_execution import (
-        build_delegate_child,
-    )
+    from fleet_rlm.integrations.daytona.interpreter import build_delegate_child
 
     parent = MagicMock()
     parent.runtime = MagicMock()
@@ -292,6 +287,7 @@ def test_build_delegate_child_fallback_no_session() -> None:
     parent._sub_rlm_depth = 0
     parent._sub_rlm_max_depth = 2
     parent._session = None  # No active session
+    parent._parent_session_for_child.return_value = None
 
     child = build_delegate_child(parent, remaining_llm_budget=10)
 

@@ -108,4 +108,3 @@ The important rules are:
   `optimization`.
 - Runtime settings and connectivity checks are handled in the settings feature
   tree, not in the workspace runtime.
-
