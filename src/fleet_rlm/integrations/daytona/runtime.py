@@ -59,8 +59,8 @@ async def _experimental_call(
     **kwargs: Any,
 ) -> Any:
     """Safely invoke an experimental Daytona SDK method on *sandbox*."""
-    method = getattr(sandbox, method_name)
     try:
+        method = getattr(sandbox, method_name)
         return await _await_if_needed(method(*args, **kwargs))
     except Exception as exc:
         raise DaytonaDiagnosticError(
