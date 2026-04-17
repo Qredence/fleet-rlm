@@ -125,7 +125,8 @@ class _DaytonaInterpreterLike(
     _submit_signature_key: tuple[tuple[str, str], ...] | None
     extract_final_artifact: Callable[..., dict[str, Any] | None]
 
-    def inject_variables(self, code: str, variables: dict[str, Any]) -> str: ...
+    def inject_variables(self, code: str, variables: dict[str, Any]) -> str:
+        raise NotImplementedError
 
 
 class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
