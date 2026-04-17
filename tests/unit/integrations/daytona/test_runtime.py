@@ -10,7 +10,7 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.types import ContextSource
+from fleet_rlm.integrations.daytona.types import ContextSource, SandboxSpec
 from fleet_rlm.integrations.daytona.repo import _areconcile_repo_checkout
 
 
@@ -34,12 +34,24 @@ class _FakeFs:
     def __init__(self) -> None:
         self.created: list[tuple[str, str]] = []
         self.uploads: dict[str, bytes] = {}
+        self.downloads: list[str] = []
+        self.list_calls: list[str] = []
+        self.files: dict[str, bytes | str] = {}
+        self.listings: dict[str, list[object]] = {}
 
     def create_folder(self, path: str, mode: str) -> None:
         self.created.append((path, mode))
 
     def upload_file(self, data: bytes, path: str) -> None:
         self.uploads[path] = bytes(data)
+
+    def download_file(self, path: str) -> bytes | str:
+        self.downloads.append(path)
+        return self.files.get(path, b"")
+
+    def list_files(self, path: str) -> list[object]:
+        self.list_calls.append(path)
+        return list(self.listings.get(path, []))
 
 
 class _FakeGit:
@@ -230,6 +242,28 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes.md") for path in upload_paths)
     assert any(path.endswith("manifest.json") for path in upload_paths)
+
+
+def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url=None,
+        ref=None,
+        spec=SandboxSpec(volume_name="tenant-spec"),
+    )
+
+    assert fake_client.volume.calls == [("tenant-spec", True)]
+    assert session.volume_name == "tenant-spec"
 
 
 def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
@@ -671,6 +705,76 @@ def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
     assert runtime_ref.calls == [("sbx-123", False)]
     assert sandbox.fs.uploads == {}
     assert replacement_sandbox.fs.uploads == {"/workspace/repo/notes.txt": b"hello"}
+
+
+def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
+    replacement_sandbox = _FakeSandbox()
+    replacement_sandbox.fs.files["/workspace/repo/notes.txt"] = b"hello"
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def _aget_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return replacement_sandbox
+
+    runtime_ref = _RuntimeRef()
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+    session.owner_loop_id = -1
+
+    text = asyncio.run(session.aread_file("notes.txt"))
+
+    assert text == "hello"
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert sandbox.fs.downloads == []
+    assert replacement_sandbox.fs.downloads == ["/workspace/repo/notes.txt"]
+
+
+def test_daytona_session_list_files_rebinds_sandbox_on_loop_change() -> None:
+    replacement_sandbox = _FakeSandbox()
+    replacement_sandbox.fs.listings["/workspace/repo"] = [
+        SimpleNamespace(name="notes.txt", is_dir=False)
+    ]
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        async def _aget_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return replacement_sandbox
+
+    runtime_ref = _RuntimeRef()
+    sandbox = _FakeSandbox()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+    session.owner_loop_id = -1
+
+    entries = asyncio.run(session.alist_files("/workspace/repo"))
+
+    assert [entry.name for entry in entries] == ["notes.txt"]
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert sandbox.fs.list_calls == []
+    assert replacement_sandbox.fs.list_calls == ["/workspace/repo"]
 
 
 def test_daytona_session_write_file_emits_progress_events() -> None:

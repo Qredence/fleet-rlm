@@ -121,20 +121,21 @@ function SessionRow({
             turns: transcriptTurns ?? [],
           });
     },
-    onSuccess: (dataset) => {
+    onSuccess: (dataset, variables) => {
       toast.success("Dataset ready for GEPA", {
         description: `Using dataset "${dataset.name}" — review the run settings before starting.`,
       });
       queryClient.invalidateQueries({ queryKey: optimizationKeys.datasets() });
       setSelectedModule("");
+      const moduleSlug = variables.moduleSlug;
       const draft: OptimizationRunDraft = {
         datasetId: dataset.id,
         datasetName: dataset.name,
-        moduleSlug: selectedModule,
+        moduleSlug,
         auto: "light",
         trainRatio: 0.8,
       };
-      const programSpec = moduleProgramSpecsBySlug.get(selectedModule);
+      const programSpec = moduleProgramSpecsBySlug.get(moduleSlug);
       if (programSpec) {
         draft.programSpec = programSpec;
       }

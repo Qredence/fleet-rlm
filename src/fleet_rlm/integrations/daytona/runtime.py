@@ -197,7 +197,20 @@ class DaytonaSandboxSession:
             return str(candidate)
         return str(PurePosixPath(self.workspace_path) / candidate)
 
+    async def _arebind_sandbox_if_needed(self) -> None:
+        if self.matches_current_async_owner() or self._runtime_ref is None:
+            return
+        sandbox_id = self.sandbox_id
+        if not sandbox_id:
+            return
+        with suppress(Exception):
+            self.sandbox = await self._runtime_ref._aget_sandbox(
+                sandbox_id, recover=False
+            )
+            self.bind_current_async_owner()
+
     async def aread_file(self, path: str) -> str:
+        await self._arebind_sandbox_if_needed()
         raw = await _await_if_needed(
             self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
         )
@@ -211,14 +224,7 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.aread_file, path)
 
     async def awrite_file(self, path: str, content: str) -> str:
-        if not self.matches_current_async_owner() and self._runtime_ref is not None:
-            sandbox_id = self.sandbox_id
-            if sandbox_id:
-                with suppress(Exception):
-                    self.sandbox = await self._runtime_ref._aget_sandbox(
-                        sandbox_id, recover=False
-                    )
-                    self.bind_current_async_owner()
+        await self._arebind_sandbox_if_needed()
         resolved_path = self._resolve_sandbox_path(path)
         payload = content.encode("utf-8")
         callback = getattr(self, "execution_event_callback", None)
@@ -257,6 +263,7 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.awrite_file, path, content)
 
     async def alist_files(self, path: str) -> list[Any]:
+        await self._arebind_sandbox_if_needed()
         entries = await _await_if_needed(
             self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
         )
@@ -664,7 +671,7 @@ class DaytonaSandboxRuntime:
                 sandbox=sandbox,
                 repo_url=repo_url,
                 resolved_ref=resolved_ref,
-                volume_name=volume_name,
+                volume_name=effective_volume,
                 workspace_path=workspace_path,
                 context_sources=context_sources,
                 timings=timings,

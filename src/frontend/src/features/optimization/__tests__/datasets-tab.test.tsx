@@ -18,12 +18,22 @@ const workspaceHistoryState = {
   conversations: [] as Conversation[],
 };
 
+const modulesState = {
+  items: [] as Array<{
+    slug: string;
+    label: string;
+    description?: string;
+    program_spec: string;
+    required_dataset_keys: string[];
+  }>,
+};
+
 const mutationState = {
   isPending: false,
   mutate: vi.fn(),
   config: null as null | {
     mutationFn?: (input: unknown) => Promise<unknown>;
-    onSuccess?: (result: unknown) => void;
+    onSuccess?: (result: unknown, variables: unknown) => void;
     onError?: (error: unknown) => void;
   },
 };
@@ -47,7 +57,7 @@ vi.mock("@tanstack/react-query", () => ({
 
     if (queryKey[0] === "optimization" && queryKey[1] === "modules") {
       return {
-        data: [],
+        data: modulesState.items,
         isLoading: false,
         isError: false,
       };
@@ -112,6 +122,7 @@ vi.mock("@/lib/rlm-api/sessions", async () => {
 describe("DatasetsTab sessions fallback", () => {
   beforeEach(() => {
     workspaceHistoryState.conversations = [];
+    modulesState.items = [];
     mutationState.isPending = false;
     mutationState.mutate.mockReset();
     mutationState.config = null;
@@ -124,7 +135,7 @@ describe("DatasetsTab sessions fallback", () => {
       void (async () => {
         try {
           const result = await mutationState.config?.mutationFn?.(variables);
-          mutationState.config?.onSuccess?.(result);
+          mutationState.config?.onSuccess?.(result, variables);
         } catch (error) {
           mutationState.config?.onError?.(error);
         }
@@ -240,6 +251,116 @@ describe("DatasetsTab sessions fallback", () => {
       moduleSlug: "reflect-and-revise",
     });
     expect(optimizationEndpoints.createRun).not.toHaveBeenCalled();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("uses the mutation variables when the selected module changes mid-flight", async () => {
+    const onPrepareRun = vi.fn();
+    workspaceHistoryState.conversations = [
+      {
+        id: "conv-opt-1",
+        title: "Recovered optimization session",
+        messages: [
+          { id: "u1", type: "user", content: "What is 2+2?" },
+          { id: "a1", type: "assistant", content: "4" },
+        ],
+        phase: "complete",
+        createdAt: "2026-04-14T09:00:00.000Z",
+        updatedAt: "2026-04-14T09:30:00.000Z",
+      },
+    ];
+    modulesState.items = [
+      {
+        slug: "reflect-and-revise",
+        label: "Reflect & Revise",
+        description: "Reflect answers",
+        program_spec: "pkg.reflect:build_program",
+        required_dataset_keys: [],
+      },
+      {
+        slug: "recursive-repair",
+        label: "Recursive Repair",
+        description: "Repair answers",
+        program_spec: "pkg.repair:build_program",
+        required_dataset_keys: [],
+      },
+    ];
+
+    let resolveDataset: ((value: Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>) => void) | null =
+      null;
+    const pendingDataset = new Promise<
+      Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>
+    >((resolve) => {
+      resolveDataset = resolve;
+    });
+    vi.mocked(datasetEndpoints.createFromTranscript).mockReturnValue(pendingDataset);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<DatasetsTab onPrepareRun={onPrepareRun} />);
+    });
+
+    const selectTrigger = () =>
+      Array.from(container.querySelectorAll("button")).find(
+        (button) => button.getAttribute("aria-label") === "Pick module",
+      );
+
+    const clickModuleOption = (label: string) => {
+      act(() => {
+        selectTrigger()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      const option = Array.from(document.querySelectorAll('[role="option"]')).find((element) =>
+        element.textContent?.includes(label),
+      );
+      expect(option).toBeTruthy();
+
+      act(() => {
+        option?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    };
+
+    clickModuleOption("Reflect & Revise");
+
+    const optimizeButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Prepare GEPA Run"),
+    );
+    expect(optimizeButton?.hasAttribute("disabled")).toBe(false);
+
+    await act(async () => {
+      optimizeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    clickModuleOption("Recursive Repair");
+
+    await act(async () => {
+      resolveDataset?.({
+        id: 77,
+        name: "Recovered optimization session",
+        row_count: 1,
+        format: "jsonl",
+        module_slug: "reflect-and-revise",
+        created_at: "2026-04-14T09:31:00.000Z",
+      });
+      await pendingDataset;
+      await Promise.resolve();
+    });
+
+    expect(onPrepareRun).toHaveBeenCalledWith({
+      datasetName: "Recovered optimization session",
+      datasetId: 77,
+      auto: "light",
+      trainRatio: 0.8,
+      moduleSlug: "reflect-and-revise",
+      programSpec: "pkg.reflect:build_program",
+    });
 
     act(() => {
       root.unmount();
