@@ -290,9 +290,7 @@ describe("DatasetsTab sessions fallback", () => {
     ];
 
     let resolveDataset:
-      | ((
-          value: Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>,
-        ) => void)
+      | ((value: Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>) => void)
       | null = null;
     const pendingDataset = new Promise<
       Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>

@@ -127,6 +127,15 @@ def _get_mlflow_status() -> tuple[bool, bool]:
         return False, False
 
 
+def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
+    """Lazily configure the planner LM from environment settings."""
+    from fleet_rlm.runtime.config import (
+        configure_planner_from_env as _configure_planner_from_env,
+    )
+
+    return _configure_planner_from_env(env_file=env_file)
+
+
 async def _resolve_dataset_request(
     request: GEPAOptimizationRequest,
 ) -> tuple[Path, str]:
@@ -499,7 +508,6 @@ def _run_optimization_background(
         fail_optimization_run,
         update_optimization_run_phase,
     )
-    from fleet_rlm.runtime.config import configure_planner_from_env
     from fleet_rlm.runtime.quality.gepa_optimization import (
         log_gepa_mlflow_run_metadata,
     )
