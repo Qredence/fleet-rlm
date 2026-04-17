@@ -700,7 +700,11 @@ def test_runtime_fork_sandbox_creates_session() -> None:
     """``fork_sandbox`` clones the sandbox and returns a new session."""
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
-    runtime = DaytonaSandboxRuntime()
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,
@@ -733,7 +737,11 @@ def test_runtime_create_sandbox_snapshot_returns_summary() -> None:
     """``create_sandbox_snapshot`` triggers snapshot creation and returns metadata."""
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
-    runtime = DaytonaSandboxRuntime()
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
         sandbox=sandbox,

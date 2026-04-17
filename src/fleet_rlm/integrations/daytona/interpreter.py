@@ -726,7 +726,7 @@ def _build_child_interpreter(
     delete_context_on_shutdown: bool = False,
     remaining_llm_budget: int,
 ) -> Any:
-    return cast(Any, interpreter).__class__(
+    return interpreter.__class__(
         runtime=runtime,
         owns_runtime=owns_runtime,
         timeout=interpreter.timeout,
@@ -1298,9 +1298,7 @@ class DaytonaInterpreter(
         if self._started:
             return
         session = await self._aensure_session_impl()
-        await session.astart_driver(
-            timeout=float(self.execute_timeout or self.timeout)
-        )
+        await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
         self._started = True
 
     def shutdown(self) -> None:

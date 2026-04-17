@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -116,7 +115,20 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
         "daytona_preflight",
         lambda sandbox_provider=None: ({"configured": True}, []),
     )
-    monkeypatch.setitem(sys.modules, "daytona", None)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.resolve_daytona_config",
+        lambda: SimpleNamespace(
+            api_key="key",
+            api_url="https://api.daytona.test",
+            target="local",
+        ),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime_helpers._build_daytona_client",
+        lambda _cfg: (_ for _ in ()).throw(
+            RuntimeError("Daytona SDK is not available.")
+        ),
+    )
 
     result = await diagnostics.run_daytona_connection_test(state=state)
 
