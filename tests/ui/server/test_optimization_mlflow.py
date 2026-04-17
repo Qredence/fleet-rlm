@@ -40,6 +40,8 @@ class TestBackgroundRunnerMlflowAvailable:
         ctx_mock.__exit__ = MagicMock(return_value=False)
         start_run_mock = MagicMock(return_value=ctx_mock)
         log_metric_mock = MagicMock()
+        log_params_mock = MagicMock()
+        set_tags_mock = MagicMock()
 
         fake_result = {
             "train_examples": 4,
@@ -58,6 +60,8 @@ class TestBackgroundRunnerMlflowAvailable:
             ),
             patch("mlflow.start_run", start_run_mock, create=True),
             patch("mlflow.log_metric", log_metric_mock, create=True),
+            patch("mlflow.log_params", log_params_mock, create=True),
+            patch("mlflow.set_tags", set_tags_mock, create=True),
             patch(
                 "fleet_rlm.runtime.quality.module_registry.get_module_spec",
                 return_value=spec_mock,
@@ -84,7 +88,24 @@ class TestBackgroundRunnerMlflowAvailable:
         init_mock.assert_called_once()
         start_run_mock.assert_called_once()
         assert "GEPA::test-mod" in str(start_run_mock.call_args)
-        log_metric_mock.assert_called_once_with("gepa_validation_score", 0.85)
+        log_params_mock.assert_called_once_with(
+            {
+                "gepa.auto": "light",
+                "gepa.train_ratio": 0.8,
+                "gepa.dataset_name": "data.jsonl",
+            }
+        )
+        set_tags_mock.assert_called_once_with(
+            {
+                "fleet.optimizer": "GEPA",
+                "fleet.optimization_source": "api_background",
+                "fleet.program_spec": "QA",
+                "fleet.module_slug": "test-mod",
+            }
+        )
+        log_metric_mock.assert_any_call("gepa_train_examples", 4)
+        log_metric_mock.assert_any_call("gepa_validation_examples", 1)
+        log_metric_mock.assert_any_call("gepa_validation_score", 0.85)
         ctx_mock.__exit__.assert_called_once()
 
 
@@ -241,3 +262,51 @@ def test_resolve_dataset_request_rejects_path_escape(
 
     with pytest.raises(HTTPException, match="Path escapes the allowed data directory."):
         asyncio.run(mod._resolve_dataset_request(request))
+
+
+@pytest.mark.parametrize("module_slug", [None, ""])
+def test_custom_program_path_does_not_open_outer_mlflow_run(
+    tmp_path: Path,
+    module_slug: str | None,
+) -> None:
+    import fleet_rlm.api.routers.optimization as mod
+
+    start_run_mock = MagicMock()
+    complete_mock = MagicMock()
+    fake_result = {
+        "train_examples": 3,
+        "validation_examples": 1,
+        "validation_score": 0.92,
+        "output_path": None,
+        "manifest_path": None,
+    }
+    optimize_mock = MagicMock(return_value=fake_result)
+
+    kwargs = _make_runner_kwargs(tmp_path)
+    kwargs["module_slug"] = module_slug
+
+    with (
+        patch("mlflow.start_run", start_run_mock, create=True),
+        patch(
+            "fleet_rlm.runtime.quality.gepa_optimization.optimize_program_with_gepa",
+            optimize_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+            MagicMock(),
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.complete_optimization_run",
+            complete_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.fail_optimization_run",
+            MagicMock(),
+        ),
+    ):
+        mod._run_optimization_background(**kwargs)
+
+    start_run_mock.assert_not_called()
+    optimize_mock.assert_called_once()
+    assert optimize_mock.call_args.kwargs.get("source") == "api_background"
+    complete_mock.assert_called_once()

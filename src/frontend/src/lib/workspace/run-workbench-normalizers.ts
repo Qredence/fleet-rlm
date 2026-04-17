@@ -462,6 +462,8 @@ export function normalizeSummary(raw: unknown): RunSummary | undefined {
     terminationReason: asText(record.termination_reason ?? record.terminationReason),
     error: asText(record.error) ?? null,
     warnings: normalizeWarnings(record.warnings),
+    mlflowTraceId: asText(record.mlflow_trace_id ?? record.mlflowTraceId),
+    mlflowClientRequestId: asText(record.mlflow_client_request_id ?? record.mlflowClientRequestId),
     humanReview: normalizeHumanReview(record.human_review ?? record.humanReview),
   };
 }

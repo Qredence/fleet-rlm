@@ -8,6 +8,7 @@ import type {
   ContextSourceSummary,
   IterationSummary,
   PromptHandleSummary,
+  RunSummary,
   RunWorkbenchState,
 } from "@/lib/workspace/workspace-types";
 import {
@@ -56,6 +57,26 @@ function getCompatRunResult(
   payload?: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   return asRecord(payload?.run_result ?? payload?.runResult);
+}
+
+function mergeMlflowTraceMetadata(
+  summary: RunSummary | undefined,
+  payload?: Record<string, unknown>,
+): RunSummary | undefined {
+  const mlflowTraceId = asText(payload?.mlflow_trace_id ?? payload?.mlflowTraceId);
+  const mlflowClientRequestId = asText(
+    payload?.mlflow_client_request_id ?? payload?.mlflowClientRequestId,
+  );
+
+  if (!summary && !mlflowTraceId && !mlflowClientRequestId) {
+    return undefined;
+  }
+
+  return {
+    ...(summary ?? {}),
+    ...(mlflowTraceId ? { mlflowTraceId } : {}),
+    ...(mlflowClientRequestId ? { mlflowClientRequestId } : {}),
+  };
 }
 
 function resolveCompatSummary(
@@ -447,6 +468,10 @@ export function applyFrameToRunWorkbenchState(
   const useCompatSummary = !isCanonicalCompletion && next.summary == null && compatSummary != null;
   const useCompatFinalArtifact =
     !isCanonicalCompletion && next.finalArtifact == null && compatFinalArtifact != null;
+  const mergedSummary = mergeMlflowTraceMetadata(
+    canonicalSummary ?? (useCompatSummary ? compatSummary : undefined) ?? next.summary,
+    payload,
+  );
 
   let compatBackfillCount = next.compatBackfillCount;
   let lastCompatBackfill = next.lastCompatBackfill;
@@ -494,7 +519,7 @@ export function applyFrameToRunWorkbenchState(
       (useCompatFinalArtifact ? compatFinalArtifact : undefined) ??
       next.finalArtifact ??
       null,
-    summary: canonicalSummary ?? (useCompatSummary ? compatSummary : undefined) ?? next.summary,
+    summary: mergedSummary,
     errorMessage: frame.data.kind === "error" ? frame.data.text : (next.errorMessage ?? null),
     compatBackfillCount,
     lastCompatBackfill,

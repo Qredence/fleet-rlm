@@ -42,7 +42,8 @@ export const sectionDescriptions: Record<SettingsSection, string> = {
   telemetry: "Privacy and communication preferences.",
   litellm: "Set planner models, provider endpoint, and API key.",
   runtime: "Manage runtime credentials and connectivity checks.",
-  optimization: "Configure and run GEPA prompt optimization.",
+  optimization:
+    "Configure GEPA prompt optimization. Use the Optimization surface for datasets, runs, and comparisons.",
 };
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
@@ -174,9 +175,9 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                 <ToggleGroupItem
                   value="light"
                   aria-label="Light mode"
-                  className="group/theme-item min-w-[8.5rem] flex-col items-start gap-3"
+                  className="group/theme-item min-w-34 flex-col items-start gap-3"
                 >
-                  <span className="flex h-14 w-full min-w-[8.5rem] items-start rounded-lg border border-border-subtle bg-white p-3 shadow-xs">
+                  <span className="flex h-14 w-full min-w-34 items-start rounded-lg border border-border-subtle bg-white p-3 shadow-xs">
                     <span className="flex w-full gap-2">
                       <span className="w-4 rounded-md bg-zinc-100" />
                       <span className="flex flex-1 flex-col gap-1.5 pt-0.5">
@@ -193,9 +194,9 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                 <ToggleGroupItem
                   value="dark"
                   aria-label="Dark mode"
-                  className="group/theme-item min-w-[8.5rem] flex-col items-start gap-3"
+                  className="group/theme-item min-w-34 flex-col items-start gap-3"
                 >
-                  <span className="flex h-14 w-full min-w-[8.5rem] items-start rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-xs">
+                  <span className="flex h-14 w-full min-w-34 items-start rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-xs">
                     <span className="flex w-full gap-2">
                       <span className="w-4 rounded-md bg-zinc-800" />
                       <span className="flex flex-1 flex-col gap-1.5 pt-0.5">

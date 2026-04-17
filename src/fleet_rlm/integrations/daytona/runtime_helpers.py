@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as _time
+from pathlib import PurePosixPath
 from typing import Any
 
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
@@ -17,9 +18,7 @@ from .workspace import _aensure_remote_directory
 
 _logger = logging.getLogger(__name__)
 
-DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = __import__("pathlib").PurePosixPath(
-    "/home/daytona/memory"
-)
+DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 
 _VOLUME_READY_STATES = frozenset({"ready"})
 _VOLUME_ERROR_STATES = frozenset({"error", "failed", "deleted"})
@@ -196,9 +195,7 @@ async def _aensure_daytona_volume_layout(
             roots.buffers_root,
             roots.meta_root,
         ):
-            await _aensure_remote_directory(
-                sandbox.fs, __import__("pathlib").PurePosixPath(path)
-            )
+            await _aensure_remote_directory(sandbox.fs, PurePosixPath(path))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona volume layout create failure: {exc}",

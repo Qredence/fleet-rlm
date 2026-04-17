@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -21,7 +22,7 @@ _REMOTE_DIRECTORY_MODE = "755"
 def _safe_repo_name(repo_url: str) -> str:
     tail = repo_url.rstrip("/").rsplit("/", 1)[-1]
     tail = tail.removesuffix(".git")
-    cleaned = __import__("re").sub(r"[^a-zA-Z0-9._-]+", "-", tail).strip("-")
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", tail).strip("-")
     return cleaned or "repo"
 
 
@@ -30,7 +31,7 @@ def _safe_workspace_name(repo_url: str | None) -> str:
 
 
 def _safe_context_slug(value: str) -> str:
-    cleaned = __import__("re").sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
     return cleaned or "context"
 
 

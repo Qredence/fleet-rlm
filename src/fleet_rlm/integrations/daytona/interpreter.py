@@ -13,10 +13,12 @@ from typing import AbstractSet, Any, Callable, Protocol, cast
 import dspy
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
+from fleet_rlm.runtime.execution.interpreter_protocol import (
+    RLMInterpreterProtocol,
+    StatefulWorkspaceInterpreterProtocol,
+)
 from fleet_rlm.runtime.execution.interpreter_support import (
     SupportsExecutionEventCallback,
-    async_enter as _async_enter_impl,
-    async_exit as _async_exit_impl,
     complete_event_data,
     emit_execution_event,
     execution_profile_context,
@@ -27,16 +29,23 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     set_registered_tools,
     start_event_data,
     summarize_code,
-    sync_enter as _sync_enter_impl,
-    sync_exit as _sync_exit_impl,
 )
-from fleet_rlm.runtime.execution.interpreter_protocol import (
-    RLMInterpreterProtocol,
-    StatefulWorkspaceInterpreterProtocol,
+from fleet_rlm.runtime.execution.interpreter_support import (
+    async_enter as _async_enter_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_support import (
+    async_exit as _async_exit_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_support import (
+    sync_enter as _sync_enter_impl,
+)
+from fleet_rlm.runtime.execution.interpreter_support import (
+    sync_exit as _sync_exit_impl,
 )
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
 
+from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from .interpreter_assets import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
@@ -51,7 +60,6 @@ from .runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from .async_compat import _await_if_needed, _run_async_compat
 from .types import SandboxSpec, dedupe_paths, normalized_context_sources
 
 
@@ -85,19 +93,39 @@ class _DaytonaInterpreterLike(
 
     timeout: int
     execute_timeout: int | None
+    volume_name: str | None
     repo_url: str | None
     repo_ref: str | None
     context_paths: list[str]
     sandbox_spec: SandboxSpec | None
     sub_lm: Any
     llm_call_timeout: float
+    delete_session_on_shutdown: bool
+    delete_context_on_shutdown: bool
+    default_execution_profile: ExecutionProfile
+    async_execute: bool
+    output_fields: list[dict[str, Any]] | None
+    volume_mount_path: str
+    _session: DaytonaSandboxSession | None
+    _persisted_sandbox_id: str | None
+    _persisted_workspace_path: str | None
+    _sub_rlm_depth: int
+    _sub_rlm_max_depth: int
     _bridge_context_id: str | None
+    _bridge: DaytonaToolBridge | None
+    _bridge_sandbox_id: str | None
     _bridge_tools: Callable[..., Any]
     _reject_unsupported_recursive_callbacks: Callable[..., None]
     _requires_bridge: Callable[..., bool]
     _aensure_session_impl: Callable[..., Any]
     _aclose_bridge: Callable[..., Any]
     _check_and_increment_llm_calls: Callable[..., bool]
+    _setup_context_id: str | None
+    _setup_workspace_path: str | None
+    _submit_signature_key: tuple[tuple[str, str], ...] | None
+    extract_final_artifact: Callable[..., dict[str, Any] | None]
+
+    def inject_variables(self, code: str, variables: dict[str, Any]) -> str: ...
 
 
 class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
@@ -156,8 +184,6 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         try:
             child._session.bind_current_async_owner()
         except RuntimeError as exc:
-            import logging
-
             logger = logging.getLogger(__name__)
             logger.debug(
                 "Failed to bind Daytona sandbox session to current async owner: %s",
@@ -200,6 +226,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         variables: dict[str, Any] | None = None,
         *,
         execution_profile: ExecutionProfile | None = None,
+        envs: dict[str, str] | None = None,
     ) -> str | FinalOutput:
         session = await self._aensure_session_impl()
         await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
@@ -221,6 +248,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
                 session=session,
                 code=code,
                 variables=safe_vars,
+                envs=envs,
             )
         except Exception as exc:
             emit_execution_event(
@@ -367,6 +395,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         session: DaytonaSandboxSession,
         code: str,
         variables: dict[str, Any],
+        envs: dict[str, str] | None = None,
         bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
         reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
         requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
@@ -400,6 +429,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             context=context,
             code=prepared_code,
             callbacks=callbacks,
+            envs=envs,
         )
         return callbacks.response_from_execution(execution)
 
@@ -432,10 +462,11 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             ),
             execute_direct=aexecute_direct_fn
             or (
-                lambda *, session, context, code: self.aexecute_direct(
+                lambda *, session, context, code, envs=None: self.aexecute_direct(
                     session=session,
                     context=context,
                     code=code,
+                    envs=envs,
                 )
             ),
             response_from_execution=response_from_execution_fn
@@ -460,6 +491,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         context: Any,
         code: str,
         callbacks: _ExecutionCallbacks,
+        envs: dict[str, str] | None = None,
     ) -> DaytonaBridgeExecution:
         tools = callbacks.bridge_tools()
         if callbacks.requires_bridge(code, tools):
@@ -482,6 +514,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             session=session,
             context=context,
             code=code,
+            envs=envs,
         )
 
     async def aexecute_direct(
@@ -711,6 +744,9 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
 
 
 def _parent_session_for_child(interpreter: Any) -> DaytonaSandboxSession | None:
+    fn = getattr(interpreter, "_parent_session_for_child", None)
+    if callable(fn) and hasattr(type(interpreter), "_parent_session_for_child"):
+        return fn()
     parent_session = getattr(interpreter, "_session", None)
     if parent_session is None or getattr(parent_session, "sandbox", None) is None:
         return None
@@ -726,6 +762,15 @@ def _build_child_interpreter(
     delete_context_on_shutdown: bool = False,
     remaining_llm_budget: int,
 ) -> Any:
+    fn = getattr(interpreter, "_build_child_interpreter", None)
+    if callable(fn) and hasattr(type(interpreter), "_build_child_interpreter"):
+        return fn(
+            runtime=runtime,
+            owns_runtime=owns_runtime,
+            delete_session_on_shutdown=delete_session_on_shutdown,
+            delete_context_on_shutdown=delete_context_on_shutdown,
+            remaining_llm_budget=remaining_llm_budget,
+        )
     return interpreter.__class__(
         runtime=runtime,
         owns_runtime=owns_runtime,
@@ -752,6 +797,10 @@ def _attach_shared_parent_session(
     parent_session: DaytonaSandboxSession,
     runtime: DaytonaSandboxRuntime,
 ) -> None:
+    fn = getattr(child, "_attach_shared_parent_session", None)
+    if callable(fn) and hasattr(type(child), "_attach_shared_parent_session"):
+        fn(parent_session=parent_session, runtime=runtime)
+        return
     child._session = DaytonaSandboxSession(
         sandbox=parent_session.sandbox,
         repo_url=parent_session.repo_url,
@@ -776,6 +825,10 @@ def _attach_shared_parent_session(
 
 
 def _propagate_parent_recursion_state(child: Any, parent: Any) -> None:
+    fn = getattr(parent, "_propagate_parent_recursion_state", None)
+    if callable(fn) and hasattr(type(parent), "_propagate_parent_recursion_state"):
+        fn(child)
+        return
     from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
 
     setattr(
@@ -802,6 +855,9 @@ def build_delegate_child(
     Uses Daytona's ``sandbox.code_interpreter.create_context()`` for
     isolation — see https://www.daytona.io/docs/sdk-reference
     """
+    fn = getattr(interpreter, "build_delegate_child", None)
+    if callable(fn) and hasattr(type(interpreter), "build_delegate_child"):
+        return fn(remaining_llm_budget=remaining_llm_budget)
     parent_session = _parent_session_for_child(interpreter)
     if parent_session is not None:
         child = _build_child_interpreter(

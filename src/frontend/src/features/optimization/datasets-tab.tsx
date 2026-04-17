@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FileText, MessageSquare, Upload } from "lucide-react";
@@ -40,6 +40,7 @@ import {
   type TranscriptTurnInput,
 } from "@/lib/rlm-api/optimization";
 import { sessionEndpoints, sessionKeys, type SessionListItem } from "@/lib/rlm-api/sessions";
+import type { OptimizationRunDraft } from "@/features/optimization/optimization-form";
 
 function formatDate(iso: string): string {
   return parseIsoTimestamp(iso).toLocaleDateString(undefined, {
@@ -49,31 +50,6 @@ function formatDate(iso: string): string {
   });
 }
 
-const datasetColumns: ColumnDef<DatasetResponse>[] = [
-  { header: "Name", accessor: "name", sortable: true },
-  {
-    header: "Rows",
-    accessor: (row) => row.row_count.toLocaleString(),
-    className: "text-right tabular-nums",
-  },
-  { header: "Format", accessor: "format" },
-  {
-    header: "Module",
-    accessor: (row) =>
-      row.module_slug ? (
-        <Badge variant="secondary" className="font-mono text-xs">
-          {row.module_slug}
-        </Badge>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      ),
-  },
-  {
-    header: "Created",
-    accessor: (row) => formatDate(row.created_at),
-  },
-];
-
 const MODULE_SLUGS = [
   { value: "reflect-and-revise", label: "Reflect & Revise" },
   { value: "recursive-context-selection", label: "Recursive Context Selection" },
@@ -81,6 +57,7 @@ const MODULE_SLUGS = [
   { value: "recursive-repair", label: "Recursive Repair" },
   { value: "recursive-verification", label: "Recursive Verification" },
 ] as const;
+const EMPTY_MODULES: GEPAModuleInfo[] = [];
 
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort(
@@ -113,11 +90,13 @@ function buildTranscriptTurns(conversation: Conversation): TranscriptTurnInput[]
 function SessionRow({
   session,
   conversation,
-  onNavigateToRuns,
+  onPrepareRun,
+  moduleProgramSpecsBySlug,
 }: {
   session: SessionListItem;
   conversation?: Conversation;
-  onNavigateToRuns?: () => void;
+  onPrepareRun?: (draft: OptimizationRunDraft) => void;
+  moduleProgramSpecsBySlug: Map<string, string>;
 }) {
   const queryClient = useQueryClient();
   const [selectedModule, setSelectedModule] = useState<string>("");
@@ -134,36 +113,35 @@ function SessionRow({
       conversationTitle?: string;
       transcriptTurns?: TranscriptTurnInput[];
     }) => {
-      const dataset =
-        typeof sessionId === "number"
-          ? await sessionEndpoints.exportSession(sessionId, moduleSlug)
-          : await datasetEndpoints.createFromTranscript({
-              module_slug: moduleSlug,
-              title: conversationTitle,
-              turns: transcriptTurns ?? [],
-            });
-
-      const run = await optimizationEndpoints.createRun({
-        dataset_id: dataset.id,
-        program_spec: "",
-        auto: "light",
-        train_ratio: 0.8,
-        module_slug: moduleSlug,
-      });
-
-      return { dataset, run };
+      return typeof sessionId === "number"
+        ? await sessionEndpoints.exportSession(sessionId, moduleSlug)
+        : await datasetEndpoints.createFromTranscript({
+            module_slug: moduleSlug,
+            title: conversationTitle,
+            turns: transcriptTurns ?? [],
+          });
     },
-    onSuccess: ({ dataset, run }) => {
-      toast.success("GEPA run started", {
-        description: `Using dataset "${dataset.name}" — run #${run.run_id}.`,
+    onSuccess: (dataset) => {
+      toast.success("Dataset ready for GEPA", {
+        description: `Using dataset "${dataset.name}" — review the run settings before starting.`,
       });
       queryClient.invalidateQueries({ queryKey: optimizationKeys.datasets() });
-      queryClient.invalidateQueries({ queryKey: optimizationKeys.runs() });
       setSelectedModule("");
-      onNavigateToRuns?.();
+      const draft: OptimizationRunDraft = {
+        datasetId: dataset.id,
+        datasetName: dataset.name,
+        moduleSlug: selectedModule,
+        auto: "light",
+        trainRatio: 0.8,
+      };
+      const programSpec = moduleProgramSpecsBySlug.get(selectedModule);
+      if (programSpec) {
+        draft.programSpec = programSpec;
+      }
+      onPrepareRun?.(draft);
     },
     onError: (error) => {
-      toast.error("GEPA launch failed", {
+      toast.error("GEPA dataset preparation failed", {
         description: error instanceof Error ? error.message : "Unexpected error",
       });
     },
@@ -215,14 +193,20 @@ function SessionRow({
           }}
         >
           <FileText className="mr-1.5 size-3.5" />
-          {optimizeMutation.isPending ? "Launching…" : "Optimize with GEPA"}
+          {optimizeMutation.isPending ? "Preparing…" : "Prepare GEPA Run"}
         </Button>
       </ItemActions>
     </Item>
   );
 }
 
-function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }) {
+function SessionsSection({
+  onPrepareRun,
+  moduleProgramSpecsBySlug,
+}: {
+  onPrepareRun?: (draft: OptimizationRunDraft) => void;
+  moduleProgramSpecsBySlug: Map<string, string>;
+}) {
   const localConversations = useWorkspaceLayoutHistory();
   const listParams = { limit: 10 };
 
@@ -283,7 +267,8 @@ function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }
                 key={`${session.title}-${index}`}
                 session={session}
                 conversation={conversation}
-                onNavigateToRuns={onNavigateToRuns}
+                onPrepareRun={onPrepareRun}
+                moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
               />
             ))}
           </ItemGroup>
@@ -306,7 +291,12 @@ function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }
       ) : (
         <ItemGroup>
           {sessions.map((session) => (
-            <SessionRow key={session.id} session={session} onNavigateToRuns={onNavigateToRuns} />
+            <SessionRow
+              key={session.id}
+              session={session}
+              onPrepareRun={onPrepareRun}
+              moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
+            />
           ))}
         </ItemGroup>
       )}
@@ -315,9 +305,9 @@ function SessionsSection({ onNavigateToRuns }: { onNavigateToRuns?: () => void }
 }
 
 export function DatasetsTab({
-  onNavigateToRuns,
+  onPrepareRun,
 }: {
-  onNavigateToRuns?: () => void;
+  onPrepareRun?: (draft: OptimizationRunDraft) => void;
 } = {}) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -377,8 +367,73 @@ export function DatasetsTab({
     [handleFiles],
   );
 
-  const modules: GEPAModuleInfo[] = modulesQuery.data ?? [];
+  const modules: GEPAModuleInfo[] = modulesQuery.data ?? EMPTY_MODULES;
   const datasets = datasetsQuery.data?.items ?? [];
+  const moduleProgramSpecsBySlug = useMemo(
+    () =>
+      new Map(
+        (modulesQuery.data ?? EMPTY_MODULES).map(
+          (moduleInfo) => [moduleInfo.slug, moduleInfo.program_spec] as const,
+        ),
+      ),
+    [modulesQuery.data],
+  );
+  const datasetColumns = useMemo<ColumnDef<DatasetResponse>[]>(
+    () => [
+      { header: "Name", accessor: "name", sortable: true },
+      {
+        header: "Rows",
+        accessor: (row) => row.row_count.toLocaleString(),
+        className: "text-right tabular-nums",
+      },
+      { header: "Format", accessor: "format" },
+      {
+        header: "Module",
+        accessor: (row) =>
+          row.module_slug ? (
+            <Badge variant="secondary" className="font-mono text-xs">
+              {row.module_slug}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        header: "Created",
+        accessor: (row) => formatDate(row.created_at),
+      },
+      {
+        header: "Action",
+        accessor: (row) => (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!onPrepareRun}
+            onClick={() => {
+              const draft: OptimizationRunDraft = {
+                datasetId: row.id,
+                datasetName: row.name,
+                moduleSlug: row.module_slug ?? null,
+                auto: "light",
+                trainRatio: 0.8,
+              };
+              if (row.module_slug) {
+                const programSpec = moduleProgramSpecsBySlug.get(row.module_slug);
+                if (programSpec) {
+                  draft.programSpec = programSpec;
+                }
+              }
+              onPrepareRun?.(draft);
+            }}
+          >
+            Use in Run
+          </Button>
+        ),
+        className: "w-[132px]",
+      },
+    ],
+    [moduleProgramSpecsBySlug, onPrepareRun],
+  );
   const filterLabel =
     moduleFilter === "all"
       ? "All modules"
@@ -480,7 +535,10 @@ export function DatasetsTab({
       )}
 
       {/* Session export */}
-      <SessionsSection onNavigateToRuns={onNavigateToRuns} />
+      <SessionsSection
+        onPrepareRun={onPrepareRun}
+        moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
+      />
     </div>
   );
 }

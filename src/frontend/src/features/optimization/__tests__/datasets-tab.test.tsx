@@ -167,7 +167,8 @@ describe("DatasetsTab sessions fallback", () => {
     });
   });
 
-  it("launches GEPA from local session history", async () => {
+  it("prepares GEPA from local session history", async () => {
+    const onPrepareRun = vi.fn();
     workspaceHistoryState.conversations = [
       {
         id: "conv-opt-1",
@@ -189,17 +190,13 @@ describe("DatasetsTab sessions fallback", () => {
       module_slug: "reflect-and-revise",
       created_at: "2026-04-14T09:31:00.000Z",
     });
-    vi.mocked(optimizationEndpoints.createRun).mockResolvedValue({
-      run_id: 99,
-      status: "running",
-    });
 
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
 
     act(() => {
-      root.render(<DatasetsTab />);
+      root.render(<DatasetsTab onPrepareRun={onPrepareRun} />);
     });
 
     const selectTrigger = Array.from(container.querySelectorAll("button")).find(
@@ -221,7 +218,7 @@ describe("DatasetsTab sessions fallback", () => {
     });
 
     const optimizeButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Optimize with GEPA"),
+      button.textContent?.includes("Prepare GEPA Run"),
     );
     expect(optimizeButton?.hasAttribute("disabled")).toBe(false);
 
@@ -235,13 +232,14 @@ describe("DatasetsTab sessions fallback", () => {
       title: "Recovered optimization session",
       turns: [{ user_message: "What is 2+2?", assistant_message: "4" }],
     });
-    expect(optimizationEndpoints.createRun).toHaveBeenCalledWith({
-      dataset_id: 41,
-      program_spec: "",
+    expect(onPrepareRun).toHaveBeenCalledWith({
+      datasetName: "Recovered optimization session",
+      datasetId: 41,
       auto: "light",
-      train_ratio: 0.8,
-      module_slug: "reflect-and-revise",
+      trainRatio: 0.8,
+      moduleSlug: "reflect-and-revise",
     });
+    expect(optimizationEndpoints.createRun).not.toHaveBeenCalled();
 
     act(() => {
       root.unmount();

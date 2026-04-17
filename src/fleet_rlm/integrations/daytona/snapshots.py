@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from .async_compat import _await_if_needed
-from .config import resolve_daytona_config, ResolvedDaytonaConfig
+from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .runtime_helpers import _build_daytona_client
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,8 @@ async def aresolve_snapshot(
 ) -> str | None:
     """Return the snapshot name if it exists and is ``ACTIVE``, else ``None``."""
     info = await aget_snapshot(preferred_name, config=config)
-    if info and info.get("state", "").upper() in ("ACTIVE", "SnapshotState.ACTIVE"):
+    state = str(info.get("state", "")).upper() if info else ""
+    if info and state in ("ACTIVE", "SNAPSHOTSTATE.ACTIVE"):
         return info["name"]
     return None
 

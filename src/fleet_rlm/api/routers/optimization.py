@@ -499,6 +499,9 @@ def _run_optimization_background(
         fail_optimization_run,
         update_optimization_run_phase,
     )
+    from fleet_rlm.runtime.quality.gepa_optimization import (
+        log_gepa_mlflow_run_metadata,
+    )
 
     def _on_phase(phase: str) -> None:
         try:
@@ -507,41 +510,60 @@ def _run_optimization_background(
             logger.debug("Failed to update phase for run %s", run_id)
 
     # -- MLflow autologging (best-effort, never blocks the run) -----------
+    # The module-registry GEPA path needs an explicit parent MLflow run here
+    # because ``run_module_optimization()`` is intentionally MLflow-agnostic.
+    # The custom-program path delegates to ``optimize_program_with_gepa()``,
+    # which already initializes MLflow and starts its own GEPA run.
     mlflow_ctx: Any = None
     _mlflow_log_metric: Any = None
-    try:
-        import mlflow
-    except ImportError:
-        logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
-    else:
-        from fleet_rlm.integrations.observability.config import MlflowConfig
-        from fleet_rlm.integrations.observability.mlflow_runtime import (
-            initialize_mlflow,
-        )
-
+    _mlflow_log_params: Any = None
+    _mlflow_set_tags: Any = None
+    if module_slug:
         try:
-            resolved_cfg = MlflowConfig.from_env().model_copy(
-                update={
-                    "dspy_log_compiles": True,
-                    "dspy_log_evals": True,
-                    "dspy_log_traces_from_compile": True,
-                    "dspy_log_traces_from_eval": True,
-                }
+            import mlflow
+        except ImportError:
+            logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
+        else:
+            from fleet_rlm.integrations.observability.config import MlflowConfig
+            from fleet_rlm.integrations.observability.mlflow_runtime import (
+                initialize_mlflow,
             )
-            if initialize_mlflow(resolved_cfg):
-                start_run = getattr(mlflow, "start_run", None)
-                _mlflow_log_metric = getattr(mlflow, "log_metric", None)
-                run_label = f"GEPA::{module_slug or program_spec}"
-                if start_run is not None:
-                    mlflow_ctx = cast(Any, start_run)(run_name=run_label)
-                    mlflow_ctx.__enter__()
-            else:
-                logger.debug(
-                    "MLflow unavailable for run %s — proceeding without tracking",
-                    run_id,
+
+            try:
+                resolved_cfg = MlflowConfig.from_env().model_copy(
+                    update={
+                        "dspy_log_compiles": True,
+                        "dspy_log_evals": True,
+                        "dspy_log_traces_from_compile": True,
+                        "dspy_log_traces_from_eval": True,
+                    }
                 )
-        except Exception:
-            logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
+                if initialize_mlflow(resolved_cfg):
+                    start_run = getattr(mlflow, "start_run", None)
+                    _mlflow_log_metric = getattr(mlflow, "log_metric", None)
+                    _mlflow_log_params = getattr(mlflow, "log_params", None)
+                    _mlflow_set_tags = getattr(mlflow, "set_tags", None)
+                    run_label = f"GEPA::{module_slug}"
+                    if start_run is not None:
+                        mlflow_ctx = cast(Any, start_run)(run_name=run_label)
+                        mlflow_ctx.__enter__()
+                        log_gepa_mlflow_run_metadata(
+                            dataset_path=dataset_path,
+                            program_spec=program_spec,
+                            auto=auto,
+                            train_ratio=train_ratio,
+                            module_slug=module_slug,
+                            source="api_background",
+                            log_params=cast(Any, _mlflow_log_params),
+                            set_tags=cast(Any, _mlflow_set_tags),
+                        )
+                else:
+                    logger.debug(
+                        "MLflow unavailable for run %s — proceeding without tracking",
+                        run_id,
+                    )
+            except Exception:
+                logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
         _on_phase("loading")
@@ -579,15 +601,23 @@ def _run_optimization_background(
                 output_path=output_path,
                 auto=auto,
                 train_ratio=train_ratio,
+                source="api_background",
             )
 
         # Log validation score to MLflow when available
         try:
-            val_score = result.get("validation_score")
-            if val_score is not None and _mlflow_log_metric is not None:
-                cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
+            if _mlflow_log_metric is not None:
+                cast(Any, _mlflow_log_metric)(
+                    "gepa_train_examples", result.get("train_examples", 0)
+                )
+                cast(Any, _mlflow_log_metric)(
+                    "gepa_validation_examples", result.get("validation_examples", 0)
+                )
+                val_score = result.get("validation_score")
+                if val_score is not None:
+                    cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
         except Exception:
-            logger.debug("Failed to log validation score to MLflow for run %s", run_id)
+            logger.debug("Failed to log GEPA metrics to MLflow for run %s", run_id)
 
         _on_phase("saving")
         complete_optimization_run(

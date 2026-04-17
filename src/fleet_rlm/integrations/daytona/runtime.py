@@ -6,21 +6,19 @@ import asyncio
 import dataclasses
 import datetime
 import logging
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-import threading
 from typing import Any
 
-from .config import ResolvedDaytonaConfig, resolve_daytona_config
-from .diagnostics import DaytonaDiagnosticError
-from .types import ContextSource, SandboxSpec
 from .async_compat import (
-    _ASYNC_COMPAT_RUNNER,
     _await_if_needed,
     _run_async_compat,
 )
+from .config import ResolvedDaytonaConfig, resolve_daytona_config
+from .diagnostics import DaytonaDiagnosticError
 from .repo import (
     _aclone_repo,
     _areconcile_repo_checkout,
@@ -33,11 +31,6 @@ from .runtime_helpers import (
     _build_daytona_client,
     _daytona_import_error,
 )
-from .workspace import (
-    _abuild_workspace_path,
-    _aensure_workspace_root,
-    _astage_context_paths,
-)
 from .snapshots import (
     DEFAULT_SNAPSHOT_NAME,
     DEFAULT_SNAPSHOT_PACKAGES,
@@ -45,6 +38,12 @@ from .snapshots import (
     aget_snapshot,
     alist_snapshots,
     aresolve_snapshot,
+)
+from .types import ContextSource, SandboxSpec
+from .workspace import (
+    _abuild_workspace_path,
+    _aensure_workspace_root,
+    _astage_context_paths,
 )
 
 logger = logging.getLogger(__name__)
@@ -166,6 +165,9 @@ class DaytonaSandboxSession:
     def close_driver(self) -> None:
         _run_async_compat(self.aclose_driver)
 
+    def list_files(self, path: str) -> list[Any]:
+        return _run_async_compat(self.alist_files, path)
+
     async def adelete_context(self) -> None:
         context = self._context
         self._context = None
@@ -260,9 +262,6 @@ class DaytonaSandboxSession:
         )
         return list(entries)
 
-    def list_files(self, path: str) -> list[Any]:
-        return _run_async_compat(self.alist_files, path)
-
     async def adelete(self) -> None:
         await self.adelete_context()
         # Graceful stop before delete to let processes flush/clean up
@@ -333,30 +332,14 @@ class DaytonaSandboxRuntime:
         self._resolved_config = resolved
         self._client: Any | None = None
         self._client_owner: tuple[int, int] | None = None
-
-    def __del__(self) -> None:
-        client = getattr(self, "_client", None)
-        if client is None:
-            return
-        close = getattr(client, "close", None)
-        if not callable(close):
-            return
-        try:
-            loop = _ASYNC_COMPAT_RUNNER._loop
-            if loop is not None and not loop.is_closed():
-                asyncio.run_coroutine_threadsafe(
-                    _await_if_needed(close()),
-                    loop,
-                )
-        except Exception:
-            pass
+        self._closed = False
 
     async def _aget_client(self) -> Any:
+        if self._closed:
+            raise RuntimeError("Daytona runtime client is closed")
         owner = (threading.get_ident(), id(asyncio.get_running_loop()))
         client = self._client
         if client is None:
-            if self._client_owner is not None:
-                raise RuntimeError("Daytona runtime client is closed")
             client = _build_daytona_client(self._resolved_config)
             self._client = client
             self._client_owner = owner
@@ -376,6 +359,7 @@ class DaytonaSandboxRuntime:
         return rebuilt
 
     async def aclose(self) -> None:
+        self._closed = True
         client = self._client
         self._client = None
         self._client_owner = None

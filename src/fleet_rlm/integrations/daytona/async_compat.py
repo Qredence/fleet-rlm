@@ -120,3 +120,56 @@ async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
         awaited = await cast(Any, value)
         return cast(_T, awaited)
     return value
+
+
+def _sync(method: Callable[..., Awaitable[_T]]) -> Callable[..., _T]:
+    """Create a sync shim that delegates to *method* via ``_run_async_compat``."""
+
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> _T:
+        return _run_async_compat(method, self, *args, **kwargs)
+
+    return wrapper
+
+
+def sync_mirror(
+    *,
+    overrides: dict[str, str] | None = None,
+    skip: set[str] | None = None,
+) -> Callable[[type], type]:
+    """Class decorator that auto-generates sync shims for async methods.
+
+    For every method ``afoo`` that is not in *skip* and has no matching
+    sync method already defined, a sync method ``foo`` is generated that
+    delegates to ``_run_async_compat(self.afoo, *args, **kwargs)``.
+
+    *overrides* maps async method names to custom sync method names when
+    the default prefix-stripping rule does not apply.
+    """
+    overrides = overrides or {}
+    skip = skip or set()
+
+    def decorator(cls: type) -> type:
+        for name, method in list(cls.__dict__.items()):
+            if name in skip:
+                continue
+            if not inspect.iscoroutinefunction(method):
+                continue
+            sync_name = overrides.get(name)
+            if sync_name is None:
+                if name.startswith("a") and len(name) > 1:
+                    sync_name = name[1:]
+                else:
+                    continue
+            if sync_name in cls.__dict__:
+                continue
+
+            def make_sync_method(am: Callable[..., Awaitable[_T]]) -> Callable[..., _T]:
+                def sync_method(self: Any, *args: Any, **kwargs: Any) -> _T:
+                    return _run_async_compat(am, self, *args, **kwargs)
+
+                return sync_method
+
+            setattr(cls, sync_name, make_sync_method(method))
+        return cls
+
+    return decorator

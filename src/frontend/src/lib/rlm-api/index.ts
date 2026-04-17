@@ -12,6 +12,7 @@ export {
   createBackendSessionId,
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
+export { traceEndpoints } from "@/lib/rlm-api/traces";
 export type {
   WsTraceMode,
   WsRuntimeMode,
@@ -34,6 +35,8 @@ export type {
   AuthMeResponse,
   SessionStateResponse,
   SessionStateSummary,
+  TraceFeedbackRequest,
+  TraceFeedbackResponse,
   RuntimeConnectivityTestKind,
   RuntimeConnectivityTestResponse,
   RuntimeSettingsSnapshot,
