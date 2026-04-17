@@ -799,7 +799,7 @@ def _attach_shared_parent_session(
 ) -> None:
     fn = getattr(child, "_attach_shared_parent_session", None)
     if callable(fn) and hasattr(type(child), "_attach_shared_parent_session"):
-        fn(parent_session=parent_session, runtime=runtime)
+        fn(child, parent_session=parent_session, runtime=runtime)
         return
     child._session = DaytonaSandboxSession(
         sandbox=parent_session.sandbox,
@@ -856,7 +856,10 @@ def build_delegate_child(
     isolation — see https://www.daytona.io/docs/sdk-reference
     """
     fn = getattr(interpreter, "build_delegate_child", None)
-    if callable(fn) and hasattr(type(interpreter), "build_delegate_child"):
+    owner_impl = getattr(type(interpreter), "build_delegate_child", None)
+    owner_func = getattr(owner_impl, "__func__", owner_impl)
+    daytona_func = getattr(DaytonaInterpreter, "build_delegate_child", None)
+    if callable(fn) and owner_func is not None and owner_func is not daytona_func:
         return fn(remaining_llm_budget=remaining_llm_budget)
     parent_session = _parent_session_for_child(interpreter)
     if parent_session is not None:

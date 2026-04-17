@@ -680,3 +680,18 @@ def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_san
     assert delete_context_calls == 1
     assert close_driver_calls == 0
     assert delete_calls == 0
+
+
+def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter._session = runtime.session
+    parent_sandbox = runtime.session.sandbox
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert isinstance(child, DaytonaInterpreter)
+    assert child is not interpreter
+    assert child._session is not None
+    assert child._session.sandbox is parent_sandbox
+    assert child._session.context_id is None
