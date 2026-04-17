@@ -14,7 +14,10 @@ from dspy.primitives.code_interpreter import CodeInterpreterError
 from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
-from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+from fleet_rlm.integrations.daytona.runtime import (
+    DaytonaSandboxRuntime,
+    DaytonaSandboxSession,
+)
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
@@ -619,6 +622,19 @@ def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     interpreter.shutdown()
 
     assert runtime.closed == 1
+
+
+def test_daytona_interpreter_does_not_recreate_open_owned_runtime() -> None:
+    runtime = object.__new__(DaytonaSandboxRuntime)
+    runtime._resolved_config = SimpleNamespace()
+    runtime._client = None
+
+    interpreter = DaytonaInterpreter(runtime=runtime, owns_runtime=True)
+
+    interpreter._ensure_runtime_available()
+
+    assert interpreter.runtime is runtime
+    assert interpreter._runtime_closed is False
 
 
 def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> (

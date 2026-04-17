@@ -504,12 +504,6 @@ def _run_optimization_background(
         log_gepa_mlflow_run_metadata,
     )
 
-    # Ensure DSPy is configured in this worker thread before any MLflow
-    # setup.  MLflow's dspy.autolog() calls dspy.settings.configure(), which
-    # enforces a single-owner-thread policy — the worker thread must be the
-    # owner, not the main thread that configured DSPy at app startup.
-    configure_planner_from_env()
-
     def _on_phase(phase: str) -> None:
         try:
             update_optimization_run_phase(run_id, phase=phase)
@@ -573,6 +567,12 @@ def _run_optimization_background(
                 logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
+        # Ensure DSPy is configured in this worker thread before any MLflow
+        # setup. MLflow's dspy.autolog() calls dspy.settings.configure(),
+        # which enforces a single-owner-thread policy — the worker thread
+        # must be the owner, not the main thread that configured DSPy at
+        # app startup.
+        configure_planner_from_env()
         _on_phase("loading")
 
         if module_slug:

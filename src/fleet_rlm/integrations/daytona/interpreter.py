@@ -1635,7 +1635,7 @@ class DaytonaInterpreter(
         runtime = self.runtime
         if not self._owns_runtime or not isinstance(runtime, DaytonaSandboxRuntime):
             return
-        if getattr(runtime, "_client", None) is not None:
+        if not self._runtime_closed:
             return
         if self._runtime_config is None:
             raise RuntimeError(

@@ -221,6 +221,31 @@ class TestBackgroundRunnerMlflowUnavailable:
         complete_mock.assert_called_once()
 
 
+def test_background_runner_marks_planner_bootstrap_failure_as_failed(
+    tmp_path: Path,
+) -> None:
+    import fleet_rlm.api.routers.optimization as mod
+
+    fail_mock = MagicMock()
+    complete_mock = MagicMock()
+
+    with (
+        patch(
+            "fleet_rlm.api.routers.optimization.configure_planner_from_env",
+            side_effect=RuntimeError("planner bootstrap failed"),
+        ),
+        patch("fleet_rlm.integrations.local_store.fail_optimization_run", fail_mock),
+        patch(
+            "fleet_rlm.integrations.local_store.complete_optimization_run",
+            complete_mock,
+        ),
+    ):
+        mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
+
+    fail_mock.assert_called_once_with(1, error="planner bootstrap failed")
+    complete_mock.assert_not_called()
+
+
 def test_resolve_dataset_request_accepts_relative_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
