@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Play } from "lucide-react";
 
@@ -22,8 +22,8 @@ import {
   optimizationKeys,
   type DatasetResponse,
   type GEPAModuleInfo,
-  type GEPAOptimizationRequest,
 } from "@/lib/rlm-api/optimization";
+import type { OptimizationRunDraft } from "@/features/optimization/optimization-form";
 
 /** Turn a kebab-case slug into a title-cased label (e.g. "reflect-and-revise" → "Reflect and Revise"). */
 function humanizeSlug(slug: string): string {
@@ -36,14 +36,12 @@ function humanizeSlug(slug: string): string {
 
 function ModuleCard({
   mod,
-  onQuickRun,
+  onPrepareRun,
   dataset,
-  isRunning,
 }: {
   mod: GEPAModuleInfo;
-  onQuickRun: (mod: GEPAModuleInfo) => void;
+  onPrepareRun: (mod: GEPAModuleInfo) => void;
   dataset: DatasetResponse | null;
-  isRunning: boolean;
 }) {
   const displayDescription = mod.description || humanizeSlug(mod.slug);
 
@@ -61,11 +59,11 @@ function ModuleCard({
           variant="outline"
           size="sm"
           className="shrink-0 gap-1.5"
-          disabled={isRunning || dataset == null}
-          onClick={() => onQuickRun(mod)}
+          disabled={dataset == null}
+          onClick={() => onPrepareRun(mod)}
         >
           <Play className="size-3" />
-          {isRunning ? "Starting…" : dataset == null ? "Dataset required" : "Quick Run"}
+          {dataset == null ? "Dataset required" : "Create Run"}
         </Button>
       </ItemActions>
       {mod.required_dataset_keys.length > 0 ? (
@@ -86,9 +84,11 @@ function ModuleCard({
   );
 }
 
-export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void }) {
-  const queryClient = useQueryClient();
-
+export function ModulesTab({
+  onPrepareRun,
+}: {
+  onPrepareRun?: (draft: OptimizationRunDraft) => void;
+}) {
   const modulesQuery = useQuery({
     queryKey: optimizationKeys.modules(),
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
@@ -98,22 +98,6 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     queryKey: [...optimizationKeys.datasets(), "list", { limit: 100 }],
     queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
     staleTime: 60_000,
-  });
-
-  const quickRunMutation = useMutation({
-    mutationFn: (input: GEPAOptimizationRequest) => optimizationEndpoints.createRun(input),
-    onSuccess: (result) => {
-      toast.success("Optimization run started", {
-        description: `Run #${result.run_id} is in progress.`,
-      });
-      queryClient.invalidateQueries({ queryKey: optimizationKeys.runs() });
-      onNavigateToRuns?.();
-    },
-    onError: (error) => {
-      toast.error("Failed to start run", {
-        description: error instanceof Error ? error.message : "Unexpected error",
-      });
-    },
   });
 
   const latestDatasetByModule = useMemo(() => {
@@ -127,20 +111,21 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
     }, new Map());
   }, [datasetsQuery.data]);
 
-  const handleQuickRun = (mod: GEPAModuleInfo) => {
+  const handlePrepareRun = (mod: GEPAModuleInfo) => {
     const dataset = latestDatasetByModule.get(mod.slug);
     if (dataset == null) {
-      toast.error("Quick Run requires a dataset", {
+      toast.error("Create Run requires a dataset", {
         description: `Upload or create a ${mod.label} dataset first.`,
       });
       return;
     }
-    quickRunMutation.mutate({
-      dataset_id: dataset.id,
-      program_spec: mod.program_spec,
+    onPrepareRun?.({
+      datasetId: dataset.id,
+      datasetName: dataset.name,
+      moduleSlug: mod.slug,
+      programSpec: mod.program_spec,
       auto: "light",
-      train_ratio: 0.8,
-      module_slug: mod.slug,
+      trainRatio: 0.8,
     });
   };
 
@@ -184,9 +169,8 @@ export function ModulesTab({ onNavigateToRuns }: { onNavigateToRuns?: () => void
         <ModuleCard
           key={mod.slug}
           mod={mod}
-          onQuickRun={handleQuickRun}
+          onPrepareRun={handlePrepareRun}
           dataset={latestDatasetByModule.get(mod.slug) ?? null}
-          isRunning={quickRunMutation.isPending}
         />
       ))}
     </ItemGroup>

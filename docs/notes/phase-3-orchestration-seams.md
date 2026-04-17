@@ -36,4 +36,3 @@
 - The delayed startup status still emits the same status text and payload.
 - Final completion summary semantics and terminal ordering remain unchanged.
 - The worker boundary and Daytona passthrough remain the execution seam; this phase only narrows where orchestration policy lives.
-

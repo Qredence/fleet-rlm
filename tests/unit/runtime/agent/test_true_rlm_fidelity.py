@@ -157,9 +157,7 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_in_bridge_tools(self):
         """bridge_tools() includes sub_rlm and sub_rlm_batched."""
-        from fleet_rlm.integrations.daytona.interpreter_execution import (
-            bridge_tools,
-        )
+        from fleet_rlm.integrations.daytona.interpreter import bridge_tools
 
         mock_interp = MagicMock()
         mock_interp.sub_rlm = MagicMock(return_value="answer")
@@ -173,9 +171,7 @@ class TestSubRLMRecursion:
 
     def test_rlm_query_still_blocked_in_sandbox(self):
         """rlm_query/rlm_query_batched remain blocked for sandbox code."""
-        from fleet_rlm.integrations.daytona.interpreter_execution import (
-            bridge_tools,
-        )
+        from fleet_rlm.integrations.daytona.interpreter import bridge_tools
 
         mock_interp = MagicMock()
         mock_interp.sub_rlm = MagicMock(return_value="answer")

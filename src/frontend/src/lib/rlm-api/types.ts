@@ -7,6 +7,8 @@ export type ReadyResponse = components["schemas"]["ReadyResponse"];
 export type AuthMeResponse = components["schemas"]["AuthMeResponse"];
 export type SessionStateResponse = components["schemas"]["SessionStateResponse"];
 export type SessionStateSummary = components["schemas"]["SessionStateSummary"];
+export type TraceFeedbackRequest = components["schemas"]["TraceFeedbackRequest"];
+export type TraceFeedbackResponse = components["schemas"]["TraceFeedbackResponse"];
 
 export type RuntimeSettingsSnapshot = components["schemas"]["RuntimeSettingsSnapshot"];
 export type RuntimeSettingsUpdateResponse = components["schemas"]["RuntimeSettingsUpdateResponse"];

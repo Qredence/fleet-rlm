@@ -48,8 +48,7 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 All Daytona-specific implementation lives under `src/fleet_rlm/integrations/daytona/`:
 
 - `runtime.py` — `DaytonaSandboxRuntime` and `DaytonaSandboxSession` (canonical async contract)
-- `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter)
-- `interpreter_execution.py` — delegate child interpreter building
+- `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter) including execution helpers and delegate child interpreter building
 - `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
 - `runtime/agent/chat_agent.py` — `RLMReActChatAgent` (canonical shared DSPy chat agent with Daytona workspace/session handling)
 - `diagnostics.py` — structured runtime diagnostics and smoke validation

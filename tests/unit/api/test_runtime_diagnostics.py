@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -56,25 +56,26 @@ async def test_run_daytona_connection_test_caches_success(
         lambda sandbox_provider=None: ({"configured": True}, []),
     )
 
-    class _FakeDaytonaConfig:
-        def __init__(self, *, api_key: str, api_url: str, target: str) -> None:
-            self.api_key = api_key
-            self.api_url = api_url
-            self.target = target
+    class _FakeAsyncDaytona:
+        instances: list["_FakeAsyncDaytona"] = []
 
-    class _FakeDaytona:
-        def __init__(self, config: _FakeDaytonaConfig) -> None:
+        def __init__(self, config: Any) -> None:
             self.config = config
+            self.closed = False
+            _FakeAsyncDaytona.instances.append(self)
 
-        def list(self, limit: int = 1):
+        async def list(self, limit: int = 1):
             _ = limit
             return SimpleNamespace(items=[object(), object()])
 
-    fake_daytona_module = SimpleNamespace(
-        Daytona=_FakeDaytona,
-        DaytonaConfig=_FakeDaytonaConfig,
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        diagnostics,
+        "daytona_preflight",
+        lambda sandbox_provider=None: ({"configured": True}, []),
     )
-    monkeypatch.setitem(sys.modules, "daytona", fake_daytona_module)
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.resolve_daytona_config",
         lambda: SimpleNamespace(
@@ -83,12 +84,10 @@ async def test_run_daytona_connection_test_caches_success(
             target="local",
         ),
     )
-
-    async def _fake_run_blocking(fn, timeout):
-        _ = timeout
-        return fn()
-
-    monkeypatch.setattr(diagnostics, "run_blocking", _fake_run_blocking)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime_helpers._build_daytona_client",
+        lambda _cfg: _FakeAsyncDaytona(_cfg),
+    )
 
     result = await diagnostics.run_daytona_connection_test(state=state)
 
@@ -99,6 +98,7 @@ async def test_run_daytona_connection_test_caches_success(
         "Daytona connectivity verified. Found 2 sandboxes (limited)."
     )
     assert state.runtime_test_results["daytona"]["ok"] is True
+    assert _FakeAsyncDaytona.instances[-1].closed is True
 
 
 @pytest.mark.asyncio
@@ -115,15 +115,27 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
         "daytona_preflight",
         lambda sandbox_provider=None: ({"configured": True}, []),
     )
-    monkeypatch.setitem(sys.modules, "daytona", None)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.resolve_daytona_config",
+        lambda: SimpleNamespace(
+            api_key="key",
+            api_url="https://api.daytona.test",
+            target="local",
+        ),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime_helpers._build_daytona_client",
+        lambda _cfg: (_ for _ in ()).throw(
+            RuntimeError("Daytona SDK is not available.")
+        ),
+    )
 
     result = await diagnostics.run_daytona_connection_test(state=state)
 
     assert result.ok is False
-    assert result.error == "Daytona SDK is not installed."
+    assert "Daytona SDK is not available" in result.error
     assert (
-        state.runtime_test_results["daytona"]["error"]
-        == "Daytona SDK is not installed."
+        "Daytona SDK is not available" in state.runtime_test_results["daytona"]["error"]
     )
 
 

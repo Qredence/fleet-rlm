@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -26,8 +26,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
+  datasetEndpoints,
   optimizationEndpoints,
   optimizationKeys,
+  type DatasetResponse,
   type GEPAModuleInfo,
   type GEPAOptimizationRequest,
 } from "@/lib/rlm-api/optimization";
@@ -36,6 +38,8 @@ const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:
 const SETTINGS_SECTION_CLASSNAME = "max-w-[44rem] gap-4";
 const CUSTOM_MODULE_VALUE = "__custom__";
 const CUSTOM_RATIO_VALUE = "__custom__";
+const CUSTOM_DATASET_VALUE = "__custom_dataset__";
+const EMPTY_MODULES: GEPAModuleInfo[] = [];
 
 const TRAIN_RATIO_PRESETS = [
   { value: "0.7", label: "70% train / 30% val" },
@@ -45,8 +49,64 @@ const TRAIN_RATIO_PRESETS = [
   { value: "0.9", label: "90% train / 10% val" },
 ];
 
-export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }) {
+export interface OptimizationRunDraft {
+  moduleSlug?: string | null;
+  datasetId?: number | null;
+  datasetName?: string | null;
+  datasetPath?: string | null;
+  programSpec?: string | null;
+  auto?: "light" | "medium" | "heavy";
+  trainRatio?: number | null;
+  outputPath?: string | null;
+}
+
+function resolveTrainRatioState(trainRatio: number | null | undefined): {
+  preset: string;
+  custom: string;
+} {
+  const normalized = trainRatio ?? 0.8;
+  const matched = TRAIN_RATIO_PRESETS.find(
+    (preset) => Number.parseFloat(preset.value) === normalized,
+  );
+  if (matched) {
+    return { preset: matched.value, custom: "" };
+  }
+  return { preset: CUSTOM_RATIO_VALUE, custom: String(normalized) };
+}
+
+function mergeDatasetsWithDraft(
+  datasets: DatasetResponse[],
+  draft: OptimizationRunDraft | null,
+): DatasetResponse[] {
+  if (!draft?.datasetId || datasets.some((dataset) => dataset.id === draft.datasetId)) {
+    return datasets;
+  }
+  return [
+    {
+      id: draft.datasetId,
+      name: draft.datasetName ?? `Dataset #${draft.datasetId}`,
+      row_count: 0,
+      format: "jsonl",
+      module_slug: draft.moduleSlug ?? null,
+      created_at: "",
+    },
+    ...datasets,
+  ];
+}
+
+interface OptimizationFormProps {
+  onRunCreated?: () => void;
+  initialDraft?: OptimizationRunDraft | null;
+  draftVersion?: number;
+}
+
+export function OptimizationForm({
+  onRunCreated,
+  initialDraft = null,
+  draftVersion,
+}: OptimizationFormProps) {
   const [selectedModule, setSelectedModule] = useState<string>(CUSTOM_MODULE_VALUE);
+  const [selectedDatasetValue, setSelectedDatasetValue] = useState<string>(CUSTOM_DATASET_VALUE);
   const [customProgramSpec, setCustomProgramSpec] = useState("");
   const [datasetPath, setDatasetPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
@@ -56,6 +116,8 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const lastHydratedDraftVersionRef = useRef<number | null>(null);
+  const lastResolvedDraftVersionRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -77,14 +139,37 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
     staleTime: 60_000,
   });
+  const datasetsQuery = useQuery({
+    queryKey: [...optimizationKeys.datasets(), "list", { limit: 100 }],
+    queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
+    staleTime: 60_000,
+  });
 
-  const modules: GEPAModuleInfo[] = modulesQuery.data ?? [];
+  const modules: GEPAModuleInfo[] = modulesQuery.data ?? EMPTY_MODULES;
+  const availableDatasets = useMemo(
+    () => mergeDatasetsWithDraft(datasetsQuery.data?.items ?? [], initialDraft),
+    [datasetsQuery.data, initialDraft],
+  );
   const activeModuleInfo =
     selectedModule !== CUSTOM_MODULE_VALUE
       ? (modules.find((m) => m.slug === selectedModule) ?? null)
       : null;
+  const selectedDatasetId =
+    selectedDatasetValue !== CUSTOM_DATASET_VALUE
+      ? Number.parseInt(selectedDatasetValue, 10)
+      : null;
+  const selectedDataset =
+    selectedDatasetId != null
+      ? (availableDatasets.find((dataset) => dataset.id === selectedDatasetId) ?? null)
+      : null;
+  const usingCustomDatasetPath = selectedDatasetValue === CUSTOM_DATASET_VALUE;
 
   const moduleDisplayLabel = activeModuleInfo ? activeModuleInfo.label : "Custom";
+  const datasetDisplayLabel = selectedDataset
+    ? selectedDataset.name
+    : usingCustomDatasetPath
+      ? "Custom path…"
+      : "Select dataset…";
 
   const isCustomRatio = trainRatioPreset === CUSTOM_RATIO_VALUE;
   const ratioDisplayLabel = isCustomRatio
@@ -100,7 +185,54 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
 
   const status = statusQuery.data;
   const available = status?.available ?? false;
-  const canRun = available && datasetPath.trim() !== "" && resolvedProgramSpec !== "" && validRatio;
+  const hasDatasetTarget = selectedDatasetId != null || datasetPath.trim() !== "";
+  const canRun = available && hasDatasetTarget && resolvedProgramSpec !== "" && validRatio;
+
+  useEffect(() => {
+    if (draftVersion == null || initialDraft == null) {
+      return;
+    }
+
+    const matchedModule = initialDraft.moduleSlug
+      ? ((modulesQuery.data ?? EMPTY_MODULES).find(
+          (moduleInfo) => moduleInfo.slug === initialDraft.moduleSlug,
+        ) ?? null)
+      : null;
+    const ratioState = resolveTrainRatioState(initialDraft.trainRatio);
+    const draftProgramSpec = (initialDraft.programSpec ?? "").trim();
+    const moduleResolutionPending =
+      Boolean(initialDraft.moduleSlug) &&
+      matchedModule == null &&
+      (modulesQuery.data == null || modulesQuery.isError);
+
+    if (lastHydratedDraftVersionRef.current !== draftVersion) {
+      setSelectedDatasetValue(
+        initialDraft.datasetId != null ? String(initialDraft.datasetId) : CUSTOM_DATASET_VALUE,
+      );
+      setDatasetPath(initialDraft.datasetPath ?? "");
+      setOutputPath(initialDraft.outputPath ?? "");
+      setAuto(initialDraft.auto ?? "light");
+      setTrainRatioPreset(ratioState.preset);
+      setCustomTrainRatio(ratioState.custom);
+      setTouched({});
+      abortRef.current?.abort();
+      setSelectedModule(matchedModule ? matchedModule.slug : CUSTOM_MODULE_VALUE);
+      setCustomProgramSpec(matchedModule ? "" : draftProgramSpec);
+      lastHydratedDraftVersionRef.current = draftVersion;
+      if (!moduleResolutionPending) {
+        lastResolvedDraftVersionRef.current = draftVersion;
+      }
+      return;
+    }
+
+    if (lastResolvedDraftVersionRef.current === draftVersion || moduleResolutionPending) {
+      return;
+    }
+
+    setSelectedModule(matchedModule ? matchedModule.slug : CUSTOM_MODULE_VALUE);
+    setCustomProgramSpec(matchedModule ? "" : draftProgramSpec);
+    lastResolvedDraftVersionRef.current = draftVersion;
+  }, [draftVersion, initialDraft, modulesQuery.data, modulesQuery.isError]);
 
   const runOptimization = useMutation({
     mutationFn: (input: GEPAOptimizationRequest) => {
@@ -129,7 +261,8 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
     setTouched({ datasetPath: true, programSpec: true, trainRatio: true });
     if (!canRun) return;
     runOptimization.mutate({
-      dataset_path: datasetPath.trim(),
+      dataset_id: selectedDatasetId,
+      dataset_path: selectedDatasetId == null ? datasetPath.trim() : null,
       program_spec: resolvedProgramSpec,
       output_path: outputPath.trim() || null,
       auto,
@@ -138,7 +271,7 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
     });
   };
 
-  const datasetInvalid = touched.datasetPath && datasetPath.trim() === "";
+  const datasetInvalid = touched.datasetPath && usingCustomDatasetPath && datasetPath.trim() === "";
   const specInvalid = touched.programSpec && !activeModuleInfo && customProgramSpec.trim() === "";
   const ratioInvalid = touched.trainRatio && isCustomRatio && !validRatio;
 
@@ -151,7 +284,7 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
           </FieldLegend>
           <FieldDescription>
             Evolve prompts using text feedback with GEPA (Generative Evolution of Prompts with
-            Assessment). Requires MLflow and an exported trace dataset.
+            Assessment). Requires MLflow and a prepared optimization dataset.
           </FieldDescription>
         </div>
 
@@ -249,22 +382,61 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
         <FieldGroup className="gap-0">
           <Field className={SETTINGS_FIELD_CLASSNAME}>
             <FieldContent>
-              <FieldTitle>Dataset path</FieldTitle>
+              <FieldTitle>Dataset</FieldTitle>
               <FieldDescription>
-                Path to the exported MLflow trace dataset (JSON file).
+                Use an uploaded/exported dataset or provide a custom path under the optimization
+                data directory.
               </FieldDescription>
             </FieldContent>
-            <Input
-              type="text"
-              value={datasetPath}
-              autoComplete="off"
-              placeholder="traces.json"
-              aria-label="Dataset path"
-              aria-invalid={datasetInvalid || undefined}
-              onChange={(event) => setDatasetPath(event.target.value)}
-              onBlur={() => setTouched((t) => ({ ...t, datasetPath: true }))}
-              className="w-full"
-            />
+            <div className="flex flex-col gap-2">
+              <Select
+                value={selectedDatasetValue}
+                onValueChange={(value) => {
+                  if (value) setSelectedDatasetValue(value);
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label="Dataset selection">
+                  <SelectValue placeholder="Select dataset…">{datasetDisplayLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {availableDatasets.map((dataset) => (
+                    <SelectItem key={dataset.id} value={String(dataset.id)}>
+                      {dataset.name}
+                    </SelectItem>
+                  ))}
+                  <SelectSeparator />
+                  <SelectItem value={CUSTOM_DATASET_VALUE}>Custom path…</SelectItem>
+                </SelectContent>
+              </Select>
+              {selectedDataset ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{selectedDataset.row_count.toLocaleString()} rows</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{selectedDataset.format.toUpperCase()}</span>
+                  {selectedDataset.module_slug ? (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {selectedDataset.module_slug}
+                      </Badge>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {usingCustomDatasetPath ? (
+              <Input
+                type="text"
+                value={datasetPath}
+                autoComplete="off"
+                placeholder="traces.json"
+                aria-label="Dataset path"
+                aria-invalid={datasetInvalid || undefined}
+                onChange={(event) => setDatasetPath(event.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, datasetPath: true }))}
+                className="w-full"
+              />
+            ) : null}
             {datasetInvalid ? <FieldError>Dataset path is required.</FieldError> : null}
           </Field>
 
@@ -393,7 +565,7 @@ export function OptimizationForm({ onRunCreated }: { onRunCreated?: () => void }
                     aria-invalid={ratioInvalid || undefined}
                     onChange={(event) => setCustomTrainRatio(event.target.value)}
                     onBlur={() => setTouched((t) => ({ ...t, trainRatio: true }))}
-                    className="max-w-[8rem]"
+                    className="max-w-32"
                   />
                   {ratioInvalid ? (
                     <FieldError>Enter a number between 0 and 1 (exclusive).</FieldError>
