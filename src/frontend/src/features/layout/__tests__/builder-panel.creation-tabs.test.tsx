@@ -27,7 +27,6 @@ vi.mock("@/components/ui/tooltip", () => ({
 const workspaceCanvas = vi.fn(() => <div>MessageInspectorPanel</div>);
 vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => workspaceCanvas(),
-  useWorkspaceCanvasTitle: () => "Inspector",
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
@@ -84,7 +83,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Inspector");
+    expect(html).toContain("Workspace");
     expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("Support rail");
   });
@@ -102,7 +101,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Inspector");
+    expect(html).toContain("Workspace");
     expect(html).toContain("RunWorkbench");
     expect(html).not.toContain("Support rail");
     expect(html).not.toContain("MessageInspectorPanel");

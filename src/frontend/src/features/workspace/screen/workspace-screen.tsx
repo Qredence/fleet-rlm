@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelRight, Settings2, TriangleAlert } from "lucide-react";
+import { Settings2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
@@ -16,7 +16,6 @@ import { WorkspaceChatEmptyState } from "@/features/workspace/conversation/trans
 import { WorkspaceMessageList } from "@/features/workspace/conversation/transcript/workspace-message-list";
 import { ExecutionStatusBar } from "@/features/workspace/screen/execution-status-bar";
 import { HitlApprovalModal } from "@/features/workspace/screen/hitl-approval-modal";
-import { SessionSidebar } from "@/features/workspace/session/session-sidebar";
 import {
   useChatHistoryStore,
   useChatStore,
@@ -163,8 +162,6 @@ export function WorkspaceScreen() {
     requestedConversationId,
     clearRequestedConversation,
     pendingHitlMessageId,
-    sidebarOpen,
-    toggleSidebar,
   } = useWorkspaceUiStore();
 
   // Chat history
@@ -266,24 +263,6 @@ export function WorkspaceScreen() {
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
       <HitlApprovalModal message={pendingHitlMessage} onResolveHitl={resolveHitl} />
-      {/* Context toggle button — fixed to top-right corner of the workspace */}
-      {!isMobile && (
-        <div className="absolute top-2 right-3 z-10">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-7 gap-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground",
-              sidebarOpen && "bg-muted text-foreground",
-            )}
-            onClick={toggleSidebar}
-            aria-pressed={sidebarOpen}
-          >
-            <PanelRight className="size-3.5" />
-            Context
-          </Button>
-        </div>
-      )}
 
       <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
         {/* Main chat column */}
@@ -396,9 +375,6 @@ export function WorkspaceScreen() {
             </>
           )}
         </div>
-
-        {/* Session sidebar */}
-        {sidebarOpen && !isMobile && <SessionSidebar messages={messages} />}
       </div>
     </div>
   );

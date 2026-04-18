@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { VisualJson, TreeView, type JsonValue } from "@visual-json/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import type { RuntimeContext } from "@/features/workspace/use-workspace";
 import type {
   ExecutionSection,
@@ -113,14 +113,15 @@ export function executionSectionState(
 export function sectionGroups(sections: ExecutionSection[]) {
   return [
     {
-      key: "tool-sessions",
-      label: "Tool sessions",
+      key: "execution",
+      label: "Execution",
       sections: sections.filter(
         (section) =>
           section.kind === "tool_session" ||
           section.kind === "tool" ||
           section.kind === "task" ||
-          section.kind === "queue",
+          section.kind === "queue" ||
+          section.kind === "status_note",
       ),
     },
     {
@@ -132,11 +133,6 @@ export function sectionGroups(sections: ExecutionSection[]) {
       key: "environment",
       label: "Environment",
       sections: sections.filter((section) => section.kind === "environment_variables"),
-    },
-    {
-      key: "errors",
-      label: "Errors / warnings",
-      sections: sections.filter((section) => section.kind === "status_note"),
     },
   ].filter((group) => group.sections.length > 0);
 }
@@ -203,13 +199,12 @@ export function DetailBlock({
   );
 }
 
-export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSessionItem[] }) {
+function renderToolSessionItems(sessionItems: ToolSessionItem[]) {
+  const items = sessionItems.filter((item) => item.part.kind !== "status_note");
+  if (items.length === 0) return null;
   return (
-    <div className={inspectorStyles.stack.cards}>
-      {sessionItems.map((item) => {
-        const badges = runtimeContextStrings(item.runtimeContext);
-        const state = toolSessionItemState(item);
-        const tone = statusTone(state);
+    <div className={inspectorStyles.stack.compact}>
+      {items.map((item) => {
         const outputValue =
           item.part.kind === "tool"
             ? stringifyValue(item.part.output)
@@ -218,49 +213,22 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
               : "";
         const inputValue = item.part.kind === "tool" ? stringifyValue(item.part.input) : "";
         const codeValue = item.part.kind === "sandbox" ? item.part.code : "";
+        const errorText =
+          item.part.kind === "tool" || item.part.kind === "sandbox"
+            ? item.part.errorText
+            : undefined;
 
         return (
-          <Card key={item.key} className={inspectorStyles.card.root}>
-            <CardHeader className={inspectorStyles.card.header}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="flex flex-col gap-1">
-                  <CardTitle className="text-sm font-medium text-foreground">
-                    {item.part.kind === "status_note"
-                      ? `Status: ${item.part.text}`
-                      : `${item.eventKind.replace("_", " ")}: ${item.toolName ?? "tool"}`}
-                  </CardTitle>
-                </div>
-                <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
-                  {tone.label}
-                </Badge>
-              </div>
-              {renderBadges(badges)}
-            </CardHeader>
-            <CardContent className={inspectorStyles.card.contentStack}>
-              <DetailBlock label="Input" value={inputValue} />
-              <DetailBlock
-                label="Output"
-                value={outputValue}
-                tone={
-                  item.part.kind !== "sandbox"
-                    ? "default"
-                    : item.part.errorText
-                      ? "error"
-                      : "default"
-                }
-              />
-              <DetailBlock
-                label="Error"
-                value={
-                  item.part.kind === "tool" || item.part.kind === "sandbox"
-                    ? item.part.errorText
-                    : undefined
-                }
-                tone="error"
-              />
-              <DetailBlock label="Code" value={codeValue} />
-            </CardContent>
-          </Card>
+          <div key={item.key}>
+            <DetailBlock label="Input" value={inputValue} />
+            <DetailBlock
+              label="Output"
+              value={outputValue}
+              tone={errorText ? "error" : "default"}
+            />
+            <DetailBlock label="Error" value={errorText} tone="error" />
+            <DetailBlock label="Code" value={codeValue} />
+          </div>
         );
       })}
     </div>
@@ -270,7 +238,7 @@ export function ToolSessionDetails({ sessionItems }: { sessionItems: ToolSession
 export function renderExecutionSectionDetails(section: ExecutionSection) {
   switch (section.kind) {
     case "tool_session":
-      return <ToolSessionDetails sessionItems={section.session.items} />;
+      return renderToolSessionItems(section.session.items);
     case "queue":
       return (
         <div className={inspectorStyles.stack.compact}>
@@ -304,7 +272,6 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
             tone={section.part.errorText ? "error" : "default"}
           />
           <DetailBlock label="Error" value={section.part.errorText} tone="error" />
-          {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
     case "sandbox":
@@ -317,7 +284,6 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
             tone={section.part.errorText ? "error" : "default"}
           />
           <DetailBlock label="Error" value={section.part.errorText} tone="error" />
-          {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
         </div>
       );
     case "environment_variables":
@@ -339,21 +305,6 @@ export function renderExecutionSectionDetails(section: ExecutionSection) {
         </div>
       );
     case "status_note":
-      return (
-        <div className={inspectorStyles.stack.cards}>
-          <DetailBlock
-            label={
-              section.part.tone === "error"
-                ? "Error"
-                : section.part.tone === "warning"
-                  ? "Warning"
-                  : "Note"
-            }
-            value={section.part.text}
-            tone={section.part.tone === "error" ? "error" : "default"}
-          />
-          {renderBadges(runtimeContextStrings(section.part.runtimeContext))}
-        </div>
-      );
+      return null;
   }
 }

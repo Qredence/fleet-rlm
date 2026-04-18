@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { VolumeFileDetail } from "@/features/volumes/volumes-canvas-panel";
+import { VolumeFileDetail } from "@/features/volumes/components/file-detail";
 import type { FsNode } from "@/features/volumes/use-volumes";
 
 let contentState: {

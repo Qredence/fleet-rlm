@@ -44,11 +44,10 @@ export function getShellPanelMeta(activeNav: NavItem): ShellPanelMeta {
       };
     default:
       return {
-        title: "Inspector",
-        description:
-          "Inspect the selected turn or track run activity without losing the conversation.",
-        toggleLabel: "Inspector",
-        toggleDescription: "Inspect turns and runs",
+        title: "Workspace",
+        description: "Inspect the selected turn, track run activity, and view session context.",
+        toggleLabel: "Workspace",
+        toggleDescription: "Inspect turns, runs, and context",
         emptyTitle: "Nothing selected yet",
         emptyDescription:
           "Choose an assistant turn to inspect it, or start a run to open the workbench.",

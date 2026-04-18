@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SkillMarkdown } from "@/features/volumes/volumes-canvas-panel";
+import { SkillMarkdown } from "@/features/volumes/components/skill-markdown";
 
 describe("SkillMarkdown link sanitization", () => {
   it("renders absolute https links as clickable anchors", () => {

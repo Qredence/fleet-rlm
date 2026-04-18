@@ -3,13 +3,13 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  SectionCard,
+  SectionCardContent,
+  SectionCardDescription,
+  SectionCardFooter,
+  SectionCardHeader,
+  SectionCardTitle,
+} from "@/components/product/section-layout";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -298,15 +298,15 @@ export function RuntimeForm() {
         <RuntimeStatusPanel status={status} />
       </FieldGroup>
 
-      <Card className="gap-0 rounded-xl border-border-subtle/70 shadow-none">
-        <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">Runtime Configuration</CardTitle>
-          <CardDescription className="text-sm">
+      <SectionCard variant="subtle">
+        <SectionCardHeader className="border-b border-border-subtle/70">
+          <SectionCardTitle>Runtime Configuration</SectionCardTitle>
+          <SectionCardDescription>
             Update runtime credentials, Daytona connectivity, and model selection used by the local
             backend.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
+          </SectionCardDescription>
+        </SectionCardHeader>
+        <SectionCardContent className="pt-6">
           <FieldGroup className="gap-5">
             {RUNTIME_FIELDS.map((field) => {
               const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
@@ -362,8 +362,8 @@ export function RuntimeForm() {
               );
             })}
           </FieldGroup>
-        </CardContent>
-        <CardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        </SectionCardContent>
+        <SectionCardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">
             Writes to <code>.env</code> (local only), updates process env, and refreshes the active
             runtime configuration.
@@ -376,8 +376,8 @@ export function RuntimeForm() {
           >
             {saveSettings.isPending ? "Saving…" : "Save settings"}
           </Button>
-        </CardFooter>
-      </Card>
+        </SectionCardFooter>
+      </SectionCard>
 
       <RuntimeConnectivityPanel
         hasUnsavedRuntimeChanges={hasUnsavedRuntimeChanges}
