@@ -271,7 +271,7 @@ export function WorkspaceScreen() {
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
               <div
                 data-slot="workspace-landing-state"
-                className="mx-auto flex w-full max-w-190 flex-col items-center gap-5"
+                className="mx-auto flex w-full max-w-container flex-col items-center gap-5"
               >
                 <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
 

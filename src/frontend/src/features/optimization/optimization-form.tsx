@@ -155,9 +155,7 @@ export function OptimizationForm({
       ? (modules.find((m) => m.slug === selectedModule) ?? null)
       : null;
   const selectedDatasetId =
-    selectedDatasetValue !== CUSTOM_DATASET_VALUE
-      ? selectedDatasetValue
-      : null;
+    selectedDatasetValue !== CUSTOM_DATASET_VALUE ? selectedDatasetValue : null;
   const selectedDataset =
     selectedDatasetId != null
       ? (availableDatasets.find((dataset) => dataset.id === selectedDatasetId) ?? null)

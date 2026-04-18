@@ -264,8 +264,6 @@ def _install_uuid_v7_helper() -> None:
             RETURN uuidv7();
           ELSIF to_regprocedure('uuid_generate_v7()') IS NOT NULL THEN
             RETURN uuid_generate_v7();
-          ELSIF to_regprocedure('gen_random_uuid()') IS NOT NULL THEN
-            RETURN gen_random_uuid();
           END IF;
 
           RAISE EXCEPTION
