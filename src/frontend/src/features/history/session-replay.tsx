@@ -52,10 +52,10 @@ function LocalMessageBubble({
 }
 
 type SessionReplayProps =
-  | { sessionId: number; conversation?: never }
+  | { sessionId: string; conversation?: never }
   | { conversation: Conversation; sessionId?: never };
 
-function SessionReplayApi({ sessionId }: { sessionId: number }) {
+function SessionReplayApi({ sessionId }: { sessionId: string }) {
   const [offset, setOffset] = useState(0);
   const params = { limit: PAGE_SIZE, offset };
 

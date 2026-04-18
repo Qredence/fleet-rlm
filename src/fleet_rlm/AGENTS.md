@@ -123,6 +123,7 @@ Auth, persistence, and observability constraints:
 
 - Supported auth modes are `dev` and `entra`
 - `AUTH_MODE=entra` requires repository-backed tenant admission in addition to token validation
+- `DATABASE_URL` is the pooled runtime connection; `DATABASE_ADMIN_URL` is the direct connection for Alembic and admin/debug tasks
 - `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
 - PostHog and MLflow are live codepaths when configured and should not be treated as no-ops
 - In local development, MLflow may auto-start when configured for localhost unless `MLFLOW_AUTO_START=false`

@@ -31,6 +31,7 @@ from fleet_rlm.integrations.database import (
     Run,
     RunStatus,
     RunStep,
+    select_database_url,
 )
 
 _DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
@@ -322,9 +323,15 @@ async def _verify_db_persistence(
 
 
 async def _run_validation(args: argparse.Namespace) -> ValidationResult:
-    database_url = os.getenv("DATABASE_URL")
+    database_url = select_database_url(
+        runtime_url=os.getenv("DATABASE_URL"),
+        admin_url=os.getenv("DATABASE_ADMIN_URL"),
+        prefer_admin=True,
+    )
     if not database_url:
-        raise RuntimeError("DATABASE_URL must be set for DB persistence verification.")
+        raise RuntimeError(
+            "DATABASE_ADMIN_URL or DATABASE_URL must be set for DB persistence verification."
+        )
 
     session_id = args.session_id or f"qre301-{uuid.uuid4().hex[:10]}"
     timestamp_str = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

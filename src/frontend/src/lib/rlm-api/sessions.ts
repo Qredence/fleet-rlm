@@ -34,8 +34,8 @@ export const sessionKeys = {
   lists: () => [...sessionKeys.all, "list"] as const,
   list: (params: SessionListParams) => [...sessionKeys.lists(), params] as const,
   details: () => [...sessionKeys.all, "detail"] as const,
-  detail: (id: number) => [...sessionKeys.details(), id] as const,
-  turns: (id: number, params?: TurnListParams) =>
+  detail: (id: string) => [...sessionKeys.details(), id] as const,
+  turns: (id: string, params?: TurnListParams) =>
     [...sessionKeys.detail(id), "turns", params ?? {}] as const,
 };
 
@@ -54,11 +54,11 @@ export const sessionEndpoints = {
     return rlmApiClient.get<SessionListResponse>(`/api/v1/sessions${qs ? `?${qs}` : ""}`, signal);
   },
 
-  getSession(id: number, signal?: AbortSignal) {
+  getSession(id: string, signal?: AbortSignal) {
     return rlmApiClient.get<SessionDetailResponse>(`/api/v1/sessions/${id}`, signal);
   },
 
-  getSessionTurns(id: number, params?: TurnListParams, signal?: AbortSignal) {
+  getSessionTurns(id: string, params?: TurnListParams, signal?: AbortSignal) {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
@@ -69,11 +69,11 @@ export const sessionEndpoints = {
     );
   },
 
-  deleteSession(id: number, signal?: AbortSignal) {
+  deleteSession(id: string, signal?: AbortSignal) {
     return rlmApiClient.delete<void>(`/api/v1/sessions/${id}`, signal);
   },
 
-  exportSession(id: number, moduleSlug: string, signal?: AbortSignal) {
+  exportSession(id: string, moduleSlug: string, signal?: AbortSignal) {
     return rlmApiClient.post<DatasetResponse>(
       `/api/v1/sessions/${id}/export`,
       { module_slug: moduleSlug },

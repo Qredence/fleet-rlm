@@ -51,7 +51,7 @@ const TRAIN_RATIO_PRESETS = [
 
 export interface OptimizationRunDraft {
   moduleSlug?: string | null;
-  datasetId?: number | null;
+  datasetId?: string | null;
   datasetName?: string | null;
   datasetPath?: string | null;
   programSpec?: string | null;
@@ -156,7 +156,7 @@ export function OptimizationForm({
       : null;
   const selectedDatasetId =
     selectedDatasetValue !== CUSTOM_DATASET_VALUE
-      ? Number.parseInt(selectedDatasetValue, 10)
+      ? selectedDatasetValue
       : null;
   const selectedDataset =
     selectedDatasetId != null

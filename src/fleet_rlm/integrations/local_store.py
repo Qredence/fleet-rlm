@@ -774,40 +774,18 @@ def _build_transcript_dataset_rows(
     *,
     module_slug: str,
     turns: list[tuple[str | None, str | None]],
-) -> tuple[list[dict[str, str]], str]:
+) -> tuple[list[dict[str, object]], str]:
     """Map transcript turns into module-specific dataset rows."""
-    from fleet_rlm.runtime.quality.module_registry import get_module_spec
+    from fleet_rlm.runtime.quality.transcript_exports import (
+        build_transcript_dataset_rows,
+    )
 
-    spec = get_module_spec(module_slug)
-    if spec is None:
-        raise ValueError(f"Unknown module slug: {module_slug!r}")
-
-    keys = spec.required_dataset_keys
-    if len(keys) < 2:
-        raise ValueError(
-            f"Module {module_slug!r} requires fewer than 2 dataset keys — "
-            "cannot map transcript turns."
-        )
-    input_key, output_key = keys[0], keys[1]
-
-    rows: list[dict[str, str]] = []
-    for user_message, assistant_message in turns:
-        if not user_message or not assistant_message:
-            continue
-        rows.append({input_key: user_message, output_key: assistant_message})
-
-    if not rows:
-        raise ValueError(
-            "Transcript has no usable turns "
-            "(both user and assistant messages required)."
-        )
-
-    return rows, spec.label
+    return build_transcript_dataset_rows(module_slug=module_slug, turns=turns)
 
 
 def _persist_transcript_dataset(
     *,
-    rows: list[dict[str, str]],
+    rows: list[dict[str, object]],
     module_slug: str,
     dataset_name: str,
     filename_stem: str,

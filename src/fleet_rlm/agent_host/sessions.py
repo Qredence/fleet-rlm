@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,8 @@ from .checkpoints import (
 
 if TYPE_CHECKING:
     from ..api.routers.ws.types import ChatAgentProtocol, LocalPersistFn
+    from fleet_rlm.integrations.database import FleetRepository
+    from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +319,110 @@ def build_orchestration_session_context(
     )
 
 
+def _manifest_metadata(manifest: dict[str, Any]) -> dict[str, Any]:
+    metadata = manifest.get("metadata")
+    if isinstance(metadata, dict):
+        return metadata
+    metadata = {}
+    manifest["metadata"] = metadata
+    return metadata
+
+
+def _parse_uuid(value: object) -> uuid.UUID | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(raw)
+    except ValueError:
+        return None
+
+
+async def _link_database_session(
+    *,
+    cached: dict[str, Any],
+    sess_id: str,
+    manifest_path: str,
+    owner_tenant_claim: str,
+    owner_user_claim: str,
+    workspace_id: str,
+    repository: FleetRepository | None,
+    identity_rows: IdentityUpsertResult | None,
+) -> str | None:
+    manifest = cached.get("manifest")
+    manifest_dict = manifest if isinstance(manifest, dict) else {}
+    metadata = _manifest_metadata(manifest_dict)
+    existing_db_session_id = str(
+        cached.get("db_session_id") or metadata.get("db_session_id") or ""
+    ).strip()
+    existing_session_uuid = _parse_uuid(existing_db_session_id)
+
+    if repository is not None and identity_rows is not None:
+        try:
+            from fleet_rlm.integrations.database import ChatSessionStatus
+            from fleet_rlm.integrations.database.types import ChatSessionUpsertRequest
+
+            workspace_uuid = (
+                identity_rows.workspace_id
+                if identity_rows.workspace_id is not None
+                else await repository.resolve_workspace_id(
+                    tenant_id=identity_rows.tenant_id,
+                    user_id=identity_rows.user_id,
+                )
+            )
+            session_row = await repository.upsert_chat_session(
+                ChatSessionUpsertRequest(
+                    tenant_id=identity_rows.tenant_id,
+                    workspace_id=workspace_uuid,
+                    user_id=identity_rows.user_id,
+                    title=sess_id,
+                    status=ChatSessionStatus.ACTIVE,
+                    active_manifest_path=manifest_path,
+                    session_id=existing_session_uuid,
+                    metadata_json={"external_session_id": sess_id},
+                )
+            )
+            linked_id = str(session_row.id)
+            metadata["db_session_id"] = linked_id
+            return linked_id
+        except Exception:
+            logger.warning(
+                "Best-effort Postgres session linkage failed",
+                exc_info=True,
+            )
+
+    if existing_db_session_id:
+        metadata["db_session_id"] = existing_db_session_id
+        return existing_db_session_id
+
+    try:
+        from fleet_rlm.integrations.local_store import create_session as _db_create
+    except ImportError:
+        logger.debug("Local session store unavailable", exc_info=True)
+        return None
+
+    try:
+        linked_id = str(
+            (
+                await asyncio.to_thread(
+                    _db_create,
+                    title=sess_id,
+                    external_session_id=sess_id,
+                    owner_tenant=owner_tenant_claim,
+                    owner_user=owner_user_claim,
+                    workspace_id=workspace_id,
+                )
+            ).id
+        )
+    except SQLAlchemyError:
+        logger.warning("Best-effort DB session linkage failed", exc_info=True)
+        return None
+    metadata["db_session_id"] = linked_id
+    return linked_id
+
+
 async def switch_orchestration_session(
     *,
     state: SessionStoreProtocol,
@@ -330,6 +437,8 @@ async def switch_orchestration_session(
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
+    repository: FleetRepository | None = None,
+    identity_rows: IdentityUpsertResult | None = None,
 ) -> SessionSwitchOutcome:
     """Apply websocket session-switch policy under outer orchestration ownership."""
 
@@ -380,24 +489,18 @@ async def switch_orchestration_session(
             "manifest": manifest if isinstance(manifest, dict) else {},
             "session": {"state": {}, "session_id": sess_id},
         }
-        try:
-            from fleet_rlm.integrations.local_store import create_session as _db_create
-        except ImportError:
-            logger.debug("Local session store unavailable", exc_info=True)
-        else:
-            try:
-                cached["db_session_id"] = (
-                    await asyncio.to_thread(
-                        _db_create,
-                        title=sess_id,
-                        external_session_id=sess_id,
-                        owner_tenant=owner_tenant_claim,
-                        owner_user=owner_user_claim,
-                        workspace_id=workspace_id,
-                    )
-                ).id
-            except SQLAlchemyError:
-                logger.warning("Best-effort DB session linkage failed", exc_info=True)
+        linked_session_id = await _link_database_session(
+            cached=cached,
+            sess_id=sess_id,
+            manifest_path=manifest_path,
+            owner_tenant_claim=owner_tenant_claim,
+            owner_user_claim=owner_user_claim,
+            workspace_id=workspace_id,
+            repository=repository,
+            identity_rows=identity_rows,
+        )
+        if linked_session_id:
+            cached["db_session_id"] = linked_session_id
 
     cached["session_id"] = sess_id
     cached["workspace_id"] = workspace_id
@@ -405,6 +508,12 @@ async def switch_orchestration_session(
     cached["owner_tenant_claim"] = owner_tenant_claim
     cached["owner_user_claim"] = owner_user_claim
     cached["owner_fingerprint"] = owner_id
+    manifest = cached.get("manifest")
+    if isinstance(manifest, dict):
+        metadata = _manifest_metadata(manifest)
+        db_session_id = str(cached.get("db_session_id") or "").strip()
+        if db_session_id:
+            metadata["db_session_id"] = db_session_id
     state.sessions[key] = cached
 
     await _restore_agent_state(

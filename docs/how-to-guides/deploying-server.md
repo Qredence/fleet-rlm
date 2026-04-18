@@ -156,26 +156,35 @@ WebSocket connections support two authentication methods:
 
 Query parameter auth requires `ALLOW_QUERY_AUTH_TOKENS=true` (automatic in Entra mode).
 
-## DATABASE_URL Setup
+## Database Connection Setup
 
 Fleet-RLM uses Neon PostgreSQL for persistence with Row-Level Security (RLS) for tenant isolation.
 
-### Connection String Format
+### Runtime Connection String Format
 
 ```bash
 DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 ```
 
-For Neon specifically:
+For Neon runtime traffic, use the pooled endpoint:
 
 ```bash
-DATABASE_URL=postgresql://neondb_owner:password@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+DATABASE_URL=postgresql://neondb_owner:password@ep-cool-darkness-123456-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
+```
+
+### Admin / Migration Connection String Format
+
+For Alembic, schema management, and direct debug/admin tasks, use the non-pooler endpoint:
+
+```bash
+DATABASE_ADMIN_URL=postgresql://neondb_owner:password@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
 ```
 
 ### Requirements
 
 - **SSL required**: Always use `sslmode=require` or higher
-- **Direct connection**: Use the non-pooler endpoint for server runtime
+- **Runtime**: Use the pooled endpoint in `DATABASE_URL`
+- **Migrations/admin**: Use the direct non-pooler endpoint in `DATABASE_ADMIN_URL`
 - **Migrations**: Run with Alembic (see [Database Architecture](../reference/database.md))
 
 ### Connection Pooling
@@ -341,6 +350,7 @@ az containerapp create \
     AUTH_MODE=entra \
     AUTH_REQUIRED=true \
     DATABASE_URL=secretref:database-url \
+    DATABASE_ADMIN_URL=secretref:database-admin-url \
     DSPY_LM_MODEL=secretref:dspy-model \
     DSPY_LLM_API_KEY=secretref:dspy-api-key \
     ENTRA_JWKS_URL=secretref:entra-jwks \

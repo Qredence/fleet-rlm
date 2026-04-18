@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+import logging
+from typing import TYPE_CHECKING, Any, cast
+import uuid
 
 import dspy
 
@@ -12,6 +15,8 @@ from .chat_session_state import append_history, history_turns
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -346,6 +351,91 @@ def record_runtime_degradation(
         )
 
 
+def _parsed_session_uuid(db_session_id: object) -> uuid.UUID | None:
+    if isinstance(db_session_id, uuid.UUID):
+        return db_session_id
+    if not isinstance(db_session_id, str):
+        return None
+    candidate = db_session_id.strip()
+    if not candidate:
+        return None
+    try:
+        return uuid.UUID(candidate)
+    except ValueError:
+        return None
+
+
+def _persist_turn_best_effort(
+    *,
+    agent: RLMReActChatAgent,
+    message: str,
+    assistant_response: str,
+) -> None:
+    db_session_id = getattr(agent, "_db_session_id", None)
+    if db_session_id is None:
+        return
+
+    repository = getattr(agent, "_repository", None)
+    identity_rows = getattr(agent, "_identity_rows", None)
+    tenant_id = getattr(identity_rows, "tenant_id", None)
+    user_id = getattr(identity_rows, "user_id", None)
+    workspace_id = getattr(identity_rows, "workspace_id", None)
+    session_uuid = _parsed_session_uuid(db_session_id)
+
+    if repository is not None and tenant_id is not None and session_uuid is not None:
+        from fleet_rlm.integrations.database.types import ChatTurnCreateRequest
+
+        async def _persist_async() -> None:
+            try:
+                resolved_workspace_id = (
+                    cast(uuid.UUID, workspace_id)
+                    if isinstance(workspace_id, uuid.UUID)
+                    else await repository.resolve_workspace_id(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                    )
+                )
+                await repository.append_chat_turn(
+                    ChatTurnCreateRequest(
+                        tenant_id=tenant_id,
+                        workspace_id=resolved_workspace_id,
+                        session_id=session_uuid,
+                        user_message=message,
+                        assistant_message=assistant_response,
+                        user_id=user_id,
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to persist chat turn in Postgres",
+                    exc_info=True,
+                )
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                asyncio.run(_persist_async())
+            except Exception:
+                logger.debug(
+                    "Failed to persist chat turn in Postgres",
+                    exc_info=True,
+                )
+        else:
+            asyncio.create_task(_persist_async())
+        return
+
+    try:
+        from fleet_rlm.integrations.local_store import add_turn
+
+        add_turn(db_session_id, 0, message, assistant_response)
+    except Exception:
+        logger.debug(
+            "Failed to persist chat turn in local_store",
+            exc_info=True,
+        )
+
+
 def process_prediction_to_turn_result(
     agent: RLMReActChatAgent,
     *,
@@ -367,14 +457,11 @@ def process_prediction_to_turn_result(
         guardrail_warnings = prediction_guardrail_warnings(prediction)
 
     append_history(agent, message, assistant_response)
-    try:
-        _db_sid = getattr(agent, "_db_session_id", None)
-        if _db_sid is not None:
-            from fleet_rlm.integrations.local_store import add_turn
-
-            add_turn(_db_sid, history_turns(agent) - 1, message, assistant_response)
-    except Exception:
-        pass
+    _persist_turn_best_effort(
+        agent=agent,
+        message=message,
+        assistant_response=assistant_response,
+    )
     resolved_turn_metrics = (
         turn_metrics
         if isinstance(turn_metrics, TurnMetricsSnapshot)

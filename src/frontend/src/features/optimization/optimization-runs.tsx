@@ -202,7 +202,7 @@ function RunListItem({
 
 export function OptimizationRuns() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const runsQuery = useQuery({
     queryKey: optimizationKeys.runsList(

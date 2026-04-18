@@ -19,6 +19,7 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
+import uuid
 
 import dspy
 from dspy.streaming.messages import StatusMessage, StreamResponse
@@ -60,10 +61,72 @@ def _persist_streaming_turn_best_effort(
     assistant_message: str,
     error_log_message: str,
     error_log_args: tuple[Any, ...],
+    agent: RLMReActChatAgent | None = None,
 ) -> None:
     """Persist a streaming turn without assuming sync or async execution."""
     if db_session_id is None:
         return
+
+    def _session_uuid(value: object) -> uuid.UUID | None:
+        if isinstance(value, uuid.UUID):
+            return value
+        if not isinstance(value, str):
+            return None
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            return uuid.UUID(candidate)
+        except ValueError:
+            return None
+
+    if agent is not None:
+        repository = getattr(agent, "_repository", None)
+        identity_rows = getattr(agent, "_identity_rows", None)
+        tenant_id = getattr(identity_rows, "tenant_id", None)
+        user_id = getattr(identity_rows, "user_id", None)
+        workspace_id = getattr(identity_rows, "workspace_id", None)
+        session_uuid = _session_uuid(db_session_id)
+        if (
+            repository is not None
+            and tenant_id is not None
+            and session_uuid is not None
+        ):
+            from fleet_rlm.integrations.database.types import ChatTurnCreateRequest
+
+            async def _write_turn_repo_async() -> None:
+                try:
+                    resolved_workspace_id = (
+                        workspace_id
+                        if isinstance(workspace_id, uuid.UUID)
+                        else await repository.resolve_workspace_id(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                        )
+                    )
+                    await repository.append_chat_turn(
+                        ChatTurnCreateRequest(
+                            tenant_id=tenant_id,
+                            workspace_id=resolved_workspace_id,
+                            session_id=session_uuid,
+                            user_message=user_message,
+                            assistant_message=assistant_message,
+                            user_id=user_id,
+                        )
+                    )
+                except Exception:
+                    logger.exception(error_log_message, *error_log_args)
+
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                try:
+                    asyncio.run(_write_turn_repo_async())
+                except Exception:
+                    logger.exception(error_log_message, *error_log_args)
+            else:
+                asyncio.create_task(_write_turn_repo_async())
+            return
 
     from fleet_rlm.integrations.local_store import add_turn
 
@@ -155,6 +218,7 @@ def build_cancelled_stream_event(
             "(session_id=%r, marked_partial=%r)"
         ),
         error_log_args=(_db_sid, marked_partial),
+        agent=agent,
     )
     return StreamEvent(
         kind="cancelled",
@@ -225,6 +289,7 @@ def build_final_stream_event(
             "Failed to persist final streaming turn to local_store (session_id=%r)"
         ),
         error_log_args=(_db_sid,),
+        agent=agent,
     )
     return StreamEvent(
         kind="final",

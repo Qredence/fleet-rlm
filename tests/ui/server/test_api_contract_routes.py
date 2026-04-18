@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import uuid
 
 import pytest
 from fastapi.routing import APIRoute
@@ -10,6 +12,8 @@ from starlette.routing import WebSocketRoute
 
 from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
+from fleet_rlm.integrations.database import ChatSessionStatus
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 
 _REQUIRED_HTTP_PATHS = {
@@ -31,6 +35,143 @@ _REQUIRED_WS_PATHS = {
     "/api/v1/ws/execution",
     "/api/v1/ws/execution/events",
 }
+
+
+class SessionHistoryRepository:
+    """Minimal repository stub for session history HTTP contract tests."""
+
+    def __init__(self) -> None:
+        now = datetime.now(timezone.utc)
+        self.tenant_id = uuid.uuid4()
+        self.user_id = uuid.uuid4()
+        self.workspace_id = uuid.uuid4()
+        self.session = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Repository Session",
+            status=ChatSessionStatus.ACTIVE,
+            model_name="gpt-5",
+            metadata_json={"external_session_id": "external-session-123"},
+            workspace_id=self.workspace_id,
+            created_at=now,
+            updated_at=now,
+        )
+        self.turns = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                turn_index=0,
+                user_message="What is 2+2?",
+                assistant_message="4",
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                turn_index=1,
+                user_message="And 3+3?",
+                assistant_message="6",
+                created_at=now,
+            ),
+        ]
+        self.archive_calls = 0
+        self.created_datasets: list[SimpleNamespace] = []
+
+    async def upsert_identity(self, **kwargs) -> IdentityUpsertResult:
+        _ = kwargs
+        return IdentityUpsertResult(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            workspace_id=self.workspace_id,
+        )
+
+    async def list_chat_sessions(
+        self,
+        *,
+        tenant_id,
+        user_id,
+        workspace_id,
+        search,
+        status,
+        limit,
+        offset,
+    ):
+        assert tenant_id == self.tenant_id
+        assert user_id == self.user_id
+        assert workspace_id == self.workspace_id
+        items = [self.session]
+        if status is not None:
+            items = [item for item in items if item.status == status]
+        elif self.session.status != ChatSessionStatus.ACTIVE:
+            items = []
+        if search:
+            needle = search.lower()
+            items = [
+                item
+                for item in items
+                if needle in item.title.lower()
+                or needle in item.metadata_json["external_session_id"].lower()
+            ]
+        total = len(items)
+        return items[offset : offset + limit], total
+
+    async def get_chat_session(self, *, tenant_id, session_id, user_id, workspace_id):
+        assert tenant_id == self.tenant_id
+        assert user_id == self.user_id
+        assert workspace_id == self.workspace_id
+        if session_id == self.session.id:
+            return self.session
+        return None
+
+    async def list_chat_turns(
+        self,
+        *,
+        tenant_id,
+        session_id,
+        user_id,
+        workspace_id,
+        limit,
+        offset,
+    ):
+        assert tenant_id == self.tenant_id
+        assert user_id == self.user_id
+        assert workspace_id == self.workspace_id
+        if session_id != self.session.id:
+            return [], 0
+        total = len(self.turns)
+        return self.turns[offset : offset + limit], total
+
+    async def archive_chat_session(
+        self,
+        *,
+        tenant_id,
+        session_id,
+        user_id,
+        workspace_id,
+    ) -> bool:
+        assert tenant_id == self.tenant_id
+        assert user_id == self.user_id
+        assert workspace_id == self.workspace_id
+        if session_id != self.session.id:
+            return False
+        self.archive_calls += 1
+        self.session.status = ChatSessionStatus.ARCHIVED
+        self.session.updated_at = datetime.now(timezone.utc)
+        return True
+
+    async def create_dataset(self, request, *, examples):
+        dataset = SimpleNamespace(
+            id=uuid.uuid4(),
+            name=request.name,
+            row_count=request.row_count,
+            format=request.format,
+            metadata_json={
+                "module_slug": request.module_slug,
+                "output_key": "next_action",
+            },
+            created_at=datetime.now(timezone.utc),
+            uri=request.uri,
+        )
+        self.created_datasets.append(dataset)
+        assert len(examples) == request.row_count
+        return dataset
 
 
 def test_required_http_and_websocket_routes_are_registered(
@@ -337,6 +478,91 @@ def test_sessions_state_endpoint_ignores_malformed_cached_sessions(
     assert payload["sessions"] == []
 
 
+def test_session_history_routes_use_repository_with_string_ids(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    repository = SessionHistoryRepository()
+    default_client.app.state.server_state.repository = repository
+
+    list_response = default_client.get(
+        "/api/v1/sessions?search=external-session-123",
+        headers=auth_headers,
+    )
+    detail_response = default_client.get(
+        f"/api/v1/sessions/{repository.session.id}",
+        headers=auth_headers,
+    )
+    turns_response = default_client.get(
+        f"/api/v1/sessions/{repository.session.id}/turns",
+        headers=auth_headers,
+    )
+    archive_response = default_client.delete(
+        f"/api/v1/sessions/{repository.session.id}",
+        headers=auth_headers,
+    )
+    archived_list_response = default_client.get(
+        "/api/v1/sessions?status=archived",
+        headers=auth_headers,
+    )
+
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload["total"] == 1
+    assert list_payload["items"][0]["id"] == str(repository.session.id)
+    assert list_payload["items"][0]["external_session_id"] == "external-session-123"
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["id"] == str(repository.session.id)
+    assert detail_payload["workspace_id"] == str(repository.workspace_id)
+    assert detail_payload["turn_count"] == 2
+
+    assert turns_response.status_code == 200
+    turns_payload = turns_response.json()
+    assert turns_payload["total"] == 2
+    assert turns_payload["items"][0]["id"] == str(repository.turns[0].id)
+    assert turns_payload["items"][0]["turn_index"] == 0
+
+    assert archive_response.status_code == 200
+    assert archive_response.json()["ok"] is True
+    assert repository.archive_calls == 1
+
+    assert archived_list_response.status_code == 200
+    archived_payload = archived_list_response.json()
+    assert archived_payload["total"] == 1
+    assert archived_payload["items"][0]["status"] == "archived"
+
+
+def test_session_export_route_uses_repository_transcript(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    local_store._engines.clear()
+
+    repository = SessionHistoryRepository()
+    default_client.app.state.server_state.repository = repository
+
+    response = default_client.post(
+        f"/api/v1/sessions/{repository.session.id}/export",
+        headers=auth_headers,
+        json={"module_slug": "reflect-and-revise"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["module_slug"] == "reflect-and-revise"
+    assert payload["row_count"] == 2
+    assert payload["name"].startswith("Repository Session")
+
+
 def test_openapi_publishes_http_bearer_security_for_protected_routes(
     local_client: TestClient,
 ) -> None:
@@ -431,12 +657,13 @@ def test_optimization_transcript_dataset_endpoint_creates_dataset(
 
 
 def test_async_optimization_run_accepts_dataset_id(
-    default_client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from fleet_rlm.api.routers import optimization
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.main import create_app
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -453,22 +680,31 @@ def test_async_optimization_run_accepts_dataset_id(
     monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
     monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, True))
 
-    response = default_client.post(
-        "/api/v1/optimization/runs",
-        headers=auth_headers,
-        json={
-            "dataset_id": dataset.id,
-            "program_spec": "",
-            "module_slug": "reflect-and-revise",
-            "auto": "light",
-            "train_ratio": 0.8,
-        },
-    )
+    with TestClient(
+        create_app(
+            config=ServerRuntimeConfig(
+                app_env="local",
+                database_required=False,
+                database_url=None,
+            )
+        )
+    ) as client:
+        response = client.post(
+            "/api/v1/optimization/runs",
+            headers=auth_headers,
+            json={
+                "dataset_id": str(dataset.id),
+                "program_spec": "",
+                "module_slug": "reflect-and-revise",
+                "auto": "light",
+                "train_ratio": 0.8,
+            },
+        )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "running"
-    assert isinstance(payload["run_id"], int)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "running"
+        assert isinstance(payload["run_id"], str)
 
 
 def test_openapi_excludes_legacy_one_shot_and_task_schemas(

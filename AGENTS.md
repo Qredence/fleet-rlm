@@ -329,6 +329,11 @@ make test
 make check
 ```
 
+Database connection rule:
+
+- `DATABASE_URL` is the pooled Neon runtime connection.
+- `DATABASE_ADMIN_URL` is the direct Neon connection for Alembic, schema management, and admin/debug scripts.
+
 ### Release-oriented confidence
 
 ```bash

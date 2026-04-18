@@ -169,10 +169,10 @@ function RunCard({
   );
 }
 
-export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void }) {
+export function RunsTab({ onCompare }: { onCompare?: (runIds: string[]) => void }) {
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [drawerRunId, setDrawerRunId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [drawerRunId, setDrawerRunId] = useState<string | null>(null);
 
   const runsQuery = useQuery({
     queryKey: optimizationKeys.runsList(
@@ -190,7 +190,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void 
     },
   });
 
-  const toggleSelect = useCallback((id: number) => {
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

@@ -325,6 +325,7 @@ class _AdmissionRepository:
             user_id=self.user_id,
             tenant_status=self.tenant_status,
             membership_role=None,
+            workspace_id=None,
         )
 
 

@@ -108,12 +108,12 @@ function SessionRow({
       conversationTitle,
       transcriptTurns,
     }: {
-      sessionId?: number;
+      sessionId?: string;
       moduleSlug: string;
       conversationTitle?: string;
       transcriptTurns?: TranscriptTurnInput[];
     }) => {
-      return typeof sessionId === "number"
+      return typeof sessionId === "string"
         ? await sessionEndpoints.exportSession(sessionId, moduleSlug)
         : await datasetEndpoints.createFromTranscript({
             module_slug: moduleSlug,
@@ -186,7 +186,7 @@ function SessionRow({
           onClick={() => {
             if (!selectedModule) return;
             optimizeMutation.mutate({
-              sessionId: Number.isFinite(session.id) ? session.id : undefined,
+              sessionId: conversation ? undefined : session.id,
               moduleSlug: selectedModule,
               conversationTitle: conversation?.title ?? session.title,
               transcriptTurns,
@@ -221,7 +221,7 @@ function SessionsSection({
   const fallbackSessions = sortConversations(localConversations).map((conversation) => ({
     conversation,
     session: {
-      id: Number.NaN,
+      id: `local:${conversation.id}`,
       title: conversation.title,
       status: "local",
       model_name: null,
