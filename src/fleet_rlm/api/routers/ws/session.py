@@ -8,6 +8,8 @@ from fleet_rlm.agent_host.sessions import (
     OrchestrationSessionContext,
     switch_orchestration_session,
 )
+from fleet_rlm.integrations.database import FleetRepository
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 from ...dependencies import ServerState
 from .types import ChatAgentProtocol, LocalPersistFn
@@ -27,6 +29,8 @@ async def switch_session_if_needed(
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
+    repository: FleetRepository | None = None,
+    identity_rows: IdentityUpsertResult | None = None,
 ) -> tuple[str, str, dict[str, Any], str | None, OrchestrationSessionContext]:
     """Switch and restore session state when session identity changed."""
     outcome = await switch_orchestration_session(
@@ -42,6 +46,8 @@ async def switch_session_if_needed(
         session_record=session_record,
         last_loaded_docs_path=last_loaded_docs_path,
         local_persist=local_persist,
+        repository=repository,
+        identity_rows=identity_rows,
     )
     return (
         outcome.key,

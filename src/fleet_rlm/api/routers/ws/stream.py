@@ -487,6 +487,7 @@ async def _resolve_session_target(
     *,
     state: ServerState,
     agent: ChatAgentProtocol,
+    runtime: _PreparedChatRuntime,
     interpreter: object | None,
     session: _ChatSessionState,
     local_persist: LocalPersistFn,
@@ -516,12 +517,12 @@ async def _resolve_session_target(
         session_record=session.session_record,
         last_loaded_docs_path=session.last_loaded_docs_path,
         local_persist=local_persist,
+        repository=runtime.repository,
+        identity_rows=runtime.identity_rows,
     )
-    setattr(
-        agent,
-        "_db_session_id",
-        (session.session_record or {}).get("db_session_id"),
-    )
+    agent._db_session_id = (session.session_record or {}).get("db_session_id")
+    agent._repository = runtime.repository
+    agent._identity_rows = runtime.identity_rows
     return _ResolvedSessionTarget(
         workspace_id=workspace_id,
         user_id=user_id,
@@ -603,6 +604,7 @@ class _ExecutionConnectionLoop:
                 target = await _resolve_session_target(
                     state=self.state,
                     agent=self.agent,
+                    runtime=self.runtime,
                     interpreter=self.interpreter,
                     local_persist=self.local_persist,
                     session=self.session,

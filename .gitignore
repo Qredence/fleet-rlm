@@ -58,6 +58,12 @@ artifacts/
 .claude/team/inboxes/
 .letta/
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
+!.agents/plugins/
+!.agents/plugins/marketplace.json
 .codex/
 .codex/environments/
 .npm-cache/

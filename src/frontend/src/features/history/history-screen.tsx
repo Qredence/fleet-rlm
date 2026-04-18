@@ -7,7 +7,7 @@ import { SessionDetail } from "./session-detail";
 import { cn } from "@/lib/utils";
 
 export type HistorySelection =
-  | { source: "api"; sessionId: number }
+  | { source: "api"; sessionId: string }
   | { source: "local"; conversationId: string };
 
 export function HistoryScreen() {

@@ -266,7 +266,7 @@ export interface components {
        * Id
        * @description Unique dataset identifier.
        */
-      id: number;
+      id: string;
       /**
        * Name
        * @description Human-readable dataset name.
@@ -345,7 +345,7 @@ export interface components {
        * Id
        * @description Unique dataset identifier.
        */
-      id: number;
+      id: string;
       /**
        * Name
        * @description Human-readable dataset name.
@@ -381,7 +381,7 @@ export interface components {
        * Id
        * @description Unique evaluation result identifier.
        */
-      id: number;
+      id: string;
       /**
        * Example Index
        * @description Zero-based index in the dataset.
@@ -485,7 +485,7 @@ export interface components {
        * Dataset Id
        * @description Registered dataset identifier to optimize against.
        */
-      dataset_id?: number | null;
+      dataset_id?: string | null;
       /**
        * Program Spec
        * @description DSPy program specification string to optimize in module:attr form. Required when module_slug is not provided.
@@ -635,7 +635,7 @@ export interface components {
        * Run Id
        * @description Unique identifier for the created run.
        */
-      run_id: number;
+      run_id: string;
       /**
        * Status
        * @description Initial run status.
@@ -652,7 +652,7 @@ export interface components {
        * Id
        * @description Unique run identifier.
        */
-      id: number;
+      id: string;
       /**
        * Status
        * @description Run status: running, completed, or failed.
@@ -804,7 +804,7 @@ export interface components {
        * Run Id
        * @description Optimization run identifier.
        */
-      run_id: number;
+      run_id: string;
       /**
        * Program Spec
        * @description DSPy program specification optimized.
@@ -1056,9 +1056,9 @@ export interface components {
     SessionDetailResponse: {
       /**
        * Id
-       * @description Local store primary key.
+       * @description Durable session identifier.
        */
-      id: number;
+      id: string;
       /**
        * Title
        * @description Human-readable session title.
@@ -1118,9 +1118,9 @@ export interface components {
     SessionListItem: {
       /**
        * Id
-       * @description Local store primary key.
+       * @description Durable session identifier.
        */
-      id: number;
+      id: string;
       /**
        * Title
        * @description Human-readable session title.
@@ -1370,9 +1370,9 @@ export interface components {
     TurnItem: {
       /**
        * Id
-       * @description Turn primary key.
+       * @description Durable turn identifier.
        */
-      id: number;
+      id: string;
       /**
        * Turn Index
        * @description Zero-based turn position.
@@ -1715,7 +1715,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to inspect. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1741,7 +1741,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to archive. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1773,7 +1773,7 @@ export interface operations {
       };
       path: {
         /** @description Identifier of the session whose turns to list. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1799,7 +1799,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to export as a dataset. */
-        session_id: number;
+        session_id: string;
       };
     };
     requestBody: {
@@ -2277,7 +2277,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the optimization run to fetch. */
-        run_id: number;
+        run_id: string;
       };
     };
     responses: {
@@ -2378,7 +2378,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the dataset to inspect. */
-        dataset_id: number;
+        dataset_id: string;
       };
     };
     responses: {
@@ -2418,7 +2418,7 @@ export interface operations {
       };
       path: {
         /** @description Identifier of the optimization run whose results to list. */
-        run_id: number;
+        run_id: string;
       };
     };
     responses: {

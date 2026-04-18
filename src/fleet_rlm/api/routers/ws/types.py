@@ -56,6 +56,9 @@ class ChatAgentProtocol(WorkspaceTaskAgent, Protocol):
     """Subset of chat-agent behavior used by websocket runtime helpers."""
 
     interpreter: MaintenanceInterpreterProtocol | None
+    _db_session_id: str | object | None
+    _repository: Any | None
+    _identity_rows: Any | None
 
     async def __aenter__(self) -> ChatAgentProtocol: ...
 

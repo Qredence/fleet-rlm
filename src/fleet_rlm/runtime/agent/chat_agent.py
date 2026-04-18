@@ -11,6 +11,7 @@ in :mod:`fleet_rlm.runtime.execution.streaming`, and command dispatch in
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from types import TracebackType
 from typing import Any, Literal
@@ -186,6 +187,11 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self._recursive_context_selection_module: dspy.Module | None = None
         self._recursive_verification_module: dspy.Module | None = None
         self._recursive_repair_module: dspy.Module | None = None
+
+        # Optional database linkage (set by transport layer)
+        self._repository: Any | None = None
+        self._identity_rows: Any | None = None
+        self._db_session_id: str | uuid.UUID | None = None
 
         # Register Core Memory tools
         self._extra_tools.extend([self.core_memory_append, self.core_memory_replace])

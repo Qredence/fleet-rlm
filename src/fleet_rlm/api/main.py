@@ -209,11 +209,14 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         await startup_server_state(state)
         # Recover optimization runs orphaned by prior server restart
         try:
-            from fleet_rlm.integrations.local_store import (
-                recover_stale_optimization_runs,
-            )
+            if state.repository is not None:
+                recovered = await state.repository.recover_stale_optimization_runs()
+            else:
+                from fleet_rlm.integrations.local_store import (
+                    recover_stale_optimization_runs,
+                )
 
-            recovered = recover_stale_optimization_runs()
+                recovered = recover_stale_optimization_runs()
             if recovered:
                 logger.info(
                     "Recovered %d stale optimization run(s) on startup", recovered

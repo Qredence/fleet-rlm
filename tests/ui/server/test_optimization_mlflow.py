@@ -83,7 +83,7 @@ class TestBackgroundRunnerMlflowAvailable:
                 MagicMock(),
             ),
         ):
-            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background_local(**_make_runner_kwargs(tmp_path))
 
         init_mock.assert_called_once()
         start_run_mock.assert_called_once()
@@ -158,7 +158,7 @@ class TestBackgroundRunnerMlflowUnavailable:
                 MagicMock(),
             ),
         ):
-            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background_local(**_make_runner_kwargs(tmp_path))
 
         run_mod_mock.assert_called_once()
         complete_mock.assert_called_once()
@@ -216,7 +216,7 @@ class TestBackgroundRunnerMlflowUnavailable:
                 MagicMock(),
             ),
         ):
-            mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
+            mod._run_optimization_background_local(**_make_runner_kwargs(tmp_path))
 
         complete_mock.assert_called_once()
 
@@ -240,7 +240,7 @@ def test_background_runner_marks_planner_bootstrap_failure_as_failed(
             complete_mock,
         ),
     ):
-        mod._run_optimization_background(**_make_runner_kwargs(tmp_path))
+        mod._run_optimization_background_local(**_make_runner_kwargs(tmp_path))
 
     fail_mock.assert_called_once_with(1, error="planner bootstrap failed")
     complete_mock.assert_not_called()
@@ -329,7 +329,7 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
             MagicMock(),
         ),
     ):
-        mod._run_optimization_background(**kwargs)
+        mod._run_optimization_background_local(**kwargs)
 
     start_run_mock.assert_not_called()
     optimize_mock.assert_called_once()

@@ -10,16 +10,20 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from fleet_rlm.integrations.database.engine import DatabaseManager
+from fleet_rlm.integrations.database.engine import DatabaseManager, select_database_url
 
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     load_dotenv(repo_root / ".env", override=False)
 
-    database_url = os.getenv("DATABASE_URL")
+    database_url = select_database_url(
+        runtime_url=os.getenv("DATABASE_URL"),
+        admin_url=os.getenv("DATABASE_ADMIN_URL"),
+        prefer_admin=True,
+    )
     if not database_url:
-        print("DATABASE_URL is required")
+        print("DATABASE_ADMIN_URL or DATABASE_URL is required")
         return 1
 
     db = DatabaseManager(database_url)

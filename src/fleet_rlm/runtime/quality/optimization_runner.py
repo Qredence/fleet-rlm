@@ -35,6 +35,8 @@ class OptimizationResult(TypedDict):
     optimizer: str
     program_spec: str
     module_slug: str
+    evaluation_results: list[dict[str, Any]]
+    prompt_snapshots: list[dict[str, str]]
 
 
 def _persist_run_artifacts(
@@ -328,4 +330,6 @@ def run_module_optimization(
         optimizer="GEPA",
         program_spec=spec.program_spec,
         module_slug=spec.module_slug,
+        evaluation_results=per_example_results,
+        prompt_snapshots=before_snapshots + after_snapshots,
     )

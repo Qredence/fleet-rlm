@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -316,6 +317,11 @@ def apply_ui_test_env(monkeypatch, tmp_path, *, planner: object = "fake-planner-
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
+    # Use the direct admin connection for tests to avoid PgBouncer
+    # prepared-statement cache invalidation after DDL changes.
+    admin_url = os.environ.get("DATABASE_ADMIN_URL")
+    if admin_url:
+        monkeypatch.setenv("DATABASE_URL", admin_url)
     patch_runtime_lm_loaders(monkeypatch, planner=planner, delegate=None)
     return env_path
 

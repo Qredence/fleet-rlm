@@ -250,8 +250,9 @@ def test_export_session_as_dataset_basic(tmp_path, monkeypatch):
     lines = Path(dataset.uri).read_text().strip().splitlines()
     assert len(lines) == 2
     row0 = json.loads(lines[0])
-    assert "What is 2+2?" in row0.values()
-    assert "4" in row0.values()
+    assert row0["user_request"] == "What is 2+2?"
+    assert row0["next_action"] == "finalize"
+    assert row0["rationale"] == "4"
 
 
 def test_export_session_unknown_module():

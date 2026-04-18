@@ -60,19 +60,19 @@ export function RunDetailDrawer({
   open,
   onOpenChange,
 }: {
-  runId: number | null;
+  runId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const runQuery = useQuery({
-    queryKey: optimizationKeys.runDetail(runId ?? 0),
+    queryKey: optimizationKeys.runDetail(runId ?? "__none__"),
     queryFn: ({ signal }) => optimizationEndpoints.getRun(runId!, signal),
     enabled: open && runId != null,
     staleTime: 30_000,
   });
 
   const resultsQuery = useQuery({
-    queryKey: optimizationKeys.runResults(runId ?? 0),
+    queryKey: optimizationKeys.runResults(runId ?? "__none__"),
     queryFn: ({ signal }) => evaluationEndpoints.getResults(runId!, undefined, signal),
     enabled: open && runId != null,
     staleTime: 30_000,

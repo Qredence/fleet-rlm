@@ -196,7 +196,11 @@ export async function createReconnectingWs(
             firstFrameTimer = null;
           }
 
-          onFrame(frame);
+          try {
+            onFrame(frame);
+          } catch (error) {
+            console.error("WebSocket frame handler error:", error);
+          }
 
           if (frame.type === "error") {
             completed = true;

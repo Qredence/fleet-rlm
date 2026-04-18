@@ -49,6 +49,14 @@ def test_reset_registry_clears() -> None:
     # Ensure registry is populated first
     list_module_slugs()
     _reset_registry()
-    # Registry is empty after reset (modules are in sys.modules but
-    # module-level register_module() won't re-execute on re-import)
     assert len(_REGISTRY) == 0
+
+
+def test_registry_repopulates_after_reset() -> None:
+    list_module_slugs()
+    _reset_registry()
+
+    slugs = list_module_slugs()
+
+    assert "reflect-and-revise" in slugs
+    assert "context-selection" in slugs

@@ -233,7 +233,7 @@ class SessionStateResponse(BaseModel):
 class SessionListItem(BaseModel):
     """Lightweight session summary for list views."""
 
-    id: int = Field(description="Local store primary key.")
+    id: str = Field(description="Durable session identifier.")
     title: str = Field(description="Human-readable session title.")
     status: str = Field(description="Session status (active, archived).")
     model_name: str | None = Field(default=None, description="Model used in session.")
@@ -257,7 +257,7 @@ class SessionListResponse(BaseModel):
 class SessionDetailResponse(BaseModel):
     """Full session detail with turn count."""
 
-    id: int = Field(description="Local store primary key.")
+    id: str = Field(description="Durable session identifier.")
     title: str = Field(description="Human-readable session title.")
     status: str = Field(description="Session status (active, archived).")
     model_name: str | None = Field(default=None, description="Model used in session.")
@@ -273,7 +273,7 @@ class SessionDetailResponse(BaseModel):
 class TurnItem(BaseModel):
     """Single turn in a session transcript."""
 
-    id: int = Field(description="Turn primary key.")
+    id: str = Field(description="Durable turn identifier.")
     turn_index: int = Field(description="Zero-based turn position.")
     user_message: str = Field(description="User message text.")
     assistant_message: str | None = Field(
@@ -526,7 +526,7 @@ class GEPAOptimizationRequest(BaseModel):
         default=None,
         description="Relative filesystem path to the dataset file.",
     )
-    dataset_id: int | None = Field(
+    dataset_id: str | None = Field(
         default=None,
         description="Registered dataset identifier to optimize against.",
     )
@@ -638,7 +638,7 @@ class GEPAStatusResponse(BaseModel):
 class OptimizationRunResponse(BaseModel):
     """A single optimization run record."""
 
-    id: int = Field(description="Unique run identifier.")
+    id: str = Field(description="Unique run identifier.")
     status: str = Field(description="Run status: running, completed, or failed.")
     module_slug: str | None = Field(
         default=None, description="Module slug when server-side dispatch was used."
@@ -685,7 +685,7 @@ class OptimizationRunResponse(BaseModel):
 class OptimizationRunCreatedResponse(BaseModel):
     """Response when an async optimization run is created."""
 
-    run_id: int = Field(description="Unique identifier for the created run.")
+    run_id: str = Field(description="Unique identifier for the created run.")
     status: str = Field(default="running", description="Initial run status.")
 
 
@@ -750,7 +750,7 @@ class TraceFeedbackResponse(BaseModel):
 class DatasetResponse(BaseModel):
     """Metadata for a registered dataset."""
 
-    id: int = Field(description="Unique dataset identifier.")
+    id: str = Field(description="Unique dataset identifier.")
     name: str = Field(description="Human-readable dataset name.")
     row_count: int = Field(description="Number of rows/examples in the dataset.")
     format: str = Field(description="File format (json or jsonl).")
@@ -782,7 +782,7 @@ class DatasetDetailResponse(DatasetResponse):
 class EvaluationResultItem(BaseModel):
     """A single per-example evaluation result."""
 
-    id: int = Field(description="Unique evaluation result identifier.")
+    id: str = Field(description="Unique evaluation result identifier.")
     example_index: int = Field(description="Zero-based index in the dataset.")
     input_data: str = Field(description="JSON-serialized input fields.")
     expected_output: str | None = Field(
@@ -815,7 +815,7 @@ class PromptSnapshotItem(BaseModel):
 class RunComparisonItem(BaseModel):
     """Summary of a single run for cross-run comparison."""
 
-    run_id: int = Field(description="Optimization run identifier.")
+    run_id: str = Field(description="Optimization run identifier.")
     program_spec: str = Field(description="DSPy program specification optimized.")
     validation_score: float | None = Field(
         default=None, description="Validation score from the run."

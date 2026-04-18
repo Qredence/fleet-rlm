@@ -203,7 +203,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
               <SessionRow
                 key={conversation.id}
                 session={{
-                  id: Number.NaN,
+                  id: `local:${conversation.id}`,
                   title: conversation.title,
                   status: "local",
                   model_name: null,
@@ -243,7 +243,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
             <SessionRow
               key={conversation.id}
               session={{
-                id: Number.NaN,
+                id: `local:${conversation.id}`,
                 title: conversation.title,
                 status: "local",
                 model_name: null,

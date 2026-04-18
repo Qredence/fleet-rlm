@@ -11,6 +11,7 @@ by providing a factory function that the registry invokes lazily on first use.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -38,6 +39,13 @@ class ModuleOptimizationSpec:
 # -- Module registry --------------------------------------------------------
 
 _REGISTRY: dict[str, ModuleOptimizationSpec] = {}
+_MODULE_ENTRYPOINTS = (
+    "fleet_rlm.runtime.quality.optimize_reflect_and_revise",
+    "fleet_rlm.runtime.quality.optimize_recursive_context_selection",
+    "fleet_rlm.runtime.quality.optimize_recursive_decomposition",
+    "fleet_rlm.runtime.quality.optimize_recursive_repair",
+    "fleet_rlm.runtime.quality.optimize_recursive_verification",
+)
 
 
 def register_module(spec: ModuleOptimizationSpec) -> None:
@@ -88,26 +96,13 @@ def _ensure_registered() -> None:
     _REGISTERED = True
 
     # Each import triggers a module-level ``register_module()`` call.
-    try:
-        from . import optimize_reflect_and_revise as _m1  # noqa: F401
-    except Exception:
-        pass
-    try:
-        from . import optimize_recursive_context_selection as _m2  # noqa: F401
-    except Exception:
-        pass
-    try:
-        from . import optimize_recursive_decomposition as _m3  # noqa: F401
-    except Exception:
-        pass
-    try:
-        from . import optimize_recursive_repair as _m4  # noqa: F401
-    except Exception:
-        pass
-    try:
-        from . import optimize_recursive_verification as _m5  # noqa: F401
-    except Exception:
-        pass
+    for module_name in _MODULE_ENTRYPOINTS:
+        try:
+            __import__(module_name)
+        except Exception as exc:
+            sys.stderr.write(
+                f"[fleet_rlm.runtime.quality] failed to load {module_name}: {exc}\n"
+            )
 
 
 def _reset_registry() -> None:
@@ -115,3 +110,5 @@ def _reset_registry() -> None:
     global _REGISTERED
     _REGISTERED = False
     _REGISTRY.clear()
+    for module_name in _MODULE_ENTRYPOINTS:
+        sys.modules.pop(module_name, None)
