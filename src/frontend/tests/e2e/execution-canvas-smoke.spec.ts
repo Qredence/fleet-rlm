@@ -6,7 +6,7 @@ const LONG_OUTPUT_TEXT =
   "This text intentionally includes a unique tail marker to verify that " +
   "Timeline and Preview panels render full content end-to-end. " +
   TAIL_FRAGMENT;
-const PANEL_LABEL_PATTERN = /inspector/i;
+const PANEL_LABEL_PATTERN = /workspace/i;
 
 test("execution canvas keeps lanes readable and payloads untruncated", async ({ page }) => {
   await page.goto("/");

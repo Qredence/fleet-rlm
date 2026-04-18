@@ -177,21 +177,22 @@ export function DetailBlock({
 }: {
   label: string;
   value?: string;
-  tone?: "default" | "error";
+  tone?: "default" | "warning" | "error";
 }) {
   if (!value) return null;
   const parsed = tryParseJson(value);
+  const insetTone = tone === "error" ? "error" : tone === "warning" ? "warning" : "strong";
   return (
     <div className="flex flex-col gap-1.5">
       <div className={inspectorStyles.heading.detail}>{label}</div>
       {parsed !== null ? (
-        <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
+        <div className={inspectorInsetClass(insetTone)}>
           <VisualJson value={parsed} onChange={() => {}}>
             <TreeView className="text-xs" />
           </VisualJson>
         </div>
       ) : (
-        <div className={inspectorInsetClass(tone === "error" ? "error" : "strong")}>
+        <div className={inspectorInsetClass(insetTone)}>
           <Streamdown content={value} streaming={false} />
         </div>
       )}
@@ -199,12 +200,37 @@ export function DetailBlock({
   );
 }
 
+type StatusNoteTone = Extract<ToolSessionItem["part"], { kind: "status_note" }>["tone"];
+
+function statusNoteDetailLabel(tone?: StatusNoteTone) {
+  if (tone === "error") return "Error";
+  if (tone === "warning") return "Warning";
+  return "Note";
+}
+
+function statusNoteDetailTone(tone?: StatusNoteTone): "default" | "warning" | "error" {
+  if (tone === "error") return "error";
+  if (tone === "warning") return "warning";
+  return "default";
+}
+
 function renderToolSessionItems(sessionItems: ToolSessionItem[]) {
-  const items = sessionItems.filter((item) => item.part.kind !== "status_note");
-  if (items.length === 0) return null;
+  if (sessionItems.length === 0) return null;
   return (
     <div className={inspectorStyles.stack.compact}>
-      {items.map((item) => {
+      {sessionItems.map((item) => {
+        if (item.part.kind === "status_note") {
+          return (
+            <div key={item.key}>
+              <DetailBlock
+                label={statusNoteDetailLabel(item.part.tone)}
+                value={item.part.text}
+                tone={statusNoteDetailTone(item.part.tone)}
+              />
+            </div>
+          );
+        }
+
         const outputValue =
           item.part.kind === "tool"
             ? stringifyValue(item.part.output)

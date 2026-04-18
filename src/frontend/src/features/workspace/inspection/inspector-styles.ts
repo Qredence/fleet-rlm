@@ -59,6 +59,7 @@ export const inspectorStyles = {
     root: "rounded-xl border border-border-subtle/80 px-3 py-2",
     default: "bg-muted/20 text-muted-foreground",
     strong: "bg-muted/20 text-foreground",
+    warning: "border-amber-500/25 bg-amber-500/8 text-amber-700 dark:text-amber-300",
     error: "border-destructive/20 bg-destructive/5 text-destructive",
   },
 
@@ -92,14 +93,16 @@ export const inspectorStyles = {
 } as const;
 
 /** Build an inset detail-block className for a given tone. */
-export function inspectorInsetClass(tone: "default" | "strong" | "error" = "default") {
+export function inspectorInsetClass(tone: "default" | "strong" | "warning" | "error" = "default") {
   return cn(
     inspectorStyles.inset.root,
     tone === "error"
       ? inspectorStyles.inset.error
-      : tone === "strong"
-        ? inspectorStyles.inset.strong
-        : inspectorStyles.inset.default,
+      : tone === "warning"
+        ? inspectorStyles.inset.warning
+        : tone === "strong"
+          ? inspectorStyles.inset.strong
+          : inspectorStyles.inset.default,
   );
 }
 

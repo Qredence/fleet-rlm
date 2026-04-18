@@ -31,7 +31,7 @@ function safeHref(href: string): string | undefined {
 function parseInline(text: string): ReactNode[] {
   const result: ReactNode[] = [];
   const inlineRegex =
-    /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[([^\]]+)\]\(([^)]+)\))/g;
+    /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*]+\*)|(_[^_]+_)|(\[([^\]]+)\]\(((?:[^()\\]|\\.|\([^()]*\))*)\))/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;

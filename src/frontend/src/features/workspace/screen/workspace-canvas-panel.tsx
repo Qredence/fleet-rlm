@@ -71,6 +71,13 @@ function selectedTurnStatus(
   return "completed";
 }
 
+function extractTraceDocumentPath(content: string): string | null {
+  const match = content.match(
+    /(?:document_path|loaded_path|path)[:=]\s*(?:"([^"]+)"|'([^']+)'|(\S+))/,
+  );
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Session sidebar tab content                                       */
 /* ------------------------------------------------------------------ */
@@ -97,8 +104,8 @@ function extractDocumentPaths(messages: ChatMessage[]): string[] {
       }
     }
     if (msg.type === "trace" && msg.content) {
-      const match = msg.content.match(/(?:document_path|loaded_path|path)[:=]\s*["']?([^\s"',]+)/);
-      if (match?.[1]) seen.add(match[1]);
+      const path = extractTraceDocumentPath(msg.content);
+      if (path) seen.add(path);
     }
   }
   return Array.from(seen);
@@ -336,17 +343,7 @@ export function WorkspaceCanvasPanel() {
     return list;
   }, [hasRunContent, model, showGraph]);
 
-  /* ---- auto-tab switching ---- */
-  useEffect(() => {
-    if (selectedAssistantTurnId) {
-      if (activeInspectorTab === "workbench") setInspectorTab("message");
-      return;
-    }
-    if (hasRunContent && !model) {
-      setInspectorTab("workbench");
-    }
-  }, [activeInspectorTab, hasRunContent, model, selectedAssistantTurnId, setInspectorTab]);
-
+  /* ---- invalid-tab recovery ---- */
   useEffect(() => {
     const first = tabs[0];
     if (tabs.length > 0 && first && !tabs.some((t) => t.id === activeInspectorTab)) {

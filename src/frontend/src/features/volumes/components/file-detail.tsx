@@ -128,15 +128,23 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
   } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "daytona");
   const resolvedContent = mockContent ?? (apiContent || null);
 
-  const handleCopyPath = () => {
-    navigator.clipboard.writeText(file.path);
-    toast.success("Path copied to clipboard");
+  const handleCopyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(file.path);
+      toast.success("Path copied to clipboard");
+    } catch {
+      toast.error("Failed to copy path");
+    }
   };
 
-  const handleCopyContent = () => {
+  const handleCopyContent = async () => {
     if (resolvedContent) {
-      navigator.clipboard.writeText(resolvedContent);
-      toast.success("Content copied");
+      try {
+        await navigator.clipboard.writeText(resolvedContent);
+        toast.success("Content copied");
+      } catch {
+        toast.error("Failed to copy content");
+      }
     }
   };
 
@@ -253,16 +261,9 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
               </div>
               <p className="text-foreground typo-label">Binary file</p>
               <p className="max-w-75 text-muted-foreground typo-caption">
-                This file cannot be previewed in the browser. Download it or open it with an
-                external tool.
+                This file cannot be previewed in the browser. Open it from the mounted volume path
+                with an external tool.
               </p>
-              <Button
-                variant="secondary"
-                className={cn("mt-2 gap-2 rounded-button", isMobile && "touch-target")}
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span className="typo-label">Open externally</span>
-              </Button>
             </CardContent>
           </Card>
         )}

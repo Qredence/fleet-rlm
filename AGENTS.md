@@ -12,6 +12,7 @@ Supported product surfaces:
 - `Volumes` — browser for mounted durable storage
 - `Optimization` — DSPy evaluation and optimization workflows
 - `Settings` — runtime configuration and diagnostics
+- `History` — session and conversation history browser
 
 Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally unsupported and should continue to fall through to `/404`.
 

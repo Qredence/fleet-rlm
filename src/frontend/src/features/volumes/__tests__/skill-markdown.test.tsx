@@ -11,6 +11,15 @@ describe("SkillMarkdown link sanitization", () => {
     expect(html).toContain('rel="noopener noreferrer nofollow"');
   });
 
+  it("renders links whose URLs contain balanced parentheses", () => {
+    const html = renderToStaticMarkup(
+      <SkillMarkdown content="[Topic](https://en.wikipedia.org/wiki/Foo_(bar))" />,
+    );
+
+    expect(html).toContain('href="https://en.wikipedia.org/wiki/Foo_(bar)"');
+    expect(html).toContain(">Topic</a>");
+  });
+
   it("blocks javascript links from becoming anchors", () => {
     const html = renderToStaticMarkup(<SkillMarkdown content="[Danger](javascript:alert(1))" />);
 
