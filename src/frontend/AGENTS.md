@@ -20,21 +20,21 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern | File(s) |
-|---------|---------|
-| Scripts & validation | `package.json` |
-| Lint/build/import rules | `vite.config.ts` |
-| Routes & surfaces | `src/routes/*` |
-| App chrome / layout | `src/features/layout/*` |
-| Product surfaces | `src/features/{workspace,volumes,settings,optimization,history}/*` |
-| UI primitives | `src/components/ui/*` (shadcn/Base UI) |
-| AI Elements | `src/components/ai-elements/*` |
-| Product compositions | `src/components/product/*` |
-| API clients & types | `src/lib/rlm-api/*` |
-| Workspace adapters | `src/lib/workspace/*` |
-| Theme / tokens | `src/styles/globals.css` |
-| shadcn config | `components.json` |
-| API contract | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts` |
+| Concern                 | File(s)                                                            |
+| ----------------------- | ------------------------------------------------------------------ |
+| Scripts & validation    | `package.json`                                                     |
+| Lint/build/import rules | `vite.config.ts`                                                   |
+| Routes & surfaces       | `src/routes/*`                                                     |
+| App chrome / layout     | `src/features/layout/*`                                            |
+| Product surfaces        | `src/features/{workspace,volumes,settings,optimization,history}/*` |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                             |
+| AI Elements             | `src/components/ai-elements/*`                                     |
+| Product compositions    | `src/components/product/*`                                         |
+| API clients & types     | `src/lib/rlm-api/*`                                                |
+| Workspace adapters      | `src/lib/workspace/*`                                              |
+| Theme / tokens          | `src/styles/globals.css`                                           |
+| shadcn config           | `components.json`                                                  |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`             |
 
 ### Generated / Synced — Do Not Hand-Edit
 
