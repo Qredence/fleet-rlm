@@ -114,7 +114,7 @@ fleet-rlm = "fleet_rlm.cli.fleet_cli:main"
 entrypoint = "fleet_rlm.api.main:app"
 
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
