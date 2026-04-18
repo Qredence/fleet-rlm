@@ -1303,15 +1303,15 @@ async def create_dataset_from_transcript(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     title = request.title.strip() if request.title else "Transcript"
-    dataset_path = await asyncio.to_thread(
-        persist_jsonl_rows,
-        root=Path(os.environ.get("FLEET_RLM_DATASET_ROOT", os.getcwd())),
-        rows=rows,
-        prefix="transcript-",
-    )
     dataset_name = f"{title} ({label})"
 
     if repository is not None and persisted_identity is not None:
+        dataset_path = await asyncio.to_thread(
+            persist_jsonl_rows,
+            root=Path(os.environ.get("FLEET_RLM_DATASET_ROOT", os.getcwd())),
+            rows=rows,
+            prefix="transcript-",
+        )
         workspace_id = _require_workspace_id(persisted_identity)
         dataset = await repository.create_dataset(
             DatasetCreateRequest(
@@ -1591,11 +1591,11 @@ def _sanitize_filename(name: str) -> str:
     return _SAFE_NAME_RE.sub("_", stem)[:120]
 
 
-def _parse_rows(content: bytes, fmt: str) -> list[dict]:
-    """Parse uploaded file content into a list of dicts."""
+def _parse_rows(content: bytes, fmt: str) -> list[Any]:
+    """Parse uploaded file content into a list of JSON-decoded rows."""
     text = content.decode("utf-8")
     if fmt == "jsonl":
-        rows: list[dict] = []
+        rows: list[Any] = []
         for line in text.splitlines():
             stripped = line.strip()
             if not stripped:
@@ -1607,6 +1607,19 @@ def _parse_rows(content: bytes, fmt: str) -> list[dict]:
         if isinstance(parsed, list):
             return parsed
         raise ValueError("JSON file must contain a top-level array of objects")
+
+
+def _require_object_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Ensure every dataset row is a JSON object before persistence."""
+    object_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset row {index} must be a JSON object.",
+            )
+        object_rows.append(cast(dict[str, Any], row))
+    return object_rows
 
 
 @router.post(
@@ -1664,6 +1677,7 @@ async def upload_dataset(
 
     if not rows:
         raise HTTPException(status_code=400, detail="Dataset is empty.")
+    object_rows = _require_object_rows(rows)
 
     # Validate first row keys against module requirements if module_slug given
     if module_slug:
@@ -1674,7 +1688,7 @@ async def upload_dataset(
             raise HTTPException(
                 status_code=400, detail=f"Unknown module slug: {module_slug!r}"
             )
-        first_keys = set(rows[0].keys()) if isinstance(rows[0], dict) else set()
+        first_keys = set(object_rows[0].keys())
         missing = set(spec.required_dataset_keys) - first_keys
         if missing:
             raise HTTPException(
@@ -1704,13 +1718,13 @@ async def upload_dataset(
                 workspace_id=workspace_id,
                 created_by_user_id=persisted_identity.user_id,
                 name=Path(file.filename).stem,
-                row_count=len(rows),
+                row_count=len(object_rows),
                 format=DatasetFormat(fmt),
                 source=DatasetSource.UPLOAD,
                 module_slug=module_slug,
                 uri=str(dest),
             ),
-            examples=[cast(dict[str, Any], row) for row in rows],
+            examples=object_rows,
         )
         return _dataset_to_response(ds)
 
@@ -1719,7 +1733,7 @@ async def upload_dataset(
     ds = await asyncio.to_thread(
         create_dataset,
         name=Path(file.filename).stem,
-        row_count=len(rows),
+        row_count=len(object_rows),
         format=fmt,
         uri=str(dest),
         module_slug=module_slug,

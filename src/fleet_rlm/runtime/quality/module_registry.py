@@ -99,8 +99,10 @@ def _ensure_registered() -> None:
     for module_name in _MODULE_ENTRYPOINTS:
         try:
             __import__(module_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            sys.stderr.write(
+                f"[fleet_rlm.runtime.quality] failed to load {module_name}: {exc}\n"
+            )
 
 
 def _reset_registry() -> None:

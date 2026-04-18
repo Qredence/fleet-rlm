@@ -701,6 +701,61 @@ def test_optimization_transcript_dataset_endpoint_creates_dataset(
     assert payload["name"].startswith("Recovered chat")
 
 
+def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mode(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    local_store._engines.clear()
+    default_client.app.state.server_state.repository = None
+
+    def _unexpected_persist(**_: object) -> Path:
+        raise AssertionError("persist_jsonl_rows should not run in local mode")
+
+    monkeypatch.setattr(optimization, "persist_jsonl_rows", _unexpected_persist)
+
+    response = default_client.post(
+        "/api/v1/optimization/transcript-datasets",
+        headers=auth_headers,
+        json={
+            "module_slug": "reflect-and-revise",
+            "title": "Recovered chat",
+            "turns": [
+                {
+                    "user_message": "What is 2+2?",
+                    "assistant_message": "4",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["module_slug"] == "reflect-and-revise"
+    assert payload["row_count"] == 1
+
+
+def test_optimization_dataset_upload_rejects_non_object_rows(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = default_client.post(
+        "/api/v1/optimization/datasets",
+        headers=auth_headers,
+        files={"file": ("dataset.jsonl", b"123\n", "application/jsonl")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Dataset row 1 must be a JSON object."
+
+
 def test_async_optimization_run_accepts_dataset_id(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
