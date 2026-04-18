@@ -259,15 +259,38 @@ def _install_uuid_v7_helper() -> None:
         RETURNS uuid
         LANGUAGE plpgsql
         AS $$
+        DECLARE
+          unix_ts_ms BIGINT;
+          ts_hex TEXT;
+          rand_hex TEXT;
+          variant_source INTEGER;
+          variant_nibble TEXT;
         BEGIN
           IF to_regprocedure('uuidv7()') IS NOT NULL THEN
             RETURN uuidv7();
           ELSIF to_regprocedure('uuid_generate_v7()') IS NOT NULL THEN
             RETURN uuid_generate_v7();
+          ELSIF to_regprocedure('gen_random_bytes(integer)') IS NOT NULL THEN
+            unix_ts_ms := floor(extract(epoch from clock_timestamp()) * 1000);
+            ts_hex := lpad(to_hex(unix_ts_ms), 12, '0');
+            rand_hex := substr(encode(gen_random_bytes(10), 'hex'), 1, 19);
+            variant_source := get_byte(
+              decode('0' || substr(rand_hex, 4, 1), 'hex'),
+              0
+            );
+            variant_nibble := substr('89ab', (variant_source & 3) + 1, 1);
+
+            RETURN (
+              substr(ts_hex, 1, 8) || '-' ||
+              substr(ts_hex, 9, 4) || '-' ||
+              '7' || substr(rand_hex, 1, 3) || '-' ||
+              variant_nibble || substr(rand_hex, 5, 3) || '-' ||
+              substr(rand_hex, 8, 12)
+            )::uuid;
           END IF;
 
           RAISE EXCEPTION
-            'No UUIDv7-compatible generator found (expected uuidv7() or uuid_generate_v7())';
+            'No UUIDv7-compatible generator found (expected uuidv7(), uuid_generate_v7(), or pgcrypto''s gen_random_bytes(integer))';
         END;
         $$;
         """

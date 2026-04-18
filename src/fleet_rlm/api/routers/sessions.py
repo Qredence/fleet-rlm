@@ -29,6 +29,8 @@ from ..schemas.core import (
 from ..server_utils import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+_TURN_COUNT_QUERY_LIMIT = 1
+_TRANSCRIPT_EXPORT_PAGE_SIZE = 1_000
 
 
 def _string_or_default(value: object, default: str) -> str:
@@ -82,6 +84,39 @@ async def _resolve_persisted_identity(
         email=identity.email,
         full_name=identity.name,
     )
+
+
+async def _load_all_repository_turns(
+    *,
+    repository,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+    page_size: int | None = None,
+) -> list[ChatTurn]:
+    """Load every turn for a persisted session without truncating large transcripts."""
+
+    resolved_page_size = page_size or _TRANSCRIPT_EXPORT_PAGE_SIZE
+    turns: list[ChatTurn] = []
+    offset = 0
+    total = 0
+    while True:
+        page, total = await repository.list_chat_turns(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=resolved_page_size,
+            offset=offset,
+        )
+        if not page:
+            break
+        turns.extend(page)
+        offset += len(page)
+        if offset >= total:
+            break
+    return turns
 
 
 def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
@@ -337,7 +372,7 @@ async def get_session_detail(
             session_id=session_uuid,
             user_id=persisted_identity.user_id,
             workspace_id=persisted_identity.workspace_id,
-            limit=0,
+            limit=_TURN_COUNT_QUERY_LIMIT,
             offset=0,
         )
         return SessionDetailResponse(
@@ -559,13 +594,12 @@ async def export_session_endpoint(
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        turns, _total = await repository.list_chat_turns(
+        turns = await _load_all_repository_turns(
+            repository=repository,
             tenant_id=persisted_identity.tenant_id,
             session_id=session_uuid,
             user_id=persisted_identity.user_id,
             workspace_id=workspace_id,
-            limit=10_000,
-            offset=0,
         )
         transcript_turns: list[tuple[str | None, str | None]] = [
             (turn.user_message, turn.assistant_message) for turn in turns

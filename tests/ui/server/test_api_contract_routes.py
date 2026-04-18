@@ -73,6 +73,7 @@ class SessionHistoryRepository:
         ]
         self.archive_calls = 0
         self.created_datasets: list[SimpleNamespace] = []
+        self.turn_list_calls: list[dict[str, int]] = []
 
     async def upsert_identity(self, **kwargs) -> IdentityUpsertResult:
         _ = kwargs
@@ -130,12 +131,15 @@ class SessionHistoryRepository:
         limit,
         offset,
     ):
+        self.turn_list_calls.append({"limit": limit, "offset": offset})
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         if session_id != self.session.id:
             return [], 0
         total = len(self.turns)
+        if limit <= 0:
+            return self.turns[offset:], total
         return self.turns[offset : offset + limit], total
 
     async def archive_chat_session(
@@ -517,6 +521,7 @@ def test_session_history_routes_use_repository_with_string_ids(
     assert detail_payload["id"] == str(repository.session.id)
     assert detail_payload["workspace_id"] == str(repository.workspace_id)
     assert detail_payload["turn_count"] == 2
+    assert repository.turn_list_calls[0] == {"limit": 1, "offset": 0}
 
     assert turns_response.status_code == 200
     turns_payload = turns_response.json()
@@ -561,6 +566,46 @@ def test_session_export_route_uses_repository_transcript(
     assert payload["module_slug"] == "reflect-and-revise"
     assert payload["row_count"] == 2
     assert payload["name"].startswith("Repository Session")
+
+
+def test_session_export_route_paginates_repository_turns(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fleet_rlm.api.routers import sessions as sessions_router
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    monkeypatch.setattr(sessions_router, "_TRANSCRIPT_EXPORT_PAGE_SIZE", 2)
+    local_store._engines.clear()
+
+    repository = SessionHistoryRepository()
+    repository.turns = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            turn_index=index,
+            user_message=f"Question {index}",
+            assistant_message=f"Answer {index}",
+            created_at=repository.session.created_at,
+        )
+        for index in range(5)
+    ]
+    default_client.app.state.server_state.repository = repository
+
+    response = default_client.post(
+        f"/api/v1/sessions/{repository.session.id}/export",
+        headers=auth_headers,
+        json={"module_slug": "reflect-and-revise"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["row_count"] == 5
+    assert [call["offset"] for call in repository.turn_list_calls[-3:]] == [0, 2, 4]
 
 
 def test_openapi_publishes_http_bearer_security_for_protected_routes(
