@@ -137,7 +137,7 @@ export async function createReconnectingWs(
           const cancel: WsCancelRequest = { type: "cancel" };
           socket.send(JSON.stringify(cancel));
           abortTimer = setTimeout(() => {
-            console.warn("WebSocket: Abort timeout reached. Forcibly closing connection.");
+            // Abort timeout reached — forcibly closing connection.
             safeClose();
             updateStatus("disconnected");
             finish(resolve);
@@ -198,8 +198,8 @@ export async function createReconnectingWs(
 
           try {
             onFrame(frame);
-          } catch (error) {
-            console.error("WebSocket frame handler error:", error);
+          } catch {
+            // Frame handler error swallowed silently to prevent stream interruption.
           }
 
           if (frame.type === "error") {

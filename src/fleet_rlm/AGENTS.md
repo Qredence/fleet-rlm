@@ -164,7 +164,6 @@ API ownership:
 - Keep websocket runtime preparation in `src/fleet_rlm/api/runtime_services/chat_runtime.py`
 - Keep websocket run/session persistence orchestration in `src/fleet_rlm/api/runtime_services/chat_persistence.py`
 - Keep websocket event shaping and session lifecycle inside `src/fleet_rlm/api/routers/ws/*`
-- Keep `api/orchestration/*` limited to compatibility shims while migration continues
 
 Websocket/runtime contract rules:
 

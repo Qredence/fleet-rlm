@@ -166,7 +166,6 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
 
   it("still settles the stream when a terminal frame handler throws", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -193,10 +192,6 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     });
 
     await expect(streamPromise).resolves.toBeUndefined();
-    expect(errorSpy).toHaveBeenCalledWith(
-      "WebSocket frame handler error:",
-      expect.objectContaining({ message: "frame reducer blew up" }),
-    );
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
@@ -294,9 +289,8 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
-  it("warns before forcing a close when cancel does not receive a terminal frame", async () => {
+  it("forces a close when cancel does not receive a terminal frame", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { streamChatOverWs } = await loadWsClientModule();
     const { sockets } = installSocketFactory();
 
@@ -318,9 +312,6 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     await vi.advanceTimersByTimeAsync(1500);
 
     await expect(streamPromise).resolves.toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(
-      "WebSocket: Abort timeout reached. Forcibly closing connection.",
-    );
     expect(sockets[0]?.close).toHaveBeenCalled();
   });
 
