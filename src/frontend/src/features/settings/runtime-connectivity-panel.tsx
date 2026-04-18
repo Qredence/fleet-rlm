@@ -2,7 +2,13 @@ import { AlertCircleIcon, BadgeCheckIcon, Clock3Icon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  SectionCard,
+  SectionCardContent,
+  SectionCardDescription,
+  SectionCardHeader,
+  SectionCardTitle,
+} from "@/components/product/section-layout";
 import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import { FieldGroup } from "@/components/ui/field";
 import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api";
@@ -62,14 +68,14 @@ export function RuntimeConnectivityPanel({
 }: RuntimeConnectivityPanelProps) {
   return (
     <>
-      <Card className="mt-4 gap-0 rounded-xl border-border-subtle/70 shadow-none">
-        <CardHeader className="border-b border-border-subtle/70">
-          <CardTitle className="text-sm font-medium">Test Credentials + Connection</CardTitle>
-          <CardDescription className="max-w-xl text-sm">
+      <SectionCard variant="subtle" className="mt-4">
+        <SectionCardHeader className="border-b border-border-subtle/70">
+          <SectionCardTitle>Test Credentials + Connection</SectionCardTitle>
+          <SectionCardDescription className="max-w-xl">
             Runs preflight credential checks plus live Daytona and LM connectivity smoke tests.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
+          </SectionCardDescription>
+        </SectionCardHeader>
+        <SectionCardContent className="pt-6">
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-2.5">
               <Button
@@ -107,8 +113,8 @@ export function RuntimeConnectivityPanel({
               </p>
             ) : null}
           </div>
-        </CardContent>
-      </Card>
+        </SectionCardContent>
+      </SectionCard>
 
       <FieldGroup className="gap-0">
         <Field orientation="responsive" className={CONN_FIELD_CLASSNAME}>

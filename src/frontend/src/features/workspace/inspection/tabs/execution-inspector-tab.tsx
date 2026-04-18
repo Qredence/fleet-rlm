@@ -1,22 +1,48 @@
 import { memo } from "react";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought";
+import {
+  ActivityIcon,
+  LayersIcon,
+  ListChecksIcon,
+  TerminalIcon,
+  VariableIcon,
+  WrenchIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { AssistantContentModel } from "@/features/workspace/conversation/assistant-content/model";
+import type { ExecutionSection } from "@/features/workspace/conversation/assistant-content/model/types";
 import { inspectorStyles } from "@/features/workspace/inspection/inspector-styles";
 import {
   executionSectionState,
   renderBadges,
   renderExecutionSectionDetails,
   sectionGroups,
-  statusTone,
 } from "../inspector-ui";
 import { InspectorTabPanel } from "../inspector-tab-panel";
+
+const sectionIcon: Record<ExecutionSection["kind"], LucideIcon> = {
+  tool_session: WrenchIcon,
+  tool: WrenchIcon,
+  task: ListChecksIcon,
+  queue: LayersIcon,
+  sandbox: TerminalIcon,
+  environment_variables: VariableIcon,
+  status_note: ActivityIcon,
+};
+
+function mapStatus(
+  state: "pending" | "running" | "completed" | "failed",
+): "complete" | "active" | "pending" {
+  if (state === "completed" || state === "failed") return "complete";
+  if (state === "running") return "active";
+  return "pending";
+}
 
 export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
   model,
@@ -27,56 +53,36 @@ export const ExecutionInspectorTab = memo(function ExecutionInspectorTab({
   return (
     <InspectorTabPanel value="execution">
       {groups.map((group) => (
-        <section key={group.key} className={inspectorStyles.stack.section}>
-          <div className="flex items-center justify-between gap-2">
-            <div className={inspectorStyles.heading.section}>{group.label}</div>
-            <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-              {group.sections.length}
-            </Badge>
-          </div>
+        <ChainOfThought key={group.key} defaultOpen>
+          <ChainOfThoughtHeader>
+            <span className="flex items-center gap-2">
+              {group.label}
+              <Badge variant="secondary" className={inspectorStyles.badge.meta}>
+                {group.sections.length}
+              </Badge>
+            </span>
+          </ChainOfThoughtHeader>
 
-          <div className={inspectorStyles.stack.cards}>
+          <ChainOfThoughtContent>
             {group.sections.map((section) => {
-              const tone = statusTone(executionSectionState(section));
+              const state = executionSectionState(section);
+              const usesSummaryAsLabel = section.kind === "status_note";
               return (
-                <Card key={section.id} className={inspectorStyles.card.root}>
-                  <CardHeader className={inspectorStyles.card.header}>
-                    <Accordion
-                      type="single"
-                      collapsible
-                      defaultValue={section.defaultOpen ? `details-${section.id}` : undefined}
-                    >
-                      <AccordionItem value={`details-${section.id}`} className="border-b-0">
-                        <AccordionTrigger className="py-0 hover:no-underline">
-                          <div className="flex flex-1 flex-col gap-2 text-left">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <CardTitle className="text-sm font-medium text-foreground">
-                                  {section.label}
-                                </CardTitle>
-                                <CardDescription>{section.summary}</CardDescription>
-                              </div>
-                              <Badge
-                                variant={tone.variant}
-                                className={inspectorStyles.badge.status}
-                              >
-                                {tone.label}
-                              </Badge>
-                            </div>
-                            {renderBadges(section.runtimeBadges)}
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="pt-3">
-                          {renderExecutionSectionDetails(section)}
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  </CardHeader>
-                </Card>
+                <ChainOfThoughtStep
+                  key={section.id}
+                  icon={sectionIcon[section.kind]}
+                  label={usesSummaryAsLabel ? section.summary : section.label}
+                  description={usesSummaryAsLabel ? undefined : section.summary}
+                  status={mapStatus(state)}
+                  className={state === "failed" ? "text-destructive" : undefined}
+                >
+                  {section.kind !== "status_note" && renderExecutionSectionDetails(section)}
+                  {section.runtimeBadges.length > 0 && renderBadges(section.runtimeBadges)}
+                </ChainOfThoughtStep>
               );
             })}
-          </div>
-        </section>
+          </ChainOfThoughtContent>
+        </ChainOfThought>
       ))}
     </InspectorTabPanel>
   );

@@ -1,5 +1,5 @@
 import { MessageResponse } from "@/components/ai-elements/message";
-import { TextShimmer } from "@/components/effects/text-shimmer";
+import { TextShimmer } from "@/components/product/text-shimmer";
 
 function LoadingState() {
   return (

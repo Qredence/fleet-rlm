@@ -109,6 +109,7 @@ const sectionCardVariants = cva("rounded-lg border transition-colors", {
       muted: "border-border-subtle/50 bg-muted/30",
       elevated: "border-border bg-card shadow-sm",
       outline: "border-border bg-transparent",
+      subtle: "rounded-xl border-border-subtle/70 bg-card shadow-none",
     },
     interactive: {
       true: "cursor-pointer hover:border-border-subtle hover:bg-accent/5",
@@ -145,6 +146,58 @@ export function SectionCard({
   }
 
   return <div className={classes}>{children}</div>;
+}
+
+export function SectionCardHeader({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("flex flex-col gap-1.5 p-6", className)}>{children}</div>;
+}
+
+export function SectionCardTitle({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <h3 className={cn("text-sm font-medium leading-none tracking-tight", className)}>{children}</h3>
+  );
+}
+
+export function SectionCardDescription({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <p className={cn("text-sm text-muted-foreground", className)}>{children}</p>;
+}
+
+export function SectionCardContent({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("p-6 pt-0", className)}>{children}</div>;
+}
+
+export function SectionCardFooter({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("flex items-center p-6 pt-0", className)}>{children}</div>;
 }
 
 /* -------------------------------------------------------------------------- */

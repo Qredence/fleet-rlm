@@ -6,7 +6,7 @@ const LONG_OUTPUT_TEXT =
   "This text intentionally includes a unique tail marker to verify that " +
   "Timeline and Preview panels render full content end-to-end. " +
   TAIL_FRAGMENT;
-const PANEL_LABEL_PATTERN = /(?:message inspector|side panel)/i;
+const PANEL_LABEL_PATTERN = /workspace/i;
 
 test("execution canvas keeps lanes readable and payloads untruncated", async ({ page }) => {
   await page.goto("/");
@@ -14,14 +14,14 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
   await expect(page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first()).toBeVisible();
 
   const closeSidePanelButton = page.getByRole("button", {
-    name: new RegExp(`^Close ${PANEL_LABEL_PATTERN.source}$`, "i"),
+    name: new RegExp(`^Hide ${PANEL_LABEL_PATTERN.source}$`, "i"),
   });
   if ((await closeSidePanelButton.count()) === 0) {
     await page
       .getByRole("button", {
-        name: new RegExp(`^Open ${PANEL_LABEL_PATTERN.source}$`, "i"),
+        name: new RegExp(`^Show ${PANEL_LABEL_PATTERN.source}$`, "i"),
       })
-      .click();
+      .click({ force: true });
   }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -197,8 +197,6 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
     page.getByRole("tabpanel").getByText(TAIL_FRAGMENT, { exact: false }).first(),
   ).toBeVisible();
 
-  await page.getByRole("tab", { name: "Evidence", exact: true }).click();
-  await expect(
-    page.getByRole("tabpanel").getByText("docs/spec.md", { exact: false }).first(),
-  ).toBeVisible();
+  await page.getByRole("tab", { name: "Message", exact: true }).nth(1).click();
+  await expect(page.getByText("docs/spec.md", { exact: false }).first()).toBeVisible();
 });

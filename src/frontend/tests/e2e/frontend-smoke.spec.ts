@@ -40,7 +40,7 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
   await page.goto("/");
 
   const signInTrigger = page.getByRole("button", {
-    name: "Sign In",
+    name: "Sign in",
     exact: true,
   });
   await expect(signInTrigger).toBeVisible();
@@ -62,9 +62,13 @@ test("opens settings without runtime exception", async ({ page }) => {
   await page.goto("/settings");
   await page.waitForURL(/\/app\/settings/);
 
-  await expect(page.getByText("Appearance", { exact: true })).toBeVisible();
-  await expect(page.getByText("Telemetry", { exact: true })).toBeVisible();
-  await expect(page.getByText("LiteLLM Integration", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Telemetry", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "LiteLLM Integration", exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Telemetry", exact: true }).click();
 
   const telemetryRow = page.getByText("Anonymous telemetry", { exact: true });
   await telemetryRow.scrollIntoViewIfNeeded();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SkillMarkdown } from "@/features/volumes/volumes-canvas-panel";
+import { SkillMarkdown } from "@/features/volumes/components/skill-markdown";
 
 describe("SkillMarkdown link sanitization", () => {
   it("renders absolute https links as clickable anchors", () => {
@@ -9,6 +9,15 @@ describe("SkillMarkdown link sanitization", () => {
 
     expect(html).toContain('href="https://openai.com/"');
     expect(html).toContain('rel="noopener noreferrer nofollow"');
+  });
+
+  it("renders links whose URLs contain balanced parentheses", () => {
+    const html = renderToStaticMarkup(
+      <SkillMarkdown content="[Topic](https://en.wikipedia.org/wiki/Foo_(bar))" />,
+    );
+
+    expect(html).toContain('href="https://en.wikipedia.org/wiki/Foo_(bar)"');
+    expect(html).toContain(">Topic</a>");
   });
 
   it("blocks javascript links from becoming anchors", () => {

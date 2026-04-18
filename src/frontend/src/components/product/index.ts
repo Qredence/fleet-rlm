@@ -14,6 +14,11 @@ export {
   SectionHeader,
   SectionContent,
   SectionCard,
+  SectionCardHeader,
+  SectionCardTitle,
+  SectionCardDescription,
+  SectionCardContent,
+  SectionCardFooter,
   ContentArea,
   MainRegion,
   FooterRegion,
@@ -35,3 +40,4 @@ export { ChartSparkline } from "./chart-sparkline";
 export type { ChartSparklineProps } from "./chart-sparkline";
 export { StateNotice } from "./state-notice";
 export { KeyValueGrid } from "./key-value-grid";
+export { TextShimmer } from "./text-shimmer";

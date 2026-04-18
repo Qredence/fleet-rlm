@@ -1,1 +1,1 @@
-export { Shimmer } from "@/components/effects/text-shimmer";
+export { Shimmer } from "@/components/product/text-shimmer";

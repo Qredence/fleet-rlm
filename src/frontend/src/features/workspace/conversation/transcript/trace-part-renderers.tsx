@@ -29,7 +29,7 @@ import {
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Streamdown } from "@/components/ui/streamdown";
-import { TextShimmer } from "@/components/effects/text-shimmer";
+import { TextShimmer } from "@/components/product/text-shimmer";
 import {
   Attachments,
   Attachment,
