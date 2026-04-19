@@ -36,7 +36,12 @@ venv/
 .tmp*
 tmp/
 .remember/
-
+docs/notes/
+docs/reference/adr/
+docs/superpowers/
+mlartifacts/*
+plugins/
+.agents/skills/
 **/tmp/
 **/.tmp*/
 results/
