@@ -215,7 +215,7 @@ function AppLayout() {
           <SheetContent
             side="bottom"
             showCloseButton={false}
-            className="h-[min(85dvh,44rem)] gap-0 rounded-t-3xl border-x-0 border-b-0 p-0 sm:max-w-none"
+            className="h-sheet-md gap-0 rounded-t-3xl border-x-0 border-b-0 p-0 sm:max-w-none"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{panelMeta.title}</SheetTitle>

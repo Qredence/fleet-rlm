@@ -32,7 +32,7 @@ function DepthPill({ depth, maxDepth }: DepthPillProps) {
   const ringColor = depthRingColor(depth, maxDepth);
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] leading-none ${ringColor}`}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono typo-helper leading-none ${ringColor}`}
     >
       <span className="text-muted-foreground/60">depth</span>
       <motion.span
@@ -77,7 +77,7 @@ function SandboxPill({ active, transition }: SandboxPillProps) {
   const label = active ? "active" : isStarting ? "starting" : "idle";
 
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-border/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+    <span className="inline-flex items-center gap-1 rounded border border-border/40 px-1.5 py-0.5 font-mono typo-helper leading-none text-muted-foreground">
       <motion.span
         key={label}
         className={indicatorColor}
@@ -100,7 +100,7 @@ interface ModePillProps {
 
 function ModePill({ mode }: ModePillProps) {
   return (
-    <span className="inline-flex items-center rounded border border-border/40 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground/70">
+    <span className="inline-flex items-center rounded border border-border/40 px-1.5 py-0.5 font-mono typo-helper leading-none text-muted-foreground/70">
       {mode}
     </span>
   );

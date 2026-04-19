@@ -182,7 +182,7 @@ export function VolumesBrowser() {
           </PageHeader>
         ) : null}
 
-        <div className="mx-auto w-full max-w-[800px] py-2">
+        <div className="mx-auto w-full max-w-page py-2">
           {isDegraded ? (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />

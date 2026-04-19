@@ -28,7 +28,7 @@ const resultColumns: ColumnDef<EvaluationResultItem>[] = [
         {row.input_data}
       </span>
     ),
-    className: "max-w-[200px]",
+    className: "max-w-drawer-sm",
   },
   {
     header: "Expected",
@@ -37,7 +37,7 @@ const resultColumns: ColumnDef<EvaluationResultItem>[] = [
         {row.expected_output ?? "—"}
       </span>
     ),
-    className: "max-w-[180px]",
+    className: "max-w-drawer-xs",
   },
   {
     header: "Predicted",
@@ -46,7 +46,7 @@ const resultColumns: ColumnDef<EvaluationResultItem>[] = [
         {row.predicted_output ?? "—"}
       </span>
     ),
-    className: "max-w-[180px]",
+    className: "max-w-drawer-xs",
   },
   {
     header: "Score",

@@ -64,7 +64,7 @@ export function LayoutHeader() {
           <TooltipContent side="bottom">
             <div className="flex flex-col gap-1">
               <p className="text-xs font-medium">{canvasActionLabel}</p>
-              <p className="max-w-[14rem] text-[11px] leading-5 text-muted-foreground">
+              <p className="max-w-56 typo-body-xs leading-5 text-muted-foreground">
                 {panelMeta.toggleDescription}
               </p>
             </div>

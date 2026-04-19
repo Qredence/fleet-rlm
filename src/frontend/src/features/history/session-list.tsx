@@ -167,7 +167,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
           if (v) setStatusFilter(v);
         }}
       >
-        <SelectTrigger className="w-[120px]" aria-label="Status filter">
+        <SelectTrigger className="w-select-sm" aria-label="Status filter">
           <SelectValue>{filterLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent>

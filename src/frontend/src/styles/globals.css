@@ -159,6 +159,149 @@
   letter-spacing: var(--font-text-3xs-tracking);
 }
 
+@utility typo-helper {
+  font-size: var(--font-text-2xs-size);
+  font-weight: var(--font-text-2xs-weight);
+  line-height: var(--font-text-2xs-line-height);
+  letter-spacing: var(--font-text-2xs-tracking);
+}
+
+@utility typo-body-xs {
+  font-size: var(--font-text-11px-size);
+  font-weight: var(--font-text-11px-weight);
+  line-height: var(--font-text-11px-line-height);
+  letter-spacing: var(--font-text-11px-tracking);
+}
+
+@utility typo-body-sm {
+  font-size: var(--font-text-13px-size);
+  font-weight: var(--font-text-13px-weight);
+  line-height: var(--font-text-13px-line-height);
+  letter-spacing: var(--font-text-13px-tracking);
+}
+
+/* ── Node color utilities (graph-step-node) ────────────────────────── */
+/* These reference the --node-color custom property set on the node.   */
+
+@utility node-tint {
+  background-color: color-mix(in srgb, var(--node-color) 12%, transparent);
+}
+
+@utility node-tint-strong {
+  background-color: color-mix(in srgb, var(--node-color) 20%, transparent);
+}
+
+@utility node-tint-header {
+  background-color: color-mix(in srgb, var(--node-color) 15%, transparent);
+}
+
+@utility node-color-text {
+  color: var(--node-color);
+}
+
+@utility node-border-left {
+  border-left-width: 2px;
+  border-left-color: var(--node-color);
+}
+
+@utility max-h-preview {
+  max-height: var(--preview-max-h, 32rem);
+}
+
+/* ── Dialog / sheet height utilities ─────────────────────────────── */
+
+@utility h-sheet-lg {
+  height: min(90dvh, 52rem);
+}
+
+@utility h-sheet-md {
+  height: min(85dvh, 44rem);
+}
+
+@utility max-h-sheet {
+  max-height: 85dvh;
+}
+
+@utility max-h-dialog {
+  max-height: min(88vh, 760px);
+}
+
+@utility h-dialog {
+  height: min(82vh, 760px);
+}
+
+@utility h-modal {
+  height: 80vh;
+}
+
+@utility w-select-sm {
+  width: 120px;
+}
+
+@utility w-select-md {
+  width: 160px;
+}
+
+@utility w-select-lg {
+  width: 180px;
+}
+
+@utility max-w-dialog-lg {
+  max-width: 1040px;
+}
+
+@utility max-w-dialog-xl {
+  max-width: 1080px;
+}
+
+@utility max-w-4\/5 {
+  max-width: 80%;
+}
+
+@utility max-w-message {
+  max-width: 95%;
+}
+
+@utility max-w-page {
+  max-width: var(--width-page);
+}
+
+@utility max-w-skeleton {
+  max-width: 280px;
+}
+
+@utility max-w-drawer-sm {
+  max-width: 200px;
+}
+
+@utility max-w-drawer-xs {
+  max-width: 180px;
+}
+
+@utility w-select-xl {
+  width: 132px;
+}
+
+@utility tracking-tight-custom {
+  letter-spacing: -0.18px;
+}
+
+@utility tracking-tighter-custom {
+  letter-spacing: -0.05em;
+}
+
+@utility tracking-wide-custom {
+  letter-spacing: 0.12em;
+}
+
+@utility tracking-wider-custom {
+  letter-spacing: 0.08em;
+}
+
+@utility leading-loose-custom {
+  line-height: 1.7142857;
+}
+
 @utility typo-mono {
   font-size: var(--font-text-xs-size);
   font-weight: var(--font-text-xs-weight);
@@ -333,6 +476,27 @@
   &:disabled {
     color: var(--color-text-disabled);
   }
+}
+
+/* Utility: graph-step-node dynamic color theming via CSS custom properties */
+@utility graph-step-node {
+  border-left-color: var(--node-color);
+}
+
+@utility graph-step-icon-bg {
+  background-color: color-mix(in srgb, var(--node-color) 12%, transparent);
+}
+
+@utility graph-step-icon-color {
+  color: var(--node-color);
+}
+
+@utility graph-step-badge-bg {
+  background-color: color-mix(in srgb, var(--node-color) 20%, transparent);
+}
+
+@utility graph-step-expanded-icon-bg {
+  background-color: color-mix(in srgb, var(--node-color) 15%, transparent);
 }
 
 /* Utility: design-token border radii */
@@ -599,6 +763,16 @@
   --font-text-3xs-line-height: 0.75rem;
   --font-text-3xs-weight: 400;
   --font-text-3xs-tracking: 0em;
+
+  /* One-off pixel sizes to eliminate arbitrary Tailwind values */
+  --font-text-11px-size: 0.6875rem;
+  --font-text-11px-line-height: 1rem;
+  --font-text-11px-weight: 400;
+  --font-text-11px-tracking: 0em;
+  --font-text-13px-size: 0.8125rem;
+  --font-text-13px-line-height: 1.25rem;
+  --font-text-13px-weight: 400;
+  --font-text-13px-tracking: 0em;
 
   /* ── OpenAI Apps SDK canonical tokens: radius, shadow, motion ────── */
   --radius-2xs: 0.125rem;
@@ -932,6 +1106,12 @@
   --font-size-md: var(--font-text-md-size);
   --font-size-2xs: var(--font-text-2xs-size);
   --font-size-3xs: var(--font-text-3xs-size);
+  --font-size-11px: var(--font-text-11px-size);
+  --font-size-13px: var(--font-text-13px-size);
+
+  /* Content widths */
+  --width-content: 44rem;
+  --width-page: 800px;
 }
 
 /* ═══ SECTION 4: Component Typography & Data-Slot Styles ══════════ */

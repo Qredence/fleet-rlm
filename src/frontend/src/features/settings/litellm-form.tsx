@@ -24,7 +24,7 @@ import type { SettingsSection } from "./settings-content";
 import { sectionDescriptions } from "./settings-content";
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
-const SETTINGS_SECTION_CLASSNAME = "max-w-[44rem] gap-4";
+const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;

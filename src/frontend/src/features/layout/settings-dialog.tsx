@@ -122,7 +122,7 @@ export function SettingsDialog({
         <SheetContent
           side="bottom"
           showCloseButton={false}
-          className="inset-x-0 bottom-0 top-auto h-[min(90dvh,52rem)] gap-0 rounded-t-[calc(var(--radius-xl)+0.25rem)] border-x-0 border-b-0 px-0 pt-0 pb-0 sm:max-w-none"
+          className="inset-x-0 bottom-0 top-auto h-sheet-lg gap-0 rounded-t-[calc(var(--radius-xl)+0.25rem)] border-x-0 border-b-0 px-0 pt-0 pb-0 sm:max-w-none"
         >
           <div className="flex items-center justify-center py-2 shrink-0">
             <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />
@@ -176,7 +176,7 @@ export function SettingsDialog({
           <Button size="sm">Open Dialog</Button>
         </DialogTrigger>
       ) : null}
-      <DialogContent className="overflow-hidden rounded-[1.75rem] border-border-subtle/80 bg-background p-0 md:max-h-[min(88vh,760px)] md:max-w-[1040px] lg:max-w-[1080px]">
+      <DialogContent className="overflow-hidden rounded-[1.75rem] border-border-subtle/80 bg-background p-0 md:max-h-dialog md:max-w-dialog-lg lg:max-w-dialog-xl">
         <SidebarProvider
           className="items-stretch"
           defaultOpen
@@ -192,9 +192,9 @@ export function SettingsDialog({
           >
             <SettingsSidebarNav section={activeSection} onSectionChange={handleSectionChange} />
           </Sidebar>
-          <main className="flex h-[min(82vh,760px)] min-w-0 flex-1 flex-col overflow-hidden bg-background">
+          <main className="flex h-dialog min-w-0 flex-1 flex-col overflow-hidden bg-background">
             <header className="shrink-0 border-b border-border-subtle bg-background px-9 py-5">
-              <DialogTitle className="text-[2rem] font-semibold tracking-tight text-foreground">
+              <DialogTitle className="typo-display font-semibold tracking-tight text-foreground">
                 Settings
               </DialogTitle>
               <DialogDescription className="sr-only">

@@ -12,7 +12,7 @@ function TurnBubble({ turn }: { turn: TurnItem }) {
     <div className="flex flex-col gap-2">
       {/* User message */}
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-lg bg-primary/10 px-3 py-2">
+        <div className="max-w-4/5 rounded-lg bg-primary/10 px-3 py-2">
           <p className="text-xs font-medium text-muted-foreground">User</p>
           <p className="whitespace-pre-wrap text-sm">{turn.user_message}</p>
         </div>
@@ -21,7 +21,7 @@ function TurnBubble({ turn }: { turn: TurnItem }) {
       {/* Assistant message */}
       {turn.assistant_message ? (
         <div className="flex justify-start">
-          <div className="max-w-[80%] rounded-lg bg-muted px-3 py-2">
+          <div className="max-w-4/5 rounded-lg bg-muted px-3 py-2">
             <p className="text-xs font-medium text-muted-foreground">Assistant</p>
             <p className="whitespace-pre-wrap text-sm">{turn.assistant_message}</p>
           </div>
@@ -41,7 +41,7 @@ function LocalMessageBubble({
   const isUser = role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isUser ? "bg-primary/10" : "bg-muted"}`}>
+      <div className={`max-w-4/5 rounded-lg px-3 py-2 ${isUser ? "bg-primary/10" : "bg-muted"}`}>
         <p className="text-xs font-medium text-muted-foreground">
           {role === "user" ? "User" : role === "assistant" ? "Assistant" : "System"}
         </p>

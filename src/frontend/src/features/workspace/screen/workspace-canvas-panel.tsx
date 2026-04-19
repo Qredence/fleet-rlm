@@ -215,7 +215,7 @@ function ContextTabContent() {
     <div className="flex flex-col gap-0.5 p-2">
       {rows.map(({ label, value }) => (
         <div key={label} className="flex flex-col gap-0.5 rounded-md px-3 py-2 hover:bg-muted/40">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+          <span className="typo-helper uppercase tracking-wider text-muted-foreground/70 font-medium">
             {label}
           </span>
           <span className="text-xs text-foreground font-mono break-all">{value}</span>

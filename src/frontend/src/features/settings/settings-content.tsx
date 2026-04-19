@@ -47,7 +47,7 @@ export const sectionDescriptions: Record<SettingsSection, string> = {
 };
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
-const SETTINGS_SECTION_CLASSNAME = "max-w-[44rem] gap-4";
+const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 
 export function resolveSettingsSection(section?: string): SettingsSection | undefined {
   return section && settingsSections.some((entry) => entry.key === section)

@@ -170,8 +170,35 @@ pnpm run check
 
 - Theme primitives live in `src/styles/globals.css`. Keep the Tailwind v4 baseline canonical.
 - Use **semantic tokens and shared variants** — avoid arbitrary colors or local token layers.
+- **Eliminate arbitrary Tailwind values**. The project maintains token-backed `@utility` classes for all font sizes. Do not introduce new `text-[Npx]`, `w-[Npx]`, `h-[Npx]`, `rounded-[Npx]`, `leading-[...]`, or `tracking-[...]` values. If a size is missing, add a design token and `@utility` in `globals.css` rather than using an arbitrary value.
+- **Typography utilities** (use these instead of arbitrary font sizes):
+  - `typo-micro` — 8px (`text-3xs`)
+  - `typo-helper` — 10px (`text-2xs`)
+  - `typo-body-xs` — 11px
+  - `typo-caption` — 12px (`text-xs`)
+  - `typo-body-sm` — 13px
+  - `typo-label` / `typo-label-regular` — 14px (`text-sm`)
+  - `typo-base` — 14px (base body)
+  - `typo-display` — 32px (`text-[2rem]`)
+  - `tracking-tight-custom` — `-0.18px` (sidebar, composer)
+  - `tracking-tighter-custom` — `-0.05em` (display headings)
+  - `tracking-wide-custom` — `0.12em` (uppercase labels)
+  - `tracking-wider-custom` — `0.08em` (uppercase mono labels)
+  - `leading-loose-custom` — `1.7142857` (file preview line numbers)
+- **Layout width utilities**:
+  - `max-w-4/5` — `80%`
+  - `max-w-message` — `95%`
+  - `max-w-skeleton` — `280px`
+  - `max-w-drawer-sm` — `200px`
+  - `max-w-drawer-xs` — `180px`
+  - `w-select-xl` — `132px`
+- **Runtime-driven styles** (e.g. dynamic colors from `STEP_TYPE_META`) must use CSS custom properties set via the `style` prop, consumed by `@utility` classes in `globals.css`. Do not use inline `style={{ color: ..., backgroundColor: ... }}` for repeated patterns. Example:
+  ```tsx
+  <div style={{ "--node-color": meta.color } as React.CSSProperties} className="node-color-text node-tint">
+  ```
+- **Shared visual recipes** belong in `src/components/product/*`, not duplicated locally. Current product components:
+  - `NodeBadge` — small badge/pill for graph nodes and execution metadata
 - Preserve shell/layout root stacking context for portaled overlays.
-- Shared visual recipes belong in `src/components/product/*`, not duplicated locally.
 
 ## React & Runtime Rules
 
@@ -237,6 +264,80 @@ If backend route/schema metadata changed:
 Keep sync artifacts in the same change; never hand-edit generated output.
 
 ---
+
+## AI Component Registries
+
+The project uses **prompt-kit** as the primary AI component registry and **AI SDK Elements** as the secondary registry for AI-SDK-native features (e.g., `attachments`). Both are configured in `components.json`.
+
+### Registry Installation
+
+```bash
+# prompt-kit (installs into src/components/ai-elements/ by default)
+npx shadcn@latest add "https://prompt-kit.com/c/{component}.json" -p src/components/ai-elements
+
+# AI SDK Elements
+npx shadcn@latest add "https://ai-sdk.dev/elements/api/registry/{component}.json" -p src/components/ai-elements
+```
+
+**Important**: Always use `-p src/components/ai-elements` to avoid overwriting UI primitives in `src/components/ui/`. If the CLI installs bundled UI primitives (button, hover-card, etc.) into `ai-elements/`, delete them — the project canonical versions live in `src/components/ui/`.
+
+### Component Catalog & Reuse Policy
+
+**Before installing any new component, check this catalog.** The project already has multiple components solving the same problem. Prefer reuse over proliferation.
+
+#### Canonical AI Components (actively used — reuse these)
+
+| Component | Location | Consumers | Purpose |
+|-----------|----------|-----------|---------|
+| `Message` | `ai-elements/message.tsx` | workspace chat (5 files) | Chat message shell with Streamdown rendering, branch support, actions |
+| `Conversation` | `ai-elements/conversation.tsx` | workspace-message-list, chat-empty-state | StickToBottom scroll container with empty state & download |
+| `Reasoning` | `ai-elements/reasoning.tsx` | 4 workspace files | Collapsible thinking block with duration tracking |
+| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | execution-inspector-tab | Step-by-step reasoning timeline |
+| `Tool` | `ai-elements/tool.tsx` | render-primitives, trace-part-renderers | Tool call/result display with status badges |
+| `Sources` | `ai-elements/sources.tsx` | trace-part-renderers | Collapsible source list (Book icon + count) |
+| `Suggestion` | `ai-elements/suggestion.tsx` | workspace-chat-empty-state | Scrollable suggestion pills with onClick handler |
+| `PromptInput` | `ai-elements/prompt-input/` | workspace-composer | Full composer input (textarea + attachments + send) |
+| `InlineCitation` | `ai-elements/inline-citation.tsx` | trace-part-renderers | Inline numbered citation badges |
+| `Task` | `ai-elements/task.tsx` | trace-part-renderers | Task status display component |
+| `Shimmer` | `product/text-shimmer.tsx` | reasoning, answer-block, trace-renderers | Animated text shimmer (loading state) |
+| `Streamdown` | `ui/streamdown.tsx` | 5 workspace files | Canonical markdown renderer (streaming-safe) |
+
+#### Removed Registry Components
+
+The following prompt-kit / AI SDK Elements components were previously installed but had zero consumers and were removed during consolidation. Do not reinstall them:
+
+| Component | Was At | Replacement |
+|-----------|--------|-------------|
+| `Markdown` | `ai-elements/markdown.tsx` | `Streamdown` is canonical |
+| `Message` (prompt-kit) | `ui/message.tsx` | Hand-rolled `ai-elements/message.tsx` |
+| `ChatContainer` | `ai-elements/chat-container.tsx` | `Conversation` |
+| `ScrollButton` | `ai-elements/scroll-button.tsx` | `ConversationScrollButton` |
+| `PromptSuggestion` | `ai-elements/prompt-suggestion.tsx` | `Suggestion` |
+| `Source` (prompt-kit) | `ai-elements/source.tsx` | `Sources` |
+| `ResponseStream` | `ai-elements/response-stream.tsx` | N/A — no use case |
+| `Attachments` | `ai-elements/attachments.tsx` | N/A — no use case |
+
+#### Markdown Renderers — One Canonical Choice
+
+- **Streamdown** (`ui/streamdown.tsx`) is the **only** markdown renderer used in feature code. It wraps the `streamdown` package with streaming-safe parsing, CJK/code/math/mermaid plugins, and Tailwind typography.
+- `ui/markdown.tsx` (react-markdown wrapper) exists in the primitives layer but has **no feature consumers**. Do not introduce new markdown renderers.
+
+### Reuse Guidelines
+
+1. **Check existing components first.** The hand-rolled AI components are mature, styled for the product, and have active consumers. Do not install a registry component that duplicates `Message`, `Conversation`, `Reasoning`, `Tool`, `Sources`, `Suggestion`, or `PromptInput` without a clear capability gap.
+2. **Registry components are for net-new capabilities.** Only install from prompt-kit or AI SDK Elements when the project genuinely lacks a component for the use case (e.g., a new `thread-list` or `command` component).
+3. **If you install a registry component, migrate to it.** Do not leave registry components as dead code. Update consumers or remove the installed file if adoption doesn't happen within the same PR.
+4. **Do not hand-roll new message/reasoning/tool/suggestion/citation components.** Extend the existing ones or install from registries.
+5. **Extend, don't duplicate.** If a component is close to what you need, add props or variants rather than creating a second component. Example: `Suggestion` already supports `wrap` and `onClick(suggestion)` — extend it before installing `PromptSuggestion`.
+
+### External Documentation References
+
+- **shadcn/ui**: https://ui.shadcn.com/docs — Open-code component distribution platform. Not a library; components are copied into `src/components/ui/` and owned by the project.
+- **Base UI**: https://base-ui.com/react/overview — Headless, accessible primitives (Accordion, Dialog, Select, etc.). Used as the underlying layer for many shadcn/ui components.
+- **TanStack Router**: https://tanstack.com/router/latest/docs/framework/react/overview — File-based routing with 100% inferred TypeScript, search-param state management, and built-in caching.
+- **TanStack Query**: https://tanstack.com/query/latest/docs/framework/react/overview — Server-state management (fetching, caching, synchronization). Used via `src/hooks/use-*` and feature data layers.
+- **prompt-kit**: https://www.prompt-kit.com/docs — AI interface components built on shadcn/ui. Registry URL: `https://www.prompt-kit.com/c/{name}.json`.
+- **AI SDK Elements**: https://elements.ai-sdk.dev/docs — AI-native components (messages, attachments, etc.) built for the Vercel AI SDK. Registry URL: `https://ai-sdk.dev/elements/api/registry/{name}.json`.
 
 ## Agent Notes
 

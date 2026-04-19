@@ -78,7 +78,7 @@ export function AssistantSummaryBar({
           key={pill.key}
           type="button"
           className={cn(
-            "rounded-full border border-border-subtle/80 bg-muted/20 px-2.5 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:border-border-strong hover:bg-muted/28",
+            "rounded-full border border-border-subtle/80 bg-muted/20 px-2.5 py-1 typo-body-xs leading-none text-muted-foreground transition-colors hover:border-border-strong hover:bg-muted/28",
           )}
           onClick={() => onOpenTab?.(pill.tab)}
         >

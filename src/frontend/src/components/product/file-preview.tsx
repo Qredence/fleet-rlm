@@ -77,10 +77,10 @@ export function FilePreview({
       </div>
 
       {/* Scrollable code area with line numbers */}
-      <div className="flex overflow-auto" style={{ maxHeight }}>
+      <div className="flex overflow-auto max-h-preview" style={{ "--preview-max-h": maxHeight } as React.CSSProperties}>
         {/* Line numbers */}
         <div
-          className="sticky left-0 shrink-0 select-none border-r border-border/40 bg-muted/20 px-2 py-4 text-right text-[13px] leading-[1.7142857] text-muted-foreground/50"
+          className="sticky left-0 shrink-0 select-none border-r border-border/40 bg-muted/20 px-2 py-4 text-right typo-body-sm leading-loose-custom text-muted-foreground/50"
           aria-hidden="true"
         >
           {Array.from({ length: lineCount }, (_, i) => (

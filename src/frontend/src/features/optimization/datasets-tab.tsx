@@ -164,7 +164,7 @@ function SessionRow({
             if (v) setSelectedModule(v);
           }}
         >
-          <SelectTrigger className="h-8 w-[180px] text-xs" aria-label="Pick module">
+          <SelectTrigger className="h-8 w-select-lg text-xs" aria-label="Pick module">
             <SelectValue placeholder="Select module…" />
           </SelectTrigger>
           <SelectContent>
@@ -430,7 +430,7 @@ export function DatasetsTab({
             Use in Run
           </Button>
         ),
-        className: "w-[132px]",
+        className: "w-select-xl",
       },
     ],
     [moduleProgramSpecsBySlug, onPrepareRun],
@@ -488,7 +488,7 @@ export function DatasetsTab({
             if (v) setModuleFilter(v);
           }}
         >
-          <SelectTrigger className="w-[180px]" aria-label="Filter by module">
+          <SelectTrigger className="w-select-lg" aria-label="Filter by module">
             <SelectValue>{filterLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>

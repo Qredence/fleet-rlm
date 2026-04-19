@@ -130,7 +130,7 @@ function RunCard({
         <ItemTitle>
           #{run.id}
           {(run.module_slug ?? run.program_spec) ? (
-            <Badge variant="outline" className="text-[0.7rem] font-normal text-muted-foreground">
+            <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
               {run.module_slug ?? run.program_spec}
             </Badge>
           ) : null}
@@ -224,7 +224,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: string[]) => void 
               if (v) setStatusFilter(v);
             }}
           >
-            <SelectTrigger className="w-[160px]" aria-label="Filter runs by status">
+            <SelectTrigger className="w-select-md" aria-label="Filter runs by status">
               <SelectValue>{filterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
