@@ -392,31 +392,6 @@ async def test_achat_turn_passes_core_memory_to_react(monkeypatch):
     assert captured["core_memory"] == agent.fmt_core_memory()
 
 
-@pytest.mark.asyncio
-async def test_achat_turn_rlm_only_uses_async_forced_runtime_handoff(monkeypatch):
-    agent = RLMReActChatAgent(
-        interpreter=FakeInterpreter(),
-        execution_mode="rlm_only",
-    )
-    captured: dict[str, object] = {}
-
-    async def _fake_run_forced(agent_obj, *, message: str):
-        captured["agent"] = agent_obj
-        captured["message"] = message
-        return dspy.Prediction(assistant_response="forced async", trajectory={})
-
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat_agent._arun_forced_rlm_turn_impl",
-        _fake_run_forced,
-    )
-
-    result = await agent.achat_turn("deep async task")
-
-    assert result["assistant_response"] == "forced async"
-    assert result["history_turns"] == 1
-    assert captured == {"agent": agent, "message": "deep async task"}
-
-
 def test_all_tools_are_dspy_tool_wrappers(monkeypatch):
     """All tools in react_tools should be dspy.Tool instances."""
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())

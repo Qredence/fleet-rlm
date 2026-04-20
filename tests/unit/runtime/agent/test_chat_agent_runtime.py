@@ -41,9 +41,7 @@ async def test_chat_agent_uses_shared_react_stream_with_daytona_runtime(
             payload={"history_turns": 1},
         )
 
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream
-    )
+    monkeypatch.setattr("fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream)
 
     events = [
         event
@@ -330,9 +328,7 @@ async def test_chat_agent_async_stream_reconfigures_workspace_and_releases_old_s
     async def _fake_stream(self, message, trace, cancel_check):
         yield StreamEvent(kind="final", text="done", payload={})
 
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream
-    )
+    monkeypatch.setattr("fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream)
 
     events = [
         event
@@ -373,9 +369,7 @@ async def test_chat_agent_preserves_existing_workspace_when_stream_args_omitted(
         )
         yield StreamEvent(kind="final", text="done", payload={})
 
-    monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream
-    )
+    monkeypatch.setattr("fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream)
 
     events = [
         event

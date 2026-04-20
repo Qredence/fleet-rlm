@@ -290,5 +290,23 @@ export default defineConfig({
     target: "esnext",
     minify: "oxc",
     cssMinify: "lightningcss",
+    rollupOptions: {
+      output: {
+        manualChunks: (id: string) => {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+            return "vendor-react";
+          }
+          if (id.includes("@tanstack/react-query") || id.includes("@tanstack/react-router")) {
+            return "vendor-tanstack";
+          }
+          if (id.includes("node_modules/motion")) {
+            return "vendor-motion";
+          }
+          if (id.includes("node_modules/zustand")) {
+            return "vendor-zustand";
+          }
+        },
+      },
+    },
   },
 });

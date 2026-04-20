@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Confirmation,
   ConfirmationAccepted,
@@ -35,7 +36,7 @@ function hitlConfirmationState(
   return "approved";
 }
 
-export function WorkspaceChatMessageItem({
+export const WorkspaceChatMessageItem = memo(function WorkspaceChatMessageItem({
   message,
   onResolveHitl,
   onResolveClarification,
@@ -168,4 +169,4 @@ export function WorkspaceChatMessageItem({
       ) : null}
     </>
   );
-}
+});

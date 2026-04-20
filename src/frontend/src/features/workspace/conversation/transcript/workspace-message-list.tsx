@@ -64,10 +64,9 @@ export function WorkspaceMessageList({
   const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
   const selectInspectorTurn = useWorkspaceUiStore((state) => state.selectInspectorTurn);
   const prefersReduced = useReducedMotion();
-  const preset = prefersReduced ? fadeUpReduced : fadeUp;
-  const hasStreamingAssistant = messages.some(
-    (message) => message.type === "assistant" && message.streaming,
-  );
+  // Use instant preset while streaming to avoid spring physics overhead on every new item.
+  const hasStreamingAssistant = messages.some((m) => m.type === "assistant" && m.streaming);
+  const preset = prefersReduced || hasStreamingAssistant ? fadeUpReduced : fadeUp;
   const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
   const lastUserMessageId = lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
   const activeTurnAssistantMessageId =

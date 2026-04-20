@@ -3,10 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useControllableState } from "@/hooks/use-controllable-state";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
+import { useStreamdownPlugins } from "@/lib/utils/streamdown-plugins";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import {
   createContext,
@@ -189,10 +186,14 @@ export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & 
   children: string;
 };
 
-const streamdownPlugins = { cjk, code, math, mermaid };
-
-export const ReasoningContent = memo(
-  ({ className, children, dir, ...props }: ReasoningContentProps) => (
+export const ReasoningContent = memo(function ReasoningContent({
+  className,
+  children,
+  dir,
+  ...props
+}: ReasoningContentProps) {
+  const streamdownPlugins = useStreamdownPlugins();
+  return (
     <CollapsibleContent
       className={cn(
         "mt-4 text-[14px] leading-5.25 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -209,8 +210,8 @@ export const ReasoningContent = memo(
     >
       <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
     </CollapsibleContent>
-  ),
-);
+  );
+});
 
 Reasoning.displayName = "Reasoning";
 ReasoningTrigger.displayName = "ReasoningTrigger";

@@ -12,7 +12,8 @@ const queryClient = new QueryClient({
       staleTime: QUERY_STALE_TIME_MS,
       gcTime: 10 * 60 * 1000,
       retry: QUERY_RETRY_COUNT,
-      refetchOnWindowFocus: true,
+      // Disabled globally — individual queries that need freshness opt in explicitly.
+      refetchOnWindowFocus: false,
       refetchOnReconnect: true,
     },
     mutations: {

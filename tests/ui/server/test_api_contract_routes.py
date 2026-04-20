@@ -299,10 +299,10 @@ def test_optimization_status_reports_unavailable_mlflow(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.api.routers.optimization import status as opt_status
 
-    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
-    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, False))
+    monkeypatch.setattr(opt_status, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(opt_status, "_get_mlflow_status", lambda: (True, False))
 
     response = default_client.get(
         "/api/v1/optimization/status",
@@ -707,7 +707,7 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.api.routers.optimization import datasets as opt_datasets
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -719,7 +719,7 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     def _unexpected_persist(**_: object) -> Path:
         raise AssertionError("persist_jsonl_rows should not run in local mode")
 
-    monkeypatch.setattr(optimization, "persist_jsonl_rows", _unexpected_persist)
+    monkeypatch.setattr(opt_datasets, "persist_jsonl_rows", _unexpected_persist)
 
     response = default_client.post(
         "/api/v1/optimization/transcript-datasets",
@@ -761,9 +761,9 @@ def test_async_optimization_run_accepts_dataset_id(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
     from fleet_rlm.api.config import ServerRuntimeConfig
     from fleet_rlm.api.main import create_app
+    from fleet_rlm.api.routers.optimization import runs as opt_runs
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -777,8 +777,8 @@ def test_async_optimization_run_accepts_dataset_id(
         turns=[("What is 2+2?", "4")],
     )
 
-    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
-    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, True))
+    monkeypatch.setattr(opt_runs, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(opt_runs, "_get_mlflow_status", lambda: (True, True))
 
     with TestClient(
         create_app(

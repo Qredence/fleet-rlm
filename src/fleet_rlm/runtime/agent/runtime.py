@@ -214,6 +214,17 @@ class _LegacyAgentRuntime(DocumentCacheMixin, CoreMemoryMixin):
         """Async reset variant that can safely await async sandbox tools."""
         docs_count = self.clear_document_cache()
         self.history = dspy.History(messages=[])
+        if clear_sandbox_buffers and self.interpreter is not None:
+            try:
+                code = "clear_buffer(name='all')"
+                if getattr(self.interpreter, "async_execute", False) and hasattr(
+                    self.interpreter, "aexecute"
+                ):
+                    await self.interpreter.aexecute(code)
+                elif hasattr(self.interpreter, "execute"):
+                    self.interpreter.execute(code)
+            except Exception:
+                pass  # best-effort; do not let buffer clearing block the reset
         return {
             "status": "ok",
             "history_turns": 0,

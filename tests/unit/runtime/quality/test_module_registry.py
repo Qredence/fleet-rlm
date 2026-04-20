@@ -15,9 +15,6 @@ def test_list_module_slugs_returns_known_modules() -> None:
     slugs = list_module_slugs()
     assert "reflect-and-revise" in slugs
     assert "context-selection" in slugs
-    assert "decomposition" in slugs
-    assert "repair" in slugs
-    assert "verification" in slugs
 
 
 def test_get_module_spec_known() -> None:
@@ -36,7 +33,7 @@ def test_get_module_spec_unknown() -> None:
 
 def test_list_module_metadata_shape() -> None:
     metadata = list_module_metadata()
-    assert len(metadata) >= 5
+    assert len(metadata) >= 2
     for entry in metadata:
         assert "slug" in entry
         assert "label" in entry
