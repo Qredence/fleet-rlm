@@ -19,7 +19,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 

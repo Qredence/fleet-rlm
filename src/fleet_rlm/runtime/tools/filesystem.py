@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 if TYPE_CHECKING:
-    from ..agent.runtime import AgentRuntime
+    from ..agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 @dataclass(slots=True)

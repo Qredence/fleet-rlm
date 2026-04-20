@@ -31,7 +31,7 @@ from fleet_rlm.runtime.tools.sandbox.common import (
 )
 
 if TYPE_CHECKING:
-    from ...agent.runtime import AgentRuntime
+    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 try:
     import mlflow as _mlflow

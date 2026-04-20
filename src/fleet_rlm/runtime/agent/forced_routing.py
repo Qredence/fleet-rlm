@@ -25,7 +25,7 @@ from .recursive_runtime import spawn_delegate_sub_agent_async
 from .tool_delegation import get_tool_by_name
 
 if TYPE_CHECKING:
-    from .runtime import AgentRuntime
+    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 @dataclass(slots=True)

@@ -18,7 +18,7 @@ from fleet_rlm.runtime.content.chunking import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 def normalize_strategy(strategy: str) -> str:

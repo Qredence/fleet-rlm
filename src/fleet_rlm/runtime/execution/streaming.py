@@ -43,7 +43,7 @@ from fleet_rlm.runtime.execution.streaming_events import (
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 # ═══════════════════════════════════════════════════════════════════════

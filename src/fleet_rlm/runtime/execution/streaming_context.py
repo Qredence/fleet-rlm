@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 @dataclass(frozen=True, slots=True)

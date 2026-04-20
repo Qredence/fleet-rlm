@@ -22,7 +22,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from ..agent.runtime import AgentRuntime
+    from ..agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 def build_batch_tools(

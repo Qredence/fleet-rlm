@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 if TYPE_CHECKING:
-    from .runtime import AgentRuntime
+    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 # Frozen set of tool names that support delegation

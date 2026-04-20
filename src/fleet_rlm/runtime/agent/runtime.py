@@ -1,22 +1,28 @@
 """Agent runtime — owns interpreter, session state, tools, and execution context.
 
-This module extracts all mutable state and lifecycle concerns from the
-monolithic ``AgentRuntime`` so the agent itself can remain a thin
-``dspy.Module`` focused on the forward pass.
+This module provides two runtime classes:
+
+- ``AgentRuntime`` — simplified runtime using ``FleetAgent`` + ``discover_tools()``.
+  This is the primary class for new code.
+- ``_LegacyAgentRuntime`` — complex legacy runtime (to be deleted).
+  Used by ``chat_agent.py`` for backward compatibility.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import dspy
 
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.runtime.execution.validation import ValidationConfig
 from fleet_rlm.runtime.models.streaming import StreamEvent
-from fleet_rlm.runtime.tools import ExecutionMode, build_tool_list
+from fleet_rlm.runtime.tools import ExecutionMode, build_tool_list, discover_tools
+
+if TYPE_CHECKING:
+    from .agent import FleetAgent
 
 from .agent import RLMReActAgent
 from .chat_session_state import (
@@ -33,12 +39,15 @@ from .signatures import RLMReActChatSignature
 _DEFAULT_HISTORY_MAX_TURNS = 6
 
 
-class AgentRuntime(DocumentCacheMixin, CoreMemoryMixin):
-    """Mutable runtime state for an RLM ReAct chat session.
+class _LegacyAgentRuntime(DocumentCacheMixin, CoreMemoryMixin):
+    """Mutable runtime state for an RLM ReAct chat session (legacy).
 
     Owns the interpreter, conversation history, tool registry, core memory,
     document cache, and session persistence hooks.  This separation keeps the
     DSPy ``dspy.Module`` thin and free of side-effectful lifecycle code.
+
+    .. deprecated::
+        Use ``AgentRuntime`` (simplified) for new code.
     """
 
     def __init__(
@@ -530,3 +539,107 @@ class AgentRuntime(DocumentCacheMixin, CoreMemoryMixin):
             tools=list(self.react_tools),
             max_iters=self.react_max_iters,
         )
+
+
+# ---------------------------------------------------------------------------
+# Simplified AgentRuntime (new primary class)
+# ---------------------------------------------------------------------------
+
+
+class AgentRuntime:
+    """Simplified agent runtime managing FleetAgent, interpreter, history, tools, and core memory.
+
+    This is the primary runtime class for new code.  It composes:
+
+    - ``agent``: a :class:`~fleet_rlm.runtime.agent.agent.FleetAgent` instance
+      initialised with tools discovered via :func:`~fleet_rlm.runtime.tools.discover_tools`.
+    - ``interpreter``: Daytona interpreter for sandbox execution (optional).
+    - ``history``: :class:`dspy.History` accumulating conversation turns.
+    - ``tools``: list of tool callables registered with the agent.
+    - ``core_memory``: key-value dict of persistent memory accessible by tools.
+    """
+
+    def __init__(
+        self,
+        *,
+        interpreter: Any | None = None,
+        max_iters: int = 10,
+        history_max_turns: int | None = 6,
+        extra_tools: list[Any] | None = None,
+    ) -> None:
+        from .agent import FleetAgent
+
+        self.interpreter: Any | None = interpreter
+        self.history: dspy.History = dspy.History(messages=[])
+        self.history_max_turns: int | None = history_max_turns
+        self.core_memory: dict[str, str] = {
+            "persona": "I am a helpful AI assistant focused on writing high-quality code.",
+            "human": "The user is a developer working on this project.",
+            "scratchpad": "",
+        }
+
+        # Discover tools from the registry; append any extra tools
+        base_tools = discover_tools()
+        self.tools: list[Any] = base_tools + list(extra_tools or [])
+
+        # Initialise agent with the discovered tool set
+        self.agent: FleetAgent = FleetAgent(
+            tools=self.tools,
+            max_iters=max_iters,
+        )
+
+    # -----------------------------------------------------------------
+    # Chat API
+    # -----------------------------------------------------------------
+
+    def chat_turn(self, user_message: str) -> dspy.Prediction:
+        """Run one synchronous chat turn and accumulate history.
+
+        Args:
+            user_message: The current user message.
+
+        Returns:
+            A :class:`dspy.Prediction` with at least a ``response`` field.
+        """
+        result = self.agent.forward(
+            chat_history=self.history,
+            user_message=user_message,
+        )
+        response = str(getattr(result, "response", ""))
+        messages = list(getattr(self.history, "messages", []) or [])
+        messages.append({"user_message": user_message, "response": response})
+        if (
+            self.history_max_turns is not None
+            and len(messages) > self.history_max_turns
+        ):
+            messages = messages[-self.history_max_turns :]
+        self.history = dspy.History(messages=messages)
+        return result
+
+    # -----------------------------------------------------------------
+    # Core memory API (accessible by tools)
+    # -----------------------------------------------------------------
+
+    def get_core_memory(self) -> dict[str, str]:
+        """Return the core memory dict for tool access."""
+        return self.core_memory
+
+    def get_core_memory_key(self, key: str) -> str | None:
+        """Read a single key from core memory.
+
+        Args:
+            key: Memory key.
+
+        Returns:
+            Associated value string, or ``None`` if absent.
+        """
+        return self.core_memory.get(key)
+
+    def set_core_memory_key(self, key: str, value: str) -> None:
+        """Write a key-value pair to core memory.
+
+        Args:
+            key: Memory key.
+            value: Text value to store.
+        """
+        self.core_memory[key] = value

@@ -18,7 +18,7 @@ from typing_extensions import Self
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 from .chat import ChatOrchestrator
-from .runtime import AgentRuntime
+from .runtime import _LegacyAgentRuntime as AgentRuntime
 from .tool_delegation import TOOL_DELEGATE_NAMES, get_tool_by_name
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]

@@ -12,7 +12,7 @@ from fleet_rlm.runtime.config import build_dspy_context
 from .turn_state import TurnDelegationState
 
 if TYPE_CHECKING:
-    from .runtime import AgentRuntime
+    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 @dataclass(slots=True)

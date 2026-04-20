@@ -17,7 +17,7 @@ from ..llm_tools import runtime_metadata as _runtime_metadata
 from .common import _resolve_path_or_error, _SandboxToolContext
 
 if TYPE_CHECKING:
-    from ...agent.runtime import AgentRuntime
+    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 logger = logging.getLogger(__name__)

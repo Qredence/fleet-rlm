@@ -19,7 +19,7 @@ from fleet_rlm.utils.volume_tree import resolve_mounted_volume_path
 from ..shared import aexecute_submit, execute_submit
 
 if TYPE_CHECKING:
-    from ...agent.runtime import AgentRuntime
+    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
 

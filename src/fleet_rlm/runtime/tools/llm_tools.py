@@ -32,7 +32,7 @@ from fleet_rlm.runtime.agent.delegation_policy import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 logger = logging.getLogger(__name__)
 

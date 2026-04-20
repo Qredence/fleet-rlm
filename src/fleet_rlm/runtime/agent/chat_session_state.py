@@ -10,7 +10,7 @@ from fleet_rlm.utils.paths import dedupe_paths
 from fleet_rlm.utils.text import compact_text
 
 if TYPE_CHECKING:
-    from .runtime import AgentRuntime
+    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 _HISTORY_SUMMARY_USER_REQUEST = "[summary of earlier conversation]"

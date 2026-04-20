@@ -32,7 +32,7 @@ from .common import build_buffer_tools as build_buffer_tools
 from .common import build_process_tools as build_process_tools
 
 if TYPE_CHECKING:
-    from ...agent.runtime import AgentRuntime
+    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 def _looks_like_python_code(path: str, content: str) -> bool:

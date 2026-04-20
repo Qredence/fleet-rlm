@@ -34,7 +34,7 @@ from .forced_routing import (
     run_forced_rlm_turn as _run_forced_rlm_turn_impl,
     arun_forced_rlm_turn as _arun_forced_rlm_turn_impl,
 )
-from .runtime import AgentRuntime
+from .runtime import _LegacyAgentRuntime as AgentRuntime
 from .tool_delegation import get_tool_by_name
 
 
