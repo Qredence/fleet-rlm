@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import dspy
-from fleet_rlm.integrations.daytona.types import dedupe_paths, normalize_history_turn
+from fleet_rlm.integrations.daytona.types import normalize_history_turn
+from fleet_rlm.utils.paths import dedupe_paths
 
 if TYPE_CHECKING:
     from .chat_agent import RLMReActChatAgent

@@ -14,6 +14,7 @@ from fleet_rlm.runtime.content.ingestion import read_document_content
 from .admin import _arun_admin_code
 from .async_compat import _await_if_needed
 from .diagnostics import DaytonaDiagnosticError
+from fleet_rlm.utils.paths import is_local_path
 from .types import ContextSource
 
 _REMOTE_DIRECTORY_MODE = "755"
@@ -229,10 +230,9 @@ async def _astage_context_paths(
     reset_existing: bool = False,
 ) -> list[ContextSource]:
     raw_paths = [
-        str(item).strip()
+        stripped
         for item in (context_paths or [])
-        if str(item).strip()
-        and not str(item).strip().startswith(("http://", "https://"))
+        if (stripped := str(item).strip()) and is_local_path(stripped)
     ]
     if reset_existing:
         await _aclear_staged_context_paths(

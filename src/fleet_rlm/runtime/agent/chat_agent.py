@@ -19,7 +19,7 @@ from typing import Any, Literal
 import dspy
 from typing_extensions import Self
 
-from fleet_rlm.integrations.daytona.types import dedupe_paths
+from fleet_rlm.utils.paths import dedupe_paths, is_local_path
 from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.execution.document_cache import DocumentCacheMixin
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
@@ -702,10 +702,7 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
             *(context_paths or []),
             *docs_paths,
         ]
-        local_only = [
-            p for p in candidates if p and not p.startswith(("http://", "https://"))
-        ]
-        return dedupe_paths(local_only)
+        return dedupe_paths([p for p in candidates if is_local_path(p)])
 
     async def _aconfigure_workspace(
         self,

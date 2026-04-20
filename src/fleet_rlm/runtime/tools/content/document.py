@@ -23,7 +23,7 @@ from fleet_rlm.runtime.execution.document_sources import (
 from fleet_rlm.runtime.content.ingestion import (
     read_document_content as _read_document_content,
 )
-from fleet_rlm.integrations.daytona.types import dedupe_paths
+from fleet_rlm.utils.paths import dedupe_paths
 from fleet_rlm.runtime.tools.sandbox.common import (
     _SandboxToolContext,
     _document_load_result,
