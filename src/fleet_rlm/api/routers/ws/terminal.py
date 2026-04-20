@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
+from fleet_rlm.integrations.database import RunStatus
 
 from ...events import ExecutionStep
+from .completion import build_execution_completion_summary, final_event_failed
 from .helpers import _try_send_json
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from .types import LocalPersistFn, StreamEventLike
+from .types import LocalPersistFn, OrchestrationSessionContext, StreamEventLike
+
+logger = logging.getLogger(__name__)
 
 
 def build_stream_event_dict(
@@ -31,6 +35,16 @@ def build_stream_event_dict(
     }
 
 
+def _terminal_run_status(event: StreamEventLike) -> RunStatus:
+    """Return the authoritative terminal run status for one event."""
+    if event.kind == "cancelled":
+        return RunStatus.CANCELLED
+    if event.kind == "final":
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
+    return RunStatus.FAILED
+
+
 async def handle_terminal_stream_event(
     *,
     websocket: WebSocket,
@@ -42,23 +56,52 @@ async def handle_terminal_stream_event(
     request_message: str,
     orchestration_session: OrchestrationSessionContext | None = None,
 ) -> None:
-    """Handle terminal websocket events without changing ordering.
+    """Handle terminal websocket events: persist, complete lifecycle, send.
 
-    ``orchestration_session`` stays optional for compatibility paths that have
-    not restored a resumable session record yet; when present, the outer layer
-    updates authoritative workflow/continuation state before persistence.
+    ``orchestration_session`` is retained for API compatibility but the
+    simplified architecture has no HITL/checkpoint logic.
     """
-    from fleet_rlm.agent_host.terminal_flow import apply_terminal_event_policy
-
-    if not await apply_terminal_event_policy(
-        lifecycle=lifecycle,
+    summary = build_execution_completion_summary(
         event=event,
-        step=step,
-        session=orchestration_session,
-        persist_session_state=persist_session_state,
         request_message=request_message,
-        send_terminal_event=lambda: _try_send_json(
-            websocket, {"type": "event", "data": event_dict}
-        ),
-    ):
+        run_id=lifecycle.run_id,
+    )
+
+    if event.kind == "final":
+        try:
+            await persist_session_state(include_volume_save=True)
+        except Exception:
+            logger.debug(
+                "Failed to persist session state before final event; continuing",
+                exc_info=True,
+            )
+        await lifecycle.complete_run(
+            _terminal_run_status(event),
+            step=step,
+            summary=summary,
+        )
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
+        return
+
+    if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
         raise WebSocketDisconnect(code=1001)
+
+    try:
+        await persist_session_state(include_volume_save=True)
+    except Exception:
+        logger.debug(
+            "Failed to persist session state after %s event; completing run anyway",
+            event.kind,
+            exc_info=True,
+        )
+
+    error_json: dict[str, Any] | None = (
+        {"error": event.text, "kind": event.kind} if event.kind == "error" else None
+    )
+    await lifecycle.complete_run(
+        _terminal_run_status(event),
+        step=step,
+        error_json=error_json,
+        summary=summary,
+    )

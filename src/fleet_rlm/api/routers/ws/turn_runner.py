@@ -8,11 +8,6 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.agent_host import (
-    OrchestrationSessionContext,
-    ReplHookBridge,
-    stream_hosted_workspace_task,
-)
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
@@ -20,10 +15,11 @@ from fleet_rlm.integrations.observability.trace_context import (
 from ...events import ExecutionStepBuilder
 from .errors import handle_stream_error
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
+from .repl_bridge import ReplHookBridge
 from .task_control import enqueue_latest_nonblocking, should_reload_docs_path
 from .turn_persistence import _emit_stream_event, complete_run_if_needed
 from .turn_setup import PreparedStreamingTurn
-from .types import ChatAgentProtocol, LocalPersistFn
+from .types import ChatAgentProtocol, LocalPersistFn, OrchestrationSessionContext
 from .worker_request import build_workspace_task_request
 
 
@@ -120,28 +116,36 @@ async def _stream_agent_events(
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
 ) -> None:
+    from .stream import stream_agent_turn
+
     worker_request = build_workspace_task_request(
         agent=agent,
         prepared_turn=prepared_turn,
         cancel_check=cancel_check,
     )
 
-    with runtime_telemetry_enabled_context(analytics_enabled):
-        # The Agent Framework outer host owns hosted HITL plus hosted
-        # continuation/session policy while still preserving the worker seam.
-        async for worker_event in stream_hosted_workspace_task(
-            request=worker_request,
-            session=orchestration_session,
-            hosted_repl_bridge=hosted_repl_bridge,
-        ):
-            await _emit_stream_event(
-                websocket=websocket,
-                lifecycle=lifecycle,
-                step_builder=step_builder,
-                event=worker_event,
-                orchestration_session=orchestration_session,
-                persist_session_state=persist_session_state,
-                request_message=prepared_turn.message,
-            )
+    bridge_started = False
+    try:
+        if hosted_repl_bridge is not None:
+            await hosted_repl_bridge.start()
+            bridge_started = True
+
+        with runtime_telemetry_enabled_context(analytics_enabled):
+            async for worker_event in stream_agent_turn(worker_request):
+                await _emit_stream_event(
+                    websocket=websocket,
+                    lifecycle=lifecycle,
+                    step_builder=step_builder,
+                    event=worker_event,
+                    orchestration_session=orchestration_session,
+                    persist_session_state=persist_session_state,
+                    request_message=prepared_turn.message,
+                )
+    finally:
+        if hosted_repl_bridge is not None and bridge_started:
+            try:
+                await hosted_repl_bridge.stop()
+            except Exception:
+                pass
 
     await complete_run_if_needed(lifecycle)

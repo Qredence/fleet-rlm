@@ -6,18 +6,21 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.agent_host import OrchestrationSessionContext
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.mlflow_context import (
     merge_trace_result_metadata as _merge_trace_result_metadata,
 )
-from fleet_rlm.worker import WorkspaceEvent
 
 from ...events import ExecutionStepBuilder
 from .helpers import _try_send_json
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
-from .types import LocalPersistFn, StreamEventLike
+from .types import (
+    LocalPersistFn,
+    OrchestrationSessionContext,
+    StreamEventLike,
+    WorkspaceEvent,
+)
 
 
 def merge_trace_result_metadata(

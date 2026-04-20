@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from fleet_rlm.api.routers.ws.errors import handle_stream_error
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.worker import WorkspaceEvent
+from fleet_rlm.api.routers.ws.types import WorkspaceEvent
 
 
 class _ClosedSendWebSocket:

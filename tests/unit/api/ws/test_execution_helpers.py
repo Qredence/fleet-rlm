@@ -8,8 +8,8 @@ from typing import Any, Literal, cast
 import pytest
 from fastapi import WebSocketDisconnect
 
-from fleet_rlm.agent_host import OrchestrationSessionContext
 from fleet_rlm.api.dependencies import session_key
+from fleet_rlm.api.routers.ws.types import OrchestrationSessionContext
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.routers.ws.stream import (
     ReplHookBridge,
@@ -431,7 +431,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
     assert isinstance(orchestration_session, OrchestrationSessionContext)
-    assert orchestration_session.session_record_link.key == key
+    assert orchestration_session.session_id == "session-a"
     assert agent.aimport_session_state_calls == 1
     assert agent.import_session_state_calls == 0
     assert agent.areset_calls == 0

@@ -12,10 +12,6 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from fleet_rlm.agent_host import (
-    cancel_startup_status_task,
-    emit_delayed_startup_status,
-)
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
@@ -45,8 +41,13 @@ from .helpers import (
     _try_send_json,
 )
 from .messages import parse_ws_message_or_send_error
+from .startup_status import (
+    cancel_startup_status_task as _cancel_startup_status_task,
+    emit_delayed_startup_status as _emit_delayed_startup_status,
+)
 from .stream import _chat_message_loop
 from .terminal import build_stream_event_dict
+from .types import WorkspaceEvent
 
 router = APIRouter(tags=["websocket"])
 
@@ -139,7 +140,7 @@ class _ExecutionWebSocketConnection:
         self.identity = identity
 
     async def _emit_delayed_startup_status(self) -> None:
-        async def _emit_event(event) -> None:
+        async def _emit_event(event: WorkspaceEvent) -> None:
             await _try_send_json(
                 self.websocket,
                 {
@@ -151,7 +152,7 @@ class _ExecutionWebSocketConnection:
                 },
             )
 
-        await emit_delayed_startup_status(
+        await _emit_delayed_startup_status(
             delay_seconds=_EXECUTION_STARTUP_STATUS_DELAY_SECONDS,
             emit_event=_emit_event,
         )
@@ -159,7 +160,7 @@ class _ExecutionWebSocketConnection:
     async def _cancel_startup_status_task(
         self, task: asyncio.Task[None] | None
     ) -> None:
-        await cancel_startup_status_task(task)
+        await _cancel_startup_status_task(task)
 
     async def _receive_initial_message(self):
         initial_msg = None

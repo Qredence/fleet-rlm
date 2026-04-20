@@ -5,9 +5,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.terminal as ws_terminal
-import fleet_rlm.agent_host.terminal_flow as terminal_flow
-from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
-from fleet_rlm.worker import WorkspaceEvent
+from fleet_rlm.api.routers.ws.types import OrchestrationSessionContext, WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
@@ -209,9 +207,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     asyncio.run(scenario())
 
 
-def test_handle_terminal_stream_event_delegates_to_terminal_flow(
-    monkeypatch,
-) -> None:
+def test_handle_terminal_stream_event_accepts_orchestration_session() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
@@ -222,20 +218,9 @@ def test_handle_terminal_stream_event_delegates_to_terminal_flow(
             session_id="session-1",
             session_record={"manifest": {"metadata": {}}},
         )
-        delegated: dict[str, Any] = {}
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
-
-        async def fake_apply_terminal_event_policy(**kwargs: Any) -> bool:
-            delegated.update(kwargs)
-            return True
-
-        monkeypatch.setattr(
-            terminal_flow,
-            "apply_terminal_event_policy",
-            fake_apply_terminal_event_policy,
-        )
 
         await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
@@ -250,8 +235,9 @@ def test_handle_terminal_stream_event_delegates_to_terminal_flow(
             request_message="hello",
         )
 
-        assert delegated["session"] is session
-        assert delegated["event"] is event
-        assert delegated["lifecycle"] is lifecycle
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["summary"]["status"] == "completed"
 
     asyncio.run(scenario())

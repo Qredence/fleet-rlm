@@ -1,4 +1,4 @@
-"""Hosted REPL/interpreter event bridge owned by the Agent Framework host."""
+"""REPL/interpreter event bridge for WebSocket chat streaming."""
 
 from __future__ import annotations
 
@@ -9,37 +9,28 @@ from typing import Any
 
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
-from .execution_events import (
-    HostedExecutionEventRouter,
-    HostedExecutionStepBuilder,
-    HostedExecutionStepSink,
-    normalize_hosted_execution_event,
-)
-
 logger = logging.getLogger(__name__)
 
 _REPL_HOOK_STEP_QUEUE_MAX = 128
 
 
 class ReplHookBridge:
-    """Queue and forward hosted interpreter callbacks into execution event flow."""
+    """Queue and forward interpreter callbacks into websocket execution event flow."""
 
     def __init__(
         self,
         *,
         ws_loop: asyncio.AbstractEventLoop,
-        lifecycle: HostedExecutionStepSink,
-        step_builder: HostedExecutionStepBuilder,
+        lifecycle: Any,
+        step_builder: Any,
         interpreter: Any,
         enqueue_nonblocking: Callable[[asyncio.Queue[Any | None], Any], bool],
-        route_event: HostedExecutionEventRouter | None = None,
     ) -> None:
         self._ws_loop = ws_loop
         self._lifecycle = lifecycle
         self._step_builder = step_builder
         self._interpreter = interpreter
         self._enqueue_nonblocking = enqueue_nonblocking
-        self._route_event = route_event
         self._previous_execution_hook: Any = None
         self._queue: asyncio.Queue[Any | None] = asyncio.Queue(
             maxsize=_REPL_HOOK_STEP_QUEUE_MAX
@@ -70,19 +61,9 @@ class ReplHookBridge:
         if callable(previous_hook):
             try:
                 previous_hook(payload)
-            except Exception:  # pragma: no cover - defensive callback isolation
+            except Exception:  # pragma: no cover
                 logger.debug("previous_execution_event_callback_failed", exc_info=True)
-
-        normalized_event = normalize_hosted_execution_event(
-            payload,
-            interpreter=self._interpreter,
-        )
-        if self._route_event is not None:
-            try:
-                self._route_event(normalized_event)
-            except Exception:  # pragma: no cover - defensive callback isolation
-                logger.debug("hosted_execution_event_route_failed", exc_info=True)
-        self._interpreter_hook(normalized_event.payload)
+        self._interpreter_hook(dict(payload) if isinstance(payload, dict) else {})
 
     async def _emit_and_persist_repl_step(self, step_data: Any) -> None:
         if self._lifecycle.run_completed:
@@ -90,12 +71,11 @@ class ReplHookBridge:
         try:
             await self._lifecycle.emit_step(step_data)
             await self._lifecycle.persist_step(step_data)
-        except Exception as exc:  # pragma: no cover - defensive path
+        except Exception as exc:  # pragma: no cover
             logger.warning(
                 "Failed to emit/persist REPL execution step: %s",
                 _sanitize_for_log(exc),
             )
-            self._lifecycle.record_persistence_error(exc)
 
     async def _repl_step_worker(self) -> None:
         while True:

@@ -1,4 +1,4 @@
-"""Startup-status policy owned by the outer Agent Framework host."""
+"""Startup-status policy for the WebSocket execution endpoint."""
 
 from __future__ import annotations
 
@@ -7,14 +7,13 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime, timezone
 
-from fleet_rlm.worker import WorkspaceEvent
+from .types import WorkspaceEvent
 
 EmitStartupEvent = Callable[[WorkspaceEvent], Awaitable[None]]
 
 
 def build_startup_status_event() -> WorkspaceEvent:
     """Return the canonical delayed startup status event."""
-
     return WorkspaceEvent(
         kind="status",
         text="Preparing Daytona workspace...",
@@ -32,14 +31,12 @@ async def emit_delayed_startup_status(
     emit_event: EmitStartupEvent,
 ) -> None:
     """Emit the startup-status event after the configured first-frame delay."""
-
     await asyncio.sleep(delay_seconds)
     await emit_event(build_startup_status_event())
 
 
 async def cancel_startup_status_task(task: asyncio.Task[None] | None) -> None:
     """Cancel the delayed startup task when startup completes first."""
-
     if task is None:
         return
     task.cancel()

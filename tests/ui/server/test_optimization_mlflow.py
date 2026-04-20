@@ -26,7 +26,9 @@ def _make_runner_kwargs(tmp_path: Path) -> dict:
 
 def _run_local(**kwargs) -> None:
     """Synchronous wrapper for the async run_optimization_background with local persistence."""
-    from fleet_rlm.api.routers.optimization.background import run_optimization_background
+    from fleet_rlm.api.routers.optimization.background import (
+        run_optimization_background,
+    )
 
     asyncio.run(run_optimization_background(**kwargs, persistence="local"))
 

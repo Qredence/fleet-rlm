@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fleet_rlm.worker import WorkspaceTaskRequest
-
 from .turn_setup import PreparedStreamingTurn
-from .types import ChatAgentProtocol
+from .types import ChatAgentProtocol, WorkspaceTaskRequest
 
 
 def build_workspace_task_request(

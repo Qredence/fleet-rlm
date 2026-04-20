@@ -18,7 +18,9 @@ def _command_response(*, command: str, result: dict[str, Any]) -> dict[str, Any]
     return {"type": "command_result", "command": command, "result": result}
 
 
-def test_handle_resolve_hitl_emits_event_and_command_result() -> None:
+def test_handle_resolve_hitl_is_no_op_in_simplified_architecture() -> None:
+    """HITL resolution is removed; handle_resolve_hitl always returns False."""
+
     async def scenario() -> None:
         websocket = _WebSocketStub()
 
@@ -27,56 +29,11 @@ def test_handle_resolve_hitl_emits_event_and_command_result() -> None:
             command="resolve_hitl",
             args={"message_id": "hitl-123", "action_label": "Approve"},
             command_response=_command_response,
-            session_record={
-                "workspace_id": "workspace-1",
-                "user_id": "user-1",
-                "session_id": "session-1",
-                "manifest": {"metadata": {}},
-                "orchestration": {
-                    "workflow_stage": "awaiting_hitl_resolution",
-                    "pending_approval": {
-                        "message_id": "hitl-123",
-                        "continuation_token": "token-123",
-                        "workflow_stage": "awaiting_hitl_resolution",
-                        "requested_at": "2026-04-10T15:00:00Z",
-                    },
-                },
-            },
+            session_record={},
         )
 
-        assert handled is True
-        assert websocket.messages[0]["type"] == "event"
-        assert websocket.messages[0]["data"]["kind"] == "hitl_resolved"
-        assert websocket.messages[1]["type"] == "command_result"
-        assert websocket.messages[1]["result"]["resolution"] == "Approve"
-
-    asyncio.run(scenario())
-
-
-def test_handle_resolve_hitl_rejects_missing_args() -> None:
-    async def scenario() -> None:
-        websocket = _WebSocketStub()
-
-        handled = await handle_resolve_hitl(
-            websocket=websocket,
-            command="resolve_hitl",
-            args={"message_id": ""},
-            command_response=_command_response,
-            session_record=None,
-        )
-
-        assert handled is True
-        assert websocket.messages == [
-            {
-                "type": "command_result",
-                "command": "resolve_hitl",
-                "result": {
-                    "status": "error",
-                    "error": "resolve_hitl requires message_id and action_label",
-                    "message_id": None,
-                },
-            }
-        ]
+        assert handled is False
+        assert websocket.messages == []
 
     asyncio.run(scenario())
 
@@ -97,3 +54,4 @@ def test_handle_resolve_hitl_ignores_other_commands() -> None:
         assert websocket.messages == []
 
     asyncio.run(scenario())
+

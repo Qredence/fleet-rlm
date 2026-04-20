@@ -8,13 +8,13 @@ import time
 from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.worker import WorkspaceEvent
 
 from ...events import ExecutionStepBuilder
 from .completion import build_execution_completion_summary
 from .failures import classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
+from .types import WorkspaceEvent
 
 logger = logging.getLogger(__name__)
 
