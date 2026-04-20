@@ -66,7 +66,6 @@ src/frontend/.tmp-*.mjs
 .letta/
 .opencode/
 .junie/
-.factory/
 
 # Output artifacts
 output/

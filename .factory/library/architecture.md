@@ -1,79 +1,73 @@
 # Architecture
 
-How the DSPy runtime, Daytona provider path, and web product surface fit together.
+## System Overview
 
-**What belongs here:** high-level ownership boundaries, runtime flows, integration seams, and invariants.
-**What does NOT belong here:** per-feature TODOs or temporary debugging notes.
+fleet-rlm is being simplified from a 4-layer to a 2-layer architecture:
 
----
+**Before (4 layers):**
+```
+Transport Shell (FastAPI/WS) → Agent Framework Host → Worker Boundary → Recursive Runtime (DSPy)
+```
 
-## Product Shape
+**After (2 layers):**
+```
+Transport Shell (FastAPI/WS) → DSPy ReAct Agent
+```
 
-`fleet-rlm` is a Daytona-backed DSPy application with four supported product surfaces:
-- **Workspace** (`/app/workspace`) — live chat + workbench with streaming trace/reasoning
-- **History** (`/app/history`) — browsable session history with turn-by-turn replay
-- **Volumes** (`/app/volumes`) — browse mounted durable storage
-- **Optimization** (`/app/optimization`) — GEPA/MLflow-backed DSPy prompt optimization dashboard
-- **Settings** — runtime settings, LM/Daytona configuration, optimization defaults
+## Components
 
-FastAPI serves health/readiness endpoints, runtime/optimization/session APIs, websocket execution, and the packaged (or dev-server) web UI.
+### 1. Transport Shell (`api/`)
+FastAPI application with WebSocket and HTTP endpoints. Handles auth, routing, SPA serving.
+- `api/main.py` — app factory, lifespan, route mounting
+- `api/routers/ws/` — WebSocket endpoint for chat streaming
+- `api/routers/` — HTTP routers (sessions, optimization, auth, health, runtime, traces)
+- `api/runtime_services/` — orchestration helpers for chat, persistence, diagnostics
 
-## High-Level Layers
+### 2. DSPy ReAct Agent (`runtime/agent/`)
+Single `dspy.Module` wrapping `dspy.ReAct` with tools.
+- `agent.py` — the module class (dspy.Module subclass with dspy.ReAct)
+- `runtime.py` — AgentRuntime: manages interpreter, history, tools, core memory
+- `chat.py` — ChatOrchestrator: sync/async chat turns, streaming
+- `chat_session_state.py` — session state with dspy.History
+- `signatures.py` — DSPy signatures (RLMReActChatSignature etc.)
 
-### Backend transport (`src/fleet_rlm/api`)
-Owns the public HTTP/websocket contract, request validation, auth/identity normalization, runtime-settings routes, optimization routes, session history routes, and websocket event emission.
+### 3. Tool Registry (`runtime/tools/`)
+Plain callables discovered via directory scan, passed to dspy.ReAct.
+- Categories: sandbox, filesystem, document, chunking, buffer/volume, core memory, RLM delegation
+- Plugin scan: `discover_tools()` scans `runtime/tools/*.py` for tool functions
 
-### Agent Framework outer host (`src/fleet_rlm/agent_host`)
-Narrow but real Microsoft Agent Framework outer host around the worker seam. Owns hosted workflow construction, session/HITL/checkpoint coordination, terminal event completion policy, and HITL resolution.
+### 4. Integrations (`integrations/`)
+Preserved as-is:
+- `daytona/` — sandbox runtime, interpreter, volumes
+- `database/` — FleetRepository (async Postgres)
+- `local_store.py` — SQLite sidecar
+- `mcp/` — MCP server surface
+- `observability/` — MLflow, PostHog
 
-**No transitional bridge layers** — `orchestration_app/` and `api/orchestration/` have been retired. All policy is in `agent_host/` directly.
+### 5. Optimization (`runtime/quality/`)
+Preserved as-is. DSPy evaluation and optimization workflows.
 
-### DSPy runtime (`src/fleet_rlm/runtime`)
-Owns Signatures, `dspy.Module` composition, the ReAct chat agent, `dspy.RLM` runtime modules, streaming helpers, evaluation/optimization helpers, and tool orchestration.
+## Data Flows
 
-### Daytona integration (`src/fleet_rlm/integrations/daytona`)
-Owns sandbox/session/volume lifecycle, runtime preflight diagnostics, and provider-specific execution behavior beneath the shared runtime contract.
+### Chat Turn Flow (simplified)
+1. WebSocket receives message frame
+2. Transport constructs/retrieves session context
+3. `runtime/factory.py` builds agent with tools
+4. Agent runtime restores history from volume (if resuming)
+5. `dspy.ReAct` processes turn with tools
+6. Events streamed back via WebSocket
+7. History persisted to Daytona volume + metadata to DB
 
-### Local persistence (`src/fleet_rlm/integrations/local_store.py`)
-SQLite-backed sidecar for developer workflows. Tables: `chat_sessions`, `chat_turns`, `datasets`, `optimization_runs`, `evaluation_results`, `example_scores`. Used by the session history API and optimization result persistence.
-
-### Frontend (`src/frontend/src`)
-Four surfaces: workspace, history, volumes, optimization (+ settings). Component layers:
-- `components/ui/` — shadcn/Base UI primitives
-- `components/ai-elements/` — AI conversation components
-- `components/product/` — app-owned reusable compositions (data-table, detail-drawer, score-badge, diff-viewer, file-preview, chart-sparkline, etc.)
-- `features/<surface>/` — surface-specific feature modules
-- `lib/workspace/` — backend event adapters, workbench state reducers (run-workbench-normalizers, run-workbench-hydration, run-workbench-adapter)
-- `lib/rlm-api/` — REST and WS clients (includes `sessions.ts`, `optimization.ts`)
-
-## Critical Flows
-
-### Workspace execution flow
-1. Frontend submits a message over `/api/v1/ws/execution`.
-2. Backend prepares the shared chat runtime; `switch_orchestration_session()` in `agent_host/sessions.py` creates a `ChatSession` in SQLite and stores `db_session_id` in session_record.
-3. `stream.py`'s `_resolve_session_target()` copies `db_session_id` to `agent._db_session_id`.
-4. `RLMReActChatAgent` runs; each completed turn is persisted via `add_turn()` in `local_store`.
-5. Streamed events emitted to websocket, adapted by frontend into transcript/workbench UI.
-
-### Session history flow
-1. Sidebar calls `GET /api/v1/sessions?limit=50` via TanStack Query (`sessionEndpoints.listSessions`).
-2. `/app/history` route loads the same data with search/filter support.
-3. Session detail page calls `GET /api/v1/sessions/{id}/turns` and renders turns using `ai-elements` conversation components.
-4. Delete calls `DELETE /api/v1/sessions/{id}`.
-
-### Optimization flow
-1. Frontend renders 4-tab dashboard: Modules / Datasets / Runs / Compare.
-2. User picks module + registered dataset, submits via `POST /api/v1/optimization/runs`.
-3. Background thread runs GEPA — persists per-example scores + before/after prompt text in `evaluation_results`/`example_scores` tables.
-4. `GET /api/v1/optimization/runs/{id}/results` returns per-example breakdown.
-5. Compare tab calls a multi-run comparison endpoint.
+### RLM Delegation Flow
+1. Agent decides to delegate via `delegate_to_rlm` tool
+2. Tool creates/reuses Daytona sandbox
+3. `dspy.RLM` executes in sandbox with sub-interpreter
+4. Result returned to agent as tool output
 
 ## Invariants
 
-- The public runtime contract remains Daytona-only.
-- `orchestration_app/` and `api/orchestration/` are fully retired — all imports point at `agent_host.*` or `worker.*` directly.
-- Frontend consumers do not need to know about backend refactor details.
-- Session history surface (`/app/history`) is a first-class supported route — not retired.
-- `components/product/*` components must not import from `screens/*`.
-- Workspace runtime/state modules in `lib/workspace/*` must not depend on workspace UI modules.
-- SQLite local_store is not safe for concurrent writes — tests that write to it must be serialized.
+- Agent is always a `dspy.Module` (optimizer compatibility)
+- History is always `dspy.History` (DSPy native)
+- Tools are plain callables or `dspy.Tool` instances
+- Session state persists to both volume (full state) and DB (metadata)
+- No `agent_host/` or `worker/` imports anywhere in the codebase
