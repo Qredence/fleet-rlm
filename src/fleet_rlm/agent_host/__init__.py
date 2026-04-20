@@ -1,4 +1,4 @@
-"""Thin Microsoft Agent Framework outer host for workspace orchestration."""
+"""Workspace orchestration host with HITL checkpointing."""
 
 from .app import stream_hosted_workspace_task
 from .hitl_flow import HitlResolution, resolve_hitl_continuation

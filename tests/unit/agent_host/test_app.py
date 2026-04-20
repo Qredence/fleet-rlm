@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_framework import Workflow
-
 from fleet_rlm.agent_host.app import stream_hosted_workspace_task
-from fleet_rlm.agent_host.workflow import build_workspace_host_workflow
 from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
 from fleet_rlm.worker import WorkspaceEvent, WorkspaceTaskRequest
 
@@ -28,10 +25,6 @@ class _BridgeStub:
 
     async def stop(self) -> None:
         self.calls.append("stop")
-
-
-def test_build_workspace_host_workflow_returns_agent_framework_workflow() -> None:
-    assert isinstance(build_workspace_host_workflow(), Workflow)
 
 
 def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
@@ -59,7 +52,7 @@ def test_stream_hosted_workspace_task_applies_host_owned_hitl_policy(
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
+        "fleet_rlm.agent_host.app.worker_boundary.stream_workspace_task",
         _fake_stream_workspace_task,
     )
 
@@ -106,7 +99,7 @@ def test_stream_hosted_workspace_task_preserves_worker_boundary(
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
+        "fleet_rlm.agent_host.app.worker_boundary.stream_workspace_task",
         _fake_stream_workspace_task,
     )
 
@@ -137,7 +130,7 @@ def test_stream_hosted_workspace_task_owns_bridge_lifecycle(monkeypatch) -> None
         yield WorkspaceEvent(kind="final", text="done", payload={}, terminal=True)
 
     monkeypatch.setattr(
-        "fleet_rlm.agent_host.workflow.worker_boundary.stream_workspace_task",
+        "fleet_rlm.agent_host.app.worker_boundary.stream_workspace_task",
         _fake_stream_workspace_task,
     )
 

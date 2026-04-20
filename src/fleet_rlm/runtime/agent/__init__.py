@@ -14,22 +14,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".recursive_context_selection",
         "AssembleRecursiveWorkspaceContextModule",
     ),
-    "PlanRecursiveRepair": (
-        ".signatures",
-        "PlanRecursiveRepair",
-    ),
-    "PlanRecursiveRepairModule": (
-        ".recursive_repair",
-        "PlanRecursiveRepairModule",
-    ),
-    "PlanRecursiveSubqueries": (
-        ".signatures",
-        "PlanRecursiveSubqueries",
-    ),
-    "PlanRecursiveSubqueriesModule": (
-        ".recursive_decomposition",
-        "PlanRecursiveSubqueriesModule",
-    ),
     "RLMReActChatAgent": (".chat_agent", "RLMReActChatAgent"),
     "ReflectAndReviseWorkspaceStepModule": (
         ".recursive_reflection",
@@ -41,18 +25,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "ReflectAndReviseWorkspaceStep",
     ),
     "RecursiveSubQuerySignature": (".signatures", "RecursiveSubQuerySignature"),
-    "RecursiveVerificationStatus": (
-        ".recursive_verification",
-        "RecursiveVerificationStatus",
-    ),
-    "VerifyRecursiveAggregation": (
-        ".signatures",
-        "VerifyRecursiveAggregation",
-    ),
-    "VerifyRecursiveAggregationModule": (
-        ".recursive_verification",
-        "VerifyRecursiveAggregationModule",
-    ),
     "spawn_delegate_sub_agent_async": (
         ".recursive_runtime",
         "spawn_delegate_sub_agent_async",

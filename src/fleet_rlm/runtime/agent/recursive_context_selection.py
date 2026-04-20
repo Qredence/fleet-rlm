@@ -7,6 +7,8 @@ from typing import Any
 
 import dspy
 
+from fleet_rlm.utils.text import compact_text as _compact_text
+
 from .signatures import AssembleRecursiveWorkspaceContext
 
 _MAX_SUMMARY_CHARS = 800
@@ -17,13 +19,6 @@ _MAX_CATALOG_ENTRY_CHARS = 240
 _DEFAULT_OMISSION_RATIONALE = (
     "Omit unselected durable memory and verbose traces to stay within budget."
 )
-
-
-def _compact_text(value: Any, *, limit: int = _MAX_SUMMARY_CHARS) -> str:
-    text = str(value or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3].rstrip() + "..."
 
 
 def _catalog_id(entry: str) -> str:

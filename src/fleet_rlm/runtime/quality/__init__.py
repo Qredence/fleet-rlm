@@ -66,27 +66,6 @@ from .optimize_recursive_context_selection import (
     resolve_recursive_context_selection_output_path,
     rows_to_recursive_context_selection_examples,
 )
-from .optimize_recursive_decomposition import (
-    build_recursive_decomposition_feedback_metric,
-    load_recursive_decomposition_rows,
-    optimize_recursive_decomposition_module,
-    resolve_recursive_decomposition_output_path,
-    rows_to_recursive_decomposition_examples,
-)
-from .optimize_recursive_repair import (
-    build_recursive_repair_feedback_metric,
-    load_recursive_repair_rows,
-    optimize_recursive_repair_module,
-    resolve_recursive_repair_output_path,
-    rows_to_recursive_repair_examples,
-)
-from .optimize_recursive_verification import (
-    build_recursive_verification_feedback_metric,
-    load_recursive_verification_rows,
-    optimize_recursive_verification_module,
-    resolve_recursive_verification_output_path,
-    rows_to_recursive_verification_examples,
-)
 from .scorers import (
     build_rlm_scorers,
     get_default_judge_model,
@@ -149,28 +128,13 @@ __all__ = [
     "workspace_score_metric",
     # Per-module entrypoints
     "build_recursive_context_selection_feedback_metric",
-    "build_recursive_decomposition_feedback_metric",
-    "build_recursive_repair_feedback_metric",
-    "build_recursive_verification_feedback_metric",
     "build_reflection_feedback_metric",
     "load_recursive_context_selection_rows",
-    "load_recursive_decomposition_rows",
-    "load_recursive_repair_rows",
-    "load_recursive_verification_rows",
     "load_reflection_rows",
     "optimize_recursive_context_selection_module",
-    "optimize_recursive_decomposition_module",
-    "optimize_recursive_repair_module",
-    "optimize_recursive_verification_module",
     "optimize_reflect_and_revise_module",
     "resolve_recursive_context_selection_output_path",
-    "resolve_recursive_decomposition_output_path",
-    "resolve_recursive_repair_output_path",
-    "resolve_recursive_verification_output_path",
     "resolve_reflection_output_path",
     "rows_to_recursive_context_selection_examples",
-    "rows_to_recursive_decomposition_examples",
-    "rows_to_recursive_repair_examples",
-    "rows_to_recursive_verification_examples",
     "rows_to_reflection_examples",
 ]

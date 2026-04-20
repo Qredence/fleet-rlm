@@ -7,6 +7,8 @@ from typing import Any, Literal, cast
 
 import dspy
 
+from fleet_rlm.utils.text import compact_text as _compact_text
+
 from .signatures import ReflectAndReviseWorkspaceStep
 
 RecursiveReflectionAction = Literal[
@@ -23,13 +25,6 @@ _ALLOWED_ACTIONS: tuple[RecursiveReflectionAction, ...] = (
     "repair_and_retry",
 )
 _MAX_SUMMARY_CHARS = 600
-
-
-def _compact_text(value: Any, *, limit: int = _MAX_SUMMARY_CHARS) -> str:
-    text = str(value or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3].rstrip() + "..."
 
 
 def _coerce_confidence(value: Any) -> float:
