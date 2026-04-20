@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ...dependencies import HTTPIdentityDep, require_http_identity
+from ...dependencies import HTTPIdentityDep
 from ...schemas.core import GEPAModuleInfo, GEPAStatusResponse
 from ._deps import AUTH_ERROR_RESPONSES, _check_gepa_available, _get_mlflow_status
 

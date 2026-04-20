@@ -169,9 +169,7 @@ async def run_optimization_background(
         try:
             import mlflow
         except ImportError:
-            logger.debug(
-                "MLflow package unavailable for run %s", run_id, exc_info=True
-            )
+            logger.debug("MLflow package unavailable for run %s", run_id, exc_info=True)
         else:
             from fleet_rlm.integrations.observability.config import MlflowConfig
             from fleet_rlm.integrations.observability.mlflow_runtime import (
@@ -212,9 +210,7 @@ async def run_optimization_background(
                         run_id,
                     )
             except Exception:
-                logger.debug(
-                    "MLflow setup skipped for run %s", run_id, exc_info=True
-                )
+                logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
         configure_planner_from_env()

@@ -196,8 +196,15 @@ async def upload_dataset(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    file: Annotated[UploadFile, File(description="Dataset file to upload in JSON or JSONL format.")],
-    module_slug: Annotated[str | None, Form(description="Optional module slug used to validate required dataset keys.")] = None,
+    file: Annotated[
+        UploadFile, File(description="Dataset file to upload in JSON or JSONL format.")
+    ],
+    module_slug: Annotated[
+        str | None,
+        Form(
+            description="Optional module slug used to validate required dataset keys."
+        ),
+    ] = None,
 ) -> DatasetResponse:
     """Upload and register a dataset file (.json or .jsonl)."""
     persisted_identity = await _resolve_persisted_identity(
@@ -312,9 +319,15 @@ async def list_datasets_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    module_slug: Annotated[str | None, Query(description="Filter by module slug")] = None,
-    limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of datasets to return.")] = 50,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset into the dataset list.")] = 0,
+    module_slug: Annotated[
+        str | None, Query(description="Filter by module slug")
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=200, description="Maximum number of datasets to return.")
+    ] = 50,
+    offset: Annotated[
+        int, Query(ge=0, description="Pagination offset into the dataset list.")
+    ] = 0,
 ) -> DatasetListResponse:
     """List registered datasets with optional module filter."""
     persisted_identity = await _resolve_persisted_identity(
@@ -378,7 +391,9 @@ async def get_dataset_detail(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    dataset_id: Annotated[str, ApiPath(description="Identifier of the dataset to inspect.")],
+    dataset_id: Annotated[
+        str, ApiPath(description="Identifier of the dataset to inspect.")
+    ],
 ) -> DatasetDetailResponse:
     """Return dataset metadata with the first 10 rows as preview."""
     persisted_identity = await _resolve_persisted_identity(

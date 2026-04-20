@@ -286,9 +286,13 @@ class AgentRuntime(DocumentCacheMixin, CoreMemoryMixin):
 
     def get_recursive_context_selection_module(self) -> dspy.Module:
         if self._recursive_context_selection_module is None:
-            from .recursive_context_selection import AssembleRecursiveWorkspaceContextModule
+            from .recursive_context_selection import (
+                AssembleRecursiveWorkspaceContextModule,
+            )
 
-            self._recursive_context_selection_module = AssembleRecursiveWorkspaceContextModule()
+            self._recursive_context_selection_module = (
+                AssembleRecursiveWorkspaceContextModule()
+            )
         return self._recursive_context_selection_module
 
     # -----------------------------------------------------------------

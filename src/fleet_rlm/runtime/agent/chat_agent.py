@@ -308,7 +308,7 @@ class RLMReActChatAgent(dspy.Module):
     ) -> dict[str, Any]:
         return await self._chat.achat_turn(message, docs_path=docs_path)
 
-    async def aiter_chat_turn_stream(
+    def aiter_chat_turn_stream(
         self,
         message: str,
         trace: bool = True,

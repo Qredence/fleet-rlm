@@ -247,8 +247,12 @@ async def list_sessions_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    search: Annotated[str | None, Query(description="Full-text search on title")] = None,
-    status: Annotated[str | None, Query(description="Filter by status (active, archived)")] = None,
+    search: Annotated[
+        str | None, Query(description="Full-text search on title")
+    ] = None,
+    status: Annotated[
+        str | None, Query(description="Filter by status (active, archived)")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
@@ -346,7 +350,9 @@ async def get_session_detail(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: Annotated[str, Path(description="Identifier of the session to inspect.")],
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to inspect.")
+    ],
 ) -> SessionDetailResponse:
     """Return full session detail with turn count."""
     persisted_identity = await _resolve_persisted_identity(
@@ -427,7 +433,9 @@ async def get_session_turns(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: Annotated[str, Path(description="Identifier of the session whose turns to list.")],
+    session_id: Annotated[
+        str, Path(description="Identifier of the session whose turns to list.")
+    ],
     limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> TurnListResponse:
@@ -507,7 +515,9 @@ async def delete_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: Annotated[str, Path(description="Identifier of the session to archive.")],
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to archive.")
+    ],
 ) -> SessionDeleteResponse:
     """Archive a session (soft delete)."""
     persisted_identity = await _resolve_persisted_identity(
@@ -555,7 +565,9 @@ async def export_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: Annotated[str, Path(description="Identifier of the session to export as a dataset.")],
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to export as a dataset.")
+    ],
 ) -> DatasetResponse:
     """Export a session as a GEPA dataset."""
     persisted_identity = await _resolve_persisted_identity(

@@ -22,8 +22,12 @@ def _summary_message(messages: list[Any]) -> dict[str, str] | None:
     for item in messages:
         if not isinstance(item, dict):
             continue
-        user_request = compact_text(item.get("user_request"), limit=_HISTORY_SNIPPET_LIMIT)
-        assistant_response = compact_text(item.get("assistant_response"), limit=_HISTORY_SNIPPET_LIMIT)
+        user_request = compact_text(
+            item.get("user_request"), limit=_HISTORY_SNIPPET_LIMIT
+        )
+        assistant_response = compact_text(
+            item.get("assistant_response"), limit=_HISTORY_SNIPPET_LIMIT
+        )
         if user_request:
             lines.append(f"User: {user_request}")
         if assistant_response:
@@ -117,9 +121,7 @@ def export_session_state(agent: AgentRuntime) -> dict[str, Any]:
     return payload
 
 
-def import_session_state(
-    agent: AgentRuntime, state: dict[str, Any]
-) -> dict[str, Any]:
+def import_session_state(agent: AgentRuntime, state: dict[str, Any]) -> dict[str, Any]:
     """Restore session state from a previously exported payload."""
     history = _restore_agent_state(agent, state)
 

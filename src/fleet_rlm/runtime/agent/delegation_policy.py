@@ -95,6 +95,7 @@ def claim_delegate_slot_or_error(
 def record_delegate_fallback(agent: AgentRuntime) -> None:
     """Increment the delegate fallback counter."""
     from .chat_turns import record_delegate_fallback as _fn
+
     _fn(agent)
 
 
@@ -116,9 +117,7 @@ def share_llm_budget(*, parent: Any, child: Any) -> Any:
     return child
 
 
-def build_child_interpreter(
-    agent: AgentRuntime, *, remaining_llm_budget: int
-) -> Any:
+def build_child_interpreter(agent: AgentRuntime, *, remaining_llm_budget: int) -> Any:
     """Reuse or create the interpreter for a recursive child run."""
     parent = agent.interpreter
     if hasattr(parent, "build_delegate_child"):
@@ -150,6 +149,7 @@ def normalize_delegate_result(
         answer_text = f"{truncated}\n\n[truncated delegate output]"
         result_copy["delegate_output_truncated"] = True
         from .chat_turns import record_delegate_truncation as _fn
+
         _fn(agent)
     else:
         result_copy["delegate_output_truncated"] = False

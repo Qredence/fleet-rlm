@@ -116,5 +116,3 @@ def _sync_compatible_tool_callable(fn: Callable[..., Any]) -> Callable[..., Any]
         return fn(*args, **kwargs)
 
     return _wrapper
-
-

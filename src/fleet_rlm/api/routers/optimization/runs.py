@@ -9,7 +9,7 @@ import os
 import uuid
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import (
     APIRouter,
@@ -42,7 +42,6 @@ from ._deps import (
     OpenAPIResponses,
     _check_gepa_available,
     _db_run_to_response,
-    _extract_metadata_str,
     _get_mlflow_status,
     _parse_uuid_id,
     _require_workspace_id,
@@ -194,9 +193,7 @@ async def run_optimization(
                 status_code=400,
                 detail="Absolute paths are not allowed. Use a relative path.",
             )
-        resolved_output = os.path.realpath(
-            os.path.join(safe_root, request.output_path)
-        )
+        resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
         if not resolved_output.startswith(safe_root):
             raise HTTPException(
                 status_code=400,
@@ -484,9 +481,7 @@ async def create_optimization_run(
                 status_code=400,
                 detail="Absolute paths are not allowed. Use a relative path.",
             )
-        resolved_output = os.path.realpath(
-            os.path.join(safe_root, request.output_path)
-        )
+        resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
         try:
             stays_under_data_root = (
                 os.path.commonpath([base_root, resolved_output]) == base_root
@@ -581,9 +576,15 @@ async def list_runs(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    status: Annotated[str | None, Query(description="Filter by status: running, completed, failed")] = None,
-    limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of runs to return.")] = 50,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset into the run list.")] = 0,
+    status: Annotated[
+        str | None, Query(description="Filter by status: running, completed, failed")
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=200, description="Maximum number of runs to return.")
+    ] = 50,
+    offset: Annotated[
+        int, Query(ge=0, description="Pagination offset into the run list.")
+    ] = 0,
 ) -> list[OptimizationRunResponse]:
     """List optimization runs, most recent first."""
     persisted_identity = await _resolve_persisted_identity(
@@ -645,7 +646,9 @@ async def compare_runs(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_ids: Annotated[str, Query(description="Comma-separated run IDs to compare (max 5).")],
+    run_ids: Annotated[
+        str, Query(description="Comma-separated run IDs to compare (max 5).")
+    ],
 ) -> RunComparisonResponse:
     """Compare prompt diffs and scores across optimization runs."""
     persisted_identity = await _resolve_persisted_identity(
@@ -673,9 +676,7 @@ async def compare_runs(
                 created_by_user_id=persisted_identity.user_id,
             )
             if run_row is None:
-                raise HTTPException(
-                    status_code=400, detail=f"Run {raw_id} not found."
-                )
+                raise HTTPException(status_code=400, detail=f"Run {raw_id} not found.")
             snapshots = await repository.get_prompt_snapshots(
                 tenant_id=persisted_identity.tenant_id,
                 run_id=run_uuid,
@@ -720,9 +721,7 @@ async def compare_runs(
         for rid in run_ids:
             run_row = get_optimization_run(rid)
             if run_row is None:
-                raise HTTPException(
-                    status_code=400, detail=f"Run {rid} not found."
-                )
+                raise HTTPException(status_code=400, detail=f"Run {rid} not found.")
             snapshots = get_prompt_snapshots(rid)
             items.append(
                 RunComparisonItem(
@@ -760,7 +759,9 @@ async def get_run(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run to fetch.")],
+    run_id: Annotated[
+        str, ApiPath(description="Identifier of the optimization run to fetch.")
+    ],
 ) -> OptimizationRunResponse:
     """Get a single optimization run by ID."""
     persisted_identity = await _resolve_persisted_identity(
@@ -818,9 +819,19 @@ async def get_run_results(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run whose results to list.")],
-    limit: Annotated[int, Query(ge=1, le=500, description="Maximum number of evaluation rows to return.")] = 100,
-    offset: Annotated[int, Query(ge=0, description="Pagination offset into the evaluation results.")] = 0,
+    run_id: Annotated[
+        str,
+        ApiPath(
+            description="Identifier of the optimization run whose results to list."
+        ),
+    ],
+    limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="Maximum number of evaluation rows to return."),
+    ] = 100,
+    offset: Annotated[
+        int, Query(ge=0, description="Pagination offset into the evaluation results.")
+    ] = 0,
 ) -> EvaluationResultsResponse:
     """Return per-example evaluation results for an optimization run."""
     persisted_identity = await _resolve_persisted_identity(

@@ -103,7 +103,7 @@ def _extract_metadata_str(metadata: object, key: str) -> str | None:
     ``_dataset_output_key``, and ``_run_dataset_path`` helpers.
     """
     if isinstance(metadata, dict):
-        val = metadata.get(key)
+        val = cast("dict[str, Any]", metadata).get(key)
         return str(val) if val is not None else None
     return None
 

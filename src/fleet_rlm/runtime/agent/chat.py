@@ -213,7 +213,9 @@ class ChatOrchestrator:
     # Commands
     # -----------------------------------------------------------------
 
-    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def execute_command(
+        self, command: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
         return await _execute_command(self.runtime, command, args)
 
     # -----------------------------------------------------------------
@@ -246,7 +248,9 @@ class ChatOrchestrator:
 
         self.runtime.start()
         effective_max_iters = self.runtime.prepare_routed_turn()
-        ctx = StreamingContext.from_agent(self.runtime, effective_max_iters=effective_max_iters)
+        ctx = StreamingContext.from_agent(
+            self.runtime, effective_max_iters=effective_max_iters
+        )
         yield StreamEvent(
             kind="status",
             text="Execution mode: RLM only",
@@ -283,7 +287,9 @@ class ChatOrchestrator:
                 payload_input=ForcedFinalPayloadInput(
                     trajectory=trajectory,
                     guardrail_warnings=guardrail_warnings,
-                    final_reasoning=str(getattr(prediction, "final_reasoning", "") or ""),
+                    final_reasoning=str(
+                        getattr(prediction, "final_reasoning", "") or ""
+                    ),
                 ),
                 ctx=ctx,
             ),
@@ -308,7 +314,9 @@ class ChatOrchestrator:
             elif event.kind == "final":
                 assistant_response = event.text
                 trajectory = dict(event.payload.get("trajectory", {}) or {})
-                guardrail_warnings = list(event.payload.get("guardrail_warnings", []) or [])
+                guardrail_warnings = list(
+                    event.payload.get("guardrail_warnings", []) or []
+                )
             elif event.kind == "cancelled":
                 cancelled = True
                 assistant_response = event.text
