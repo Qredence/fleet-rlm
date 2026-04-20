@@ -44,7 +44,7 @@ class WorkspaceTaskRequest:
 
 
 @dataclass(slots=True)
-class OrchestrationSessionContext:
+class SessionContext:
     """Simplified session context for websocket streaming."""
 
     workspace_id: str | None = None

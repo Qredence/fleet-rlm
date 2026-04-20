@@ -19,7 +19,7 @@ from ..dependencies import ServerState
 from ..server_utils import sanitize_id as _sanitize_id
 
 if TYPE_CHECKING:
-    from ..routers.ws.types import OrchestrationSessionContext
+    from ..routers.ws.types import SessionContext
 
 
 @dataclass(slots=True)
@@ -45,7 +45,7 @@ class ChatSessionState:
     active_run_db_id: uuid.UUID | None = None
     lifecycle: Any | None = None
     last_loaded_docs_path: str | None = None
-    orchestration_session: OrchestrationSessionContext | None = None
+    orchestration_session: SessionContext | None = None
 
 
 def set_interpreter_default_profile(

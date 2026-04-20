@@ -15,7 +15,7 @@ from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id as _sanitize
 from fleet_rlm.utils.identity import session_key
 
 from ...dependencies import ServerState
-from .types import ChatAgentProtocol, LocalPersistFn, OrchestrationSessionContext
+from .types import ChatAgentProtocol, LocalPersistFn, SessionContext
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +178,8 @@ def _build_orchestration_context(
     workspace_id: str,
     user_id: str,
     sess_id: str,
-) -> OrchestrationSessionContext:
-    return OrchestrationSessionContext(
+) -> SessionContext:
+    return SessionContext(
         workspace_id=workspace_id,
         user_id=user_id,
         session_id=sess_id,
@@ -203,7 +203,7 @@ async def switch_session_if_needed(
     local_persist: LocalPersistFn,
     repository: FleetRepository | None = None,
     identity_rows: IdentityUpsertResult | None = None,
-) -> tuple[str, str, dict[str, Any], str | None, OrchestrationSessionContext]:
+) -> tuple[str, str, dict[str, Any], str | None, SessionContext]:
     """Switch and restore session state when session identity changed."""
     key = session_key(owner_tenant_claim, owner_user_claim, sess_id)
     owner_id = owner_fingerprint(owner_tenant_claim, owner_user_claim)

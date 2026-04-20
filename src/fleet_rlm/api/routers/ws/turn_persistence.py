@@ -17,7 +17,7 @@ from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
 from .types import (
     LocalPersistFn,
-    OrchestrationSessionContext,
+    SessionContext,
     StreamEventLike,
     WorkspaceEvent,
 )
@@ -76,7 +76,7 @@ async def _emit_stream_event(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
-    orchestration_session: OrchestrationSessionContext | None = None,
+    orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:

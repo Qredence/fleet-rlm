@@ -14,7 +14,7 @@ from ...events import ExecutionStep
 from .completion import build_execution_completion_summary, final_event_failed
 from .helpers import _try_send_json
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from .types import LocalPersistFn, OrchestrationSessionContext, StreamEventLike
+from .types import LocalPersistFn, SessionContext, StreamEventLike
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def handle_terminal_stream_event(
     step: ExecutionStep | None,
     persist_session_state: LocalPersistFn,
     request_message: str,
-    orchestration_session: OrchestrationSessionContext | None = None,
+    orchestration_session: SessionContext | None = None,
 ) -> None:
     """Handle terminal websocket events: persist, complete lifecycle, send.
 

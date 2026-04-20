@@ -1269,3 +1269,65 @@ def test_websocket_resolve_hitl_command_flow(
         assert command_result["result"]["status"] == "ok"
         assert command_result["version"] == 1
         assert isinstance(command_result["event_id"], str)
+
+
+def test_ws_endpoint_has_no_orchestration_session_context_import():
+    """VAL-WS-003: No OrchestrationSessionContext anywhere in ws/ endpoint modules."""
+    import importlib
+    import importlib.util
+    import inspect
+    import sys
+
+    ws_modules = [
+        "fleet_rlm.api.routers.ws.types",
+        "fleet_rlm.api.routers.ws.stream",
+        "fleet_rlm.api.routers.ws.session",
+        "fleet_rlm.api.routers.ws.terminal",
+        "fleet_rlm.api.routers.ws.turn_persistence",
+        "fleet_rlm.api.routers.ws.turn_runner",
+        "fleet_rlm.api.routers.ws.endpoint",
+    ]
+    for mod_name in ws_modules:
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            spec = importlib.util.find_spec(mod_name)
+            if spec is not None:
+                mod = importlib.import_module(mod_name)
+        if mod is None:
+            continue
+        src = inspect.getsource(mod)
+        assert "OrchestrationSessionContext" not in src, (
+            f"{mod_name} still references OrchestrationSessionContext"
+        )
+
+
+def test_factory_produces_callable_agent():
+    """VAL-FACTORY-002: build_chat_agent returns an object callable as a chat agent."""
+    from fleet_rlm.runtime import factory as _factory
+
+    # factory must not import from agent_host or worker
+    import inspect
+
+    factory_src = inspect.getsource(_factory)
+    assert "agent_host" not in factory_src
+    assert "worker" not in factory_src
+
+    # build_chat_agent must be importable and callable
+    assert callable(_factory.build_chat_agent)
+
+
+def test_ws_endpoint_streams_without_agent_host_imports():
+    """VAL-WS-001: ws endpoint has no imports from agent_host or worker."""
+    import inspect
+    import fleet_rlm.api.routers.ws.endpoint as endpoint_mod
+    import fleet_rlm.api.routers.ws.stream as stream_mod
+    import fleet_rlm.api.routers.ws.session as session_mod
+
+    for mod, name in [
+        (endpoint_mod, "endpoint"),
+        (stream_mod, "stream"),
+        (session_mod, "session"),
+    ]:
+        src = inspect.getsource(mod)
+        assert "fleet_rlm.agent_host" not in src, f"{name} imports agent_host"
+        assert "fleet_rlm.worker" not in src, f"{name} imports worker"

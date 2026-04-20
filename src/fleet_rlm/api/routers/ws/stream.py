@@ -48,7 +48,7 @@ from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
 from .types import (
     ChatAgentProtocol,
     LocalPersistFn,
-    OrchestrationSessionContext,
+    SessionContext,
     StreamEventLike,
     WorkspaceEvent,
     WorkspaceTaskRequest,
@@ -165,7 +165,7 @@ async def run_streaming_turn(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
@@ -245,7 +245,7 @@ async def _stream_agent_events(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     hosted_repl_bridge: ReplHookBridge | None,
@@ -294,7 +294,7 @@ async def _emit_stream_event(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
-    orchestration_session: OrchestrationSessionContext | None = None,
+    orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
@@ -375,14 +375,11 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
-    orchestration_session = (
-        session.orchestration_session
-        or OrchestrationSessionContext(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            session_id=sess_id,
-            session_record=session.session_record,
-        )
+    orchestration_session = session.orchestration_session or SessionContext(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=sess_id,
+        session_record=session.session_record,
     )
     session.orchestration_session = orchestration_session
 

@@ -19,7 +19,7 @@ from .repl_bridge import ReplHookBridge
 from .task_control import enqueue_latest_nonblocking, should_reload_docs_path
 from .turn_persistence import _emit_stream_event, complete_run_if_needed
 from .turn_setup import PreparedStreamingTurn
-from .types import ChatAgentProtocol, LocalPersistFn, OrchestrationSessionContext
+from .types import ChatAgentProtocol, LocalPersistFn, SessionContext
 from .worker_request import build_workspace_task_request
 
 
@@ -28,7 +28,7 @@ async def run_streaming_turn(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
@@ -108,7 +108,7 @@ async def _stream_agent_events(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     hosted_repl_bridge: ReplHookBridge | None,

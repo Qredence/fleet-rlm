@@ -54,4 +54,3 @@ def test_handle_resolve_hitl_ignores_other_commands() -> None:
         assert websocket.messages == []
 
     asyncio.run(scenario())
-

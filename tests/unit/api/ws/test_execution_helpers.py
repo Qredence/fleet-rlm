@@ -9,7 +9,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.api.routers.ws.types import OrchestrationSessionContext
+from fleet_rlm.api.routers.ws.types import SessionContext
 from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.routers.ws.stream import (
     ReplHookBridge,
@@ -386,7 +386,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
-    assert isinstance(orchestration_session, OrchestrationSessionContext)
+    assert isinstance(orchestration_session, SessionContext)
     assert orchestration_session.session_id == "session-a"
     assert agent.areset_calls == 1
     assert agent.reset_calls == 0
@@ -430,7 +430,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
     assert manifest_path.endswith("react-session-session-a.json")
     assert session_record["session_id"] == "session-a"
     assert docs_path is None
-    assert isinstance(orchestration_session, OrchestrationSessionContext)
+    assert isinstance(orchestration_session, SessionContext)
     assert orchestration_session.session_id == "session-a"
     assert agent.aimport_session_state_calls == 1
     assert agent.import_session_state_calls == 0

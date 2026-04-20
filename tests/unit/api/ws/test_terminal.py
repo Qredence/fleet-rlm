@@ -5,7 +5,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.terminal as ws_terminal
-from fleet_rlm.api.routers.ws.types import OrchestrationSessionContext, WorkspaceEvent
+from fleet_rlm.api.routers.ws.types import SessionContext, WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
@@ -207,12 +207,12 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     asyncio.run(scenario())
 
 
-def test_handle_terminal_stream_event_accepts_orchestration_session() -> None:
+def test_handle_terminal_stream_event_accepts_session_context() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
-        session = OrchestrationSessionContext(
+        session = SessionContext(
             workspace_id="workspace-1",
             user_id="user-1",
             session_id="session-1",
