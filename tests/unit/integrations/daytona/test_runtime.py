@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
+from fleet_rlm.integrations.daytona.repo import _areconcile_repo_checkout
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
 from fleet_rlm.integrations.daytona.types import ContextSource, SandboxSpec
-from fleet_rlm.integrations.daytona.repo import _areconcile_repo_checkout
 
 
 class _FakeProcessExecResult:
@@ -266,6 +269,36 @@ def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> Non
     assert session.volume_name == "tenant-spec"
 
 
+def test_create_workspace_session_aborts_on_invalid_context_path(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    missing_context = tmp_path / "missing.md"
+
+    with pytest.raises(DaytonaDiagnosticError, match="Context path does not exist"):
+        runtime.create_workspace_session(
+            repo_url=None,
+            ref=None,
+            context_paths=[str(missing_context)],
+            volume_name="tenant-a",
+        )
+
+    assert not any(
+        path.endswith("manifest.json") for path in fake_client.sandbox.fs.uploads
+    )
+
+
 def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
     fake_client = _FakeClient()
     monkeypatch.setattr(
@@ -459,6 +492,52 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     assert len(fake_client.sandbox.process.code_run_calls) == 2
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes-b.md") for path in upload_paths)
+
+
+def test_reconcile_workspace_session_failure_keeps_existing_session_context(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    first_context = tmp_path / "notes-a.md"
+    first_context.write_text("# A\n", encoding="utf-8")
+    missing_context = tmp_path / "notes-missing.md"
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+    session = runtime.create_workspace_session(
+        repo_url="https://github.com/example/repo.git",
+        ref="main",
+        context_paths=[str(first_context)],
+        volume_name="tenant-a",
+    )
+    original_repo_url = session.repo_url
+    original_ref = session.ref
+    original_workspace_path = session.workspace_path
+    original_context_sources = list(session.context_sources)
+
+    with pytest.raises(DaytonaDiagnosticError, match="Context path does not exist"):
+        runtime.reconcile_workspace_session(
+            session,
+            repo_url="https://github.com/example/other.git",
+            ref="develop",
+            context_paths=[str(missing_context)],
+        )
+
+    assert session.repo_url == original_repo_url
+    assert session.ref == original_ref
+    assert session.workspace_path == original_workspace_path
+    assert session.volume_name == "tenant-a"
+    assert session.context_sources == original_context_sources
+    assert session.context_sources[0].host_path == str(first_context.resolve())
 
 
 def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sandbox(

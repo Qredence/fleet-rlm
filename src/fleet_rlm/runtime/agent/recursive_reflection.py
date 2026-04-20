@@ -47,6 +47,11 @@ def _coerce_action(value: Any) -> RecursiveReflectionAction:
     return "finalize"
 
 
+def _format_kv_pairs(source: dict[str, Any], *keys: str) -> list[str]:
+    """Return 'key=value' strings from *source* for present, non-empty values."""
+    return [f"{key}={value}" for key in keys if (value := source.get(key))]
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceReflectionInputs:
     """Typed input for the recursive reflection module."""
@@ -148,29 +153,20 @@ def build_workspace_reflection_inputs(
     reflection_passes: int,
     fallback_used: bool,
 ) -> WorkspaceReflectionInputs:
-    """Build reflection inputs from summarized Daytona-backed evidence only."""
+    """Build reflection inputs from summarized runtime metadata and latest results."""
 
     metadata = runtime_metadata if isinstance(runtime_metadata, dict) else {}
     verification = latest_result.get("recursive_verification")
     verification_payload = verification if isinstance(verification, dict) else {}
     working_memory_summary = (
         "\n".join(
-            part
-            for part in (
-                f"volume_name={metadata.get('volume_name')}"
-                if metadata.get("volume_name")
-                else "",
-                f"workspace_path={metadata.get('workspace_path')}"
-                if metadata.get("workspace_path")
-                else "",
-                f"sandbox_id={metadata.get('sandbox_id')}"
-                if metadata.get("sandbox_id")
-                else "",
-                f"memory_handle={metadata.get('memory_handle')}"
-                if metadata.get("memory_handle")
-                else "",
+            _format_kv_pairs(
+                metadata,
+                "volume_name",
+                "workspace_path",
+                "sandbox_id",
+                "memory_handle",
             )
-            if part
         )
         or "No durable memory contents were copied; only workspace handles are available."
     )

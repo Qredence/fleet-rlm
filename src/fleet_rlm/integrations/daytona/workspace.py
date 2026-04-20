@@ -229,7 +229,10 @@ async def _astage_context_paths(
     reset_existing: bool = False,
 ) -> list[ContextSource]:
     raw_paths = [
-        str(item).strip() for item in (context_paths or []) if str(item).strip()
+        str(item).strip()
+        for item in (context_paths or [])
+        if str(item).strip()
+        and not str(item).strip().startswith(("http://", "https://"))
     ]
     if reset_existing:
         await _aclear_staged_context_paths(
@@ -245,13 +248,15 @@ async def _astage_context_paths(
     staged_sources: list[ContextSource] = []
 
     for index, raw_path in enumerate(raw_paths, start=1):
-        resolved = _resolve_local_context_path(raw_path)
         source_id = f"context-{index}"
-        staged_root = (
-            context_root
-            / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
-        )
+        display_path = raw_path
         try:
+            resolved = _resolve_local_context_path(raw_path)
+            display_path = str(resolved)
+            staged_root = (
+                context_root
+                / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
+            )
             if resolved.is_dir():
                 staged_sources.append(
                     await _astage_local_directory(
@@ -274,7 +279,7 @@ async def _astage_context_paths(
             raise
         except Exception as exc:
             raise DaytonaDiagnosticError(
-                f"Failed to stage context path '{resolved}': {exc}",
+                f"Failed to stage context path '{display_path}': {exc}",
                 category="context_stage_error",
                 phase="context_stage",
             ) from exc

@@ -736,13 +736,15 @@ class RLMReActChatAgent(DocumentCacheMixin, CoreMemoryMixin, dspy.Module):
         self, *, docs_path: str | None, context_paths: list[str] | None
     ) -> list[str]:
         docs_paths = [str(docs_path)] if docs_path is not None else []
-        return dedupe_paths(
-            [
-                *self.loaded_document_paths,
-                *(context_paths or []),
-                *docs_paths,
-            ]
-        )
+        candidates = [
+            *self.loaded_document_paths,
+            *(context_paths or []),
+            *docs_paths,
+        ]
+        local_only = [
+            p for p in candidates if p and not p.startswith(("http://", "https://"))
+        ]
+        return dedupe_paths(local_only)
 
     async def _aconfigure_workspace(
         self,

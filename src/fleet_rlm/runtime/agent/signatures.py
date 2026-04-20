@@ -335,8 +335,8 @@ class PlanRecursiveSubqueries(dspy.Signature):
     subqueries: list[str] = dspy.OutputField(
         desc="Bounded semantic subqueries or subproblems for the next recursive pass"
     )
-    batching_strategy: str = dspy.OutputField(
-        desc="How Python/runtime should batch the proposed subqueries, for example serial or batched"
+    batching_strategy: Literal["serial", "batched"] = dspy.OutputField(
+        desc="How Python/runtime should batch the proposed subqueries: serial or batched"
     )
     aggregation_plan: str = dspy.OutputField(
         desc="How Python/runtime should aggregate the subquery results for the parent recursive state"
