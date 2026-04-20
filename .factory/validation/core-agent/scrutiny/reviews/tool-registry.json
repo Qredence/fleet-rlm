@@ -1,0 +1,43 @@
+{
+  "featureId": "tool-registry",
+  "reviewedAt": "2026-04-21T00:00:00.000Z",
+  "commitId": "7698ae64",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation fully satisfies all 11 validation assertions (VAL-TOOLS-001 through VAL-TOOLS-011). The design is clean: a lightweight @tool_fn marker decorator, a scannable discover_tools() entry point with alphabetical stable ordering, a separately testable _collect_tools_from_modules() helper, and 6 focused tool modules. All 13 registered tools are valid dspy.Tool instances that construct successfully with dspy.ReAct. 15/15 unit tests pass. make lint and make typecheck are both clean. The stub pattern for Daytona-bound tools (raising RuntimeError with clear guidance) is appropriate and well-documented. chunking_tools.py is the one fully functional tool (delegates to shared.py chunk_text), document_tools.py's load_document and filesystem.py's list_files/read_file_slice/find_files are also functionally operative without a runtime. Code quality is high: every public function has a complete docstring with Args/Returns/Raises sections; type hints are present throughout.",
+    "issues": [
+      {
+        "file": "src/fleet_rlm/runtime/tools/__init__.py",
+        "line": 256,
+        "severity": "non_blocking",
+        "description": "_collect_tools_from_modules is listed in __all__ despite the underscore prefix. The intent (testability) is valid and noted in the handoff, but including a private function in __all__ is a convention violation that may cause linters or future developers to be surprised. This is the only issue found."
+      }
+    ]
+  },
+  "testsPassed": true,
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    "_collect_tools_from_modules exported in __all__ despite underscore prefix (testability tradeoff, clearly intentional)"
+  ],
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The backend-refactor skill references '@dspy.tool decorator' but DSPy 3.1.3 has no such decorator. The worker correctly used the custom @tool_fn marker approach instead and noted this in skillFeedback.suggestedChanges. The skill procedure text should be updated to reflect the correct pattern for tool registry discovery (custom marker, not a DSPy built-in).",
+      "evidence": "Handoff skillFeedback.suggestedChanges: 'The skill says @dspy.tool decorator but DSPy 3.1.3 has no such decorator — the AGENTS.md clarification that tools are plain callables is correct. The skill could note the custom @tool_fn marker approach as the recommended pattern for registry discovery.' Worker correctly deviated from the outdated skill text."
+    },
+    {
+      "area": "conventions",
+      "observation": "The new module-level tool functions in filesystem.py shadow the inner closures with the same names (list_files, read_file_slice, find_files) that exist inside build_filesystem_tools(). The module-level @tool_fn decorated versions call the _impl helpers with agent=None. This is functional but results in a subtle dual-definition pattern (builder path vs. registry path) in the same file. Not a bug, but future maintainers editing one version may not notice the other exists.",
+      "evidence": "src/fleet_rlm/runtime/tools/filesystem.py: build_filesystem_tools() at line ~157 defines inner closures named list_files, read_file_slice, find_files; the @tool_fn decorated module-level versions with identical names appear at lines ~201-263."
+    },
+    {
+      "area": "conventions",
+      "observation": "Six of thirteen registered tools (execute_code, read_buffer, write_buffer, clear_buffer, read_core_memory, write_core_memory) are stubs that always raise RuntimeError when called directly. While this is documented clearly in each docstring, there is no AGENTS.md or library note explaining this stub pattern for future tool authors. A developer adding a new Daytona-bound tool module might not know to follow this stub convention.",
+      "evidence": "src/fleet_rlm/runtime/tools/sandbox_tools.py, buffer_tools.py, memory_tools.py — all raise RuntimeError unconditionally. Pattern is not described in src/fleet_rlm/AGENTS.md or .factory/library/."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. All 11 validation assertions are satisfied. 15/15 tests pass, lint is clean, typecheck is clean. The implementation introduces a clean @tool_fn marker pattern, a robust discover_tools() scanner with stable ordering and duplicate rejection, and 6 well-documented tool modules covering all required categories. One minor non-blocking convention note: _collect_tools_from_modules is included in __all__ despite its underscore prefix. Three shared-state observations are recorded for future maintainability: the skill's @dspy.tool reference needs updating, the dual-definition pattern in filesystem.py should be documented, and the Daytona-stub convention for registry tools should be captured in AGENTS.md or the library."
+}

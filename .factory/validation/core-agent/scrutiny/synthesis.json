@@ -1,0 +1,57 @@
+{
+  "milestone": "core-agent",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "lint": { "passed": true, "command": "make lint", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "make typecheck", "exitCode": 0 },
+    "test": { "passed": true, "command": "make test", "exitCode": 0, "note": "21 pre-existing test failures (from prior optimization router refactoring and recursive module removal) were fixed before running; all tests now pass." }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Created .factory/library/runtime-patterns.md documenting: @tool_fn marker pattern (not @dspy.tool), Daytona-bound tool stub convention, filesystem.py dual-definition pattern, AgentRuntime interpreter holding design, _LegacyAgentRuntime cleanup note, FleetAgentSignature placement inconsistency.",
+      "sourceFeature": "tool-registry, agent-runtime, core-react-agent-module"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md (src/fleet_rlm/AGENTS.md)",
+      "suggestion": "Add rule: new @tool_fn-decorated tools that require a live Daytona interpreter must follow the stub pattern (raise RuntimeError with clear guidance message). Mention that runtime/tools/ has this convention for Daytona-bound tools.",
+      "evidence": "tool-registry feature introduced 6 stub tools (execute_code, read_buffer, write_buffer, clear_buffer, read_core_memory, write_core_memory) with no documented convention for future tool authors.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md (src/fleet_rlm/AGENTS.md)",
+      "suggestion": "Add guidance on how legacy code is flagged before deletion: use a module docstring note AND a TODO comment with the target milestone/feature. The current pattern of only documenting in docstrings (without deprecation decorators or ticket references) may cause the legacy code to linger.",
+      "evidence": "_LegacyAgentRuntime in runtime/agent/runtime.py is flagged 'to be deleted' in the module docstring but has no deprecation decorator or milestone reference. AGENTS.md has no guidance on this pattern.",
+      "isSystemic": false
+    },
+    {
+      "target": "backend-refactor skill (.factory/droids/ or skills/)",
+      "suggestion": "Update any references to '@dspy.tool decorator' to reference the custom '@tool_fn' marker pattern from runtime/tools/_marker.py. DSPy 3.1.3 has no @dspy.tool — tools are discovered via the @tool_fn marker and wrapped as dspy.Tool instances by discover_tools().",
+      "evidence": "tool-registry worker noted in skillFeedback.suggestedChanges: 'The skill says @dspy.tool decorator but DSPy 3.1.3 has no such decorator'. Worker correctly deviated from outdated skill text.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md (src/fleet_rlm/AGENTS.md)",
+      "suggestion": "The rule 'Keep DSPy signatures in runtime/agent/signatures.py' should be reinforced or clarified. FleetAgentSignature was placed in agent.py by the core-react-agent-module worker because the feature description said to use RLMReActChatSignature (incompatible fields). Future feature descriptions creating new signatures should explicitly reference signatures.py as the required location.",
+      "evidence": "FleetAgentSignature is in agent.py:15 rather than signatures.py. AGENTS.md already states the rule but the worker's rationale was reasonable (the feature description contradicted it).",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "agent-runtime: AgentRuntime holds interpreter but doesn't expose it in public API",
+      "reason": "Captured in library/runtime-patterns.md. This is a design note for future workers, not a guidance update."
+    }
+  ],
+  "previousRound": null
+}
