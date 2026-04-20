@@ -361,7 +361,7 @@ class LLMQueryMixin:
             try:
                 child.shutdown()
             except Exception:
-                pass
+                pass  # Child may already be stopped
 
     def _remaining_llm_budget(self) -> int:
         """Return how many LLM calls remain in the shared budget."""

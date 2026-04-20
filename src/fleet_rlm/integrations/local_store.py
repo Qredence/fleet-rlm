@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Column, Integer, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 _DEFAULT_DB_DIR = Path(".data")
@@ -61,7 +62,7 @@ def _migrate_optimization_runs(engine: Any) -> None:
                         f"ALTER TABLE optimization_runs ADD COLUMN {col_name} {col_type}"
                     )
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
 
@@ -81,7 +82,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
                 conn.execute(
                     text(f"ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}")
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         # Best-effort index for ownership queries
         try:
@@ -91,7 +92,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
                     "ON chat_sessions (owner_tenant, owner_user, updated_at DESC)"
                 )
             )
-        except Exception:
+        except (OperationalError, ProgrammingError):
             # This index is an opportunistic local-store optimization; startup should
             # not fail if a legacy SQLite version or partial schema cannot create it.
             pass
@@ -110,7 +111,7 @@ def _migrate_dataset_columns(engine: Any) -> None:
                 conn.execute(
                     text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}")
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
 
@@ -136,7 +137,7 @@ def _migrate_evaluation_tables(engine: Any) -> None:
         for _name, ddl in indexes:
             try:
                 conn.execute(text(ddl))
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 # Evaluation tables are best-effort local developer persistence; index
                 # creation failure should not block the app from serving requests.
                 pass

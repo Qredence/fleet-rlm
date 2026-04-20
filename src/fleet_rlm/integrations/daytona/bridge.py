@@ -364,7 +364,7 @@ class DaytonaToolBridge:
                         self.sandbox.process.delete_session(session_id)
                     )
                 except Exception:
-                    pass
+                    pass  # Best-effort session cleanup
                 if attempt < self.broker_start_retries:
                     await asyncio.sleep(0.5 * (attempt + 1))
                 continue

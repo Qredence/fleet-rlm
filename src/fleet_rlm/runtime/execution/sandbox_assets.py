@@ -208,7 +208,7 @@ def save_to_volume(path: str, content: str) -> str:
     try:
         subprocess.run(["sync", "/data"], check=False, capture_output=True)
     except Exception:
-        pass
+        pass  # sync(1) may not exist on all platforms
     return full
 
 
