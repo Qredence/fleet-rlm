@@ -32,7 +32,7 @@ None.
    - Type hints on all signatures
    - No import-time side effects
    - Follow ruff formatting
-   - DSPy 3.1.3: tools are plain callables or `dspy.Tool(func)`, NOT `@dspy.tool` decorator
+   - DSPy 3.1.3: tools are plain callables or `dspy.Tool(func)`. Use `@tool_fn` marker from `runtime/tools/_marker.py` for registry discovery.
    
 5. **For deletion features:** Delete the directories/files, then grep for dangling imports and fix them. Remove corresponding test directories.
 
