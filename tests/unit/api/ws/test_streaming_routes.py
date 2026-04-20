@@ -23,7 +23,7 @@ def test_iter_chat_turn_stream_rlm_only_emits_forced_events(
         return {"answer": "forced response", "trajectory": {}}
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat_agent.get_tool_by_name",
+        "fleet_rlm.runtime.agent.chat.get_tool_by_name",
         lambda _agent, name: _fake_tool if name == "rlm_query" else None,
     )
 

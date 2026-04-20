@@ -32,7 +32,7 @@ from .common import build_buffer_tools as build_buffer_tools
 from .common import build_process_tools as build_process_tools
 
 if TYPE_CHECKING:
-    from ...agent.chat_agent import RLMReActChatAgent
+    from ...agent.runtime import AgentRuntime
 
 
 def _looks_like_python_code(path: str, content: str) -> bool:
@@ -86,7 +86,7 @@ except SyntaxError as exc:
     return _python_syntax_error(str(result.get("error", "invalid syntax")))
 
 
-def build_storage_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_storage_tools(agent: AgentRuntime) -> list[Any]:
     """Build sandbox editing, buffer, volume, workspace, and memory tools.
 
     Aggregates tools from :func:`build_buffer_tools`,

@@ -72,15 +72,7 @@ class CoreMemoryMixin:
         return normalized
 
     def core_memory_append(self, section: str, content: str) -> str:
-        """Append text to a specific Core Memory block.
-
-        Args:
-            section: The block name (e.g., 'scratchpad', 'human', 'persona')
-            content: The text to append
-
-        Returns:
-            Success message or error description
-        """
+        """Append *content* to a named core memory block; returns a status string."""
         if section not in self._core_memory:
             return self._missing_section_error(section)
 
@@ -95,15 +87,7 @@ class CoreMemoryMixin:
         return f"Appended to '{section}'. New content length: {len(self._core_memory[section])} chars."
 
     def core_memory_replace(self, section: str, content: str) -> str:
-        """Replace the entire content of a Core Memory block.
-
-        Args:
-            section: The block name to replace
-            content: The new content
-
-        Returns:
-            Success message or error description
-        """
+        """Replace *content* of a named core memory block; returns a status string."""
         if section not in self._core_memory:
             return self._missing_section_error(section)
 
@@ -115,11 +99,7 @@ class CoreMemoryMixin:
         return f"Updated block '{section}'."
 
     def fmt_core_memory(self) -> str:
-        """Format the core memory blocks for the prompt.
-
-        Returns:
-            Formatted string with XML-style tags for each block
-        """
+        """Return core memory blocks formatted as XML-style tags for the prompt."""
         blocks = []
         for key, value in self._core_memory.items():
             blocks.append(f"<{key}>\n{value}\n</{key}>")

@@ -31,7 +31,7 @@ from fleet_rlm.runtime.tools.sandbox.common import (
 )
 
 if TYPE_CHECKING:
-    from ...agent.chat_agent import RLMReActChatAgent
+    from ...agent.runtime import AgentRuntime
 
 try:
     import mlflow as _mlflow
@@ -99,14 +99,14 @@ def _rlm_fetch_large_url(agent: Any, url: str, alias: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_document_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_document_tools(agent: AgentRuntime) -> list[Any]:
     """Build document management tools with closures bound to *agent*.
 
     Each inner function has a descriptive ``__name__``, docstring, and
     type-hinted parameters so ``dspy.ReAct`` can introspect them cleanly.
 
     Args:
-        agent: The RLMReActChatAgent instance to bind tools to.
+        agent: The AgentRuntime instance to bind tools to.
 
     Returns:
         List of dspy.Tool objects for document management.

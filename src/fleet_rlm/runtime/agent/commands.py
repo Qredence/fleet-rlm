@@ -11,7 +11,7 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from .runtime import AgentRuntime
 
 # ---------------------------------------------------------------------------
 # Dispatch table: command_name -> (tool_function_name, required_args, optional_args)
@@ -142,7 +142,7 @@ _BLOCKING_COMMANDS = frozenset(
 
 
 async def execute_command(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     command: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
@@ -197,7 +197,7 @@ async def execute_command(
     return result
 
 
-def _resolve_tool(agent: RLMReActChatAgent, tool_name: str) -> Any:
+def _resolve_tool(agent: AgentRuntime, tool_name: str) -> Any:
     """Find a tool by name in the agent's tool list or as a method."""
     for tool in getattr(agent, "react_tools", []):
         name = getattr(tool, "name", None) or getattr(tool, "__name__", None)

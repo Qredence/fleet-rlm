@@ -43,7 +43,7 @@ from fleet_rlm.runtime.execution.streaming_events import (
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -61,7 +61,7 @@ def _persist_streaming_turn_best_effort(
     assistant_message: str,
     error_log_message: str,
     error_log_args: tuple[Any, ...],
-    agent: RLMReActChatAgent | None = None,
+    agent: AgentRuntime | None = None,
 ) -> None:
     """Persist a streaming turn without assuming sync or async execution."""
     if db_session_id is None:
@@ -177,14 +177,16 @@ def is_terminal_stream_event_kind(kind: str) -> bool:
 
 
 def prepare_streaming_turn(
-    agent: RLMReActChatAgent, *, message: str, trace: bool
+    agent: AgentRuntime, *, message: str, trace: bool
 ) -> PreparedStreamingTurn:
     """Validate a message and build the shared streaming turn context."""
     if not message or not message.strip():
         raise ValueError("message cannot be empty")
 
+    from fleet_rlm.runtime.agent import chat_turns as _chat_turns
+
     agent.start()
-    effective_max_iters = agent._prepare_turn(message)
+    effective_max_iters = _chat_turns.prepare_turn(agent, message)
     stream_listeners = [StreamListener(signature_field_name="assistant_response")]
     if trace:
         stream_listeners.append(
@@ -199,7 +201,7 @@ def prepare_streaming_turn(
 
 def build_cancelled_stream_event(
     *,
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     message: str,
     assistant_chunks: list[str],
     ctx: StreamingContext,
@@ -207,7 +209,10 @@ def build_cancelled_stream_event(
     """Build the canonical cancellation event for a partially streamed turn."""
     partial = "".join(assistant_chunks).strip()
     marked_partial = f"{partial}\n\n[cancelled]" if partial else "[cancelled]"
-    agent._append_history(message, marked_partial)
+    from fleet_rlm.runtime.agent import chat_session_state as _chat_session_state
+    from fleet_rlm.runtime.agent import chat_turns as _chat_turns
+
+    _chat_session_state.append_history(agent, message, marked_partial)
     _db_sid = getattr(agent, "_db_session_id", None)
     _persist_streaming_turn_best_effort(
         db_session_id=_db_sid,
@@ -226,7 +231,7 @@ def build_cancelled_stream_event(
         payload=ctx.enrich(
             {
                 "history_turns": agent.history_turns(),
-                **agent._turn_metrics(),
+                **_chat_turns.snapshot_turn_metrics(agent).as_payload(),
             }
         ),
     )
@@ -263,7 +268,7 @@ def _extract_final_response(
 
 def build_final_stream_event(
     *,
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     message: str,
     final_prediction: dspy.Prediction | None,
     assistant_chunks: list[str],
@@ -274,12 +279,15 @@ def build_final_stream_event(
         final_prediction=final_prediction,
         assistant_chunks=assistant_chunks,
     )
-    agent._finalize_turn(trajectory)
+    from fleet_rlm.runtime.agent import chat_session_state as _chat_session_state
+    from fleet_rlm.runtime.agent import chat_turns as _chat_turns
+
+    _chat_turns.finalize_turn(agent, trajectory)
     assistant_response, guardrail_warnings = agent._validate_assistant_response(
         assistant_response=assistant_response,
         trajectory=trajectory,
     )
-    agent._append_history(message, assistant_response)
+    _chat_session_state.append_history(agent, message, assistant_response)
     _db_sid = getattr(agent, "_db_session_id", None)
     _persist_streaming_turn_best_effort(
         db_session_id=_db_sid,
@@ -302,7 +310,7 @@ def build_final_stream_event(
                     trajectory=cast(dict[str, Any], trajectory or {}),
                     history_turns=agent.history_turns(),
                     guardrail_warnings=guardrail_warnings,
-                    turn_metrics=agent._turn_metrics(),
+                    turn_metrics=_chat_turns.snapshot_turn_metrics(agent).as_payload(),
                     fallback=False,
                 ),
                 "final_reasoning": final_reasoning,
@@ -321,7 +329,7 @@ def _build_fallback_events(
     fallback: dict[str, Any],
     exc: Exception,
     effective_max_iters: int,
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     init_phase: bool,
     ctx: StreamingContext,
 ) -> Iterable[StreamEvent]:
@@ -472,7 +480,7 @@ def _emit_prediction_trajectory_events(
 
 
 def _build_stream_program(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     trace: bool,
     is_async_program: bool,
@@ -492,7 +500,7 @@ def _build_stream_program(
     )
 
 
-def _activate_live_event_queue(agent: RLMReActChatAgent) -> _ActiveStreamingTurn:
+def _activate_live_event_queue(agent: AgentRuntime) -> _ActiveStreamingTurn:
     state = _ActiveStreamingTurn()
     state.previous_live_callback = getattr(agent, "_live_event_callback", None)
 
@@ -508,7 +516,7 @@ def _activate_live_event_queue(agent: RLMReActChatAgent) -> _ActiveStreamingTurn
 
 
 def _restore_live_event_queue(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     state: _ActiveStreamingTurn,
 ) -> None:
     agent._live_event_callback = state.previous_live_callback
@@ -536,7 +544,7 @@ def _handle_stream_value(
 
 
 def iter_chat_turn_stream(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     message: str,
     trace: bool,
     cancel_check: Callable[[], bool] | None = None,
@@ -639,7 +647,7 @@ def iter_chat_turn_stream(
 
 
 async def aiter_chat_turn_stream(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     message: str,
     trace: bool,
     cancel_check: Callable[[], bool] | None = None,

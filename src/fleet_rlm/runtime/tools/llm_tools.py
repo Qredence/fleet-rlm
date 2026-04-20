@@ -32,7 +32,7 @@ from fleet_rlm.runtime.agent.delegation_policy import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +374,7 @@ class LLMQueryMixin:
 # ---------------------------------------------------------------------------
 
 
-def _runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
+def _runtime_degradation_payload(agent: AgentRuntime) -> dict[str, Any]:
     """Load runtime degradation metadata without a fragile module-level import."""
     from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
 
@@ -415,7 +415,7 @@ def prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
 
 
 def run_cached_runtime_module(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     module_name: str,
     **kwargs: Any,
 ) -> tuple[Any | None, dict[str, Any] | None, bool]:
@@ -431,7 +431,7 @@ def run_cached_runtime_module(
 
 
 def runtime_metadata(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     prediction: Any,
     *,
     fallback_used: bool,

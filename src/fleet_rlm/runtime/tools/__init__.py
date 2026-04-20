@@ -16,7 +16,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 
@@ -65,7 +65,7 @@ _RLM_ONLY_TOOL_NAMES: frozenset[str] = _RECURSIVE_RLM_TOOL_NAMES
 
 
 def build_tool_list(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     extra_tools: list[Callable[..., Any]] | None = None,
 ) -> list[Any]:
     """Build the DSPy ReAct tool list with closures bound to *agent*.

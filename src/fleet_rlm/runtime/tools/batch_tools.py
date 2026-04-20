@@ -22,11 +22,11 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ..agent.runtime import AgentRuntime
 
 
 def build_batch_tools(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
 ) -> tuple[list[Any], list[Any]]:
     """Build batch orchestration tools bound to *agent*.
 

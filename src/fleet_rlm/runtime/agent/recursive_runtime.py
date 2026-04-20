@@ -48,7 +48,7 @@ from .recursive_context_selection import (
 )
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from .runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def _execution_profile_name(interpreter: Any) -> str:
 
 
 def _delegate_streaming_context(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     interpreter: Any,
     effective_max_iters: int,
@@ -245,7 +245,7 @@ def _delegate_trajectory_events(
 
 
 async def spawn_delegate_sub_agent_async(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     prompt: str,
     context: str = "",

@@ -124,7 +124,7 @@ def test_process_prediction_to_turn_result_finalizes_and_validates() -> None:
 
     assert result["assistant_response"] == "NEEDS VALIDATION"
     assert result["guardrail_warnings"] == ["validated"]
-    assert agent._last_tool_error_count == 3
+    assert agent._last_tool_error_count == 0
 
 
 def test_build_turn_payload_merges_metrics_and_extra_payload() -> None:

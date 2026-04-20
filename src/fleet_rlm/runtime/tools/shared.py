@@ -18,7 +18,7 @@ from fleet_rlm.runtime.content.chunking import (
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
 
 def normalize_strategy(strategy: str) -> str:
@@ -74,7 +74,7 @@ def chunk_to_text(chunk: Any) -> str:
     return json.dumps(chunk, ensure_ascii=False, default=str)
 
 
-def resolve_document(agent: RLMReActChatAgent, alias: str) -> str:
+def resolve_document(agent: AgentRuntime, alias: str) -> str:
     """Resolve a document alias to its full text content."""
     if alias == "active":
         if agent.active_alias is None:
@@ -86,7 +86,7 @@ def resolve_document(agent: RLMReActChatAgent, alias: str) -> str:
 
 
 def execute_submit(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     code: str,
     *,
     variables: dict[str, Any] | None = None,
@@ -112,7 +112,7 @@ def execute_submit(
 
 
 async def aexecute_submit(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     code: str,
     *,
     variables: dict[str, Any] | None = None,
@@ -146,7 +146,7 @@ async def _await_if_needed(value: Any) -> Any:
 
 
 def _normalize_submit_result(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     result: Any,
     *,
     variables: dict[str, Any] | None = None,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from fleet_rlm.runtime.agent import RLMReActChatAgent
+from fleet_rlm.runtime.agent.chat_turns import prepare_turn as _prepare_turn
 from fleet_rlm.runtime.agent.delegation_policy import (
     claim_delegate_slot_or_error,
     invoke_runtime_module,
@@ -38,7 +39,7 @@ def test_invoke_runtime_module_records_budget_and_fallback() -> None:
         interpreter=FakeInterpreter(),
         delegate_max_calls_per_turn=2,
     )
-    agent._prepare_turn("inspect runtime module")
+    _prepare_turn(agent,"inspect runtime module")
     agent.get_runtime_module = lambda _name: (  # type: ignore[method-assign]
         lambda **_kwargs: {"answer": "ok"}
     )
@@ -62,7 +63,7 @@ def test_invoke_runtime_module_records_budget_and_fallback() -> None:
 
 def test_invoke_runtime_module_uses_context_builder_for_module(monkeypatch) -> None:
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
-    agent._prepare_turn("structured runtime module")
+    _prepare_turn(agent,"structured runtime module")
     agent.delegate_lm = object()
     captured: dict[str, object] = {}
 
@@ -104,7 +105,7 @@ def test_normalize_delegate_result_truncates_and_tracks_counter() -> None:
         interpreter=FakeInterpreter(),
         delegate_result_truncation_chars=256,
     )
-    agent._prepare_turn("truncate child output")
+    _prepare_turn(agent,"truncate child output")
     raw_answer = "x" * 300
 
     payload = normalize_delegate_result(
@@ -127,7 +128,7 @@ def test_invoke_runtime_module_fallback_catches_second_failure(monkeypatch) -> N
         interpreter=FakeInterpreter(),
         delegate_max_calls_per_turn=2,
     )
-    agent._prepare_turn("inspect runtime module")
+    _prepare_turn(agent,"inspect runtime module")
     agent.delegate_lm = object()
 
     call_count = 0

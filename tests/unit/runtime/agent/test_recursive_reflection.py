@@ -217,7 +217,6 @@ async def test_spawn_delegate_sub_agent_async_runs_recursive_verification_before
     agent = RLMReActChatAgent(
         interpreter=FakeInterpreter(),
         recursive_decomposition_enabled=True,
-        recursive_verification_enabled=True,
         recursive_reflection_enabled=True,
     )
     agent.interpreter.max_llm_calls = 10
@@ -448,7 +447,6 @@ async def test_spawn_delegate_sub_agent_async_preserves_aggregate_when_verificat
     agent = RLMReActChatAgent(
         interpreter=FakeInterpreter(),
         recursive_decomposition_enabled=True,
-        recursive_verification_enabled=True,
     )
     agent.interpreter.max_llm_calls = 10
     agent.prepare_routed_turn()

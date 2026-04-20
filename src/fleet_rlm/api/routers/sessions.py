@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 import os
 from pathlib import Path as FsPath
-from typing import cast
+from typing import Annotated, cast
 import uuid
 
 from fastapi import APIRouter, HTTPException, Path, Query
@@ -247,12 +247,10 @@ async def list_sessions_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    search: str | None = Query(default=None, description="Full-text search on title"),
-    status: str | None = Query(
-        default=None, description="Filter by status (active, archived)"
-    ),
-    limit: int = Query(default=20, ge=1, le=100, description="Page size"),
-    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    search: Annotated[str | None, Query(description="Full-text search on title")] = None,
+    status: Annotated[str | None, Query(description="Filter by status (active, archived)")] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
     """Return paginated session history filtered by the caller's ownership."""
     persisted_identity = await _resolve_persisted_identity(
@@ -348,7 +346,7 @@ async def get_session_detail(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: str = Path(description="Identifier of the session to inspect."),
+    session_id: Annotated[str, Path(description="Identifier of the session to inspect.")],
 ) -> SessionDetailResponse:
     """Return full session detail with turn count."""
     persisted_identity = await _resolve_persisted_identity(
@@ -429,11 +427,9 @@ async def get_session_turns(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: str = Path(
-        description="Identifier of the session whose turns to list."
-    ),
-    limit: int = Query(default=50, ge=1, le=200, description="Page size"),
-    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    session_id: Annotated[str, Path(description="Identifier of the session whose turns to list.")],
+    limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> TurnListResponse:
     """Return paginated turns for a session."""
     persisted_identity = await _resolve_persisted_identity(
@@ -511,7 +507,7 @@ async def delete_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: str = Path(description="Identifier of the session to archive."),
+    session_id: Annotated[str, Path(description="Identifier of the session to archive.")],
 ) -> SessionDeleteResponse:
     """Archive a session (soft delete)."""
     persisted_identity = await _resolve_persisted_identity(
@@ -559,9 +555,7 @@ async def export_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    session_id: str = Path(
-        description="Identifier of the session to export as a dataset."
-    ),
+    session_id: Annotated[str, Path(description="Identifier of the session to export as a dataset.")],
 ) -> DatasetResponse:
     """Export a session as a GEPA dataset."""
     persisted_identity = await _resolve_persisted_identity(

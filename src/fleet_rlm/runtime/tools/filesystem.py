@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+    from ..agent.runtime import AgentRuntime
 
 
 @dataclass(slots=True)
 class _FilesystemToolContext:
     """Shared tool context for host filesystem operations."""
 
-    agent: RLMReActChatAgent
+    agent: AgentRuntime
 
 
 def _list_files_impl(
@@ -194,7 +194,7 @@ def _find_files_impl(
     }
 
 
-def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_filesystem_tools(agent: AgentRuntime) -> list[Any]:
     """Build filesystem navigation tools with a shared context object."""
     from dspy import Tool
 

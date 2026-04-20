@@ -17,7 +17,7 @@ from ..llm_tools import runtime_metadata as _runtime_metadata
 from .common import _resolve_path_or_error, _SandboxToolContext
 
 if TYPE_CHECKING:
-    from ...agent.chat_agent import RLMReActChatAgent
+    from ...agent.runtime import AgentRuntime
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def _reload_memory_volume_best_effort(
 
 
 def _resolve_memory_root(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     root_path: str,
 ) -> tuple[str | None, dict[str, Any] | None]:
     roots = runtime_storage_roots(cast(RLMInterpreterProtocol, agent.interpreter))
@@ -122,7 +122,7 @@ def _normalize_non_empty_strings(value: Any) -> list[str]:
     return normalized
 
 
-def build_memory_intelligence_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_memory_intelligence_tools(agent: AgentRuntime) -> list[Any]:
     """Build memory-analysis tools backed by cached runtime modules."""
     from dspy import Tool
 

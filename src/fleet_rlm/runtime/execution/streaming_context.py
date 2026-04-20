@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +72,7 @@ class StreamingContext:
     @classmethod
     def from_agent(
         cls,
-        agent: RLMReActChatAgent,
+        agent: AgentRuntime,
         *,
         effective_max_iters: int | None = None,
     ) -> StreamingContext:

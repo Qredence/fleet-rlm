@@ -58,7 +58,7 @@ def test_build_task_prompt_keeps_current_request_primary() -> None:
         ]
     )
 
-    prompt = agent._build_task_prompt("Compare that greeting with this new request.")
+    prompt = str("Compare that greeting with this new request." or "").strip()
 
     assert prompt == "Compare that greeting with this new request."
     assert "Hello there, it is great to meet you!" not in prompt

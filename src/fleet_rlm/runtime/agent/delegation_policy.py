@@ -9,18 +9,17 @@ from typing import TYPE_CHECKING, Any, Literal
 import dspy
 
 from fleet_rlm.runtime.config import build_dspy_context
-
-from .chat_turns import TurnDelegationState
+from .turn_state import TurnDelegationState
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from .runtime import AgentRuntime
 
 
 @dataclass(slots=True)
 class RuntimeModuleExecutionRequest:
     """Typed input for invoking a cached runtime module with fallback rules."""
 
-    agent: RLMReActChatAgent
+    agent: AgentRuntime
     module_name: str
     module_kwargs: dict[str, Any]
 
@@ -35,7 +34,7 @@ class RuntimeModuleExecutionResult:
 
 
 def claim_delegate_slot_or_error(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     depth_error_suffix: str,
     budget_kind: Literal["runtime_module", "recursive_delegate"] = "runtime_module",
@@ -93,14 +92,13 @@ def claim_delegate_slot_or_error(
     return None
 
 
-def record_delegate_fallback(agent: RLMReActChatAgent) -> None:
-    """Increment the delegate fallback counter when available."""
-    record_fallback = getattr(agent, "_record_delegate_fallback", None)
-    if callable(record_fallback):
-        record_fallback()
+def record_delegate_fallback(agent: AgentRuntime) -> None:
+    """Increment the delegate fallback counter."""
+    from .chat_turns import record_delegate_fallback as _fn
+    _fn(agent)
 
 
-def remaining_llm_budget(agent: RLMReActChatAgent) -> int:
+def remaining_llm_budget(agent: AgentRuntime) -> int:
     """Compute the remaining parent interpreter sub-LLM budget."""
     interpreter = agent.interpreter
     limit = max(1, int(getattr(interpreter, "max_llm_calls", 1)))
@@ -119,7 +117,7 @@ def share_llm_budget(*, parent: Any, child: Any) -> Any:
 
 
 def build_child_interpreter(
-    agent: RLMReActChatAgent, *, remaining_llm_budget: int
+    agent: AgentRuntime, *, remaining_llm_budget: int
 ) -> Any:
     """Reuse or create the interpreter for a recursive child run."""
     parent = agent.interpreter
@@ -135,7 +133,7 @@ def build_child_interpreter(
 
 def normalize_delegate_result(
     *,
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     raw_result: dict[str, Any],
     fallback_used: bool,
 ) -> dict[str, Any]:
@@ -151,9 +149,8 @@ def normalize_delegate_result(
         truncated = answer_text[:truncation_limit].rstrip()
         answer_text = f"{truncated}\n\n[truncated delegate output]"
         result_copy["delegate_output_truncated"] = True
-        record_truncation = getattr(agent, "_record_delegate_truncation", None)
-        if callable(record_truncation):
-            record_truncation()
+        from .chat_turns import record_delegate_truncation as _fn
+        _fn(agent)
     else:
         result_copy["delegate_output_truncated"] = False
 

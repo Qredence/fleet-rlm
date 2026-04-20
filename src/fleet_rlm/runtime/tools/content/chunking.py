@@ -23,7 +23,7 @@ from ..shared import (
 )
 
 if TYPE_CHECKING:
-    from ...agent.chat_agent import RLMReActChatAgent
+    from ...agent.runtime import AgentRuntime
 
 
 # ---------------------------------------------------------------------------
@@ -31,14 +31,14 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def build_chunking_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_chunking_tools(agent: AgentRuntime) -> list[Any]:
     """Build chunking tools with closures bound to *agent*.
 
     Each inner function has a descriptive ``__name__``, docstring, and
     type-hinted parameters so ``dspy.ReAct`` can introspect them cleanly.
 
     Args:
-        agent: The RLMReActChatAgent instance to bind tools to.
+        agent: The AgentRuntime instance to bind tools to.
 
     Returns:
         List of dspy.Tool objects for document chunking.

@@ -10,70 +10,14 @@ import uuid
 
 import dspy
 
-from .trajectory_errors import trajectory_has_tool_errors
+from .trajectory_errors import count_tool_errors, trajectory_has_tool_errors
 from .chat_session_state import append_history, history_turns
+from .turn_state import TurnDelegationState
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from .runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class TurnDelegationState:
-    """Mutable per-turn counters for ReAct-to-RLM delegation behavior."""
-
-    effective_max_iters: int = 1
-    delegate_calls_turn: int = 0
-    runtime_module_calls_turn: int = 0
-    recursive_delegate_calls_turn: int = 0
-    delegate_fallback_count_turn: int = 0
-    delegate_result_truncated_count_turn: int = 0
-
-    def reset(self, *, effective_max_iters: int) -> int:
-        self.delegate_calls_turn = 0
-        self.runtime_module_calls_turn = 0
-        self.recursive_delegate_calls_turn = 0
-        self.delegate_fallback_count_turn = 0
-        self.delegate_result_truncated_count_turn = 0
-        self.effective_max_iters = max(1, int(effective_max_iters))
-        return self.effective_max_iters
-
-    def claim_runtime_module_slot(self, *, max_calls_per_turn: int) -> tuple[bool, int]:
-        limit = max(1, int(max_calls_per_turn))
-        if self.runtime_module_calls_turn >= limit:
-            return False, limit
-        self.runtime_module_calls_turn += 1
-        self.delegate_calls_turn += 1
-        return True, limit
-
-    def claim_recursive_delegate_slot(
-        self, *, max_calls_per_turn: int
-    ) -> tuple[bool, int]:
-        limit = max(1, int(max_calls_per_turn))
-        if self.recursive_delegate_calls_turn >= limit:
-            return False, limit
-        self.recursive_delegate_calls_turn += 1
-        self.delegate_calls_turn += 1
-        return True, limit
-
-    def record_fallback(self) -> None:
-        self.delegate_fallback_count_turn += 1
-
-    def record_truncation(self) -> None:
-        self.delegate_result_truncated_count_turn += 1
-
-    def as_payload(self) -> dict[str, int]:
-        return {
-            "effective_max_iters": int(self.effective_max_iters),
-            "delegate_calls_turn": int(self.delegate_calls_turn),
-            "runtime_module_calls_turn": int(self.runtime_module_calls_turn),
-            "recursive_delegate_calls_turn": int(self.recursive_delegate_calls_turn),
-            "delegate_fallback_count_turn": int(self.delegate_fallback_count_turn),
-            "delegate_result_truncated_count_turn": int(
-                self.delegate_result_truncated_count_turn
-            ),
-        }
 
 
 @dataclass(slots=True)
@@ -100,7 +44,7 @@ class TurnMetricsSnapshot:
         }
 
 
-def snapshot_turn_metrics(agent: RLMReActChatAgent) -> TurnMetricsSnapshot:
+def snapshot_turn_metrics(agent: AgentRuntime) -> TurnMetricsSnapshot:
     """Capture the current per-turn counters from *agent*."""
     state = _turn_delegation_state(agent)
     return TurnMetricsSnapshot(
@@ -174,7 +118,7 @@ def prediction_guardrail_warnings(prediction: dspy.Prediction) -> list[str]:
 
 
 def build_turn_result(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     assistant_response: str,
     trajectory: dict[str, Any],
@@ -198,7 +142,7 @@ def build_turn_result(
 
 
 def build_turn_payload(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     trajectory: dict[str, Any],
     guardrail_warnings: list[str],
@@ -230,7 +174,7 @@ def build_turn_payload(
     return payload
 
 
-def prepare_turn(agent: RLMReActChatAgent, user_request: str) -> int:
+def prepare_turn(agent: AgentRuntime, user_request: str) -> int:
     """Initialize per-turn counters and compute the effective iteration budget."""
     _reset_runtime_degradation_state(agent)
     return _turn_delegation_state(agent).reset(
@@ -239,7 +183,7 @@ def prepare_turn(agent: RLMReActChatAgent, user_request: str) -> int:
 
 
 def prepare_routed_turn(
-    agent: RLMReActChatAgent, *, effective_max_iters: int | None = None
+    agent: AgentRuntime, *, effective_max_iters: int | None = None
 ) -> int:
     """Reset per-turn counters for an externally-routed RLM turn."""
     _reset_runtime_degradation_state(agent)
@@ -255,7 +199,7 @@ def prepare_routed_turn(
     )
 
 
-def compute_effective_max_iters(agent: RLMReActChatAgent, user_request: str) -> int:
+def compute_effective_max_iters(agent: AgentRuntime, user_request: str) -> int:
     """Compute the adaptive ReAct iteration budget for the current request."""
     baseline = max(1, int(agent.react_max_iters))
     if not agent.enable_adaptive_iters:
@@ -284,36 +228,36 @@ def compute_effective_max_iters(agent: RLMReActChatAgent, user_request: str) -> 
     return baseline
 
 
-def finalize_turn(agent: RLMReActChatAgent, trajectory: Any) -> None:
+def finalize_turn(agent: AgentRuntime, trajectory: Any) -> None:
     """Capture post-turn metrics for adaptive follow-up turns."""
-    agent._last_tool_error_count = agent._count_tool_errors(trajectory)
+    agent._last_tool_error_count = count_tool_errors(trajectory)
 
 
-def claim_runtime_module_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
+def claim_runtime_module_slot(agent: AgentRuntime) -> tuple[bool, int]:
     """Claim one runtime-module slot from the per-turn budget."""
     return _turn_delegation_state(agent).claim_runtime_module_slot(
         max_calls_per_turn=agent.delegate_max_calls_per_turn
     )
 
 
-def claim_recursive_delegate_slot(agent: RLMReActChatAgent) -> tuple[bool, int]:
+def claim_recursive_delegate_slot(agent: AgentRuntime) -> tuple[bool, int]:
     """Claim one recursive delegate slot from the per-turn budget."""
     return _turn_delegation_state(agent).claim_recursive_delegate_slot(
         max_calls_per_turn=agent.delegate_max_calls_per_turn
     )
 
 
-def record_delegate_fallback(agent: RLMReActChatAgent) -> None:
+def record_delegate_fallback(agent: AgentRuntime) -> None:
     """Record one delegate-LM fallback for the active turn."""
     _turn_delegation_state(agent).record_fallback()
 
 
-def record_delegate_truncation(agent: RLMReActChatAgent) -> None:
+def record_delegate_truncation(agent: AgentRuntime) -> None:
     """Record one truncated delegate result for the active turn."""
     _turn_delegation_state(agent).record_truncation()
 
 
-def runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
+def runtime_degradation_payload(agent: AgentRuntime) -> dict[str, Any]:
     """Return additive runtime degradation markers from the active interpreter."""
     interpreter = getattr(agent, "interpreter", None)
     metadata_fn = getattr(interpreter, "current_runtime_metadata", None)
@@ -335,7 +279,7 @@ def runtime_degradation_payload(agent: RLMReActChatAgent) -> dict[str, Any]:
 
 
 def record_runtime_degradation(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     category: str | None = None,
     phase: str | None = None,
@@ -367,7 +311,7 @@ def _parsed_session_uuid(db_session_id: object) -> uuid.UUID | None:
 
 def _persist_turn_best_effort(
     *,
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     message: str,
     assistant_response: str,
 ) -> None:
@@ -437,7 +381,7 @@ def _persist_turn_best_effort(
 
 
 def process_prediction_to_turn_result(
-    agent: RLMReActChatAgent,
+    agent: AgentRuntime,
     *,
     prediction: dspy.Prediction,
     message: str,
@@ -477,7 +421,7 @@ def process_prediction_to_turn_result(
     )
 
 
-def _turn_delegation_state(agent: RLMReActChatAgent) -> TurnDelegationState:
+def _turn_delegation_state(agent: AgentRuntime) -> TurnDelegationState:
     state = getattr(agent, "_turn_delegation_state", None)
     if isinstance(state, TurnDelegationState):
         return state
@@ -488,7 +432,7 @@ def _turn_delegation_state(agent: RLMReActChatAgent) -> TurnDelegationState:
     return fallback
 
 
-def _reset_runtime_degradation_state(agent: RLMReActChatAgent) -> None:
+def _reset_runtime_degradation_state(agent: AgentRuntime) -> None:
     reset = getattr(agent.interpreter, "reset_runtime_degradation_state", None)
     if callable(reset):
         reset()

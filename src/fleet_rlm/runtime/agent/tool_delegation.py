@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 if TYPE_CHECKING:
-    from .chat_agent import RLMReActChatAgent
+    from .runtime import AgentRuntime
 
 
 # Frozen set of tool names that support delegation
@@ -71,14 +71,14 @@ TOOL_DELEGATE_NAMES: frozenset[str] = frozenset(
 )
 
 
-def get_tool_by_name(agent: RLMReActChatAgent, name: str) -> Callable[..., Any]:
+def get_tool_by_name(agent: AgentRuntime, name: str) -> Callable[..., Any]:
     """Look up a tool by name in the agent's tool list.
 
     Handles both raw callables (via ``__name__``) and ``dspy.Tool``
     wrappers (via ``.name``).
 
     Args:
-        agent: The RLMReActChatAgent instance
+        agent: The AgentRuntime instance
         name: The tool name to look up
 
     Returns:

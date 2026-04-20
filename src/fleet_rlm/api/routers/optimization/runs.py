@@ -9,7 +9,7 @@ import os
 import uuid
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import (
     APIRouter,
@@ -581,15 +581,9 @@ async def list_runs(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    status: str | None = Query(
-        default=None, description="Filter by status: running, completed, failed"
-    ),
-    limit: int = Query(
-        default=50, ge=1, le=200, description="Maximum number of runs to return."
-    ),
-    offset: int = Query(
-        default=0, ge=0, description="Pagination offset into the run list."
-    ),
+    status: Annotated[str | None, Query(description="Filter by status: running, completed, failed")] = None,
+    limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of runs to return.")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset into the run list.")] = 0,
 ) -> list[OptimizationRunResponse]:
     """List optimization runs, most recent first."""
     persisted_identity = await _resolve_persisted_identity(
@@ -651,7 +645,7 @@ async def compare_runs(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_ids: str = Query(description="Comma-separated run IDs to compare (max 5)."),
+    run_ids: Annotated[str, Query(description="Comma-separated run IDs to compare (max 5).")],
 ) -> RunComparisonResponse:
     """Compare prompt diffs and scores across optimization runs."""
     persisted_identity = await _resolve_persisted_identity(
@@ -766,7 +760,7 @@ async def get_run(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_id: str = ApiPath(description="Identifier of the optimization run to fetch."),
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run to fetch.")],
 ) -> OptimizationRunResponse:
     """Get a single optimization run by ID."""
     persisted_identity = await _resolve_persisted_identity(
@@ -824,18 +818,9 @@ async def get_run_results(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
-    run_id: str = ApiPath(
-        description="Identifier of the optimization run whose results to list."
-    ),
-    limit: int = Query(
-        default=100,
-        ge=1,
-        le=500,
-        description="Maximum number of evaluation rows to return.",
-    ),
-    offset: int = Query(
-        default=0, ge=0, description="Pagination offset into the evaluation results."
-    ),
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run whose results to list.")],
+    limit: Annotated[int, Query(ge=1, le=500, description="Maximum number of evaluation rows to return.")] = 100,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset into the evaluation results.")] = 0,
 ) -> EvaluationResultsResponse:
     """Return per-example evaluation results for an optimization run."""
     persisted_identity = await _resolve_persisted_identity(

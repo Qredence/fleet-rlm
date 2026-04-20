@@ -29,14 +29,14 @@ from ..shared import (
 )
 
 if TYPE_CHECKING:
-    from ...agent.chat_agent import RLMReActChatAgent
+    from ...agent.runtime import AgentRuntime
 
 
 @dataclass(slots=True)
 class _DelegateToolContext:
     """Shared context for RLM delegation tool callables."""
 
-    agent: RLMReActChatAgent
+    agent: AgentRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +131,7 @@ def _build_tool(registration: _ToolRegistration) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _has_interpreter(agent: RLMReActChatAgent) -> bool:
+def _has_interpreter(agent: AgentRuntime) -> bool:
     """Check whether the agent has a started interpreter for variable mode."""
     interp = getattr(agent, "interpreter", None)
     return interp is not None and getattr(interp, "_started", False)
@@ -192,7 +192,7 @@ async def _variable_mode_rlm_query(
         }
 
 
-def build_rlm_delegate_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_rlm_delegate_tools(agent: AgentRuntime) -> list[Any]:
     """Build cached-runtime and recursive delegation tools bound to *agent*."""
     ctx = _DelegateToolContext(agent=agent)
 

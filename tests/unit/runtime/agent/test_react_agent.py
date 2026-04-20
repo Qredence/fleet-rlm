@@ -195,14 +195,14 @@ def test_forward_rlm_only_uses_explicit_forced_runtime_handoff(monkeypatch):
         return dspy.Prediction(assistant_response="forced", trajectory={})
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.agent.chat_agent._run_forced_rlm_turn_impl",
+        "fleet_rlm.runtime.agent.forced_routing.run_forced_rlm_turn",
         _fake_run_forced,
     )
 
     prediction = agent.forward(user_request="deep task")
 
     assert prediction.assistant_response == "forced"
-    assert captured == {"agent": agent, "message": "deep task"}
+    assert captured == {"agent": agent._runtime, "message": "deep task"}
 
 
 def test_forward_uses_deep_iters_for_deep_analysis_prompt(monkeypatch):
@@ -288,7 +288,7 @@ def test_forward_disable_adaptive_iters_keeps_baseline(monkeypatch):
 
 
 def test_chat_turn_uses_module_call_semantics(monkeypatch):
-    """chat_turn() should invoke the DSPy module call path (`self(...)`)."""
+    """chat_turn() should invoke the underlying DSPy module via orchestrator."""
     called: dict[str, object] = {"used": False, "kwargs": {}}
 
     def _fake_module_call(self, *args, **kwargs):
@@ -300,13 +300,15 @@ def test_chat_turn_uses_module_call_semantics(monkeypatch):
             trajectory={"tool_name_0": "finish"},
         )
 
-    monkeypatch.setattr(RLMReActChatAgent, "__call__", _fake_module_call)
+    from fleet_rlm.runtime.agent.agent import RLMReActAgent
+
+    monkeypatch.setattr(RLMReActAgent, "forward", _fake_module_call)
 
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     result = agent.chat_turn("hello")
 
     assert called["used"] is True
-    assert called["kwargs"] == {"user_request": "hello"}
+    assert called["kwargs"]["user_request"] == "hello"
     assert result["assistant_response"] == "module-call:hello"
     assert result["history_turns"] == 1
     assert agent.history.messages[0]["user_request"] == "hello"
