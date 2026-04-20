@@ -30,11 +30,6 @@
 - [Settings](explanation/product-spec.md)
 - [History](reference/frontend-backend-integration.md)
 
-## Historical Notes
-
-- [Historical Snapshots](historical/index.md)
-- [Architecture and migration history](historical/index.md#architecture-and-migration-history)
-
 ## Complete Table Of Contents
 
 - [SUMMARY.md](SUMMARY.md)

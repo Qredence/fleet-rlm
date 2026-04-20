@@ -50,11 +50,6 @@ Then open `http://localhost:8000`.
 - [User interaction flows](explanation/user-flows.md)
 - [Component UML](explanation/component-uml.md)
 
-## Historical Notes
-
-- [Historical snapshots](historical/index.md)
-- [Architecture and migration history](historical/index.md#architecture-and-migration-history)
-
 ## Documentation Map
 
 - [Tutorials](tutorials/index.md)

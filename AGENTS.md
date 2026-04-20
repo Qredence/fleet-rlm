@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed recursive DSPy runtime. It layers a thin FastAPI/WebSocket transport shell and a narrow Microsoft Agent Framework outer host over a core recursive worker/runtime that executes tasks in Daytona sandboxes.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed DSPy ReAct agent runtime. It layers a thin FastAPI/WebSocket transport shell over a single DSPy ReAct agent that executes tasks in Daytona sandboxes.
 
 The repo ships as a single Python package (`fleet-rlm`) with a bundled React frontend. Published installs include built frontend assets, so end users do not need a separate frontend build step.
 
@@ -44,11 +44,10 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 
 ## Architecture and Code Organization
 
-The backend is organized into four layers, innermost first:
+The backend is organized into two layers, innermost first:
 
-1. **Worker / Runtime Core** — recursive chat/runtime logic
-   - `src/fleet_rlm/worker/` — workspace task stream boundary, streaming contracts
-   - `src/fleet_rlm/runtime/agent/` — main cognition loop (`chat_agent.py`, `recursive_runtime.py`, DSPy signatures)
+1. **DSPy ReAct Agent** — single agent with tool registry
+   - `src/fleet_rlm/runtime/agent/` — agent module (`agent.py`), runtime (`runtime.py`), chat orchestration (`chat.py`), session state, signatures
    - `src/fleet_rlm/runtime/execution/` — execution drivers and event assembly
    - `src/fleet_rlm/runtime/models/` — runtime model construction and registry
    - `src/fleet_rlm/runtime/content/` — content-oriented helpers
@@ -60,10 +59,7 @@ The backend is organized into four layers, innermost first:
    - `src/fleet_rlm/integrations/database/` — async Neon/Postgres persistence (`FleetRepository`)
    - `src/fleet_rlm/integrations/local_store.py` — lightweight SQLite sidecar
 
-3. **Agent Framework Outer Host** — hosted policy layer
-   - `src/fleet_rlm/agent_host/` — workflow, HITL checkpointing, terminal flow, sessions, execution events, REPL bridge
-
-4. **Transport Shell** — auth, routing, websockets, SPA serving
+3. **Transport Shell** — auth, routing, websockets, SPA serving
    - `src/fleet_rlm/api/main.py` — app factory, lifespan, route mounting, SPA asset resolution
    - `src/fleet_rlm/api/bootstrap.py` — runtime bootstrap, LM loading, persistence init
    - `src/fleet_rlm/api/routers/` — HTTP routers and websocket endpoints
@@ -172,7 +168,7 @@ make release                  # clean + check + security + build-release
 - **Docstrings**: required for modules and public functions
 - **Type hints**: required on all function signatures
 - **Import rules**: config/package-root modules must not have import-time side effects (no DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks at import time)
-- **Layering**: keep transport logic in `api/`, business logic in `runtime/` or `src/fleet_rlm/integrations/daytona/`, and hosted policy in `agent_host/`
+- **Layering**: keep transport logic in `api/`, business logic in `runtime/` or `src/fleet_rlm/integrations/daytona/`
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `test:`, `chore:`
 
 ### Frontend
@@ -364,9 +360,9 @@ Backend reading order for understanding the runtime story:
 
 1. `src/fleet_rlm/api/main.py`
 2. `src/fleet_rlm/api/routers/ws/endpoint.py`
-3. `src/fleet_rlm/agent_host/workflow.py`
-4. `src/fleet_rlm/worker/streaming.py`
-5. `src/fleet_rlm/runtime/factory.py`
-6. `src/fleet_rlm/runtime/agent/chat_agent.py`
+3. `src/fleet_rlm/runtime/factory.py`
+4. `src/fleet_rlm/runtime/agent/agent.py`
+5. `src/fleet_rlm/runtime/agent/runtime.py`
+6. `src/fleet_rlm/runtime/agent/chat.py`
 7. `src/fleet_rlm/integrations/daytona/interpreter.py`
 8. `src/fleet_rlm/integrations/daytona/runtime.py`
