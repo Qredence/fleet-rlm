@@ -30,7 +30,7 @@ from ...runtime_services.chat_runtime import (
     prepare_chat_runtime as _prepare_chat_runtime_service,
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from ...server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from .execution_support import get_execution_emitter
 from .failures import chat_startup_error_payload
 from .helpers import (

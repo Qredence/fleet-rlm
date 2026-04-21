@@ -16,7 +16,7 @@ from fleet_rlm.runtime.factory import build_chat_agent
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
 from ..dependencies import ServerState
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 if TYPE_CHECKING:
     from ..routers.ws.types import SessionContext

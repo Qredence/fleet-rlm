@@ -18,7 +18,7 @@ from fleet_rlm.integrations.observability.mlflow_context import (
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.runtime.execution.streaming import is_terminal_stream_event_kind
+from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder

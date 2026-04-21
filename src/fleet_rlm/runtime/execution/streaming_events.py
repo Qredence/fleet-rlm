@@ -18,6 +18,18 @@ from dspy.streaming.messages import StatusMessageProvider
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 # ═══════════════════════════════════════════════════════════════════════
+# Terminal event helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"done", "error"})
+
+
+def is_terminal_stream_event_kind(kind: str) -> bool:
+    """Return whether *kind* is terminal for both runtime and websocket flows."""
+    return kind in TERMINAL_STREAM_EVENT_KINDS
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Status parsing and tool/HITL event helpers  (was streaming_status.py)
 # ═══════════════════════════════════════════════════════════════════════
 

@@ -26,7 +26,7 @@ from ..schemas.core import (
     TurnItem,
     TurnListResponse,
 )
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 _TURN_COUNT_QUERY_LIMIT = 1

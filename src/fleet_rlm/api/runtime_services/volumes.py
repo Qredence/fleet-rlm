@@ -23,7 +23,7 @@ from ..schemas.core import (
     VolumeProvider,
     VolumeTreeResponse,
 )
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 
 VolumeOperation = Callable[[str, str, int], dict[str, Any] | Awaitable[dict[str, Any]]]

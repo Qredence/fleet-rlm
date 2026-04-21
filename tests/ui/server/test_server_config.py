@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from fleet_rlm.api.config import ServerRuntimeConfig, resolve_server_volume_name
 from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
-from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
     HealthResponse,

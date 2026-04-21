@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.integrations.database import ChatSessionStatus
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
