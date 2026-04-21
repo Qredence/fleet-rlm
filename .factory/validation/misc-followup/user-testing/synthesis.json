@@ -1,0 +1,67 @@
+{
+  "milestone": "misc-followup",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "notes": {
+    "testableAssertionsFromFulfills": "The only implementation feature in the misc-followup milestone is 'docs-update-stale-references', which has an empty 'fulfills' array. No new testable assertions were introduced by this milestone.",
+    "regressionChecks": [
+      {
+        "check": "Stale Daytona module references in docs/",
+        "command": "rg 'daytona/volumes\\.py|daytona/runtime_helpers\\.py|daytona/repo\\.py|daytona/workspace\\.py|daytona/snapshots\\.py|daytona/admin\\.py' docs/",
+        "result": "No matches — docs are clean"
+      },
+      {
+        "check": "Lint",
+        "command": "make lint",
+        "result": "Passed (exit 0)"
+      },
+      {
+        "check": "Format",
+        "command": "make format-check",
+        "result": "Passed (exit 0, 308 files already formatted)"
+      },
+      {
+        "check": "Typecheck",
+        "command": "make typecheck",
+        "result": "Passed (exit 0)"
+      },
+      {
+        "check": "Unit tests",
+        "command": "make test-unit",
+        "result": "Passed (exit 0, all tests green)"
+      },
+      {
+        "check": "UI tests",
+        "command": "make test-ui",
+        "result": "Passed (exit 0, all tests green)"
+      },
+      {
+        "check": "Import-time side effects (VAL-CROSS-005)",
+        "command": "python -c import fleet_rlm and check banned modules",
+        "result": "Passed — no banned modules (dspy, mlflow, posthog, litellm, daytona) loaded at import time"
+      },
+      {
+        "check": "Daytona imports (VAL-DAYTONA-002)",
+        "command": "python -c 'from fleet_rlm.integrations.daytona import *'",
+        "result": "Passed"
+      },
+      {
+        "check": "Database imports (VAL-DB-002)",
+        "command": "python -c 'from fleet_rlm.integrations.database import FleetRepository, DatabaseManager'",
+        "result": "Passed"
+      }
+    ],
+    "conclusion": "The misc-followup milestone contained only documentation reference updates. No new functional assertions were introduced. All regression checks (lint, format, typecheck, unit tests, UI tests, import checks) pass cleanly, confirming the docs changes did not break any runtime behavior."
+  }
+}
