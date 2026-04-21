@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -25,6 +26,11 @@ _DEFAULT_WORKSPACE_NAME = "Default Workspace"
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _coerce_enum(value: Any, enum_cls: type) -> Any:
+    """Coerce a string or raw value to an enum instance if needed."""
+    return value if isinstance(value, enum_cls) else enum_cls(value)
 
 
 class _RepositoryState:

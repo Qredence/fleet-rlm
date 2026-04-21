@@ -71,7 +71,25 @@ from .models_runs import (
     TraceFeedback,
 )
 from .models_sandbox import SandboxSession, VolumeObject, WorkspaceVolume
-from .repository import FleetRepository
+from .repository_chat import ChatRepository
+from .repository_identity import IdentityRepository
+from .repository_jobs import JobsRepository
+from .repository_memory import MemoryRepository
+from .repository_optimization import OptimizationRepository
+
+
+class FleetRepository(
+    IdentityRepository,
+    ChatRepository,
+    OptimizationRepository,
+    MemoryRepository,
+    JobsRepository,
+):
+    """Backward-compatible facade combining all domain repositories."""
+
+    def __init__(self, database: DatabaseManager) -> None:
+        self._db = database
+
 
 __all__ = [
     "Artifact",
@@ -79,6 +97,7 @@ __all__ = [
     "ArtifactProvider",
     "Base",
     "BillingSource",
+    "ChatRepository",
     "ChatSession",
     "ChatSessionStatus",
     "ChatTurn",
@@ -93,18 +112,22 @@ __all__ = [
     "ExternalTrace",
     "ExternalTraceProvider",
     "FleetRepository",
+    "IdentityRepository",
     "Job",
     "JobStatus",
     "JobType",
+    "JobsRepository",
     "Membership",
     "MembershipRole",
     "MemoryItem",
     "MemoryKind",
     "MemoryLink",
+    "MemoryRepository",
     "MemoryScope",
     "MemorySource",
     "MemoryStatus",
     "OptimizationModule",
+    "OptimizationRepository",
     "OptimizationRun",
     "OptimizationRunStatus",
     "OutboxEvent",
