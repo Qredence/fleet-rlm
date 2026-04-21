@@ -1,13 +1,13 @@
 {
   "milestone": "dead-code-removal",
-  "round": 1,
+  "round": 2,
   "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
       "command": "make test",
       "exitCode": 0,
-      "observation": "pytest passed 100% with no failures"
+      "observation": "pytest passed 100% with no failures (excluding live_llm and benchmark)"
     },
     "typecheck": {
       "passed": true,
@@ -23,84 +23,48 @@
     }
   },
   "reviewsSummary": {
-    "total": 3,
-    "passed": 3,
+    "total": 2,
+    "passed": 2,
     "failed": 0,
     "failedFeatures": []
   },
   "blockingIssues": [],
-  "appliedUpdates": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Removed stale reference to deleted chat_session_state.py from .factory/library/architecture.md active components list and updated planned refactoring section to mark dead-code-removal items as completed.",
+      "sourceFeature": "dead-remove-runtime"
+    }
+  ],
   "suggestedGuidanceUpdates": [
     {
       "target": "src/fleet_rlm/AGENTS.md",
-      "suggestion": "Remove stale references to deleted files and directories: (1) Line 145 references deleted `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py` as the 'main cognition loop' — update to reference `runtime/agent/agent.py` and `runtime/agent/runtime.py`. (2) Line 151 references `runtime/quality/optimize_*.py` entrypoints that do not exist — update or remove since `_MODULE_ENTRYPOINTS` is empty. (3) Lines 155-156 list deleted directories `runtime/tools/content/*` and `runtime/tools/sandbox/*` under grouped tool helpers — remove these lines.",
-      "evidence": "Reviewers confirmed these stale references exist in AGENTS.md while the corresponding source files/directories were deleted. Verified with grep.",
+      "suggestion": "Remove stale reference to deleted `runtime/agent/chat_session_state.py` from line 145 (runtime ownership section: 'Keep the main cognition loop in ...'). Update to reference only `agent.py` and `runtime.py`.",
+      "evidence": "Both round 1 and round 2 reviewers flagged this. The file was deleted but AGENTS.md still instructs agents to keep cognition loop in it.",
       "isSystemic": true
     },
     {
-      "target": "src/fleet_rlm/scaffold/skills/daytona-runtime/SKILL.md",
-      "suggestion": "Remove stale references to deleted `RLMReActChatAgent` class and `runtime/agent/chat_agent.py` path. Lines 35 and 53 still document the deleted class/file as the canonical runtime.",
-      "evidence": "Reviewer found lines 35 and 53 in daytona-runtime/SKILL.md referencing deleted artifacts.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/scaffold/skills/rlm-test-suite/SKILL.md",
-      "suggestion": "Remove stale references to deleted `RLMReActChatAgent` class, deleted test categories (chat turns, recursion, delegation, routing), and the dangling Python import example `from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent`. Lines 72 and 108.",
-      "evidence": "Reviewer found lines 72 and 108 in rlm-test-suite/SKILL.md referencing deleted artifacts, including an actual dangling import example.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/quality/transcript_exports.py",
-      "suggestion": "Remove dead dict entries for deleted module slugs 'reflect-and-revise' and 'context-selection' from `_TRANSCRIPT_OUTPUT_DEFAULTS` (line 29) and `_ASSISTANT_SINKS` (line 43). These entries are unreachable since the corresponding optimizer modules were deleted.",
-      "evidence": "Both reviewers flagged this. The defaults dicts contain entries for slugs whose modules no longer exist, making the data unreachable dead code.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/agent/chat_session_state.py",
-      "suggestion": "Update module docstring on line 1 which references deleted `fleet_rlm.runtime.agent.chat_agent` module. Should reference `FleetAgent` or `AgentRuntime` instead.",
-      "evidence": "Reviewer found docstring still references deleted chat_agent.py.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/agent/commands.py",
-      "suggestion": "Update docstring around line 153 that references deleted `:func:`build_tool_list``. Should reference `discover_tools()` or the current tool registry mechanism.",
-      "evidence": "Reviewer found stale docstring reference to deleted build_tool_list function.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/tools/document_tools.py",
-      "suggestion": "Update or remove docstring reference to deleted `runtime/tools/content/document.py` on line 10.",
-      "evidence": "Reviewer found stale docstring reference to deleted content/ directory.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/tools/buffer_tools.py",
-      "suggestion": "Update or remove docstring reference to deleted `runtime/tools/sandbox/common.py` on line 10.",
-      "evidence": "Reviewer found stale docstring reference to deleted sandbox/ directory.",
-      "isSystemic": false
-    },
-    {
-      "target": "src/fleet_rlm/runtime/tools/memory_tools.py",
-      "suggestion": "Update or remove docstring reference to deleted `runtime/tools/sandbox/memory.py` on line 10.",
-      "evidence": "Reviewer found stale docstring reference to deleted sandbox/ directory.",
-      "isSystemic": false
-    },
-    {
       "target": "AGENTS.md",
-      "suggestion": "Add a checklist/reminder for workers to grep `src/fleet_rlm/AGENTS.md`, `src/fleet_rlm/scaffold/`, and surviving module docstrings for stale references after deleting source modules. Multiple reviewers found stale references that were missed during deletion work.",
-      "evidence": "Stale references found in AGENTS.md, scaffold SKILL.md files, and module docstrings across all three deletion features. This is a systemic gap in the deletion workflow.",
+      "suggestion": "Remove deleted `src/fleet_rlm/runtime/agent/chat_session_state.py` from backend reading order line 366.",
+      "evidence": "Round 2 reviewer confirmed this stale reference still exists. Agents following the reading order will hit a missing file.",
+      "isSystemic": true
+    },
+    {
+      "target": ".factory/skills/backend-refactor/SKILL.md",
+      "suggestion": "Add a documentation-cleanup step to the deletion workflow: after deleting files and fixing dangling imports, grep AGENTS.md (both root and src/fleet_rlm/), .factory/library/architecture.md, and surviving module docstrings for references to deleted modules and update/remove them.",
+      "evidence": "Both reviewers found stale doc references missed by the worker. The skill currently only mentions fixing dangling imports, not documentation.",
       "isSystemic": true
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Duplicate stub fixtures for 'reflect-and-revise' module across test files should be consolidated into a shared conftest.py",
-      "reason": "already-documented"
+      "observation": "Generated egg-info/SOURCES.txt still lists deleted files turn_persistence.py and turn_runner.py",
+      "reason": "Generated packaging artifacts are not source-of-truth and are auto-regenerated on build. make clean does not target egg-info but this is harmless at runtime."
     },
     {
-      "observation": "Feature description mentioned fixing 'rlm_query_tool_name' import but actual dangling import was LLMQueryMixin",
-      "reason": "ambiguous"
+      "observation": "_emit_stream_event in stream.py changed from sequential to parallel persistence via asyncio.gather",
+      "reason": "already-documented"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/dead-code-removal/scrutiny/synthesis.json"
 }

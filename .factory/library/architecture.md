@@ -28,7 +28,6 @@ Single `dspy.Module` wrapping `dspy.ReAct` with tools.
 - `agent.py` — the module class (dspy.Module subclass with dspy.ReAct)
 - `runtime.py` — AgentRuntime: manages interpreter, history, tools, core memory
 - `chat.py` — ChatOrchestrator: sync/async chat turns, streaming
-- `chat_session_state.py` — session state with dspy.History
 - `signatures.py` — DSPy signatures (RLMReActChatSignature etc.)
 
 ### 3. Tool Registry (`runtime/tools/`)
@@ -119,10 +118,10 @@ Example: `runtime.py` uses `filesystem.py` for volume operations inside specific
 - `database/repository_jobs.py` — jobs, sandbox sessions
 - `database/repository_shared.py`, `database/engine.py`, model files — preserved
 
-**Target Runtime/API cleanup:**
-- Remove orphaned files: `chat_session_state.py`, `memory.py`, `document_cache.py`, `output_utils.py`, `document_sources.py`, `validation.py`, `rewards.py`, `turn_runner.py`, `turn_persistence.py`
-- Consolidate `streaming.py` re-exports into direct imports
-- Consolidate small `ws/` helpers into `lifecycle.py`
+**Completed Runtime/API cleanup:**
+- Removed orphaned files: `chat_session_state.py`, `memory.py`, `document_cache.py`, `output_utils.py`, `document_sources.py`, `validation.py`, `rewards.py`, `turn_runner.py`, `turn_persistence.py`
+- Consolidate `streaming.py` re-exports into direct imports (pending)
+- Consolidate small `ws/` helpers into `lifecycle.py` (pending)
 
 ## Invariants
 
