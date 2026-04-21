@@ -1,0 +1,37 @@
+{
+  "milestone": "api-rewiring",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 16,
+    "passed": 15,
+    "failed": 1,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-CLEANUP-001",
+    "VAL-CLEANUP-002",
+    "VAL-CLEANUP-003",
+    "VAL-CLEANUP-004",
+    "VAL-CLEANUP-005",
+    "VAL-CLEANUP-006",
+    "VAL-WS-001",
+    "VAL-WS-003",
+    "VAL-WS-004",
+    "VAL-WS-005",
+    "VAL-FACTORY-001",
+    "VAL-FACTORY-002",
+    "VAL-CROSS-004",
+    "VAL-CROSS-005",
+    "VAL-CROSS-006"
+  ],
+  "failedAssertions": [
+    {
+      "id": "VAL-WS-002",
+      "reason": "StreamEventKind type retains all legacy kinds (assistant_token, reasoning_step, trajectory_step, plan_update, rlm_executing, memory_update, hitl_request, hitl_resolved, command_ack, command_reject, final, cancelled). forced_routing.py (used in rlm_only execution mode) still emits rlm_executing, cancelled, final. WS tests assert legacy kinds (assistant_token, final) from the stream. The stream does not emit only the 8 simplified kinds specified in the contract."
+    }
+  ],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}
