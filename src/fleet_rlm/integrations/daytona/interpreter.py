@@ -43,7 +43,7 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge

@@ -1,9 +1,8 @@
-"""LLM query tools and runtime module helpers for interpreter-backed RLM flows.
+"""LLM query mixin and helpers for interpreter-backed RLM flows.
 
-This module provides:
-  - LLMQueryMixin: Mixin providing built-in RLM tools for recursive LLM calls
-    (llm_query, llm_query_batched) and true-RLM symbolic recursion primitives
-    (sub_rlm, sub_rlm_batched).
+Provides :class:`LLMQueryMixin` with built-in RLM tools for recursive LLM calls
+(``llm_query``, ``llm_query_batched``) and true-RLM symbolic recursion primitives
+(``sub_rlm``, ``sub_rlm_batched``).
 """
 
 from __future__ import annotations
@@ -355,50 +354,6 @@ class LLMQueryMixin:
         """Return how many LLM calls remain in the shared budget."""
         with self._llm_call_lock:
             return max(0, self.max_llm_calls - self._llm_call_count)
-
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Utility helpers
-# ---------------------------------------------------------------------------
-
-
-def coerce_int(
-    value: Any,
-    *,
-    default: int = 0,
-    minimum: int | None = None,
-    maximum: int | None = None,
-) -> int:
-    """Parse *value* as an integer with optional bounds."""
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    if minimum is not None:
-        parsed = max(minimum, parsed)
-    if maximum is not None:
-        parsed = min(maximum, parsed)
-    return parsed
-
-
-def coerce_str_list(value: Any) -> list[str]:
-    """Normalize list-like prediction fields into a list of strings."""
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
-
-
-def prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
-    """Read a field from either a dict-shaped or attribute-shaped prediction."""
-    if isinstance(prediction, dict):
-        return prediction.get(field_name, default)
-    return getattr(prediction, field_name, default)
-
-
-# ---------------------------------------------------------------------------
-# Output metadata helper (Algorithm 1 variable-mode support)
-# ---------------------------------------------------------------------------
 
 
 def metadata_summary(

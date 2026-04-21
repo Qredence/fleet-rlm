@@ -2,17 +2,57 @@
 
 Exports a module-level ``chunk_document`` function marked with ``@tool_fn``
 so that ``discover_tools()`` can collect it.
-
-For the full agent-bound experience (host and sandbox chunking with buffer
-storage), use the builders in ``runtime/tools/content/chunking.py`` via
-``AgentRuntime``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm.runtime.content.chunking import (
+    chunk_by_headers,
+    chunk_by_json_keys,
+    chunk_by_size,
+    chunk_by_timestamps,
+)
 from fleet_rlm.runtime.tools._marker import tool_fn
+
+
+def _normalize_strategy(strategy: str) -> str:
+    """Normalise a chunking strategy name to its canonical form."""
+    normalized = strategy.strip().lower().replace("-", "_")
+    mapping = {
+        "size": "size",
+        "headers": "headers",
+        "header": "headers",
+        "timestamps": "timestamps",
+        "timestamp": "timestamps",
+        "json": "json_keys",
+        "json_keys": "json_keys",
+    }
+    if normalized not in mapping:
+        raise ValueError(
+            "Unsupported strategy. Choose one of: size, headers, timestamps, json_keys"
+        )
+    return mapping[normalized]
+
+
+def _chunk_text(
+    text: str,
+    strategy: str,
+    *,
+    size: int,
+    overlap: int,
+    pattern: str,
+) -> list[Any]:
+    """Chunk *text* using the named strategy."""
+    strategy_norm = _normalize_strategy(strategy)
+    if strategy_norm == "size":
+        return chunk_by_size(text, size=size, overlap=overlap)
+    if strategy_norm == "headers":
+        return chunk_by_headers(text, pattern=pattern or r"^#{1,3} ")
+    if strategy_norm == "timestamps":
+        return chunk_by_timestamps(text, pattern=pattern or r"^\d{4}-\d{2}-\d{2}[T ]")
+    return chunk_by_json_keys(text)
 
 
 @tool_fn
@@ -46,13 +86,11 @@ def chunk_document(
         Dictionary with ``status``, ``strategy``, ``chunk_count``, and a
         ``preview`` of the first chunk.
     """
-    from fleet_rlm.runtime.tools.shared import chunk_text, normalize_strategy
-
-    chunks = chunk_text(text, strategy, size=size, overlap=overlap, pattern=pattern)
+    chunks = _chunk_text(text, strategy, size=size, overlap=overlap, pattern=pattern)
     preview = chunks[0] if chunks else ""
     return {
         "status": "ok",
-        "strategy": normalize_strategy(strategy),
+        "strategy": _normalize_strategy(strategy),
         "chunk_count": len(chunks),
         "preview": str(preview)[:400],
     }

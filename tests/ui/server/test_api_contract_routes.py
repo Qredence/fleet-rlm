@@ -259,7 +259,6 @@ def test_ws_router_split_modules_import() -> None:
     import fleet_rlm.api.routers.ws.endpoint as ws_endpoint
     import fleet_rlm.api.routers.ws.errors as ws_errors
     import fleet_rlm.api.routers.ws.failures as ws_failures
-    import fleet_rlm.api.routers.ws.hitl as ws_hitl
     import fleet_rlm.api.routers.ws.loop_exit as ws_loop_exit
     import fleet_rlm.api.routers.ws.manifest as ws_manifest
     import fleet_rlm.api.routers.ws.messages as ws_messages
@@ -282,7 +281,6 @@ def test_ws_router_split_modules_import() -> None:
     assert ws_execution_support.get_execution_emitter is not None
     assert ws_errors.handle_stream_error is not None
     assert ws_failures.classify_stream_failure is not None
-    assert ws_hitl.handle_resolve_hitl is not None
     assert chat_persistence.ExecutionLifecycleManager is not None
     assert ws_loop_exit.handle_chat_disconnect is not None
     assert ws_manifest._manifest_path is not None

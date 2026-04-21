@@ -92,7 +92,7 @@ class TestSymbolicOutput:
         assert "SUBMIT" in desc
 
     def test_metadata_summary_truncates_large_output(self):
-        from fleet_rlm.runtime.tools.llm_tools import metadata_summary
+        from fleet_rlm.runtime.execution.llm_query import metadata_summary
 
         large = "x" * 50000
         result = metadata_summary(large, preview_length=200, label="Result")
@@ -100,7 +100,7 @@ class TestSymbolicOutput:
         assert len(result) < 300
 
     def test_metadata_summary_passes_small_output(self):
-        from fleet_rlm.runtime.tools.llm_tools import metadata_summary
+        from fleet_rlm.runtime.execution.llm_query import metadata_summary
 
         small = "hello world"
         assert metadata_summary(small) == "hello world"
@@ -129,7 +129,7 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_depth_enforcement(self):
         """sub_rlm refuses at max depth."""
-        from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+        from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
         mixin = LLMQueryMixin()
         mixin._sub_rlm_depth = 2
@@ -143,7 +143,7 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_budget_enforcement(self):
         """sub_rlm refuses when budget exhausted."""
-        from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+        from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
         mixin = LLMQueryMixin()
         mixin._sub_rlm_depth = 0

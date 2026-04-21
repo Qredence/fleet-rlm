@@ -12,7 +12,7 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     initialize_llm_query_state,
     initialize_sub_rlm_state,
 )
-from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
 
 class _StubInterpreter(LLMQueryMixin):
