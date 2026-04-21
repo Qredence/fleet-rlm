@@ -38,7 +38,6 @@ from fleet_rlm.runtime.execution.streaming_events import (
     parse_tool_call_status as parse_tool_call_status,
     parse_tool_result_payload as parse_tool_result_payload,
     parse_tool_result_status as parse_tool_result_status,
-    try_parse_hitl_request as try_parse_hitl_request,
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
@@ -51,7 +50,9 @@ if TYPE_CHECKING:
 # ═══════════════════════════════════════════════════════════════════════
 
 logger = logging.getLogger(__name__)
-TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"final", "cancelled", "error"})
+TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset(
+    {"done", "final", "cancelled", "error"}
+)
 
 
 def _persist_streaming_turn_best_effort(
@@ -226,10 +227,11 @@ def build_cancelled_stream_event(
         agent=agent,
     )
     return StreamEvent(
-        kind="cancelled",
+        kind="done",
         text=marked_partial,
         payload=ctx.enrich(
             {
+                "cancelled": True,
                 "history_turns": agent.history_turns(),
                 **_chat_turns.snapshot_turn_metrics(agent).as_payload(),
             }
@@ -300,7 +302,7 @@ def build_final_stream_event(
         agent=agent,
     )
     return StreamEvent(
-        kind="final",
+        kind="done",
         flush_tokens=True,
         text=assistant_response,
         payload=ctx.enrich(
@@ -340,7 +342,7 @@ def _build_fallback_events(
         payload=ctx.enrich({"fallback": True, "error_type": type(exc).__name__}),
     )
     yield StreamEvent(
-        kind="final",
+        kind="done",
         flush_tokens=True,
         text=str(fallback.get("assistant_response", "")),
         payload=ctx.enrich(
@@ -391,13 +393,13 @@ def _process_stream_value(
         if value.signature_field_name == "assistant_response":
             assistant_chunks.append(value.chunk)
             yield StreamEvent(
-                kind="assistant_token",
+                kind="text",
                 text=value.chunk,
                 payload=ctx.enrich({}) if ctx else {},
             )
         elif value.signature_field_name == "next_thought" and trace:
             yield StreamEvent(
-                kind="reasoning_step",
+                kind="reasoning",
                 text=value.chunk,
                 payload=ctx.enrich({"source": "next_thought"})
                 if ctx
@@ -439,44 +441,14 @@ def _process_stream_value(
                 payload=ctx.enrich(result_payload) if ctx else result_payload,
             )
 
-            # Check for HITL triggers
-            hitl_req = try_parse_hitl_request(
-                tool_name=last_tool_name_ref[0],
-                payload=result_payload,
-            )
-            if hitl_req:
-                if ctx:
-                    hitl_req.payload = ctx.enrich(hitl_req.payload)
-                yield hitl_req
-
 
 def _emit_prediction_trajectory_events(
     final_prediction: dspy.Prediction,
     ctx: StreamingContext | None = None,
 ) -> Iterable[StreamEvent]:
-    trajectory = getattr(final_prediction, "trajectory", {})
-    if not trajectory or not isinstance(trajectory, dict):
-        return
-
-    steps = _normalize_trajectory(trajectory)
-    if not steps:
-        return
-
-    for idx, step in enumerate(steps):
-        if not isinstance(step, dict):
-            continue
-        step_text = step.get("thought", step.get("action", str(step)))
-        step_payload: dict[str, Any] = {
-            "step_index": idx,
-            "step_data": step,
-            "total_steps": len(steps),
-        }
-        yield StreamEvent(
-            kind="trajectory_step",
-            flush_tokens=True,
-            text=step_text,
-            payload=ctx.enrich(step_payload) if ctx else step_payload,
-        )
+    """Trajectory steps are included in the final 'done' payload; no per-step events needed."""
+    return
+    yield  # make this an explicit generator for type compat
 
 
 def _build_stream_program(

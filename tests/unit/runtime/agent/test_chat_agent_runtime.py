@@ -426,32 +426,24 @@ def test_build_chat_agent_threads_interpreter_async_execute(
     def _extra_tool() -> None:
         return None
 
-    class _FakeRLMReActChatAgent:
+    class _FakeAgentRuntime:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.factory.RLMReActChatAgent",
-        _FakeRLMReActChatAgent,
+        "fleet_rlm.runtime.factory.AgentRuntime",
+        _FakeAgentRuntime,
     )
 
     agent = runtime_factory.build_chat_agent(
-        timeout=123,
-        max_depth=4,
-        secret_name="SECRET",
-        volume_name="tenant-a",
+        react_max_iters=15,
         extra_tools=[_extra_tool],
-        interpreter_async_execute=False,
         planner_lm=object(),
     )
 
-    assert isinstance(agent, _FakeRLMReActChatAgent)
-    assert captured["timeout"] == 123
-    assert captured["max_depth"] == 4
-    assert captured["secret_name"] == "SECRET"
-    assert captured["volume_name"] == "tenant-a"
+    assert isinstance(agent, _FakeAgentRuntime)
     assert captured["extra_tools"] == [_extra_tool]
-    assert captured["interpreter_async_execute"] is False
+    assert captured["max_iters"] == 15
 
 
 @pytest.mark.asyncio

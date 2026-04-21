@@ -8,7 +8,8 @@ from typing import Any, Literal
 
 import dspy
 
-from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.runtime.agent.agent import FleetAgent  # noqa: F401
+from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.config import configure_planner_from_env
 
 
@@ -49,39 +50,16 @@ def build_chat_agent(
     delegate_lm: Any | None = None,
     delegate_max_calls_per_turn: int = 8,
     delegate_result_truncation_chars: int = 8000,
-) -> RLMReActChatAgent:
-    """Build the canonical Daytona-backed DSPy chat agent."""
+) -> Any:
+    """Build the canonical DSPy chat agent using FleetAgent and AgentRuntime."""
     if planner_lm is None:
         _require_planner_ready(env_file)
 
-    agent = RLMReActChatAgent(
-        react_max_iters=react_max_iters,
-        deep_react_max_iters=deep_react_max_iters,
-        enable_adaptive_iters=enable_adaptive_iters,
-        rlm_max_iterations=rlm_max_iterations,
-        rlm_max_llm_calls=rlm_max_llm_calls,
-        max_depth=max_depth,
-        timeout=timeout,
-        secret_name=secret_name,
-        volume_name=volume_name,
-        runtime=runtime,
-        verbose=verbose,
+    agent = AgentRuntime(
+        max_iters=react_max_iters,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
-        delegate_lm=delegate_lm,
-        delete_session_on_shutdown=delete_session_on_shutdown,
-        guardrail_mode=guardrail_mode,
-        max_output_chars=max_output_chars,
-        min_substantive_chars=min_substantive_chars,
-        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
-        delegate_result_truncation_chars=delegate_result_truncation_chars,
-        interpreter_async_execute=interpreter_async_execute,
-        sandbox_spec=sandbox_spec,
-        sub_lm=sub_lm,
     )
-
-    if docs_path is not None:
-        agent.load_document(str(docs_path), alias="active")
 
     return agent
 

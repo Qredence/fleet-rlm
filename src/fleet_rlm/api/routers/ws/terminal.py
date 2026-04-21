@@ -37,9 +37,11 @@ def build_stream_event_dict(
 
 def _terminal_run_status(event: StreamEventLike) -> RunStatus:
     """Return the authoritative terminal run status for one event."""
-    if event.kind == "cancelled":
+    if event.kind in ("cancelled", "done") and (
+        isinstance(event.payload, dict) and event.payload.get("cancelled")
+    ):
         return RunStatus.CANCELLED
-    if event.kind == "final":
+    if event.kind in ("final", "done"):
         payload = event.payload if isinstance(event.payload, dict) else {}
         return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
     return RunStatus.FAILED
@@ -67,7 +69,7 @@ async def handle_terminal_stream_event(
         run_id=lifecycle.run_id,
     )
 
-    if event.kind == "final":
+    if event.kind in ("final", "done"):
         try:
             await persist_session_state(include_volume_save=True)
         except Exception:

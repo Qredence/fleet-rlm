@@ -202,3 +202,29 @@ def test_fleet_agent_signature_importable_without_network():
     from fleet_rlm.runtime.agent.agent import FleetAgentSignature as Sig
 
     assert issubclass(Sig, dspy.Signature)
+
+
+# ---------------------------------------------------------------------------
+# Factory: build_chat_agent returns AgentRuntime
+# ---------------------------------------------------------------------------
+
+
+def test_build_chat_agent_returns_agent_runtime(monkeypatch: pytest.MonkeyPatch):
+    """build_chat_agent should return an AgentRuntime instance (VAL-FACTORY-002)."""
+    from fleet_rlm.runtime import factory as _factory
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+    # Ensure factory has no RLMReActChatAgent reference
+    import inspect
+
+    factory_src = inspect.getsource(_factory)
+    assert "RLMReActChatAgent" not in factory_src
+
+    # Suppress LM configuration requirement
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.factory._require_planner_ready",
+        lambda *a, **kw: None,
+    )
+
+    agent = _factory.build_chat_agent(planner_lm=object())
+    assert isinstance(agent, AgentRuntime)

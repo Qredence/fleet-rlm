@@ -36,9 +36,9 @@ def test_iter_chat_turn_stream_rlm_only_emits_forced_events(
 
     assert [event.kind for event in events] == [
         "status",
-        "rlm_executing",
+        "status",
         "tool_result",
-        "final",
+        "done",
     ]
     assert events[-1].text == "forced response"
     assert events[0].payload["forced"] is True

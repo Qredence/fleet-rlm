@@ -257,7 +257,7 @@ class ChatOrchestrator:
             payload=ctx.enrich({"forced": True}),
         )
         yield StreamEvent(
-            kind="rlm_executing",
+            kind="status",
             text="tool call: rlm_query",
             payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
         )
@@ -279,7 +279,7 @@ class ChatOrchestrator:
             payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
         )
         yield StreamEvent(
-            kind="final",
+            kind="done",
             flush_tokens=True,
             text=assistant_response,
             payload=forced_stream_final_payload(
@@ -305,18 +305,22 @@ class ChatOrchestrator:
         guardrail_warnings: list[str] = []
 
         for event in self.iter_chat_turn_stream(message=message, trace=trace):
-            if event.kind == "assistant_token":
+            if event.kind in ("assistant_token", "text"):
                 assistant_chunks.append(event.text)
-            elif event.kind == "reasoning_step":
+            elif event.kind in ("reasoning_step", "reasoning"):
                 thought_chunks.append(event.text)
             elif event.kind == "status":
                 status_messages.append(event.text)
-            elif event.kind == "final":
-                assistant_response = event.text
-                trajectory = dict(event.payload.get("trajectory", {}) or {})
-                guardrail_warnings = list(
-                    event.payload.get("guardrail_warnings", []) or []
-                )
+            elif event.kind in ("final", "done"):
+                if event.payload.get("cancelled"):
+                    cancelled = True
+                    assistant_response = event.text
+                else:
+                    assistant_response = event.text
+                    trajectory = dict(event.payload.get("trajectory", {}) or {})
+                    guardrail_warnings = list(
+                        event.payload.get("guardrail_warnings", []) or []
+                    )
             elif event.kind == "cancelled":
                 cancelled = True
                 assistant_response = event.text

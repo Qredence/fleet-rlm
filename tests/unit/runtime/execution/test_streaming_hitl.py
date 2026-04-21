@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fleet_rlm.runtime.execution.streaming import (
+from fleet_rlm.runtime.execution.streaming_events import (
     try_parse_hitl_request as _try_parse_hitl_request,
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent
@@ -24,7 +24,7 @@ def test_hitl_request_from_clarification_questions_with_questions():
 
     assert event is not None
     assert isinstance(event, StreamEvent)
-    assert event.kind == "hitl_request"
+    assert event.kind == "status"
     assert event.payload["source"] == "clarification_questions"
     assert event.payload["requires_response"] is True
     assert event.payload["options"] == ["What scope?", "Which environment?"]
@@ -70,7 +70,7 @@ def test_hitl_request_from_memory_action_intent_requires_confirmation():
     event = _try_parse_hitl_request("memory_action_intent", payload)
 
     assert event is not None
-    assert event.kind == "hitl_request"
+    assert event.kind == "status"
     assert event.payload["source"] == "memory_action_intent"
     assert event.payload["action"] == "delete_memory_path"
     assert event.payload["requires_response"] is True

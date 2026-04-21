@@ -154,8 +154,8 @@ def test_iter_chat_turn_stream_emits_ordered_events(monkeypatch):
 
     kinds = [e.kind for e in events]
     assert kinds[0] == "status"
-    assert "assistant_token" in kinds
-    assert kinds[-1] == "final"
+    assert "text" in kinds
+    assert kinds[-1] == "done"
 
     final_event = events[-1]
     assert final_event.text == "hello world"
@@ -181,9 +181,7 @@ def test_iter_chat_turn_stream_enriches_tool_payloads(monkeypatch):
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("store memory", trace=False))
 
-    tool_call_event = next(
-        event for event in events if event.kind in ("tool_call", "memory_update")
-    )
+    tool_call_event = next(event for event in events if event.kind == "tool_call")
     assert tool_call_event.payload["tool_name"] == "memory_write"
     assert tool_call_event.payload["raw_status"].startswith("Calling tool:")
     assert "path='/tmp/x'" in tool_call_event.payload["tool_args"]
@@ -229,7 +227,7 @@ async def test_aiter_chat_turn_stream_passes_core_memory(monkeypatch):
         )
     ]
 
-    assert events[-1].kind == "final"
+    assert events[-1].kind == "done"
     assert events[-1].text == "hello"
     assert len(agent.history.messages) == 1
 
@@ -267,7 +265,7 @@ async def test_aiter_chat_turn_stream_passes_effective_max_iters(monkeypatch):
         )
     ]
 
-    assert events[-1].kind == "final"
+    assert events[-1].kind == "done"
     assert captured["max_iters"] == 35
 
 
@@ -311,7 +309,10 @@ def test_iter_chat_turn_stream_cancelled_emits_partial_and_marks_history(monkeyp
     )
 
     kinds = [e.kind for e in events]
-    assert "cancelled" in kinds
+    assert "done" in kinds
+    # The "done" event for a cancelled turn should carry cancelled=True in payload
+    done_event = next(e for e in events if e.kind == "done")
+    assert done_event.payload.get("cancelled") is True
     assert len(agent.history.messages) == 1
     assert agent.history.messages[0]["assistant_response"].endswith("[cancelled]")
 
@@ -338,7 +339,8 @@ def test_build_cancelled_stream_event_logs_local_store_failure(monkeypatch):
         ctx=prepared.ctx,
     )
 
-    assert event.kind == "cancelled"
+    assert event.kind == "done"
+    assert event.payload.get("cancelled") is True
     log_exception.assert_called_once()
     assert (
         "Failed to persist cancelled streaming turn to local_store"
@@ -367,7 +369,8 @@ def test_build_cancelled_stream_event_persists_without_running_loop(monkeypatch)
         ctx=prepared.ctx,
     )
 
-    assert event.kind == "cancelled"
+    assert event.kind == "done"
+    assert event.payload.get("cancelled") is True
     assert recorded_calls == [
         (
             (123, 0, "please", "partial\n\n[cancelled]"),
@@ -402,7 +405,7 @@ def test_build_final_stream_event_logs_local_store_failure(monkeypatch):
         ctx=prepared.ctx,
     )
 
-    assert event.kind == "final"
+    assert event.kind == "done"
     assert event.text == "world"
     log_exception.assert_called_once()
     assert (
@@ -436,7 +439,7 @@ def test_build_final_stream_event_persists_without_running_loop(monkeypatch):
         ctx=prepared.ctx,
     )
 
-    assert event.kind == "final"
+    assert event.kind == "done"
     assert recorded_calls == [
         (
             (123, 0, "hello", "world"),
@@ -494,7 +497,7 @@ def test_iter_chat_turn_stream_fallback_on_stream_exception(monkeypatch):
     agent = RLMReActChatAgent(interpreter=FakeInterpreter())
     events = list(agent.iter_chat_turn_stream("fallback now", trace=False))
     assert events[0].kind == "status"
-    assert events[-1].kind == "final"
+    assert events[-1].kind == "done"
     assert events[-1].text == "echo:fallback now"
     assert len(agent.history.messages) == 1
 
@@ -527,7 +530,7 @@ def test_iter_chat_turn_stream_includes_guardrail_warnings(monkeypatch):
     events = list(agent.iter_chat_turn_stream("say hi", trace=False))
 
     final_event = events[-1]
-    assert final_event.kind == "final"
+    assert final_event.kind == "done"
     warnings = list(final_event.payload.get("guardrail_warnings", []) or [])
     assert warnings
     assert any("brief" in warning for warning in warnings)
@@ -564,7 +567,7 @@ def test_iter_chat_turn_stream_enriches_final_payload_with_sources_and_citations
     events = list(agent.iter_chat_turn_stream("cite", trace=False))
     final_event = events[-1]
 
-    assert final_event.kind == "final"
+    assert final_event.kind == "done"
     assert final_event.payload["schema_version"] == 2
     assert len(final_event.payload["citations"]) == 1
     assert len(final_event.payload["sources"]) == 1

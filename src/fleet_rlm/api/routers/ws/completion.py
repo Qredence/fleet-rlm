@@ -74,7 +74,10 @@ def _canonical_run_status(
     *,
     human_review_required: bool,
 ) -> str:
-    if kind == "final":
+    if kind in ("final", "done"):
+        # A "done" event with payload["cancelled"]=True is a cancelled turn.
+        if isinstance(payload, dict) and payload.get("cancelled"):
+            return "cancelled"
         if human_review_required:
             return "needs_human_review"
         return "error" if final_event_failed(payload) else "completed"
@@ -84,7 +87,7 @@ def _canonical_run_status(
 
 
 def _build_fallback_final_artifact(event: StreamEventLike) -> dict[str, Any] | None:
-    if event.kind != "final":
+    if event.kind not in ("final", "done"):
         return None
     return {
         "kind": "assistant_response",
@@ -135,7 +138,7 @@ def _resolve_termination_reason(
     human_review_required: bool,
 ) -> str:
     normalized = _as_text(existing_reason)
-    if human_review_required and normalized in {None, "", "final", "completed"}:
+    if human_review_required and normalized in {None, "", "final", "done", "completed"}:
         return "needs_human_review"
     return normalized or event_kind
 

@@ -21,7 +21,7 @@ from fleet_rlm.runtime.models.streaming import StreamEvent
 # Status parsing and tool/HITL event helpers  (was streaming_status.py)
 # ═══════════════════════════════════════════════════════════════════════
 
-ToolEventKind = Literal["tool_call", "plan_update", "rlm_executing", "memory_update"]
+ToolEventKind = Literal["tool_call"]
 
 
 def parse_tool_call_status(message: str) -> str | None:
@@ -117,7 +117,7 @@ def try_parse_hitl_request(
             questions = data.get("questions", [])
         if questions:
             return StreamEvent(
-                kind="hitl_request",
+                kind="status",
                 text="The agent has some questions for you.",
                 payload={
                     "options": questions,
@@ -129,7 +129,7 @@ def try_parse_hitl_request(
     if tool_name == "memory_action_intent":
         if data and isinstance(data, dict) and data.get("requires_confirmation"):
             return StreamEvent(
-                kind="hitl_request",
+                kind="status",
                 text="This memory action requires confirmation.",
                 payload={
                     "action": data.get("intent"),
@@ -142,20 +142,6 @@ def try_parse_hitl_request(
 
 
 def classify_tool_event_kind(tool_name: str | None) -> ToolEventKind:
-    if tool_name == "plan_code_change":
-        return "plan_update"
-    if tool_name in {
-        "rlm_query",
-        "rlm_query_batched",
-        "summarize_long_document",
-        "extract_from_logs",
-        "grounded_answer",
-        "triage_incident_logs",
-        "parallel_semantic_map",
-    }:
-        return "rlm_executing"
-    if tool_name and (tool_name.startswith("core_memory") or "memory" in tool_name):
-        return "memory_update"
     return "tool_call"
 
 

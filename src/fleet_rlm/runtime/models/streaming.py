@@ -61,12 +61,18 @@ class TranscriptEvent(BaseModel):
 
 
 StreamEventKind = Literal[
-    "assistant_token",
+    # Simplified canonical kinds (current)
     "status",
-    "warning",
-    "reasoning_step",
+    "text",
+    "reasoning",
     "tool_call",
     "tool_result",
+    "warning",
+    "error",
+    "done",
+    # Legacy kinds retained for backward-compatible consumers (deprecated)
+    "assistant_token",
+    "reasoning_step",
     "trajectory_step",
     "plan_update",
     "rlm_executing",
@@ -76,7 +82,6 @@ StreamEventKind = Literal[
     "command_ack",
     "command_reject",
     "final",
-    "error",
     "cancelled",
 ]
 
@@ -117,7 +122,7 @@ class TurnState:
 
     def apply(self, event: StreamEvent) -> None:
         """Apply one event to state in a deterministic way."""
-        if event.kind == "assistant_token":
+        if event.kind in ("assistant_token", "text"):
             token = event.text
             self.assistant_tokens.append(token)
             self.stream_chunks.append(token)
@@ -140,7 +145,7 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind == "reasoning_step":
+        if event.kind in ("reasoning_step", "reasoning"):
             if event.text:
                 self.reasoning_lines.append(event.text)
                 self.thought_chunks.append(event.text)
@@ -171,12 +176,20 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind == "final":
-            final_text = event.text or self.transcript_text
-            self.final_text = final_text
-            self.transcript_text = final_text
-            self.trajectory = dict(event.payload.get("trajectory", {}) or {})
-            self.final_reasoning = event.payload.get("final_reasoning", "")
+        if event.kind in ("final", "done"):
+            # "done" is the canonical new kind; "final" kept for backward compat.
+            # A "done" event with payload["cancelled"]=True marks a cancelled turn.
+            if event.payload.get("cancelled"):
+                self.cancelled = True
+                cancelled_text = event.text or self.transcript_text
+                self.final_text = cancelled_text
+                self.transcript_text = cancelled_text
+            else:
+                final_text = event.text or self.transcript_text
+                self.final_text = final_text
+                self.transcript_text = final_text
+                self.trajectory = dict(event.payload.get("trajectory", {}) or {})
+                self.final_reasoning = event.payload.get("final_reasoning", "")
             self.history_turns = int(
                 event.payload.get("history_turns", self.history_turns)
             )

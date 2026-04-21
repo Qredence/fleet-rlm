@@ -55,11 +55,18 @@ def test_stream_event_custom_fields():
 @pytest.mark.parametrize(
     "kind",
     [
-        "assistant_token",
+        # Canonical simplified kinds
         "status",
-        "reasoning_step",
+        "text",
+        "reasoning",
         "tool_call",
         "tool_result",
+        "warning",
+        "error",
+        "done",
+        # Legacy backward-compat kinds
+        "assistant_token",
+        "reasoning_step",
         "trajectory_step",
         "plan_update",
         "rlm_executing",
@@ -69,7 +76,6 @@ def test_stream_event_custom_fields():
         "command_ack",
         "command_reject",
         "final",
-        "error",
         "cancelled",
     ],
 )
@@ -96,6 +102,17 @@ def test_turn_state_apply_assistant_token():
     assert state.done is False
 
 
+def test_turn_state_apply_text_kind():
+    """New 'text' kind should behave identically to 'assistant_token'."""
+    state = TurnState()
+    state.apply(StreamEvent(kind="text", text="Hello"))
+    state.apply(StreamEvent(kind="text", text=" world"))
+
+    assert state.assistant_tokens == ["Hello", " world"]
+    assert state.transcript_text == "Hello world"
+    assert state.token_count == 2
+
+
 def test_turn_state_apply_status():
     state = TurnState()
     state.apply(StreamEvent(kind="status", text="Calling tool: load_document"))
@@ -111,6 +128,15 @@ def test_turn_state_apply_reasoning_step():
 
     assert "I need to analyze this file." in state.reasoning_lines
     assert "I need to analyze this file." in state.thought_chunks
+
+
+def test_turn_state_apply_reasoning_kind():
+    """New 'reasoning' kind should behave identically to 'reasoning_step'."""
+    state = TurnState()
+    state.apply(StreamEvent(kind="reasoning", text="Thinking step."))
+
+    assert "Thinking step." in state.reasoning_lines
+    assert "Thinking step." in state.thought_chunks
 
 
 def test_turn_state_apply_tool_call():
@@ -161,6 +187,48 @@ def test_turn_state_apply_final():
     assert state.history_turns == 3
     assert state.final_reasoning == "Some reasoning."
     assert state.trajectory["steps"][0]["t"] == "finish"
+
+
+def test_turn_state_apply_done_kind():
+    """New 'done' kind should behave identically to 'final'."""
+    state = TurnState()
+    state.apply(StreamEvent(kind="assistant_token", text="partial"))
+    state.apply(
+        StreamEvent(
+            kind="done",
+            text="The complete answer.",
+            payload={
+                "trajectory": {"steps": [{"t": "finish"}]},
+                "final_reasoning": "Some reasoning.",
+                "history_turns": 3,
+            },
+        )
+    )
+
+    assert state.done is True
+    assert state.final_text == "The complete answer."
+    assert state.transcript_text == "The complete answer."
+    assert state.history_turns == 3
+    assert state.final_reasoning == "Some reasoning."
+    assert state.trajectory["steps"][0]["t"] == "finish"
+
+
+def test_turn_state_apply_done_kind_cancelled():
+    """'done' with cancelled=True in payload marks cancelled turn."""
+    state = TurnState()
+    state.apply(StreamEvent(kind="assistant_token", text="partial response"))
+    state.apply(
+        StreamEvent(
+            kind="done",
+            text="partial response\n\n[cancelled]",
+            payload={"cancelled": True, "history_turns": 1},
+        )
+    )
+
+    assert state.cancelled is True
+    assert state.done is True
+    assert state.final_text == "partial response\n\n[cancelled]"
+    assert state.history_turns == 1
 
 
 def test_turn_state_apply_final_uses_tokens_when_no_text():
