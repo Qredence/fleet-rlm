@@ -1,6 +1,8 @@
 commands:
   install: uv sync --all-extras
   test: make test
+  test-unit: make test-unit
+  test-ui: make test-ui
   test-daytona: uv run pytest tests/unit/integrations/daytona/ -q
   test-observability: uv run pytest tests/unit/integrations/observability/ -q
   test-integration: uv run pytest tests/integration/ -q

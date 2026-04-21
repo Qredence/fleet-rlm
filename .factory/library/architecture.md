@@ -97,6 +97,27 @@ Preserved as-is. DSPy evaluation and optimization workflows.
 
 **NOTE:** As of milestone persistence-rlm, `AgentRuntime.chat_turn()` does not call `set_delegate_interpreter()` before running the agent. If the LLM selects the `delegate_to_rlm` tool during a real chat turn, it will raise `RuntimeError`. The tool is correctly implemented and tested in isolation; the wiring gap in `AgentRuntime` is a known deferred task.
 
+## Planned Refactoring (Mission: integrations-cleanup)
+
+**Target Daytona structure:**
+- `daytona/filesystem.py` — merged from `repo.py` + `workspace.py` + `volumes.py`
+- `daytona/runtime.py` — absorbs `runtime_helpers.py` + `snapshots.py` + `admin.py`
+- `daytona/interpreter.py`, `daytona/bridge.py`, `daytona/config.py`, `daytona/types.py`, `daytona/async_compat.py`, `daytona/diagnostics.py`, `daytona/interpreter_assets.py` — preserved
+- `wiki_bootstrap.py` — deleted (zero references)
+
+**Target Database structure:**
+- `database/repository_identity.py` — tenant/user/workspace CRUD
+- `database/repository_chat.py` — sessions, turns, runs, steps, artifacts
+- `database/repository_optimization.py` — datasets, optimization runs, evaluations
+- `database/repository_memory.py` — memory items
+- `database/repository_jobs.py` — jobs, sandbox sessions
+- `database/repository_shared.py`, `database/engine.py`, model files — preserved
+
+**Target Runtime/API cleanup:**
+- Remove orphaned files: `chat_session_state.py`, `memory.py`, `document_cache.py`, `output_utils.py`, `document_sources.py`, `validation.py`, `rewards.py`, `turn_runner.py`, `turn_persistence.py`
+- Consolidate `streaming.py` re-exports into direct imports
+- Consolidate small `ws/` helpers into `lifecycle.py`
+
 ## Invariants
 
 - Agent is always a `dspy.Module` (optimizer compatibility)

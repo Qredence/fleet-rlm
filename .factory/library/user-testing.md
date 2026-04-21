@@ -49,5 +49,7 @@ def _assert_import_does_not_load(module_name: str, banned: set[str]) -> None:
 
 ## Daytona SDK 0.168.0 Notes
 - Package name: `daytona` on PyPI (not `daytona_sdk`)
+- **BREAKING CHANGE:** Python SDK enforces snake_case for all class attributes. Previously camelCase was accepted.
 - Key imports: `AsyncDaytona`, `DaytonaConfig`, `CreateSandboxFromImageParams`, `CreateSandboxFromSnapshotParams`, `Resources`, `VolumeMount`
+- Current codebase already uses snake_case kwargs; verify no camelCase attribute access patterns
 - If API drift found, prefer defensive `try/except` or compatibility shims

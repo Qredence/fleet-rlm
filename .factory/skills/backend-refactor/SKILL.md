@@ -10,11 +10,13 @@ NOTE: Startup and cleanup are handled by `worker-base`. This skill defines the W
 ## When to Use This Skill
 
 Any feature that involves:
-- Rewriting Python modules in `src/fleet_rlm/runtime/` or `src/fleet_rlm/api/`
-- Deleting directories (`agent_host/`, `worker/`)
+- Rewriting Python modules in `src/fleet_rlm/runtime/`, `src/fleet_rlm/api/`, `src/fleet_rlm/integrations/daytona/`, or `src/fleet_rlm/integrations/database/`
+- Deleting directories or orphaned files
 - Creating new simplified modules
 - Updating or creating unit tests
 - Removing dangling imports
+- Merging multiple modules into one
+- Upgrading dependencies with breaking changes
 
 ## Required Skills
 
@@ -34,22 +36,27 @@ None.
    - Follow ruff formatting
    - DSPy 3.1.3: tools are plain callables or `dspy.Tool(func)`. Use `@tool_fn` marker from `runtime/tools/_marker.py` for registry discovery.
    
-5. **For deletion features:** Delete the directories/files, then grep for dangling imports and fix them. Remove corresponding test directories.
+5. **For deletion features:** Delete the directories/files, then grep for dangling imports and fix them. Remove corresponding test directories. Also verify no dynamic/runtime imports are broken (e.g., `discover_tools()` scanning `runtime/tools/*.py`).
 
-6. **Run validation:**
+6. **For consolidation features:** Before merging files, read ALL files involved. Merge into the most natural target file. Update all imports across the codebase. After merging, delete the old files and verify no dangling imports.
+
+7. **For Daytona 0.168.0 upgrade:** Search for camelCase attribute access on Daytona objects (e.g., `autoStopInterval`, `autoArchiveInterval`, `idleTimeout`). Daytona 0.168.0 enforces snake_case. Fix all occurrences to snake_case. Run `uv sync --all-extras` after updating `pyproject.toml`.
+
+8. **Run validation:**
    ```bash
    make format
    make lint
    make typecheck
-   make test
+   make test-unit
    ```
    Fix all failures before completing.
 
-7. **Verify no dangling imports** for any deleted modules:
+9. **Verify no dangling imports** for any deleted or consolidated modules:
    ```bash
    rg "from fleet_rlm\.(agent_host|worker)" src/fleet_rlm/
    rg "import fleet_rlm\.(agent_host|worker)" src/fleet_rlm/
    ```
+   Also search for imports of the specific deleted module names.
 
 ## Example Handoff
 
@@ -89,4 +96,4 @@ None.
 - A module you need to modify is not in the expected location or has unexpected structure
 - Existing tests fail before your changes (pre-existing failures)
 - DSPy API behaves differently than documented in `.factory/library/environment.md`
-- You need to modify off-limits directories (integrations/, quality/, frontend/)
+- You need to modify off-limits directories (observability/, mcp/, config/, quality/, frontend/, scaffold/)
