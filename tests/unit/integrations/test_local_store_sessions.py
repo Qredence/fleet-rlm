@@ -17,6 +17,38 @@ def _isolated_db(monkeypatch, tmp_path):
     local_store._engines.clear()
 
 
+@pytest.fixture(autouse=True)
+def _register_test_module_spec():
+    """Register a stub module spec for tests that use 'reflect-and-revise' slug."""
+    import dspy
+
+    from fleet_rlm.runtime.quality.module_registry import (
+        ModuleOptimizationSpec,
+        _REGISTRY,
+        register_module,
+    )
+
+    def _stub_row_converter(rows):
+        return [dspy.Example(**{k: str(v) for k, v in row.items()}).with_inputs("user_request") for row in rows]
+
+    spec = ModuleOptimizationSpec(
+        module_slug="reflect-and-revise",
+        label="Reflect & Revise",
+        program_spec="stub",
+        artifact_filename="stub.json",
+        input_keys=["user_request"],
+        required_dataset_keys=["user_request"],
+        module_factory=lambda: None,
+        row_converter=_stub_row_converter,
+        metric_builder=lambda: None,
+        metric_name="stub",
+        description="stub for testing",
+    )
+    register_module(spec)
+    yield
+    _REGISTRY.pop("reflect-and-revise", None)
+
+
 # ---------------------------------------------------------------------------
 # Schema + create_session
 # ---------------------------------------------------------------------------

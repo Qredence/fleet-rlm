@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from dspy.primitives import FinalOutput
 
@@ -16,9 +16,6 @@ from fleet_rlm.runtime.content.chunking import (
     chunk_by_size,
     chunk_by_timestamps,
 )
-
-if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 def normalize_strategy(strategy: str) -> str:
@@ -74,7 +71,7 @@ def chunk_to_text(chunk: Any) -> str:
     return json.dumps(chunk, ensure_ascii=False, default=str)
 
 
-def resolve_document(agent: AgentRuntime, alias: str) -> str:
+def resolve_document(agent: Any, alias: str) -> str:
     """Resolve a document alias to its full text content."""
     if alias == "active":
         if agent.active_alias is None:
@@ -86,7 +83,7 @@ def resolve_document(agent: AgentRuntime, alias: str) -> str:
 
 
 def execute_submit(
-    agent: AgentRuntime,
+    agent: Any,
     code: str,
     *,
     variables: dict[str, Any] | None = None,
@@ -112,7 +109,7 @@ def execute_submit(
 
 
 async def aexecute_submit(
-    agent: AgentRuntime,
+    agent: Any,
     code: str,
     *,
     variables: dict[str, Any] | None = None,
@@ -146,7 +143,7 @@ async def _await_if_needed(value: Any) -> Any:
 
 
 def _normalize_submit_result(
-    agent: AgentRuntime,
+    agent: Any,
     result: Any,
     *,
     variables: dict[str, Any] | None = None,

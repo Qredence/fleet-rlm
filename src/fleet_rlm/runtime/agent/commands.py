@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 # ---------------------------------------------------------------------------
 # Dispatch table: command_name -> (tool_function_name, required_args, optional_args)
@@ -142,7 +140,7 @@ _BLOCKING_COMMANDS = frozenset(
 
 
 async def execute_command(
-    agent: AgentRuntime,
+    agent: Any,
     command: str,
     args: dict[str, Any],
 ) -> dict[str, Any]:
@@ -197,7 +195,7 @@ async def execute_command(
     return result
 
 
-def _resolve_tool(agent: AgentRuntime, tool_name: str) -> Any:
+def _resolve_tool(agent: Any, tool_name: str) -> Any:
     """Find a tool by name in the agent's tool list or as a method."""
     for tool in getattr(agent, "react_tools", []):
         name = getattr(tool, "name", None) or getattr(tool, "__name__", None)

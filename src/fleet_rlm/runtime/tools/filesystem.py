@@ -4,19 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fleet_rlm.runtime.tools._marker import tool_fn
-
-if TYPE_CHECKING:
-    from ..agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 @dataclass(slots=True)
 class _FilesystemToolContext:
     """Shared tool context for host filesystem operations."""
 
-    agent: AgentRuntime | None
+    agent: Any | None
 
 
 def _list_files_impl(
@@ -196,7 +193,7 @@ def _find_files_impl(
     }
 
 
-def build_filesystem_tools(agent: AgentRuntime) -> list[Any]:
+def build_filesystem_tools(agent: Any) -> list[Any]:
     """Build filesystem navigation tools with a shared context object."""
     from dspy import Tool
 

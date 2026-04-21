@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fleet_rlm.runtime.execution.document_sources import (
     fetch_url_document_content,
@@ -29,9 +29,6 @@ from fleet_rlm.runtime.tools.sandbox.common import (
     _document_load_result,
     _load_daytona_workspace_text_sync,
 )
-
-if TYPE_CHECKING:
-    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 try:
     import mlflow as _mlflow
@@ -99,7 +96,7 @@ def _rlm_fetch_large_url(agent: Any, url: str, alias: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_document_tools(agent: AgentRuntime) -> list[Any]:
+def build_document_tools(agent: Any) -> list[Any]:
     """Build document management tools with closures bound to *agent*.
 
     Each inner function has a descriptive ``__name__``, docstring, and

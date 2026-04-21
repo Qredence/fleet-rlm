@@ -4,10 +4,6 @@ This module provides:
   - LLMQueryMixin: Mixin providing built-in RLM tools for recursive LLM calls
     (llm_query, llm_query_batched) and true-RLM symbolic recursion primitives
     (sub_rlm, sub_rlm_batched).
-  - Shared helpers for tools that call cached runtime modules via
-    ``agent.get_runtime_module(...)``.  These cover the non-recursive path;
-    explicit recursion still flows through ``rlm_query`` and
-    :mod:`fleet_rlm.runtime.agent.recursive_runtime`.
 """
 
 from __future__ import annotations
@@ -22,17 +18,9 @@ from concurrent.futures import (
 from concurrent.futures import (
     TimeoutError as FutureTimeoutError,
 )
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import dspy
-
-from fleet_rlm.runtime.agent.delegation_policy import (
-    RuntimeModuleExecutionRequest,
-    invoke_runtime_module,
-)
-
-if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -370,15 +358,9 @@ class LLMQueryMixin:
 
 
 # ---------------------------------------------------------------------------
-# Cached runtime-module helpers (merged from runtime_module_helpers.py)
 # ---------------------------------------------------------------------------
-
-
-def _runtime_degradation_payload(agent: AgentRuntime) -> dict[str, Any]:
-    """Load runtime degradation metadata without a fragile module-level import."""
-    from fleet_rlm.runtime.agent.chat_turns import runtime_degradation_payload
-
-    return runtime_degradation_payload(agent)
+# Utility helpers
+# ---------------------------------------------------------------------------
 
 
 def coerce_int(
@@ -412,48 +394,6 @@ def prediction_value(prediction: Any, field_name: str, default: Any) -> Any:
     if isinstance(prediction, dict):
         return prediction.get(field_name, default)
     return getattr(prediction, field_name, default)
-
-
-def run_cached_runtime_module(
-    agent: AgentRuntime,
-    module_name: str,
-    **kwargs: Any,
-) -> tuple[Any | None, dict[str, Any] | None, bool]:
-    """Invoke one cached runtime module through the shared delegation policy."""
-    result = invoke_runtime_module(
-        RuntimeModuleExecutionRequest(
-            agent=agent,
-            module_name=module_name,
-            module_kwargs=kwargs,
-        )
-    )
-    return result.prediction, result.error, result.fallback_used
-
-
-def runtime_metadata(
-    agent: AgentRuntime,
-    prediction: Any,
-    *,
-    fallback_used: bool,
-) -> dict[str, Any]:
-    """Return stable metadata shared by cached runtime-module tool results."""
-    metadata: dict[str, Any] = {
-        "depth": coerce_int(
-            prediction_value(prediction, "depth", agent._current_depth + 1),
-            default=agent._current_depth + 1,
-            minimum=0,
-        ),
-        "sub_agent_history": coerce_int(
-            prediction_value(prediction, "sub_agent_history", 0),
-            default=0,
-            minimum=0,
-        ),
-        "delegate_lm_fallback": bool(fallback_used),
-        "runtime_degraded": False,
-        "runtime_fallback_used": False,
-    }
-    metadata.update(_runtime_degradation_payload(agent))
-    return metadata
 
 
 # ---------------------------------------------------------------------------

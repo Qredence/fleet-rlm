@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
-from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.runtime.tools import _sync_compatible_tool_callable
 from fleet_rlm.runtime.execution.interpreter_protocol import RLMInterpreterProtocol
 from fleet_rlm.runtime.execution.storage_paths import (
     RuntimeStorageRoots,
@@ -19,7 +19,6 @@ from fleet_rlm.utils.volume_tree import resolve_mounted_volume_path
 from ..shared import aexecute_submit, execute_submit
 
 if TYPE_CHECKING:
-    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 class _SandboxToolContext:
     """Shared context for sandbox and volume tool operations."""
 
-    agent: AgentRuntime
+    agent: Any
 
 
 def _execute_submit_ctx(
@@ -284,21 +283,14 @@ def _load_daytona_workspace_text_sync(
 # ---------------------------------------------------------------------------
 
 
-def build_sandbox_tools(agent: AgentRuntime) -> list[Any]:
+def build_sandbox_tools(agent: Any) -> list[Any]:
     """Build sandbox / buffer / volume tools bound to *agent*.
 
     Returns a list of ``dspy.Tool`` wrappers ready to be appended to the
     main tool list built by ``build_tool_list``.
     """
-    from .delegate import build_rlm_delegate_tools
-    from .memory import build_memory_intelligence_tools
-    from .storage import build_storage_tools
-
     tools: list[Any] = []
     ctx = _SandboxToolContext(agent=agent)
-    tools.extend(build_rlm_delegate_tools(agent))
-    tools.extend(build_memory_intelligence_tools(agent))
-    tools.extend(build_storage_tools(agent))
     if _is_daytona_interpreter(ctx):
         tools.extend(build_snapshot_tools(agent))
         tools.extend(build_lsp_tools(agent))
@@ -312,7 +304,7 @@ def build_sandbox_tools(agent: AgentRuntime) -> list[Any]:
 _infra_logger = logging.getLogger(__name__ + ".infra")
 
 
-def build_snapshot_tools(agent: AgentRuntime) -> list[Any]:
+def build_snapshot_tools(agent: Any) -> list[Any]:
     """Return ``dspy.Tool`` wrappers for Daytona snapshot management."""
     from dspy import Tool
 
@@ -370,7 +362,7 @@ def build_snapshot_tools(agent: AgentRuntime) -> list[Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_lsp_tools(agent: AgentRuntime) -> list[Any]:
+def build_lsp_tools(agent: Any) -> list[Any]:
     """Return ``dspy.Tool`` wrappers for Daytona LSP code intelligence."""
     from dspy import Tool
 
@@ -471,7 +463,7 @@ def build_lsp_tools(agent: AgentRuntime) -> list[Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_buffer_tools(agent: AgentRuntime) -> list[Any]:
+def build_buffer_tools(agent: Any) -> list[Any]:
     """Build sandbox buffer and volume-load tools bound to *agent*."""
     from dspy import Tool
 
@@ -645,7 +637,7 @@ _UNSUPPORTED_PROVIDER_ERROR: dict[str, Any] = {
 }
 
 
-def build_process_tools(agent: AgentRuntime) -> list[Any]:
+def build_process_tools(agent: Any) -> list[Any]:
     """Build sandbox execution, workspace I/O, and background-process tools.
 
     ``workspace_read`` and ``workspace_write`` are available for all sandbox

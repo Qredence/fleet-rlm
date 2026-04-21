@@ -50,22 +50,6 @@ from .mlflow_optimization import (
     rows_to_examples,
     split_examples,
 )
-
-# -- Per-module entrypoints --------------------------------------------------
-from .optimize_reflect_and_revise import (
-    build_reflection_feedback_metric,
-    load_reflection_rows,
-    optimize_reflect_and_revise_module,
-    resolve_reflection_output_path,
-    rows_to_reflection_examples,
-)
-from .optimize_recursive_context_selection import (
-    build_recursive_context_selection_feedback_metric,
-    load_recursive_context_selection_rows,
-    optimize_recursive_context_selection_module,
-    resolve_recursive_context_selection_output_path,
-    rows_to_recursive_context_selection_examples,
-)
 from .scorers import (
     build_rlm_scorers,
     get_default_judge_model,
@@ -126,15 +110,4 @@ __all__ = [
     "split_examples",
     "workspace_feedback_metric",
     "workspace_score_metric",
-    # Per-module entrypoints
-    "build_recursive_context_selection_feedback_metric",
-    "build_reflection_feedback_metric",
-    "load_recursive_context_selection_rows",
-    "load_reflection_rows",
-    "optimize_recursive_context_selection_module",
-    "optimize_reflect_and_revise_module",
-    "resolve_recursive_context_selection_output_path",
-    "resolve_reflection_output_path",
-    "rows_to_recursive_context_selection_examples",
-    "rows_to_reflection_examples",
 ]

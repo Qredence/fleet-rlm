@@ -7,10 +7,7 @@ volume info, degradation flags) as a frozen dataclass for one chat turn.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from fleet_rlm.runtime.agent.runtime import _LegacyAgentRuntime as AgentRuntime
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +69,7 @@ class StreamingContext:
     @classmethod
     def from_agent(
         cls,
-        agent: AgentRuntime,
+        agent: Any,
         *,
         effective_max_iters: int | None = None,
     ) -> StreamingContext:

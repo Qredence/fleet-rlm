@@ -39,10 +39,7 @@ class ModuleOptimizationSpec:
 # -- Module registry --------------------------------------------------------
 
 _REGISTRY: dict[str, ModuleOptimizationSpec] = {}
-_MODULE_ENTRYPOINTS = (
-    "fleet_rlm.runtime.quality.optimize_reflect_and_revise",
-    "fleet_rlm.runtime.quality.optimize_recursive_context_selection",
-)
+_MODULE_ENTRYPOINTS: tuple[str, ...] = ()
 
 
 def register_module(spec: ModuleOptimizationSpec) -> None:

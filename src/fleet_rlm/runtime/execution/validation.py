@@ -10,7 +10,58 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fleet_rlm.runtime.agent.trajectory_errors import trajectory_has_tool_errors
+_TRAJECTORY_ERROR_TOKENS: tuple[str, ...] = (
+    "[error]",
+    "traceback",
+    "runtimeerror",
+    "codeinterpretererror",
+    "syntaxerror",
+    "execution error in",
+    "exception",
+    "failed",
+    "error:",
+)
+
+_TRAJECTORY_FALSE_POSITIVE_TOKENS: tuple[str, ...] = (
+    "no error",
+    "without error",
+    "0 errors",
+    "zero errors",
+)
+
+
+def _looks_like_tool_error(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    if any(token in text for token in _TRAJECTORY_FALSE_POSITIVE_TOKENS):
+        return False
+    return any(token in text for token in _TRAJECTORY_ERROR_TOKENS)
+
+
+def trajectory_has_tool_errors(trajectory: Any) -> bool:
+    """Return True when any observation in *trajectory* looks erroneous."""
+    if not isinstance(trajectory, dict):
+        return False
+    for key, value in trajectory.items():
+        if str(key).startswith(("output_", "observation_", "error_")):
+            if _looks_like_tool_error(value):
+                return True
+    steps: list[Any] = []
+    maybe_steps = trajectory.get("steps")
+    if isinstance(maybe_steps, list):
+        steps.extend(maybe_steps)
+    maybe_trajectory = trajectory.get("trajectory")
+    if isinstance(maybe_trajectory, list):
+        steps.extend(maybe_trajectory)
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for field_name in ("output", "observation", "error"):
+            field_value = step.get(field_name)
+            if field_value is not None and _looks_like_tool_error(field_value):
+                return True
+    return False
 
 
 @dataclass

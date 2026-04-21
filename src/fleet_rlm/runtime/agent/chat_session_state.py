@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import dspy
 from fleet_rlm.integrations.daytona.types import normalize_history_turn
 from fleet_rlm.utils.paths import dedupe_paths
 from fleet_rlm.utils.text import compact_text
-
-if TYPE_CHECKING:
-    from .runtime import _LegacyAgentRuntime as AgentRuntime
 
 
 _HISTORY_SUMMARY_USER_REQUEST = "[summary of earlier conversation]"
@@ -59,7 +56,7 @@ def _enforce_history_cap(
     return [summary, *tail][-history_max_turns:]
 
 
-def history_messages(agent: AgentRuntime) -> list[Any]:
+def history_messages(agent: Any) -> list[Any]:
     """Return chat history messages as a defensive list copy."""
     messages = getattr(agent.history, "messages", None)
     if messages is None:
@@ -70,14 +67,12 @@ def history_messages(agent: AgentRuntime) -> list[Any]:
         return []
 
 
-def history_turns(agent: AgentRuntime) -> int:
+def history_turns(agent: Any) -> int:
     """Return number of stored history turns safely."""
     return len(history_messages(agent))
 
 
-def append_history(
-    agent: AgentRuntime, user_request: str, assistant_response: str
-) -> None:
+def append_history(agent: Any, user_request: str, assistant_response: str) -> None:
     """Append one chat turn and enforce the configured history cap."""
     messages = history_messages(agent)
     messages.append(
@@ -90,7 +85,7 @@ def append_history(
     agent.history = dspy.History(messages=messages)
 
 
-def export_session_state(agent: AgentRuntime) -> dict[str, Any]:
+def export_session_state(agent: Any) -> dict[str, Any]:
     """Export serializable session state for persistence."""
     history: list[dict[str, str]] = []
     for item in history_messages(agent):
@@ -121,7 +116,7 @@ def export_session_state(agent: AgentRuntime) -> dict[str, Any]:
     return payload
 
 
-def import_session_state(agent: AgentRuntime, state: dict[str, Any]) -> dict[str, Any]:
+def import_session_state(agent: Any, state: dict[str, Any]) -> dict[str, Any]:
     """Restore session state from a previously exported payload."""
     history = _restore_agent_state(agent, state)
 
@@ -133,9 +128,7 @@ def import_session_state(agent: AgentRuntime, state: dict[str, Any]) -> dict[str
     return _import_result(agent, history)
 
 
-async def aimport_session_state(
-    agent: AgentRuntime, state: dict[str, Any]
-) -> dict[str, Any]:
+async def aimport_session_state(agent: Any, state: dict[str, Any]) -> dict[str, Any]:
     """Async restore variant for interpreters with async session state hooks."""
     history = _restore_agent_state(agent, state)
 
@@ -151,7 +144,7 @@ async def aimport_session_state(
     return _import_result(agent, history)
 
 
-def _restore_agent_state(agent: AgentRuntime, state: dict[str, Any]) -> list[Any]:
+def _restore_agent_state(agent: Any, state: dict[str, Any]) -> list[Any]:
     """Restore shared chat/session state prior to interpreter-specific hooks."""
     history = state.get("history", [])
     if not isinstance(history, list):
@@ -184,7 +177,7 @@ def _restore_agent_state(agent: AgentRuntime, state: dict[str, Any]) -> list[Any
     return normalized_history
 
 
-def _import_result(agent: AgentRuntime, history: list[Any]) -> dict[str, Any]:
+def _import_result(agent: Any, history: list[Any]) -> dict[str, Any]:
     """Build the canonical import response payload."""
     return {
         "status": "ok",
@@ -195,7 +188,7 @@ def _import_result(agent: AgentRuntime, history: list[Any]) -> dict[str, Any]:
     }
 
 
-def forced_delegate_context(agent: AgentRuntime) -> str:
+def forced_delegate_context(agent: Any) -> str:
     """Build the compact forced-RLM context payload for recursive delegation."""
     parts: list[str] = []
 

@@ -11,9 +11,9 @@ Tools included:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from fleet_rlm.runtime.agent.tool_delegation import _sync_compatible_tool_callable
+from fleet_rlm.runtime.tools import _sync_compatible_tool_callable
 
 from ..shared import (
     aexecute_submit,
@@ -22,16 +22,13 @@ from ..shared import (
     resolve_document,
 )
 
-if TYPE_CHECKING:
-    from ...agent.runtime import _LegacyAgentRuntime as AgentRuntime
-
 
 # ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
 
 
-def build_chunking_tools(agent: AgentRuntime) -> list[Any]:
+def build_chunking_tools(agent: Any) -> list[Any]:
     """Build chunking tools with closures bound to *agent*.
 
     Each inner function has a descriptive ``__name__``, docstring, and
