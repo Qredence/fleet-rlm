@@ -40,14 +40,15 @@ Plain callables discovered via directory scan, passed to dspy.ReAct.
 External system integrations and persistence layer.
 
 **Daytona (`daytona/`):**
-- `interpreter.py` — `DaytonaInterpreter` (~1,750 lines). ReAct-compatible sandbox interpreter. Handles session lifecycle, code execution (direct and bridged), child delegation, and degradation tracking. **Target for decomposition into session_lifecycle, execution_bridge, delegation, and degradation modules.**
-- `runtime.py` — `DaytonaSandboxRuntime` (factory) and `DaytonaSandboxSession` (per-sandbox handle). **Target for splitting session into lifecycle + filesystem concerns.**
-- `runtime_helpers.py` — Daytona client building, volume state normalization, readiness polling
-- `config.py` — Daytona env resolution and `ResolvedDaytonaConfig`
-- `volumes.py` — Volume tree browsing and file reading
+- `interpreter.py` — `DaytonaInterpreter` (~1,750 lines). ReAct-compatible sandbox interpreter. Handles session lifecycle, code execution (direct and bridged), child delegation, and degradation tracking.
+- `runtime.py` — `DaytonaSandboxRuntime` (factory), `DaytonaSandboxSession` (per-sandbox handle), client building, volume state normalization, readiness polling, snapshot creation, admin process helpers.
+- `filesystem.py` — Sandbox filesystem operations: repo staging, workspace creation, volume browsing, file upload/download.
 - `bridge.py` — HTTP broker for host-side tool callbacks from sandbox
+- `config.py` — Daytona env resolution and `ResolvedDaytonaConfig`
 - `diagnostics.py` — Structured error types and smoke test
 - `async_compat.py` — Global async/sync compatibility bridge
+- `types.py` — Daytona integration type definitions
+- `interpreter_assets.py` — Embedded interpreter assets
 
 **Database (`database/`):**
 - `repository.py` — `FleetRepository` (~1,800 lines). Async DB access layer covering identity, chat, execution, optimization, memory, jobs, sandbox sessions. **Target for splitting into IdentityRepository, ChatRepository, OptimizationRepository, MemoryRepository.**
@@ -97,12 +98,17 @@ Preserved as-is. DSPy evaluation and optimization workflows.
 
 **NOTE:** As of milestone persistence-rlm, `AgentRuntime.chat_turn()` does not call `set_delegate_interpreter()` before running the agent. If the LLM selects the `delegate_to_rlm` tool during a real chat turn, it will raise `RuntimeError`. The tool is correctly implemented and tested in isolation; the wiring gap in `AgentRuntime` is a known deferred task.
 
+## Circular Import Break Pattern
+
+When two modules in the same package have mutual runtime dependencies, move the import inside the method body that needs it (local import) rather than at module top-level. This breaks circular imports at runtime while preserving clean module boundaries.
+
+Example: `runtime.py` uses `filesystem.py` for volume operations inside specific methods, so it imports `.filesystem` locally within those methods rather than at the top of the file.
+
 ## Planned Refactoring (Mission: integrations-cleanup)
 
-**Target Daytona structure:**
+**Completed Daytona consolidation:**
 - `daytona/filesystem.py` — merged from `repo.py` + `workspace.py` + `volumes.py`
 - `daytona/runtime.py` — absorbs `runtime_helpers.py` + `snapshots.py` + `admin.py`
-- `daytona/interpreter.py`, `daytona/bridge.py`, `daytona/config.py`, `daytona/types.py`, `daytona/async_compat.py`, `daytona/diagnostics.py`, `daytona/interpreter_assets.py` — preserved
 - `wiki_bootstrap.py` — deleted (zero references)
 
 **Target Database structure:**

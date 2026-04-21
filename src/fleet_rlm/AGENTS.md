@@ -189,8 +189,8 @@ Daytona-specific boundaries:
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
-- Keep Daytona volume browsing in `integrations/daytona/volumes.py`
-- Keep Daytona volume readiness/state normalization in `integrations/daytona/runtime_helpers.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
+- Keep Daytona filesystem operations (repo staging, workspace creation, volume browsing) in `integrations/daytona/filesystem.py`
+- Keep Daytona sandbox lifecycle, client building, snapshot creation, and volume readiness in `integrations/daytona/runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
