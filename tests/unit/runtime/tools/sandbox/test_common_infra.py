@@ -13,7 +13,7 @@ from fleet_rlm.runtime.tools.sandbox.common import (
 
 
 class _StubAgent:
-    """Minimal stand-in for ``RLMReActChatAgent``."""
+    """Minimal stand-in for ``AgentRuntime``."""
 
     def __init__(self) -> None:
         self.interpreter = None

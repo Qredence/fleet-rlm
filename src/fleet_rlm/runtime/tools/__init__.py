@@ -23,7 +23,7 @@ from .shared import (
 
 
 # ---------------------------------------------------------------------------
-# Async-compatibility utility (moved from tool_delegation)
+# Async-compatibility utility
 # ---------------------------------------------------------------------------
 
 
