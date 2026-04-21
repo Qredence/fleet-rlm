@@ -37,3 +37,28 @@ Editing one version does not automatically update the other. When making changes
 ## FleetAgentSignature Location
 
 `FleetAgentSignature` (the signature for `FleetAgent`) is currently defined in `runtime/agent/agent.py`. Per AGENTS.md, DSPy signatures should live in `runtime/agent/signatures.py`. This is a known placement inconsistency that should be resolved in a future cleanup.
+
+## FleetAgent Signature Kwarg: chat_history vs history
+
+`FleetAgent` (in `runtime/agent/agent.py`) uses `chat_history` as the kwarg name for conversation history (from `FleetAgentSignature`). The legacy `RLMReActChatAgent` used `history` (from `RLMReActChatSignature`). When monkeypatching or directly calling `FleetAgent.forward()` in tests, use `chat_history=...`, not `history=...`. This applies to `AgentRuntime.chat_turn()` which calls `self.agent.forward(chat_history=..., ...)`.
+
+## Persistence Helpers Are Library-Only (Not Auto-Wired)
+
+`runtime/agent/persistence.py` provides `persist_history_to_volume()`, `persist_session_metadata()`, and `restore_history_from_volume()` as standalone library functions. As of milestone persistence-rlm, **none of these are automatically called by `AgentRuntime.chat_turn()`** or the WebSocket turn runner. They exist as an explicit-caller library. Future workers wiring automatic persistence into the live chat path should call these helpers from `AgentRuntime.chat_turn()` or the WebSocket streaming layer. The cross-area integration tests (`tests/integration/test_simplified_flows.py`) demonstrate how to call them manually.
+
+## ContextVar Injection Pattern for Daytona-Bound Tools
+
+`rlm_delegate.py` uses a ContextVar-based injection pattern (as an alternative to the RuntimeError stub pattern in `memory_tools.py`):
+
+```python
+_delegate_interpreter: ContextVar[Any | None] = ContextVar("_delegate_interpreter", default=None)
+
+def set_delegate_interpreter(interpreter: Any) -> Token:
+    return _delegate_interpreter.set(interpreter)
+```
+
+The tool reads `_delegate_interpreter.get()` at call time and raises `RuntimeError` if not set. The caller (e.g., `AgentRuntime.chat_turn()`) is expected to call `set_delegate_interpreter(self.interpreter)` before invoking the agent. **As of milestone persistence-rlm, `AgentRuntime.chat_turn()` does not call `set_delegate_interpreter()`**, so the `delegate_to_rlm` tool will raise `RuntimeError` if selected by the LLM at runtime. This gap is consistent with the `memory_tools.py` stub pattern — both require explicit wiring by a future worker.
+
+## WebSocket Test Fixtures Available in tests/ui/
+
+`tests/ui/ws/test_chat_stream.py` and related files use well-established fixtures (`ws_client`, `FakeChatAgent`, `DelayedRepository`) that can test the WebSocket transport layer without live services. When writing integration tests that need to exercise the WS → agent → streaming path, look for `conftest.py` or fixture imports in `tests/ui/` rather than building custom fixtures from scratch.

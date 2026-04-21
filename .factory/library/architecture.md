@@ -53,16 +53,18 @@ Preserved as-is. DSPy evaluation and optimization workflows.
 1. WebSocket receives message frame
 2. Transport constructs/retrieves session context
 3. `runtime/factory.py` builds agent with tools
-4. Agent runtime restores history from volume (if resuming)
+4. Agent runtime restores history from volume (if resuming) — **NOTE: as of milestone persistence-rlm, `restore_history_from_volume` is not auto-called; it must be explicitly invoked by the transport layer**
 5. `dspy.ReAct` processes turn with tools
 6. Events streamed back via WebSocket
-7. History persisted to Daytona volume + metadata to DB
+7. History persisted to Daytona volume + metadata to DB — **NOTE: as of milestone persistence-rlm, `persist_history_to_volume` and `persist_session_metadata` are not auto-called from `AgentRuntime.chat_turn()`; they exist as standalone library helpers**
 
 ### RLM Delegation Flow
 1. Agent decides to delegate via `delegate_to_rlm` tool
 2. Tool creates/reuses Daytona sandbox
 3. `dspy.RLM` executes in sandbox with sub-interpreter
 4. Result returned to agent as tool output
+
+**NOTE:** As of milestone persistence-rlm, `AgentRuntime.chat_turn()` does not call `set_delegate_interpreter()` before running the agent. If the LLM selects the `delegate_to_rlm` tool during a real chat turn, it will raise `RuntimeError`. The tool is correctly implemented and tested in isolation; the wiring gap in `AgentRuntime` is a known deferred task.
 
 ## Invariants
 
