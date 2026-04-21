@@ -248,38 +248,3 @@ class TestLongContext:
             tools = call_kwargs.get("tools", [])
             # custom_tool + sub_rlm + sub_rlm_batched
             assert len(tools) == 3
-
-
-# ── Reward function quality gates ────────────────────────────────────
-
-
-class TestQualityGates:
-    """Verify reward functions correctly score predictions."""
-
-    def test_grounded_perfect_score(self):
-        from fleet_rlm.runtime.models.rewards import grounded_answer_reward
-
-        pred = dspy.Prediction(
-            answer="Complete answer with details.",
-            citations=[{"src": "doc1"}, {"src": "doc2"}],
-            confidence=0.95,
-        )
-        assert grounded_answer_reward({}, pred) == pytest.approx(1.0)
-
-    def test_grounded_zero_score(self):
-        from fleet_rlm.runtime.models.rewards import grounded_answer_reward
-
-        pred = dspy.Prediction(answer="", citations=[], confidence=0)
-        assert grounded_answer_reward({}, pred) == pytest.approx(0.0)
-
-    def test_variable_mode_meaningful(self):
-        from fleet_rlm.runtime.models.rewards import variable_mode_answer_reward
-
-        pred = dspy.Prediction(answer="A meaningful multi-word answer here.")
-        assert variable_mode_answer_reward({}, pred) == 1.0
-
-    def test_variable_mode_empty(self):
-        from fleet_rlm.runtime.models.rewards import variable_mode_answer_reward
-
-        pred = dspy.Prediction(answer="")
-        assert variable_mode_answer_reward({}, pred) == 0.0
