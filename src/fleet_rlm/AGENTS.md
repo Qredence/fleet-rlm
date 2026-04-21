@@ -142,19 +142,16 @@ Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
 - Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
-- Keep the main cognition loop in `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py`
+- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent), `runtime/agent/runtime.py` (AgentRuntime), and `runtime/agent/chat_session_state.py`
 - Keep Daytona execution and durable workspace/session semantics in `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py`
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
 - Keep shared evaluation infrastructure in `runtime/quality/datasets.py`, `runtime/quality/scoring_helpers.py`, `runtime/quality/artifacts.py`, `runtime/quality/module_registry.py`, and `runtime/quality/optimization_runner.py`
 - Keep per-module optimization entrypoints in `runtime/quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
-- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend
+- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `_MODULE_ENTRYPOINTS` is currently empty and must be populated for the registry to function.
 - GEPA runs offline only — never in the live request path
-- Keep grouped tool helpers under:
-  - `runtime/tools/content/*`
-  - `runtime/tools/sandbox/*`
-  - root `runtime/tools/*` only for shared/filesystem/batch/llm entrypoints
+- Keep grouped tool helpers under root `runtime/tools/*`
 
 API ownership:
 
@@ -230,6 +227,16 @@ Backend setup and runtime:
 Daytona workflow:
 
 - `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`
+
+## Known Pre-Existing Issues
+
+These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
+
+- **Import-time side effects in runtime packages** — `runtime/factory.py`, `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime and quality packages do not yet.
+- **Empty module registry** — `runtime/quality/module_registry.py` has `_MODULE_ENTRYPOINTS = ()`. No optimizable modules are registered, so `list_module_metadata()` returns an empty list.
+- **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts ~25 arguments but only passes 3 into `AgentRuntime`. This is a known structural debt item.
+- **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
+- **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.
 
 ## Validation by Change Type
 

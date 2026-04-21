@@ -37,12 +37,43 @@ Plain callables discovered via directory scan, passed to dspy.ReAct.
 - Plugin scan: `discover_tools()` scans `runtime/tools/*.py` for tool functions
 
 ### 4. Integrations (`integrations/`)
-Preserved as-is:
-- `daytona/` — sandbox runtime, interpreter, volumes
-- `database/` — FleetRepository (async Postgres)
-- `local_store.py` — SQLite sidecar
-- `mcp/` — MCP server surface
-- `observability/` — MLflow, PostHog
+External system integrations and persistence layer.
+
+**Daytona (`daytona/`):**
+- `interpreter.py` — `DaytonaInterpreter` (~1,750 lines). ReAct-compatible sandbox interpreter. Handles session lifecycle, code execution (direct and bridged), child delegation, and degradation tracking. **Target for decomposition into session_lifecycle, execution_bridge, delegation, and degradation modules.**
+- `runtime.py` — `DaytonaSandboxRuntime` (factory) and `DaytonaSandboxSession` (per-sandbox handle). **Target for splitting session into lifecycle + filesystem concerns.**
+- `runtime_helpers.py` — Daytona client building, volume state normalization, readiness polling
+- `config.py` — Daytona env resolution and `ResolvedDaytonaConfig`
+- `volumes.py` — Volume tree browsing and file reading
+- `bridge.py` — HTTP broker for host-side tool callbacks from sandbox
+- `diagnostics.py` — Structured error types and smoke test
+- `async_compat.py` — Global async/sync compatibility bridge
+
+**Database (`database/`):**
+- `repository.py` — `FleetRepository` (~1,800 lines). Async DB access layer covering identity, chat, execution, optimization, memory, jobs, sandbox sessions. **Target for splitting into IdentityRepository, ChatRepository, OptimizationRepository, MemoryRepository.**
+- `repository_shared.py` — `RepositoryContextMixin` with tenant/workspace resolution and Postgres request context setting
+- `engine.py` — Async SQLAlchemy engine/session factory with Neon-specific URL normalization
+- `types.py` — Frozen dataclass DTOs for repository requests
+- `models_*.py` — SQLAlchemy ORM models (identity, jobs, memory, optimization, runs, sandbox)
+
+**Observability (`observability/`):**
+- `__init__.py` — Lazy-export facade using `__getattr__` to avoid loading PostHog/MLflow/DSPy at import time
+- `mlflow_runtime.py` — MLflow initialization, DSPy callback registration, token usage extraction. **Target for consolidating token extraction and reducing private API usage.**
+- `mlflow_traces.py` — Trace lookup, feedback logging, trace-to-dataset export
+- `posthog_callback.py` — DSPy callback that emits `$ai_generation` events to PostHog
+- `client.py` — Singleton PostHog client lifecycle
+- `config.py` — Pydantic models for `PostHogConfig` and `MlflowConfig`
+
+**MCP (`mcp/`):**
+- `server.py` — FastMCP server exposing ReAct + RLM tools. **Target for deferring heavy imports.**
+
+**Config (`config/`):**
+- `env.py` — Pydantic-based `AppConfig` schema
+- `runtime_settings.py` — Runtime setting definitions, .env path resolution, snapshot building
+- `_env_utils.py` — Pure helpers for parsing env booleans, integers, CSV lists
+
+**Local Store:**
+- `local_store.py` — SQLite sidecar for local sessions, chat turns, datasets, optimization runs. Synchronous SQLModel with inline migrations.
 
 ### 5. Optimization (`runtime/quality/`)
 Preserved as-is. DSPy evaluation and optimization workflows.
