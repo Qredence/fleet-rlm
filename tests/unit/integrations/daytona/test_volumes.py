@@ -12,7 +12,7 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     DaytonaDiagnosticError,
     VolumeNotReadyError,
 )
-from fleet_rlm.integrations.daytona.runtime_helpers import (
+from fleet_rlm.integrations.daytona.runtime import (
     _await_volume_ready,
 )
 from fleet_rlm.integrations.daytona.filesystem import (
