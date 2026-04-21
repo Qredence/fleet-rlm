@@ -41,15 +41,20 @@ export interface WsCommandRequest {
 export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
 
 export type WsEventKind =
-  | "assistant_token"
-  | "reasoning_step"
+  // Canonical backend kinds (v0.5+)
   | "status"
-  | "warning"
+  | "text"
+  | "reasoning"
   | "tool_call"
   | "tool_result"
+  | "warning"
+  | "error"
+  | "done"
+  // Legacy kinds (retained for backward compatibility)
+  | "assistant_token"
+  | "reasoning_step"
   | "trajectory_step"
   | "final"
-  | "error"
   | "cancelled"
   | "plan_update"
   | "rlm_executing"

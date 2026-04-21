@@ -63,7 +63,7 @@ export async function createReconnectingWs(
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
     firstFrameTimeoutMs = DEFAULT_FIRST_FRAME_TIMEOUT,
-    terminalEventKinds = ["final", "cancelled"],
+    terminalEventKinds = ["final", "done", "cancelled"],
     abortMode = "close",
     abortTimeoutMs = 1500,
   } = options;

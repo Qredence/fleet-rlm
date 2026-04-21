@@ -530,14 +530,16 @@ function applyEvent(
   const { kind, text, payload } = frame.data;
 
   switch (kind) {
-    case "assistant_token": {
+    case "assistant_token":
+    case "text": {
       return {
         messages: appendAssistantToken(messages, text),
         terminal: false,
         errored: false,
       };
     }
-    case "reasoning_step": {
+    case "reasoning_step":
+    case "reasoning": {
       return {
         messages: appendReasoningEvent(messages, text, "live", payload),
         terminal: false,
@@ -776,7 +778,16 @@ function applyEvent(
         errored: false,
       };
     }
-    case "final": {
+    case "final":
+    case "done": {
+      // A "done" event with payload["cancelled"]=True marks a cancelled turn.
+      if (payload && payload["cancelled"] === true) {
+        let next = finishReasoning(messages);
+        next = finalizeTraceParts(next);
+        next = appendSystem(next, text || "Request cancelled.");
+        return { messages: next, terminal: true, errored: false };
+      }
+
       let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
       next = finishReasoning(next);
       next = finalizeTraceParts(next);

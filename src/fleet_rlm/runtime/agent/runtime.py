@@ -8,10 +8,14 @@ This module provides:
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 import dspy
 
+from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
+from fleet_rlm.runtime.models.streaming import StreamEvent
 from fleet_rlm.runtime.tools import discover_tools
 
 if TYPE_CHECKING:
@@ -50,6 +54,16 @@ class AgentRuntime:
             "scratchpad": "",
         }
 
+        # Session-management hooks used by the websocket layer
+        self._db_session_id: str | object | None = None
+        self._repository: Any | None = None
+        self._identity_rows: Any | None = None
+
+        # Execution and document state
+        self.execution_mode: str = "auto"
+        self.loaded_document_paths: list[str] = []
+        self.batch_concurrency: int | None = None
+
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
         self.tools: list[Any] = base_tools + list(extra_tools or [])
@@ -73,7 +87,7 @@ class AgentRuntime:
         Returns:
             A :class:`dspy.Prediction` with at least a ``response`` field.
         """
-        result = self.agent.forward(
+        result = self.agent(
             chat_history=self.history,
             user_message=user_message,
         )
@@ -87,6 +101,181 @@ class AgentRuntime:
             messages = messages[-self.history_max_turns :]
         self.history = dspy.History(messages=messages)
         return result
+
+    # -----------------------------------------------------------------
+    # Async context manager (required by ChatAgentProtocol)
+    # -----------------------------------------------------------------
+
+    async def __aenter__(self) -> AgentRuntime:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> bool:
+        if self.interpreter is not None:
+            ashutdown = getattr(self.interpreter, "ashutdown", None)
+            if callable(ashutdown):
+                try:
+                    await ashutdown()
+                except Exception:
+                    pass
+            else:
+                shutdown = getattr(self.interpreter, "shutdown", None)
+                if callable(shutdown):
+                    try:
+                        shutdown()
+                    except Exception:
+                        pass
+        return False
+
+    # -----------------------------------------------------------------
+    # ChatAgentProtocol surface
+    # -----------------------------------------------------------------
+
+    def history_turns(self) -> int:
+        return len(list(getattr(self.history, "messages", []) or []))
+
+    def set_execution_mode(self, execution_mode: str) -> None:
+        self.execution_mode = execution_mode
+
+    def load_document(self, path: str, alias: str = "active") -> None:
+        _ = alias
+        self.loaded_document_paths.append(path)
+
+    def export_session_state(self) -> dict[str, Any]:
+        return self.export_session(session_id=str(self._db_session_id or "unknown"))
+
+    def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        return self.import_session(data=state)
+
+    async def aimport_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        return self.import_session(data=state)
+
+    def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
+        _ = clear_sandbox_buffers
+        self.history = dspy.History(messages=[])
+        return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
+
+    async def areset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
+        return self.reset(clear_sandbox_buffers=clear_sandbox_buffers)
+
+    async def execute_command(
+        self, command: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from .commands import execute_command as _execute_command
+
+        return await _execute_command(self, command, args)
+
+    async def aiter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream one chat turn through the agent, yielding events.
+
+        This is the canonical entrypoint used by the websocket streaming
+        layer.  It runs a single forward pass, extracts the trajectory,
+        and yields ``StreamEvent`` objects for each step plus a terminal
+        ``done`` event.
+        """
+        _ = trace
+        _ = docs_path
+        _ = repo_url
+        _ = repo_ref
+        _ = context_paths
+        _ = volume_name
+        if batch_concurrency is not None:
+            self.batch_concurrency = batch_concurrency
+
+        if cancel_check is not None and cancel_check():
+            yield StreamEvent(
+                kind="done",
+                text="[cancelled]",
+                payload={"cancelled": True, "history_turns": self.history_turns()},
+            )
+            return
+
+        yield StreamEvent(kind="status", text="Starting turn...")
+
+        try:
+            result = await asyncio.to_thread(
+                self.agent,
+                chat_history=self.history,
+                user_message=message,
+            )
+        except Exception as exc:
+            yield StreamEvent(
+                kind="error",
+                text=str(exc),
+                payload={"history_turns": self.history_turns()},
+            )
+            return
+
+        response = str(getattr(result, "response", ""))
+        trajectory_raw = getattr(result, "trajectory", None) or {}
+        trajectory = _normalize_trajectory(trajectory_raw)
+
+        for step in trajectory:
+            thought = step.get("thought")
+            if thought:
+                yield StreamEvent(
+                    kind="reasoning",
+                    text=str(thought),
+                    payload={"phase": "reasoning"},
+                )
+
+            tool_name = step.get("tool_name")
+            if tool_name:
+                tool_args = step.get("tool_args") or step.get("input", "")
+                yield StreamEvent(
+                    kind="tool_call",
+                    text=f"Calling tool: {tool_name}({tool_args})",
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_input": str(tool_args),
+                    },
+                )
+
+            observation = step.get("observation") or step.get("output", "")
+            if observation and tool_name:
+                yield StreamEvent(
+                    kind="tool_result",
+                    text=f"Tool result: {observation}",
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_output": str(observation),
+                    },
+                )
+
+        if response:
+            yield StreamEvent(kind="text", text=response)
+
+        # Accumulate history (mirrors chat_turn)
+        messages = list(getattr(self.history, "messages", []) or [])
+        messages.append({"user_message": message, "response": response})
+        if (
+            self.history_max_turns is not None
+            and len(messages) > self.history_max_turns
+        ):
+            messages = messages[-self.history_max_turns :]
+        self.history = dspy.History(messages=messages)
+
+        done_payload: dict[str, Any] = {
+            "trajectory": {"steps": trajectory},
+            "history_turns": self.history_turns(),
+        }
+        yield StreamEvent(kind="done", text=response, payload=done_payload)
 
     # -----------------------------------------------------------------
     # Core memory API (accessible by tools)
