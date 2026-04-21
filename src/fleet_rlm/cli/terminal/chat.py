@@ -251,7 +251,7 @@ class _TerminalChatSession:
                 text = event.text or ""
                 stripped = text.strip()
 
-                if kind == "assistant_token":
+                if kind in ("assistant_token", "text"):
                     assistant_chunks.append(text)
                     token_since_render += 1
                     if token_since_render >= 24:
@@ -280,7 +280,7 @@ class _TerminalChatSession:
                     continue
 
                 if (
-                    kind == "reasoning_step"
+                    kind in ("reasoning_step", "reasoning")
                     and stripped
                     and self.trace_mode == "verbose"
                 ):
@@ -288,10 +288,12 @@ class _TerminalChatSession:
                     self._render_shell(draft_assistant="".join(assistant_chunks))
                     continue
 
-                if kind == "final":
+                if kind in ("final", "done"):
                     final_text = text.strip()
                     payload = event.payload if isinstance(event.payload, dict) else {}
                     final_payload = dict(payload)
+                    if payload.get("cancelled"):
+                        self._print_warning("Turn cancelled.")
                     break
 
                 if kind == "cancelled":

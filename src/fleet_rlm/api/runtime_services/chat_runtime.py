@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -182,7 +182,7 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
 
 
 def build_chat_agent_context(runtime: PreparedChatRuntime):
-    return cast(Any, build_chat_agent(**_chat_agent_builder_kwargs(runtime)))
+    return build_chat_agent(**_chat_agent_builder_kwargs(runtime))
 
 
 def new_chat_session_state(
