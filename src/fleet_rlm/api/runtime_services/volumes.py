@@ -11,7 +11,7 @@ from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.daytona.volumes import (
+from fleet_rlm.integrations.daytona.filesystem import (
     alist_daytona_volume_tree,
     aread_daytona_volume_file_text,
 )

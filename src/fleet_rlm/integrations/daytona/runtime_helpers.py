@@ -14,9 +14,17 @@ from .async_compat import _await_if_needed
 from .config import ResolvedDaytonaConfig
 from .diagnostics import DaytonaDiagnosticError, VolumeNotReadyError
 from .types import ContextSource
-from .workspace import _aensure_remote_directory
 
 _logger = logging.getLogger(__name__)
+
+_REMOTE_DIRECTORY_MODE = "755"
+
+
+async def _aensure_remote_directory(fs: Any, remote_path: PurePosixPath) -> None:
+    directory = str(remote_path)
+    if directory and directory not in {".", "/"}:
+        await _await_if_needed(fs.create_folder(directory, _REMOTE_DIRECTORY_MODE))
+
 
 DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 

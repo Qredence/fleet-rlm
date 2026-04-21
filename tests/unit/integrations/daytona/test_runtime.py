@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.daytona.repo import _areconcile_repo_checkout
+from fleet_rlm.integrations.daytona.filesystem import _areconcile_repo_checkout
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,

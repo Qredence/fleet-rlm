@@ -19,10 +19,13 @@ from .async_compat import (
 )
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .diagnostics import DaytonaDiagnosticError
-from .repo import (
+from .filesystem import (
+    _abuild_workspace_path,
     _aclone_repo,
     _areconcile_repo_checkout,
     _aresolve_clone_ref,
+    _aensure_workspace_root,
+    _astage_context_paths,
 )
 from .runtime_helpers import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
@@ -40,11 +43,6 @@ from .snapshots import (
     aresolve_snapshot,
 )
 from .types import ContextSource, SandboxSpec
-from .workspace import (
-    _abuild_workspace_path,
-    _aensure_workspace_root,
-    _astage_context_paths,
-)
 
 logger = logging.getLogger(__name__)
 
