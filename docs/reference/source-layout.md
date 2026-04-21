@@ -8,7 +8,6 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | --- | --- |
 | `__init__.py` | Minimal public package exports and version marker. |
 | `AGENTS.md` | Backend-specific contributor guidance. |
-| `agent_host/` | Hosted policy layer around the worker seam, HITL, checkpoints, and terminal/session flow. |
 | `api/` | FastAPI transport, auth, schemas, routers, websocket lifecycle, runtime services, and event shaping. |
 | `cli/` | `fleet` / `fleet-rlm` entrypoints, command registration, runtime helpers, and terminal UX. |
 | `integrations/` | Config, database, observability, MCP, Daytona, and local-store integrations. |
@@ -26,7 +25,6 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `config.py` | `ServerRuntimeConfig` for the HTTP/WebSocket server. |
 | `dependencies.py` | Shared `ServerState` container and dependency helpers. |
 | `middleware.py` | Cross-cutting HTTP middleware registration. |
-| `server_utils.py` | Shared API utility helpers. |
 | `auth/` | Auth providers, tenant admission, and auth types. |
 | `events/` | Execution-event models, sanitization, and payload shaping for the passive event stream. |
 | `routers/` | HTTP and websocket route handlers. |
@@ -61,21 +59,7 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `manifest.py` | Session manifest handling. |
 | `artifacts.py` | Artifact event helpers. |
 | `execution_support.py` | Passive execution event emitter wiring. |
-| `errors.py`, `failures.py`, `loop_exit.py`, `task_control.py`, `worker_request.py`, `helpers.py`, `types.py` | Focused helpers for errors, shutdown, task control, request normalization, and websocket utility code. |
-
-## `agent_host/`
-
-| Path | Description |
-| --- | --- |
-| `workflow.py` | Hosted Agent Framework workflow around the worker seam. |
-| `hitl_flow.py` | HITL checkpoint and resume logic. |
-| `terminal_flow.py` | Terminal ordering and completion policy. |
-| `checkpoints.py` | Checkpoint helpers for hosted execution. |
-| `sessions.py` | Session continuation, restore, and orchestration-context helpers. |
-| `execution_events.py` | Host-side execution-event normalization and metadata shaping. |
-| `repl_bridge.py` | Interpreter callback bridge into host/state handling. |
-| `startup_status.py` | Delayed startup-status policy for slow initial turns. |
-| `app.py`, `adapters.py`, `types.py` | Workflow adapters and host-facing types. |
+| `errors.py`, `helpers.py`, `lifecycle.py`, `types.py` | Focused helpers for errors, shutdown, task control, request normalization, and websocket utility code. |
 
 ## `runtime/`
 

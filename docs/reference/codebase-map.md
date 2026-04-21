@@ -6,10 +6,8 @@ This document summarizes the current backend package layout with the live runtim
 
 | Path | Role | Notes |
 | --- | --- | --- |
-| `src/fleet_rlm/worker/` | worker boundary | task contracts and the stream adapter that hands work into the runtime agent |
 | `src/fleet_rlm/runtime/` | runtime core | shared chat logic, recursive execution, execution helpers, runtime models, tools, content helpers, and offline quality |
-| `src/fleet_rlm/integrations/daytona/` | Daytona substrate | interpreter, runtime/session lifecycle, workspace helpers, diagnostics, and volume access |
-| `src/fleet_rlm/agent_host/` | hosted policy layer | Agent Framework workflow, HITL, checkpointing, terminal ordering, and startup/repl bridges |
+| `src/fleet_rlm/integrations/daytona/` | Daytona substrate | interpreter, runtime/session lifecycle, filesystem helpers, diagnostics, and volume access |
 | `src/fleet_rlm/api/` | transport shell | FastAPI app factory, auth, routers, schemas, websocket transport, runtime services, and event shaping |
 | `src/fleet_rlm/cli/` | operator surface | `fleet` / `fleet-rlm` entrypoints, command registration, and terminal UX |
 | `src/fleet_rlm/scaffold/` | packaged guidance | init assets, agent prompts, skills, hooks, and team templates |
@@ -25,13 +23,10 @@ graph TB
     CLI --> INTEGRATIONS
     CLI --> SCAFFOLD
 
-    API["api/"] --> HOST["agent_host/"]
-    API --> RUNTIME["runtime/"]
+    API["api/"] --> RUNTIME["runtime/"]
     API --> INTEGRATIONS["integrations/"]
     API --> UI["ui/"]
 
-    HOST --> WORKER["worker/"]
-    WORKER --> RUNTIME
     RUNTIME --> DAYTONA["integrations/daytona/"]
     RUNTIME --> QUALITY["runtime/quality/"]
 ```
@@ -45,7 +40,6 @@ graph TB
   - frontend HTTP and websocket clients
   - tests
 - Outgoing:
-  - `src/fleet_rlm/agent_host/*`
   - `src/fleet_rlm/runtime/*`
   - `src/fleet_rlm/integrations/*`
 
@@ -58,27 +52,10 @@ Key files:
 - `api/runtime_services/chat_persistence.py` writes turn/session lifecycle data
 - `api/events/events.py` shapes execution-event payloads for passive subscribers
 
-### `src/fleet_rlm/agent_host/`
-
-- Incoming:
-  - `api/routers/ws/*`
-  - tests
-- Outgoing:
-  - `src/fleet_rlm/worker/*`
-
-Key files:
-
-- `agent_host/workflow.py` is the hosted Agent Framework workflow around the worker seam
-- `agent_host/hitl_flow.py` owns HITL checkpointing policy
-- `agent_host/terminal_flow.py` owns terminal ordering/completion policy
-- `agent_host/sessions.py` owns session continuation and restore helpers
-- `agent_host/execution_events.py` normalizes execution events for the host layer
-
-### `src/fleet_rlm/worker/`, `src/fleet_rlm/runtime/`, and `src/fleet_rlm/integrations/daytona/`
+### `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
 
 - Incoming:
   - `api/*`
-  - `agent_host/*`
   - `cli/runners.py`
   - `integrations/mcp/server.py`
 - Outgoing:
@@ -87,10 +64,10 @@ Key files:
 
 Key files:
 
-- `worker/streaming.py` is the boundary that streams a prepared request through the runtime agent
+- `api/routers/ws/stream.py` handles websocket streaming and message loop coordination
 - `runtime/factory.py` builds the canonical Daytona-backed chat agent
-- `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py` contain the main cognition loop
-- `runtime/execution/*` contains execution helpers and streaming context
+- `runtime/agent/agent.py` and `runtime/agent/runtime.py` contain the main cognition loop
+- `runtime/execution/*` contains execution helpers and streaming event construction
 - `runtime/models/*` contains runtime model assembly and registry code
 - `runtime/quality/*` is the offline evaluation and optimization layer
 - `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the sandbox and durable-workspace substrate
@@ -117,10 +94,10 @@ Key files:
 
 | Task | Read first |
 | --- | --- |
-| Websocket or runtime contract change | `api/main.py`, `api/routers/ws/endpoint.py`, `api/runtime_services/chat_runtime.py`, `agent_host/workflow.py`, `worker/streaming.py` |
+| Websocket or runtime contract change | `api/main.py`, `api/routers/ws/endpoint.py`, `api/runtime_services/chat_runtime.py`, `api/routers/ws/stream.py` |
 | Session/history change | `api/routers/sessions.py`, `integrations/local_store.py`, `api/runtime_services/chat_persistence.py` |
 | Runtime settings or diagnostics | `api/routers/runtime.py`, `api/runtime_services/settings.py`, `api/runtime_services/diagnostics.py` |
-| Daytona execution change | `runtime/factory.py`, `runtime/agent/chat_agent.py`, `integrations/daytona/interpreter.py`, `integrations/daytona/runtime.py` |
+| Daytona execution change | `runtime/factory.py`, `runtime/agent/agent.py`, `integrations/daytona/interpreter.py`, `integrations/daytona/runtime.py` |
 | Offline optimization change | `runtime/quality/module_registry.py`, `runtime/quality/optimization_runner.py` |
 
 ## Historical Note

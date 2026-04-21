@@ -47,8 +47,8 @@ class RLMReActChatSignature(dspy.Signature):
 
 ### 3. Streaming Context
 
-Real-time response streaming via `runtime/execution/streaming_context.py` and
-`runtime/execution/streaming.py` provides:
+Real-time response streaming via `api/routers/ws/stream.py` and
+`runtime/execution/streaming_events.py` provides:
 
 - WebSocket-compatible event emission
 - Citation tracking for tool outputs
@@ -92,6 +92,6 @@ The parent shares its LLM budget with children via `_share_llm_budget()` to enfo
 - `src/fleet_rlm/runtime/agent/signatures.py` — DSPy signature definitions
 - `src/fleet_rlm/runtime/agent/chat_turns.py` — Per-turn state, metrics, and result shaping
 - `src/fleet_rlm/runtime/agent/recursive_runtime.py` — Recursive delegation logic
-- `src/fleet_rlm/runtime/execution/streaming.py` — Response streaming implementation
-- `src/fleet_rlm/runtime/execution/streaming_context.py` — Streaming context management
+- `src/fleet_rlm/api/routers/ws/stream.py` — WebSocket streaming loop
+- `src/fleet_rlm/runtime/execution/streaming_events.py` — Event construction and streaming helpers
 - DSPy documentation: https://dspy.ai/

@@ -1,8 +1,8 @@
 """Event construction, status parsing, citation handling, and payload building
 for the RLM ReAct chat agent streaming pipeline.
 
-Extracted from :mod:`fleet_rlm.runtime.execution.streaming` to keep event
-construction logic separate from stream orchestration.
+Event construction logic kept separate from stream orchestration in
+:mod:`fleet_rlm.api.routers.ws.stream`.
 """
 
 from __future__ import annotations
