@@ -1279,8 +1279,6 @@ def test_ws_endpoint_has_no_orchestration_session_context_import():
         "fleet_rlm.api.routers.ws.stream",
         "fleet_rlm.api.routers.ws.session",
         "fleet_rlm.api.routers.ws.terminal",
-        "fleet_rlm.api.routers.ws.turn_persistence",
-        "fleet_rlm.api.routers.ws.turn_runner",
         "fleet_rlm.api.routers.ws.endpoint",
     ]
     for mod_name in ws_modules:

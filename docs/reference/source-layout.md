@@ -53,8 +53,6 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `stream.py` | Execution turn streaming and message loop coordination. |
 | `session.py` | Runtime preparation and session restore/switch helpers. |
 | `turn_setup.py` | Converts a websocket payload into a prepared runtime turn. |
-| `turn_runner.py` | Turn execution coordination around the worker boundary. |
-| `turn_persistence.py` | Local and durable persistence hooks for a turn. |
 | `commands.py` | Command-frame dispatch and run lifecycle initialization. |
 | `messages.py` | Websocket message parsing and validation. |
 | `terminal.py` | Terminal event shaping and ordering. |
