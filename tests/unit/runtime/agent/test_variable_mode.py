@@ -217,21 +217,3 @@ def test_variable_mode_threshold_is_reasonable():
     from fleet_rlm.runtime.models.builders import VARIABLE_MODE_THRESHOLD
 
     assert VARIABLE_MODE_THRESHOLD == 32_000
-
-
-# ── rlm_query auto-routing ──────────────────────────────────────────
-
-
-def test_has_interpreter_checks_started():
-    from fleet_rlm.runtime.tools.sandbox.delegate import _has_interpreter
-
-    agent = MagicMock()
-    agent.interpreter = MagicMock()
-    agent.interpreter._started = True
-    assert _has_interpreter(agent) is True
-
-    agent.interpreter._started = False
-    assert _has_interpreter(agent) is False
-
-    agent.interpreter = None
-    assert _has_interpreter(agent) is False

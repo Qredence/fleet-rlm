@@ -16,6 +16,31 @@ from fleet_rlm.integrations.database import ChatSessionStatus
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _register_reflect_and_revise_stub():
+    """Register a stub 'reflect-and-revise' module for contract tests."""
+    from fleet_rlm.runtime.quality.module_registry import (
+        ModuleOptimizationSpec,
+        _REGISTRY,
+        register_module,
+    )
+
+    spec = ModuleOptimizationSpec(
+        module_slug="reflect-and-revise",
+        label="Reflect & Revise",
+        program_spec="stub",
+        artifact_filename="stub.json",
+        input_keys=["user_request"],
+        required_dataset_keys=["user_request", "next_action"],
+        module_factory=lambda: None,
+        row_converter=lambda rows: rows,
+        metric_builder=lambda: None,
+    )
+    register_module(spec)
+    yield
+    _REGISTRY.pop("reflect-and-revise", None)
+
+
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
     "/api/v1/optimization/modules",
