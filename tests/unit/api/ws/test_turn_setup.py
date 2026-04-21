@@ -10,7 +10,7 @@ from fleet_rlm.api.runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
 )
 from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
-from fleet_rlm.api.routers.ws.worker_request import build_workspace_task_request
+from fleet_rlm.api.routers.ws.lifecycle import build_workspace_task_request
 from fleet_rlm.api.schemas import WSMessage
 from tests.ui.fixtures_ui import FakeChatAgent
 

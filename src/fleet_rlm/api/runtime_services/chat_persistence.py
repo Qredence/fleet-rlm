@@ -48,7 +48,7 @@ _EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
 
 
 def _new_persistence_required_error(code: str, message: str) -> RuntimeError:
-    from ..routers.ws.failures import PersistenceRequiredError
+    from ..routers.ws.lifecycle import PersistenceRequiredError
 
     return PersistenceRequiredError(code, message)
 

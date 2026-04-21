@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from fastapi import WebSocketDisconnect
 
-from fleet_rlm.api.routers.ws.task_control import (
+from fleet_rlm.api.routers.ws.lifecycle import (
     cancel_task,
     cancelled_event_payload,
     enqueue_latest_nonblocking,

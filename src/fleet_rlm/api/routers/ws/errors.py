@@ -11,8 +11,8 @@ from fleet_rlm.integrations.database import RunStatus
 
 from ...events import ExecutionStepBuilder
 from .completion import build_execution_completion_summary
-from .failures import classify_stream_failure
 from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
+from .lifecycle import classify_stream_failure
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .types import WorkspaceEvent
 

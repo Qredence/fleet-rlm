@@ -31,8 +31,6 @@ from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
-from .execution_support import get_execution_emitter
-from .failures import chat_startup_error_payload
 from .helpers import (
     _authenticate_websocket,
     _close_websocket_safely,
@@ -40,11 +38,13 @@ from .helpers import (
     _sanitize_for_log,
     _try_send_json,
 )
-from .messages import parse_ws_message_or_send_error
-from .startup_status import (
+from .lifecycle import (
     cancel_startup_status_task as _cancel_startup_status_task,
+    chat_startup_error_payload,
     emit_delayed_startup_status as _emit_delayed_startup_status,
+    get_execution_emitter,
 )
+from .messages import parse_ws_message_or_send_error
 from .stream import _chat_message_loop
 from .terminal import build_stream_event_dict
 from .types import WorkspaceEvent

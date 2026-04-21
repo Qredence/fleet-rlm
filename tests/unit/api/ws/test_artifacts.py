@@ -13,7 +13,7 @@ from fleet_rlm.api.routers.ws.artifacts import (
     persist_artifact_metadata,
     track_command_artifact_if_needed,
 )
-from fleet_rlm.api.routers.ws.failures import PersistenceRequiredError
+from fleet_rlm.api.routers.ws.lifecycle import PersistenceRequiredError
 
 
 class _FakeRepository:

@@ -24,24 +24,21 @@ from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
-from .execution_support import get_execution_emitter
 from .errors import handle_stream_error
 from .helpers import _try_send_json
-from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from ...runtime_services.chat_runtime import (
-    ChatSessionState as _ChatSessionState,
-    PreparedChatRuntime as _PreparedChatRuntime,
+from .lifecycle import (
+    build_workspace_task_request,
+    cancelled_event_payload,
+    enqueue_latest_nonblocking,
+    get_execution_emitter,
+    handle_chat_disconnect,
+    handle_chat_loop_exception,
+    should_reload_docs_path,
 )
-from .loop_exit import handle_chat_disconnect, handle_chat_loop_exception
 from .messages import parse_ws_message_or_send_error, resolve_session_identity
 from .repl_bridge import ReplHookBridge
 from .session import (
     switch_session_if_needed,
-)
-from .task_control import (
-    cancelled_event_payload,
-    enqueue_latest_nonblocking,
-    should_reload_docs_path,
 )
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
 from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
@@ -53,7 +50,11 @@ from .types import (
     WorkspaceEvent,
     WorkspaceTaskRequest,
 )
-from .worker_request import build_workspace_task_request
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
+from ...runtime_services.chat_runtime import (
+    ChatSessionState as _ChatSessionState,
+    PreparedChatRuntime as _PreparedChatRuntime,
+)
 
 logger = logging.getLogger(__name__)
 
