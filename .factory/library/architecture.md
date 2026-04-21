@@ -120,8 +120,8 @@ Example: `runtime.py` uses `filesystem.py` for volume operations inside specific
 
 **Completed Runtime/API cleanup:**
 - Removed orphaned files: `chat_session_state.py`, `memory.py`, `document_cache.py`, `output_utils.py`, `document_sources.py`, `validation.py`, `rewards.py`, `turn_runner.py`, `turn_persistence.py`
-- Consolidate `streaming.py` re-exports into direct imports (pending)
-- Consolidate small `ws/` helpers into `lifecycle.py` (pending)
+- Consolidated `streaming.py` re-exports into direct imports (completed)
+- Consolidated small `ws/` helpers into `lifecycle.py` (completed)
 
 ## Invariants
 

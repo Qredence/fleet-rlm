@@ -1,0 +1,58 @@
+{
+  "featureId": "runtime-consolidate-execution",
+  "reviewedAt": "2026-04-21T21:30:00Z",
+  "commitId": "72f5f8b884e6c60fd2f0f3208c3e92274eaffa0d",
+  "transcriptSkeletonReviewed": false,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The consolidation is clean and mechanically correct. Three modules were removed (runtime/execution/streaming.py, runtime/execution/streaming_context.py, api/server_utils.py) and their functionality was inlined or rerouted to direct imports. All 15 affected files were updated, no dangling imports remain in src/ or tests/, and all validators (lint, typecheck, test-unit, test-ui) passed.",
+    "issues": [
+      {
+        "file": "src/fleet_rlm/runtime/execution/streaming_events.py",
+        "line": 4,
+        "severity": "non_blocking",
+        "description": "Module docstring still references the deleted :mod:`fleet_rlm.runtime.execution.streaming` as the extraction source. Should be updated to reflect the current module structure."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "docs",
+      "observation": "docs/reference/source-layout.md:29 still lists `server_utils.py` as an active module, but it was deleted in this refactor.",
+      "evidence": "docs/reference/source-layout.md line 29: `| server_utils.py | Shared API utility helpers. |`"
+    },
+    {
+      "area": "docs",
+      "observation": "docs/reference/module-map.md:103 still references `runtime/execution/streaming_context.py` as an event-shaping dependency, but the module was deleted.",
+      "evidence": "docs/reference/module-map.md line 103: `runtime/execution/streaming_context.py, frontend workspace stores`"
+    },
+    {
+      "area": "docs",
+      "observation": "Multiple docs files reference `worker/streaming.py` or `src/fleet_rlm/worker/streaming.py`, but no `worker/` package exists under `src/fleet_rlm/`. This appears to be pre-existing stale documentation.",
+      "evidence": "docs/reference/codebase-map.md:90, docs/architecture.md:70 and :152, docs/reference/module-map.md:39 all reference worker/streaming.py; `find src/fleet_rlm/worker` returns nothing."
+    },
+    {
+      "area": "library",
+      "observation": ".factory/library/cleanup-audit.md:15 still lists `runtime/execution/streaming.py` as a cleanup target, but it was completed in this refactor.",
+      "evidence": ".factory/library/cleanup-audit.md line 15: `- src/fleet_rlm/runtime/execution/streaming.py`"
+    },
+    {
+      "area": "library",
+      "observation": ".factory/library/architecture.md:123 lists 'Consolidate streaming.py re-exports into direct imports (pending)' but this was completed in this refactor.",
+      "evidence": ".factory/library/architecture.md line 123: 'Consolidate streaming.py re-exports into direct imports (pending)'"
+    },
+    {
+      "area": "library",
+      "observation": ".factory/library/runtime-patterns.md:35 references `streaming.py:54` for TERMINAL_STREAM_EVENT_KINDS, but the constant now lives in `streaming_events.py`. The documented inconsistency about the live-event-queue filter may also be stale.",
+      "evidence": ".factory/library/runtime-patterns.md line 35: `streaming.py:54` defines `TERMINAL_STREAM_EVENT_KINDS...`"
+    },
+    {
+      "area": "scaffold",
+      "observation": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md:50 references the deleted `runtime/execution/streaming.py` as a relevant file for debugging.",
+      "evidence": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md line 50: `- src/fleet_rlm/runtime/execution/streaming.py` (streaming context)"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The runtime-consolidate-execution feature is fully and correctly implemented. Three redundant/unnecessary modules were removed, imports were cleanly rerouted to direct sources, and all validation passed. The only code-level issue is a stale docstring in streaming_events.py. Several docs, library, and scaffold files contain stale references to the deleted modules that should be updated in a follow-up documentation pass."
+}

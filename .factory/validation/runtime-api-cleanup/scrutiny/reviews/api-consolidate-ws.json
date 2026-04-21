@@ -1,0 +1,27 @@
+{
+  "featureId": "api-consolidate-ws",
+  "reviewedAt": "2026-04-21T19:40:00Z",
+  "commitId": "a19bfc1fc7100f7c4b54c75c21065fbe333c3371",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The consolidation of six small WebSocket helper modules into ws/lifecycle.py is clean, complete, and preserves all existing behavior. The deleted modules (startup_status.py, task_control.py, loop_exit.py, worker_request.py, failures.py, execution_support.py) are fully accounted for in lifecycle.py with clear sectional organization. Imports are updated correctly across all consumers (endpoint.py, stream.py, errors.py, artifacts.py, chat_persistence.py) and test files. All WS unit tests pass. WebSocket route registration remains intact.",
+    "issues": [
+      {
+        "severity": "suggestion",
+        "description": "Functions build_execution_event and map_execution_step_type in lifecycle.py appear to have no external callers after consolidation. chat_persistence.py maintains its own local _build_execution_event and _map_execution_step_type variants. These were likely already unused before the refactor, but the consolidation preserves them. Consider removing dead code in a follow-up cleanup.",
+        "location": "src/fleet_rlm/api/routers/ws/lifecycle.py:96-140"
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The test_ws_router_split_modules_import test in tests/ui/server/test_api_contract_routes.py acts as a valuable regression guard for module consolidation/import stability. Workers should continue updating it when ws modules are merged or renamed.",
+      "evidence": "tests/ui/server/test_api_contract_routes.py:252-300 — test was correctly updated by the worker to import ws_lifecycle instead of deleted modules."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature passes review. Six small WebSocket helper files were cleanly consolidated into ws/lifecycle.py, imports updated across 5 source files and 7 test files, no dangling imports remain, and all unit tests pass. The single non-blocking suggestion is to consider removing two functions that appear to be dead code."
+}

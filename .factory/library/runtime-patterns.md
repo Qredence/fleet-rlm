@@ -32,7 +32,7 @@ Editing one version does not automatically update the other. When making changes
 
 ## StreamEventKind Terminal Filter Inconsistency
 
-`streaming.py:54` defines `TERMINAL_STREAM_EVENT_KINDS = frozenset({"done", "final", "cancelled", "error"})` as the authoritative set of terminal event kinds. However, the live-event-queue filter in `_activate_live_event_queue` (streaming.py:~482) uses a hardcoded set `{"final", "cancelled", "error"}` — missing `"done"`. This means `done` terminal events are not filtered from the live event callback queue, which is inconsistent with the module constant. Additionally, `error` is filtered alongside legacy kinds, which silently drops error events from nested runtimes rather than propagating them. Both issues predate the api-rewiring milestone. The module constant `TERMINAL_STREAM_EVENT_KINDS` should be reused in the filter.
+`streaming_events.py` defines `TERMINAL_STREAM_EVENT_KINDS = frozenset({"done", "final", "cancelled", "error"})` as the authoritative set of terminal event kinds. However, the live-event-queue filter in `_activate_live_event_queue` (streaming_events.py) uses a hardcoded set `{"final", "cancelled", "error"}` — missing `"done"`. This means `done` terminal events are not filtered from the live event callback queue, which is inconsistent with the module constant. Additionally, `error` is filtered alongside legacy kinds, which silently drops error events from nested runtimes rather than propagating them. Both issues predate the api-rewiring milestone. The module constant `TERMINAL_STREAM_EVENT_KINDS` should be reused in the filter.
 
 ## FleetAgentSignature Location
 
