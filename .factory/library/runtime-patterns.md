@@ -30,6 +30,10 @@ Editing one version does not automatically update the other. When making changes
 
 `runtime/agent/runtime.py` contains both the new simplified `AgentRuntime` (lines ~554+) and the legacy `_LegacyAgentRuntime` (lines ~36-540) marked "to be deleted" in the module docstring. The legacy class is imported by `chat_agent.py` as `AgentRuntime` for backward compatibility. No deprecation guard, decorator, or ticket number is associated with this cleanup task.
 
+## StreamEventKind Terminal Filter Inconsistency
+
+`streaming.py:54` defines `TERMINAL_STREAM_EVENT_KINDS = frozenset({"done", "final", "cancelled", "error"})` as the authoritative set of terminal event kinds. However, the live-event-queue filter in `_activate_live_event_queue` (streaming.py:~482) uses a hardcoded set `{"final", "cancelled", "error"}` — missing `"done"`. This means `done` terminal events are not filtered from the live event callback queue, which is inconsistent with the module constant. Additionally, `error` is filtered alongside legacy kinds, which silently drops error events from nested runtimes rather than propagating them. Both issues predate the api-rewiring milestone. The module constant `TERMINAL_STREAM_EVENT_KINDS` should be reused in the filter.
+
 ## FleetAgentSignature Location
 
 `FleetAgentSignature` (the signature for `FleetAgent`) is currently defined in `runtime/agent/agent.py`. Per AGENTS.md, DSPy signatures should live in `runtime/agent/signatures.py`. This is a known placement inconsistency that should be resolved in a future cleanup.
