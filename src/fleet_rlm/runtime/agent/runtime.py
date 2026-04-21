@@ -654,3 +654,39 @@ class AgentRuntime:
             value: Text value to store.
         """
         self.core_memory[key] = value
+
+    # -----------------------------------------------------------------
+    # Session persistence helpers
+    # -----------------------------------------------------------------
+
+    def export_session(self, session_id: str) -> dict[str, Any]:
+        """Export the full session state as a JSON-compatible dict.
+
+        Delegates to :func:`~fleet_rlm.runtime.agent.persistence.export_session`.
+
+        Args:
+            session_id: Session identifier to embed in the payload.
+
+        Returns:
+            JSON-compatible dict with ``schema_version``, ``session_id``,
+            ``timestamp``, ``turns``, and ``core_memory``.
+        """
+        from .persistence import export_session as _export_session
+
+        return _export_session(self, session_id)
+
+    def import_session(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Restore session state from a previously exported dict.
+
+        Delegates to :func:`~fleet_rlm.runtime.agent.persistence.import_session`.
+
+        Args:
+            data: Dict previously produced by :meth:`export_session`.
+
+        Returns:
+            Summary dict with ``status``, ``session_id``, and
+            ``history_turns``.
+        """
+        from .persistence import import_session as _import_session
+
+        return _import_session(self, data)
