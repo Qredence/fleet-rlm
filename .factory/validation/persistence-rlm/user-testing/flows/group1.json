@@ -1,0 +1,66 @@
+{
+  "groupId": "group1",
+  "testedAt": "2026-04-21T00:00:00Z",
+  "isolation": {
+    "appRoot": "/Volumes/SSD-T7/qredence-environnement/fleet-rlm",
+    "externalServices": "none (all tests mock Daytona/DB)"
+  },
+  "toolsUsed": ["pytest", "rg"],
+  "assertions": {
+    "VAL-PERSIST-001": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_persist_history_to_volume_calls_awrite, test_persist_history_to_volume_writes_valid_json, test_persist_history_to_volume_path_contains_session_id, test_persist_history_to_volume_fallback_sync — all pass. Also covered by test_volume_persist_restore_round_trip and integration tests in test_simplified_flows.py."
+    },
+    "VAL-PERSIST-002": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_persist_session_metadata_calls_upsert, test_persist_session_metadata_passes_correct_ids, test_persist_session_metadata_noop_when_repository_none, test_persist_session_metadata_noop_on_invalid_uuid — all pass. Integration test test_e2e_session_metadata_persisted_to_db also passes."
+    },
+    "VAL-PERSIST-003": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_restore_history_from_volume_returns_history, test_restore_history_from_volume_preserves_turns, test_restore_history_from_volume_returns_none_when_missing, test_restore_history_from_volume_returns_none_on_bad_json — all pass. Volume round-trip test also passes."
+    },
+    "VAL-PERSIST-004": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_serialize_history_has_required_keys, test_serialize_history_schema_version, test_serialize_history_session_id, test_serialize_history_timestamp_is_float, test_serialize_history_turns_list, test_serialize_history_turns_have_required_fields, test_serialize_history_is_json_serializable — all pass. JSON schema with required keys (schema_version, session_id, timestamp, turns) is validated."
+    },
+    "VAL-PERSIST-005": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_export_session_produces_valid_schema, test_export_session_encodes_turns, test_export_session_includes_core_memory, test_import_session_restores_history, test_import_session_returns_correct_session_id, test_export_import_round_trip_preserves_all_turns, test_agent_runtime_export_session_method, test_agent_runtime_import_session_method — all pass. Integration test_multi_turn_export_import_round_trip also passes."
+    },
+    "VAL-PERSIST-006": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/agent/test_persistence.py: test_agent_runtime_history_is_dspy_history, test_agent_runtime_history_updated_after_chat_turn, test_agent_runtime_history_is_dspy_history_after_import — all pass. Static check confirms AgentRuntime.history is initialized as dspy.History in runtime.py."
+    },
+    "VAL-RLM-001": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/tools/test_rlm_delegate.py: test_delegate_to_rlm_has_fleet_tool_marker, test_delegate_to_rlm_in_discover_tools, test_delegate_to_rlm_valid_for_react — all pass. delegate_to_rlm is marked with __is_fleet_tool__=True and is discoverable via discover_tools(); dspy.ReAct construction with the full tool list succeeds."
+    },
+    "VAL-RLM-002": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/tools/test_rlm_delegate.py: test_delegate_to_rlm_raises_without_interpreter, test_delegate_to_rlm_starts_sandbox_when_not_started, test_delegate_to_rlm_reuses_started_sandbox, test_delegate_to_rlm_builds_rlm_with_interpreter — all pass. Daytona interpreter lifecycle is correctly managed."
+    },
+    "VAL-RLM-003": {
+      "status": "pass",
+      "notes": "tests/unit/runtime/tools/test_rlm_delegate.py: test_delegate_to_rlm_returns_ok_dict, test_delegate_to_rlm_returns_error_dict_on_exception, test_delegate_to_rlm_result_is_string_or_dict, test_delegate_to_rlm_empty_answer_returns_empty_string — all pass. Returns dict with status='ok'/'error' and answer field consumable by agent."
+    },
+    "VAL-CROSS-001": {
+      "status": "pass",
+      "notes": "tests/integration/test_simplified_flows.py: test_e2e_agent_chat_turn_produces_prediction, test_e2e_agent_chat_turn_accumulates_history, test_e2e_history_persisted_to_volume_after_turn, test_e2e_session_metadata_persisted_to_db, test_e2e_full_persist_and_restore_cycle — all pass. Full E2E cycle verified: chat turn → history accumulation → volume persistence → DB metadata upsert → restore."
+    },
+    "VAL-CROSS-002": {
+      "status": "pass",
+      "notes": "tests/integration/test_simplified_flows.py: test_multi_turn_history_accumulates, test_multi_turn_session_restore_then_continue, test_multi_turn_export_import_round_trip, test_multi_turn_continuity_db_upserted_per_turn — all pass. Two-turn continuity verified: history restored, second turn receives first turn's context, both turns persisted."
+    },
+    "VAL-CROSS-003": {
+      "status": "pass",
+      "notes": "tests/integration/test_simplified_flows.py: test_rlm_delegation_turn_has_tool_call_in_trajectory, test_rlm_delegation_stream_emits_tool_call_and_result_events, test_rlm_delegation_turn_persists_delegation_in_history, test_rlm_delegate_tool_is_in_registry, test_rlm_delegate_tool_raises_without_interpreter, test_rlm_delegation_with_mocked_interpreter_and_rlm — all pass. Delegation turn emits tool_call/tool_result events and persists in history."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "summary": "All 67 tests across 3 test files passed in 1.03s. All 12 assertions confirmed pass: VAL-PERSIST-001 through VAL-PERSIST-006 (persistence helpers), VAL-RLM-001 through VAL-RLM-003 (delegate_to_rlm tool), and VAL-CROSS-001 through VAL-CROSS-003 (cross-area integration flows).",
+  "evidence": {
+    "testOutput": "evidence/persistence-rlm/group1/pytest-output.txt",
+    "summary": "67 passed in 1.03s — exit code 0"
+  }
+}
