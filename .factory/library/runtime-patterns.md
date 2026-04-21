@@ -28,7 +28,7 @@ Editing one version does not automatically update the other. When making changes
 
 ## Legacy _LegacyAgentRuntime
 
-`runtime/agent/runtime.py` contains both the new simplified `AgentRuntime` (lines ~554+) and the legacy `_LegacyAgentRuntime` (lines ~36-540) marked "to be deleted" in the module docstring. The legacy class is imported by `chat_agent.py` as `AgentRuntime` for backward compatibility. No deprecation guard, decorator, or ticket number is associated with this cleanup task.
+`runtime/agent/runtime.py` contains both the new simplified `AgentRuntime` (lines ~554+) and the legacy `_LegacyAgentRuntime` (lines ~36-540) marked "to be deleted" in the module docstring. The legacy class is imported by `agent.py` as `AgentRuntime` for backward compatibility. No deprecation guard, decorator, or ticket number is associated with this cleanup task.
 
 ## StreamEventKind Terminal Filter Inconsistency
 

@@ -7,7 +7,7 @@ Backend-only. No browser/UI testing needed.
 **Secondary:** `make lint`, `make typecheck`
 **Milestone-specific lanes:**
 - Daytona upgrade: `uv run pytest tests/unit/integrations/daytona/ -q`
-- Daytona focused: `uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_smoke.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_chat_agent_runtime.py`
+- Daytona focused: `uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_smoke.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_agent.py`
 - Observability: `uv run pytest tests/unit/integrations/observability/ -q`
 - Database integration: `uv run pytest tests/integration/test_db_repository.py -v`
 
