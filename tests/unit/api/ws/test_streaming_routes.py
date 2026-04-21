@@ -65,7 +65,7 @@ async def test_aiter_chat_turn_stream_rlm_only_uses_forced_stream(
         assert "Core memory:" in context
         assert callable(stream_event_callback)
         await stream_event_callback(
-            StreamEvent(kind="reasoning_step", text="delegating to recursive runtime")
+            StreamEvent(kind="reasoning", text="delegating to recursive runtime")
         )
         return {"answer": "forced async response", "trajectory": {}}
 
@@ -83,8 +83,8 @@ async def test_aiter_chat_turn_stream_rlm_only_uses_forced_stream(
     ]
 
     kinds = [event.kind for event in events]
-    assert kinds[:2] == ["status", "rlm_executing"]
-    assert "reasoning_step" in kinds
-    assert kinds[-2:] == ["tool_result", "final"]
+    assert kinds[:2] == ["status", "status"]
+    assert "reasoning" in kinds
+    assert kinds[-2:] == ["tool_result", "done"]
     assert events[-1].text == "forced async response"
     assert len(agent.history.messages) == 1

@@ -61,7 +61,6 @@ class TranscriptEvent(BaseModel):
 
 
 StreamEventKind = Literal[
-    # Simplified canonical kinds (current)
     "status",
     "text",
     "reasoning",
@@ -70,19 +69,6 @@ StreamEventKind = Literal[
     "warning",
     "error",
     "done",
-    # Legacy kinds retained for backward-compatible consumers (deprecated)
-    "assistant_token",
-    "reasoning_step",
-    "trajectory_step",
-    "plan_update",
-    "rlm_executing",
-    "memory_update",
-    "hitl_request",
-    "hitl_resolved",
-    "command_ack",
-    "command_reject",
-    "final",
-    "cancelled",
 ]
 
 
@@ -122,7 +108,7 @@ class TurnState:
 
     def apply(self, event: StreamEvent) -> None:
         """Apply one event to state in a deterministic way."""
-        if event.kind in ("assistant_token", "text"):
+        if event.kind == "text":
             token = event.text
             self.assistant_tokens.append(token)
             self.stream_chunks.append(token)
@@ -145,7 +131,7 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind in ("reasoning_step", "reasoning"):
+        if event.kind == "reasoning":
             if event.text:
                 self.reasoning_lines.append(event.text)
                 self.thought_chunks.append(event.text)
@@ -161,23 +147,7 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind == "trajectory_step":
-            step_data = event.payload.get("step_data", {})
-            if step_data:
-                current_steps = self.trajectory.get("steps", [])
-                current_steps.append(step_data)
-                self.trajectory["steps"] = current_steps
-            return
-
-        if event.kind in ("plan_update", "rlm_executing", "memory_update"):
-            if event.text:
-                # Maintain CLI backward compatibility by casting these as status/timeline noise
-                self.status_lines.append(event.text)
-                self.tool_timeline.append(event.text)
-            return
-
-        if event.kind in ("final", "done"):
-            # "done" is the canonical new kind; "final" kept for backward compat.
+        if event.kind == "done":
             # A "done" event with payload["cancelled"]=True marks a cancelled turn.
             if event.payload.get("cancelled"):
                 self.cancelled = True
@@ -194,17 +164,6 @@ class TurnState:
                 event.payload.get("history_turns", self.history_turns)
             )
             self.done = True
-            return
-
-        if event.kind == "cancelled":
-            self.cancelled = True
-            self.done = True
-            cancelled_text = event.text or self.transcript_text
-            self.final_text = cancelled_text
-            self.transcript_text = cancelled_text
-            self.history_turns = int(
-                event.payload.get("history_turns", self.history_turns)
-            )
             return
 
         if event.kind == "error":

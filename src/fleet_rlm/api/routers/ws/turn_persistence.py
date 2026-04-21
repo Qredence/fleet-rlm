@@ -64,8 +64,7 @@ def _is_terminal_transport_event(event: StreamEventLike) -> bool:
     """Return websocket-terminal semantics for worker and legacy runtime events."""
 
     return bool(getattr(event, "terminal", False)) or event.kind in {
-        "final",
-        "cancelled",
+        "done",
         "error",
     }
 
@@ -82,7 +81,7 @@ async def _emit_stream_event(
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
-    if event.kind == "final":
+    if event.kind == "done":
         payload = merge_trace_result_metadata(
             payload if isinstance(payload, dict) else None,
             response_preview=event.text,

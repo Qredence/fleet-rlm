@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -157,7 +157,7 @@ def test_emit_stream_event_translates_closed_send_runtime_error_to_disconnect() 
                 websocket=cast(Any, _ClosedSendWebSocket()),
                 lifecycle=cast(Any, _LifecycleStub()),
                 step_builder=cast(Any, _NoopStepBuilder()),
-                event=StreamEvent(kind="assistant_token", text="hi", timestamp=ts()),
+                event=StreamEvent(kind="text", text="hi", timestamp=ts()),
                 persist_session_state=_noop_persist,
                 request_message="hello",
             )
@@ -237,14 +237,38 @@ def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize(
-    ("kind", "expected_include_volume_save"),
-    [("cancelled", True), ("error", True)],
-)
-def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
-    kind: Literal["cancelled", "error"],
-    expected_include_volume_save: bool,
-) -> None:
+def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run() -> (
+    None
+):
+    """done events call persist_session_state then send after complete_run."""
+
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        persist_calls: list[bool] = []
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            persist_calls.append(include_volume_save)
+
+        await _emit_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            step_builder=cast(Any, _NoopStepBuilder()),
+            event=StreamEvent(kind="done", text="done turn", timestamp=ts()),
+            persist_session_state=persist_session_state,
+            request_message="hello",
+        )
+
+        assert websocket.sent
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert persist_calls == [True]
+
+    asyncio.run(scenario())
+
+
+def test_emit_stream_event_persists_terminal_error_before_run_completion() -> None:
+    """error events send to websocket before complete_run."""
+
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _HangingTerminalLifecycle()
@@ -258,7 +282,7 @@ def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
                 websocket=cast(Any, websocket),
                 lifecycle=cast(Any, lifecycle),
                 step_builder=cast(Any, _NoopStepBuilder()),
-                event=StreamEvent(kind=kind, text=f"{kind} turn", timestamp=ts()),
+                event=StreamEvent(kind="error", text="error turn", timestamp=ts()),
                 persist_session_state=persist_session_state,
                 request_message="hello",
             )
@@ -271,8 +295,8 @@ def test_emit_stream_event_persists_terminal_cancelled_and_error_events(
             await asyncio.sleep(0.01)
 
         assert websocket.sent
-        assert websocket.sent[0]["data"]["kind"] == kind
-        assert persist_calls == [expected_include_volume_save]
+        assert websocket.sent[0]["data"]["kind"] == "error"
+        assert persist_calls == [True]
 
         task.cancel()
         with suppress(asyncio.CancelledError):

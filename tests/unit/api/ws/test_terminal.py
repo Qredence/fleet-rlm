@@ -75,7 +75,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         persist_calls: list[bool] = []
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
@@ -94,7 +94,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
 
         assert persist_calls == [True]
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["summary"]["status"] == "completed"
 
@@ -105,7 +105,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
@@ -124,7 +124,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
         )
 
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["summary"]["status"] == "completed"
 
@@ -173,7 +173,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         event = WorkspaceEvent(
-            kind="final",
+            kind="done",
             text="claimed success",
             payload={
                 "runtime_degraded": True,
@@ -199,7 +199,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         )
 
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["status"].name == "FAILED"
         assert lifecycle.completed_with["summary"]["status"] == "error"
@@ -211,7 +211,7 @@ def test_handle_terminal_stream_event_accepts_session_context() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
         session = SessionContext(
             workspace_id="workspace-1",
             user_id="user-1",
@@ -236,7 +236,7 @@ def test_handle_terminal_stream_event_accepts_session_context() -> None:
         )
 
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["summary"]["status"] == "completed"
 

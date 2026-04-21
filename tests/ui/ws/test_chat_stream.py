@@ -20,10 +20,10 @@ def test_websocket_basic_message_flow(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(kind="assistant_token", text="Hello", timestamp=ts(1.0)),
-            StreamEvent(kind="assistant_token", text=" world", timestamp=ts(2.0)),
+            StreamEvent(kind="text", text="Hello", timestamp=ts(1.0)),
+            StreamEvent(kind="text", text=" world", timestamp=ts(2.0)),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Hello world",
                 payload={"trajectory": {}, "history_turns": 1},
                 timestamp=ts(3.0),
@@ -42,11 +42,11 @@ def test_websocket_basic_message_flow(
             if data["type"] == "error":
                 raise AssertionError(f"Received error from websocket: {data}")
             received_events.append(data)
-            if data["type"] == "event" and data["data"]["kind"] == "final":
+            if data["type"] == "event" and data["data"]["kind"] == "done":
                 break
 
         assert len(received_events) == 3
-        assert received_events[0]["data"]["kind"] == "assistant_token"
+        assert received_events[0]["data"]["kind"] == "text"
         assert received_events[0]["data"]["text"] == "Hello"
         assert set(received_events[0]["data"].keys()) >= {
             "kind",
@@ -58,10 +58,10 @@ def test_websocket_basic_message_flow(
         }
         assert received_events[0]["data"]["version"] == 2
         assert isinstance(received_events[0]["data"]["event_id"], str)
-        assert received_events[1]["data"]["kind"] == "assistant_token"
+        assert received_events[1]["data"]["kind"] == "text"
         assert received_events[1]["data"]["text"] == " world"
         assert received_events[2]["type"] == "event"
-        assert received_events[2]["data"]["kind"] == "final"
+        assert received_events[2]["data"]["kind"] == "done"
         assert received_events[2]["data"]["text"] == "Hello world"
         assert received_events[2]["data"]["payload"]["history_turns"] == 1
 
@@ -70,7 +70,7 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="ok",
                 payload={"history_turns": 1},
                 timestamp=ts(1.0),
@@ -86,7 +86,7 @@ def test_websocket_accepts_query_auth_in_dev_mode(ws_client, fake_agent: FakeCha
         websocket.send_json({"type": "message", "content": "hello from query auth"})
         data = websocket.receive_json()
         assert data["type"] == "event"
-        assert data["data"]["kind"] == "final"
+        assert data["data"]["kind"] == "done"
         assert data["data"]["text"] == "ok"
 
 
@@ -114,7 +114,7 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
                 timestamp=ts(1.0),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Daytona done",
                 payload={
                     "history_turns": 1,
@@ -163,7 +163,7 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
         "volume_name": "default",
     }
     assert final["type"] == "event"
-    assert final["data"]["kind"] == "final"
+    assert final["data"]["kind"] == "done"
     assert final["data"]["text"] == "Daytona done"
 
 
@@ -175,7 +175,7 @@ def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="trajectory_step",
+                kind="status",
                 text="Starting Daytona iteration 1.",
                 payload={
                     "phase": "iteration",
@@ -197,7 +197,7 @@ def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
                 timestamp=ts(1.0),
             ),
             StreamEvent(
-                kind="reasoning_step",
+                kind="reasoning",
                 text="Planner prompt preview:\n\nSummarize the repo.",
                 payload={
                     "phase": "prepare_prompt",
@@ -214,7 +214,7 @@ def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
                 timestamp=ts(2.0),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Done",
                 payload={"runtime_mode": "daytona_pilot", "history_turns": 1},
                 timestamp=ts(3.0),
@@ -236,11 +236,11 @@ def test_websocket_streams_live_daytona_reasoning_and_trajectory_events(
         reasoning = websocket.receive_json()
         final = websocket.receive_json()
 
-    assert trajectory["data"]["kind"] == "trajectory_step"
+    assert trajectory["data"]["kind"] == "status"
     assert trajectory["data"]["payload"]["step_data"]["action"] == "Iteration 1"
-    assert reasoning["data"]["kind"] == "reasoning_step"
+    assert reasoning["data"]["kind"] == "reasoning"
     assert reasoning["data"]["payload"]["reasoning_label"] == "prompt_iter_1"
-    assert final["data"]["kind"] == "final"
+    assert final["data"]["kind"] == "done"
 
 
 def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
@@ -251,7 +251,7 @@ def test_websocket_routes_daytona_repo_only_messages_to_daytona_chat_agent(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Repo only",
                 payload={
                     "runtime_mode": "daytona_pilot",
@@ -298,7 +298,7 @@ def test_websocket_routes_daytona_local_context_only_messages_to_daytona_chat_ag
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Local context only",
                 payload={
                     "runtime_mode": "daytona_pilot",
@@ -352,7 +352,7 @@ def test_websocket_accepts_daytona_reasoning_only_requests(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Reasoning only",
                 payload={
                     "runtime_mode": "daytona_pilot",
@@ -376,7 +376,7 @@ def test_websocket_accepts_daytona_reasoning_only_requests(
         event = websocket.receive_json()
 
     assert event["type"] == "event"
-    assert event["data"]["kind"] == "final"
+    assert event["data"]["kind"] == "done"
     assert fake_agent.last_stream_kwargs == {
         "message": "think through this architecture",
         "trace": True,
@@ -435,7 +435,7 @@ def test_execution_websocket_without_session_id_accepts_chat_messages(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="ok",
                 payload={"history_turns": 1},
                 timestamp=ts(1.0),
@@ -450,7 +450,7 @@ def test_execution_websocket_without_session_id_accepts_chat_messages(
         event = websocket.receive_json()
 
     assert event["type"] == "event"
-    assert event["data"]["kind"] == "final"
+    assert event["data"]["kind"] == "done"
     assert event["data"]["text"] == "ok"
 
 
@@ -551,7 +551,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(kind="reasoning_step", text="Thinking...", timestamp=ts(1.0)),
+            StreamEvent(kind="reasoning", text="Thinking...", timestamp=ts(1.0)),
             StreamEvent(
                 kind="tool_call",
                 text="Calling tool: read_file_slice",
@@ -563,7 +563,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
                 timestamp=ts(1.5),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Done",
                 payload={
                     "trajectory": {},
@@ -599,7 +599,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
                     },
                     "summary": {
                         "warnings": ["Execution warning"],
-                        "termination_reason": "final",
+                        "termination_reason": "done",
                         "duration_ms": 42,
                     },
                 },
@@ -625,10 +625,7 @@ def test_execution_websocket_streams_execution_events_for_matching_session(
 
             while True:
                 chat_data = chat_ws.receive_json()
-                if (
-                    chat_data["type"] == "event"
-                    and chat_data["data"]["kind"] == "final"
-                ):
+                if chat_data["type"] == "event" and chat_data["data"]["kind"] == "done":
                     break
 
             execution_events = []
@@ -689,7 +686,7 @@ def test_execution_events_surface_needs_human_review_summary(
                 timestamp=ts(1.0),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Need a human to review the risky repair.",
                 payload={
                     "recursive_repair": {
@@ -723,10 +720,7 @@ def test_execution_events_surface_needs_human_review_summary(
 
             while True:
                 chat_data = chat_ws.receive_json()
-                if (
-                    chat_data["type"] == "event"
-                    and chat_data["data"]["kind"] == "final"
-                ):
+                if chat_data["type"] == "event" and chat_data["data"]["kind"] == "done":
                     break
 
             while True:
@@ -748,7 +742,7 @@ def test_websocket_final_event_waits_for_run_completion(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="done",
                 payload={"history_turns": 1},
                 timestamp=ts(1.0),
@@ -767,7 +761,7 @@ def test_websocket_final_event_waits_for_run_completion(
         elapsed = time.perf_counter() - started
 
         assert data["type"] == "event"
-        assert data["data"]["kind"] == "final"
+        assert data["data"]["kind"] == "done"
         assert delayed_repo.update_run_status_calls == 1
         assert elapsed >= delayed_repo.completion_delay_seconds * 0.8
 
@@ -781,7 +775,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="done",
                 payload={"history_turns": 1},
                 timestamp=ts(1.0),
@@ -804,7 +798,7 @@ def test_websocket_final_event_can_include_mlflow_metadata(
         data = websocket.receive_json()
 
     assert data["type"] == "event"
-    assert data["data"]["kind"] == "final"
+    assert data["data"]["kind"] == "done"
     assert data["data"]["payload"]["history_turns"] == 1
     assert data["data"]["payload"]["mlflow_trace_id"] == "trace-123"
     assert data["data"]["payload"]["mlflow_client_request_id"] == "req-123"
@@ -819,7 +813,7 @@ def test_websocket_final_event_forwards_runtime_degradation_metadata_to_mlflow(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="done",
                 payload={
                     "history_turns": 1,
@@ -880,7 +874,7 @@ def test_websocket_multiple_messages_sequential(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(kind="final", text="Response 1", timestamp=ts(1.0)),
+            StreamEvent(kind="done", text="Response 1", timestamp=ts(1.0)),
         ]
     )
 
@@ -898,7 +892,7 @@ def test_websocket_multiple_messages_sequential(
 
         fake_agent.set_events(
             [
-                StreamEvent(kind="final", text="Response 2", timestamp=ts(2.0)),
+                StreamEvent(kind="done", text="Response 2", timestamp=ts(2.0)),
             ]
         )
         websocket.send_json({"type": "message", "content": "message 2"})
@@ -911,7 +905,7 @@ def test_websocket_session_state_isolated_by_session_id(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(kind="final", text="Response A", timestamp=ts(1.0)),
+            StreamEvent(kind="done", text="Response A", timestamp=ts(1.0)),
         ]
     )
 
@@ -930,7 +924,7 @@ def test_websocket_session_state_isolated_by_session_id(
 
         fake_agent.set_events(
             [
-                StreamEvent(kind="final", text="Response B", timestamp=ts(2.0)),
+                StreamEvent(kind="done", text="Response B", timestamp=ts(2.0)),
             ]
         )
         websocket.send_json(
@@ -1002,7 +996,7 @@ def test_websocket_with_docs_path(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Processed doc",
                 timestamp=ts(),
             ),
@@ -1022,7 +1016,7 @@ def test_websocket_with_docs_path(
 
         data = websocket.receive_json()
         assert data["type"] == "event"
-        assert data["data"]["kind"] == "final"
+        assert data["data"]["kind"] == "done"
         assert data["data"]["text"] == "Processed doc"
         assert fake_agent._loaded_docs == ["/path/to/doc.txt"]
 
@@ -1052,12 +1046,12 @@ def test_websocket_with_trace_flag(
     fake_agent.set_events(
         [
             StreamEvent(
-                kind="reasoning_step",
+                kind="reasoning",
                 text="Thinking...",
                 timestamp=ts(1.0),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Done",
                 timestamp=ts(2.0),
             ),
@@ -1070,10 +1064,10 @@ def test_websocket_with_trace_flag(
         websocket.send_json({"type": "message", "content": "test", "trace": True})
 
         data1 = websocket.receive_json()
-        assert data1["data"]["kind"] == "reasoning_step"
+        assert data1["data"]["kind"] == "reasoning"
 
         data2 = websocket.receive_json()
-        assert data2["data"]["kind"] == "final"
+        assert data2["data"]["kind"] == "done"
 
 
 def test_websocket_tool_events(
@@ -1094,7 +1088,7 @@ def test_websocket_tool_events(
                 timestamp=ts(2.0),
             ),
             StreamEvent(
-                kind="final",
+                kind="done",
                 text="Executed code",
                 timestamp=ts(3.0),
             ),
@@ -1117,7 +1111,7 @@ def test_websocket_tool_events(
         assert data2["data"]["payload"]["tool_output"] == "test\n"
 
         data3 = websocket.receive_json()
-        assert data3["data"]["kind"] == "final"
+        assert data3["data"]["kind"] == "done"
         assert data3["data"]["text"] == "Executed code"
 
 
@@ -1178,12 +1172,10 @@ def test_websocket_cancel_message(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(
-                kind="assistant_token", text=f"Token {i}", timestamp=ts(float(i))
-            )
+            StreamEvent(kind="text", text=f"Token {i}", timestamp=ts(float(i)))
             for i in range(5)
         ]
-        + [StreamEvent(kind="final", text="Done", timestamp=ts(99.0))]
+        + [StreamEvent(kind="done", text="Done", timestamp=ts(99.0))]
     )
 
     with ws_client.websocket_connect(
@@ -1198,7 +1190,7 @@ def test_websocket_cancel_message(
         while True:
             data = websocket.receive_json()
             remaining.append(data)
-            if data["type"] == "event" and data["data"]["kind"] == "final":
+            if data["type"] == "event" and data["data"]["kind"] == "done":
                 break
 
         total = 1 + len(remaining)
@@ -1210,12 +1202,10 @@ def test_websocket_cancel_message_mid_stream(
 ):
     fake_agent.set_events(
         [
-            StreamEvent(
-                kind="assistant_token", text=f"Token {i}", timestamp=ts(float(i))
-            )
+            StreamEvent(kind="text", text=f"Token {i}", timestamp=ts(float(i)))
             for i in range(10)
         ]
-        + [StreamEvent(kind="final", text="Done", timestamp=ts(99.0))]
+        + [StreamEvent(kind="done", text="Done", timestamp=ts(99.0))]
     )
 
     with ws_client.websocket_connect(
@@ -1225,7 +1215,7 @@ def test_websocket_cancel_message_mid_stream(
 
         first = websocket.receive_json()
         assert first["type"] == "event"
-        assert first["data"]["kind"] == "assistant_token"
+        assert first["data"]["kind"] == "text"
 
         websocket.send_json({"type": "cancel"})
 
@@ -1236,13 +1226,19 @@ def test_websocket_cancel_message_mid_stream(
             if data["type"] != "event":
                 continue
             kinds.append(data["data"]["kind"])
-            if data["data"]["kind"] == "cancelled":
+            event_data = data["data"]
+            if (
+                event_data["kind"] == "done"
+                and isinstance(event_data.get("payload"), dict)
+                and event_data["payload"].get("cancelled")
+            ):
                 cancelled = data
                 break
 
         assert cancelled is not None
         assert cancelled["data"]["text"] == "[cancelled]"
         assert "final" not in kinds
+        assert "done" in kinds
 
 
 def test_websocket_resolve_hitl_command_flow(

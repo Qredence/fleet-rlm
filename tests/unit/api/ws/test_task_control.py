@@ -37,9 +37,9 @@ def test_cancelled_event_payload_structure() -> None:
     payload = cancelled_event_payload("stop now")
 
     assert payload["type"] == "event"
-    assert payload["data"]["kind"] == "cancelled"
+    assert payload["data"]["kind"] == "done"
     assert payload["data"]["text"] == "stop now"
-    assert payload["data"]["payload"] is None
+    assert payload["data"]["payload"] == {"cancelled": True}
     assert payload["data"]["version"] == 2
     assert isinstance(payload["data"]["event_id"], str) and payload["data"]["event_id"]
     assert isinstance(payload["data"]["timestamp"], str)

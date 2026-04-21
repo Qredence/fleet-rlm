@@ -229,7 +229,7 @@ def _delegate_trajectory_events(
         step_text = str(step.get("thought") or step.get("action") or f"Step {idx + 1}")
         events.append(
             StreamEvent(
-                kind="trajectory_step",
+                kind="status",
                 flush_tokens=True,
                 text=step_text,
                 payload=ctx.enrich(

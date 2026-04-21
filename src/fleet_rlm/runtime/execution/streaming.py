@@ -50,9 +50,7 @@ if TYPE_CHECKING:
 # ═══════════════════════════════════════════════════════════════════════
 
 logger = logging.getLogger(__name__)
-TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset(
-    {"done", "final", "cancelled", "error"}
-)
+TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"done", "error"})
 
 
 def _persist_streaming_turn_best_effort(
@@ -479,7 +477,7 @@ def _activate_live_event_queue(agent: AgentRuntime) -> _ActiveStreamingTurn:
     def _queue_live_event(event: StreamEvent) -> None:
         if not isinstance(event, StreamEvent):
             return
-        if event.kind in {"final", "cancelled", "error"}:
+        if event.kind in {"done", "error"}:
             return
         state.pending_live_events.append(event)
 

@@ -305,13 +305,13 @@ class ChatOrchestrator:
         guardrail_warnings: list[str] = []
 
         for event in self.iter_chat_turn_stream(message=message, trace=trace):
-            if event.kind in ("assistant_token", "text"):
+            if event.kind == "text":
                 assistant_chunks.append(event.text)
-            elif event.kind in ("reasoning_step", "reasoning"):
+            elif event.kind == "reasoning":
                 thought_chunks.append(event.text)
             elif event.kind == "status":
                 status_messages.append(event.text)
-            elif event.kind in ("final", "done"):
+            elif event.kind == "done":
                 if event.payload.get("cancelled"):
                     cancelled = True
                     assistant_response = event.text
@@ -321,9 +321,6 @@ class ChatOrchestrator:
                     guardrail_warnings = list(
                         event.payload.get("guardrail_warnings", []) or []
                     )
-            elif event.kind == "cancelled":
-                cancelled = True
-                assistant_response = event.text
 
         if not assistant_response:
             assistant_response = "".join(assistant_chunks).strip()

@@ -36,7 +36,7 @@ async def test_chat_agent_uses_shared_react_stream_with_daytona_runtime(
             }
         )
         yield StreamEvent(
-            kind="final",
+            kind="done",
             text="Daytona done",
             payload={"history_turns": 1},
         )
@@ -59,7 +59,7 @@ async def test_chat_agent_uses_shared_react_stream_with_daytona_runtime(
     assert events[0].kind == "status"
     assert events[0].payload["runtime"]["runtime_mode"] == "daytona_pilot"
     assert events[0].payload["runtime"]["volume_name"] == "tenant-a"
-    assert events[1].kind == "final"
+    assert events[1].kind == "done"
     assert events[1].payload["runtime_mode"] == "daytona_pilot"
     assert events[1].payload["runtime"]["runtime_mode"] == "daytona_pilot"
     assert runtime.create_calls == []
@@ -326,7 +326,7 @@ async def test_chat_agent_async_stream_reconfigures_workspace_and_releases_old_s
     )
 
     async def _fake_stream(self, message, trace, cancel_check):
-        yield StreamEvent(kind="final", text="done", payload={})
+        yield StreamEvent(kind="done", text="done", payload={})
 
     monkeypatch.setattr("fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream)
 
@@ -339,7 +339,7 @@ async def test_chat_agent_async_stream_reconfigures_workspace_and_releases_old_s
         )
     ]
 
-    assert [event.kind for event in events] == ["status", "final"]
+    assert [event.kind for event in events] == ["status", "done"]
     assert runtime.session.deleted == 1
     assert runtime.session.closed == 0
 
@@ -367,7 +367,7 @@ async def test_chat_agent_preserves_existing_workspace_when_stream_args_omitted(
                 "cancel_check": cancel_check,
             }
         )
-        yield StreamEvent(kind="final", text="done", payload={})
+        yield StreamEvent(kind="done", text="done", payload={})
 
     monkeypatch.setattr("fleet_rlm.runtime.agent.chat._aiter_stream", _fake_stream)
 
@@ -376,7 +376,7 @@ async def test_chat_agent_preserves_existing_workspace_when_stream_args_omitted(
         async for event in agent.aiter_chat_turn_stream("inspect recursive reasoning")
     ]
 
-    assert [event.kind for event in events] == ["status", "final"]
+    assert [event.kind for event in events] == ["status", "done"]
     assert events[0].payload["repo_url"] == "https://github.com/example/repo.git"
     assert events[0].payload["repo_ref"] == "main"
     assert events[0].payload["context_paths"] == ["docs/spec.md"]

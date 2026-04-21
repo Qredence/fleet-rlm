@@ -145,7 +145,7 @@ async def aiter_forced_rlm_turn_stream(
         payload=ctx.enrich({"forced": True}),
     )
     yield StreamEvent(
-        kind="rlm_executing",
+        kind="status",
         text="tool call: rlm_query",
         payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
     )
@@ -174,9 +174,10 @@ async def aiter_forced_rlm_turn_stream(
                 cancelled_text = "[cancelled]"
                 append_history(agent, message, cancelled_text)
                 yield StreamEvent(
-                    kind="cancelled",
+                    kind="done",
                     text=cancelled_text,
                     payload={
+                        "cancelled": True,
                         "history_turns": history_turns(agent),
                         **snapshot_turn_metrics(agent).as_payload(),
                     },
@@ -213,7 +214,7 @@ async def aiter_forced_rlm_turn_stream(
         payload=ctx.enrich({"tool_name": "rlm_query", "forced": True}),
     )
     yield StreamEvent(
-        kind="final",
+        kind="done",
         flush_tokens=True,
         text=assistant_response,
         payload=forced_stream_final_payload(
