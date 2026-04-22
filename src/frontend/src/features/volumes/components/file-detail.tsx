@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { cn } from "@/lib/utils";
-import { type FsNode, useFileContent } from "@/features/volumes/use-volumes";
+import { type FsNode, useFileContent, useVolumesSelectionStore } from "@/features/volumes/use-volumes";
 import {
   formatDetailDate,
   formatDetailFileSize,
@@ -121,11 +121,16 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
   const isMarkdown = isMarkdownFile(file.name, file.mime);
   const mock = rlmApiConfig.mockMode;
   const mockContent = mock ? (MOCK_FILE_CONTENT[file.path] ?? null) : null;
+  const selectedVolumeName = useVolumesSelectionStore((state) => state.selectedVolumeName);
   const {
     content: apiContent,
     isLoading: isContentLoading,
     error: contentError,
-  } = useFileContent(isText && !mock ? file.path : null, file.provider ?? "daytona");
+  } = useFileContent(
+    isText && !mock ? file.path : null,
+    file.provider ?? "daytona",
+    selectedVolumeName,
+  );
   const resolvedContent = mockContent ?? (apiContent || null);
 
   const handleCopyPath = async () => {

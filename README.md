@@ -7,7 +7,7 @@
 
 ![thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace whose center of gravity is a Daytona-backed recursive DSPy runtime. The repo layers that core behind a thin FastAPI/WebSocket transport and a narrow but real Microsoft Agent Framework outer orchestration host.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace whose center of gravity is a Daytona-backed recursive DSPy runtime. The repo layers that core behind a thin FastAPI/WebSocket transport and a narrow hosted-policy orchestration layer.
 
 [Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
@@ -15,28 +15,21 @@
 
 The maintained backend is easiest to read in this order:
 
-1. **Recursive DSPy worker/runtime core**
-   - `src/fleet_rlm/worker/*`
+1. **Recursive DSPy runtime core**
    - `src/fleet_rlm/runtime/agent/*`
    - `src/fleet_rlm/runtime/models/*`
    - `src/fleet_rlm/integrations/daytona/*`
-2. **Agent Framework outer orchestration host**
-   - `src/fleet_rlm/agent_host/*`
-3. **Thin transport shell**
+2. **Thin transport shell**
    - `src/fleet_rlm/api/main.py`
    - `src/fleet_rlm/api/routers/ws/*`
    - `src/fleet_rlm/api/runtime_services/*`
-4. **Transitional compatibility layers**
-   - `src/fleet_rlm/orchestration_app/*`
-   - `src/fleet_rlm/api/orchestration/*`
-5. **Offline DSPy quality and optimization layer**
+3. **Offline DSPy quality and optimization layer**
    - `src/fleet_rlm/runtime/quality/*`
 
 That means:
 
-- `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py` are the main cognition loop.
+- `runtime/agent/agent.py` and `runtime/agent/runtime.py` are the main cognition loop.
 - `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the execution and durable-memory substrate.
-- `agent_host/workflow.py` is host policy around the worker seam, not the core engine.
 - FastAPI/WebSocket modules are transport: auth, request parsing, session extraction, lifecycle, and event-envelope delivery.
 
 The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.

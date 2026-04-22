@@ -112,6 +112,13 @@ export interface paths {
      */
     get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
   };
+  "/api/v1/runtime/volumes": {
+    /**
+     * Get Volumes
+     * @description List all persistent volumes for the active workspace and provider.
+     */
+    get: operations["get_volumes_api_v1_runtime_volumes_get"];
+  };
   "/api/v1/optimization/status": {
     /**
      * Get Optimization Status
@@ -148,13 +155,6 @@ export interface paths {
      */
     post: operations["create_optimization_run_api_v1_optimization_runs_post"];
   };
-  "/api/v1/optimization/transcript-datasets": {
-    /**
-     * Create Dataset From Transcript
-     * @description Convert transcript turns into a GEPA dataset.
-     */
-    post: operations["create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post"];
-  };
   "/api/v1/optimization/runs/compare": {
     /**
      * Compare Runs
@@ -168,6 +168,20 @@ export interface paths {
      * @description Get a single optimization run by ID.
      */
     get: operations["get_run_api_v1_optimization_runs__run_id__get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/results": {
+    /**
+     * Get Run Results
+     * @description Return per-example evaluation results for an optimization run.
+     */
+    get: operations["get_run_results_api_v1_optimization_runs__run_id__results_get"];
+  };
+  "/api/v1/optimization/transcript-datasets": {
+    /**
+     * Create Dataset From Transcript
+     * @description Convert transcript turns into a GEPA dataset.
+     */
+    post: operations["create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post"];
   };
   "/api/v1/optimization/datasets": {
     /**
@@ -187,13 +201,6 @@ export interface paths {
      * @description Return dataset metadata with the first 10 rows as preview.
      */
     get: operations["get_dataset_detail_api_v1_optimization_datasets__dataset_id__get"];
-  };
-  "/api/v1/optimization/runs/{run_id}/results": {
-    /**
-     * Get Run Results
-     * @description Return per-example evaluation results for an optimization run.
-     */
-    get: operations["get_run_results_api_v1_optimization_runs__run_id__results_get"];
   };
   "/api/v1/traces/feedback": {
     /**
@@ -1492,6 +1499,50 @@ export interface components {
       truncated?: boolean;
     };
     /**
+     * VolumeListItem
+     * @description Single volume entry returned by the volume list endpoint.
+     */
+    VolumeListItem: {
+      /**
+       * Id
+       * @description Volume identifier.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Volume name.
+       */
+      name: string;
+      /**
+       * State
+       * @description Volume state (e.g. ready, creating).
+       * @default
+       */
+      state?: string;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp when available.
+       */
+      created_at?: string | null;
+    };
+    /**
+     * VolumeListResponse
+     * @description Response for the volume list endpoint.
+     */
+    VolumeListResponse: {
+      /**
+       * Provider
+       * @description Runtime volume backend used to satisfy the request.
+       * @constant
+       */
+      provider: "daytona";
+      /**
+       * Volumes
+       * @description Available persistent volumes.
+       */
+      volumes?: components["schemas"]["VolumeListItem"][];
+    };
+    /**
      * VolumeTreeNode
      * @description A single node in the volume file tree.
      */
@@ -1964,6 +2015,8 @@ export interface operations {
         max_depth?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
+        /** @description Optional specific volume name to browse. Defaults to the workspace-scoped volume. */
+        volume_name?: string | null;
       };
     };
     responses: {
@@ -2014,6 +2067,8 @@ export interface operations {
         max_bytes?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
+        /** @description Optional specific volume name to read from. Defaults to the workspace-scoped volume. */
+        volume_name?: string | null;
       };
     };
     responses: {
@@ -2050,6 +2105,52 @@ export interface operations {
         content: never;
       };
       /** @description Volume file reading timed out before the backend returned a result. */
+      504: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Volumes
+   * @description List all persistent volumes for the active workspace and provider.
+   */
+  get_volumes_api_v1_runtime_volumes_get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
+        provider?: "daytona" | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["VolumeListResponse"];
+        };
+      };
+      /** @description The requested volume provider is not supported. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description The runtime volume provider failed to list volumes. */
+      502: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+      /** @description Volume list timed out before the backend returned a result. */
       504: {
         content: never;
       };
@@ -2203,39 +2304,6 @@ export interface operations {
     };
   };
   /**
-   * Create Dataset From Transcript
-   * @description Convert transcript turns into a GEPA dataset.
-   */
-  create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TranscriptDatasetRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["DatasetResponse"];
-        };
-      };
-      /** @description Invalid transcript dataset payload. */
-      400: {
-        content: never;
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
    * Compare Runs
    * @description Compare prompt diffs and scores across optimization runs.
    */
@@ -2293,6 +2361,79 @@ export interface operations {
       };
       /** @description Run not found. */
       404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Run Results
+   * @description Return per-example evaluation results for an optimization run.
+   */
+  get_run_results_api_v1_optimization_runs__run_id__results_get: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of evaluation rows to return. */
+        limit?: number;
+        /** @description Pagination offset into the evaluation results. */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the optimization run whose results to list. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationResultsResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Dataset From Transcript
+   * @description Convert transcript turns into a GEPA dataset.
+   */
+  create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranscriptDatasetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Invalid transcript dataset payload. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
         content: never;
       };
       /** @description Validation Error */
@@ -2393,46 +2534,6 @@ export interface operations {
         content: never;
       };
       /** @description Dataset not found. */
-      404: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Get Run Results
-   * @description Return per-example evaluation results for an optimization run.
-   */
-  get_run_results_api_v1_optimization_runs__run_id__results_get: {
-    parameters: {
-      query?: {
-        /** @description Maximum number of evaluation rows to return. */
-        limit?: number;
-        /** @description Pagination offset into the evaluation results. */
-        offset?: number;
-      };
-      path: {
-        /** @description Identifier of the optimization run whose results to list. */
-        run_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["EvaluationResultsResponse"];
-        };
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Run not found. */
       404: {
         content: never;
       };

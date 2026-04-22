@@ -18,15 +18,25 @@ vi.mock("@/features/volumes/use-volumes", async () => {
   return {
     ...actual,
     useFilesystem: (provider: VolumeProvider) => useFilesystemMock(provider),
+    useVolumesList: () => ({
+      volumes: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
     useVolumesSelectionStore: (
       selector: (state: {
         selectFile: (node: unknown) => void;
         clearSelectedFile: () => void;
+        selectedVolumeName: string | null;
+        selectVolume: (name: string | null) => void;
       }) => unknown,
     ) =>
       selector({
         selectFile,
         clearSelectedFile,
+        selectedVolumeName: null,
+        selectVolume: vi.fn(),
       }),
   };
 });

@@ -12,10 +12,11 @@ let contentState: {
 let fileContentCalls: Array<{ path: string | null; provider: string }> = [];
 
 vi.mock("@/features/volumes/use-volumes", () => ({
-  useFileContent: (path: string | null, provider: string) => {
+  useFileContent: (path: string | null, provider: string, _volumeName?: string | null) => {
     fileContentCalls.push({ path, provider });
     return contentState;
   },
+  useVolumesSelectionStore: () => null,
 }));
 
 vi.mock("@/hooks/use-is-mobile", () => ({

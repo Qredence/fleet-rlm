@@ -60,6 +60,18 @@ interface VolumeFileContentResponse {
   truncated: boolean;
 }
 
+interface VolumeListItem {
+  id: string;
+  name: string;
+  state: string;
+  createdAt: string | null;
+}
+
+interface VolumeListResponse {
+  provider: VolumeProvider;
+  volumes: VolumeListItem[];
+}
+
 // ── Conversion ──────────────────────────────────────────────────────
 
 function toFsNode(node: VolumeTreeNode, provider: VolumeProvider): FsNode {
@@ -304,9 +316,15 @@ export function getMockFilesystem(provider: VolumeProvider): FsNode[] {
 
 export const filesystemKeys = {
   all: ["filesystem"] as const,
-  tree: (provider: VolumeProvider) => [...filesystemKeys.all, "tree", provider] as const,
-  fileContent: (provider: VolumeProvider, path: string) =>
-    [...filesystemKeys.all, "file", provider, path] as const,
+  tree: (provider: VolumeProvider, volumeName?: string | null) =>
+    [...filesystemKeys.all, "tree", provider, volumeName ?? "default"] as const,
+  fileContent: (provider: VolumeProvider, path: string, volumeName?: string | null) =>
+    [...filesystemKeys.all, "file", provider, volumeName ?? "default", path] as const,
+};
+
+export const volumesKeys = {
+  all: ["volumes"] as const,
+  list: (provider: VolumeProvider) => [...volumesKeys.all, "list", provider] as const,
 };
 
 // ── useFilesystem (tree) ────────────────────────────────────────────
@@ -328,7 +346,10 @@ interface UseFilesystemReturn {
   refetch: () => void;
 }
 
-export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
+export function useFilesystem(
+  provider: VolumeProvider,
+  volumeName?: string | null,
+): UseFilesystemReturn {
   const mock = rlmApiConfig.mockMode;
 
   type FilesystemPayload = {
@@ -338,7 +359,7 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
   };
 
   const query = useQuery({
-    queryKey: filesystemKeys.tree(provider),
+    queryKey: filesystemKeys.tree(provider, volumeName),
     queryFn: async ({ signal }): Promise<FilesystemPayload> => {
       if (mock) {
         return {
@@ -352,6 +373,9 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
         url.searchParams.set("max_depth", "4");
         url.searchParams.set("provider", provider);
+        if (volumeName) {
+          url.searchParams.set("volume_name", volumeName);
+        }
         const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
         return {
           volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
@@ -410,19 +434,24 @@ interface UseFileContentReturn {
 export function useFileContent(
   path: string | null,
   provider: VolumeProvider,
+  volumeName?: string | null,
 ): UseFileContentReturn {
   const mock = rlmApiConfig.mockMode;
 
   const query = useQuery({
-    queryKey: filesystemKeys.fileContent(provider, path ?? ""),
+    queryKey: filesystemKeys.fileContent(provider, path ?? "", volumeName),
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
 
-      const qs = new URLSearchParams({
+      const params: Record<string, string> = {
         path,
         max_bytes: "200000",
         provider,
-      }).toString();
+      };
+      if (volumeName) {
+        params.volume_name = volumeName;
+      }
+      const qs = new URLSearchParams(params).toString();
       const resp = await rlmApiClient.get<VolumeFileContentResponse>(
         `/api/v1/runtime/volume/file?${qs}`,
         signal,
@@ -445,6 +474,50 @@ export function useFileContent(
     size: query.data?.size ?? 0,
     isLoading: query.isLoading,
     error: query.error,
+  };
+}
+
+// ── useVolumesList ──────────────────────────────────────────────────
+
+export interface UseVolumesListReturn {
+  volumes: VolumeListItem[];
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export function useVolumesList(provider: VolumeProvider): UseVolumesListReturn {
+  const mock = rlmApiConfig.mockMode;
+
+  const query = useQuery({
+    queryKey: volumesKeys.list(provider),
+    queryFn: async ({ signal }): Promise<VolumeListItem[]> => {
+      if (mock) {
+        return [
+          { id: "vol-memory", name: "memory", state: "ready", createdAt: null },
+          { id: "vol-artifacts", name: "artifacts", state: "ready", createdAt: null },
+          { id: "vol-buffers", name: "buffers", state: "ready", createdAt: null },
+          { id: "vol-meta", name: "meta", state: "ready", createdAt: null },
+        ];
+      }
+
+      const url = new URL("/api/v1/runtime/volumes", window.location.origin);
+      url.searchParams.set("provider", provider);
+      const resp = await rlmApiClient.get<VolumeListResponse>(
+        url.pathname + url.search,
+        signal,
+      );
+      return resp.volumes;
+    },
+    staleTime: mock ? Infinity : 30_000,
+    retry: false,
+  });
+
+  return {
+    volumes: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    refetch: query.refetch,
   };
 }
 

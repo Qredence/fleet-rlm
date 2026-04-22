@@ -22,6 +22,7 @@ function isWsEventKind(value: string): value is WsEventKind {
     "memory_update",
     "hitl_request",
     "hitl_resolved",
+    "clarification",
     "command_ack",
     "command_reject",
   ].includes(value);

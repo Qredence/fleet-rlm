@@ -45,48 +45,30 @@ afterEach(() => {
 });
 
 describe("ClarificationCard", () => {
-  it("reveals a labeled textarea for custom answers and resolves trimmed text", () => {
+  it("selects an option and resolves with its label on Confirm", () => {
     const onResolve = vi.fn();
     const { container } = renderClarificationCard(
       {
         question: "What should the assistant focus on?",
         stepLabel: "Question 1 of 1",
-        customOptionId: "custom",
+        customOptionId: "",
         options: [
           { id: "docs", label: "Project docs" },
-          { id: "custom", label: "Write your own" },
+          { id: "sandbox", label: "Sandbox runner" },
         ],
       },
       onResolve,
     );
-    const customOption = container.querySelector('button[aria-label="Write your own"]');
+
     const confirmButton = Array.from(container.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Confirm"),
     );
 
-    expect(container.querySelector("textarea")).toBeNull();
-
-    act(() => {
-      customOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    const textarea = container.querySelector("textarea");
-    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
     expect(confirmButton?.hasAttribute("disabled")).toBe(true);
 
-    const textareaId = textarea?.getAttribute("id");
-    expect(textareaId).toBeTruthy();
-
-    const label = textareaId ? container.querySelector(`label[for="${textareaId}"]`) : null;
-    expect(label).not.toBeNull();
-    expect(label?.className).toContain("sr-only");
-
+    const docsOption = container.querySelector('button[data-id="docs"]');
     act(() => {
-      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-
-      setValue?.call(textarea, "  Focus on the sandbox runner  ");
-      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
-      textarea?.dispatchEvent(new Event("change", { bubbles: true }));
+      docsOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(confirmButton?.hasAttribute("disabled")).toBe(false);
@@ -95,6 +77,20 @@ describe("ClarificationCard", () => {
       confirmButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(onResolve).toHaveBeenCalledWith("Focus on the sandbox runner");
+    expect(onResolve).toHaveBeenCalledWith("Project docs");
+  });
+
+  it("shows receipt state when data.resolved is true", () => {
+    const { container } = renderClarificationCard({
+      question: "Which file first?",
+      stepLabel: "File selection",
+      customOptionId: "",
+      options: [{ id: "readme", label: "README.md" }],
+      resolved: true,
+      resolvedAnswer: "README.md",
+    });
+
+    expect(container.querySelector("[data-receipt='true']")).not.toBeNull();
+    expect(container.textContent).toContain("README.md");
   });
 });

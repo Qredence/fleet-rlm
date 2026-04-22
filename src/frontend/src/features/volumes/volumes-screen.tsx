@@ -21,6 +21,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PageHeader } from "@/components/product/page-header";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
@@ -33,6 +40,7 @@ import {
   type FsNode,
   type VolumeProvider,
   useFilesystem,
+  useVolumesList,
   useVolumesSelectionStore,
 } from "@/features/volumes/use-volumes";
 import { useNavigationStore } from "@/stores/navigation-store";
@@ -45,29 +53,37 @@ export function VolumesBrowser() {
   const openCanvas = useNavigationStore((state) => state.openCanvas);
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
   const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
+  const selectedVolumeName = useVolumesSelectionStore((state) => state.selectedVolumeName);
+  const selectVolume = useVolumesSelectionStore((state) => state.selectVolume);
   const isMobile = useIsMobile();
   const prefersReduced = useReducedMotion();
   const activeProvider: VolumeProvider = "daytona";
   const providerLabel = "Daytona";
+
+  const {
+    volumes: allVolumes,
+    isLoading: volumesListLoading,
+  } = useVolumesList(activeProvider);
+
   const {
     volumes: filesystem,
     dataSource: filesystemDataSource,
     degradedReason: filesystemDegradedReason,
     isLoading,
     refetch,
-  } = useFilesystem(activeProvider);
+  } = useFilesystem(activeProvider, selectedVolumeName);
 
   const [fsExpanded, setFsExpanded] = useState<Set<string>>(new Set());
   const [fsSearch, setFsSearch] = useState("");
-  const previousProviderRef = useRef<VolumeProvider | null>(null);
+  const previousVolumeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (previousProviderRef.current && previousProviderRef.current !== activeProvider) {
+    if (previousVolumeRef.current !== selectedVolumeName) {
       clearSelectedFile();
       setFsExpanded(new Set());
     }
-    previousProviderRef.current = activeProvider;
-  }, [activeProvider, clearSelectedFile]);
+    previousVolumeRef.current = selectedVolumeName;
+  }, [selectedVolumeName, clearSelectedFile]);
 
   const toggleFsNode = useCallback((id: string) => {
     setFsExpanded((prev) => {
@@ -145,6 +161,30 @@ export function VolumesBrowser() {
           </Button>
         </div>
       </div>
+
+      {allVolumes.length > 0 || volumesListLoading ? (
+        <div className="mb-3">
+          <Select
+            value={selectedVolumeName ?? "__default__"}
+            onValueChange={(value) => {
+              selectVolume(value === "__default__" ? null : value);
+            }}
+          >
+            <SelectTrigger className={cn("typo-label", isMobile && "touch-target")}>
+              <SelectValue placeholder="Select a volume…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__default__">Workspace default volume</SelectItem>
+              {allVolumes.map((vol) => (
+                <SelectItem key={vol.id} value={vol.name}>
+                  {vol.name}
+                  {vol.state ? ` (${vol.state})` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

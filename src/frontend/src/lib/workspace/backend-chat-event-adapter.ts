@@ -649,6 +649,43 @@ function applyEvent(
       }
       return { messages: next, terminal: false, errored: false };
     }
+    case "clarification": {
+      const clarPayload = asRecord(payload);
+      const question = asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
+      const messageId = asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
+      const stepLabel = asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
+      const rawOptions = clarPayload?.options;
+      const options: { id: string; label: string; description?: string }[] = Array.isArray(rawOptions)
+        ? rawOptions.flatMap((item) => {
+            const rec = asRecord(item);
+            if (!rec) return [];
+            const id = asOptionalText(rec.id);
+            const label = asOptionalText(rec.label);
+            if (!id || !label) return [];
+            const description = asOptionalText(rec.description);
+            return description != null ? [{ id, label, description }] : [{ id, label }];
+          })
+        : [];
+      return {
+        messages: [
+          ...messages,
+          {
+            id: messageId,
+            type: "clarification" as const,
+            content: question,
+            phase: DEFAULT_PHASE,
+            clarificationData: {
+              question,
+              stepLabel,
+              options,
+              customOptionId: "",
+            },
+          },
+        ],
+        terminal: false,
+        errored: false,
+      };
+    }
     case "hitl_request": {
       const hitlPayload = asRecord(payload?.hitl ?? payload);
       const question = asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";

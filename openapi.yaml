@@ -465,6 +465,18 @@ paths:
           title: Provider
         description: Optional runtime volume backend override. Defaults to the active
           sandbox provider.
+      - name: volume_name
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional specific volume name to browse. Defaults to the workspace-scoped
+            volume.
+          title: Volume Name
+        description: Optional specific volume name to browse. Defaults to the workspace-scoped
+          volume.
       responses:
         '200':
           description: Successful Response
@@ -536,6 +548,18 @@ paths:
           title: Provider
         description: Optional runtime volume backend override. Defaults to the active
           sandbox provider.
+      - name: volume_name
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional specific volume name to read from. Defaults to the
+            workspace-scoped volume.
+          title: Volume Name
+        description: Optional specific volume name to read from. Defaults to the workspace-scoped
+          volume.
       responses:
         '200':
           description: Successful Response
@@ -557,6 +581,53 @@ paths:
         '504':
           description: Volume file reading timed out before the backend returned a
             result.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/volumes:
+    get:
+      tags:
+      - runtime
+      summary: Get Volumes
+      description: List all persistent volumes for the active workspace and provider.
+      operationId: get_volumes_api_v1_runtime_volumes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - const: daytona
+            type: string
+          - type: 'null'
+          description: Optional runtime volume backend override. Defaults to the active
+            sandbox provider.
+          title: Provider
+        description: Optional runtime volume backend override. Defaults to the active
+          sandbox provider.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '400':
+          description: The requested volume provider is not supported.
+        '502':
+          description: The runtime volume provider failed to list volumes.
+        '504':
+          description: Volume list timed out before the backend returned a result.
         '422':
           description: Validation Error
           content:
@@ -734,38 +805,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/optimization/transcript-datasets:
-    post:
-      tags:
-      - optimization
-      summary: Create Dataset From Transcript
-      description: Convert transcript turns into a GEPA dataset.
-      operationId: create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TranscriptDatasetRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatasetResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
-        '400':
-          description: Invalid transcript dataset payload.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-      security:
-      - HTTPBearer: []
   /api/v1/optimization/runs/compare:
     get:
       tags:
@@ -836,6 +875,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/runs/{run_id}/results:
+    get:
+      tags:
+      - optimization
+      summary: Get Run Results
+      description: Return per-example evaluation results for an optimization run.
+      operationId: get_run_results_api_v1_optimization_runs__run_id__results_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the optimization run whose results to list.
+          title: Run Id
+        description: Identifier of the optimization run whose results to list.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          description: Maximum number of evaluation rows to return.
+          default: 100
+          title: Limit
+        description: Maximum number of evaluation rows to return.
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset into the evaluation results.
+          default: 0
+          title: Offset
+        description: Pagination offset into the evaluation results.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationResultsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/transcript-datasets:
+    post:
+      tags:
+      - optimization
+      summary: Create Dataset From Transcript
+      description: Convert transcript turns into a GEPA dataset.
+      operationId: create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptDatasetRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '400':
+          description: Invalid transcript dataset payload.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/optimization/datasets:
     post:
       tags:
@@ -952,62 +1079,6 @@ paths:
           description: Authentication is required or the provided token is invalid.
         '404':
           description: Dataset not found.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/optimization/runs/{run_id}/results:
-    get:
-      tags:
-      - optimization
-      summary: Get Run Results
-      description: Return per-example evaluation results for an optimization run.
-      operationId: get_run_results_api_v1_optimization_runs__run_id__results_get
-      security:
-      - HTTPBearer: []
-      parameters:
-      - name: run_id
-        in: path
-        required: true
-        schema:
-          type: string
-          description: Identifier of the optimization run whose results to list.
-          title: Run Id
-        description: Identifier of the optimization run whose results to list.
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 500
-          minimum: 1
-          description: Maximum number of evaluation rows to return.
-          default: 100
-          title: Limit
-        description: Maximum number of evaluation rows to return.
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          description: Pagination offset into the evaluation results.
-          default: 0
-          title: Offset
-        description: Pagination offset into the evaluation results.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluationResultsResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
-        '404':
-          description: Run not found.
         '422':
           description: Validation Error
           content:
@@ -2418,6 +2489,51 @@ components:
       - content
       title: VolumeFileContentResponse
       description: Response for runtime volume file-content preview endpoint.
+    VolumeListItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Volume identifier.
+        name:
+          type: string
+          title: Name
+          description: Volume name.
+        state:
+          type: string
+          title: State
+          description: Volume state (e.g. ready, creating).
+          default: ''
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+      type: object
+      required:
+      - id
+      - name
+      title: VolumeListItem
+      description: Single volume entry returned by the volume list endpoint.
+    VolumeListResponse:
+      properties:
+        provider:
+          type: string
+          const: daytona
+          title: Provider
+          description: Runtime volume backend used to satisfy the request.
+        volumes:
+          items:
+            $ref: '#/components/schemas/VolumeListItem'
+          type: array
+          title: Volumes
+          description: Available persistent volumes.
+      type: object
+      required:
+      - provider
+      title: VolumeListResponse
+      description: Response for the volume list endpoint.
     VolumeTreeNode:
       properties:
         id:

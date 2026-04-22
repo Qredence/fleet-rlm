@@ -17,5 +17,3 @@ If you encounter freshness-check failures for `src/frontend/AGENTS.md`, verify t
 `scripts/check_docs_quality.py` validates only markdown hyperlinks (`[text](url)` syntax). It does **not** validate backtick-wrapped path references in documentation prose (e.g., `` `src/fleet_rlm/agent_host/` ``).
 
 Consequence: stale path references in prose — like deleted directory paths wrapped in backticks — will not be caught by this validator or by `check_agents_md_freshness.py` (which only checks AGENTS.md files, not docs/*.md).
-
-Known stale reference surviving as of commit `8916178f`: `src/fleet_rlm/agent_host/` at `docs/index.md:42`. No current validator catches it.
