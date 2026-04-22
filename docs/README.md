@@ -65,4 +65,4 @@ When docs conflict with implementation, trust:
 - CLI truth: `uv run fleet-rlm --help` and `uv run fleet --help`
 - API truth: `openapi.yaml`
 - WebSocket truth: `src/fleet_rlm/api/routers/ws/endpoint.py` and adjacent helpers in `src/fleet_rlm/api/routers/ws/`
-- Runtime truth: `src/fleet_rlm/runtime/agent/chat_agent.py`, `src/fleet_rlm/runtime/agent/recursive_runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`
+- Runtime truth: `src/fleet_rlm/runtime/agent/agent.py`, `src/fleet_rlm/runtime/agent/runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`

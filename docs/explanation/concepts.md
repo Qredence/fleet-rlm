@@ -7,7 +7,7 @@ execution over a shared Daytona-backed interpreter runtime.
 
 ## 1. ReAct Chat Orchestrator
 
-`RLMReActChatAgent` is the interactive orchestrator.
+`FleetAgent` (wrapped by `AgentRuntime`) is the interactive orchestrator.
 
 It:
 

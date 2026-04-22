@@ -40,7 +40,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `sandbox.get_preview_link(...)`
 - Daytona-backed recursive work follows the guide's core invariants through the
   shared `dspy.RLM` path:
-  - `RLMReActChatAgent` remains the top-level conversational runtime
+  - `FleetAgent` (wrapped by `AgentRuntime`) remains the top-level conversational runtime
   - long-context and recursive execution flow through `dspy.RLM`
   - `spawn_delegate_sub_agent_async` is the single recursive child-run path
   - `llm_query` and `llm_query_batched` are semantic-only sandbox callbacks
@@ -54,7 +54,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   `dspy.RLM` runtime architecture.
 - The maintained interpreter implementation is `DaytonaInterpreter`.
 - Websocket session switching must use the async agent/session reset path (`agent.areset(...)`) when clearing Daytona sandbox buffers for a fresh or restored session without saved state.
-- `RLMReActChatAgent` is the canonical shared DSPy agent and carries the
+- `AgentRuntime` (wrapping `FleetAgent`) is the canonical shared DSPy agent and carries the
   Daytona workspace/session metadata needed by the workbench runtime.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:
@@ -73,7 +73,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   - sync helper methods remain only as public compatibility shims over the async implementation
   - internal Daytona interpreter flow assumes the canonical async provider contract and does not probe for older sync-only runtime/session shapes
 - Shared runtime control is intentionally split across three paths:
-  - `RLMReActChatAgent` for ordinary user-facing interaction
+  - `AgentRuntime` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
   - cached runtime-module execution for non-recursive helper reuse
 - Daytona's public heavy-work surface is intentionally limited to the named cached runtime-module capabilities plus `rlm_query` / `rlm_query_batched`. `parallel_semantic_map` is not part of the Daytona tool surface.

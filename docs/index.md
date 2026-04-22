@@ -39,6 +39,6 @@
 When docs disagree with the code, trust the code and generated contracts:
 
 - backend routes and websocket behavior in `src/fleet_rlm/api/`
-- outer host policy in `src/fleet_rlm/agent_host/`
+- transport, auth, and websocket lifecycle in `src/fleet_rlm/api/`
 - runtime and Daytona execution in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
 - frontend route and workspace behavior in `src/frontend/src/`

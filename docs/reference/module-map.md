@@ -34,7 +34,7 @@ graph TB
 graph LR
     REQUEST["Workspace task request"] --> STREAM["api/routers/ws/stream.py"]
     STREAM --> AGENT["runtime/factory.py"]
-    AGENT --> CHAT["runtime/agent/chat_agent.py"]
+    AGENT --> CHAT["runtime/agent/agent.py"]
     CHAT --> EXEC["runtime/execution/*"]
     EXEC --> DAYTONA_INTERPRETER["integrations/daytona/interpreter.py"]
     EXEC --> DAYTONA_RUNTIME["integrations/daytona/runtime.py"]
@@ -47,9 +47,9 @@ graph LR
 | From | To | Purpose |
 | --- | --- | --- |
 | `api/routers/ws/stream.py` | `runtime/agent/*` | Stream prepared workspace work through the shared runtime agent |
-| `runtime/agent/chat_agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
-| `runtime/agent/chat_agent.py` | `runtime/execution/*` | Streaming turn execution and interpreter support |
-| `runtime/agent/recursive_runtime.py` | `integrations/daytona/*` | Recursive child execution over the Daytona substrate |
+| `runtime/agent/agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
+| `runtime/agent/agent.py` | `runtime/execution/*` | Streaming turn execution and interpreter support |
+| `runtime/agent/runtime.py` | `integrations/daytona/*` | Recursive child execution over the Daytona substrate |
 | `runtime/execution/*` | `integrations/daytona/interpreter.py`, `integrations/daytona/runtime.py` | Stateful interpreter/session backend integration |
 | `runtime/models/*` | `runtime/agent/*` | Builder, registry, and runtime-model exports |
 | `runtime/quality/*` | `runtime/agent/*`, `runtime/models/*` | Offline evaluation and optimization against the live runtime graph |
