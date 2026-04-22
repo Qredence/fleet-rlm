@@ -181,8 +181,23 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     }
 
 
+def _try_build_daytona_interpreter(volume_name: str | None) -> Any | None:
+    """Instantiate a DaytonaInterpreter if Daytona credentials are configured."""
+    try:
+        from fleet_rlm.integrations.daytona.config import DaytonaConfigError
+        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+
+        return DaytonaInterpreter(volume_name=volume_name)
+    except (ImportError, DaytonaConfigError):
+        return None
+
+
 def build_chat_agent_context(runtime: PreparedChatRuntime):
-    return build_chat_agent(**_chat_agent_builder_kwargs(runtime))
+    kwargs = _chat_agent_builder_kwargs(runtime)
+    interpreter = _try_build_daytona_interpreter(runtime.cfg.volume_name)
+    if interpreter is not None:
+        kwargs["interpreter"] = interpreter
+    return build_chat_agent(**kwargs)
 
 
 def new_chat_session_state(

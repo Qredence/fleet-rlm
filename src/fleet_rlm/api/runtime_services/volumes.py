@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.daytona.filesystem import (
     alist_daytona_volume_tree,
+    alist_daytona_volumes,
     aread_daytona_volume_file_text,
 )
 
@@ -20,6 +21,8 @@ from ..auth import NormalizedIdentity
 from ..dependencies import ServerState
 from ..schemas.core import (
     VolumeFileContentResponse,
+    VolumeListItem,
+    VolumeListResponse,
     VolumeProvider,
     VolumeTreeResponse,
 )
@@ -90,11 +93,15 @@ def _resolve_volume_backend(
     state: ServerState,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
+    volume_name: str | None = None,
 ) -> _ResolvedVolumeBackend:
     effective_provider = resolve_volume_provider(state=state, provider=provider)
+    effective_volume_name = volume_name or resolve_daytona_volume_name(
+        identity=identity, state=state
+    )
     return _ResolvedVolumeBackend(
         provider=effective_provider,
-        volume_name=resolve_daytona_volume_name(identity=identity, state=state),
+        volume_name=effective_volume_name,
         list_tree=alist_daytona_volume_tree,
         read_file_text=aread_daytona_volume_file_text,
     )
@@ -139,10 +146,13 @@ async def load_volume_tree(
     provider: VolumeProvider | None,
     root_path: str,
     max_depth: int,
+    volume_name: str | None = None,
 ) -> VolumeTreeResponse:
     """Load a normalized runtime volume tree for the selected provider."""
     normalized_root_path = normalize_volume_tree_path(root_path)
-    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
+    backend = _resolve_volume_backend(
+        state=state, identity=identity, provider=provider, volume_name=volume_name
+    )
     result = await _run_volume_operation(
         operation=backend.list_tree,
         volume_name=backend.volume_name,
@@ -161,10 +171,13 @@ async def load_volume_file_content(
     provider: VolumeProvider | None,
     path: str,
     max_bytes: int,
+    volume_name: str | None = None,
 ) -> VolumeFileContentResponse:
     """Load a text preview for a normalized runtime volume file path."""
     normalized_path = normalize_volume_file_path(path)
-    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
+    backend = _resolve_volume_backend(
+        state=state, identity=identity, provider=provider, volume_name=volume_name
+    )
     result = await _run_volume_operation(
         operation=backend.read_file_text,
         volume_name=backend.volume_name,
@@ -175,3 +188,32 @@ async def load_volume_file_content(
         error_shaper=raise_volume_file_error,
     )
     return VolumeFileContentResponse(provider=backend.provider, **result)
+
+
+async def load_volume_list(
+    *,
+    state: ServerState,
+    identity: NormalizedIdentity,
+    provider: VolumeProvider | None,
+) -> VolumeListResponse:
+    """List all persistent volumes for the selected provider."""
+    effective_provider = resolve_volume_provider(state=state, provider=provider)
+    if effective_provider != "daytona":
+        raise HTTPException(status_code=400, detail="Unsupported volume provider.")
+
+    try:
+        volumes = await asyncio.wait_for(
+            alist_daytona_volumes(),
+            timeout=VOLUME_OPERATION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Volume list timed out.") from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Volume list failed: {exc}"
+        ) from exc
+
+    return VolumeListResponse(
+        provider=effective_provider,
+        volumes=[VolumeListItem(**v) for v in volumes],
+    )

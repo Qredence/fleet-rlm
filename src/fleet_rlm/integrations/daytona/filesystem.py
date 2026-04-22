@@ -803,9 +803,51 @@ def read_daytona_volume_file_text(
     )
 
 
+async def alist_daytona_volumes() -> list[dict[str, Any]]:
+    """List all Daytona persistent volumes."""
+    client = _build_daytona_client(resolve_daytona_config())
+    try:
+        volumes = await _await_if_needed(client.volume.list())
+    finally:
+        with suppress(Exception):
+            await _await_if_needed(client.close())
+
+    result: list[dict[str, Any]] = []
+    for vol in volumes:
+        state = getattr(vol, "state", None)
+        state_str = ""
+        if state is not None:
+            if hasattr(state, "name"):
+                state_str = str(state.name)
+            elif hasattr(state, "value"):
+                state_str = str(state.value)
+            else:
+                state_str = str(state)
+        created_at = getattr(vol, "created_at", None)
+        result.append(
+            {
+                "id": str(getattr(vol, "id", "") or ""),
+                "name": str(getattr(vol, "name", "") or ""),
+                "state": state_str,
+                "created_at": created_at.isoformat()
+                if hasattr(created_at, "isoformat")
+                else str(created_at)
+                if created_at is not None
+                else None,
+            }
+        )
+    return result
+
+
+def list_daytona_volumes() -> list[dict[str, Any]]:
+    return _run_async_compat(alist_daytona_volumes)
+
+
 __all__ = [
     "alist_daytona_volume_tree",
+    "alist_daytona_volumes",
     "aread_daytona_volume_file_text",
     "list_daytona_volume_tree",
+    "list_daytona_volumes",
     "read_daytona_volume_file_text",
 ]

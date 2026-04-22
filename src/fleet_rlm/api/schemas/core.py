@@ -519,6 +519,28 @@ class VolumeFileContentResponse(BaseModel):
     )
 
 
+class VolumeListItem(BaseModel):
+    """Single volume entry returned by the volume list endpoint."""
+
+    id: str = Field(description="Volume identifier.")
+    name: str = Field(description="Volume name.")
+    state: str = Field(default="", description="Volume state (e.g. ready, creating).")
+    created_at: str | None = Field(
+        default=None, description="ISO-8601 creation timestamp when available."
+    )
+
+
+class VolumeListResponse(BaseModel):
+    """Response for the volume list endpoint."""
+
+    provider: VolumeProvider = Field(
+        description="Runtime volume backend used to satisfy the request."
+    )
+    volumes: list[VolumeListItem] = Field(
+        default_factory=list, description="Available persistent volumes."
+    )
+
+
 class GEPAOptimizationRequest(BaseModel):
     """Request body for triggering a GEPA prompt optimization run."""
 

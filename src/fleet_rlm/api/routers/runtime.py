@@ -14,6 +14,7 @@ from ..runtime_services import (
     build_runtime_settings_snapshot,
     build_runtime_status_response,
     load_volume_file_content,
+    load_volume_list,
     load_volume_tree,
     run_daytona_connection_test,
     run_lm_connection_test,
@@ -24,6 +25,7 @@ from ..schemas.core import (
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
     RuntimeStatusResponse,
+    VolumeListResponse,
     VolumeProvider,
     VolumeFileContentResponse,
     VolumeTreeResponse,
@@ -76,6 +78,13 @@ VOLUME_FILE_RESPONSES: OpenAPIResponses = {
     504: {
         "description": "Volume file reading timed out before the backend returned a result."
     },
+}
+
+VOLUME_LIST_RESPONSES: OpenAPIResponses = {
+    **AUTH_ERROR_RESPONSES,
+    400: {"description": "The requested volume provider is not supported."},
+    502: {"description": "The runtime volume provider failed to list volumes."},
+    504: {"description": "Volume list timed out before the backend returned a result."},
 }
 
 
@@ -169,6 +178,12 @@ async def get_volume_tree(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
+    volume_name: Annotated[
+        str | None,
+        Query(
+            description="Optional specific volume name to browse. Defaults to the workspace-scoped volume."
+        ),
+    ] = None,
 ) -> VolumeTreeResponse:
     """List the runtime volume tree for the active workspace and provider."""
     return await load_volume_tree(
@@ -177,6 +192,7 @@ async def get_volume_tree(
         provider=provider,
         root_path=root_path,
         max_depth=max_depth,
+        volume_name=volume_name,
     )
 
 
@@ -209,6 +225,12 @@ async def get_volume_file_content(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
+    volume_name: Annotated[
+        str | None,
+        Query(
+            description="Optional specific volume name to read from. Defaults to the workspace-scoped volume."
+        ),
+    ] = None,
 ) -> VolumeFileContentResponse:
     """Read a text preview for a single file from the runtime volume."""
     return await load_volume_file_content(
@@ -217,4 +239,28 @@ async def get_volume_file_content(
         provider=provider,
         path=path,
         max_bytes=max_bytes,
+        volume_name=volume_name,
+    )
+
+
+@router.get(
+    "/volumes",
+    response_model=VolumeListResponse,
+    responses=VOLUME_LIST_RESPONSES,
+)
+async def get_volumes(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    provider: Annotated[
+        VolumeProvider | None,
+        Query(
+            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
+        ),
+    ] = None,
+) -> VolumeListResponse:
+    """List all persistent volumes for the active workspace and provider."""
+    return await load_volume_list(
+        state=state,
+        identity=identity,
+        provider=provider,
     )

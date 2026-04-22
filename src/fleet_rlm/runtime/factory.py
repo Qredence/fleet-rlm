@@ -40,6 +40,7 @@ def build_chat_agent(
     extra_tools: list[Callable[..., Any]] | None = None,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
+    interpreter: Any | None = None,
     interpreter_async_execute: bool = True,
     delete_session_on_shutdown: bool = False,
     sandbox_spec: Any | None = None,
@@ -52,10 +53,35 @@ def build_chat_agent(
     delegate_result_truncation_chars: int = 8000,
 ) -> Any:
     """Build the canonical DSPy chat agent using FleetAgent and AgentRuntime."""
+    _ = (
+        docs_path,
+        deep_react_max_iters,
+        enable_adaptive_iters,
+        rlm_max_iterations,
+        rlm_max_llm_calls,
+        max_depth,
+        timeout,
+        secret_name,
+        volume_name,
+        runtime,
+        verbose,
+        interpreter_async_execute,
+        delete_session_on_shutdown,
+        sandbox_spec,
+        sub_lm,
+        guardrail_mode,
+        max_output_chars,
+        min_substantive_chars,
+        delegate_lm,
+        delegate_max_calls_per_turn,
+        delegate_result_truncation_chars,
+    )
+
     if planner_lm is None:
         _require_planner_ready(env_file)
 
     agent = AgentRuntime(
+        interpreter=interpreter,
         max_iters=react_max_iters,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,

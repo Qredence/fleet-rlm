@@ -22,6 +22,82 @@ if TYPE_CHECKING:
     from .agent import FleetAgent
 
 
+def _bind_sandbox_filesystem_tools(
+    tools: list[Any],
+    *,
+    interpreter: Any,
+) -> list[Any]:
+    """Replace unbound sandbox-filesystem stubs with interpreter-bound closures."""
+    from dspy import Tool
+
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _SandboxFilesystemToolContext,
+        _sandbox_create_directory_impl,
+        _sandbox_delete_file_impl,
+        _sandbox_find_in_files_impl,
+        _sandbox_get_file_info_impl,
+        _sandbox_list_files_impl,
+        _sandbox_move_file_impl,
+        _sandbox_read_file_impl,
+        _sandbox_replace_in_files_impl,
+        _sandbox_search_files_impl,
+        _sandbox_write_file_impl,
+    )
+
+    ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
+
+    _bound_factories: dict[str, Callable[..., Any]] = {
+        "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(ctx, path=path),
+        "sandbox_read_file": lambda path: _sandbox_read_file_impl(ctx, path=path),
+        "sandbox_write_file": lambda path, content: _sandbox_write_file_impl(
+            ctx, path=path, content=content
+        ),
+        "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(
+            ctx, path=path
+        ),
+        "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(ctx, path=path),
+        "sandbox_move_file": lambda source, destination: _sandbox_move_file_impl(
+            ctx, source=source, destination=destination
+        ),
+        "sandbox_search_files": lambda path, pattern: _sandbox_search_files_impl(
+            ctx, path=path, pattern=pattern
+        ),
+        "sandbox_find_in_files": lambda path, pattern: _sandbox_find_in_files_impl(
+            ctx, path=path, pattern=pattern
+        ),
+        "sandbox_replace_in_files": lambda files, pattern, replacement: (
+            _sandbox_replace_in_files_impl(
+                ctx, files=files, pattern=pattern, replacement=replacement
+            )
+        ),
+        "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(
+            ctx, path=path
+        ),
+    }
+
+    def _tool_name(tool: Any) -> str | None:
+        return getattr(tool, "name", None) or getattr(
+            getattr(tool, "func", tool), "__name__", None
+        )
+
+    result: list[Any] = []
+    for tool in tools:
+        name = _tool_name(tool)
+        if name in _bound_factories:
+            result.append(
+                Tool(
+                    _bound_factories[name],
+                    name=name,
+                    desc=getattr(tool, "desc", None)
+                    or getattr(getattr(tool, "func", tool), "__doc__", "")
+                    or "",
+                )
+            )
+        else:
+            result.append(tool)
+    return result
+
+
 class AgentRuntime:
     """Simplified agent runtime managing FleetAgent, interpreter, history, tools, and core memory.
 
@@ -66,6 +142,14 @@ class AgentRuntime:
 
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
+
+        # Bind sandbox filesystem tools when an interpreter is present
+        if interpreter is not None:
+            base_tools = _bind_sandbox_filesystem_tools(
+                base_tools,
+                interpreter=interpreter,
+            )
+
         self.tools: list[Any] = base_tools + list(extra_tools or [])
 
         # Initialise agent with the discovered tool set
@@ -257,6 +341,20 @@ class AgentRuntime:
                         "tool_output": str(observation),
                     },
                 )
+                # Emit a structured clarification event when a tool signals it.
+                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
+                    import uuid as _uuid
+                    clar_payload = observation
+                    yield StreamEvent(
+                        kind="clarification",
+                        text=str(clar_payload.get("question", "Please clarify your intent.")),
+                        payload={
+                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+                            "question": clar_payload.get("question"),
+                            "step_label": clar_payload.get("step_label", "Clarification needed"),
+                            "options": clar_payload.get("options", []),
+                        },
+                    )
 
         if response:
             yield StreamEvent(kind="text", text=response)

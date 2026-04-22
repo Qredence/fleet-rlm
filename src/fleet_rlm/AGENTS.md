@@ -47,8 +47,7 @@ Artifacts and areas to treat carefully:
 
 Active top-level areas under `src/fleet_rlm/`:
 
-- `agent_host/`: Microsoft Agent Framework outer host that wraps the worker seam, hosted policy, terminal flow, and HITL checkpointing
-- `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities
+- `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, observability, MCP, and external-system integrations
@@ -132,9 +131,9 @@ Auth, persistence, and observability constraints:
 
 Layering rules:
 
-- Keep Agent Framework outer-host orchestration in `agent_host/`; it owns hosted policy, terminal flow, HITL checkpointing, and the worker seam
+- Keep hosted policy, terminal flow, and HITL checkpointing in `api/`; the outer-host responsibilities now live alongside transport logic
 - Keep transport logic in `api/` only
-- Keep recursive business/runtime behavior in `worker/`, `runtime/`, or `integrations/daytona/`
+- Keep recursive business/runtime behavior in `runtime/` or `integrations/daytona/`
 - Keep runtime config imports lightweight; config/package-root modules must not import DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks as import-time side effects
 - Reuse existing helpers before introducing new compatibility wrappers
 
