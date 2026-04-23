@@ -901,6 +901,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes/{sandbox_id}:
+    get:
+      tags:
+      - sandboxes
+      summary: Get sandbox details
+      description: Return full sandbox details including state, config, and volume.
+      operationId: get_sandbox_detail_api_v1_sandboxes__sandbox_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -2280,6 +2318,130 @@ components:
       type: object
       title: RuntimeTestCache
       description: Cached runtime test results included in the runtime status payload.
+    SandboxDetailResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Sandbox identifier.
+        name:
+          type: string
+          title: Name
+          description: Sandbox name.
+        state:
+          type: string
+          title: State
+          description: Sandbox state (e.g. started, stopped, archived).
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+        volume_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Name
+          description: Name of the persistent volume attached to the sandbox.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Custom labels attached to the sandbox.
+        cpu:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu
+          description: Allocated CPU cores.
+        memory:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Memory
+          description: Allocated memory in GiB.
+        disk:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Disk
+          description: Allocated disk in GiB.
+        env_vars:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env Vars
+          description: Environment variables configured for the sandbox.
+        image:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Image
+          description: Base image or declarative image used by the sandbox.
+        snapshot:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snapshot
+          description: Snapshot name used to create the sandbox.
+        language:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Language
+          description: Programming language of the sandbox.
+        auto_stop_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Stop Interval
+          description: Minutes of inactivity before auto-stopping.
+        auto_archive_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Archive Interval
+          description: Minutes after stop before archiving to cold storage.
+        auto_delete_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Delete Interval
+          description: Minutes after archive before permanent deletion.
+        ephemeral:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Ephemeral
+          description: Whether the sandbox is ephemeral.
+        network_block_all:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Network Block All
+          description: Whether all outbound network is blocked.
+        network_allow_list:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Network Allow List
+          description: Comma-separated list of allowed domains.
+        volumes:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Volumes
+          description: Detailed volume mounts.
+      type: object
+      required:
+      - id
+      - name
+      - state
+      title: SandboxDetailResponse
+      description: Detailed response for a single sandbox.
     SandboxListItem:
       properties:
         id:
