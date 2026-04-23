@@ -138,6 +138,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
         '422':
           description: Validation Error
           content:
@@ -169,6 +176,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
         '422':
           description: Validation Error
           content:
@@ -200,6 +216,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDeleteResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
         '422':
           description: Validation Error
           content:
@@ -252,6 +277,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TurnListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
         '422':
           description: Validation Error
           content:
@@ -291,6 +325,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatasetResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '400':
+          description: Invalid export parameters.
         '422':
           description: Validation Error
           content:

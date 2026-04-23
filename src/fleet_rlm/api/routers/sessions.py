@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 import os
 from pathlib import Path as FsPath
-from typing import Annotated, cast
+from typing import Annotated, Any, TypeAlias, cast
 import uuid
 
 from fastapi import APIRouter, HTTPException, Path, Query
@@ -31,6 +31,25 @@ from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 _TURN_COUNT_QUERY_LIMIT = 1
 _TRANSCRIPT_EXPORT_PAGE_SIZE = 1_000
+
+OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
+
+SESSIONS_ERROR_RESPONSES: OpenAPIResponses = {
+    401: {
+        "description": "Authentication is required or the provided token is invalid."
+    },
+    403: {
+        "description": "The caller does not have permission to access this resource."
+    },
+    503: {
+        "description": "Session services are unavailable because server startup is incomplete."
+    },
+}
+
+SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
+    **SESSIONS_ERROR_RESPONSES,
+    404: {"description": "Session not found."},
+}
 
 
 def _string_or_default(value: object, default: str) -> str:
@@ -240,6 +259,7 @@ async def list_session_state(
 @router.get(
     "",
     response_model=SessionListResponse,
+    responses=SESSIONS_ERROR_RESPONSES,
     summary="List session history",
     description="Paginated list of durable session transcripts with search and status filters.",
 )
@@ -343,6 +363,7 @@ async def list_sessions_endpoint(
 @router.get(
     "/{session_id}",
     response_model=SessionDetailResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Get session detail",
     description="Return session metadata and turn count for a specific session.",
 )
@@ -426,6 +447,7 @@ async def get_session_detail(
 @router.get(
     "/{session_id}/turns",
     response_model=TurnListResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Get session turns",
     description="Paginated turn-by-turn transcript for a session.",
 )
@@ -508,6 +530,7 @@ async def get_session_turns(
 @router.delete(
     "/{session_id}",
     response_model=SessionDeleteResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Archive session",
     description="Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.",
 )
@@ -553,6 +576,10 @@ async def delete_session_endpoint(
 @router.post(
     "/{session_id}/export",
     response_model=DatasetResponse,
+    responses={
+        **SESSION_DETAIL_RESPONSES,
+        400: {"description": "Invalid export parameters."},
+    },
     summary="Export session as GEPA dataset",
     description=(
         "Convert a session's turn history into a JSONL dataset suitable for "
