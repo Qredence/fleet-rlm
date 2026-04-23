@@ -214,3 +214,30 @@ async def delete_sandbox(sandbox_id: str) -> None:
             close = getattr(client, "close", None)
             if callable(close):
                 await _await_if_needed(close())
+
+
+async def archive_sandbox(sandbox_id: str) -> None:
+    """Archive a Daytona sandbox by ID to cold storage.
+
+    Wraps ``DaytonaSandboxSession.aarchive()`` to move the sandbox to
+    cold storage for later recovery.
+    """
+    client: Any | None = None
+    try:
+        config = _daytona_config.resolve_daytona_config()
+        client = _daytona_runtime._build_daytona_client(config)
+
+        sandbox = await _await_if_needed(client.get(sandbox_id))
+        session = _daytona_runtime.DaytonaSandboxSession(
+            sandbox=sandbox,
+            repo_url=None,
+            ref=None,
+            volume_name=None,
+            workspace_path="/",
+        )
+        await session.aarchive()
+    finally:
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                await _await_if_needed(close())

@@ -972,6 +972,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes/{sandbox_id}/archive:
+    post:
+      tags:
+      - sandboxes
+      summary: Archive sandbox
+      description: Archive a Daytona sandbox to cold storage for later recovery.
+      operationId: archive_sandbox_endpoint_api_v1_sandboxes__sandbox_id__archive_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxArchiveResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -2351,6 +2389,16 @@ components:
       type: object
       title: RuntimeTestCache
       description: Cached runtime test results included in the runtime status payload.
+    SandboxArchiveResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the sandbox was archived successfully.
+          default: true
+      type: object
+      title: SandboxArchiveResponse
+      description: Result payload after archiving a sandbox.
     SandboxDetailResponse:
       properties:
         id:

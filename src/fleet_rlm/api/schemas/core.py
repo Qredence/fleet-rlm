@@ -986,6 +986,15 @@ class SandboxListResponse(BaseModel):
     total_pages: int = Field(default=1, description="Total number of pages.")
 
 
+class SandboxArchiveResponse(BaseModel):
+    """Result payload after archiving a sandbox."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the sandbox was archived successfully.",
+    )
+
+
 class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
 

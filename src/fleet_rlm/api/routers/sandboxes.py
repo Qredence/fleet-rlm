@@ -7,8 +7,17 @@ from typing import Annotated, Any, TypeAlias
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep
-from ..runtime_services.sandboxes import delete_sandbox, load_sandbox_detail, load_sandbox_list
-from ..schemas.core import SandboxDetailResponse, SandboxListResponse
+from ..runtime_services.sandboxes import (
+    archive_sandbox,
+    delete_sandbox,
+    load_sandbox_detail,
+    load_sandbox_list,
+)
+from ..schemas.core import (
+    SandboxArchiveResponse,
+    SandboxDetailResponse,
+    SandboxListResponse,
+)
 
 router = APIRouter(
     prefix="/sandboxes",
@@ -113,3 +122,28 @@ async def delete_sandbox_endpoint(
             status_code=404,
             detail=f"Sandbox not found: {exc}",
         ) from exc
+
+
+@router.post(
+    "/{sandbox_id}/archive",
+    response_model=SandboxArchiveResponse,
+    responses=SBX_ERROR_RESPONSES,
+    summary="Archive sandbox",
+    description="Archive a Daytona sandbox to cold storage for later recovery.",
+)
+async def archive_sandbox_endpoint(
+    sandbox_id: Annotated[str, Path(description="Unique sandbox identifier.")],
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> SandboxArchiveResponse:
+    """Archive a Daytona sandbox to cold storage."""
+    _ = state
+    _ = identity
+    try:
+        await archive_sandbox(sandbox_id=sandbox_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sandbox not found: {exc}",
+        ) from exc
+    return SandboxArchiveResponse()
