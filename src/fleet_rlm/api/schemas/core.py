@@ -301,6 +301,15 @@ class SessionDeleteResponse(BaseModel):
     )
 
 
+class SessionRestoreResponse(BaseModel):
+    """Result payload after restoring an archived session."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the session was restored successfully.",
+    )
+
+
 class SessionPatchRequest(BaseModel):
     """Patch body for updating session metadata."""
 

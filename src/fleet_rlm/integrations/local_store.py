@@ -632,6 +632,33 @@ def archive_session(
         return True
 
 
+def restore_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> bool:
+    """Restore an archived session by setting status to ACTIVE.
+
+    Returns True if the session was found and restored, False otherwise.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return False
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return False
+        if owner_user is not None and row.owner_user != owner_user:
+            return False
+        if row.status != SessionStatus.ARCHIVED:
+            return False
+        row.status = SessionStatus.ACTIVE
+        row.updated_at = _utc_now()
+        db.add(row)
+        db.commit()
+        return True
+
+
 def get_turns_paginated(
     session_id: int,
     *,

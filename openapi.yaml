@@ -380,6 +380,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/restore:
+    post:
+      tags:
+      - sessions
+      summary: Restore session
+      description: Unarchive (restore) a soft-deleted session. Returns success when
+        restored, 404 if not found, 409 if already active.
+      operationId: restore_session_endpoint_api_v1_sessions__session_id__restore_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session to restore.
+          title: Session Id
+        description: Identifier of the session to restore.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionRestoreResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '409':
+          description: Session is already active.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/sessions/{session_id}/export:
     post:
       tags:
@@ -2317,6 +2360,16 @@ components:
       type: object
       title: SessionPatchRequest
       description: Patch body for updating session metadata.
+    SessionRestoreResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the session was restored successfully.
+          default: true
+      type: object
+      title: SessionRestoreResponse
+      description: Result payload after restoring an archived session.
     SessionStateResponse:
       properties:
         ok:

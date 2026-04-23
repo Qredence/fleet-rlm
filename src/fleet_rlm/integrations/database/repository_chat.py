@@ -461,6 +461,39 @@ class ChatRepository(RepositoryContextMixin):
             result = await session.execute(stmt)
             return result.scalar_one_or_none() is not None
 
+    async def restore_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Restore an archived session to active status.
+
+        Returns True if the session was found and restored, False otherwise.
+        """
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            stmt = update(ChatSession).where(
+                and_(
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.id == session_id,
+                    ChatSession.status == ChatSessionStatus.ARCHIVED,
+                )
+            )
+            if user_id is not None:
+                stmt = stmt.where(ChatSession.user_id == user_id)
+            if workspace_id is not None:
+                stmt = stmt.where(ChatSession.workspace_id == workspace_id)
+            stmt = stmt.values(
+                status=ChatSessionStatus.ACTIVE,
+                updated_at=_utc_now(),
+                last_activity_at=_utc_now(),
+            ).returning(ChatSession.id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
     async def update_run_status(
         self,
         *,

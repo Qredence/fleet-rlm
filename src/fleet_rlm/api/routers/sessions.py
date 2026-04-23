@@ -23,6 +23,7 @@ from ..schemas.core import (
     SessionListItem,
     SessionListResponse,
     SessionPatchRequest,
+    SessionRestoreResponse,
     SessionStateResponse,
     SessionStateSummary,
     TurnItem,
@@ -686,6 +687,88 @@ async def delete_session_endpoint(
     if not archived:
         raise HTTPException(status_code=404, detail="Session not found")
     return SessionDeleteResponse()
+
+
+SESSION_RESTORE_RESPONSES: OpenAPIResponses = {
+    **SESSIONS_ERROR_RESPONSES,
+    404: {"description": "Session not found."},
+    409: {"description": "Session is already active."},
+}
+
+
+@router.post(
+    "/{session_id}/restore",
+    response_model=SessionRestoreResponse,
+    responses=SESSION_RESTORE_RESPONSES,
+    summary="Restore session",
+    description="Unarchive (restore) a soft-deleted session. Returns success when restored, 404 if not found, 409 if already active.",
+)
+async def restore_session_endpoint(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to restore.")
+    ],
+) -> SessionRestoreResponse:
+    """Restore an archived session to active status."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if (
+            hasattr(session.status, "value")
+            and session.status.value == ChatSessionStatus.ACTIVE.value
+        ) or str(session.status) == ChatSessionStatus.ACTIVE.value:
+            raise HTTPException(status_code=409, detail="Session is already active")
+        restored = await repository.restore_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if not restored:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionRestoreResponse()
+
+    from fleet_rlm.integrations.local_store import get_chat_session, restore_session
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        get_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from fleet_rlm.integrations.local_store import SessionStatus
+
+    if (
+        hasattr(session.status, "value")
+        and session.status.value == SessionStatus.ACTIVE.value
+    ) or str(session.status) == SessionStatus.ACTIVE.value:
+        raise HTTPException(status_code=409, detail="Session is already active")
+    restored = await asyncio.to_thread(
+        restore_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if not restored:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return SessionRestoreResponse()
 
 
 @router.post(
