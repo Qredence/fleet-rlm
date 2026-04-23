@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from importlib import import_module
@@ -126,18 +127,21 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        requested_file = resolve_ui_file(full_path)
+        requested_file = await asyncio.to_thread(resolve_ui_file, full_path)
         if requested_file is not None:
             return FileResponse(requested_file)
 
         index_path = ui_root / "index.html"
-        if index_path.exists() and should_serve_spa_index(full_path):
+        index_exists = await asyncio.to_thread(index_path.exists)
+        if index_exists and should_serve_spa_index(full_path):
             return FileResponse(index_path)
 
-        if index_path.exists():
+        if index_exists:
             raise HTTPException(status_code=404, detail="Not Found")
 
-        return JSONResponse(_ui_unavailable_payload(), status_code=503)
+        return JSONResponse(
+            await asyncio.to_thread(_ui_unavailable_payload), status_code=503
+        )
 
 
 def _ui_unavailable_payload() -> dict[str, str]:
