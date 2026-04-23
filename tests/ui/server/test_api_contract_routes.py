@@ -141,7 +141,9 @@ class SessionHistoryRepository:
             ]
         if model_name is not None:
             items = [
-                item for item in items if getattr(item, "model_name", None) == model_name
+                item
+                for item in items
+                if getattr(item, "model_name", None) == model_name
             ]
         if model_provider is not None:
             items = [

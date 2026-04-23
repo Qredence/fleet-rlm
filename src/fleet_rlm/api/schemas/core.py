@@ -301,6 +301,19 @@ class SessionDeleteResponse(BaseModel):
     )
 
 
+class SessionPatchRequest(BaseModel):
+    """Patch body for updating session metadata."""
+
+    title: str | None = Field(
+        default=None,
+        description="New human-readable session title.",
+    )
+    metadata_json: dict[str, Any] | None = Field(
+        default=None,
+        description="New metadata dictionary to merge or replace session metadata.",
+    )
+
+
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 

@@ -22,6 +22,7 @@ from ..schemas.core import (
     SessionExportRequest,
     SessionListItem,
     SessionListResponse,
+    SessionPatchRequest,
     SessionStateResponse,
     SessionStateSummary,
     TurnItem,
@@ -445,6 +446,97 @@ async def get_session_detail(
         local_session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _turns, turn_count = await asyncio.to_thread(
+        get_turns_paginated, local_session_id, limit=0, offset=0
+    )
+    return SessionDetailResponse(
+        id=str(session.id),
+        title=session.title,
+        status=session.status.value
+        if hasattr(session.status, "value")
+        else str(session.status),
+        model_name=session.model_name,
+        external_session_id=session.external_session_id,
+        workspace_id=session.workspace_id,
+        turn_count=turn_count,
+        created_at=session.created_at.isoformat(),
+        updated_at=session.updated_at.isoformat(),
+    )
+
+
+@router.patch(
+    "/{session_id}",
+    response_model=SessionDetailResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Patch session metadata",
+    description="Update session title and/or metadata_json. Returns the updated session snapshot.",
+)
+async def patch_session_endpoint(
+    body: SessionPatchRequest,
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to update.")
+    ],
+) -> SessionDetailResponse:
+    """Update session title and/or metadata."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.update_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            title=body.title,
+            metadata_json=body.metadata_json,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        _turns, turn_count = await repository.list_chat_turns(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            limit=_TURN_COUNT_QUERY_LIMIT,
+            offset=0,
+        )
+        return SessionDetailResponse(
+            id=str(session.id),
+            title=session.title,
+            status=session.status.value
+            if hasattr(session.status, "value")
+            else str(session.status),
+            model_name=session.model_name,
+            external_session_id=_session_external_id(session.metadata_json),
+            workspace_id=str(session.workspace_id),
+            turn_count=turn_count,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+        )
+
+    from fleet_rlm.integrations.local_store import (
+        get_turns_paginated,
+        update_chat_session,
+    )
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        update_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+        title=body.title,
     )
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")

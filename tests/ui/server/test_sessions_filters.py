@@ -148,9 +148,7 @@ def multi_session_repo(default_client):
     return repo
 
 
-def test_filter_by_created_after(
-    default_client, auth_headers, multi_session_repo
-):
+def test_filter_by_created_after(default_client, auth_headers, multi_session_repo):
     cutoff = "2026-01-10T00:00:00Z"
     response = default_client.get(
         f"/api/v1/sessions?created_after={cutoff}",
@@ -163,9 +161,7 @@ def test_filter_by_created_after(
     assert payload["items"][0]["id"] == str(multi_session_repo.sessions[0].id)
 
 
-def test_filter_by_created_before(
-    default_client, auth_headers, multi_session_repo
-):
+def test_filter_by_created_before(default_client, auth_headers, multi_session_repo):
     cutoff = "2026-01-20T00:00:00Z"
     response = default_client.get(
         f"/api/v1/sessions?created_before={cutoff}",
@@ -180,9 +176,7 @@ def test_filter_by_created_before(
     assert ids == expected
 
 
-def test_filter_by_date_range(
-    default_client, auth_headers, multi_session_repo
-):
+def test_filter_by_date_range(default_client, auth_headers, multi_session_repo):
     after = "2026-01-10T00:00:00Z"
     before = "2026-01-20T00:00:00Z"
     response = default_client.get(
@@ -196,9 +190,7 @@ def test_filter_by_date_range(
     assert payload["items"][0]["id"] == str(multi_session_repo.sessions[0].id)
 
 
-def test_filter_by_model_name(
-    default_client, auth_headers, multi_session_repo
-):
+def test_filter_by_model_name(default_client, auth_headers, multi_session_repo):
     response = default_client.get(
         "/api/v1/sessions?model_name=gpt-4o",
         headers=auth_headers,
@@ -209,9 +201,7 @@ def test_filter_by_model_name(
     assert payload["items"][0]["model_name"] == "gpt-4o"
 
 
-def test_filter_by_model_provider(
-    default_client, auth_headers, multi_session_repo
-):
+def test_filter_by_model_provider(default_client, auth_headers, multi_session_repo):
     response = default_client.get(
         "/api/v1/sessions?model_provider=anthropic",
         headers=auth_headers,
@@ -222,9 +212,7 @@ def test_filter_by_model_provider(
     assert payload["items"][0]["title"] == "Session Beta"
 
 
-def test_combined_filters(
-    default_client, auth_headers, multi_session_repo
-):
+def test_combined_filters(default_client, auth_headers, multi_session_repo):
     response = default_client.get(
         "/api/v1/sessions?model_name=gpt-4o&status=archived",
         headers=auth_headers,
@@ -235,9 +223,7 @@ def test_combined_filters(
     assert payload["items"][0]["title"] == "Session Gamma"
 
 
-def test_invalid_date_format_returns_422(
-    default_client, auth_headers
-):
+def test_invalid_date_format_returns_422(default_client, auth_headers):
     response = default_client.get(
         "/api/v1/sessions?created_after=not-a-date",
         headers=auth_headers,

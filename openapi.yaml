@@ -233,6 +233,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - sessions
+      summary: Patch session metadata
+      description: Update session title and/or metadata_json. Returns the updated
+        session snapshot.
+      operationId: patch_session_endpoint_api_v1_sessions__session_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session to update.
+          title: Session Id
+        description: Identifier of the session to update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionPatchRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - sessions
@@ -2253,6 +2299,24 @@ components:
       - has_more
       title: SessionListResponse
       description: Paginated session list.
+    SessionPatchRequest:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+          description: New human-readable session title.
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+          description: New metadata dictionary to merge or replace session metadata.
+      type: object
+      title: SessionPatchRequest
+      description: Patch body for updating session metadata.
     SessionStateResponse:
       properties:
         ok:

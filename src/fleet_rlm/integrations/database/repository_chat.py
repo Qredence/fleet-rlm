@@ -399,6 +399,40 @@ class ChatRepository(RepositoryContextMixin):
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, int(total)
 
+    async def update_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+        title: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> ChatSession | None:
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            stmt = update(ChatSession).where(
+                and_(
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.id == session_id,
+                )
+            )
+            if user_id is not None:
+                stmt = stmt.where(ChatSession.user_id == user_id)
+            if workspace_id is not None:
+                stmt = stmt.where(ChatSession.workspace_id == workspace_id)
+            values: dict[str, object] = {
+                "updated_at": _utc_now(),
+                "last_activity_at": _utc_now(),
+            }
+            if title is not None:
+                values["title"] = title
+            if metadata_json is not None:
+                values["metadata_json"] = metadata_json
+            stmt = stmt.values(**values).returning(ChatSession)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     async def archive_chat_session(
         self,
         *,

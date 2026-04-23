@@ -342,16 +342,27 @@ class AgentRuntime:
                     },
                 )
                 # Emit a structured clarification event when a tool signals it.
-                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
+                if (
+                    isinstance(observation, dict)
+                    and observation.get("status") == "clarification_needed"
+                ):
                     import uuid as _uuid
+
                     clar_payload = observation
                     yield StreamEvent(
                         kind="clarification",
-                        text=str(clar_payload.get("question", "Please clarify your intent.")),
+                        text=str(
+                            clar_payload.get("question", "Please clarify your intent.")
+                        ),
                         payload={
-                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+                            "message_id": str(
+                                clar_payload.get("message_id")
+                                or f"clar-{_uuid.uuid4().hex[:8]}"
+                            ),
                             "question": clar_payload.get("question"),
-                            "step_label": clar_payload.get("step_label", "Clarification needed"),
+                            "step_label": clar_payload.get(
+                                "step_label", "Clarification needed"
+                            ),
                             "options": clar_payload.get("options", []),
                         },
                     )

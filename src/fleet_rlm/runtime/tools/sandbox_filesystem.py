@@ -157,6 +157,7 @@ def _sandbox_create_directory_impl(
     stripped = (path or "").strip()
     if stripped and "/" not in stripped and not stripped.startswith("."):
         import uuid as _uuid
+
         volume_path = f"/home/daytona/memory/{stripped}"
         workspace_hint = f"<workspace>/{stripped}"
         return {

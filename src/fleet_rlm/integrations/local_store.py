@@ -577,6 +577,36 @@ def get_chat_session(
         return row
 
 
+def update_chat_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+    title: str | None = None,
+    metadata_json: dict[str, Any] | None = None,
+) -> ChatSession | None:
+    """Update a session's title and/or metadata.
+
+    Returns the updated session row, or None if not found or not owned.
+    Local store only supports title updates; metadata_json is ignored.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return None
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return None
+        if owner_user is not None and row.owner_user != owner_user:
+            return None
+        if title is not None:
+            row.title = title
+        row.updated_at = _utc_now()
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
 def archive_session(
     session_id: int,
     *,
