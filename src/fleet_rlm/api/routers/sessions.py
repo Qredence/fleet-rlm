@@ -181,7 +181,7 @@ def _parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None
         },
     },
 )
-async def list_session_state(
+def list_session_state(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
 ) -> SessionStateResponse:

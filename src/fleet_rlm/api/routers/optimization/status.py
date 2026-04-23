@@ -58,7 +58,7 @@ async def get_optimization_status(
     response_model=list[GEPAModuleInfo],
     responses=AUTH_ERROR_RESPONSES,
 )
-async def list_optimization_modules(
+def list_optimization_modules(
     identity: HTTPIdentityDep,
 ) -> list[GEPAModuleInfo]:
     """Return the list of registered optimizable DSPy modules."""

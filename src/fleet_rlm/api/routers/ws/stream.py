@@ -262,7 +262,7 @@ async def _stream_agent_events(
     bridge_started = False
     try:
         if hosted_repl_bridge is not None:
-            await hosted_repl_bridge.start()
+            hosted_repl_bridge.start()
             bridge_started = True
 
         with runtime_telemetry_enabled_context(analytics_enabled):

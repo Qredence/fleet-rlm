@@ -37,7 +37,7 @@ class ReplHookBridge:
         )
         self._worker_task: asyncio.Task[None] | None = None
 
-    async def start(self) -> None:
+    def start(self) -> None:
         self._worker_task = asyncio.create_task(self._repl_step_worker())
         if self._interpreter is None:
             return

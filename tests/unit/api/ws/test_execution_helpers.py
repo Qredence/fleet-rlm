@@ -219,7 +219,7 @@ def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook
             enqueue_nonblocking=enqueue_nonblocking,
         )
 
-        await bridge.start()
+        bridge.start()
         assert interpreter.execution_event_callback is not previous_hook
 
         payload = {"kind": "sandbox_output", "text": "hello"}
