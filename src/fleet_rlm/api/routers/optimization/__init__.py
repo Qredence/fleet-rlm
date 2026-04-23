@@ -6,15 +6,13 @@ that is included by the application factory exactly as before.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from ...dependencies import require_http_identity
 from . import datasets, runs, status
 
 router = APIRouter(
     prefix="/optimization",
     tags=["optimization"],
-    dependencies=[Depends(require_http_identity)],
 )
 
 router.include_router(status.router)

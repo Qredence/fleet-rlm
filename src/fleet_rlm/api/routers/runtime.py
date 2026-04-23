@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any, TypeAlias
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
 
-from ..dependencies import HTTPIdentityDep, ServerStateDep, require_http_identity
+from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..runtime_services import (
     apply_runtime_settings_patch,
     build_runtime_settings_snapshot,
@@ -34,7 +34,6 @@ from ..schemas.core import (
 router = APIRouter(
     prefix="/runtime",
     tags=["runtime"],
-    dependencies=[Depends(require_http_identity)],
 )
 
 OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
@@ -93,8 +92,12 @@ VOLUME_LIST_RESPONSES: OpenAPIResponses = {
     response_model=RuntimeSettingsSnapshot,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot:
+async def get_runtime_settings(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
+    _ = identity
     return build_runtime_settings_snapshot(state=state)
 
 
@@ -105,9 +108,11 @@ async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot
 )
 async def patch_runtime_settings(
     state: ServerStateDep,
+    identity: HTTPIdentityDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
+    _ = identity
     return await apply_runtime_settings_patch(
         state=state,
         request=request,
@@ -121,8 +126,12 @@ async def patch_runtime_settings(
     response_model=RuntimeConnectivityTestResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestResponse:
+async def test_lm_connection(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeConnectivityTestResponse:
     """Verify that the planner and delegate language-model configuration can load."""
+    _ = identity
     return await run_lm_connection_test(
         state=state,
         planner_loader=get_planner_lm_from_env,
@@ -137,8 +146,10 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
 )
 async def test_daytona_connection(
     state: ServerStateDep,
+    identity: HTTPIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     """Run the Daytona preflight and connectivity check exposed in runtime diagnostics."""
+    _ = identity
     return await run_daytona_connection_test(state=state)
 
 
@@ -147,8 +158,12 @@ async def test_daytona_connection(
     response_model=RuntimeStatusResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
+async def get_runtime_status(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
+    _ = identity
     return build_runtime_status_response(state=state)
 
 
