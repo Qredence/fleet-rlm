@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from datetime import datetime
 import os
 from pathlib import Path as FsPath
 from typing import Annotated, Any, TypeAlias, cast
@@ -273,6 +274,20 @@ async def list_sessions_endpoint(
     status: Annotated[
         str | None, Query(description="Filter by status (active, archived)")
     ] = None,
+    created_after: Annotated[
+        datetime | None,
+        Query(description="Filter sessions created on or after this date (ISO 8601)"),
+    ] = None,
+    created_before: Annotated[
+        datetime | None,
+        Query(description="Filter sessions created on or before this date (ISO 8601)"),
+    ] = None,
+    model_name: Annotated[
+        str | None, Query(description="Filter by exact model name")
+    ] = None,
+    model_provider: Annotated[
+        str | None, Query(description="Filter by exact model provider")
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
@@ -298,6 +313,10 @@ async def list_sessions_endpoint(
             workspace_id=persisted_identity.workspace_id,
             search=search,
             status=status_filter,
+            created_after=created_after,
+            created_before=created_before,
+            model_name=model_name,
+            model_provider=model_provider,
             limit=limit,
             offset=offset,
         )
@@ -337,6 +356,10 @@ async def list_sessions_endpoint(
         owner_user=identity.user_claim,
         search=search,
         status=status_filter,
+        created_after=created_after,
+        created_before=created_before,
+        model_name=model_name,
+        model_provider=model_provider,
         limit=limit,
         offset=offset,
     )

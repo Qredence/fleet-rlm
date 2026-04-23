@@ -110,6 +110,48 @@ paths:
           description: Filter by status (active, archived)
           title: Status
         description: Filter by status (active, archived)
+      - name: created_after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: Filter sessions created on or after this date (ISO 8601)
+          title: Created After
+        description: Filter sessions created on or after this date (ISO 8601)
+      - name: created_before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: Filter sessions created on or before this date (ISO 8601)
+          title: Created Before
+        description: Filter sessions created on or before this date (ISO 8601)
+      - name: model_name
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by exact model name
+          title: Model Name
+        description: Filter by exact model name
+      - name: model_provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by exact model provider
+          title: Model Provider
+        description: Filter by exact model provider
       - name: limit
         in: query
         required: false

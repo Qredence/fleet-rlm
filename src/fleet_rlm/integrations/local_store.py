@@ -75,6 +75,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
         ("owner_user", "VARCHAR(255)"),
         ("workspace_id", "VARCHAR(255)"),
         ("_monotonic_turn_counter", "INTEGER DEFAULT 0 NOT NULL"),
+        ("model_provider", "VARCHAR(128)"),
     ]
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
@@ -192,6 +193,7 @@ class ChatSession(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(default="New Session", max_length=255)
     status: SessionStatus = Field(default=SessionStatus.ACTIVE)
+    model_provider: str | None = Field(default=None, max_length=128)
     model_name: str | None = Field(default=None, max_length=255)
     external_session_id: str | None = Field(default=None, max_length=255, index=True)
     owner_tenant: str | None = Field(default=None, max_length=255)
@@ -505,6 +507,10 @@ def list_sessions(
     owner_user: str | None = None,
     search: str | None = None,
     status: SessionStatus | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> tuple[list[ChatSession], int]:
@@ -529,6 +535,14 @@ def list_sessions(
                 (ChatSession.title.contains(search))  # type: ignore
                 | (ChatSession.external_session_id.like(like_pat))  # type: ignore
             )
+        if created_after is not None:
+            base = base.where(ChatSession.created_at >= created_after)
+        if created_before is not None:
+            base = base.where(ChatSession.created_at <= created_before)
+        if model_name is not None:
+            base = base.where(ChatSession.model_name == model_name)
+        if model_provider is not None:
+            base = base.where(ChatSession.model_provider == model_provider)
 
         from sqlalchemy import func
 

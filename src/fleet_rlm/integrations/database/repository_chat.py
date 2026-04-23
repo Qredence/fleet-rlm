@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Select, and_, func, or_, select, update
@@ -300,6 +301,10 @@ class ChatRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         search: str | None = None,
         status: ChatSessionStatus | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        model_name: str | None = None,
+        model_provider: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[ChatSession], int]:
@@ -326,6 +331,14 @@ class ChatRepository(RepositoryContextMixin):
                         .ilike(like_pattern),
                     )
                 )
+            if created_after is not None:
+                stmt = stmt.where(ChatSession.created_at >= created_after)
+            if created_before is not None:
+                stmt = stmt.where(ChatSession.created_at <= created_before)
+            if model_name is not None:
+                stmt = stmt.where(ChatSession.model_name == model_name)
+            if model_provider is not None:
+                stmt = stmt.where(ChatSession.model_provider == model_provider)
 
             count_stmt = select(func.count()).select_from(stmt.subquery())
             total = (await session.execute(count_stmt)).scalar_one()

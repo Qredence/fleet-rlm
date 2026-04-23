@@ -116,6 +116,10 @@ class SessionHistoryRepository:
         workspace_id,
         search,
         status,
+        created_after=None,
+        created_before=None,
+        model_name=None,
+        model_provider=None,
         limit,
         offset,
     ):
@@ -134,6 +138,16 @@ class SessionHistoryRepository:
                 for item in items
                 if needle in item.title.lower()
                 or needle in item.metadata_json["external_session_id"].lower()
+            ]
+        if model_name is not None:
+            items = [
+                item for item in items if getattr(item, "model_name", None) == model_name
+            ]
+        if model_provider is not None:
+            items = [
+                item
+                for item in items
+                if getattr(item, "model_provider", None) == model_provider
             ]
         total = len(items)
         return items[offset : offset + limit], total
