@@ -676,6 +676,18 @@ class ChatRepository(RepositoryContextMixin):
                 "model_breakdown": model_breakdown,
             }
 
+    async def get_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+    ) -> Run | None:
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id)
+            stmt = select(Run).where(and_(Run.tenant_id == tenant_id, Run.id == run_id))
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     async def get_run_steps(
         self,
         *,

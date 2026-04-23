@@ -1010,6 +1010,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/steps:
+    get:
+      tags:
+      - runs
+      summary: List run steps
+      description: Paginated execution trace steps for a run with step_type, tool_name,
+        tokens, and latency.
+      operationId: get_run_steps_api_v1_runs__run_id__steps_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the run whose steps to list.
+          title: Run Id
+        description: Identifier of the run whose steps to list.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size
+          default: 50
+          title: Limit
+        description: Page size
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset
+          default: 0
+          title: Offset
+        description: Pagination offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStepListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Run services are unavailable because server startup is incomplete.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -2176,6 +2235,89 @@ components:
       - runs
       title: RunComparisonResponse
       description: Cross-run comparison payload.
+    RunStepItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Durable step identifier.
+        step_index:
+          type: integer
+          title: Step Index
+          description: Step position within the run.
+        step_type:
+          type: string
+          title: Step Type
+          description: Step type (e.g. tool_call, reasoning).
+        tool_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tool Name
+          description: Tool name when applicable.
+        tokens_in:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens In
+          description: Input token count.
+        tokens_out:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens Out
+          description: Output token count.
+        latency_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Latency Ms
+          description: Step latency in milliseconds.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+      - id
+      - step_index
+      - step_type
+      - created_at
+      title: RunStepItem
+      description: Single execution step for a run.
+    RunStepListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/RunStepItem'
+          type: array
+          title: Items
+          description: Step list items.
+        total:
+          type: integer
+          title: Total
+          description: Total steps in run.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more steps exist beyond this page.
+      type: object
+      required:
+      - items
+      - total
+      - offset
+      - limit
+      - has_more
+      title: RunStepListResponse
+      description: Paginated execution step list for a run.
     RuntimeActiveModels:
       properties:
         planner:

@@ -995,6 +995,33 @@ class SandboxArchiveResponse(BaseModel):
     )
 
 
+class RunStepItem(BaseModel):
+    """Single execution step for a run."""
+
+    id: str = Field(description="Durable step identifier.")
+    step_index: int = Field(description="Step position within the run.")
+    step_type: str = Field(description="Step type (e.g. tool_call, reasoning).")
+    tool_name: str | None = Field(
+        default=None, description="Tool name when applicable."
+    )
+    tokens_in: int | None = Field(default=None, description="Input token count.")
+    tokens_out: int | None = Field(default=None, description="Output token count.")
+    latency_ms: int | None = Field(
+        default=None, description="Step latency in milliseconds."
+    )
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+
+
+class RunStepListResponse(BaseModel):
+    """Paginated execution step list for a run."""
+
+    items: list[RunStepItem] = Field(description="Step list items.")
+    total: int = Field(description="Total steps in run.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more steps exist beyond this page.")
+
+
 class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
 
