@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any, TypeAlias
 
 from fastapi import APIRouter, Query
@@ -98,7 +99,7 @@ async def get_runtime_settings(
 ) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
     _ = identity
-    return build_runtime_settings_snapshot(state=state)
+    return await asyncio.to_thread(build_runtime_settings_snapshot, state=state)
 
 
 @router.patch(
@@ -164,7 +165,7 @@ async def get_runtime_status(
 ) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
     _ = identity
-    return build_runtime_status_response(state=state)
+    return await asyncio.to_thread(build_runtime_status_response, state=state)
 
 
 @router.get(

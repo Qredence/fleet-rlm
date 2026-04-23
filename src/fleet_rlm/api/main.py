@@ -173,7 +173,8 @@ def _mount_ui_unavailable_root(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     async def ui_unavailable_root():
-        return JSONResponse(_ui_unavailable_payload(), status_code=503)
+        payload = await asyncio.to_thread(_ui_unavailable_payload)
+        return JSONResponse(payload, status_code=503)
 
 
 def _annotate_validation_error_schemas(app: FastAPI) -> None:

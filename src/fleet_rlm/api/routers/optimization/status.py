@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter
 
 from ...dependencies import HTTPIdentityDep
@@ -21,8 +23,8 @@ async def get_optimization_status(
 ) -> GEPAStatusResponse:
     """Return GEPA optimization availability and prerequisites."""
     _ = identity
-    gepa_installed = _check_gepa_available()
-    mlflow_configured, mlflow_enabled = _get_mlflow_status()
+    gepa_installed = await asyncio.to_thread(_check_gepa_available)
+    mlflow_configured, mlflow_enabled = await asyncio.to_thread(_get_mlflow_status)
     available = gepa_installed and mlflow_enabled
 
     guidance: list[str] = []
