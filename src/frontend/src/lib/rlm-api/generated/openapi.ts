@@ -3187,6 +3187,10 @@ export interface operations {
           "application/json": components["schemas"]["OptimizationRunResponse"][];
         };
       };
+      /** @description Invalid status filter. */
+      400: {
+        content: never;
+      };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
         content: never;

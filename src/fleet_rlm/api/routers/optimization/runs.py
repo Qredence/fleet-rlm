@@ -570,7 +570,13 @@ async def create_optimization_run(
 @router.get(
     "/runs",
     response_model=list[OptimizationRunResponse],
-    responses=AUTH_ERROR_RESPONSES,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid status filter."},
+        },
+    ),
 )
 async def list_runs(
     state: ServerStateDep,

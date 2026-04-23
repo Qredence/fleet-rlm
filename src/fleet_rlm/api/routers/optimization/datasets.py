@@ -111,6 +111,13 @@ def _require_object_rows(rows: list[Any]) -> list[dict[str, Any]]:
 @router.post(
     "/datasets/from-transcript",
     response_model=DatasetResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            400: {"description": "Invalid transcript dataset payload."},
+        },
+    ),
     include_in_schema=False,
 )
 async def create_dataset_from_transcript(

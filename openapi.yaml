@@ -1295,6 +1295,8 @@ paths:
                 title: Response List Runs Api V1 Optimization Runs Get
         '401':
           description: Authentication is required or the provided token is invalid.
+        '400':
+          description: Invalid status filter.
         '422':
           description: Validation Error
           content:
