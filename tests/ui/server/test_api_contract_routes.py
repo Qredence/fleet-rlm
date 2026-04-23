@@ -55,6 +55,7 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/runtime/status",
     "/api/v1/sandboxes",
     "/api/v1/sandboxes/{sandbox_id}",
+    "/api/v1/sandboxes/{sandbox_id}/archive",
     "/api/v1/sessions/state",
     "/api/v1/traces/feedback",
 }
@@ -645,6 +646,37 @@ def test_session_export_route_paginates_repository_turns(
     payload = response.json()
     assert payload["row_count"] == 5
     assert [call["offset"] for call in repository.turn_list_calls[-3:]] == [0, 2, 4]
+
+
+def test_sandbox_list_paginates_with_limit(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, int]] = []
+
+    async def fake_load_sandbox_list(*, page: int, limit: int) -> dict[str, object]:
+        calls.append({"page": page, "limit": limit})
+        return {"items": [], "total": 0, "page": page, "total_pages": 0}
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.sandboxes.load_sandbox_list",
+        fake_load_sandbox_list,
+    )
+
+    response = default_client.get(
+        "/api/v1/sandboxes?limit=5",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert calls == [{"page": 1, "limit": 5}]
+
+    response = default_client.get(
+        "/api/v1/sandboxes?page=2&limit=10",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert calls == [{"page": 1, "limit": 5}, {"page": 2, "limit": 10}]
 
 
 def test_openapi_publishes_http_bearer_security_for_protected_routes(
