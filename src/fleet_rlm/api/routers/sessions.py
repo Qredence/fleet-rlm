@@ -26,6 +26,7 @@ from ..schemas.core import (
     SessionRestoreResponse,
     SessionStateResponse,
     SessionStateSummary,
+    SessionStatsResponse,
     TurnItem,
     TurnListResponse,
 )
@@ -640,6 +641,75 @@ async def get_session_turns(
         offset=offset,
         limit=limit,
         has_more=(offset + limit) < total,
+    )
+
+
+@router.get(
+    "/{session_id}/stats",
+    response_model=SessionStatsResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Get session usage stats",
+    description="Aggregated token counts, latency, and model breakdown for all turns in a session.",
+)
+async def get_session_stats(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session whose stats to retrieve.")
+    ],
+) -> SessionStatsResponse:
+    """Return aggregated usage stats for a session."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        stats = await repository.get_session_stats(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if stats is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionStatsResponse(
+            total_tokens_in=int(cast(int, stats.get("total_tokens_in", 0))),
+            total_tokens_out=int(cast(int, stats.get("total_tokens_out", 0))),
+            total_latency_ms=int(cast(int, stats.get("total_latency_ms", 0))),
+            model_breakdown=dict(
+                cast(dict[str, int], stats.get("model_breakdown") or {})
+            ),
+        )
+
+    from fleet_rlm.integrations.local_store import get_chat_session, get_turns
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        get_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    turns = await asyncio.to_thread(get_turns, local_session_id)
+    total_tokens_in = sum((t.tokens_in or 0) for t in turns)
+    total_tokens_out = sum((t.tokens_out or 0) for t in turns)
+    total_latency_ms = sum((t.latency_ms or 0) for t in turns)
+    model_breakdown: dict[str, int] = {}
+    for t in turns:
+        name = getattr(t, "model_name", None) or "unknown"
+        model_breakdown[name] = model_breakdown.get(name, 0) + 1
+
+    return SessionStatsResponse(
+        total_tokens_in=total_tokens_in,
+        total_tokens_out=total_tokens_out,
+        total_latency_ms=total_latency_ms,
+        model_breakdown=model_breakdown,
     )
 
 

@@ -619,6 +619,63 @@ class ChatRepository(RepositoryContextMixin):
             result = await session.execute(stmt)
             return result.scalar_one()
 
+    async def get_session_stats(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> dict[str, object] | None:
+        """Return aggregated usage stats for all turns in a session.
+
+        Returns None if the session does not exist or is not owned.
+        """
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            # Verify session exists and is owned
+            session_stmt: Select[tuple[ChatSession]] = select(ChatSession).where(
+                and_(
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.id == session_id,
+                )
+            )
+            if user_id is not None:
+                session_stmt = session_stmt.where(ChatSession.user_id == user_id)
+            if workspace_id is not None:
+                session_stmt = session_stmt.where(
+                    ChatSession.workspace_id == workspace_id
+                )
+            session_row = (await session.execute(session_stmt)).scalar_one_or_none()
+            if session_row is None:
+                return None
+
+            # Aggregate stats from turns
+            stmt: Select[tuple[ChatTurn]] = select(ChatTurn).where(
+                and_(
+                    ChatTurn.tenant_id == tenant_id,
+                    ChatTurn.session_id == session_id,
+                )
+            )
+            if workspace_id is not None:
+                stmt = stmt.where(ChatTurn.workspace_id == workspace_id)
+            turns = list((await session.execute(stmt)).scalars().all())
+
+            total_tokens_in = sum((t.tokens_in or 0) for t in turns)
+            total_tokens_out = sum((t.tokens_out or 0) for t in turns)
+            total_latency_ms = sum((t.latency_ms or 0) for t in turns)
+            model_breakdown: dict[str, int] = {}
+            for t in turns:
+                name = t.model_name or "unknown"
+                model_breakdown[name] = model_breakdown.get(name, 0) + 1
+
+            return {
+                "total_tokens_in": total_tokens_in,
+                "total_tokens_out": total_tokens_out,
+                "total_latency_ms": total_latency_ms,
+                "model_breakdown": model_breakdown,
+            }
+
     async def get_run_steps(
         self,
         *,

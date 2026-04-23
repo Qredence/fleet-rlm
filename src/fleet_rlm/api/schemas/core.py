@@ -323,6 +323,27 @@ class SessionPatchRequest(BaseModel):
     )
 
 
+class SessionStatsResponse(BaseModel):
+    """Aggregated usage stats for a session."""
+
+    total_tokens_in: int = Field(
+        default=0,
+        description="Total input tokens across all turns.",
+    )
+    total_tokens_out: int = Field(
+        default=0,
+        description="Total output tokens across all turns.",
+    )
+    total_latency_ms: int = Field(
+        default=0,
+        description="Total latency in milliseconds across all turns.",
+    )
+    model_breakdown: dict[str, int] = Field(
+        default_factory=dict,
+        description="Mapping of model_name to turn count.",
+    )
+
+
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 

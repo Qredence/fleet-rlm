@@ -380,6 +380,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/stats:
+    get:
+      tags:
+      - sessions
+      summary: Get session usage stats
+      description: Aggregated token counts, latency, and model breakdown for all turns
+        in a session.
+      operationId: get_session_stats_api_v1_sessions__session_id__stats_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session whose stats to retrieve.
+          title: Session Id
+        description: Identifier of the session whose stats to retrieve.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStatsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/sessions/{session_id}/restore:
     post:
       tags:
@@ -2446,6 +2487,32 @@ components:
       - user_id
       title: SessionStateSummary
       description: Lightweight summary of a persisted or active chat session.
+    SessionStatsResponse:
+      properties:
+        total_tokens_in:
+          type: integer
+          title: Total Tokens In
+          description: Total input tokens across all turns.
+          default: 0
+        total_tokens_out:
+          type: integer
+          title: Total Tokens Out
+          description: Total output tokens across all turns.
+          default: 0
+        total_latency_ms:
+          type: integer
+          title: Total Latency Ms
+          description: Total latency in milliseconds across all turns.
+          default: 0
+        model_breakdown:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Model Breakdown
+          description: Mapping of model_name to turn count.
+      type: object
+      title: SessionStatsResponse
+      description: Aggregated usage stats for a session.
     TraceFeedbackRequest:
       properties:
         trace_id:
