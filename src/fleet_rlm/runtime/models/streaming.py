@@ -69,6 +69,7 @@ StreamEventKind = Literal[
     "warning",
     "error",
     "done",
+    "clarification",
 ]
 
 
@@ -145,6 +146,10 @@ class TurnState:
         if event.kind == "tool_result":
             if event.text:
                 self.tool_timeline.append(event.text)
+            return
+
+        if event.kind == "clarification":
+            # UI-only event; no state mutation needed
             return
 
         if event.kind == "done":

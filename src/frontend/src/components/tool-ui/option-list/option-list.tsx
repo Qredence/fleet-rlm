@@ -311,7 +311,7 @@ export function OptionList({
       if (
         prev < 0 ||
         prev >= optionStates.length ||
-        optionStates[prev].isDisabled
+        optionStates[prev]?.isDisabled
       ) {
         const firstEnabled = optionStates.findIndex((s) => !s.isDisabled);
         return firstEnabled >= 0 ? firstEnabled : 0;
@@ -435,7 +435,7 @@ export function OptionList({
 
   const findLastEnabledIndex = useCallback(() => {
     for (let i = optionStates.length - 1; i >= 0; i--) {
-      if (!optionStates[i].isDisabled) return i;
+      if (!optionStates[i]?.isDisabled) return i;
     }
     return 0;
   }, [optionStates]);
@@ -446,7 +446,7 @@ export function OptionList({
       if (len === 0) return 0;
       for (let step = 1; step <= len; step++) {
         const idx = (start + direction * step + len) % len;
-        if (!optionStates[idx].isDisabled) return idx;
+        if (!optionStates[idx]?.isDisabled) return idx;
       }
       return start;
     },
