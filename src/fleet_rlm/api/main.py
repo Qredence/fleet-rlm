@@ -26,6 +26,7 @@ from .middleware import add_middlewares
 from .routers import (
     auth,
     health,
+    memory,
     optimization,
     runs,
     runtime,
@@ -44,6 +45,7 @@ _CANONICAL_API_ROUTERS = (
     runtime.router,
     sandboxes.router,
     runs.router,
+    memory.router,
     optimization.router,
     traces.router,
 )

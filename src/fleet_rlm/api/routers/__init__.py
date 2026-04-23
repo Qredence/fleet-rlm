@@ -3,6 +3,7 @@
 from . import (
     auth,
     health,
+    memory,
     optimization,
     runs,
     runtime,
@@ -20,6 +21,7 @@ __all__ = [
     "runtime",
     "sandboxes",
     "runs",
+    "memory",
     "optimization",
     "traces",
 ]

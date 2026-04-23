@@ -1069,6 +1069,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/memory:
+    get:
+      tags:
+      - memory
+      summary: List memory items
+      description: Return memory items filtered by scope and scope_id. Without filters,
+        returns all memory for the authenticated user.
+      operationId: list_memory_items_api_v1_memory_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by memory scope (user, tenant, workspace, run, session).
+          title: Scope
+        description: Filter by memory scope (user, tenant, workspace, run, session).
+      - name: scope_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by scope identifier.
+          title: Scope Id
+        description: Filter by scope identifier.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size
+          default: 100
+          title: Limit
+        description: Page size
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Memory services are unavailable because server startup is incomplete.
+        '400':
+          description: Invalid scope filter value.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -2008,6 +2069,87 @@ components:
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
+    MemoryItemResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Durable memory item identifier.
+        scope:
+          type: string
+          title: Scope
+          description: Memory scope (e.g. user, tenant, workspace, run, session).
+        scope_id:
+          type: string
+          title: Scope Id
+          description: Identifier within the scope.
+        kind:
+          type: string
+          title: Kind
+          description: Memory kind (e.g. fact, observation, preference).
+        source:
+          type: string
+          title: Source
+          description: Memory source (e.g. user, agent, system).
+        status:
+          type: string
+          title: Status
+          description: Memory status (e.g. active, archived).
+        content_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Text
+          description: Textual content when available.
+        importance:
+          type: integer
+          title: Importance
+          description: Importance score (0-100).
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          description: Associated tags.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+      - id
+      - scope
+      - scope_id
+      - kind
+      - source
+      - status
+      - importance
+      - created_at
+      title: MemoryItemResponse
+      description: Single memory item returned by the memory browse endpoint.
+    MemoryListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/MemoryItemResponse'
+          type: array
+          title: Items
+          description: Memory item list items.
+        total:
+          type: integer
+          title: Total
+          description: Total matching memory items.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      title: MemoryListResponse
+      description: Paginated memory item list response.
     OptimizationRunCreatedResponse:
       properties:
         run_id:

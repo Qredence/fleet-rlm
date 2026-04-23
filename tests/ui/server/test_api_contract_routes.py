@@ -43,6 +43,7 @@ def _register_reflect_and_revise_stub():
 
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
+    "/api/v1/memory",
     "/api/v1/optimization/modules",
     "/api/v1/optimization/run",
     "/api/v1/optimization/runs",
