@@ -241,6 +241,9 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         title="fleet-rlm",
         version=__version__,
         lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
     )
     _annotate_validation_error_schemas(app)
 
