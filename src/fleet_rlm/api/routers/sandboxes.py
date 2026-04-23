@@ -6,6 +6,14 @@ from typing import Annotated, Any, TypeAlias
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
+from daytona import (
+    DaytonaAuthenticationError,
+    DaytonaAuthorizationError,
+    DaytonaConnectionError,
+    DaytonaNotFoundError,
+    DaytonaTimeoutError,
+)
+
 from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..runtime_services.sandboxes import (
     archive_sandbox,
@@ -17,6 +25,14 @@ from ..schemas.core import (
     SandboxArchiveResponse,
     SandboxDetailResponse,
     SandboxListResponse,
+)
+
+_DAYTONA_NOT_FOUND_ERRORS: tuple[type[BaseException], ...] = (DaytonaNotFoundError,)
+_DAYTONA_UNAVAILABLE_ERRORS: tuple[type[BaseException], ...] = (
+    DaytonaConnectionError,
+    DaytonaAuthenticationError,
+    DaytonaAuthorizationError,
+    DaytonaTimeoutError,
 )
 
 router = APIRouter(
@@ -93,10 +109,15 @@ async def get_sandbox_detail(
     _ = identity
     try:
         return await load_sandbox_detail(sandbox_id=sandbox_id)
-    except Exception as exc:
+    except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Sandbox not found: {exc}",
+        ) from exc
+    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Sandbox service unavailable: {exc}",
         ) from exc
 
 
@@ -117,10 +138,15 @@ async def delete_sandbox_endpoint(
     _ = identity
     try:
         await delete_sandbox(sandbox_id=sandbox_id)
-    except Exception as exc:
+    except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Sandbox not found: {exc}",
+        ) from exc
+    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Sandbox service unavailable: {exc}",
         ) from exc
 
 
@@ -141,9 +167,14 @@ async def archive_sandbox_endpoint(
     _ = identity
     try:
         await archive_sandbox(sandbox_id=sandbox_id)
-    except Exception as exc:
+    except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,
             detail=f"Sandbox not found: {exc}",
+        ) from exc
+    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Sandbox service unavailable: {exc}",
         ) from exc
     return SandboxArchiveResponse()

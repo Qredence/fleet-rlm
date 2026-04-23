@@ -654,8 +654,7 @@ class DaytonaSandboxSession:
 
     async def aarchive(self) -> None:
         """Archive the sandbox for later recovery (cheaper than keeping it running)."""
-        with suppress(Exception):
-            await _await_if_needed(self.sandbox.archive())
+        await _await_if_needed(self.sandbox.archive())
 
     def archive(self) -> None:
         _run_async_compat(self.aarchive)

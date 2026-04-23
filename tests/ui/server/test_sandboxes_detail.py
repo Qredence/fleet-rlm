@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from daytona import DaytonaConnectionError, DaytonaNotFoundError
+
 
 @pytest.fixture
 def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
@@ -51,7 +53,7 @@ def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         async def get(self, sandbox_id: str) -> SimpleNamespace:
             if sandbox_id == "sb-001":
                 return sandbox
-            raise RuntimeError(f"Sandbox {sandbox_id} not found")
+            raise DaytonaNotFoundError(f"Sandbox {sandbox_id} not found")
 
         async def close(self) -> None:
             self.closed = True
@@ -112,6 +114,35 @@ def test_get_sandbox_detail_not_found_returns_404(
 ) -> None:
     response = default_client.get("/api/v1/sandboxes/nonexistent", headers=auth_headers)
     assert response.status_code == 404
+
+
+def test_get_sandbox_detail_connection_error_returns_503(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeAsyncDaytona:
+        async def get(self, _sandbox_id: str) -> Any:
+            raise DaytonaConnectionError("daytona unreachable")
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.sandboxes._daytona_config.resolve_daytona_config",
+        lambda: SimpleNamespace(
+            api_key="daytona-key",
+            api_url="https://daytona.example.com/",
+            target="local",
+        ),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.sandboxes._daytona_runtime._build_daytona_client",
+        lambda _cfg: _FakeAsyncDaytona(),
+    )
+    response = default_client.get("/api/v1/sandboxes/sb-001", headers=auth_headers)
+    assert response.status_code == 503
+    assert "unavailable" in response.json()["detail"].lower()
 
 
 def test_get_sandbox_detail_without_auth_returns_401(
