@@ -160,6 +160,10 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
         _fake_builder,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_runtime._try_build_daytona_interpreter",
+        lambda _volume_name: None,
+    )
 
     runtime = _PreparedChatRuntime(
         cfg=_runtime_cfg(),
