@@ -29,6 +29,12 @@ Then open `http://localhost:8000`.
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Frontend/Backend Integration](reference/frontend-backend-integration.md)
 
+## New API Reference Surfaces
+
+- [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
+- [Runs API](reference/runs-api.md) — Execution trace step browsing
+- [Memory API](reference/memory-api.md) — Scoped memory item queries
+
 ## Use the Product
 
 - [Installation](how-to-guides/installation.md)
@@ -39,6 +45,9 @@ Then open `http://localhost:8000`.
 ## Build and Integrate
 
 - [HTTP and WebSocket API](reference/http-api.md)
+- [Sandbox API](reference/sandbox-api.md)
+- [Runs API](reference/runs-api.md)
+- [Memory API](reference/memory-api.md)
 - [Python API](reference/python-api.md)
 - [CLI reference](reference/cli.md)
 - [Using the MCP server](how-to-guides/using-mcp-server.md)
