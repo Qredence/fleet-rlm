@@ -43,6 +43,7 @@
   * [Python API](reference/python-api.md)
   * [Auth Modes](reference/auth.md)
   * [Database Architecture](reference/database.md)
+  * [Sandbox API](reference/sandbox-api.md)
   * [Sandbox File System](reference/sandbox-fs.md)
   * [Source Layout](reference/source-layout.md)
   * [Frontend Architecture](reference/frontend-architecture.md)
