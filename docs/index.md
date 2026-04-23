@@ -30,6 +30,12 @@
 - [Settings](explanation/product-spec.md)
 - [History](reference/frontend-backend-integration.md)
 
+## New API Reference Surfaces
+
+- [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
+- [Runs API](reference/runs-api.md) — Execution trace step browsing
+- [Memory API](reference/memory-api.md) — Scoped memory item queries
+
 ## Complete Table Of Contents
 
 - [SUMMARY.md](SUMMARY.md)
