@@ -9,7 +9,11 @@ This reference documents the REST and WebSocket API surface exposed by `src/flee
 | Health | `/` | Unprefixed health and readiness probes |
 | Auth | `/api/v1/auth` | Identity endpoints |
 | Runtime | `/api/v1/runtime` | Settings, diagnostics, volume access |
-| Sessions | `/api/v1/sessions` | Session state summaries |
+| Sessions | `/api/v1/sessions` | Session history, turns, stats, export, restore |
+| Sandboxes | `/api/v1/sandboxes` | Daytona sandbox management |
+| Runs | `/api/v1/runs` | Execution run steps |
+| Memory | `/api/v1/memory` | Memory item browsing |
+| Optimization | `/api/v1/optimization` | GEPA optimization, datasets, runs |
 | Traces | `/api/v1/traces` | MLflow trace feedback |
 | WebSocket | `/api/v1/ws` | Real-time chat and execution streams |
 
@@ -312,6 +316,30 @@ Reads a volume file as UTF-8 text for frontend preview.
 }
 ```
 
+### `GET /api/v1/runtime/volumes`
+
+Lists all persistent volumes for the active workspace and provider.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Constraints |
+|-----------|------|----------|-------------|
+| `provider` | `"daytona"` | no | active backend when omitted |
+
+**Response:**
+
+```json
+{
+  "provider": "daytona",
+  "items": [
+    {
+      "name": "fleet-rlm-volume",
+      "created_at": "2026-03-09T12:00:00Z"
+    }
+  ]
+}
+```
+
 ---
 
 ## Sessions Endpoints
@@ -339,6 +367,409 @@ Returns lightweight summaries of active in-memory session state.
       "updated_at": "2026-03-09T12:00:00Z"
     }
   ]
+}
+```
+
+### `GET /api/v1/sessions`
+
+Paginated list of durable session transcripts with search and status filters.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `search` | string | no | `null` | Full-text search on title |
+| `status` | string | no | `null` | Filter by status (`active`, `archived`) |
+| `created_after` | datetime | no | `null` | Filter sessions created on or after this date (ISO 8601) |
+| `created_before` | datetime | no | `null` | Filter sessions created on or before this date (ISO 8601) |
+| `model_name` | string | no | `null` | Filter by exact model name |
+| `model_provider` | string | no | `null` | Filter by exact model provider |
+| `limit` | integer | no | `20` | Page size (1-100) |
+| `offset` | integer | no | `0` | Pagination offset |
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "session-uuid",
+      "title": "My Chat Session",
+      "status": "active",
+      "model_name": "openai/gpt-4o",
+      "external_session_id": "ext-123",
+      "created_at": "2026-03-09T12:00:00Z",
+      "updated_at": "2026-03-09T12:05:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 20,
+  "has_more": false
+}
+```
+
+### `GET /api/v1/sessions/{session_id}`
+
+Return session metadata and turn count for a specific session.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session to inspect |
+
+**Response:**
+
+```json
+{
+  "id": "session-uuid",
+  "title": "My Chat Session",
+  "status": "active",
+  "model_name": "openai/gpt-4o",
+  "external_session_id": "ext-123",
+  "workspace_id": "workspace-uuid",
+  "turn_count": 5,
+  "created_at": "2026-03-09T12:00:00Z",
+  "updated_at": "2026-03-09T12:05:00Z"
+}
+```
+
+### `PATCH /api/v1/sessions/{session_id}`
+
+Update session title and/or metadata.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session to update |
+
+**Request:**
+
+```json
+{
+  "title": "New Title",
+  "metadata_json": {
+    "tags": ["tag1", "tag2"],
+    "priority": "high"
+  }
+}
+```
+
+**Response:** Returns `SessionDetailResponse` (same shape as `GET /api/v1/sessions/{session_id}`).
+
+### `DELETE /api/v1/sessions/{session_id}`
+
+Soft-delete (archive) a session.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session to archive |
+
+**Response:**
+
+```json
+{
+  "ok": true
+}
+```
+
+### `GET /api/v1/sessions/{session_id}/turns`
+
+Paginated turn-by-turn transcript for a session.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session whose turns to list |
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | integer | no | `50` | Page size (1-200) |
+| `offset` | integer | no | `0` | Pagination offset |
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "turn-uuid",
+      "turn_index": 1,
+      "user_message": "Hello",
+      "assistant_message": "Hi there!",
+      "created_at": "2026-03-09T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 50,
+  "has_more": false
+}
+```
+
+### `GET /api/v1/sessions/{session_id}/stats`
+
+Aggregated token counts, latency, and model breakdown for all turns in a session.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session whose stats to retrieve |
+
+**Response:**
+
+```json
+{
+  "total_tokens_in": 1500,
+  "total_tokens_out": 800,
+  "total_latency_ms": 4500,
+  "model_breakdown": {
+    "openai/gpt-4o": 3,
+    "openai/gpt-4o-mini": 2
+  }
+}
+```
+
+### `POST /api/v1/sessions/{session_id}/restore`
+
+Unarchive (restore) a soft-deleted session. Returns 409 if the session is already active.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session to restore |
+
+**Response:**
+
+```json
+{
+  "ok": true
+}
+```
+
+### `POST /api/v1/sessions/{session_id}/export`
+
+Convert a session's turn history into a JSONL dataset suitable for GEPA optimization.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Identifier of the session to export as a dataset |
+
+**Request:**
+
+```json
+{
+  "module_slug": "my-module"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "dataset-uuid",
+  "name": "My Chat Session (my-module)",
+  "row_count": 5,
+  "format": "jsonl",
+  "module_slug": "my-module",
+  "created_at": "2026-03-09T12:00:00Z"
+}
+```
+
+---
+
+## Sandbox Endpoints
+
+### `GET /api/v1/sandboxes`
+
+List active Daytona sandboxes with id, state, created_at, and volume info.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `page` | integer | no | `1` | Page number (starting from 1) |
+| `limit` | integer | no | `100` | Maximum sandboxes per page (1-1000) |
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "sandbox-123",
+      "name": "my-sandbox",
+      "state": "started",
+      "created_at": "2026-03-09T12:00:00Z",
+      "volume_name": "fleet-rlm-volume",
+      "labels": {},
+      "cpu": 2,
+      "memory": 4,
+      "disk": 10
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "total_pages": 1
+}
+```
+
+### `GET /api/v1/sandboxes/{sandbox_id}`
+
+Return full sandbox details including state, config, and volume.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sandbox_id` | string | Unique sandbox identifier |
+
+**Response:**
+
+```json
+{
+  "id": "sandbox-123",
+  "name": "my-sandbox",
+  "state": "started",
+  "created_at": "2026-03-09T12:00:00Z",
+  "volume_name": "fleet-rlm-volume",
+  "labels": {},
+  "cpu": 2,
+  "memory": 4,
+  "disk": 10,
+  "env_vars": {},
+  "image": "daytonaio/workspace-resume:latest",
+  "snapshot": null,
+  "language": null,
+  "auto_stop_interval": 30,
+  "auto_archive_interval": 60,
+  "auto_delete_interval": null,
+  "ephemeral": false,
+  "network_block_all": false,
+  "network_allow_list": null,
+  "volumes": []
+}
+```
+
+### `DELETE /api/v1/sandboxes/{sandbox_id}`
+
+Stop and permanently delete a Daytona sandbox. Returns `204 No Content` on success.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sandbox_id` | string | Unique sandbox identifier |
+
+### `POST /api/v1/sandboxes/{sandbox_id}/archive`
+
+Archive a Daytona sandbox to cold storage for later recovery.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sandbox_id` | string | Unique sandbox identifier |
+
+**Response:**
+
+```json
+{
+  "ok": true
+}
+```
+
+---
+
+## Runs Endpoints
+
+### `GET /api/v1/runs/{run_id}/steps`
+
+Paginated execution trace steps for a run with step_type, tool_name, tokens, and latency.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `run_id` | string | Identifier of the run whose steps to list |
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | integer | no | `50` | Page size (1-200) |
+| `offset` | integer | no | `0` | Pagination offset |
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "step-uuid",
+      "step_index": 0,
+      "step_type": "tool_call",
+      "tool_name": "search",
+      "tokens_in": 150,
+      "tokens_out": 50,
+      "latency_ms": 1200,
+      "created_at": "2026-03-09T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 50,
+  "has_more": false
+}
+```
+
+---
+
+## Memory Endpoints
+
+### `GET /api/v1/memory`
+
+Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scope` | string | no | `null` | Filter by memory scope (`user`, `tenant`, `workspace`, `run`, `session`) |
+| `scope_id` | string | no | `null` | Filter by scope identifier |
+| `limit` | integer | no | `100` | Page size (1-200) |
+
+**Response:**
+
+```json
+{
+  "items": [
+    {
+      "id": "memory-uuid",
+      "scope": "session",
+      "scope_id": "session-123",
+      "kind": "fact",
+      "source": "agent",
+      "status": "active",
+      "content_text": "User prefers concise answers.",
+      "importance": 80,
+      "tags": ["preference"],
+      "created_at": "2026-03-09T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 100
 }
 ```
 
@@ -807,8 +1238,6 @@ The following endpoints have been removed from the API:
 | `/api/v1/taxonomy*` | Removed | Taxonomy feature discontinued |
 | `/api/v1/analytics*` | Removed | Use MLflow traces instead |
 | `/api/v1/search` | Removed | Search feature discontinued |
-| `/api/v1/memory*` | Removed | Memory feature discontinued |
-| `/api/v1/sandbox*` | Removed | Use `/api/v1/runtime/volume/*` for volume access |
 
 ---
 
@@ -819,7 +1248,7 @@ The following endpoints have been removed from the API:
 rg -n "^  /" openapi.yaml
 
 # Verify router definitions
-rg -n "@router\.(get|post|patch)" src/fleet_rlm/api/routers/
+rg -n "@router\.(get|post|patch|delete)" src/fleet_rlm/api/routers/
 
 # Check WebSocket routes
 rg -n "@router.websocket" src/fleet_rlm/api/routers/ws/endpoint.py
