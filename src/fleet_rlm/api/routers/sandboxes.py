@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, TypeAlias
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep
-from ..runtime_services.sandboxes import load_sandbox_detail, load_sandbox_list
+from ..runtime_services.sandboxes import delete_sandbox, load_sandbox_detail, load_sandbox_list
 from ..schemas.core import SandboxDetailResponse, SandboxListResponse
 
 router = APIRouter(
@@ -84,6 +84,30 @@ async def get_sandbox_detail(
     _ = identity
     try:
         return await load_sandbox_detail(sandbox_id=sandbox_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sandbox not found: {exc}",
+        ) from exc
+
+
+@router.delete(
+    "/{sandbox_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=SBX_ERROR_RESPONSES,
+    summary="Delete sandbox",
+    description="Stop and permanently delete a Daytona sandbox.",
+)
+async def delete_sandbox_endpoint(
+    sandbox_id: Annotated[str, Path(description="Unique sandbox identifier.")],
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> None:
+    """Stop and delete a Daytona sandbox."""
+    _ = state
+    _ = identity
+    try:
+        await delete_sandbox(sandbox_id=sandbox_id)
     except Exception as exc:
         raise HTTPException(
             status_code=404,

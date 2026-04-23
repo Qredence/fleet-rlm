@@ -187,3 +187,30 @@ async def load_sandbox_detail(sandbox_id: str) -> SandboxDetailResponse:
             close = getattr(client, "close", None)
             if callable(close):
                 await _await_if_needed(close())
+
+
+async def delete_sandbox(sandbox_id: str) -> None:
+    """Stop and delete a Daytona sandbox by ID.
+
+    Wraps ``DaytonaSandboxSession.adelete()`` to perform a graceful stop
+    followed by deletion.
+    """
+    client: Any | None = None
+    try:
+        config = _daytona_config.resolve_daytona_config()
+        client = _daytona_runtime._build_daytona_client(config)
+
+        sandbox = await _await_if_needed(client.get(sandbox_id))
+        session = _daytona_runtime.DaytonaSandboxSession(
+            sandbox=sandbox,
+            repo_url=None,
+            ref=None,
+            volume_name=None,
+            workspace_path="/",
+        )
+        await session.adelete()
+    finally:
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                await _await_if_needed(close())

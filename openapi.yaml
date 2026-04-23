@@ -939,6 +939,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - sandboxes
+      summary: Delete sandbox
+      description: Stop and permanently delete a Daytona sandbox.
+      operationId: delete_sandbox_endpoint_api_v1_sandboxes__sandbox_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
