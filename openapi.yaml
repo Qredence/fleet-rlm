@@ -851,6 +851,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes:
+    get:
+      tags:
+      - sandboxes
+      summary: List sandboxes
+      description: List active Daytona sandboxes with id, state, created_at, and volume
+        info.
+      operationId: list_sandboxes_api_v1_sandboxes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number for pagination (starting from 1).
+          default: 1
+          title: Page
+        description: Page number for pagination (starting from 1).
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum number of sandboxes per page.
+          default: 100
+          title: Limit
+        description: Maximum number of sandboxes per page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -2230,6 +2280,90 @@ components:
       type: object
       title: RuntimeTestCache
       description: Cached runtime test results included in the runtime status payload.
+    SandboxListItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Sandbox identifier.
+        name:
+          type: string
+          title: Name
+          description: Sandbox name.
+        state:
+          type: string
+          title: State
+          description: Sandbox state (e.g. started, stopped, archived).
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+        volume_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Name
+          description: Name of the persistent volume attached to the sandbox.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Custom labels attached to the sandbox.
+        cpu:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu
+          description: Allocated CPU cores.
+        memory:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Memory
+          description: Allocated memory in GiB.
+        disk:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Disk
+          description: Allocated disk in GiB.
+      type: object
+      required:
+      - id
+      - name
+      - state
+      title: SandboxListItem
+      description: Single sandbox entry returned by the sandbox list endpoint.
+    SandboxListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/SandboxListItem'
+          type: array
+          title: Items
+          description: Available sandboxes.
+        total:
+          type: integer
+          title: Total
+          description: Total number of sandboxes.
+        page:
+          type: integer
+          title: Page
+          description: Current page number.
+          default: 1
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: Total number of pages.
+          default: 1
+      type: object
+      required:
+      - total
+      title: SandboxListResponse
+      description: Response for the sandbox list endpoint.
     SessionDeleteResponse:
       properties:
         ok:

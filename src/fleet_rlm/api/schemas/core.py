@@ -896,6 +896,38 @@ class RunComparisonResponse(BaseModel):
     runs: list[RunComparisonItem] = Field(description="Compared run summaries.")
 
 
+class SandboxListItem(BaseModel):
+    """Single sandbox entry returned by the sandbox list endpoint."""
+
+    id: str = Field(description="Sandbox identifier.")
+    name: str = Field(description="Sandbox name.")
+    state: str = Field(description="Sandbox state (e.g. started, stopped, archived).")
+    created_at: str | None = Field(
+        default=None, description="ISO-8601 creation timestamp when available."
+    )
+    volume_name: str | None = Field(
+        default=None,
+        description="Name of the persistent volume attached to the sandbox.",
+    )
+    labels: dict[str, str] = Field(
+        default_factory=dict, description="Custom labels attached to the sandbox."
+    )
+    cpu: int | None = Field(default=None, description="Allocated CPU cores.")
+    memory: int | None = Field(default=None, description="Allocated memory in GiB.")
+    disk: int | None = Field(default=None, description="Allocated disk in GiB.")
+
+
+class SandboxListResponse(BaseModel):
+    """Response for the sandbox list endpoint."""
+
+    items: list[SandboxListItem] = Field(
+        default_factory=list, description="Available sandboxes."
+    )
+    total: int = Field(description="Total number of sandboxes.")
+    page: int = Field(default=1, description="Current page number.")
+    total_pages: int = Field(default=1, description="Total number of pages.")
+
+
 class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
 

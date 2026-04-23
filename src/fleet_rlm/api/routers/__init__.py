@@ -5,6 +5,7 @@ from . import (
     health,
     optimization,
     runtime,
+    sandboxes,
     sessions,
     traces,
     ws,
@@ -16,6 +17,7 @@ __all__ = [
     "ws",
     "sessions",
     "runtime",
+    "sandboxes",
     "optimization",
     "traces",
 ]

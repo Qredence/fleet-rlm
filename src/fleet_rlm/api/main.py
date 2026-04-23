@@ -28,6 +28,7 @@ from .routers import (
     health,
     optimization,
     runtime,
+    sandboxes,
     sessions,
     traces,
     ws,
@@ -40,6 +41,7 @@ _CANONICAL_API_ROUTERS = (
     ws.router,
     sessions.router,
     runtime.router,
+    sandboxes.router,
     optimization.router,
     traces.router,
 )

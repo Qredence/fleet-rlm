@@ -52,6 +52,7 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/runtime/tests/daytona",
     "/api/v1/runtime/tests/lm",
     "/api/v1/runtime/status",
+    "/api/v1/sandboxes",
     "/api/v1/sessions/state",
     "/api/v1/traces/feedback",
 }
