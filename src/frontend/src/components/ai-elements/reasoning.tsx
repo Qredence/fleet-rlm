@@ -113,6 +113,9 @@ export const Reasoning = memo(
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
         setIsOpen(newOpen);
+        if (!newOpen) {
+          setHasAutoClosed(true);
+        }
       },
       [setIsOpen],
     );
