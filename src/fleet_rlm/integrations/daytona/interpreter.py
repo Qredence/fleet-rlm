@@ -98,6 +98,7 @@ class _DaytonaInterpreterLike(
     repo_ref: str | None
     context_paths: list[str]
     sandbox_spec: SandboxSpec | None
+    sandbox_labels: dict[str, str]
     sub_lm: Any
     llm_call_timeout: float
     delete_session_on_shutdown: bool
@@ -155,6 +156,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             repo_ref=self.repo_ref,
             context_paths=list(self.context_paths),
             sandbox_spec=getattr(self, "sandbox_spec", None),
+            sandbox_labels=self.sandbox_labels,
             delete_session_on_shutdown=delete_session_on_shutdown,
             delete_context_on_shutdown=delete_context_on_shutdown,
             sub_lm=self.sub_lm,
@@ -281,7 +283,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             try:
                 json.dumps(value)
                 safe_vars[normalized_key] = value
-            except TypeError:
+            except (TypeError, ValueError, RecursionError):
                 safe_vars[normalized_key] = str(value)
         return safe_vars
 
@@ -782,6 +784,7 @@ def _build_child_interpreter(
         repo_ref=interpreter.repo_ref,
         context_paths=list(interpreter.context_paths),
         sandbox_spec=getattr(interpreter, "sandbox_spec", None),
+        sandbox_labels=interpreter.sandbox_labels,
         delete_session_on_shutdown=delete_session_on_shutdown,
         delete_context_on_shutdown=delete_context_on_shutdown,
         sub_lm=interpreter.sub_lm,

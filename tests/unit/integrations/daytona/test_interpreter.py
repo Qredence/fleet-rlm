@@ -730,3 +730,31 @@ def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> Non
     assert child._session is not None
     assert child._session.sandbox is parent_sandbox
     assert child._session.context_id is None
+
+
+def test_daytona_interpreter_child_inherits_parent_sandbox_labels() -> None:
+    runtime = _FakeRuntime()
+    parent_labels = {"team": "alpha", "env": "prod"}
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        sandbox_labels=parent_labels,
+    )
+    interpreter._session = runtime.session
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert child.sandbox_labels == parent_labels
+
+
+def test_daytona_interpreter_safe_variables_handles_circular_refs() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    circular_dict: dict[str, Any] = {"name": "root"}
+    circular_dict["self"] = circular_dict
+
+    result = interpreter.safe_variables({"a": 1, "b": circular_dict})
+
+    assert result["a"] == 1
+    assert isinstance(result["b"], str)
+    assert "root" in result["b"]
