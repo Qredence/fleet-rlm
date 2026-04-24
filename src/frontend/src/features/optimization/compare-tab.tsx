@@ -21,7 +21,7 @@ import {
 /* -------------------------------------------------------------------------- */
 
 interface ScoreDeltaRow extends Record<string, unknown> {
-  runId: number;
+  runId: string;
   programSpec: string;
   score: number | null;
   delta: number | null;
@@ -258,9 +258,9 @@ function groupByPredictor(diffs: PromptDiff[]): Map<string, PromptDiff[]> {
 /*                               Main component                               */
 /* -------------------------------------------------------------------------- */
 
-export function CompareTab({ initialRunIds }: { initialRunIds?: number[] }) {
+export function CompareTab({ initialRunIds }: { initialRunIds?: string[] }) {
   const [runIdsInput, setRunIdsInput] = useState(initialRunIds?.join(", ") ?? "");
-  const [activeRunIds, setActiveRunIds] = useState<number[]>(initialRunIds ?? []);
+  const [activeRunIds, setActiveRunIds] = useState<string[]>(initialRunIds ?? []);
 
   const comparisonQuery = useQuery({
     queryKey: optimizationKeys.runComparison(activeRunIds),
@@ -275,7 +275,7 @@ export function CompareTab({ initialRunIds }: { initialRunIds?: number[] }) {
 
   const evalQueries = useQueries({
     queries: [firstRunId, lastRunId]
-      .filter((id): id is number => id != null)
+      .filter((id): id is string => id != null)
       .map((runId) => ({
         queryKey: optimizationKeys.runResults(runId, { limit: 200 }),
         queryFn: ({ signal }: { signal: AbortSignal }) =>
@@ -288,8 +288,8 @@ export function CompareTab({ initialRunIds }: { initialRunIds?: number[] }) {
   const handleCompare = () => {
     const parsed = runIdsInput
       .split(/[,\s]+/)
-      .map((s) => Number.parseInt(s.trim(), 10))
-      .filter((n) => !Number.isNaN(n) && n > 0);
+      .map((s) => s.trim())
+      .filter((value) => value.length > 0);
     if (parsed.length >= 2) {
       setActiveRunIds(parsed);
     }
@@ -324,7 +324,7 @@ export function CompareTab({ initialRunIds }: { initialRunIds?: number[] }) {
               id="compare-run-ids"
               value={runIdsInput}
               onChange={(e) => setRunIdsInput(e.target.value)}
-              placeholder="1, 2, 3"
+              placeholder="run-uuid-1, run-uuid-2"
               autoComplete="off"
             />
           </div>

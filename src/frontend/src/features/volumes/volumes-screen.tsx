@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Archive,
@@ -44,11 +44,11 @@ export function VolumesScreen() {
 export function VolumesBrowser() {
   const openCanvas = useNavigationStore((state) => state.openCanvas);
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
-  const clearSelectedFile = useVolumesSelectionStore((state) => state.clearSelectedFile);
   const isMobile = useIsMobile();
   const prefersReduced = useReducedMotion();
   const activeProvider: VolumeProvider = "daytona";
   const providerLabel = "Daytona";
+
   const {
     volumes: filesystem,
     dataSource: filesystemDataSource,
@@ -59,15 +59,6 @@ export function VolumesBrowser() {
 
   const [fsExpanded, setFsExpanded] = useState<Set<string>>(new Set());
   const [fsSearch, setFsSearch] = useState("");
-  const previousProviderRef = useRef<VolumeProvider | null>(null);
-
-  useEffect(() => {
-    if (previousProviderRef.current && previousProviderRef.current !== activeProvider) {
-      clearSelectedFile();
-      setFsExpanded(new Set());
-    }
-    previousProviderRef.current = activeProvider;
-  }, [activeProvider, clearSelectedFile]);
 
   const toggleFsNode = useCallback((id: string) => {
     setFsExpanded((prev) => {
@@ -182,7 +173,7 @@ export function VolumesBrowser() {
           </PageHeader>
         ) : null}
 
-        <div className="mx-auto w-full max-w-[800px] py-2">
+        <div className="mx-auto w-full max-w-page py-2">
           {isDegraded ? (
             <Alert className={cn("mb-3", isMobile ? "mx-4" : "mx-6")}>
               <TriangleAlert className="text-muted-foreground" />

@@ -175,7 +175,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         <RuntimeContextBadge ctx={item.runtimeContext} />
         {item.part.errorText || item.part.output ? (
           <div className="flex flex-col gap-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="typo-helper uppercase tracking-wide-custom text-muted-foreground">
               Output
             </div>
             <div
@@ -196,7 +196,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
         ) : null}
         {item.part.code ? (
           <div className="flex flex-col gap-1">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="typo-helper uppercase tracking-wide-custom text-muted-foreground">
               Code
             </div>
             <CodeBlock className="border-subtle/80 bg-muted/20">
@@ -224,7 +224,7 @@ function renderToolSessionItemDetails(item: ToolSessionItem): ReactNode {
                 {variable.name}
               </span>
               {variable.required ? (
-                <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className="typo-helper uppercase tracking-wide-custom text-muted-foreground">
                   required
                 </span>
               ) : null}
@@ -331,7 +331,7 @@ function renderReasoningPart(
   return (
     <div className="flex flex-col gap-1">
       {showSectionLabel ? (
-        <div className="font-mono text-[11px] font-medium lowercase tracking-[0.08em] text-muted-foreground">
+        <div className="font-mono typo-body-xs font-medium lowercase tracking-wider-custom text-muted-foreground">
           {sectionLabel}
         </div>
       ) : null}

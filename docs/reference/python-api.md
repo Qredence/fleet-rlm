@@ -24,15 +24,14 @@ Key capabilities:
 - sync/async execution (`execute`, `aexecute`)
 - execution profile support used by server and delegate workflows
 
-### `fleet_rlm.runtime.agent.chat_agent.RLMReActChatAgent`
+### `fleet_rlm.runtime.agent.agent.FleetAgent`
 
 Interactive ReAct orchestration module used by CLI and server chat surfaces.
 
 Key behaviors:
 
-- document loading and active-alias management
-- command dispatch execution
-- sync/async chat turn helpers
+- tool discovery and registration via `discover_tools()`
+- sync chat turn helpers
 - streaming event generation for WebSocket clients
 
 ## Runner Functions (`fleet_rlm.cli.runners`)
@@ -45,7 +44,7 @@ Current maintained runner surface:
 - `run_long_context(...)`
 ### `build_chat_agent(...)`
 
-Constructs an `RLMReActChatAgent` with runtime controls such as:
+Constructs an `AgentRuntime` wrapping `FleetAgent` with runtime controls such as:
 
 - ReAct/RLM iteration budgets
 - recursion depth

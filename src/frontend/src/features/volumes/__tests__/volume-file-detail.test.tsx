@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { act } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { VolumeFileDetail } from "@/features/volumes/components/file-detail";
-import type { FsNode } from "@/features/volumes/use-volumes";
+import { VolumesBrowser } from "@/features/volumes/volumes-screen";
+import type { FsNode, VolumeProvider } from "@/features/volumes/use-volumes";
 
 let contentState: {
   content: string;
@@ -11,15 +15,56 @@ let contentState: {
 };
 let fileContentCalls: Array<{ path: string | null; provider: string }> = [];
 
-vi.mock("@/features/volumes/use-volumes", () => ({
-  useFileContent: (path: string | null, provider: string) => {
-    fileContentCalls.push({ path, provider });
-    return contentState;
-  },
+const useFilesystemMock = vi.fn();
+const clearSelectedFile = vi.fn();
+const selectFile = vi.fn();
+const openCanvas = vi.fn();
+
+vi.mock("@/features/volumes/use-volumes", async () => {
+  const actual = await vi.importActual<typeof import("@/features/volumes/use-volumes")>(
+    "@/features/volumes/use-volumes",
+  );
+  return {
+    ...actual,
+    useFileContent: (path: string | null, provider: string) => {
+      fileContentCalls.push({ path, provider });
+      return contentState;
+    },
+    useFilesystem: (provider: VolumeProvider) => useFilesystemMock(provider),
+    useVolumesSelectionStore: (
+      selector?: (state: {
+        selectFile: (node: unknown) => void;
+        clearSelectedFile: () => void;
+      }) => unknown,
+    ) => (selector ? selector({ selectFile, clearSelectedFile }) : null),
+  };
+});
+
+vi.mock("@/stores/navigation-store", () => ({
+  useNavigationStore: (selector: (state: { openCanvas: () => void }) => unknown) =>
+    selector({ openCanvas }),
 }));
 
 vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => false,
+}));
+
+vi.mock("@/hooks/use-runtime-status", () => ({
+  useRuntimeStatus: () => ({
+    data: {
+      sandbox_provider: "daytona",
+    },
+  }),
+}));
+
+vi.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: {
+    div: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => (
+      <div {...props}>{children}</div>
+    ),
+  },
+  useReducedMotion: () => true,
 }));
 
 vi.mock("sonner", () => ({
@@ -27,6 +72,12 @@ vi.mock("sonner", () => ({
     success: vi.fn(),
   },
 }));
+
+(
+  globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("VolumeFileDetail markdown rendering", () => {
   beforeEach(() => {
@@ -113,6 +164,57 @@ describe("VolumeFileDetail markdown rendering", () => {
     expect(fileContentCalls[0]).toEqual({
       path: "/workspace/notes.py",
       provider: "daytona",
+    });
+  });
+});
+
+describe("VolumesBrowser", () => {
+  beforeEach(() => {
+    useFilesystemMock.mockImplementation((provider: VolumeProvider) => ({
+      volumes: [
+        {
+          id: `${provider}-volume`,
+          name: `${provider}-volume`,
+          path: `/${provider}`,
+          provider,
+          type: "volume",
+          children: [],
+        },
+      ],
+      dataSource: "api",
+      degradedReason: undefined,
+      isLoading: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
+    useFilesystemMock.mockClear();
+    clearSelectedFile.mockClear();
+    selectFile.mockClear();
+    openCanvas.mockClear();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("uses the Daytona durable volume view by default", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<VolumesBrowser />);
+    });
+
+    expect(useFilesystemMock).toHaveBeenCalled();
+    expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
+    expect(container.textContent).toContain("Browse the daytona mounted durable volume");
+    expect(container.textContent).toContain("/daytona");
+    expect(clearSelectedFile).not.toHaveBeenCalled();
+
+    act(() => {
+      root.unmount();
     });
   });
 });

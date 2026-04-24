@@ -164,7 +164,10 @@ class AgentsMdValidator:
             ).exists():
                 package_root = candidate
             elif (candidate.parent / "pyproject.toml").exists():
-                # src/frontend case
+                # Python src layout case (e.g., src/fleet_rlm/)
+                package_root = candidate
+            elif (candidate / "package.json").exists():
+                # Node.js frontend case (e.g., src/frontend/)
                 package_root = candidate
 
         # Pattern for backtick-enclosed paths like `src/fleet_rlm/` or `core/agent/`
@@ -192,10 +195,20 @@ class AgentsMdValidator:
                 if full_path.exists():
                     continue
 
-                # If package root is set, try package-relative
+                # If package root is set, try package-relative and common subdirs
                 if package_root:
                     pkg_path = package_root / path_ref
                     if pkg_path.exists():
+                        continue
+
+                    # For Node.js/frontend projects: paths may be relative to src/ or src/components/
+                    for subdir in ("src", "src/components", "src/lib", "src/features"):
+                        subdir_path = package_root / subdir / path_ref
+                        if subdir_path.exists():
+                            break
+                    else:
+                        subdir_path = None
+                    if subdir_path and subdir_path.exists():
                         continue
 
                 # Try relative to the AGENTS.md parent

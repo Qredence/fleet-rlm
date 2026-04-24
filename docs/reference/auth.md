@@ -168,7 +168,8 @@ Entra mode provides production-grade multitenant authentication using Microsoft 
 AUTH_MODE=entra
 ENTRA_JWKS_URL=https://login.microsoftonline.com/common/discovery/v2.0/keys
 ENTRA_AUDIENCE=api://your-api-client-id
-DATABASE_URL=postgresql://...  # Required for tenant admission
+DATABASE_URL=postgresql://...  # Runtime DB connection (pooled)
+# DATABASE_ADMIN_URL=postgresql://...  # Optional direct admin/migration connection
 
 # Optional (defaults shown)
 ENTRA_ISSUER_TEMPLATE=https://login.microsoftonline.com/{tenantid}/v2.0

@@ -167,7 +167,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
           if (v) setStatusFilter(v);
         }}
       >
-        <SelectTrigger className="w-[120px]" aria-label="Status filter">
+        <SelectTrigger className="w-select-sm" aria-label="Status filter">
           <SelectValue>{filterLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -203,7 +203,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
               <SessionRow
                 key={conversation.id}
                 session={{
-                  id: Number.NaN,
+                  id: `local:${conversation.id}`,
                   title: conversation.title,
                   status: "local",
                   model_name: null,
@@ -243,7 +243,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
             <SessionRow
               key={conversation.id}
               session={{
-                id: Number.NaN,
+                id: `local:${conversation.id}`,
                 title: conversation.title,
                 status: "local",
                 model_name: null,

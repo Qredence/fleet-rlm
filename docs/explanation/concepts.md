@@ -7,7 +7,7 @@ execution over a shared Daytona-backed interpreter runtime.
 
 ## 1. ReAct Chat Orchestrator
 
-`RLMReActChatAgent` is the interactive orchestrator.
+`FleetAgent` (wrapped by `AgentRuntime`) is the interactive orchestrator.
 
 It:
 
@@ -45,7 +45,6 @@ Current backend shape:
 
 - Terminal chat: `fleet-rlm chat` or `fleet`
 - Web/API: `fleet web` or `fleet-rlm serve-api`
-- MCP: `fleet-rlm serve-mcp`
 
 All surfaces converge on shared orchestration/runtime modules.
 

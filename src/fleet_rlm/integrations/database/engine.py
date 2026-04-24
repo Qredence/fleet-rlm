@@ -15,6 +15,31 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
+def select_database_url(
+    *,
+    runtime_url: str | None,
+    admin_url: str | None = None,
+    prefer_admin: bool = False,
+) -> str | None:
+    """Return the configured database URL for the requested access pattern.
+
+    Fleet-RLM uses:
+    - ``DATABASE_URL`` for application/runtime traffic
+    - ``DATABASE_ADMIN_URL`` for Alembic, schema management, and debug/admin tasks
+
+    When ``prefer_admin`` is true, the admin URL wins when present and falls back
+    to the runtime URL.
+    """
+
+    primary = admin_url if prefer_admin else runtime_url
+    fallback = runtime_url if prefer_admin else admin_url
+    for candidate in (primary, fallback):
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
 def _normalize_async_query(database_url: str) -> str:
     """Normalize query params for asyncpg compatibility."""
     parsed = urlparse(database_url)
@@ -24,6 +49,16 @@ def _normalize_async_query(database_url: str) -> str:
     query.pop("channel_binding", None)
     if sslmode and "ssl" not in query:
         query["ssl"] = "require" if sslmode != "disable" else "disable"
+
+    if (
+        parsed.hostname
+        and ("-pooler." in parsed.hostname or parsed.hostname.endswith(".neon.tech"))
+        and "prepared_statement_cache_size" not in query
+    ):
+        # Neon connections (direct or pooled) can experience stale prepared-statement
+        # plans after DDL changes from other clients. Disabling the cache avoids
+        # ``InvalidCachedStatementError`` in environments like CI or local dev.
+        query["prepared_statement_cache_size"] = "0"
 
     normalized = parsed._replace(query=urlencode(query))
     return urlunparse(normalized)

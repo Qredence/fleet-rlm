@@ -194,7 +194,7 @@ describe("DatasetsTab sessions fallback", () => {
       },
     ];
     vi.mocked(datasetEndpoints.createFromTranscript).mockResolvedValue({
-      id: 41,
+      id: "41",
       name: "Recovered optimization session",
       row_count: 1,
       format: "jsonl",
@@ -245,7 +245,7 @@ describe("DatasetsTab sessions fallback", () => {
     });
     expect(onPrepareRun).toHaveBeenCalledWith({
       datasetName: "Recovered optimization session",
-      datasetId: 41,
+      datasetId: "41",
       auto: "light",
       trainRatio: 0.8,
       moduleSlug: "reflect-and-revise",
@@ -343,7 +343,7 @@ describe("DatasetsTab sessions fallback", () => {
 
     await act(async () => {
       resolveDataset?.({
-        id: 77,
+        id: "77",
         name: "Recovered optimization session",
         row_count: 1,
         format: "jsonl",
@@ -356,7 +356,7 @@ describe("DatasetsTab sessions fallback", () => {
 
     expect(onPrepareRun).toHaveBeenCalledWith({
       datasetName: "Recovered optimization session",
-      datasetId: 77,
+      datasetId: "77",
       auto: "light",
       trainRatio: 0.8,
       moduleSlug: "reflect-and-revise",

@@ -100,7 +100,7 @@ export const GraphInspectorTab = memo(function GraphInspectorTab({
               </MorphingDialogTrigger>
 
               <MorphingDialogContainer>
-                <MorphingDialogContent className="relative flex h-[80vh] w-[80vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
+                <MorphingDialogContent className="relative flex h-modal w-[80vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
                   <ArtifactGraph
                     steps={steps}
                     activeStepId={activeStepId}

@@ -32,7 +32,7 @@ export function HitlApprovalModal({ message, onResolveHitl }: HitlApprovalModalP
           aria-atomic="true"
         >
           {/* Backdrop */}
-          <div className="pointer-events-none absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
+          <div className="pointer-events-none absolute inset-0 bg-black/20 backdrop-blur-sm" />
 
           {/* Panel */}
           <div

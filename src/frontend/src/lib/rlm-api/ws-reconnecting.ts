@@ -63,7 +63,7 @@ export async function createReconnectingWs(
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
     firstFrameTimeoutMs = DEFAULT_FIRST_FRAME_TIMEOUT,
-    terminalEventKinds = ["final", "cancelled"],
+    terminalEventKinds = ["final", "done", "cancelled"],
     abortMode = "close",
     abortTimeoutMs = 1500,
   } = options;
@@ -137,7 +137,7 @@ export async function createReconnectingWs(
           const cancel: WsCancelRequest = { type: "cancel" };
           socket.send(JSON.stringify(cancel));
           abortTimer = setTimeout(() => {
-            console.warn("WebSocket: Abort timeout reached. Forcibly closing connection.");
+            // Abort timeout reached — forcibly closing connection.
             safeClose();
             updateStatus("disconnected");
             finish(resolve);
@@ -196,7 +196,11 @@ export async function createReconnectingWs(
             firstFrameTimer = null;
           }
 
-          onFrame(frame);
+          try {
+            onFrame(frame);
+          } catch {
+            // Frame handler error swallowed silently to prevent stream interruption.
+          }
 
           if (frame.type === "error") {
             completed = true;

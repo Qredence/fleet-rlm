@@ -73,7 +73,7 @@ function mergeMlflowTraceMetadata(
   }
 
   return {
-    ...(summary ?? {}),
+    ...summary,
     ...(mlflowTraceId ? { mlflowTraceId } : {}),
     ...(mlflowClientRequestId ? { mlflowClientRequestId } : {}),
   };

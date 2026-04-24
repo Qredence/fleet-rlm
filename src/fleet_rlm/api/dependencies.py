@@ -10,11 +10,11 @@ from fastapi import Depends, HTTPException, Request, Security, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
+from fleet_rlm.utils.identity import owner_fingerprint
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity
 from .config import ServerRuntimeConfig
 from .events import ExecutionEventEmitter
-from .server_utils import owner_fingerprint
 
 logger = logging.getLogger(__name__)
 

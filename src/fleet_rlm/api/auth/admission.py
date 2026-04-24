@@ -48,4 +48,5 @@ async def resolve_admitted_identity(
         user_id=persisted.user_id,
         tenant_status=persisted.tenant_status,
         membership_role=persisted.membership_role,
+        workspace_id=persisted.workspace_id,
     )

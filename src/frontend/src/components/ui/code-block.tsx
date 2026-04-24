@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
 import React, { useEffect, useState } from "react";
-import { codeToHtml } from "shiki";
 
 export type CodeBlockProps = {
   children?: React.ReactNode;
@@ -45,13 +44,14 @@ function CodeBlockCode({
         return;
       }
 
+      const { codeToHtml } = await import("shiki");
       const html = await codeToHtml(code, { lang: language, theme });
       setHighlightedHtml(html);
     }
     highlight();
   }, [code, language, theme]);
 
-  const classNames = cn("w-full overflow-x-auto text-[13px] [&>pre]:px-4 [&>pre]:py-4", className);
+  const classNames = cn("w-full overflow-x-auto typo-body-sm [&>pre]:px-4 [&>pre]:py-4", className);
 
   // SSR fallback: render plain code if not hydrated yet
   return highlightedHtml ? (

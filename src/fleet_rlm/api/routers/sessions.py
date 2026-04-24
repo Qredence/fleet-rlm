@@ -2,10 +2,19 @@
 
 import asyncio
 from collections.abc import Mapping
+from datetime import datetime
+import os
+from pathlib import Path as FsPath
+from typing import Annotated, Any, TypeAlias, cast
+import uuid
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
-from ..dependencies import HTTPIdentityDep, ServerStateDep
+from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
+
+from ..auth import AuthError, resolve_admitted_identity
+from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
 from ..schemas.core import (
     DatasetResponse,
     SessionDeleteResponse,
@@ -13,14 +22,38 @@ from ..schemas.core import (
     SessionExportRequest,
     SessionListItem,
     SessionListResponse,
+    SessionPatchRequest,
+    SessionRestoreResponse,
     SessionStateResponse,
     SessionStateSummary,
+    SessionStatsResponse,
     TurnItem,
     TurnListResponse,
 )
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+_TURN_COUNT_QUERY_LIMIT = 1
+_TRANSCRIPT_EXPORT_PAGE_SIZE = 1_000
+
+OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
+
+SESSIONS_ERROR_RESPONSES: OpenAPIResponses = {
+    401: {
+        "description": "Authentication is required or the provided token is invalid."
+    },
+    403: {
+        "description": "The caller does not have permission to access this resource."
+    },
+    503: {
+        "description": "Session services are unavailable because server startup is incomplete."
+    },
+}
+
+SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
+    **SESSIONS_ERROR_RESPONSES,
+    404: {"description": "Session not found."},
+}
 
 
 def _string_or_default(value: object, default: str) -> str:
@@ -29,6 +62,94 @@ def _string_or_default(value: object, default: str) -> str:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _parse_session_uuid(session_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+
+
+def _parse_legacy_session_id(session_id: str) -> int:
+    try:
+        return int(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+
+
+def _session_external_id(metadata: object) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    metadata_dict = cast(dict[str, object], metadata)
+    return _optional_string(metadata_dict.get("external_session_id"))
+
+
+async def _resolve_persisted_identity(
+    *,
+    state: ServerStateDep,
+    repository: RepositoryDep,
+    identity: HTTPIdentityDep,
+) -> IdentityUpsertResult | None:
+    if repository is None:
+        return None
+    if state.config.auth_mode == "entra":
+        try:
+            return await resolve_admitted_identity(repository, identity)
+        except AuthError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.message,
+            ) from exc
+    return await repository.upsert_identity(
+        entra_tenant_id=identity.tenant_claim,
+        entra_user_id=identity.user_claim,
+        email=identity.email,
+        full_name=identity.name,
+    )
+
+
+async def _load_all_repository_turns(
+    *,
+    repository,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    workspace_id: uuid.UUID | None,
+    page_size: int | None = None,
+) -> list[ChatTurn]:
+    """Load every turn for a persisted session without truncating large transcripts."""
+
+    resolved_page_size = page_size or _TRANSCRIPT_EXPORT_PAGE_SIZE
+    turns: list[ChatTurn] = []
+    offset = 0
+    total = 0
+    while True:
+        page, total = await repository.list_chat_turns(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=resolved_page_size,
+            offset=offset,
+        )
+        if not page:
+            break
+        turns.extend(page)
+        offset += len(page)
+        if offset >= total:
+            break
+    return turns
+
+
+def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
+    return TurnItem(
+        id=str(turn.id),
+        turn_index=turn.turn_index,
+        user_message=turn.user_message,
+        assistant_message=turn.assistant_message,
+        created_at=turn.created_at.isoformat(),
+    )
 
 
 def _parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None]:
@@ -60,7 +181,7 @@ def _parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None
         },
     },
 )
-async def list_session_state(
+def list_session_state(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
 ) -> SessionStateResponse:
@@ -142,19 +263,87 @@ async def list_session_state(
 @router.get(
     "",
     response_model=SessionListResponse,
+    responses=SESSIONS_ERROR_RESPONSES,
     summary="List session history",
     description="Paginated list of durable session transcripts with search and status filters.",
 )
 async def list_sessions_endpoint(
+    state: ServerStateDep,
     identity: HTTPIdentityDep,
-    search: str | None = Query(default=None, description="Full-text search on title"),
-    status: str | None = Query(
-        default=None, description="Filter by status (active, archived)"
-    ),
-    limit: int = Query(default=20, ge=1, le=100, description="Page size"),
-    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    repository: RepositoryDep,
+    search: Annotated[
+        str | None, Query(description="Full-text search on title")
+    ] = None,
+    status: Annotated[
+        str | None, Query(description="Filter by status (active, archived)")
+    ] = None,
+    created_after: Annotated[
+        datetime | None,
+        Query(description="Filter sessions created on or after this date (ISO 8601)"),
+    ] = None,
+    created_before: Annotated[
+        datetime | None,
+        Query(description="Filter sessions created on or before this date (ISO 8601)"),
+    ] = None,
+    model_name: Annotated[
+        str | None, Query(description="Filter by exact model name")
+    ] = None,
+    model_provider: Annotated[
+        str | None, Query(description="Filter by exact model provider")
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
     """Return paginated session history filtered by the caller's ownership."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        status_filter = None
+        if status:
+            try:
+                status_filter = ChatSessionStatus(status)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status: {status}",
+                ) from exc
+        items, total = await repository.list_chat_sessions(
+            tenant_id=persisted_identity.tenant_id,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            search=search,
+            status=status_filter,
+            created_after=created_after,
+            created_before=created_before,
+            model_name=model_name,
+            model_provider=model_provider,
+            limit=limit,
+            offset=offset,
+        )
+        return SessionListResponse(
+            items=[
+                SessionListItem(
+                    id=str(s.id),
+                    title=s.title,
+                    status=s.status.value
+                    if hasattr(s.status, "value")
+                    else str(s.status),
+                    model_name=s.model_name,
+                    external_session_id=_session_external_id(s.metadata_json),
+                    created_at=s.created_at.isoformat(),
+                    updated_at=s.updated_at.isoformat(),
+                )
+                for s in items
+            ],
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=(offset + limit) < total,
+        )
+
     from fleet_rlm.integrations.local_store import SessionStatus, list_sessions
 
     status_filter = None
@@ -170,13 +359,17 @@ async def list_sessions_endpoint(
         owner_user=identity.user_claim,
         search=search,
         status=status_filter,
+        created_after=created_after,
+        created_before=created_before,
+        model_name=model_name,
+        model_provider=model_provider,
         limit=limit,
         offset=offset,
     )
     return SessionListResponse(
         items=[
             SessionListItem(
-                id=s.id,  # type: ignore
+                id=str(s.id),
                 title=s.title,
                 status=s.status.value if hasattr(s.status, "value") else str(s.status),
                 model_name=s.model_name,
@@ -196,19 +389,63 @@ async def list_sessions_endpoint(
 @router.get(
     "/{session_id}",
     response_model=SessionDetailResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Get session detail",
     description="Return session metadata and turn count for a specific session.",
 )
 async def get_session_detail(
+    state: ServerStateDep,
     identity: HTTPIdentityDep,
-    session_id: int = Path(description="Identifier of the session to inspect."),
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to inspect.")
+    ],
 ) -> SessionDetailResponse:
     """Return full session detail with turn count."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        _turns, turn_count = await repository.list_chat_turns(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            limit=_TURN_COUNT_QUERY_LIMIT,
+            offset=0,
+        )
+        return SessionDetailResponse(
+            id=str(session.id),
+            title=session.title,
+            status=session.status.value
+            if hasattr(session.status, "value")
+            else str(session.status),
+            model_name=session.model_name,
+            external_session_id=_session_external_id(session.metadata_json),
+            workspace_id=str(session.workspace_id),
+            turn_count=turn_count,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+        )
+
     from fleet_rlm.integrations.local_store import get_chat_session, get_turns_paginated
 
+    local_session_id = _parse_legacy_session_id(session_id)
     session = await asyncio.to_thread(
         get_chat_session,
-        session_id,
+        local_session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
     )
@@ -216,10 +453,102 @@ async def get_session_detail(
         raise HTTPException(status_code=404, detail="Session not found")
 
     _turns, turn_count = await asyncio.to_thread(
-        get_turns_paginated, session_id, limit=0, offset=0
+        get_turns_paginated, local_session_id, limit=0, offset=0
     )
     return SessionDetailResponse(
-        id=session.id,  # type: ignore
+        id=str(session.id),
+        title=session.title,
+        status=session.status.value
+        if hasattr(session.status, "value")
+        else str(session.status),
+        model_name=session.model_name,
+        external_session_id=session.external_session_id,
+        workspace_id=session.workspace_id,
+        turn_count=turn_count,
+        created_at=session.created_at.isoformat(),
+        updated_at=session.updated_at.isoformat(),
+    )
+
+
+@router.patch(
+    "/{session_id}",
+    response_model=SessionDetailResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Patch session metadata",
+    description="Update session title and/or metadata_json. Returns the updated session snapshot.",
+)
+async def patch_session_endpoint(
+    body: SessionPatchRequest,
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to update.")
+    ],
+) -> SessionDetailResponse:
+    """Update session title and/or metadata."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.update_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            title=body.title,
+            metadata_json=body.metadata_json,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        _turns, turn_count = await repository.list_chat_turns(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            limit=_TURN_COUNT_QUERY_LIMIT,
+            offset=0,
+        )
+        return SessionDetailResponse(
+            id=str(session.id),
+            title=session.title,
+            status=session.status.value
+            if hasattr(session.status, "value")
+            else str(session.status),
+            model_name=session.model_name,
+            external_session_id=_session_external_id(session.metadata_json),
+            workspace_id=str(session.workspace_id),
+            turn_count=turn_count,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+        )
+
+    from fleet_rlm.integrations.local_store import (
+        get_turns_paginated,
+        update_chat_session,
+    )
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        update_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+        title=body.title,
+        metadata_json=body.metadata_json,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    _turns, turn_count = await asyncio.to_thread(
+        get_turns_paginated, local_session_id, limit=0, offset=0
+    )
+    return SessionDetailResponse(
+        id=str(session.id),
         title=session.title,
         status=session.status.value
         if hasattr(session.status, "value")
@@ -236,23 +565,59 @@ async def get_session_detail(
 @router.get(
     "/{session_id}/turns",
     response_model=TurnListResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Get session turns",
     description="Paginated turn-by-turn transcript for a session.",
 )
 async def get_session_turns(
+    state: ServerStateDep,
     identity: HTTPIdentityDep,
-    session_id: int = Path(
-        description="Identifier of the session whose turns to list."
-    ),
-    limit: int = Query(default=50, ge=1, le=200, description="Page size"),
-    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session whose turns to list.")
+    ],
+    limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> TurnListResponse:
     """Return paginated turns for a session."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        items, total = await repository.list_chat_turns(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+        return TurnListResponse(
+            items=[_turn_item_from_repo(turn) for turn in items],
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=(offset + limit) < total,
+        )
+
     from fleet_rlm.integrations.local_store import get_chat_session, get_turns_paginated
 
+    local_session_id = _parse_legacy_session_id(session_id)
     session = await asyncio.to_thread(
         get_chat_session,
-        session_id,
+        local_session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
     )
@@ -260,12 +625,12 @@ async def get_session_turns(
         raise HTTPException(status_code=404, detail="Session not found")
 
     items, total = await asyncio.to_thread(
-        get_turns_paginated, session_id, limit=limit, offset=offset
+        get_turns_paginated, local_session_id, limit=limit, offset=offset
     )
     return TurnListResponse(
         items=[
             TurnItem(
-                id=t.id,  # type: ignore
+                id=str(t.id),
                 turn_index=t.turn_index,
                 user_message=t.user_message,
                 assistant_message=t.assistant_message,
@@ -280,22 +645,113 @@ async def get_session_turns(
     )
 
 
+@router.get(
+    "/{session_id}/stats",
+    response_model=SessionStatsResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Get session usage stats",
+    description="Aggregated token counts, latency, and model breakdown for all turns in a session.",
+)
+async def get_session_stats(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session whose stats to retrieve.")
+    ],
+) -> SessionStatsResponse:
+    """Return aggregated usage stats for a session."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        stats = await repository.get_session_stats(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if stats is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionStatsResponse(
+            total_tokens_in=int(cast(int, stats.get("total_tokens_in", 0))),
+            total_tokens_out=int(cast(int, stats.get("total_tokens_out", 0))),
+            total_latency_ms=int(cast(int, stats.get("total_latency_ms", 0))),
+            model_breakdown=dict(
+                cast(dict[str, int], stats.get("model_breakdown") or {})
+            ),
+        )
+
+    from fleet_rlm.integrations.local_store import get_chat_session, get_turns
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        get_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    turns = await asyncio.to_thread(get_turns, local_session_id)
+    total_tokens_in = sum((t.tokens_in or 0) for t in turns)
+    total_tokens_out = sum((t.tokens_out or 0) for t in turns)
+    total_latency_ms = sum((t.latency_ms or 0) for t in turns)
+    model_breakdown: dict[str, int] = {}
+    for t in turns:
+        name = getattr(t, "model_name", None) or "unknown"
+        model_breakdown[name] = model_breakdown.get(name, 0) + 1
+
+    return SessionStatsResponse(
+        total_tokens_in=total_tokens_in,
+        total_tokens_out=total_tokens_out,
+        total_latency_ms=total_latency_ms,
+        model_breakdown=model_breakdown,
+    )
+
+
 @router.delete(
     "/{session_id}",
     response_model=SessionDeleteResponse,
+    responses=SESSION_DETAIL_RESPONSES,
     summary="Archive session",
     description="Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.",
 )
 async def delete_session_endpoint(
+    state: ServerStateDep,
     identity: HTTPIdentityDep,
-    session_id: int = Path(description="Identifier of the session to archive."),
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to archive.")
+    ],
 ) -> SessionDeleteResponse:
     """Archive a session (soft delete)."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        archived = await repository.archive_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=_parse_session_uuid(session_id),
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if not archived:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionDeleteResponse()
+
     from fleet_rlm.integrations.local_store import archive_session
 
+    local_session_id = _parse_legacy_session_id(session_id)
     archived = await asyncio.to_thread(
         archive_session,
-        session_id,
+        local_session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
     )
@@ -304,9 +760,95 @@ async def delete_session_endpoint(
     return SessionDeleteResponse()
 
 
+SESSION_RESTORE_RESPONSES: OpenAPIResponses = {
+    **SESSIONS_ERROR_RESPONSES,
+    404: {"description": "Session not found."},
+    409: {"description": "Session is already active."},
+}
+
+
+@router.post(
+    "/{session_id}/restore",
+    response_model=SessionRestoreResponse,
+    responses=SESSION_RESTORE_RESPONSES,
+    summary="Restore session",
+    description="Unarchive (restore) a soft-deleted session. Returns success when restored, 404 if not found, 409 if already active.",
+)
+async def restore_session_endpoint(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to restore.")
+    ],
+) -> SessionRestoreResponse:
+    """Restore an archived session to active status."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if (
+            hasattr(session.status, "value")
+            and session.status.value == ChatSessionStatus.ACTIVE.value
+        ) or str(session.status) == ChatSessionStatus.ACTIVE.value:
+            raise HTTPException(status_code=409, detail="Session is already active")
+        restored = await repository.restore_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if not restored:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return SessionRestoreResponse()
+
+    from fleet_rlm.integrations.local_store import get_chat_session, restore_session
+
+    local_session_id = _parse_legacy_session_id(session_id)
+    session = await asyncio.to_thread(
+        get_chat_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from fleet_rlm.integrations.local_store import SessionStatus
+
+    if (
+        hasattr(session.status, "value")
+        and session.status.value == SessionStatus.ACTIVE.value
+    ) or str(session.status) == SessionStatus.ACTIVE.value:
+        raise HTTPException(status_code=409, detail="Session is already active")
+    restored = await asyncio.to_thread(
+        restore_session,
+        local_session_id,
+        owner_tenant=identity.tenant_claim,
+        owner_user=identity.user_claim,
+    )
+    if not restored:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return SessionRestoreResponse()
+
+
 @router.post(
     "/{session_id}/export",
     response_model=DatasetResponse,
+    responses={
+        **SESSION_DETAIL_RESPONSES,
+        400: {"description": "Invalid export parameters."},
+    },
     summary="Export session as GEPA dataset",
     description=(
         "Convert a session's turn history into a JSONL dataset suitable for "
@@ -316,20 +858,101 @@ async def delete_session_endpoint(
 )
 async def export_session_endpoint(
     body: SessionExportRequest,
+    state: ServerStateDep,
     identity: HTTPIdentityDep,
-    session_id: int = Path(
-        description="Identifier of the session to export as a dataset."
-    ),
+    repository: RepositoryDep,
+    session_id: Annotated[
+        str, Path(description="Identifier of the session to export as a dataset.")
+    ],
 ) -> DatasetResponse:
     """Export a session as a GEPA dataset."""
+    persisted_identity = await _resolve_persisted_identity(
+        state=state,
+        repository=repository,
+        identity=identity,
+    )
+    if repository is not None and persisted_identity is not None:
+        from fleet_rlm.api.runtime_services.optimization_datasets import (
+            build_transcript_dataset_rows,
+            persist_jsonl_rows,
+        )
+        from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
+        from fleet_rlm.integrations.database.types import DatasetCreateRequest
+
+        workspace_id = persisted_identity.workspace_id
+        if workspace_id is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Workspace persistence is unavailable.",
+            )
+
+        session_uuid = _parse_session_uuid(session_id)
+        session = await repository.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        turns = await _load_all_repository_turns(
+            repository=repository,
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=workspace_id,
+        )
+        transcript_turns: list[tuple[str | None, str | None]] = [
+            (turn.user_message, turn.assistant_message) for turn in turns
+        ]
+        try:
+            rows, label = build_transcript_dataset_rows(
+                module_slug=body.module_slug,
+                turns=transcript_turns,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        dataset_path = await asyncio.to_thread(
+            persist_jsonl_rows,
+            root=FsPath(os.environ.get("FLEET_RLM_DATASET_ROOT", os.getcwd())),
+            rows=rows,
+            prefix="transcript-",
+        )
+        dataset = await repository.create_dataset(
+            DatasetCreateRequest(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=workspace_id,
+                created_by_user_id=persisted_identity.user_id,
+                name=f"{session.title} ({label})",
+                row_count=len(rows),
+                format=DatasetFormat.JSONL,
+                source=DatasetSource.TRANSCRIPT,
+                module_slug=body.module_slug,
+                uri=str(dataset_path),
+            ),
+            examples=rows,
+        )
+        return DatasetResponse(
+            id=str(dataset.id),
+            name=dataset.name,
+            row_count=dataset.row_count or 0,
+            format=dataset.format.value
+            if hasattr(dataset.format, "value")
+            else str(dataset.format or "jsonl"),
+            module_slug=body.module_slug,
+            created_at=dataset.created_at.isoformat(),
+        )
+
     from fleet_rlm.integrations.local_store import (
         export_session_as_dataset,
         get_chat_session,
     )
 
+    local_session_id = _parse_legacy_session_id(session_id)
     session = await asyncio.to_thread(
         get_chat_session,
-        session_id,
+        local_session_id,
         owner_tenant=identity.tenant_claim,
         owner_user=identity.user_claim,
     )
@@ -338,13 +961,13 @@ async def export_session_endpoint(
 
     try:
         dataset = await asyncio.to_thread(
-            export_session_as_dataset, session_id, body.module_slug
+            export_session_as_dataset, local_session_id, body.module_slug
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return DatasetResponse(
-        id=dataset.id or 0,
+        id=str(dataset.id or 0),
         name=dataset.name,
         row_count=dataset.row_count or 0,
         format=dataset.format or "jsonl",

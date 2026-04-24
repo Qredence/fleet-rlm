@@ -29,6 +29,12 @@ Then open `http://localhost:8000`.
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Frontend/Backend Integration](reference/frontend-backend-integration.md)
 
+## New API Reference Surfaces
+
+- [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
+- [Runs API](reference/runs-api.md) — Execution trace step browsing
+- [Memory API](reference/memory-api.md) — Scoped memory item queries
+
 ## Use the Product
 
 - [Installation](how-to-guides/installation.md)
@@ -39,9 +45,11 @@ Then open `http://localhost:8000`.
 ## Build and Integrate
 
 - [HTTP and WebSocket API](reference/http-api.md)
+- [Sandbox API](reference/sandbox-api.md)
+- [Runs API](reference/runs-api.md)
+- [Memory API](reference/memory-api.md)
 - [Python API](reference/python-api.md)
 - [CLI reference](reference/cli.md)
-- [Using the MCP server](how-to-guides/using-mcp-server.md)
 
 ## Understand the System
 
@@ -49,11 +57,6 @@ Then open `http://localhost:8000`.
 - [Concepts](explanation/concepts.md)
 - [User interaction flows](explanation/user-flows.md)
 - [Component UML](explanation/component-uml.md)
-
-## Historical Notes
-
-- [Historical snapshots](historical/index.md)
-- [Architecture and migration history](historical/index.md#architecture-and-migration-history)
 
 ## Documentation Map
 
@@ -70,4 +73,4 @@ When docs conflict with implementation, trust:
 - CLI truth: `uv run fleet-rlm --help` and `uv run fleet --help`
 - API truth: `openapi.yaml`
 - WebSocket truth: `src/fleet_rlm/api/routers/ws/endpoint.py` and adjacent helpers in `src/fleet_rlm/api/routers/ws/`
-- Runtime truth: `src/fleet_rlm/runtime/agent/chat_agent.py`, `src/fleet_rlm/runtime/agent/recursive_runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`
+- Runtime truth: `src/fleet_rlm/runtime/agent/agent.py`, `src/fleet_rlm/runtime/agent/runtime.py`, `src/fleet_rlm/integrations/daytona/interpreter.py`, and `src/fleet_rlm/integrations/daytona/runtime.py`

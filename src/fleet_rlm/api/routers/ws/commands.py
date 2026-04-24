@@ -13,7 +13,6 @@ from fleet_rlm.integrations.database.types import IdentityUpsertResult
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from .artifacts import track_command_artifact_if_needed
-from .hitl import handle_resolve_hitl
 from .types import ChatAgentProtocol
 
 logger = logging.getLogger(__name__)
@@ -91,15 +90,6 @@ async def _handle_command(
         return
     if args is None:
         await _send_command_args_error(websocket=websocket, command=command)
-        return
-
-    if await handle_resolve_hitl(
-        websocket=websocket,
-        command=command,
-        args=args,
-        command_response=_command_response,
-        session_record=session_record,
-    ):
         return
 
     try:

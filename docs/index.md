@@ -30,10 +30,11 @@
 - [Settings](explanation/product-spec.md)
 - [History](reference/frontend-backend-integration.md)
 
-## Historical Notes
+## New API Reference Surfaces
 
-- [Historical Snapshots](historical/index.md)
-- [Architecture and migration history](historical/index.md#architecture-and-migration-history)
+- [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
+- [Runs API](reference/runs-api.md) — Execution trace step browsing
+- [Memory API](reference/memory-api.md) — Scoped memory item queries
 
 ## Complete Table Of Contents
 
@@ -44,6 +45,6 @@
 When docs disagree with the code, trust the code and generated contracts:
 
 - backend routes and websocket behavior in `src/fleet_rlm/api/`
-- outer host policy in `src/fleet_rlm/agent_host/`
+- transport, auth, and websocket lifecycle in `src/fleet_rlm/api/`
 - runtime and Daytona execution in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
 - frontend route and workspace behavior in `src/frontend/src/`

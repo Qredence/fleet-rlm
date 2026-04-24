@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from importlib import import_module
@@ -25,8 +26,11 @@ from .middleware import add_middlewares
 from .routers import (
     auth,
     health,
+    memory,
     optimization,
+    runs,
     runtime,
+    sandboxes,
     sessions,
     traces,
     ws,
@@ -39,6 +43,9 @@ _CANONICAL_API_ROUTERS = (
     ws.router,
     sessions.router,
     runtime.router,
+    sandboxes.router,
+    runs.router,
+    memory.router,
     optimization.router,
     traces.router,
 )
@@ -126,18 +133,21 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        requested_file = resolve_ui_file(full_path)
+        requested_file = await asyncio.to_thread(resolve_ui_file, full_path)
         if requested_file is not None:
             return FileResponse(requested_file)
 
         index_path = ui_root / "index.html"
-        if index_path.exists() and should_serve_spa_index(full_path):
+        index_exists = await asyncio.to_thread(index_path.exists)
+        if index_exists and should_serve_spa_index(full_path):
             return FileResponse(index_path)
 
-        if index_path.exists():
+        if index_exists:
             raise HTTPException(status_code=404, detail="Not Found")
 
-        return JSONResponse(_ui_unavailable_payload(), status_code=503)
+        return JSONResponse(
+            await asyncio.to_thread(_ui_unavailable_payload), status_code=503
+        )
 
 
 def _ui_unavailable_payload() -> dict[str, str]:
@@ -169,7 +179,8 @@ def _mount_ui_unavailable_root(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     async def ui_unavailable_root():
-        return JSONResponse(_ui_unavailable_payload(), status_code=503)
+        payload = await asyncio.to_thread(_ui_unavailable_payload)
+        return JSONResponse(payload, status_code=503)
 
 
 def _annotate_validation_error_schemas(app: FastAPI) -> None:
@@ -209,11 +220,14 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         await startup_server_state(state)
         # Recover optimization runs orphaned by prior server restart
         try:
-            from fleet_rlm.integrations.local_store import (
-                recover_stale_optimization_runs,
-            )
+            if state.repository is not None:
+                recovered = await state.repository.recover_stale_optimization_runs()
+            else:
+                from fleet_rlm.integrations.local_store import (
+                    recover_stale_optimization_runs,
+                )
 
-            recovered = recover_stale_optimization_runs()
+                recovered = recover_stale_optimization_runs()
             if recovered:
                 logger.info(
                     "Recovered %d stale optimization run(s) on startup", recovered
@@ -227,6 +241,9 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         title="fleet-rlm",
         version=__version__,
         lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
     )
     _annotate_validation_error_schemas(app)
 
@@ -238,7 +255,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
 
         @app.get("/scalar", include_in_schema=False)
-        async def scalar_docs():
+        def scalar_docs():
             return get_scalar_api_reference(
                 openapi_url=app.openapi_url,
                 title=app.title,

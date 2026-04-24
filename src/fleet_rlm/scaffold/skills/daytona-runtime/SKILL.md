@@ -50,12 +50,12 @@ All Daytona-specific implementation lives under `src/fleet_rlm/integrations/dayt
 - `runtime.py` — `DaytonaSandboxRuntime` and `DaytonaSandboxSession` (canonical async contract)
 - `interpreter.py` — `DaytonaInterpreter` (DSPy CodeInterpreter adapter) including execution helpers and delegate child interpreter building
 - `bridge.py` — host callback bridge (`llm_query`, `llm_query_batched`, custom tools)
-- `runtime/agent/chat_agent.py` — `RLMReActChatAgent` (canonical shared DSPy chat agent with Daytona workspace/session handling)
+- `runtime/agent/agent.py` — `RLMReActAgent` (canonical shared DSPy chat agent with Daytona workspace/session handling)
 - `diagnostics.py` — structured runtime diagnostics and smoke validation
 - `types.py` — consolidated Daytona types plus chat/session normalization helpers
-- `volumes.py` — Daytona volume browsing
+- `filesystem.py` — Daytona volume browsing and filesystem operations
 - `config.py` — `ResolvedDaytonaConfig` resolution
-- `runtime_helpers.py`, `interpreter_assets.py` — internal utilities
+- `interpreter_assets.py` — internal utilities
 
 Deleted module paths such as `state.py` and `snapshots.py` are intentionally unsupported; use the owner modules above.
 

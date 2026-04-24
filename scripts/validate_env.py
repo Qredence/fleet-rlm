@@ -29,7 +29,6 @@ OPTIONAL_FIELDS = {
     "permissionMode",
     "maxTurns",
     "skills",
-    "mcpServers",
     "hooks",
     "memory",
 }

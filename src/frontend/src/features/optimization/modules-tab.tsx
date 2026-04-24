@@ -50,7 +50,7 @@ function ModuleCard({
       <ItemContent>
         <ItemTitle className="text-sm">{mod.label}</ItemTitle>
         <ItemDescription className="text-xs">{displayDescription}</ItemDescription>
-        <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground/60">
+        <span className="mt-0.5 block font-mono typo-helper text-muted-foreground/60">
           {mod.program_spec}
         </span>
       </ItemContent>

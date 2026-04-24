@@ -271,7 +271,7 @@ export function WorkspaceScreen() {
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 pt-16 pb-8 lg:pt-24">
               <div
                 data-slot="workspace-landing-state"
-                className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-5"
+                className="mx-auto flex w-full max-w-container flex-col items-center gap-5"
               >
                 <WorkspaceChatEmptyState isMobile={false} onSuggestionClick={setInputValue} />
 
@@ -307,7 +307,7 @@ export function WorkspaceScreen() {
 
                 <div
                   data-slot="workspace-landing-composer"
-                  className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/[0.03] backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/[0.05]"
+                  className="w-full rounded-3xl p-1.5 shadow-lg shadow-black/3 backdrop-blur-sm transition-shadow hover:shadow-xl hover:shadow-black/5"
                 >
                   {composer}
                 </div>

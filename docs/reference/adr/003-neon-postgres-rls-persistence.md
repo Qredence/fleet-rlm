@@ -176,6 +176,7 @@ class DatabaseManager:
 ### Neutral
 
 - `DATABASE_URL` must use `postgresql+asyncpg://` scheme for async
+- `DATABASE_URL` is the pooled runtime connection; `DATABASE_ADMIN_URL` should use the direct non-pooler endpoint for Alembic and admin/debug tasks
 - `DATABASE_REQUIRED=true` enforced when `AUTH_MODE=entra`
 - Migrations managed via Alembic in `migrations/`
 

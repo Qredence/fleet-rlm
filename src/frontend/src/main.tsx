@@ -17,11 +17,19 @@ import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 
 const posthogConfig = resolvePostHogWebConfig(import.meta.env);
 
-if (posthogConfig.apiKey) {
-  posthog.init(posthogConfig.apiKey, {
-    api_host: posthogConfig.host,
-    defaults: "2026-01-30",
-  });
+const posthogApiKey = posthogConfig.apiKey;
+if (posthogApiKey) {
+  // Defer analytics init until after first paint — does not affect app functionality.
+  const initPostHog = () =>
+    posthog.init(posthogApiKey, {
+      api_host: posthogConfig.host,
+      defaults: "2026-01-30",
+    });
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(initPostHog, { timeout: 3000 });
+  } else {
+    setTimeout(initPostHog, 0);
+  }
 }
 
 const PRELOAD_RELOAD_KEY = "fleetwebapp:vite-preload-retried";

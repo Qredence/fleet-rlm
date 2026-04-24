@@ -95,7 +95,7 @@ This command:
 - Creates a virtual environment in `.venv/`
 - Installs all runtime dependencies
 - Installs development dependencies (`pytest`, `ruff`, `ty`, etc.)
-- Installs optional extras (`mcp`, `server`, `full`)
+- Installs optional extras (`server`, `full`)
 
 ### Install Pre-commit Hooks
 
@@ -130,7 +130,7 @@ DSPY_LLM_API_KEY=sk-your-api-key-here
 | Category     | Variables                                            | Required        |
 | ------------ | ---------------------------------------------------- | --------------- |
 | **LLM**      | `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`                  | Yes             |
-| **Database** | `DATABASE_URL`                                       | For persistence |
+| **Database** | `DATABASE_URL`, `DATABASE_ADMIN_URL`                 | For persistence and migrations |
 | **Auth**     | `AUTH_MODE`, `AUTH_REQUIRED`                         | For API server  |
 | **MLflow**   | `MLFLOW_ENABLED`, `MLFLOW_TRACKING_URI`              | For tracing     |
 | **PostHog**  | `POSTHOG_ENABLED`, `POSTHOG_API_KEY`, `POSTHOG_HOST` | For analytics   |

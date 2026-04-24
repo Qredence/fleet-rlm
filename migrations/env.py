@@ -19,7 +19,11 @@ if str(SRC) not in sys.path:
 
 load_dotenv(ROOT / ".env", override=True)
 
-from fleet_rlm.integrations.database import Base, to_sync_database_url  # noqa: E402
+from fleet_rlm.integrations.database import (  # noqa: E402
+    Base,
+    select_database_url,
+    to_sync_database_url,
+)
 
 config = context.config
 
@@ -31,13 +35,19 @@ target_metadata = Base.metadata
 
 
 def _resolve_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
+    database_url = select_database_url(
+        runtime_url=os.getenv("DATABASE_URL"),
+        admin_url=os.getenv("DATABASE_ADMIN_URL"),
+        prefer_admin=True,
+    )
     if not database_url:
         configured = config.get_main_option("sqlalchemy.url")
         database_url = configured
     if not database_url:
         raise RuntimeError(
-            "DATABASE_URL is not set. Set DATABASE_URL or sqlalchemy.url before running migrations."
+            "DATABASE_ADMIN_URL or DATABASE_URL is not set. "
+            "Set DATABASE_ADMIN_URL for direct admin access, DATABASE_URL as a fallback, "
+            "or sqlalchemy.url before running migrations."
         )
     return to_sync_database_url(database_url)
 

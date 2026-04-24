@@ -84,6 +84,7 @@ class ServerRuntimeConfig(BaseSettings):
     )
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    database_admin_url: str | None = Field(default=None, alias="DATABASE_ADMIN_URL")
     database_required: bool = False
     db_echo: bool = False
     db_validate_on_startup: bool = False

@@ -108,12 +108,12 @@ function SessionRow({
       conversationTitle,
       transcriptTurns,
     }: {
-      sessionId?: number;
+      sessionId?: string;
       moduleSlug: string;
       conversationTitle?: string;
       transcriptTurns?: TranscriptTurnInput[];
     }) => {
-      return typeof sessionId === "number"
+      return typeof sessionId === "string"
         ? await sessionEndpoints.exportSession(sessionId, moduleSlug)
         : await datasetEndpoints.createFromTranscript({
             module_slug: moduleSlug,
@@ -164,7 +164,7 @@ function SessionRow({
             if (v) setSelectedModule(v);
           }}
         >
-          <SelectTrigger className="h-8 w-[180px] text-xs" aria-label="Pick module">
+          <SelectTrigger className="h-8 w-select-lg text-xs" aria-label="Pick module">
             <SelectValue placeholder="Select module…" />
           </SelectTrigger>
           <SelectContent>
@@ -186,7 +186,7 @@ function SessionRow({
           onClick={() => {
             if (!selectedModule) return;
             optimizeMutation.mutate({
-              sessionId: Number.isFinite(session.id) ? session.id : undefined,
+              sessionId: conversation ? undefined : session.id,
               moduleSlug: selectedModule,
               conversationTitle: conversation?.title ?? session.title,
               transcriptTurns,
@@ -221,7 +221,7 @@ function SessionsSection({
   const fallbackSessions = sortConversations(localConversations).map((conversation) => ({
     conversation,
     session: {
-      id: Number.NaN,
+      id: `local:${conversation.id}`,
       title: conversation.title,
       status: "local",
       model_name: null,
@@ -430,7 +430,7 @@ export function DatasetsTab({
             Use in Run
           </Button>
         ),
-        className: "w-[132px]",
+        className: "w-select-xl",
       },
     ],
     [moduleProgramSpecsBySlug, onPrepareRun],
@@ -488,7 +488,7 @@ export function DatasetsTab({
             if (v) setModuleFilter(v);
           }}
         >
-          <SelectTrigger className="w-[180px]" aria-label="Filter by module">
+          <SelectTrigger className="w-select-lg" aria-label="Filter by module">
             <SelectValue>{filterLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>

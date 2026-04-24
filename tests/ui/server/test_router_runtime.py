@@ -729,7 +729,7 @@ def test_runtime_volume_tree_uses_explicit_daytona_provider_override(
 
     response = staging_client.get(
         "/api/v1/runtime/volume/tree",
-        params={"provider": "daytona"},
+        params={"provider": "daytona", "volume_name": "foreign-volume"},
         headers=_staging_bearer_headers(),
     )
 
@@ -778,7 +778,11 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
 
     response = staging_client.get(
         "/api/v1/runtime/volume/file",
-        params={"provider": "daytona", "path": "/notes.txt"},
+        params={
+            "provider": "daytona",
+            "path": "/notes.txt",
+            "volume_name": "foreign-volume",
+        },
         headers=_staging_bearer_headers(),
     )
 
@@ -790,6 +794,91 @@ def test_runtime_volume_file_uses_explicit_daytona_provider_override(
         "path": "/notes.txt",
         "max_bytes": 200000,
     }
+
+
+def test_runtime_volumes_lists_only_workspace_volume(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+
+    async def _fake_list_daytona_volumes():
+        return [
+            {
+                "id": "other-id",
+                "name": "other-workspace",
+                "state": "ready",
+                "created_at": None,
+            },
+            {
+                "id": "tenant-id",
+                "name": "tenant-a",
+                "state": "ready",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ]
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volumes",
+        _fake_list_daytona_volumes,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volumes",
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "daytona"
+    assert payload["volumes"] == [
+        {
+            "id": "tenant-id",
+            "name": "tenant-a",
+            "state": "ready",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+    ]
+
+
+def test_runtime_volumes_returns_synthetic_workspace_volume_when_missing(
+    staging_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _server_state(staging_client)
+    state.config.sandbox_provider = "daytona"
+
+    async def _fake_list_daytona_volumes():
+        return [
+            {
+                "id": "other-id",
+                "name": "other-workspace",
+                "state": "ready",
+                "created_at": None,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.volumes.alist_daytona_volumes",
+        _fake_list_daytona_volumes,
+    )
+
+    response = staging_client.get(
+        "/api/v1/runtime/volumes",
+        headers=_staging_bearer_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["volumes"] == [
+        {
+            "id": "tenant-a",
+            "name": "tenant-a",
+            "state": "unknown",
+            "created_at": None,
+        }
+    ]
 
 
 def test_runtime_volume_file_rejects_modal_provider_override(

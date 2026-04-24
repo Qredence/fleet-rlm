@@ -16,53 +16,44 @@ pytestmark = [
 
 
 @pytest.mark.asyncio
-async def test_migrations_apply_and_core_tables_exist(require_database_url: str):
+async def test_migrations_apply_and_core_tables_exist(
+    require_migration_database_url: str,
+):
     """Verify that all Alembic migrations apply cleanly and expected tables exist.
 
-    This test requires a *dedicated* test database: it drops and recreates the
-    ``public`` schema before running migrations so that Alembic starts from a
-    completely empty state.  Do not run it against a shared or production database.
+    This test requires a *dedicated* test database. It prefers
+    ``DATABASE_ADMIN_URL`` for the destructive reset + migration path and falls
+    back to ``DATABASE_URL`` when a separate admin URL is not configured. It
+    drops and recreates the ``public`` schema before running migrations so that
+    Alembic starts from a completely empty state. Do not run it against a shared
+    or production database.
     """
     repo_root = Path(__file__).resolve().parents[2]
 
     cfg = Config(str(repo_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(repo_root / "migrations"))
-    with psycopg.connect(require_database_url) as conn:
+    with psycopg.connect(require_migration_database_url) as conn:
         with conn.cursor() as cur:
             cur.execute("DROP SCHEMA public CASCADE")
             cur.execute("CREATE SCHEMA public")
         conn.commit()
     command.upgrade(cfg, "head")
 
-    db = DatabaseManager(require_database_url)
+    db = DatabaseManager(require_migration_database_url)
     try:
         async with db.session() as session:
             async with session.begin():
-                result = await session.execute(
+                all_tables_result = await session.execute(
                     text(
                         """
                         select table_name
                         from information_schema.tables
                         where table_schema = 'public'
-                          and table_name in (
-                            'tenants',
-                            'users',
-                            'memberships',
-                            'sandbox_sessions',
-                            'runs',
-                            'run_steps',
-                            'artifacts',
-                            'rlm_programs',
-                            'rlm_traces',
-                            'memory_items',
-                            'jobs',
-                            'tenant_subscriptions'
-                          )
                         order by table_name
                         """
                     )
                 )
-                names = [row[0] for row in result.fetchall()]
+                all_table_names = {row[0] for row in all_tables_result.fetchall()}
 
                 column_result = await session.execute(
                     text(
@@ -71,10 +62,12 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
                         from information_schema.columns
                         where table_schema = 'public'
                           and (
-                            (table_name = 'tenants' and column_name = 'slug')
+                            (table_name = 'workspaces' and column_name = 'slug')
+                            or (table_name = 'execution_runs' and column_name = 'workspace_id')
                             or (table_name = 'sandbox_sessions' and column_name = 'created_by_user_id')
-                            or (table_name = 'memory_items' and column_name = 'uri')
+                            or (table_name = 'memory_items' and column_name = 'workspace_id')
                             or (table_name = 'tenant_subscriptions' and column_name = 'purchaser_tenant_id')
+                            or (table_name = 'trace_feedback' and column_name = 'external_trace_id')
                           )
                         order by table_name, column_name
                         """
@@ -92,25 +85,15 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
                         where schemaname = 'public'
                           and indexname in (
                             'ix_tenants_status',
-                            'ix_tenant_subscriptions_status'
+                            'ix_tenant_subscriptions_status',
+                            'ix_jobs_workspace_status_available',
+                            'ix_execution_events_run_sequence'
                           )
                         order by indexname
                         """
                     )
                 )
                 control_plane_indexes = {row[0] for row in index_result.fetchall()}
-
-                all_tables_result = await session.execute(
-                    text(
-                        """
-                        select table_name
-                        from information_schema.tables
-                        where table_schema = 'public'
-                        order by table_name
-                        """
-                    )
-                )
-                all_table_names = {row[0] for row in all_tables_result.fetchall()}
 
                 enum_result = await session.execute(
                     text(
@@ -125,30 +108,83 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
                     )
                 )
                 enum_names = {row[0] for row in enum_result.fetchall()}
-        assert names == [
+
+                rls_result = await session.execute(
+                    text(
+                        """
+                        select c.relname, c.relrowsecurity, c.relforcerowsecurity
+                        from pg_class c
+                        join pg_namespace n on n.oid = c.relnamespace
+                        where n.nspname = 'public'
+                          and c.relname in ('users', 'chat_sessions', 'jobs')
+                        order by c.relname
+                        """
+                    )
+                )
+                rls_state = {
+                    row[0]: (bool(row[1]), bool(row[2]))
+                    for row in rls_result.fetchall()
+                }
+
+                uuid_helper_result = await session.execute(
+                    text("select to_regprocedure('app.uuid_v7()')")
+                )
+                uuid_helper = uuid_helper_result.scalar_one()
+
+        expected_tables = {
             "artifacts",
+            "chat_sessions",
+            "chat_turns",
+            "dataset_examples",
+            "datasets",
+            "evaluation_results",
+            "execution_events",
+            "execution_runs",
+            "execution_steps",
+            "external_traces",
             "jobs",
-            "memberships",
             "memory_items",
-            "rlm_programs",
-            "rlm_traces",
-            "run_steps",
-            "runs",
+            "memory_links",
+            "optimization_modules",
+            "optimization_runs",
+            "outbox_events",
+            "program_versions",
+            "prompt_snapshots",
             "sandbox_sessions",
+            "session_state_snapshots",
+            "tenant_memberships",
             "tenant_subscriptions",
             "tenants",
+            "trace_feedback",
             "users",
-        ]
+            "volume_objects",
+            "workspace_memberships",
+            "workspace_runtime_settings",
+            "workspace_volumes",
+            "workspaces",
+        }
+        assert all_table_names - {"alembic_version"} == expected_tables
         assert control_plane_columns == {
-            ("memory_items", "uri"),
+            ("execution_runs", "workspace_id"),
+            ("memory_items", "workspace_id"),
             ("sandbox_sessions", "created_by_user_id"),
             ("tenant_subscriptions", "purchaser_tenant_id"),
-            ("tenants", "slug"),
+            ("trace_feedback", "external_trace_id"),
+            ("workspaces", "slug"),
         }
         assert control_plane_indexes == {
+            "ix_execution_events_run_sequence",
+            "ix_jobs_workspace_status_available",
             "ix_tenant_subscriptions_status",
             "ix_tenants_status",
         }
+        assert rls_state == {
+            "chat_sessions": (True, True),
+            "jobs": (True, True),
+            "users": (True, True),
+        }
+        assert uuid_helper == "app.uuid_v7()"
+
         for deprecated_table in {
             "skill_taxonomies",
             "taxonomy_terms",
@@ -156,6 +192,11 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
             "skill_versions",
             "skill_term_links",
             "run_skill_usages",
+            "memberships",
+            "runs",
+            "run_steps",
+            "rlm_programs",
+            "rlm_traces",
         }:
             assert deprecated_table not in all_table_names
 
@@ -166,5 +207,16 @@ async def test_migrations_apply_and_core_tables_exist(require_database_url: str)
             "skill_usage_status",
         }:
             assert deprecated_enum not in enum_names
+        for required_enum in {
+            "workspace_status",
+            "workspace_role",
+            "run_type",
+            "chat_session_status",
+            "chat_turn_status",
+            "artifact_provider",
+            "memory_status",
+            "outbox_status",
+        }:
+            assert required_enum in enum_names
     finally:
         await db.dispose()

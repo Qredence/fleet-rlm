@@ -1,0 +1,38 @@
+{
+  "milestone": "core-agent",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-AGENT-001",
+    "VAL-AGENT-002",
+    "VAL-AGENT-003",
+    "VAL-AGENT-004",
+    "VAL-AGENT-005",
+    "VAL-AGENT-006",
+    "VAL-AGENT-007",
+    "VAL-AGENT-008",
+    "VAL-AGENT-009",
+    "VAL-AGENT-010",
+    "VAL-TOOLS-001",
+    "VAL-TOOLS-002",
+    "VAL-TOOLS-003",
+    "VAL-TOOLS-004",
+    "VAL-TOOLS-005",
+    "VAL-TOOLS-006",
+    "VAL-TOOLS-007",
+    "VAL-TOOLS-008",
+    "VAL-TOOLS-009",
+    "VAL-TOOLS-010",
+    "VAL-TOOLS-011"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

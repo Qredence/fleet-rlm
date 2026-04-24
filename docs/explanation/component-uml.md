@@ -1,6 +1,6 @@
 # Component UML
 
-This UML view shows key relationships between agent orchestration, memory/document mixins, and runtime execution.
+This UML view shows key relationships between agent orchestration, runtime state, and interpreter execution.
 
 ```mermaid
 classDiagram
@@ -8,19 +8,17 @@ classDiagram
         <<dspy.Module>>
     }
 
-    class RLMReActChatAgent {
-        +__getattr__(name)
+    class FleetAgent {
+        +tools
+        +max_iters
     }
 
-    class CoreMemoryMixin {
-        +persona
-        +human
-        +scratchpad memory
-    }
-
-    class DocumentCacheMixin {
-        +document storage
-        +alias management
+    class AgentRuntime {
+        +interpreter
+        +history
+        +core_memory
+        +chat_turn()
+        +achat_turn()
     }
 
     class DaytonaInterpreter {
@@ -32,10 +30,9 @@ classDiagram
         +runtime_settings
     }
 
-    dspy_Module <|-- RLMReActChatAgent
-    CoreMemoryMixin <--* RLMReActChatAgent : uses mixin
-    DocumentCacheMixin <--* RLMReActChatAgent : uses mixin
-    RLMReActChatAgent --> DaytonaInterpreter : delegates execution
-    AppConfig ..> RLMReActChatAgent : configures
+    dspy_Module <|-- FleetAgent
+    AgentRuntime *-- FleetAgent : wraps
+    AgentRuntime --> DaytonaInterpreter : delegates execution
+    AppConfig ..> AgentRuntime : configures
     AppConfig ..> DaytonaInterpreter : configures
 ```

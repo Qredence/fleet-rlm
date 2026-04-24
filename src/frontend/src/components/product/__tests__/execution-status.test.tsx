@@ -38,7 +38,7 @@ describe("StatusBadge", () => {
     const lgHtml = renderToStaticMarkup(<StatusBadge status="idle" size="lg" />);
 
     // Size sm uses smaller padding
-    expect(smHtml).toContain("text-[11px]");
+    expect(smHtml).toContain("typo-body-xs");
     // Size lg uses larger padding
     expect(lgHtml).toContain("text-sm");
   });

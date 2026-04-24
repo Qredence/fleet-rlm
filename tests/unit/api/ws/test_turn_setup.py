@@ -10,8 +10,9 @@ from fleet_rlm.api.runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
 )
 from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
-from fleet_rlm.api.routers.ws.worker_request import build_workspace_task_request
+from fleet_rlm.api.routers.ws.lifecycle import build_workspace_task_request
 from fleet_rlm.api.schemas import WSMessage
+from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 from tests.ui.fixtures_ui import FakeChatAgent
 
 
@@ -168,6 +169,11 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
                 "repo_ref": "main",
                 "context_paths": ["src", "docs", "docs/current.md"],
                 "volume_name": "workspace",
+                "sandbox_labels": sandbox_owner_labels(
+                    tenant_claim="workspace",
+                    user_claim="user",
+                    session_id="session",
+                ),
             }
         ]
         assert getattr(agent, "batch_concurrency") == 4

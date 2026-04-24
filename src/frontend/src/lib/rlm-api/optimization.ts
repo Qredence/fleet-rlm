@@ -28,7 +28,7 @@ export interface GEPAModuleInfo {
 
 export interface GEPAOptimizationRequest {
   dataset_path?: string | null;
-  dataset_id?: number | null;
+  dataset_id?: string | null;
   program_spec: string;
   output_path?: string | null;
   auto: "light" | "medium" | "heavy";
@@ -61,12 +61,12 @@ export interface GEPAOptimizationResponse {
 }
 
 export interface OptimizationRunCreated {
-  run_id: number;
+  run_id: string;
   status: string;
 }
 
 export interface OptimizationRunSummary {
-  id: number;
+  id: string;
   status: "running" | "completed" | "failed";
   module_slug: string | null;
   program_spec: string;
@@ -122,7 +122,7 @@ export const optimizationEndpoints = {
     );
   },
 
-  getRun(runId: number, signal?: AbortSignal) {
+  getRun(runId: string, signal?: AbortSignal) {
     return rlmApiClient.get<OptimizationRunSummary>(`/api/v1/optimization/runs/${runId}`, signal);
   },
 };
@@ -163,7 +163,7 @@ export const datasetEndpoints = {
   },
 
   /** Get dataset detail with sample rows. */
-  get(datasetId: number, signal?: AbortSignal) {
+  get(datasetId: string, signal?: AbortSignal) {
     return rlmApiClient.get<DatasetDetailResponse>(
       `/api/v1/optimization/datasets/${datasetId}`,
       signal,
@@ -184,7 +184,7 @@ export const datasetEndpoints = {
 
 export const evaluationEndpoints = {
   /** Get paginated per-example evaluation results for a run. */
-  getResults(runId: number, params?: { limit?: number; offset?: number }, signal?: AbortSignal) {
+  getResults(runId: string, params?: { limit?: number; offset?: number }, signal?: AbortSignal) {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
@@ -200,7 +200,7 @@ export const evaluationEndpoints = {
 
 export const comparisonEndpoints = {
   /** Compare prompt diffs and scores across optimization runs. */
-  compare(runIds: number[], signal?: AbortSignal) {
+  compare(runIds: string[], signal?: AbortSignal) {
     const qs = runIds.join(",");
     return rlmApiClient.get<RunComparisonResponse>(
       `/api/v1/optimization/runs/compare?run_ids=${qs}`,
@@ -218,12 +218,12 @@ export const optimizationKeys = {
   runs: () => [...optimizationKeys.all, "runs"] as const,
   runsList: (params?: { status?: string }) =>
     [...optimizationKeys.runs(), "list", params ?? {}] as const,
-  runDetail: (id: number) => [...optimizationKeys.runs(), "detail", id] as const,
-  runResults: (runId: number, params?: { limit?: number; offset?: number }) =>
+  runDetail: (id: string) => [...optimizationKeys.runs(), "detail", id] as const,
+  runResults: (runId: string, params?: { limit?: number; offset?: number }) =>
     [...optimizationKeys.runs(), "results", runId, params ?? {}] as const,
-  runComparison: (runIds: number[]) => [...optimizationKeys.runs(), "compare", ...runIds] as const,
+  runComparison: (runIds: string[]) => [...optimizationKeys.runs(), "compare", ...runIds] as const,
   datasets: () => [...optimizationKeys.all, "datasets"] as const,
   datasetList: (params?: { module_slug?: string }) =>
     [...optimizationKeys.datasets(), "list", params ?? {}] as const,
-  datasetDetail: (id: number) => [...optimizationKeys.datasets(), "detail", id] as const,
+  datasetDetail: (id: string) => [...optimizationKeys.datasets(), "detail", id] as const,
 };

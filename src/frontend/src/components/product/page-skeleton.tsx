@@ -5,7 +5,7 @@ function PageSkeleton({ isMobile, className }: { isMobile?: boolean; className?:
   return (
     <div
       className={cn(
-        "mx-auto flex w-full max-w-[800px] animate-in fade-in flex-col gap-6 duration-150",
+        "mx-auto flex w-full max-w-page animate-in fade-in flex-col gap-6 duration-150",
         isMobile ? "p-4" : "p-6",
         className,
       )}

@@ -19,6 +19,7 @@ from fleet_rlm.integrations.database import (
     MemoryScope,
     MemorySource,
     RunStepType,
+    select_database_url,
 )
 from fleet_rlm.integrations.database.types import (
     ArtifactCreateRequest,
@@ -31,9 +32,14 @@ from fleet_rlm.integrations.database.types import (
 
 
 async def _run() -> None:
-    database_url = os.getenv("DATABASE_URL")
+    # Match the server's runtime contract: use the pooled runtime URL first and
+    # only fall back to the admin URL when a dedicated runtime URL is unavailable.
+    database_url = select_database_url(
+        runtime_url=os.getenv("DATABASE_URL"),
+        admin_url=os.getenv("DATABASE_ADMIN_URL"),
+    )
     if not database_url:
-        raise RuntimeError("DATABASE_URL is required")
+        raise RuntimeError("DATABASE_URL or DATABASE_ADMIN_URL is required")
 
     db = DatabaseManager(database_url)
     repo = FleetRepository(db)

@@ -72,14 +72,14 @@ export function WorkspaceChatEmptyState({
         initial={{ opacity: 0, y: prefersReduced ? 0 : 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={prefersReduced ? { duration: 0.01 } : { duration: 0.28, ease: "easeOut" }}
-        className="flex w-full max-w-3xl flex-col items-center gap-4 pb-[41px]"
+        className="flex w-full max-w-3xl flex-col items-center gap-4 pb-10"
       >
         <StateNotice
           icon={<Terminal className="size-10 text-muted-foreground/40" />}
           title="Start a conversation"
           description="Type a message below to begin working with the AI assistant"
           className="w-full py-0"
-          titleClassName="text-[3rem] font-medium leading-[1.2] tracking-[-0.05em]"
+          titleClassName="text-5xl font-medium leading-tight tracking-tighter-custom"
         />
 
         <Suggestions

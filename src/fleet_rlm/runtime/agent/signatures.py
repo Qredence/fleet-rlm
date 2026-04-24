@@ -269,10 +269,19 @@ class ClarificationQuestionSignature(dspy.Signature):
 
 
 class RecursiveSubQuerySignature(dspy.Signature):
-    """Answer a bounded recursive sub-problem by exploring context in Python."""
+    """Answer a bounded recursive sub-problem by exploring context in Python.
+
+    The ``context`` field may contain file paths pointing to documents that
+    have been persisted in the Daytona sandbox volume (e.g.
+    ``/home/daytona/memory/artifacts/doc_abc123.txt``). When a path is
+    provided, read the file with Python file I/O instead of assuming the
+    full text is present in the context string.
+    """
 
     prompt: str = dspy.InputField(desc="The delegated sub-task to solve")
-    context: str = dspy.InputField(desc="Optional context for the sub-task")
+    context: str = dspy.InputField(
+        desc="Optional context for the sub-task. May contain sandbox file paths for large documents."
+    )
     answer: str = dspy.OutputField(desc="Answer for the parent caller")
 
 
@@ -335,8 +344,8 @@ class PlanRecursiveSubqueries(dspy.Signature):
     subqueries: list[str] = dspy.OutputField(
         desc="Bounded semantic subqueries or subproblems for the next recursive pass"
     )
-    batching_strategy: str = dspy.OutputField(
-        desc="How Python/runtime should batch the proposed subqueries, for example serial or batched"
+    batching_strategy: Literal["serial", "batched"] = dspy.OutputField(
+        desc="How Python/runtime should batch the proposed subqueries: serial or batched"
     )
     aggregation_plan: str = dspy.OutputField(
         desc="How Python/runtime should aggregate the subquery results for the parent recursive state"

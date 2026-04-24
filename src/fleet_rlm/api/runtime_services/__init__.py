@@ -29,6 +29,7 @@ from .settings import (
 )
 from .volumes import (
     load_volume_file_content,
+    load_volume_list,
     load_volume_tree,
     resolve_daytona_volume_name,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "ExecutionLifecycleManager",
     "initialize_turn_lifecycle",
     "load_volume_file_content",
+    "load_volume_list",
     "load_volume_tree",
     "new_chat_session_state",
     "persist_memory_item_if_needed",

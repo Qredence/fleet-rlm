@@ -1,0 +1,22 @@
+{
+  "milestone": "daytona-upgrade",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-DAYTONA-001",
+    "VAL-DAYTONA-002",
+    "VAL-DAYTONA-003",
+    "VAL-DAYTONA-004",
+    "VAL-DAYTONA-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

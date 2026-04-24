@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.failures import PersistenceRequiredError
-from fleet_rlm.api.routers.ws.loop_exit import (
+from fleet_rlm.api.routers.ws.lifecycle import (
+    PersistenceRequiredError,
     handle_chat_disconnect,
     handle_chat_loop_exception,
 )

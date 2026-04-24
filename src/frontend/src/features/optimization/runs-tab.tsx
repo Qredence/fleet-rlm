@@ -130,7 +130,7 @@ function RunCard({
         <ItemTitle>
           #{run.id}
           {(run.module_slug ?? run.program_spec) ? (
-            <Badge variant="outline" className="text-[0.7rem] font-normal text-muted-foreground">
+            <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
               {run.module_slug ?? run.program_spec}
             </Badge>
           ) : null}
@@ -169,10 +169,10 @@ function RunCard({
   );
 }
 
-export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void }) {
+export function RunsTab({ onCompare }: { onCompare?: (runIds: string[]) => void }) {
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [drawerRunId, setDrawerRunId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [drawerRunId, setDrawerRunId] = useState<string | null>(null);
 
   const runsQuery = useQuery({
     queryKey: optimizationKeys.runsList(
@@ -190,7 +190,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void 
     },
   });
 
-  const toggleSelect = useCallback((id: number) => {
+  const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -224,7 +224,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: number[]) => void 
               if (v) setStatusFilter(v);
             }}
           >
-            <SelectTrigger className="w-[160px]" aria-label="Filter runs by status">
+            <SelectTrigger className="w-select-md" aria-label="Filter runs by status">
               <SelectValue>{filterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>

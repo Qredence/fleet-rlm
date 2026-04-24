@@ -8,7 +8,11 @@ import pytest_asyncio
 
 from fleet_rlm.runtime.config import configure_planner_from_env
 from fleet_rlm.integrations.daytona.config import resolve_daytona_config
-from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
+from fleet_rlm.integrations.database import (
+    DatabaseManager,
+    FleetRepository,
+    select_database_url,
+)
 
 
 def _lm_configured() -> bool:
@@ -33,6 +37,14 @@ def _live_daytona_enabled() -> bool:
 
 def _database_url() -> str | None:
     return os.environ.get("DATABASE_URL")
+
+
+def _migration_database_url() -> str | None:
+    return select_database_url(
+        runtime_url=os.environ.get("DATABASE_URL"),
+        admin_url=os.environ.get("DATABASE_ADMIN_URL"),
+        prefer_admin=True,
+    )
 
 
 def pytest_collection_modifyitems(
@@ -86,6 +98,14 @@ def require_database_url() -> str:
 
 
 @pytest.fixture
+def require_migration_database_url() -> str:
+    database_url = _migration_database_url()
+    if not database_url:
+        pytest.skip("DATABASE_ADMIN_URL or DATABASE_URL not configured")
+    return database_url
+
+
+@pytest.fixture
 def require_qre301_live(require_database_url: str) -> str:
     if os.environ.get("QRE301_LIVE") != "1":
         pytest.skip("QRE301_LIVE=1 is required")
@@ -100,10 +120,15 @@ def require_qre301_live(require_database_url: str) -> str:
 
 @pytest_asyncio.fixture
 async def database_manager() -> AsyncIterator[DatabaseManager]:
-    """DB manager fixture for integration tests."""
-    database_url = _database_url()
+    """DB manager fixture for integration tests.
+
+    Prefer the direct admin URL to avoid PgBouncer prepared-statement cache
+    invalidation issues when migrations (run via direct connection) drop and
+    recreate the schema between tests.
+    """
+    database_url = _migration_database_url()
     if not database_url:
-        pytest.skip("DATABASE_URL not configured")
+        pytest.skip("DATABASE_ADMIN_URL or DATABASE_URL not configured")
     db = DatabaseManager(database_url)
     try:
         yield db

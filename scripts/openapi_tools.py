@@ -62,7 +62,7 @@ def do_validate(args: argparse.Namespace) -> int:
             has_success = False
             has_error = False
             for status, resp in responses.items():
-                if status.startswith("2") and "content" in resp:
+                if status.startswith("2") and ("content" in resp or status == "204"):
                     has_success = True
                 elif status.startswith("4") or status.startswith("5"):
                     has_error = True

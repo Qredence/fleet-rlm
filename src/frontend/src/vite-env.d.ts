@@ -19,6 +19,10 @@ interface ImportMetaEnv {
   readonly VITE_ENTRA_SCOPES?: string;
   /** Redirect path after Entra login/logout. */
   readonly VITE_ENTRA_REDIRECT_PATH?: string;
+  /** PostHog analytics write key. */
+  readonly VITE_PUBLIC_POSTHOG_API_KEY?: string;
+  /** PostHog ingest host URL. */
+  readonly VITE_PUBLIC_POSTHOG_HOST?: string;
 }
 
 interface ImportMeta {

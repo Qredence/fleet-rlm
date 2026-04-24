@@ -13,7 +13,6 @@ from .core import (
     WSCommandResult,
     WSMessage,
 )
-from .session import SessionCreate, SessionResponse, SessionUpdate
 
 __all__ = [
     "AuthMeResponse",
@@ -27,7 +26,4 @@ __all__ = [
     "WSMessage",
     "WSCommandMessage",
     "WSCommandResult",
-    "SessionCreate",
-    "SessionUpdate",
-    "SessionResponse",
 ]

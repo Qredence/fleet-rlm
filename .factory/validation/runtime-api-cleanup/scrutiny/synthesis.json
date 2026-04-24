@@ -1,0 +1,74 @@
+{
+  "milestone": "runtime-api-cleanup",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "make test",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "make typecheck",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "make lint",
+      "exitCode": 0
+    },
+    "formatCheck": {
+      "passed": true,
+      "command": "make format-check",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Removed stale reference to runtime/execution/streaming.py from .factory/library/cleanup-audit.md complexity hotspots list.",
+      "sourceFeature": "runtime-consolidate-execution"
+    },
+    {
+      "target": "library",
+      "description": "Marked streaming.py consolidation and ws/ helpers consolidation as completed in .factory/library/architecture.md planned refactoring section.",
+      "sourceFeature": "runtime-consolidate-execution"
+    },
+    {
+      "target": "library",
+      "description": "Updated .factory/library/runtime-patterns.md to reference streaming_events.py instead of deleted streaming.py for TERMINAL_STREAM_EVENT_KINDS.",
+      "sourceFeature": "runtime-consolidate-execution"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add a note reminding workers to update the regression guard test `test_ws_router_split_modules_import` in `tests/ui/server/test_api_contract_routes.py` when ws modules are merged or renamed.",
+      "evidence": "The api-consolidate-ws worker correctly updated this test, but it's a valuable pattern that should be explicitly documented to prevent future regressions.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "docs/reference/source-layout.md:29 lists server_utils.py as active; docs/reference/module-map.md:103 references streaming_context.py; multiple docs files reference worker/streaming.py",
+      "reason": "already-documented — a dedicated follow-up feature 'docs-update-stale-references' (id: docs-update-stale-references) already exists in the mission backlog to address stale Daytona and runtime module references in docs/."
+    },
+    {
+      "observation": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md:50 references deleted runtime/execution/streaming.py",
+      "reason": "already-documented — AGENTS.md explicitly lists scaffold/ as off-limits for this mission."
+    },
+    {
+      "observation": "Functions build_execution_event and map_execution_step_type in lifecycle.py appear to have no external callers",
+      "reason": "already-documented — these were likely already unused before the refactor; removing them is a separate dead-code cleanup task, not a blocking issue for this milestone."
+    }
+  ],
+  "previousRound": null
+}

@@ -316,7 +316,7 @@ async def run_daytona_connection_test(
         try:
             from fleet_rlm.integrations.daytona import resolve_daytona_config
             from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
-            from fleet_rlm.integrations.daytona.runtime_helpers import (
+            from fleet_rlm.integrations.daytona.runtime import (
                 _build_daytona_client,
             )
 

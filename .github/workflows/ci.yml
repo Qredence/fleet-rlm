@@ -48,8 +48,10 @@ jobs:
         run: |
           # TODO: Remove this ignore once Pygments ships a patched release for
           # GHSA-5239-wwwm-4pmq / CVE-2026-4539.
-          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
-          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/_scaffold -lll
+          # TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
+          # pulls pip 26.0.1 / CVE-2026-3219.
+          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219
+          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
       - name: Python unused dependencies (deptry)
         run: uvx deptry . --config pyproject.toml
@@ -62,7 +64,7 @@ jobs:
       - name: Type-check with ty
         run: >
           uv run ty check src
-          --exclude "src/fleet_rlm/_scaffold/**"
+          --exclude "src/fleet_rlm/scaffold/**"
           --exclude "src/fleet_rlm/analytics/**"
           --exclude "src/fleet_rlm/daytona_rlm/**"
 
@@ -174,7 +176,7 @@ jobs:
 
       - name: Install Vite+ CLI
         if: steps.frontend.outputs.enabled == 'true'
-        run: npm install -g vite-plus@0.1.11
+        run: npm install -g vite-plus@0.1.17
 
       - name: Frontend install
         if: steps.frontend.outputs.enabled == 'true'

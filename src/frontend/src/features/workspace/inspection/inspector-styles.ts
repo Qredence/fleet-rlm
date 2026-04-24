@@ -37,9 +37,9 @@ export const inspectorStyles = {
   /** Text headings. */
   heading: {
     /** Section heading (e.g. "Citations", "Tool sessions", "Execution"). */
-    section: "text-[11px] font-medium tracking-[0.04em] text-muted-foreground",
+    section: "typo-body-xs font-medium tracking-[0.04em] text-muted-foreground",
     /** Micro label inside detail blocks (e.g. "Input", "Output", "Code"). */
-    detail: "text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
+    detail: "typo-helper uppercase tracking-[0.16em] text-muted-foreground",
   },
 
   /** Card chrome. */
@@ -82,7 +82,7 @@ export const inspectorStyles = {
 
   /** Runtime context inline text (pill-joined with " · "). */
   runtime: {
-    inline: "text-[10px] leading-relaxed text-muted-foreground",
+    inline: "typo-helper leading-relaxed text-muted-foreground",
   },
 
   /** Graph tab specifics. */

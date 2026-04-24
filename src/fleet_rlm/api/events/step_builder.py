@@ -22,7 +22,6 @@ from .step_builder_mapping import (
     build_status_spec,
     build_tool_call_spec,
     build_tool_result_spec,
-    build_trajectory_spec,
 )
 
 
@@ -209,27 +208,6 @@ class ExecutionStepBuilder:
             raw_payload=payload_obj,
         )
 
-    def _build_trajectory_step(
-        self,
-        *,
-        text: str,
-        payload_obj: dict[str, Any],
-        timestamp: float,
-    ) -> ExecutionStep:
-        step_type, label, input_payload, output_payload = build_trajectory_spec(
-            text=text,
-            payload_obj=payload_obj,
-        )
-        return self._build_step(
-            step_type=step_type,
-            label=label,
-            input_payload=input_payload,
-            output_payload=output_payload,
-            timestamp=timestamp,
-            parent_id=self._resolve_parent(payload_obj),
-            raw_payload=payload_obj,
-        )
-
     def from_stream_event(
         self,
         *,
@@ -241,7 +219,7 @@ class ExecutionStepBuilder:
         payload_obj = payload if isinstance(payload, dict) else {}
         stripped_text = (text or "").strip()
 
-        if kind == "assistant_token":
+        if kind == "text":
             return None
 
         if kind in {"status", "warning"}:
@@ -251,7 +229,7 @@ class ExecutionStepBuilder:
                 timestamp=timestamp,
             )
 
-        if kind in {"reasoning_step", "plan_update", "rlm_executing", "memory_update"}:
+        if kind == "reasoning":
             return self._build_simple_event_step(
                 kind=kind,
                 text=stripped_text,
@@ -273,14 +251,7 @@ class ExecutionStepBuilder:
                 timestamp=timestamp,
             )
 
-        if kind == "trajectory_step":
-            return self._build_trajectory_step(
-                text=stripped_text,
-                payload_obj=payload_obj,
-                timestamp=timestamp,
-            )
-
-        if kind in {"final", "cancelled", "error"}:
+        if kind in {"done", "error"}:
             return self._build_output_like_step(
                 kind=kind,
                 text=stripped_text,

@@ -392,19 +392,14 @@ async for value in stream_rlm(prompt="Analyze this document", context="..."):
 
 ### Delegation from ReAct Agents
 
-The `RLMReActChatAgent` delegates to child RLMs via the `rlm_query` tool:
+The `FleetAgent` delegates to child RLMs via the `rlm_query` tool:
 
 ```python
-from fleet_rlm.runtime.agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.runtime.agent.agent import FleetAgent
 
-agent = RLMReActChatAgent(
-    react_max_iters=10,
-    rlm_max_iterations=30,
-    rlm_max_llm_calls=50,
-    delegate_lm=None,  # Uses parent LM if not specified
-    delegate_max_calls_per_turn=8,
-    timeout=900,
-    secret_name="LITELLM",
+agent = FleetAgent(
+    tools=[...],
+    max_iters=10,
 )
 
 # The agent can use rlm_query tool for long-context tasks
@@ -529,7 +524,7 @@ If recursive delegation hits depth limits:
 
 ```python
 # Increase max depth
-agent = RLMReActChatAgent(max_depth=4)
+agent = FleetAgent(tools=[...], max_iters=4)
 
 # Or simplify the task to reduce delegation
 ```

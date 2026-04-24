@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -70,6 +71,7 @@ class _FakeAgentInterpreter:
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         _ = force_new_session
@@ -78,6 +80,7 @@ class _FakeAgentInterpreter:
             "repo_ref": repo_ref,
             "context_paths": list(context_paths or []),
             "volume_name": volume_name,
+            "sandbox_labels": dict(sandbox_labels or {}),
         }
         self.workspace_config_calls.append(payload)
         self.repo_url = repo_url
@@ -92,6 +95,7 @@ class _FakeAgentInterpreter:
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         self.configure_workspace(
@@ -99,6 +103,7 @@ class _FakeAgentInterpreter:
             repo_ref=repo_ref,
             context_paths=context_paths,
             volume_name=volume_name,
+            sandbox_labels=sandbox_labels,
             force_new_session=force_new_session,
         )
 
@@ -171,7 +176,12 @@ class FakeChatAgent:
         }
         for event in self._events:
             if cancel_check is not None and cancel_check():
-                yield StreamEvent(kind="cancelled", text="[cancelled]", timestamp=ts())
+                yield StreamEvent(
+                    kind="done",
+                    text="[cancelled]",
+                    payload={"cancelled": True},
+                    timestamp=ts(),
+                )
                 return
             await asyncio.sleep(0.01)
             yield event
@@ -243,12 +253,17 @@ class DelayedRepository:
         self.completion_delay_seconds = completion_delay_seconds
         self.tenant_id = uuid.uuid4()
         self.user_id = uuid.uuid4()
+        self.workspace_id = uuid.uuid4()
         self.run_id = uuid.uuid4()
         self.update_run_status_calls = 0
 
     async def upsert_identity(self, **kwargs) -> SimpleNamespace:
         _ = kwargs
-        return SimpleNamespace(tenant_id=self.tenant_id, user_id=self.user_id)
+        return SimpleNamespace(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            workspace_id=self.workspace_id,
+        )
 
     async def create_run(self, request) -> SimpleNamespace:
         _ = request
@@ -316,6 +331,11 @@ def apply_ui_test_env(monkeypatch, tmp_path, *, planner: object = "fake-planner-
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
+    # Use the direct admin connection for tests to avoid PgBouncer
+    # prepared-statement cache invalidation after DDL changes.
+    admin_url = os.environ.get("DATABASE_ADMIN_URL")
+    if admin_url:
+        monkeypatch.setenv("DATABASE_URL", admin_url)
     patch_runtime_lm_loaders(monkeypatch, planner=planner, delegate=None)
     return env_path
 

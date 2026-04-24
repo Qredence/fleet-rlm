@@ -36,28 +36,6 @@ export type {
 
 export { createBackendSessionId };
 
-function sanitizeLogValue(value: unknown): string {
-  let text: string;
-  if (value instanceof Error) {
-    text = `${value.name}: ${value.message}`;
-  } else if (typeof value === "string") {
-    text = value;
-  } else {
-    try {
-      text = JSON.stringify(value);
-    } catch {
-      text = String(value);
-    }
-  }
-  // Remove ASCII control characters (including newlines) to prevent log injection.
-  let sanitized = "";
-  for (const char of text) {
-    const code = char.charCodeAt(0);
-    sanitized += code <= 0x1f || code === 0x7f ? " " : char;
-  }
-  return sanitized;
-}
-
 export async function streamChatOverWs(
   message: WsMessageRequest,
   options: StreamWsOptions,
@@ -96,7 +74,7 @@ export function subscribeToExecutionStream(
   const controller = new AbortController();
 
   if (!rlmApiConfig.wsExecutionUrl) {
-    console.warn("WebSocket Execution URL is not configured");
+    // WebSocket Execution URL is not configured — return no-op cleanup.
     return () => controller.abort();
   }
 
@@ -109,8 +87,8 @@ export function subscribeToExecutionStream(
     signal: controller.signal,
     terminalEventKinds: [],
     abortMode: "close",
-  }).catch((err: unknown) => {
-    console.error("Execution stream error:", sanitizeLogValue(err));
+  }).catch(() => {
+    // Execution stream error swallowed silently to prevent unhandled rejection.
   });
 
   return () => controller.abort();

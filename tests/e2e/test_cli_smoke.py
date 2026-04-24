@@ -42,7 +42,7 @@ def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     help_text = _normalized_help_text(result.stdout)
-    for command in ("init", "serve-api", "serve-mcp", "chat", "daytona-smoke"):
+    for command in ("init", "serve-api", "chat", "daytona-smoke"):
         assert command in help_text
 
 

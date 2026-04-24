@@ -11,8 +11,7 @@ Current simplification audit for the operational Python package under `src/fleet
 
 ## Largest complexity hotspots
 
-- `src/fleet_rlm/runtime/agent/chat_agent.py`
-- `src/fleet_rlm/runtime/execution/streaming.py`
+- `src/fleet_rlm/runtime/agent/agent.py`
 - `src/fleet_rlm/api/routers/ws/stream.py`
 - `src/fleet_rlm/api/routers/ws/runtime.py`
 - `src/fleet_rlm/cli/runtime_factory.py`

@@ -110,6 +110,48 @@ paths:
           description: Filter by status (active, archived)
           title: Status
         description: Filter by status (active, archived)
+      - name: created_after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: Filter sessions created on or after this date (ISO 8601)
+          title: Created After
+        description: Filter sessions created on or after this date (ISO 8601)
+      - name: created_before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          description: Filter sessions created on or before this date (ISO 8601)
+          title: Created Before
+        description: Filter sessions created on or before this date (ISO 8601)
+      - name: model_name
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by exact model name
+          title: Model Name
+        description: Filter by exact model name
+      - name: model_provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by exact model provider
+          title: Model Provider
+        description: Filter by exact model provider
       - name: limit
         in: query
         required: false
@@ -138,6 +180,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
         '422':
           description: Validation Error
           content:
@@ -158,7 +207,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the session to inspect.
           title: Session Id
         description: Identifier of the session to inspect.
@@ -169,6 +218,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - sessions
+      summary: Patch session metadata
+      description: Update session title and/or metadata_json. Returns the updated
+        session snapshot.
+      operationId: patch_session_endpoint_api_v1_sessions__session_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session to update.
+          title: Session Id
+        description: Identifier of the session to update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionPatchRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
         '422':
           description: Validation Error
           content:
@@ -189,7 +293,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the session to archive.
           title: Session Id
         description: Identifier of the session to archive.
@@ -200,6 +304,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDeleteResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
         '422':
           description: Validation Error
           content:
@@ -220,7 +333,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the session whose turns to list.
           title: Session Id
         description: Identifier of the session whose turns to list.
@@ -252,6 +365,99 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TurnListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/stats:
+    get:
+      tags:
+      - sessions
+      summary: Get session usage stats
+      description: Aggregated token counts, latency, and model breakdown for all turns
+        in a session.
+      operationId: get_session_stats_api_v1_sessions__session_id__stats_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session whose stats to retrieve.
+          title: Session Id
+        description: Identifier of the session whose stats to retrieve.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionStatsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/restore:
+    post:
+      tags:
+      - sessions
+      summary: Restore session
+      description: Unarchive (restore) a soft-deleted session. Returns success when
+        restored, 404 if not found, 409 if already active.
+      operationId: restore_session_endpoint_api_v1_sessions__session_id__restore_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session to restore.
+          title: Session Id
+        description: Identifier of the session to restore.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionRestoreResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '409':
+          description: Session is already active.
         '422':
           description: Validation Error
           content:
@@ -274,7 +480,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the session to export as a dataset.
           title: Session Id
         description: Identifier of the session to export as a dataset.
@@ -291,6 +497,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatasetResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '400':
+          description: Invalid export parameters.
         '422':
           description: Validation Error
           content:
@@ -563,6 +780,342 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/volumes:
+    get:
+      tags:
+      - runtime
+      summary: Get Volumes
+      description: List the active workspace volume for the selected provider.
+      operationId: get_volumes_api_v1_runtime_volumes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - const: daytona
+            type: string
+          - type: 'null'
+          description: Optional runtime volume backend override. Defaults to the active
+            sandbox provider.
+          title: Provider
+        description: Optional runtime volume backend override. Defaults to the active
+          sandbox provider.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '400':
+          description: The requested volume provider is not supported.
+        '502':
+          description: The runtime volume provider failed to list volumes.
+        '504':
+          description: Volume list timed out before the backend returned a result.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes:
+    get:
+      tags:
+      - sandboxes
+      summary: List sandboxes
+      description: List active Daytona sandboxes with id, state, created_at, and volume
+        info.
+      operationId: list_sandboxes_api_v1_sandboxes_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number for pagination (starting from 1).
+          default: 1
+          title: Page
+        description: Page number for pagination (starting from 1).
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum number of sandboxes per page.
+          default: 100
+          title: Limit
+        description: Maximum number of sandboxes per page.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes/{sandbox_id}:
+    get:
+      tags:
+      - sandboxes
+      summary: Get sandbox details
+      description: Return full sandbox details including state, config, and volume.
+      operationId: get_sandbox_detail_api_v1_sandboxes__sandbox_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - sandboxes
+      summary: Delete sandbox
+      description: Stop and permanently delete a Daytona sandbox.
+      operationId: delete_sandbox_endpoint_api_v1_sandboxes__sandbox_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sandboxes/{sandbox_id}/archive:
+    post:
+      tags:
+      - sandboxes
+      summary: Archive sandbox
+      description: Archive a Daytona sandbox to cold storage for later recovery.
+      operationId: archive_sandbox_endpoint_api_v1_sandboxes__sandbox_id__archive_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: sandbox_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Unique sandbox identifier.
+          title: Sandbox Id
+        description: Unique sandbox identifier.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxArchiveResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Sandbox not found or inaccessible.
+        '503':
+          description: Sandbox services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/steps:
+    get:
+      tags:
+      - runs
+      summary: List run steps
+      description: Paginated execution trace steps for a run with step_type, tool_name,
+        tokens, and latency.
+      operationId: get_run_steps_api_v1_runs__run_id__steps_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the run whose steps to list.
+          title: Run Id
+        description: Identifier of the run whose steps to list.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size
+          default: 50
+          title: Limit
+        description: Page size
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset
+          default: 0
+          title: Offset
+        description: Pagination offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStepListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Run services are unavailable because server startup is incomplete.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/memory:
+    get:
+      tags:
+      - memory
+      summary: List memory items
+      description: Return memory items filtered by scope and scope_id. Without filters,
+        returns all memory for the authenticated user.
+      operationId: list_memory_items_api_v1_memory_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by memory scope (user, tenant, workspace, run, session).
+          title: Scope
+        description: Filter by memory scope (user, tenant, workspace, run, session).
+      - name: scope_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by scope identifier.
+          title: Scope Id
+        description: Filter by scope identifier.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size
+          default: 100
+          title: Limit
+        description: Page size
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset
+          default: 0
+          title: Offset
+        description: Pagination offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Memory services are unavailable because server startup is incomplete.
+        '400':
+          description: Invalid scope filter value.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/optimization/status:
     get:
       tags:
@@ -728,44 +1281,14 @@ paths:
                 title: Response List Runs Api V1 Optimization Runs Get
         '401':
           description: Authentication is required or the provided token is invalid.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/optimization/transcript-datasets:
-    post:
-      tags:
-      - optimization
-      summary: Create Dataset From Transcript
-      description: Convert transcript turns into a GEPA dataset.
-      operationId: create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TranscriptDatasetRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatasetResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
         '400':
-          description: Invalid transcript dataset payload.
+          description: Invalid status filter.
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-      security:
-      - HTTPBearer: []
   /api/v1/optimization/runs/compare:
     get:
       tags:
@@ -815,7 +1338,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the optimization run to fetch.
           title: Run Id
         description: Identifier of the optimization run to fetch.
@@ -836,6 +1359,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/runs/{run_id}/results:
+    get:
+      tags:
+      - optimization
+      summary: Get Run Results
+      description: Return per-example evaluation results for an optimization run.
+      operationId: get_run_results_api_v1_optimization_runs__run_id__results_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the optimization run whose results to list.
+          title: Run Id
+        description: Identifier of the optimization run whose results to list.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          description: Maximum number of evaluation rows to return.
+          default: 100
+          title: Limit
+        description: Maximum number of evaluation rows to return.
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset into the evaluation results.
+          default: 0
+          title: Offset
+        description: Pagination offset into the evaluation results.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationResultsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/transcript-datasets:
+    post:
+      tags:
+      - optimization
+      summary: Create Dataset From Transcript
+      description: Convert transcript turns into a GEPA dataset.
+      operationId: create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptDatasetRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '400':
+          description: Invalid transcript dataset payload.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/optimization/datasets:
     post:
       tags:
@@ -937,7 +1548,7 @@ paths:
         in: path
         required: true
         schema:
-          type: integer
+          type: string
           description: Identifier of the dataset to inspect.
           title: Dataset Id
         description: Identifier of the dataset to inspect.
@@ -952,62 +1563,6 @@ paths:
           description: Authentication is required or the provided token is invalid.
         '404':
           description: Dataset not found.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/optimization/runs/{run_id}/results:
-    get:
-      tags:
-      - optimization
-      summary: Get Run Results
-      description: Return per-example evaluation results for an optimization run.
-      operationId: get_run_results_api_v1_optimization_runs__run_id__results_get
-      security:
-      - HTTPBearer: []
-      parameters:
-      - name: run_id
-        in: path
-        required: true
-        schema:
-          type: integer
-          description: Identifier of the optimization run whose results to list.
-          title: Run Id
-        description: Identifier of the optimization run whose results to list.
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 500
-          minimum: 1
-          description: Maximum number of evaluation rows to return.
-          default: 100
-          title: Limit
-        description: Maximum number of evaluation rows to return.
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          description: Pagination offset into the evaluation results.
-          default: 0
-          title: Offset
-        description: Pagination offset into the evaluation results.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvaluationResultsResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
-        '404':
-          description: Run not found.
         '422':
           description: Validation Error
           content:
@@ -1116,7 +1671,7 @@ components:
     DatasetDetailResponse:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
           description: Unique dataset identifier.
         name:
@@ -1199,7 +1754,7 @@ components:
     DatasetResponse:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
           description: Unique dataset identifier.
         name:
@@ -1236,7 +1791,7 @@ components:
     EvaluationResultItem:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
           description: Unique evaluation result identifier.
         example_index:
@@ -1347,7 +1902,7 @@ components:
           description: Relative filesystem path to the dataset file.
         dataset_id:
           anyOf:
-          - type: integer
+          - type: string
           - type: 'null'
           title: Dataset Id
           description: Registered dataset identifier to optimize against.
@@ -1502,10 +2057,96 @@ components:
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
+    MemoryItemResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Durable memory item identifier.
+        scope:
+          type: string
+          title: Scope
+          description: Memory scope (e.g. user, tenant, workspace, run, session).
+        scope_id:
+          type: string
+          title: Scope Id
+          description: Identifier within the scope.
+        kind:
+          type: string
+          title: Kind
+          description: Memory kind (e.g. fact, observation, preference).
+        source:
+          type: string
+          title: Source
+          description: Memory source (e.g. user, agent, system).
+        status:
+          type: string
+          title: Status
+          description: Memory status (e.g. active, archived).
+        content_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Text
+          description: Textual content when available.
+        importance:
+          type: integer
+          title: Importance
+          description: Importance score (0-100).
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          description: Associated tags.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+      - id
+      - scope
+      - scope_id
+      - kind
+      - source
+      - status
+      - importance
+      - created_at
+      title: MemoryItemResponse
+      description: Single memory item returned by the memory browse endpoint.
+    MemoryListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/MemoryItemResponse'
+          type: array
+          title: Items
+          description: Memory item list items.
+        total:
+          type: integer
+          title: Total
+          description: Total matching memory items.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+      type: object
+      required:
+      - items
+      - total
+      - offset
+      - limit
+      title: MemoryListResponse
+      description: Paginated memory item list response.
     OptimizationRunCreatedResponse:
       properties:
         run_id:
-          type: integer
+          type: string
           title: Run Id
           description: Unique identifier for the created run.
         status:
@@ -1521,7 +2162,7 @@ components:
     OptimizationRunResponse:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
           description: Unique run identifier.
         status:
@@ -1690,7 +2331,7 @@ components:
     RunComparisonItem:
       properties:
         run_id:
-          type: integer
+          type: string
           title: Run Id
           description: Optimization run identifier.
         program_spec:
@@ -1729,6 +2370,89 @@ components:
       - runs
       title: RunComparisonResponse
       description: Cross-run comparison payload.
+    RunStepItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Durable step identifier.
+        step_index:
+          type: integer
+          title: Step Index
+          description: Step position within the run.
+        step_type:
+          type: string
+          title: Step Type
+          description: Step type (e.g. tool_call, reasoning).
+        tool_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tool Name
+          description: Tool name when applicable.
+        tokens_in:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens In
+          description: Input token count.
+        tokens_out:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens Out
+          description: Output token count.
+        latency_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Latency Ms
+          description: Step latency in milliseconds.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO-8601 creation timestamp.
+      type: object
+      required:
+      - id
+      - step_index
+      - step_type
+      - created_at
+      title: RunStepItem
+      description: Single execution step for a run.
+    RunStepListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/RunStepItem'
+          type: array
+          title: Items
+          description: Step list items.
+        total:
+          type: integer
+          title: Total
+          description: Total steps in run.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more steps exist beyond this page.
+      type: object
+      required:
+      - items
+      - total
+      - offset
+      - limit
+      - has_more
+      title: RunStepListResponse
+      description: Paginated execution step list for a run.
     RuntimeActiveModels:
       properties:
         planner:
@@ -1942,6 +2666,224 @@ components:
       type: object
       title: RuntimeTestCache
       description: Cached runtime test results included in the runtime status payload.
+    SandboxArchiveResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the sandbox was archived successfully.
+          default: true
+      type: object
+      title: SandboxArchiveResponse
+      description: Result payload after archiving a sandbox.
+    SandboxDetailResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Sandbox identifier.
+        name:
+          type: string
+          title: Name
+          description: Sandbox name.
+        state:
+          type: string
+          title: State
+          description: Sandbox state (e.g. started, stopped, archived).
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+        volume_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Name
+          description: Name of the persistent volume attached to the sandbox.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Custom labels attached to the sandbox.
+        cpu:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu
+          description: Allocated CPU cores.
+        memory:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Memory
+          description: Allocated memory in GiB.
+        disk:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Disk
+          description: Allocated disk in GiB.
+        env_vars:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env Vars
+          description: Environment variables configured for the sandbox.
+        image:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Image
+          description: Base image or declarative image used by the sandbox.
+        snapshot:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Snapshot
+          description: Snapshot name used to create the sandbox.
+        language:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Language
+          description: Programming language of the sandbox.
+        auto_stop_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Stop Interval
+          description: Minutes of inactivity before auto-stopping.
+        auto_archive_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Archive Interval
+          description: Minutes after stop before archiving to cold storage.
+        auto_delete_interval:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Auto Delete Interval
+          description: Minutes after archive before permanent deletion.
+        ephemeral:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Ephemeral
+          description: Whether the sandbox is ephemeral.
+        network_block_all:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Network Block All
+          description: Whether all outbound network is blocked.
+        network_allow_list:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Network Allow List
+          description: Comma-separated list of allowed domains.
+        volumes:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Volumes
+          description: Detailed volume mounts.
+      type: object
+      required:
+      - id
+      - name
+      - state
+      title: SandboxDetailResponse
+      description: Detailed response for a single sandbox.
+    SandboxListItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Sandbox identifier.
+        name:
+          type: string
+          title: Name
+          description: Sandbox name.
+        state:
+          type: string
+          title: State
+          description: Sandbox state (e.g. started, stopped, archived).
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+        volume_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Name
+          description: Name of the persistent volume attached to the sandbox.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Custom labels attached to the sandbox.
+        cpu:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu
+          description: Allocated CPU cores.
+        memory:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Memory
+          description: Allocated memory in GiB.
+        disk:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Disk
+          description: Allocated disk in GiB.
+      type: object
+      required:
+      - id
+      - name
+      - state
+      title: SandboxListItem
+      description: Single sandbox entry returned by the sandbox list endpoint.
+    SandboxListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/SandboxListItem'
+          type: array
+          title: Items
+          description: Available sandboxes.
+        total:
+          type: integer
+          title: Total
+          description: Total number of sandboxes.
+        page:
+          type: integer
+          title: Page
+          description: Current page number.
+          default: 1
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: Total number of pages.
+          default: 1
+      type: object
+      required:
+      - total
+      title: SandboxListResponse
+      description: Response for the sandbox list endpoint.
     SessionDeleteResponse:
       properties:
         ok:
@@ -1955,9 +2897,9 @@ components:
     SessionDetailResponse:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
-          description: Local store primary key.
+          description: Durable session identifier.
         title:
           type: string
           title: Title
@@ -2022,9 +2964,9 @@ components:
     SessionListItem:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
-          description: Local store primary key.
+          description: Durable session identifier.
         title:
           type: string
           title: Title
@@ -2095,6 +3037,34 @@ components:
       - has_more
       title: SessionListResponse
       description: Paginated session list.
+    SessionPatchRequest:
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+          description: New human-readable session title.
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+          description: New metadata dictionary to merge or replace session metadata.
+      type: object
+      title: SessionPatchRequest
+      description: Patch body for updating session metadata.
+    SessionRestoreResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the session was restored successfully.
+          default: true
+      type: object
+      title: SessionRestoreResponse
+      description: Result payload after restoring an archived session.
     SessionStateResponse:
       properties:
         ok:
@@ -2171,6 +3141,32 @@ components:
       - user_id
       title: SessionStateSummary
       description: Lightweight summary of a persisted or active chat session.
+    SessionStatsResponse:
+      properties:
+        total_tokens_in:
+          type: integer
+          title: Total Tokens In
+          description: Total input tokens across all turns.
+          default: 0
+        total_tokens_out:
+          type: integer
+          title: Total Tokens Out
+          description: Total output tokens across all turns.
+          default: 0
+        total_latency_ms:
+          type: integer
+          title: Total Latency Ms
+          description: Total latency in milliseconds across all turns.
+          default: 0
+        model_breakdown:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Model Breakdown
+          description: Mapping of model_name to turn count.
+      type: object
+      title: SessionStatsResponse
+      description: Aggregated usage stats for a session.
     TraceFeedbackRequest:
       properties:
         trace_id:
@@ -2286,9 +3282,9 @@ components:
     TurnItem:
       properties:
         id:
-          type: integer
+          type: string
           title: Id
-          description: Turn primary key.
+          description: Durable turn identifier.
         turn_index:
           type: integer
           title: Turn Index
@@ -2418,6 +3414,51 @@ components:
       - content
       title: VolumeFileContentResponse
       description: Response for runtime volume file-content preview endpoint.
+    VolumeListItem:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Volume identifier.
+        name:
+          type: string
+          title: Name
+          description: Volume name.
+        state:
+          type: string
+          title: State
+          description: Volume state (e.g. ready, creating).
+          default: ''
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+          description: ISO-8601 creation timestamp when available.
+      type: object
+      required:
+      - id
+      - name
+      title: VolumeListItem
+      description: Single volume entry returned by the volume list endpoint.
+    VolumeListResponse:
+      properties:
+        provider:
+          type: string
+          const: daytona
+          title: Provider
+          description: Runtime volume backend used to satisfy the request.
+        volumes:
+          items:
+            $ref: '#/components/schemas/VolumeListItem'
+          type: array
+          title: Volumes
+          description: Available persistent volumes.
+      type: object
+      required:
+      - provider
+      title: VolumeListResponse
+      description: Response for the volume list endpoint.
     VolumeTreeNode:
       properties:
         id:

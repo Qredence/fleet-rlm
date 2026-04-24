@@ -35,7 +35,7 @@ import {
 } from "@/lib/rlm-api/optimization";
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
-const SETTINGS_SECTION_CLASSNAME = "max-w-[44rem] gap-4";
+const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 const CUSTOM_MODULE_VALUE = "__custom__";
 const CUSTOM_RATIO_VALUE = "__custom__";
 const CUSTOM_DATASET_VALUE = "__custom_dataset__";
@@ -51,7 +51,7 @@ const TRAIN_RATIO_PRESETS = [
 
 export interface OptimizationRunDraft {
   moduleSlug?: string | null;
-  datasetId?: number | null;
+  datasetId?: string | null;
   datasetName?: string | null;
   datasetPath?: string | null;
   programSpec?: string | null;
@@ -155,9 +155,7 @@ export function OptimizationForm({
       ? (modules.find((m) => m.slug === selectedModule) ?? null)
       : null;
   const selectedDatasetId =
-    selectedDatasetValue !== CUSTOM_DATASET_VALUE
-      ? Number.parseInt(selectedDatasetValue, 10)
-      : null;
+    selectedDatasetValue !== CUSTOM_DATASET_VALUE ? selectedDatasetValue : null;
   const selectedDataset =
     selectedDatasetId != null
       ? (availableDatasets.find((dataset) => dataset.id === selectedDatasetId) ?? null)

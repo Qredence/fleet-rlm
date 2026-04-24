@@ -1,38 +1,27 @@
 # Environment
 
-Environment variables, external dependencies, and setup notes for the DSPy refactor mission.
+Environment variables, external dependencies, and setup notes.
 
-**What belongs here:** required env vars, external services, provider notes, local setup caveats.
-**What does NOT belong here:** service commands/ports (see `.factory/services.yaml`).
+**What belongs here:** Required env vars, external API keys/services, dependency quirks.
+**What does NOT belong here:** Service ports/commands (use `.factory/services.yaml`).
 
 ---
 
-## Required Runtime Inputs
+## Python Environment
+- Python 3.13.9, managed via `uv`
+- DSPy 3.1.3 pinned in pyproject.toml
+- All extras: `uv sync --all-extras`
 
-### DSPy / LM
-- `DSPY_LM_MODEL` or equivalent configured planner model
-- `DSPY_LM_API_KEY` or provider-specific API key consumed by the runtime settings flow
-- Optional `LM_API_BASE` / proxy URL when routed through LiteLLM-compatible infrastructure
+## Key Env Vars
+- `DAYTONA_API_KEY`, `DAYTONA_API_URL` — Daytona sandbox access
+- `DATABASE_URL` — pooled Neon runtime connection
+- `DATABASE_ADMIN_URL` — direct Neon for Alembic/admin
+- `FLEET_RLM_LOCAL_DB_URL` — SQLite sidecar override (default: `.data/local.db`)
+- `APP_ENV` — `local` enables settings PATCH
+- `AUTH_MODE` — `dev` or `entra`
 
-### Daytona
-- `DAYTONA_API_KEY`
-- `DAYTONA_API_URL`
-- `DAYTONA_TARGET`
-- Any volume/workspace defaults used by the local runtime configuration
-
-### MLflow / optimization
-- Existing MLflow server is available on `http://127.0.0.1:5001`
-- Prefer `MLFLOW_AUTO_START=false` during local mission validation so workers reuse the existing service instead of starting a competing one
-- Optimization requires MLflow to be enabled plus a valid trace dataset and resolvable DSPy program spec
-
-## Local Notes
-
-- The local app entrypoint for validation is `uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000`.
-- The packaged UI is served by FastAPI; a separate frontend dev server is not required for browser validation.
-- During planning, live workspace execution failed because Daytona volume `rlm-volume-dspy` was stuck in `pending_create`. This mission explicitly includes fixing that readiness path.
-
-## Safety Notes
-
-- Do not commit secrets written through runtime settings.
-- Treat runtime settings secret fields as write-only; preserve redaction behavior.
-- Reuse the configured MLflow service rather than mutating its deployment.
+## DSPy 3.1.3 Notes
+- No `@dspy.tool` decorator — tools are plain callables or `dspy.Tool(func)` wrappers
+- `dspy.ReAct(signature, tools=[...])` accepts list of callables
+- `dspy.History` is a frozen Pydantic model
+- `dspy.streamify(program)` returns async generator

@@ -10,6 +10,7 @@ export function useRuntimeStatus(options?: { enabled?: boolean; refetchIntervalM
     queryFn: ({ signal }) => runtimeEndpoints.status(signal),
     staleTime: 10_000,
     refetchInterval: options?.refetchIntervalMs ?? 30_000,
+    refetchOnWindowFocus: true,
     enabled: options?.enabled ?? true,
   });
 }

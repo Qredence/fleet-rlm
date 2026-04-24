@@ -38,8 +38,6 @@ from fleet_rlm.integrations.observability.mlflow_runtime import (
     new_client_request_id,
 )
 from fleet_rlm.runtime.factory import (
-    _build_react_agent_from_options,
-    _ReActAgentOptions,
     _require_planner_ready,
     build_chat_agent,
 )
@@ -117,31 +115,27 @@ def run_react_chat_once(
     delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Run a single prompt through the interactive ReAct chat agent."""
-    options = _ReActAgentOptions(
-        react_max_iters=react_max_iters,
-        deep_react_max_iters=deep_react_max_iters,
-        enable_adaptive_iters=enable_adaptive_iters,
-        rlm_max_iterations=rlm_max_iterations,
-        rlm_max_llm_calls=rlm_max_llm_calls,
-        max_depth=max_depth,
-        timeout=timeout,
-        secret_name=secret_name,
-        volume_name=volume_name,
-        verbose=verbose,
-        interpreter_async_execute=interpreter_async_execute,
-        guardrail_mode=guardrail_mode,
-        max_output_chars=max_output_chars,
-        min_substantive_chars=min_substantive_chars,
-        delegate_lm=delegate_lm,
-        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
-        delegate_result_truncation_chars=delegate_result_truncation_chars,
-    )
     with (
-        _build_react_agent_from_options(
-            options=options,
+        build_chat_agent(
             docs_path=docs_path,
+            react_max_iters=react_max_iters,
+            deep_react_max_iters=deep_react_max_iters,
+            enable_adaptive_iters=enable_adaptive_iters,
+            rlm_max_iterations=rlm_max_iterations,
+            rlm_max_llm_calls=rlm_max_llm_calls,
+            max_depth=max_depth,
+            timeout=timeout,
+            secret_name=secret_name,
+            volume_name=volume_name,
+            verbose=verbose,
+            interpreter_async_execute=interpreter_async_execute,
+            guardrail_mode=guardrail_mode,
+            max_output_chars=max_output_chars,
+            min_substantive_chars=min_substantive_chars,
+            delegate_lm=delegate_lm,
+            delegate_max_calls_per_turn=delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=delegate_result_truncation_chars,
             env_file=env_file,
-            planner_lm=None,
         ) as agent,
         mlflow_request_context(
             _runner_trace_context(
@@ -185,7 +179,8 @@ async def arun_react_chat_once(
     delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Async version of ``run_react_chat_once`` using ``achat_turn``."""
-    options = _ReActAgentOptions(
+    agent = build_chat_agent(
+        docs_path=docs_path,
         react_max_iters=react_max_iters,
         deep_react_max_iters=deep_react_max_iters,
         enable_adaptive_iters=enable_adaptive_iters,
@@ -203,10 +198,6 @@ async def arun_react_chat_once(
         delegate_lm=delegate_lm,
         delegate_max_calls_per_turn=delegate_max_calls_per_turn,
         delegate_result_truncation_chars=delegate_result_truncation_chars,
-    )
-    agent = _build_react_agent_from_options(
-        options=options,
-        docs_path=docs_path,
         env_file=env_file,
         planner_lm=planner_lm,
     )

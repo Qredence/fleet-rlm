@@ -97,7 +97,7 @@ export function LoginDialog({ open, onOpenChange, returnFocusRef }: LoginDialogP
         <SheetContent
           side="bottom"
           showCloseButton={false}
-          className="surface-glass-sheet inset-x-0 bottom-0 top-auto max-h-[85dvh] rounded-t-[calc(var(--radius-xl)+0.25rem)] border-t-0 px-0 pt-0 pb-0"
+          className="surface-glass-sheet inset-x-0 bottom-0 top-auto max-h-sheet rounded-t-[calc(var(--radius-xl)+0.25rem)] border-t-0 px-0 pt-0 pb-0"
         >
           <div className="flex items-center justify-center py-2 shrink-0">
             <div className="surface-glass-handle h-1.25 w-9 rounded-full" aria-hidden="true" />

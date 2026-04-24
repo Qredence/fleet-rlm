@@ -50,6 +50,11 @@ export interface paths {
      * @description Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.
      */
     delete: operations["delete_session_endpoint_api_v1_sessions__session_id__delete"];
+    /**
+     * Patch session metadata
+     * @description Update session title and/or metadata_json. Returns the updated session snapshot.
+     */
+    patch: operations["patch_session_endpoint_api_v1_sessions__session_id__patch"];
   };
   "/api/v1/sessions/{session_id}/turns": {
     /**
@@ -57,6 +62,20 @@ export interface paths {
      * @description Paginated turn-by-turn transcript for a session.
      */
     get: operations["get_session_turns_api_v1_sessions__session_id__turns_get"];
+  };
+  "/api/v1/sessions/{session_id}/stats": {
+    /**
+     * Get session usage stats
+     * @description Aggregated token counts, latency, and model breakdown for all turns in a session.
+     */
+    get: operations["get_session_stats_api_v1_sessions__session_id__stats_get"];
+  };
+  "/api/v1/sessions/{session_id}/restore": {
+    /**
+     * Restore session
+     * @description Unarchive (restore) a soft-deleted session. Returns success when restored, 404 if not found, 409 if already active.
+     */
+    post: operations["restore_session_endpoint_api_v1_sessions__session_id__restore_post"];
   };
   "/api/v1/sessions/{session_id}/export": {
     /**
@@ -112,6 +131,53 @@ export interface paths {
      */
     get: operations["get_volume_file_content_api_v1_runtime_volume_file_get"];
   };
+  "/api/v1/runtime/volumes": {
+    /**
+     * Get Volumes
+     * @description List the active workspace volume for the selected provider.
+     */
+    get: operations["get_volumes_api_v1_runtime_volumes_get"];
+  };
+  "/api/v1/sandboxes": {
+    /**
+     * List sandboxes
+     * @description List active Daytona sandboxes with id, state, created_at, and volume info.
+     */
+    get: operations["list_sandboxes_api_v1_sandboxes_get"];
+  };
+  "/api/v1/sandboxes/{sandbox_id}": {
+    /**
+     * Get sandbox details
+     * @description Return full sandbox details including state, config, and volume.
+     */
+    get: operations["get_sandbox_detail_api_v1_sandboxes__sandbox_id__get"];
+    /**
+     * Delete sandbox
+     * @description Stop and permanently delete a Daytona sandbox.
+     */
+    delete: operations["delete_sandbox_endpoint_api_v1_sandboxes__sandbox_id__delete"];
+  };
+  "/api/v1/sandboxes/{sandbox_id}/archive": {
+    /**
+     * Archive sandbox
+     * @description Archive a Daytona sandbox to cold storage for later recovery.
+     */
+    post: operations["archive_sandbox_endpoint_api_v1_sandboxes__sandbox_id__archive_post"];
+  };
+  "/api/v1/runs/{run_id}/steps": {
+    /**
+     * List run steps
+     * @description Paginated execution trace steps for a run with step_type, tool_name, tokens, and latency.
+     */
+    get: operations["get_run_steps_api_v1_runs__run_id__steps_get"];
+  };
+  "/api/v1/memory": {
+    /**
+     * List memory items
+     * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
+     */
+    get: operations["list_memory_items_api_v1_memory_get"];
+  };
   "/api/v1/optimization/status": {
     /**
      * Get Optimization Status
@@ -148,13 +214,6 @@ export interface paths {
      */
     post: operations["create_optimization_run_api_v1_optimization_runs_post"];
   };
-  "/api/v1/optimization/transcript-datasets": {
-    /**
-     * Create Dataset From Transcript
-     * @description Convert transcript turns into a GEPA dataset.
-     */
-    post: operations["create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post"];
-  };
   "/api/v1/optimization/runs/compare": {
     /**
      * Compare Runs
@@ -168,6 +227,20 @@ export interface paths {
      * @description Get a single optimization run by ID.
      */
     get: operations["get_run_api_v1_optimization_runs__run_id__get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/results": {
+    /**
+     * Get Run Results
+     * @description Return per-example evaluation results for an optimization run.
+     */
+    get: operations["get_run_results_api_v1_optimization_runs__run_id__results_get"];
+  };
+  "/api/v1/optimization/transcript-datasets": {
+    /**
+     * Create Dataset From Transcript
+     * @description Convert transcript turns into a GEPA dataset.
+     */
+    post: operations["create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post"];
   };
   "/api/v1/optimization/datasets": {
     /**
@@ -187,13 +260,6 @@ export interface paths {
      * @description Return dataset metadata with the first 10 rows as preview.
      */
     get: operations["get_dataset_detail_api_v1_optimization_datasets__dataset_id__get"];
-  };
-  "/api/v1/optimization/runs/{run_id}/results": {
-    /**
-     * Get Run Results
-     * @description Return per-example evaluation results for an optimization run.
-     */
-    get: operations["get_run_results_api_v1_optimization_runs__run_id__results_get"];
   };
   "/api/v1/traces/feedback": {
     /**
@@ -266,7 +332,7 @@ export interface components {
        * Id
        * @description Unique dataset identifier.
        */
-      id: number;
+      id: string;
       /**
        * Name
        * @description Human-readable dataset name.
@@ -345,7 +411,7 @@ export interface components {
        * Id
        * @description Unique dataset identifier.
        */
-      id: number;
+      id: string;
       /**
        * Name
        * @description Human-readable dataset name.
@@ -381,7 +447,7 @@ export interface components {
        * Id
        * @description Unique evaluation result identifier.
        */
-      id: number;
+      id: string;
       /**
        * Example Index
        * @description Zero-based index in the dataset.
@@ -485,7 +551,7 @@ export interface components {
        * Dataset Id
        * @description Registered dataset identifier to optimize against.
        */
-      dataset_id?: number | null;
+      dataset_id?: string | null;
       /**
        * Program Spec
        * @description DSPy program specification string to optimize in module:attr form. Required when module_slug is not provided.
@@ -627,6 +693,88 @@ export interface components {
       version?: string;
     };
     /**
+     * MemoryItemResponse
+     * @description Single memory item returned by the memory browse endpoint.
+     */
+    MemoryItemResponse: {
+      /**
+       * Id
+       * @description Durable memory item identifier.
+       */
+      id: string;
+      /**
+       * Scope
+       * @description Memory scope (e.g. user, tenant, workspace, run, session).
+       */
+      scope: string;
+      /**
+       * Scope Id
+       * @description Identifier within the scope.
+       */
+      scope_id: string;
+      /**
+       * Kind
+       * @description Memory kind (e.g. fact, observation, preference).
+       */
+      kind: string;
+      /**
+       * Source
+       * @description Memory source (e.g. user, agent, system).
+       */
+      source: string;
+      /**
+       * Status
+       * @description Memory status (e.g. active, archived).
+       */
+      status: string;
+      /**
+       * Content Text
+       * @description Textual content when available.
+       */
+      content_text?: string | null;
+      /**
+       * Importance
+       * @description Importance score (0-100).
+       */
+      importance: number;
+      /**
+       * Tags
+       * @description Associated tags.
+       */
+      tags?: string[];
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+    };
+    /**
+     * MemoryListResponse
+     * @description Paginated memory item list response.
+     */
+    MemoryListResponse: {
+      /**
+       * Items
+       * @description Memory item list items.
+       */
+      items: components["schemas"]["MemoryItemResponse"][];
+      /**
+       * Total
+       * @description Total matching memory items.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+    };
+    /**
      * OptimizationRunCreatedResponse
      * @description Response when an async optimization run is created.
      */
@@ -635,7 +783,7 @@ export interface components {
        * Run Id
        * @description Unique identifier for the created run.
        */
-      run_id: number;
+      run_id: string;
       /**
        * Status
        * @description Initial run status.
@@ -652,7 +800,7 @@ export interface components {
        * Id
        * @description Unique run identifier.
        */
-      id: number;
+      id: string;
       /**
        * Status
        * @description Run status: running, completed, or failed.
@@ -804,7 +952,7 @@ export interface components {
        * Run Id
        * @description Optimization run identifier.
        */
-      run_id: number;
+      run_id: string;
       /**
        * Program Spec
        * @description DSPy program specification optimized.
@@ -831,6 +979,83 @@ export interface components {
        * @description Compared run summaries.
        */
       runs: components["schemas"]["RunComparisonItem"][];
+    };
+    /**
+     * RunStepItem
+     * @description Single execution step for a run.
+     */
+    RunStepItem: {
+      /**
+       * Id
+       * @description Durable step identifier.
+       */
+      id: string;
+      /**
+       * Step Index
+       * @description Step position within the run.
+       */
+      step_index: number;
+      /**
+       * Step Type
+       * @description Step type (e.g. tool_call, reasoning).
+       */
+      step_type: string;
+      /**
+       * Tool Name
+       * @description Tool name when applicable.
+       */
+      tool_name?: string | null;
+      /**
+       * Tokens In
+       * @description Input token count.
+       */
+      tokens_in?: number | null;
+      /**
+       * Tokens Out
+       * @description Output token count.
+       */
+      tokens_out?: number | null;
+      /**
+       * Latency Ms
+       * @description Step latency in milliseconds.
+       */
+      latency_ms?: number | null;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp.
+       */
+      created_at: string;
+    };
+    /**
+     * RunStepListResponse
+     * @description Paginated execution step list for a run.
+     */
+    RunStepListResponse: {
+      /**
+       * Items
+       * @description Step list items.
+       */
+      items: components["schemas"]["RunStepItem"][];
+      /**
+       * Total
+       * @description Total steps in run.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Current page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether more steps exist beyond this page.
+       */
+      has_more: boolean;
     };
     /**
      * RuntimeActiveModels
@@ -1038,6 +1263,211 @@ export interface components {
       daytona?: components["schemas"]["RuntimeConnectivityTestResponse"] | null;
     };
     /**
+     * SandboxArchiveResponse
+     * @description Result payload after archiving a sandbox.
+     */
+    SandboxArchiveResponse: {
+      /**
+       * Ok
+       * @description Whether the sandbox was archived successfully.
+       * @default true
+       */
+      ok?: boolean;
+    };
+    /**
+     * SandboxDetailResponse
+     * @description Detailed response for a single sandbox.
+     */
+    SandboxDetailResponse: {
+      /**
+       * Id
+       * @description Sandbox identifier.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Sandbox name.
+       */
+      name: string;
+      /**
+       * State
+       * @description Sandbox state (e.g. started, stopped, archived).
+       */
+      state: string;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp when available.
+       */
+      created_at?: string | null;
+      /**
+       * Volume Name
+       * @description Name of the persistent volume attached to the sandbox.
+       */
+      volume_name?: string | null;
+      /**
+       * Labels
+       * @description Custom labels attached to the sandbox.
+       */
+      labels?: {
+        [key: string]: string;
+      };
+      /**
+       * Cpu
+       * @description Allocated CPU cores.
+       */
+      cpu?: number | null;
+      /**
+       * Memory
+       * @description Allocated memory in GiB.
+       */
+      memory?: number | null;
+      /**
+       * Disk
+       * @description Allocated disk in GiB.
+       */
+      disk?: number | null;
+      /**
+       * Env Vars
+       * @description Environment variables configured for the sandbox.
+       */
+      env_vars?: {
+        [key: string]: string;
+      };
+      /**
+       * Image
+       * @description Base image or declarative image used by the sandbox.
+       */
+      image?: string | null;
+      /**
+       * Snapshot
+       * @description Snapshot name used to create the sandbox.
+       */
+      snapshot?: string | null;
+      /**
+       * Language
+       * @description Programming language of the sandbox.
+       */
+      language?: string | null;
+      /**
+       * Auto Stop Interval
+       * @description Minutes of inactivity before auto-stopping.
+       */
+      auto_stop_interval?: number | null;
+      /**
+       * Auto Archive Interval
+       * @description Minutes after stop before archiving to cold storage.
+       */
+      auto_archive_interval?: number | null;
+      /**
+       * Auto Delete Interval
+       * @description Minutes after archive before permanent deletion.
+       */
+      auto_delete_interval?: number | null;
+      /**
+       * Ephemeral
+       * @description Whether the sandbox is ephemeral.
+       */
+      ephemeral?: boolean | null;
+      /**
+       * Network Block All
+       * @description Whether all outbound network is blocked.
+       */
+      network_block_all?: boolean | null;
+      /**
+       * Network Allow List
+       * @description Comma-separated list of allowed domains.
+       */
+      network_allow_list?: string | null;
+      /**
+       * Volumes
+       * @description Detailed volume mounts.
+       */
+      volumes?: {
+        [key: string]: unknown;
+      }[];
+    };
+    /**
+     * SandboxListItem
+     * @description Single sandbox entry returned by the sandbox list endpoint.
+     */
+    SandboxListItem: {
+      /**
+       * Id
+       * @description Sandbox identifier.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Sandbox name.
+       */
+      name: string;
+      /**
+       * State
+       * @description Sandbox state (e.g. started, stopped, archived).
+       */
+      state: string;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp when available.
+       */
+      created_at?: string | null;
+      /**
+       * Volume Name
+       * @description Name of the persistent volume attached to the sandbox.
+       */
+      volume_name?: string | null;
+      /**
+       * Labels
+       * @description Custom labels attached to the sandbox.
+       */
+      labels?: {
+        [key: string]: string;
+      };
+      /**
+       * Cpu
+       * @description Allocated CPU cores.
+       */
+      cpu?: number | null;
+      /**
+       * Memory
+       * @description Allocated memory in GiB.
+       */
+      memory?: number | null;
+      /**
+       * Disk
+       * @description Allocated disk in GiB.
+       */
+      disk?: number | null;
+    };
+    /**
+     * SandboxListResponse
+     * @description Response for the sandbox list endpoint.
+     */
+    SandboxListResponse: {
+      /**
+       * Items
+       * @description Available sandboxes.
+       */
+      items?: components["schemas"]["SandboxListItem"][];
+      /**
+       * Total
+       * @description Total number of sandboxes.
+       */
+      total: number;
+      /**
+       * Page
+       * @description Current page number.
+       * @default 1
+       */
+      page?: number;
+      /**
+       * Total Pages
+       * @description Total number of pages.
+       * @default 1
+       */
+      total_pages?: number;
+    };
+    /**
      * SessionDeleteResponse
      * @description Result payload after archiving a session.
      */
@@ -1056,9 +1486,9 @@ export interface components {
     SessionDetailResponse: {
       /**
        * Id
-       * @description Local store primary key.
+       * @description Durable session identifier.
        */
-      id: number;
+      id: string;
       /**
        * Title
        * @description Human-readable session title.
@@ -1118,9 +1548,9 @@ export interface components {
     SessionListItem: {
       /**
        * Id
-       * @description Local store primary key.
+       * @description Durable session identifier.
        */
-      id: number;
+      id: string;
       /**
        * Title
        * @description Human-readable session title.
@@ -1182,6 +1612,36 @@ export interface components {
        * @description Whether more results exist beyond this page.
        */
       has_more: boolean;
+    };
+    /**
+     * SessionPatchRequest
+     * @description Patch body for updating session metadata.
+     */
+    SessionPatchRequest: {
+      /**
+       * Title
+       * @description New human-readable session title.
+       */
+      title?: string | null;
+      /**
+       * Metadata Json
+       * @description New metadata dictionary to merge or replace session metadata.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * SessionRestoreResponse
+     * @description Result payload after restoring an archived session.
+     */
+    SessionRestoreResponse: {
+      /**
+       * Ok
+       * @description Whether the session was restored successfully.
+       * @default true
+       */
+      ok?: boolean;
     };
     /**
      * SessionStateResponse
@@ -1260,6 +1720,37 @@ export interface components {
        * @description Last updated timestamp recorded in the session manifest, when available.
        */
       updated_at?: string | null;
+    };
+    /**
+     * SessionStatsResponse
+     * @description Aggregated usage stats for a session.
+     */
+    SessionStatsResponse: {
+      /**
+       * Total Tokens In
+       * @description Total input tokens across all turns.
+       * @default 0
+       */
+      total_tokens_in?: number;
+      /**
+       * Total Tokens Out
+       * @description Total output tokens across all turns.
+       * @default 0
+       */
+      total_tokens_out?: number;
+      /**
+       * Total Latency Ms
+       * @description Total latency in milliseconds across all turns.
+       * @default 0
+       */
+      total_latency_ms?: number;
+      /**
+       * Model Breakdown
+       * @description Mapping of model_name to turn count.
+       */
+      model_breakdown?: {
+        [key: string]: number;
+      };
     };
     /**
      * TraceFeedbackRequest
@@ -1370,9 +1861,9 @@ export interface components {
     TurnItem: {
       /**
        * Id
-       * @description Turn primary key.
+       * @description Durable turn identifier.
        */
-      id: number;
+      id: string;
       /**
        * Turn Index
        * @description Zero-based turn position.
@@ -1490,6 +1981,50 @@ export interface components {
        * @default false
        */
       truncated?: boolean;
+    };
+    /**
+     * VolumeListItem
+     * @description Single volume entry returned by the volume list endpoint.
+     */
+    VolumeListItem: {
+      /**
+       * Id
+       * @description Volume identifier.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Volume name.
+       */
+      name: string;
+      /**
+       * State
+       * @description Volume state (e.g. ready, creating).
+       * @default
+       */
+      state?: string;
+      /**
+       * Created At
+       * @description ISO-8601 creation timestamp when available.
+       */
+      created_at?: string | null;
+    };
+    /**
+     * VolumeListResponse
+     * @description Response for the volume list endpoint.
+     */
+    VolumeListResponse: {
+      /**
+       * Provider
+       * @description Runtime volume backend used to satisfy the request.
+       * @constant
+       */
+      provider: "daytona";
+      /**
+       * Volumes
+       * @description Available persistent volumes.
+       */
+      volumes?: components["schemas"]["VolumeListItem"][];
     };
     /**
      * VolumeTreeNode
@@ -1686,6 +2221,14 @@ export interface operations {
         search?: string | null;
         /** @description Filter by status (active, archived) */
         status?: string | null;
+        /** @description Filter sessions created on or after this date (ISO 8601) */
+        created_after?: string | null;
+        /** @description Filter sessions created on or before this date (ISO 8601) */
+        created_before?: string | null;
+        /** @description Filter by exact model name */
+        model_name?: string | null;
+        /** @description Filter by exact model provider */
+        model_provider?: string | null;
         /** @description Page size */
         limit?: number;
         /** @description Pagination offset */
@@ -1699,11 +2242,23 @@ export interface operations {
           "application/json": components["schemas"]["SessionListResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
@@ -1715,7 +2270,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to inspect. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1725,11 +2280,27 @@ export interface operations {
           "application/json": components["schemas"]["SessionDetailResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
@@ -1741,7 +2312,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to archive. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1751,11 +2322,74 @@ export interface operations {
           "application/json": components["schemas"]["SessionDeleteResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Patch session metadata
+   * @description Update session title and/or metadata_json. Returns the updated session snapshot.
+   */
+  patch_session_endpoint_api_v1_sessions__session_id__patch: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session to update. */
+        session_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionDetailResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
@@ -1773,7 +2407,7 @@ export interface operations {
       };
       path: {
         /** @description Identifier of the session whose turns to list. */
-        session_id: number;
+        session_id: string;
       };
     };
     responses: {
@@ -1783,11 +2417,115 @@ export interface operations {
           "application/json": components["schemas"]["TurnListResponse"];
         };
       };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get session usage stats
+   * @description Aggregated token counts, latency, and model breakdown for all turns in a session.
+   */
+  get_session_stats_api_v1_sessions__session_id__stats_get: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session whose stats to retrieve. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionStatsResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Restore session
+   * @description Unarchive (restore) a soft-deleted session. Returns success when restored, 404 if not found, 409 if already active.
+   */
+  restore_session_endpoint_api_v1_sessions__session_id__restore_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session to restore. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionRestoreResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Session is already active. */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
@@ -1799,7 +2537,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the session to export as a dataset. */
-        session_id: number;
+        session_id: string;
       };
     };
     requestBody: {
@@ -1814,11 +2552,31 @@ export interface operations {
           "application/json": components["schemas"]["DatasetResponse"];
         };
       };
+      /** @description Invalid export parameters. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
       /** @description Validation Error */
       422: {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
       };
     };
   };
@@ -2056,6 +2814,288 @@ export interface operations {
     };
   };
   /**
+   * Get Volumes
+   * @description List the active workspace volume for the selected provider.
+   */
+  get_volumes_api_v1_runtime_volumes_get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
+        provider?: "daytona" | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["VolumeListResponse"];
+        };
+      };
+      /** @description The requested volume provider is not supported. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description The runtime volume provider failed to list volumes. */
+      502: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+      /** @description Volume list timed out before the backend returned a result. */
+      504: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * List sandboxes
+   * @description List active Daytona sandboxes with id, state, created_at, and volume info.
+   */
+  list_sandboxes_api_v1_sandboxes_get: {
+    parameters: {
+      query?: {
+        /** @description Page number for pagination (starting from 1). */
+        page?: number;
+        /** @description Maximum number of sandboxes per page. */
+        limit?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SandboxListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Sandbox services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get sandbox details
+   * @description Return full sandbox details including state, config, and volume.
+   */
+  get_sandbox_detail_api_v1_sandboxes__sandbox_id__get: {
+    parameters: {
+      path: {
+        /** @description Unique sandbox identifier. */
+        sandbox_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SandboxDetailResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Sandbox not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Sandbox services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Delete sandbox
+   * @description Stop and permanently delete a Daytona sandbox.
+   */
+  delete_sandbox_endpoint_api_v1_sandboxes__sandbox_id__delete: {
+    parameters: {
+      path: {
+        /** @description Unique sandbox identifier. */
+        sandbox_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Sandbox not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Sandbox services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Archive sandbox
+   * @description Archive a Daytona sandbox to cold storage for later recovery.
+   */
+  archive_sandbox_endpoint_api_v1_sandboxes__sandbox_id__archive_post: {
+    parameters: {
+      path: {
+        /** @description Unique sandbox identifier. */
+        sandbox_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SandboxArchiveResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Sandbox not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Sandbox services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * List run steps
+   * @description Paginated execution trace steps for a run with step_type, tool_name, tokens, and latency.
+   */
+  get_run_steps_api_v1_runs__run_id__steps_get: {
+    parameters: {
+      query?: {
+        /** @description Page size */
+        limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the run whose steps to list. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RunStepListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Run services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * List memory items
+   * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
+   */
+  list_memory_items_api_v1_memory_get: {
+    parameters: {
+      query?: {
+        /** @description Filter by memory scope (user, tenant, workspace, run, session). */
+        scope?: string | null;
+        /** @description Filter by scope identifier. */
+        scope_id?: string | null;
+        /** @description Page size */
+        limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MemoryListResponse"];
+        };
+      };
+      /** @description Invalid scope filter value. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Memory services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
    * Get Optimization Status
    * @description Return GEPA optimization availability and prerequisites.
    */
@@ -2150,6 +3190,10 @@ export interface operations {
           "application/json": components["schemas"]["OptimizationRunResponse"][];
         };
       };
+      /** @description Invalid status filter. */
+      400: {
+        content: never;
+      };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
         content: never;
@@ -2203,39 +3247,6 @@ export interface operations {
     };
   };
   /**
-   * Create Dataset From Transcript
-   * @description Convert transcript turns into a GEPA dataset.
-   */
-  create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TranscriptDatasetRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["DatasetResponse"];
-        };
-      };
-      /** @description Invalid transcript dataset payload. */
-      400: {
-        content: never;
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
    * Compare Runs
    * @description Compare prompt diffs and scores across optimization runs.
    */
@@ -2277,7 +3288,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the optimization run to fetch. */
-        run_id: number;
+        run_id: string;
       };
     };
     responses: {
@@ -2293,6 +3304,79 @@ export interface operations {
       };
       /** @description Run not found. */
       404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Run Results
+   * @description Return per-example evaluation results for an optimization run.
+   */
+  get_run_results_api_v1_optimization_runs__run_id__results_get: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of evaluation rows to return. */
+        limit?: number;
+        /** @description Pagination offset into the evaluation results. */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the optimization run whose results to list. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationResultsResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Dataset From Transcript
+   * @description Convert transcript turns into a GEPA dataset.
+   */
+  create_dataset_from_transcript_api_v1_optimization_transcript_datasets_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TranscriptDatasetRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Invalid transcript dataset payload. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
         content: never;
       };
       /** @description Validation Error */
@@ -2378,7 +3462,7 @@ export interface operations {
     parameters: {
       path: {
         /** @description Identifier of the dataset to inspect. */
-        dataset_id: number;
+        dataset_id: string;
       };
     };
     responses: {
@@ -2393,46 +3477,6 @@ export interface operations {
         content: never;
       };
       /** @description Dataset not found. */
-      404: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Get Run Results
-   * @description Return per-example evaluation results for an optimization run.
-   */
-  get_run_results_api_v1_optimization_runs__run_id__results_get: {
-    parameters: {
-      query?: {
-        /** @description Maximum number of evaluation rows to return. */
-        limit?: number;
-        /** @description Pagination offset into the evaluation results. */
-        offset?: number;
-      };
-      path: {
-        /** @description Identifier of the optimization run whose results to list. */
-        run_id: number;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["EvaluationResultsResponse"];
-        };
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Run not found. */
       404: {
         content: never;
       };

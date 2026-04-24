@@ -18,6 +18,8 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
+from fleet_rlm.integrations.daytona.types import SandboxSpec
+from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
@@ -184,6 +186,7 @@ class _FakeRuntime:
         self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
         self.fail_next_resume: Exception | None = None
         self.fail_next_reconcile: Exception | None = None
+        self.last_spec: object | None = None
 
     async def acreate_workspace_session(
         self,
@@ -194,6 +197,7 @@ class _FakeRuntime:
         volume_name: str | None = None,
         spec: object | None = None,
     ) -> DaytonaSandboxSession:
+        self.last_spec = spec
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
@@ -434,6 +438,37 @@ def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -
     assert interpreter._last_workspace_reconfigured is True
 
 
+def test_daytona_interpreter_applies_owner_labels_to_created_sandbox_spec() -> None:
+    runtime = _FakeRuntime()
+    owner_labels = sandbox_owner_labels(
+        tenant_claim="tenant-a",
+        user_claim="user-a",
+        session_id="session-a",
+    )
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        volume_name="tenant-a",
+        sandbox_spec=SandboxSpec(
+            labels={
+                "env": "test",
+                SANDBOX_OWNER_LABEL: "untrusted-owner",
+            }
+        ),
+        sandbox_labels=owner_labels,
+    )
+
+    interpreter.start()
+
+    assert isinstance(runtime.last_spec, SandboxSpec)
+    assert runtime.last_spec.volume_name == "tenant-a"
+    assert runtime.last_spec.labels is not None
+    assert runtime.last_spec.labels["env"] == "test"
+    assert (
+        runtime.last_spec.labels[SANDBOX_OWNER_LABEL]
+        == owner_labels[SANDBOX_OWNER_LABEL]
+    )
+
+
 def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
@@ -607,6 +642,35 @@ def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
     assert bridge["llm_query_batched"] == interpreter.llm_query_batched
 
 
+def test_invoke_tool_dispatches_bridged_fetch_document_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    calls: list[str] = []
+
+    def fake_fetch_document_text(url_or_path: str) -> dict[str, Any]:
+        calls.append(url_or_path)
+        return {"status": "ok", "text": "body", "char_count": 4, "metadata": {}}
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.document_tools.fetch_document_text",
+        fake_fetch_document_text,
+    )
+
+    result = interpreter._invoke_tool(
+        "fetch_document_text", ["https://example.test"], {}
+    )
+
+    assert result == {
+        "status": "ok",
+        "text": "body",
+        "char_count": 4,
+        "metadata": {},
+    }
+    assert calls == ["https://example.test"]
+
+
 def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     runtime = _FakeRuntime()
     runtime.closed = 0
@@ -695,3 +759,31 @@ def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> Non
     assert child._session is not None
     assert child._session.sandbox is parent_sandbox
     assert child._session.context_id is None
+
+
+def test_daytona_interpreter_child_inherits_parent_sandbox_labels() -> None:
+    runtime = _FakeRuntime()
+    parent_labels = {"team": "alpha", "env": "prod"}
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        sandbox_labels=parent_labels,
+    )
+    interpreter._session = runtime.session
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert child.sandbox_labels == parent_labels
+
+
+def test_daytona_interpreter_safe_variables_handles_circular_refs() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    circular_dict: dict[str, Any] = {"name": "root"}
+    circular_dict["self"] = circular_dict
+
+    result = interpreter.safe_variables({"a": 1, "b": circular_dict})
+
+    assert result["a"] == 1
+    assert isinstance(result["b"], str)
+    assert "root" in result["b"]

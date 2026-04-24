@@ -7,7 +7,7 @@
 
 ![thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace whose center of gravity is a Daytona-backed recursive DSPy runtime. The repo layers that core behind a thin FastAPI/WebSocket transport and a narrow but real Microsoft Agent Framework outer orchestration host.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace whose center of gravity is a Daytona-backed recursive DSPy runtime. The repo layers that core behind a thin FastAPI/WebSocket transport and a narrow hosted-policy orchestration layer.
 
 [Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
 
@@ -15,28 +15,21 @@
 
 The maintained backend is easiest to read in this order:
 
-1. **Recursive DSPy worker/runtime core**
-   - `src/fleet_rlm/worker/*`
+1. **Recursive DSPy runtime core**
    - `src/fleet_rlm/runtime/agent/*`
    - `src/fleet_rlm/runtime/models/*`
    - `src/fleet_rlm/integrations/daytona/*`
-2. **Agent Framework outer orchestration host**
-   - `src/fleet_rlm/agent_host/*`
-3. **Thin transport shell**
+2. **Thin transport shell**
    - `src/fleet_rlm/api/main.py`
    - `src/fleet_rlm/api/routers/ws/*`
    - `src/fleet_rlm/api/runtime_services/*`
-4. **Transitional compatibility layers**
-   - `src/fleet_rlm/orchestration_app/*`
-   - `src/fleet_rlm/api/orchestration/*`
-5. **Offline DSPy quality and optimization layer**
+3. **Offline DSPy quality and optimization layer**
    - `src/fleet_rlm/runtime/quality/*`
 
 That means:
 
-- `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py` are the main cognition loop.
+- `runtime/agent/agent.py` and `runtime/agent/runtime.py` are the main cognition loop.
 - `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the execution and durable-memory substrate.
-- `agent_host/workflow.py` is host policy around the worker seam, not the core engine.
 - FastAPI/WebSocket modules are transport: auth, request parsing, session extraction, lifecycle, and event-envelope delivery.
 
 The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
@@ -47,7 +40,7 @@ The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Sett
 - Keep the product path goal-first rather than repo-first.
 - Preserve one shared frontend and websocket contract instead of parallel runtime modes.
 - Ship thin transport and hosting layers around the runtime core rather than duplicating runtime logic in API or orchestration wrappers.
-- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
+- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, and WebSocket workflows.
 
 ## Quick Start
 
@@ -97,15 +90,6 @@ uv run fleet-rlm chat --trace-mode compact
 uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000
 ```
 
-### Enable MCP support
-
-If you want the optional MCP server surface, install the extra first:
-
-```bash
-uv add "fleet-rlm[mcp]"
-uv run fleet-rlm serve-mcp --transport stdio
-```
-
 ## Runtime Contract
 
 `fleet-rlm` exposes a Daytona-only runtime contract:
@@ -121,7 +105,7 @@ The product is goal-first rather than repo-first. Repositories are one possible 
 This package exposes two command entrypoints:
 
 - `fleet`: lightweight launcher for terminal chat and `fleet web`
-- `fleet-rlm`: fuller Typer CLI for API, MCP, scaffold, and Daytona flows
+- `fleet-rlm`: fuller Typer CLI for API, scaffold, and Daytona flows
 
 Common commands:
 
@@ -135,9 +119,6 @@ uv run fleet-rlm chat --trace-mode verbose
 
 # FastAPI server
 uv run fleet-rlm serve-api --port 8000
-
-# Optional MCP server
-uv run fleet-rlm serve-mcp --transport stdio
 
 # Scaffold bundled Claude Code assets
 uv run fleet-rlm init --list
@@ -254,5 +235,5 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 - [Auth reference](docs/reference/auth.md)
 - [Frontend/backend integration](docs/reference/frontend-backend-integration.md)
 - [Runtime settings](docs/how-to-guides/runtime-settings.md)
-- [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
+
 - [MLflow workflows](docs/how-to-guides/mlflow-workflows.md)

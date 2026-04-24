@@ -69,7 +69,7 @@ vi.mock("@tanstack/react-query", () => ({
         data: {
           items: [
             {
-              id: 12,
+              id: "12",
               name: "Refine Dataset",
               row_count: 4,
               format: "jsonl",
@@ -143,7 +143,7 @@ describe("OptimizationForm", () => {
   it("submits a prefilled GEPA run from the optimization workflow", async () => {
     const onRunCreated = vi.fn();
     vi.mocked(optimizationEndpoints.createRun).mockResolvedValue({
-      run_id: 77,
+      run_id: "77",
       status: "running",
     });
 
@@ -156,7 +156,7 @@ describe("OptimizationForm", () => {
         <OptimizationForm
           initialDraft={{
             moduleSlug: "reflect-and-revise",
-            datasetId: 12,
+            datasetId: "12",
             datasetName: "Refine Dataset",
             auto: "medium",
             trainRatio: 0.75,
@@ -184,7 +184,7 @@ describe("OptimizationForm", () => {
 
     expect(optimizationEndpoints.createRun).toHaveBeenCalledWith(
       {
-        dataset_id: 12,
+        dataset_id: "12",
         dataset_path: null,
         program_spec: "pkg.module:build_program",
         output_path: null,
@@ -206,7 +206,7 @@ describe("OptimizationForm", () => {
 
   it("recovers a draft after module hydration retries", async () => {
     vi.mocked(optimizationEndpoints.createRun).mockResolvedValue({
-      run_id: 88,
+      run_id: "88",
       status: "running",
     });
     modulesQueryState.data = undefined;
@@ -218,7 +218,7 @@ describe("OptimizationForm", () => {
     const draftProps = {
       initialDraft: {
         moduleSlug: "reflect-and-revise",
-        datasetId: 12,
+        datasetId: "12",
         datasetName: "Refine Dataset",
         auto: "medium" as const,
         trainRatio: 0.75,
@@ -267,7 +267,7 @@ describe("OptimizationForm", () => {
 
     expect(optimizationEndpoints.createRun).toHaveBeenCalledWith(
       {
-        dataset_id: 12,
+        dataset_id: "12",
         dataset_path: null,
         program_spec: "pkg.module:build_program",
         output_path: null,

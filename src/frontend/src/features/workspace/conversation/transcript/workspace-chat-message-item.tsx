@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Confirmation,
   ConfirmationAccepted,
@@ -35,7 +36,7 @@ function hitlConfirmationState(
   return "approved";
 }
 
-export function WorkspaceChatMessageItem({
+export const WorkspaceChatMessageItem = memo(function WorkspaceChatMessageItem({
   message,
   onResolveHitl,
   onResolveClarification,
@@ -56,8 +57,8 @@ export function WorkspaceChatMessageItem({
 
       {message.type === "user" ? (
         <Message from="user" className="mb-2.5">
-          <MessageContent className="max-w-[85%] rounded-xl border-subtle/80 bg-card/70 px-3.5 py-2.5 md:max-w-lg">
-            <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
+          <MessageContent className="max-w-message rounded-xl border-subtle/80 bg-card/70 px-3.5 py-2.5 md:max-w-lg">
+            <div className="whitespace-pre-wrap typo-body-sm leading-relaxed text-foreground">
               {message.content}
             </div>
           </MessageContent>
@@ -168,4 +169,4 @@ export function WorkspaceChatMessageItem({
       ) : null}
     </>
   );
-}
+});

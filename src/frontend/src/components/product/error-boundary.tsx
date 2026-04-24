@@ -28,12 +28,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(
-      `[ErrorBoundary${this.props.name ? `: ${this.props.name}` : ""}]`,
-      error,
-      info.componentStack,
-    );
-
     telemetryClient.captureException(error);
     telemetryClient.capture("react_error_boundary_exception", {
       boundary_name: this.props.name ?? null,

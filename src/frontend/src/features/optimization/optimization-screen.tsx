@@ -17,11 +17,11 @@ import { cn } from "@/lib/utils";
 export function OptimizationScreen() {
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("modules");
-  const [compareRunIds, setCompareRunIds] = useState<number[] | undefined>();
+  const [compareRunIds, setCompareRunIds] = useState<string[] | undefined>();
   const [runDraft, setRunDraft] = useState<OptimizationRunDraft | null>(null);
   const [draftVersion, setDraftVersion] = useState(0);
 
-  const handleCompare = useCallback((runIds: number[]) => {
+  const handleCompare = useCallback((runIds: string[]) => {
     setCompareRunIds(runIds);
     setActiveTab("compare");
   }, []);

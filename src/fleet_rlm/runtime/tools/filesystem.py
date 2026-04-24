@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..agent.chat_agent import RLMReActChatAgent
+from fleet_rlm.runtime.tools._marker import tool_fn
 
 
 @dataclass(slots=True)
 class _FilesystemToolContext:
     """Shared tool context for host filesystem operations."""
 
-    agent: RLMReActChatAgent
+    agent: Any | None
 
 
 def _list_files_impl(
@@ -118,9 +117,18 @@ def _read_file_slice_impl(
     num_lines: int = 100,
 ) -> dict[str, Any]:
     """Read a range of lines from a host file without loading the full document."""
-    from .content.document import _read_document_content
+    from fleet_rlm.runtime.content.ingestion import (
+        read_document_content as _read_document_content,
+    )
 
-    file_path = Path(path)
+    stripped = str(path or "").strip()
+    if stripped.startswith(("http://", "https://")):
+        raise ValueError(
+            f"read_file_slice only works on local files. "
+            f"To read a remote document use load_document('{stripped}') first, "
+            f"then call read_file_slice with the returned local alias or path."
+        )
+    file_path = Path(stripped)
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     if file_path.is_dir():
@@ -194,7 +202,7 @@ def _find_files_impl(
     }
 
 
-def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
+def build_filesystem_tools(agent: Any) -> list[Any]:
     """Build filesystem navigation tools with a shared context object."""
     from dspy import Tool
 
@@ -233,3 +241,68 @@ def build_filesystem_tools(agent: RLMReActChatAgent) -> list[Any]:
             desc="Search file contents on the host using regex pattern (ripgrep)",
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Module-level tool functions for discover_tools() registry scan
+# ---------------------------------------------------------------------------
+
+
+@tool_fn
+def list_files(path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
+    """List files on the host filesystem matching a glob pattern.
+
+    Results are capped at 100 entries.  When called from the default root
+    (``"."``), listing is scoped to ``src/``, ``tests/``, ``docs/``, and
+    ``scripts/`` directories if they exist.
+
+    Args:
+        path: Directory path to list.  Defaults to the current directory.
+        pattern: Glob pattern to filter files.  Defaults to ``"**/*"``.
+
+    Returns:
+        Dictionary with ``status``, ``path``, ``files``, ``count``, and
+        ``total_bytes``.
+    """
+    _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
+    return _list_files_impl(_ctx, path=path, pattern=pattern)
+
+
+@tool_fn
+def read_file_slice(
+    path: str,
+    start_line: int = 1,
+    num_lines: int = 100,
+) -> dict[str, Any]:
+    """Read a range of lines from a host file without loading the full document.
+
+    Args:
+        path: Path to the file to read.
+        start_line: 1-based line number to start from. Defaults to 1.
+        num_lines: Maximum number of lines to return. Defaults to 100.
+
+    Returns:
+        Dictionary with ``status``, ``path``, ``lines``, ``returned_count``,
+        and ``total_lines``.
+    """
+    _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
+    return _read_file_slice_impl(
+        _ctx, path=path, start_line=start_line, num_lines=num_lines
+    )
+
+
+@tool_fn
+def find_files(pattern: str, path: str = ".", include: str = "") -> dict[str, Any]:
+    """Search file contents on the host using a regex pattern (ripgrep).
+
+    Args:
+        pattern: Regex pattern to search for.
+        path: Directory to search in. Defaults to the current directory.
+        include: Optional glob pattern to restrict searched file types
+            (e.g. ``"*.py"``).
+
+    Returns:
+        Dictionary with ``status``, ``pattern``, ``count``, and ``hits``.
+    """
+    _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
+    return _find_files_impl(_ctx, pattern=pattern, path=path, include=include)

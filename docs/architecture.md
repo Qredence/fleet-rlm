@@ -5,17 +5,14 @@
 ## Current Layering
 
 1. **Thin FastAPI/WebSocket transport** in `src/fleet_rlm/api/`
-2. **Narrow but real Agent Framework outer host** in `src/fleet_rlm/agent_host/`
-3. **Worker/runtime core** in `src/fleet_rlm/worker/`, `src/fleet_rlm/runtime/`, and `src/fleet_rlm/integrations/daytona/`
-4. **Offline evaluation and optimization** in `src/fleet_rlm/runtime/quality/`
+2. **Runtime core** in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
+3. **Offline evaluation and optimization** in `src/fleet_rlm/runtime/quality/`
 
 ```mermaid
 graph TB
-    CLIENTS["CLI / Web UI / MCP clients"] --> API["FastAPI transport\napi/main.py\napi/routers/*\napi/runtime_services/*"]
-    API --> HOST["agent_host/\nhosted policy + HITL + checkpoints"]
-    HOST --> WORKER["worker/\nworkspace task stream boundary"]
-    WORKER --> RUNTIME["runtime/\nchat agent + execution helpers + models"]
-    RUNTIME --> DAYTONA["integrations/daytona/\ninterpreter + runtime + volumes"]
+    CLIENTS["CLI / Web UI"] --> API["FastAPI transport\napi/main.py\napi/routers/*\napi/runtime_services/*"]
+    API --> RUNTIME["runtime/\nchat agent + execution helpers + models"]
+    RUNTIME --> DAYTONA["integrations/daytona/\ninterpreter + runtime + filesystem"]
     API --> EVENTS["api/events/\nexecution event shaping"]
     API --> PERSISTENCE["integrations/local_store.py\nintegrations/database/"]
     RUNTIME --> QUALITY["runtime/quality/\noffline GEPA + DSPy optimization"]
@@ -43,35 +40,14 @@ Responsibilities:
 - Websocket lifecycle and execution-event envelope delivery
 - Runtime settings, diagnostics, and Daytona volume browsing
 
-### 2. Hosted policy
+### 2. Runtime core
 
 Primary files:
 
-- `src/fleet_rlm/agent_host/workflow.py`
-- `src/fleet_rlm/agent_host/hitl_flow.py`
-- `src/fleet_rlm/agent_host/terminal_flow.py`
-- `src/fleet_rlm/agent_host/checkpoints.py`
-- `src/fleet_rlm/agent_host/sessions.py`
-- `src/fleet_rlm/agent_host/execution_events.py`
-- `src/fleet_rlm/agent_host/repl_bridge.py`
-- `src/fleet_rlm/agent_host/startup_status.py`
-
-Responsibilities:
-
-- Hosted Agent Framework workflow around the worker seam
-- HITL checkpointing, terminal ordering, and session continuation policy
-- Startup-status gating for slow initial turns
-- REPL bridge and execution-event coordination around the runtime stream
-
-### 3. Worker/runtime core
-
-Primary files:
-
-- `src/fleet_rlm/worker/streaming.py`
-- `src/fleet_rlm/worker/contracts.py`
+- `src/fleet_rlm/api/routers/ws/stream.py`
 - `src/fleet_rlm/runtime/factory.py`
-- `src/fleet_rlm/runtime/agent/chat_agent.py`
-- `src/fleet_rlm/runtime/agent/recursive_runtime.py`
+- `src/fleet_rlm/runtime/agent/agent.py`
+- `src/fleet_rlm/runtime/agent/runtime.py`
 - `src/fleet_rlm/runtime/execution/*`
 - `src/fleet_rlm/runtime/models/*`
 
@@ -82,14 +58,13 @@ Responsibilities:
 - Execution-event assembly and workbench hydration inputs
 - Runtime model assembly and registry management
 
-### 4. Daytona substrate
+### 3. Daytona substrate
 
 Primary files:
 
 - `src/fleet_rlm/integrations/daytona/interpreter.py`
 - `src/fleet_rlm/integrations/daytona/runtime.py`
-- `src/fleet_rlm/integrations/daytona/runtime_helpers.py`
-- `src/fleet_rlm/integrations/daytona/volumes.py`
+- `src/fleet_rlm/integrations/daytona/filesystem.py`
 - `src/fleet_rlm/integrations/daytona/diagnostics.py`
 
 Responsibilities:
@@ -98,7 +73,7 @@ Responsibilities:
 - Repo checkout, workspace path staging, and durable mounted volumes
 - Provider-specific diagnostics and volume normalization
 
-### 5. Offline quality
+### 4. Offline quality
 
 Primary files:
 
@@ -148,12 +123,11 @@ When you need the current backend story, start here:
 
 1. `src/fleet_rlm/api/main.py`
 2. `src/fleet_rlm/api/routers/ws/endpoint.py`
-3. `src/fleet_rlm/agent_host/workflow.py`
-4. `src/fleet_rlm/worker/streaming.py`
-5. `src/fleet_rlm/runtime/factory.py`
-6. `src/fleet_rlm/runtime/agent/chat_agent.py`
-7. `src/fleet_rlm/integrations/daytona/interpreter.py`
-8. `src/fleet_rlm/integrations/daytona/runtime.py`
+3. `src/fleet_rlm/api/routers/ws/stream.py`
+4. `src/fleet_rlm/runtime/factory.py`
+5. `src/fleet_rlm/runtime/agent/agent.py`
+6. `src/fleet_rlm/integrations/daytona/interpreter.py`
+7. `src/fleet_rlm/integrations/daytona/runtime.py`
 
 ## Historical Note
 
