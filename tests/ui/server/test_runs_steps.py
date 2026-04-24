@@ -213,7 +213,10 @@ def test_get_run_steps_pagination(default_client, auth_headers, run_steps_repo):
     assert payload["items"][0]["step_index"] == 1
 
 
-def test_get_run_steps_nonexistent_run_returns_404(default_client, auth_headers):
+def test_get_run_steps_nonexistent_run_returns_404(
+    default_client, auth_headers, run_steps_repo
+):
+    _ = run_steps_repo
     response = default_client.get(
         f"/api/v1/runs/{uuid.uuid4()}/steps",
         headers=auth_headers,
