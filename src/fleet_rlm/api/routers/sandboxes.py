@@ -13,6 +13,7 @@ from daytona import (
     DaytonaNotFoundError,
     DaytonaTimeoutError,
 )
+from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..runtime_services.sandboxes import (
@@ -63,6 +64,10 @@ SBX_ERROR_RESPONSES: OpenAPIResponses = {
 }
 
 
+def _allow_unlabeled_legacy_sandboxes(state: ServerStateDep) -> bool:
+    return state.config.app_env == "local" and state.config.auth_mode == "dev"
+
+
 @router.get(
     "",
     response_model=SandboxListResponse,
@@ -87,9 +92,15 @@ async def list_sandboxes(
     ] = 100,
 ) -> SandboxListResponse:
     """Return a paginated list of active Daytona sandboxes."""
-    _ = state
-    _ = identity
-    return await load_sandbox_list(page=page, limit=limit)
+    return await load_sandbox_list(
+        page=page,
+        limit=limit,
+        owner_labels=sandbox_owner_labels(
+            tenant_claim=identity.tenant_claim,
+            user_claim=identity.user_claim,
+        ),
+        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(state),
+    )
 
 
 @router.get(
@@ -105,10 +116,15 @@ async def get_sandbox_detail(
     identity: HTTPIdentityDep,
 ) -> SandboxDetailResponse:
     """Return detailed information for a single Daytona sandbox."""
-    _ = state
-    _ = identity
     try:
-        return await load_sandbox_detail(sandbox_id=sandbox_id)
+        return await load_sandbox_detail(
+            sandbox_id=sandbox_id,
+            owner_labels=sandbox_owner_labels(
+                tenant_claim=identity.tenant_claim,
+                user_claim=identity.user_claim,
+            ),
+            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(state),
+        )
     except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,
@@ -124,6 +140,7 @@ async def get_sandbox_detail(
 @router.delete(
     "/{sandbox_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     responses=SBX_ERROR_RESPONSES,
     summary="Delete sandbox",
     description="Stop and permanently delete a Daytona sandbox.",
@@ -134,10 +151,15 @@ async def delete_sandbox_endpoint(
     identity: HTTPIdentityDep,
 ) -> None:
     """Stop and delete a Daytona sandbox."""
-    _ = state
-    _ = identity
     try:
-        await delete_sandbox(sandbox_id=sandbox_id)
+        await delete_sandbox(
+            sandbox_id=sandbox_id,
+            owner_labels=sandbox_owner_labels(
+                tenant_claim=identity.tenant_claim,
+                user_claim=identity.user_claim,
+            ),
+            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(state),
+        )
     except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,
@@ -163,10 +185,15 @@ async def archive_sandbox_endpoint(
     identity: HTTPIdentityDep,
 ) -> SandboxArchiveResponse:
     """Archive a Daytona sandbox to cold storage."""
-    _ = state
-    _ = identity
     try:
-        await archive_sandbox(sandbox_id=sandbox_id)
+        await archive_sandbox(
+            sandbox_id=sandbox_id,
+            owner_labels=sandbox_owner_labels(
+                tenant_claim=identity.tenant_claim,
+                user_claim=identity.user_claim,
+            ),
+            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(state),
+        )
     except _DAYTONA_NOT_FOUND_ERRORS as exc:
         raise HTTPException(
             status_code=404,

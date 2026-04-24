@@ -655,7 +655,10 @@ def test_sandbox_list_paginates_with_limit(
 ) -> None:
     calls: list[dict[str, int]] = []
 
-    async def fake_load_sandbox_list(*, page: int, limit: int) -> dict[str, object]:
+    async def fake_load_sandbox_list(
+        *, page: int, limit: int, **kwargs: object
+    ) -> dict[str, object]:
+        _ = kwargs
         calls.append({"page": page, "limit": limit})
         return {"items": [], "total": 0, "page": page, "total_pages": 0}
 

@@ -156,12 +156,16 @@ def test_websocket_routes_daytona_runtime_messages_through_shared_daytona_agent(
         "batch_concurrency": 5,
         "volume_name": "default",
     }
-    assert fake_agent.interpreter.workspace_config_calls[-1] == {
-        "repo_url": "https://github.com/qredence/fleet-rlm.git",
-        "repo_ref": "main",
-        "context_paths": ["/Users/zocho/Documents/spec.pdf"],
-        "volume_name": "default",
-    }
+    last_workspace_config = fake_agent.interpreter.workspace_config_calls[-1]
+    assert (
+        last_workspace_config["repo_url"] == "https://github.com/qredence/fleet-rlm.git"
+    )
+    assert last_workspace_config["repo_ref"] == "main"
+    assert last_workspace_config["context_paths"] == ["/Users/zocho/Documents/spec.pdf"]
+    assert last_workspace_config["volume_name"] == "default"
+    assert "sandbox_labels" in last_workspace_config
+    assert "fleet-rlm-owner" in last_workspace_config["sandbox_labels"]
+    assert "fleet-rlm-session" in last_workspace_config["sandbox_labels"]
     assert final["type"] == "event"
     assert final["data"]["kind"] == "done"
     assert final["data"]["text"] == "Daytona done"
