@@ -26,7 +26,7 @@ graph TB
 | `fleet` | `cli/main.py` | `cli/fleet_cli.py`, `cli/terminal/*` |
 | `fleet-rlm` | `cli/fleet_cli.py` | `cli/commands/*`, `cli/runners.py`, `integrations/config/*` |
 | FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `api/runtime_services/*`, `integrations/database/*`, `integrations/observability/*` |
-| FastMCP server | `integrations/mcp/server.py:create_mcp_server` | `cli/runners.py`, `runtime/agent/*`, `runtime/config.py` |
+
 
 ## Core Execution Path
 
@@ -98,7 +98,7 @@ graph LR
 | `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
 | `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
-| `integrations/mcp/` | FastMCP server surface | `server.py` |
+
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
 | `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `runtime.py`, `filesystem.py`, `config.py`, `diagnostics.py`, `types.py`, `bridge.py` |
 | `runtime/quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `gepa_optimization.py`, `mlflow_evaluation.py`, `mlflow_optimization.py`, `workspace_metrics.py`, `scorers.py` |

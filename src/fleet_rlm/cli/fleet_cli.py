@@ -6,7 +6,6 @@ and diagnostics. Commands are organized by use case:
 Core commands:
     - chat: Standalone in-process interactive terminal chat
     - serve-api: Optional FastAPI server surface
-    - serve-mcp: Optional FastMCP server surface
     - init: Bootstrap Claude Code scaffold assets
     - daytona-smoke: Native Daytona runtime smoke validation
 
@@ -29,7 +28,6 @@ from .commands import (
     init_command,
     optimize_command,
     serve_api_command,
-    serve_mcp_command,
 )
 from .config import (
     initialize_app_config,
@@ -71,7 +69,6 @@ def _require_config(*, error_message: str | None = None) -> Any:
 
 _register_command("init", init_command)
 _register_command("serve-api", serve_api_command)
-_register_command("serve-mcp", serve_mcp_command)
 _register_command("optimize", optimize_command)
 
 

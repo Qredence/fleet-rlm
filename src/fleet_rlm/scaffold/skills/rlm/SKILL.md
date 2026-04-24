@@ -22,7 +22,6 @@ works today.
 uv sync --all-extras
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
-uv run fleet-rlm serve-mcp --transport stdio
 uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
 

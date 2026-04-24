@@ -642,6 +642,35 @@ def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
     assert bridge["llm_query_batched"] == interpreter.llm_query_batched
 
 
+def test_invoke_tool_dispatches_bridged_fetch_document_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    calls: list[str] = []
+
+    def fake_fetch_document_text(url_or_path: str) -> dict[str, Any]:
+        calls.append(url_or_path)
+        return {"status": "ok", "text": "body", "char_count": 4, "metadata": {}}
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.tools.document_tools.fetch_document_text",
+        fake_fetch_document_text,
+    )
+
+    result = interpreter._invoke_tool(
+        "fetch_document_text", ["https://example.test"], {}
+    )
+
+    assert result == {
+        "status": "ok",
+        "text": "body",
+        "char_count": 4,
+        "metadata": {},
+    }
+    assert calls == ["https://example.test"]
+
+
 def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     runtime = _FakeRuntime()
     runtime.closed = 0

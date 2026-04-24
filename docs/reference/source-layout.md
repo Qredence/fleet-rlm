@@ -86,7 +86,7 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `config/` | App/env/runtime settings helpers and defaults. |
 | `database/` | Database manager, SQLModel models, repository, and DB-facing types. |
 | `local_store.py` | Local session/history/optimization persistence. |
-| `mcp/` | FastMCP server surface. |
+
 | `observability/` | PostHog and MLflow integrations plus trace/request-context helpers. |
 | `daytona/` | Daytona interpreter backend, bridge/runtime helpers, diagnostics, and volume access. |
 

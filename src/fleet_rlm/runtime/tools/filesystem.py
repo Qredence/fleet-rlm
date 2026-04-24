@@ -121,7 +121,14 @@ def _read_file_slice_impl(
         read_document_content as _read_document_content,
     )
 
-    file_path = Path(path)
+    stripped = str(path or "").strip()
+    if stripped.startswith(("http://", "https://")):
+        raise ValueError(
+            f"read_file_slice only works on local files. "
+            f"To read a remote document use load_document('{stripped}') first, "
+            f"then call read_file_slice with the returned local alias or path."
+        )
+    file_path = Path(stripped)
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     if file_path.is_dir():

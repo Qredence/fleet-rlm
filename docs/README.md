@@ -50,7 +50,6 @@ Then open `http://localhost:8000`.
 - [Memory API](reference/memory-api.md)
 - [Python API](reference/python-api.md)
 - [CLI reference](reference/cli.md)
-- [Using the MCP server](how-to-guides/using-mcp-server.md)
 
 ## Understand the System
 

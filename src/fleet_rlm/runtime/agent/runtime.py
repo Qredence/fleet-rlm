@@ -165,10 +165,14 @@ def _bound_runtime_tool_factories(
             {"buffer_name": name},
         )
 
-    def delegate_to_rlm(query: str, context: str = "") -> dict[str, Any]:
+    def delegate_to_rlm(
+        query: str, context: str = "", document_url: str = ""
+    ) -> dict[str, Any]:
         token = set_delegate_interpreter(interpreter)
         try:
-            return _delegate_to_rlm(query=query, context=context)
+            return _delegate_to_rlm(
+                query=query, context=context, document_url=document_url
+            )
         finally:
             _delegate_interpreter.reset(token)
 

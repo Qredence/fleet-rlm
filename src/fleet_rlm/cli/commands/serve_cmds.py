@@ -1,7 +1,6 @@
-"""Serve commands for FastAPI and FastMCP servers.
+"""Serve commands for FastAPI servers.
 
-This module implements the serve-api and serve-mcp commands used by the parent
-CLI entrypoint.
+This module implements the serve-api command used by the parent CLI entrypoint.
 """
 
 from __future__ import annotations
@@ -38,43 +37,3 @@ def serve_api_command(
 
     app_obj = create_app(config=ServerRuntimeConfig.from_app_config(config))
     uvicorn.run(app_obj, host=host, port=port)
-
-
-def serve_mcp_command(
-    transport: str = typer.Option(
-        "stdio",
-        help="FastMCP transport: stdio, sse, streamable-http",
-    ),
-    host: str = typer.Option("127.0.0.1", help="Host for HTTP transports"),
-    port: int = typer.Option(8001, help="Port for HTTP transports"),
-) -> None:
-    """Run optional FastMCP server surface (requires `--extra mcp`)."""
-    config = require_current_app_config()
-    missing = [pkg for pkg in ("fastmcp",) if find_spec(pkg) is None]
-    if missing:
-        typer.echo(
-            "MCP dependencies missing: "
-            + ", ".join(missing)
-            + "\nInstall with:\n  uv sync --extra dev --extra mcp",
-            err=True,
-        )
-        raise typer.Exit(code=2)
-
-    from fleet_rlm.integrations.mcp.server import (
-        MCPRuntimeConfig,
-        create_mcp_server,
-    )
-
-    server = create_mcp_server(config=MCPRuntimeConfig.from_app_config(config))
-
-    transport_norm = transport.strip().lower()
-    if transport_norm == "stdio":
-        server.run(transport="stdio")
-        return
-
-    if transport_norm in {"sse", "streamable-http"}:
-        server.run(transport=transport_norm, host=host, port=port)
-        return
-
-    typer.echo("transport must be one of: stdio, sse, streamable-http", err=True)
-    raise typer.Exit(code=2)

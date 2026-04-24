@@ -1,6 +1,6 @@
 ---
 name: rlm-run
-description: Run fleet-rlm through its current public entrypoints. Use when you need the right command for the Web UI, API server, MCP server, terminal chat, or Daytona smoke validation from a Claude Code workflow.
+description: Run fleet-rlm through its current public entrypoints. Use when you need the right command for the Web UI, API server, terminal chat, or Daytona smoke validation from a Claude Code workflow.
 ---
 
 # RLM Runner
@@ -13,7 +13,6 @@ Use this skill for current entrypoint selection.
 # from repo root
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
-uv run fleet-rlm serve-mcp --transport stdio
 uv run fleet-rlm chat
 uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 ```
@@ -22,7 +21,6 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 
 - `fleet web` when the task is workspace-first and UI driven
 - `serve-api` when the backend surface itself is what you need
-- `serve-mcp` when an MCP client should talk to fleet-rlm tools
 - `chat` for in-process terminal interaction
 - `daytona-smoke` before any `daytona_pilot` workflow
 

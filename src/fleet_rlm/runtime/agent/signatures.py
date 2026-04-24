@@ -269,10 +269,19 @@ class ClarificationQuestionSignature(dspy.Signature):
 
 
 class RecursiveSubQuerySignature(dspy.Signature):
-    """Answer a bounded recursive sub-problem by exploring context in Python."""
+    """Answer a bounded recursive sub-problem by exploring context in Python.
+
+    The ``context`` field may contain file paths pointing to documents that
+    have been persisted in the Daytona sandbox volume (e.g.
+    ``/home/daytona/memory/artifacts/doc_abc123.txt``). When a path is
+    provided, read the file with Python file I/O instead of assuming the
+    full text is present in the context string.
+    """
 
     prompt: str = dspy.InputField(desc="The delegated sub-task to solve")
-    context: str = dspy.InputField(desc="Optional context for the sub-task")
+    context: str = dspy.InputField(
+        desc="Optional context for the sub-task. May contain sandbox file paths for large documents."
+    )
     answer: str = dspy.OutputField(desc="Answer for the parent caller")
 
 

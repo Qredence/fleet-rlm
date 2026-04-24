@@ -590,13 +590,17 @@ class TestResetClearsSandboxBuffers:
         assert result["buffers_cleared"] is True
         # No crash despite missing interpreter
 
-    def test_reset_clears_history(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reset_clears_history(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(
             "fleet_rlm.runtime.agent.runtime.discover_tools",
             lambda: [],
         )
         rt = AgentRuntime()
-        rt.history = dspy.History(messages=[{"user_message": "hi", "response": "hello"}])
+        rt.history = dspy.History(
+            messages=[{"user_message": "hi", "response": "hello"}]
+        )
 
         rt.reset(clear_sandbox_buffers=False)
 

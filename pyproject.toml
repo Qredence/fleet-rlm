@@ -75,7 +75,6 @@ dev = [
     "ruff>=0.15.9",
     "ty>=0.0.29",
 ]
-mcp = ["fastmcp>=3.2.0,<4", "httpx[socks]>=0.28.1,<1", "pydantic>=2.12.5,<3"]
 server = [
     "alembic>=1.13,<2",
     "psycopg[binary]>=3.3.2,<4",
@@ -84,8 +83,6 @@ server = [
 ]
 full = [
     "alembic>=1.13,<2",
-    "fastmcp>=3.2.0,<4",
-    "httpx[socks]>=0.28.1,<1",
     "psycopg[binary]>=3.3.2,<4",
     "scalar-fastapi>=1.5.0,<2",
     "uvicorn[standard]>=0.42.0,<1",

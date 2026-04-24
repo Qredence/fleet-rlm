@@ -57,7 +57,7 @@ Key files:
 - Incoming:
   - `api/*`
   - `cli/runners.py`
-  - `integrations/mcp/server.py`
+
 - Outgoing:
   - `src/fleet_rlm/integrations/database/*`
   - external Daytona SDK and provider systems

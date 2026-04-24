@@ -932,6 +932,13 @@ def bridge_tools(
         tools["sub_rlm"] = interpreter.sub_rlm
     if "sub_rlm_batched" not in tools and hasattr(interpreter, "sub_rlm_batched"):
         tools["sub_rlm_batched"] = interpreter.sub_rlm_batched
+    # Host-side document fetching bridged into the sandbox so RLM code can
+    # call fetch_document_text(url) directly instead of delegating back to
+    # the host agent via delegate_to_rlm.
+    if "fetch_document_text" not in tools:
+        from fleet_rlm.runtime.tools.document_tools import fetch_document_text
+
+        tools["fetch_document_text"] = fetch_document_text
     return tools
 
 
@@ -965,6 +972,10 @@ def invoke_tool(
             if not isinstance(prompts, list):
                 prompts = []
             value = interpreter.llm_query_batched([str(item) for item in prompts])
+        elif name == "fetch_document_text":
+            from fleet_rlm.runtime.tools.document_tools import fetch_document_text
+
+            value = fetch_document_text(*args, **kwargs)
         else:
             raise RuntimeError(f"Unknown host callback: {name}")
         try:

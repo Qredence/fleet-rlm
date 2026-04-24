@@ -29,7 +29,6 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 - **Auth**: `dev` mode or Entra (Azure AD) bearer-token validation
 - **Observability**: PostHog, MLflow
 - **CLI**: Typer + argparse (`fleet` and `fleet-rlm` entrypoints)
-- **MCP**: Optional FastMCP server surface
 
 ### Frontend
 
@@ -71,7 +70,6 @@ The backend is organized into two layers, innermost first:
 Other backend areas:
 
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
-- `src/fleet_rlm/integrations/mcp/` — MCP integration
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
 - `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
 - `src/fleet_rlm/scaffold/` — curated packaged Claude Code translation assets (exposed by `fleet-rlm init`)
@@ -107,7 +105,6 @@ uv sync --extra dev           # install with dev extras only
 ```bash
 uv run fleet web              # start Web UI + API server (delegates to fleet-rlm serve-api)
 uv run fleet-rlm serve-api --port 8000
-uv run fleet-rlm serve-mcp --transport stdio
 uv run fleet-rlm chat --trace-mode compact
 ```
 

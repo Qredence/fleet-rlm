@@ -28,7 +28,7 @@
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
   * [DSPy Integration Guide](how-to-guides/dspy-integration.md)
   * [Deploying the API Server](how-to-guides/deploying-server.md)
-  * [Using the MCP Server](how-to-guides/using-mcp-server.md)
+
   * [Using with Claude Code](how-to-guides/using-claude-code-agents.md)
   * [Jupyter Notebook Workflows](how-to-guides/using-notebooks.md)
   * [MLflow Tracing, Feedback, Eval, and Optimization](how-to-guides/mlflow-workflows.md)

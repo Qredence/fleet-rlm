@@ -1,4 +1,4 @@
-"""Canonical runtime construction helpers for FastAPI, CLI, and MCP."""
+"""Canonical runtime construction helpers for FastAPI and CLI."""
 
 from __future__ import annotations
 

@@ -10,7 +10,7 @@
 
 ```mermaid
 graph TB
-    CLIENTS["CLI / Web UI / MCP clients"] --> API["FastAPI transport\napi/main.py\napi/routers/*\napi/runtime_services/*"]
+    CLIENTS["CLI / Web UI"] --> API["FastAPI transport\napi/main.py\napi/routers/*\napi/runtime_services/*"]
     API --> RUNTIME["runtime/\nchat agent + execution helpers + models"]
     RUNTIME --> DAYTONA["integrations/daytona/\ninterpreter + runtime + filesystem"]
     API --> EVENTS["api/events/\nexecution event shaping"]

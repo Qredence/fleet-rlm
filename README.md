@@ -40,7 +40,7 @@ The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Sett
 - Keep the product path goal-first rather than repo-first.
 - Preserve one shared frontend and websocket contract instead of parallel runtime modes.
 - Ship thin transport and hosting layers around the runtime core rather than duplicating runtime logic in API or orchestration wrappers.
-- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, WebSocket, and MCP workflows.
+- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, and WebSocket workflows.
 
 ## Quick Start
 
@@ -90,15 +90,6 @@ uv run fleet-rlm chat --trace-mode compact
 uv run fleet-rlm serve-api --host 127.0.0.1 --port 8000
 ```
 
-### Enable MCP support
-
-If you want the optional MCP server surface, install the extra first:
-
-```bash
-uv add "fleet-rlm[mcp]"
-uv run fleet-rlm serve-mcp --transport stdio
-```
-
 ## Runtime Contract
 
 `fleet-rlm` exposes a Daytona-only runtime contract:
@@ -114,7 +105,7 @@ The product is goal-first rather than repo-first. Repositories are one possible 
 This package exposes two command entrypoints:
 
 - `fleet`: lightweight launcher for terminal chat and `fleet web`
-- `fleet-rlm`: fuller Typer CLI for API, MCP, scaffold, and Daytona flows
+- `fleet-rlm`: fuller Typer CLI for API, scaffold, and Daytona flows
 
 Common commands:
 
@@ -128,9 +119,6 @@ uv run fleet-rlm chat --trace-mode verbose
 
 # FastAPI server
 uv run fleet-rlm serve-api --port 8000
-
-# Optional MCP server
-uv run fleet-rlm serve-mcp --transport stdio
 
 # Scaffold bundled Claude Code assets
 uv run fleet-rlm init --list
@@ -247,5 +235,5 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 - [Auth reference](docs/reference/auth.md)
 - [Frontend/backend integration](docs/reference/frontend-backend-integration.md)
 - [Runtime settings](docs/how-to-guides/runtime-settings.md)
-- [Using the MCP server](docs/how-to-guides/using-mcp-server.md)
+
 - [MLflow workflows](docs/how-to-guides/mlflow-workflows.md)

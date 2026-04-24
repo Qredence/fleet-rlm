@@ -50,7 +50,7 @@ Active top-level areas under `src/fleet_rlm/`:
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
-- `integrations/`: config, database, observability, MCP, and external-system integrations
+- `integrations/`: config, database, observability, and external-system integrations
 - `scaffold/`: packaged Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
@@ -67,7 +67,6 @@ Preserve these command surfaces:
 - `fleet web`
 - `fleet-rlm chat`
 - `fleet-rlm serve-api`
-- `fleet-rlm serve-mcp`
 - `fleet-rlm init`
 - `fleet-rlm daytona-smoke`
 
@@ -227,7 +226,6 @@ Backend setup and runtime:
 - `uv sync --all-extras`
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
-- `uv run fleet-rlm serve-mcp --transport stdio`
 - `uv run python scripts/openapi_tools.py generate`
 - `uv run python scripts/openapi_tools.py validate`
 
