@@ -28,15 +28,27 @@ class _FakeResponse:
         return self._chunks.pop(0)
 
 
+class _FakeOpener:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+
+    def open(self, request: Any, timeout: int) -> _FakeResponse:
+        _ = (request, timeout)
+        return self._response
+
+
 def test_download_url_removes_partial_temp_file_on_size_limit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created: list[Path] = []
 
-    def fake_urlopen(request: Any, timeout: int) -> _FakeResponse:
-        _ = (request, timeout)
-        return _FakeResponse([b"abcd", b"efgh"])
+    def fake_build_opener(*handlers: Any) -> _FakeOpener:
+        assert any(
+            isinstance(handler, document_tools._ValidatingRedirectHandler)
+            for handler in handlers
+        )
+        return _FakeOpener(_FakeResponse([b"abcd", b"efgh"]))
 
     def fake_getaddrinfo(*args: Any, **kwargs: Any) -> list[Any]:
         _ = (args, kwargs)
@@ -49,7 +61,9 @@ def test_download_url_removes_partial_temp_file_on_size_limit(
         return fd, str(path)
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(document_tools.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        document_tools.urllib.request, "build_opener", fake_build_opener
+    )
     monkeypatch.setattr(document_tools.tempfile, "mkstemp", fake_mkstemp)
     monkeypatch.setattr(document_tools, "_MAX_DOWNLOAD_BYTES", 4)
 
@@ -73,11 +87,13 @@ def test_download_url_rejects_private_network_targets(
     url: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_urlopen(*args: Any, **kwargs: Any) -> None:
+    def fail_build_opener(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
-        raise AssertionError("urlopen should not be called for blocked URLs")
+        raise AssertionError("build_opener should not be called for blocked URLs")
 
-    monkeypatch.setattr(document_tools.urllib.request, "urlopen", fail_urlopen)
+    monkeypatch.setattr(
+        document_tools.urllib.request, "build_opener", fail_build_opener
+    )
 
     with pytest.raises(ValueError, match="private network"):
         document_tools._download_url(url)
@@ -90,12 +106,52 @@ def test_download_url_rejects_hosts_resolving_to_private_addresses(
         _ = (args, kwargs)
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
 
-    def fail_urlopen(*args: Any, **kwargs: Any) -> None:
+    def fail_build_opener(*args: Any, **kwargs: Any) -> None:
         _ = (args, kwargs)
-        raise AssertionError("urlopen should not be called for blocked URLs")
+        raise AssertionError("build_opener should not be called for blocked URLs")
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(document_tools.urllib.request, "urlopen", fail_urlopen)
+    monkeypatch.setattr(
+        document_tools.urllib.request, "build_opener", fail_build_opener
+    )
+
+    with pytest.raises(ValueError, match="private network"):
+        document_tools._download_url("https://docs.example.test/file.txt")
+
+
+def test_download_url_rejects_private_redirect_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getaddrinfo(*args: Any, **kwargs: Any) -> list[Any]:
+        _ = (args, kwargs)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    def fake_build_opener(*handlers: Any) -> Any:
+        redirect_handler = next(
+            handler
+            for handler in handlers
+            if isinstance(handler, document_tools._ValidatingRedirectHandler)
+        )
+
+        class _RedirectingOpener:
+            def open(self, request: Any, timeout: int) -> _FakeResponse:
+                _ = timeout
+                redirect_handler.redirect_request(
+                    request,
+                    None,
+                    302,
+                    "Found",
+                    {},
+                    "http://169.254.169.254/latest/meta-data/",
+                )
+                raise AssertionError("private redirect should be blocked")
+
+        return _RedirectingOpener()
+
+    monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(
+        document_tools.urllib.request, "build_opener", fake_build_opener
+    )
 
     with pytest.raises(ValueError, match="private network"):
         document_tools._download_url("https://docs.example.test/file.txt")
