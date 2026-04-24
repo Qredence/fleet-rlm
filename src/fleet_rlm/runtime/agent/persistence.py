@@ -174,6 +174,10 @@ async def persist_history_to_volume(
         write = getattr(interpreter, "write_file", None)
         if callable(write):
             write(path, content)
+        else:
+            raise RuntimeError(
+                "Interpreter has no write method (awrite_file or write_file)"
+            )
 
     return path
 
@@ -223,6 +227,9 @@ async def restore_history_from_volume(
     try:
         data = json.loads(content)
     except (json.JSONDecodeError, ValueError):
+        return None
+
+    if not isinstance(data, dict):
         return None
 
     return deserialize_history(data)

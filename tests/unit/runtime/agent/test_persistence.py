@@ -353,6 +353,29 @@ async def test_persist_history_to_volume_fallback_sync(
     assert len(written) == 1
 
 
+@pytest.mark.asyncio
+async def test_persist_history_to_volume_raises_when_no_write_method(
+    sample_history: dspy.History,
+    sample_workspace_id: str,
+    sample_user_id: str,
+    sample_session_id: str,
+) -> None:
+    """VAL-BACKEND-PERSIST-001: Raises RuntimeError when no write method exists."""
+    interp = MagicMock()
+    interp.volume_mount_path = "/home/daytona/memory"
+    del interp.awrite_file
+    del interp.write_file
+
+    with pytest.raises(RuntimeError, match="write"):
+        await persist_history_to_volume(
+            interp,
+            sample_workspace_id,
+            sample_user_id,
+            sample_session_id,
+            sample_history,
+        )
+
+
 # ---------------------------------------------------------------------------
 # VAL-PERSIST-003: History restored on session resume
 # ---------------------------------------------------------------------------
@@ -439,6 +462,32 @@ async def test_restore_history_from_volume_returns_none_on_bad_json(
 
     async def _aread(path: str) -> str:
         return "not valid json!!!"
+
+    interp.aread_file = _aread
+
+    restored = await restore_history_from_volume(
+        interp, sample_workspace_id, sample_user_id, sample_session_id
+    )
+    assert restored is None
+
+
+@pytest.mark.parametrize(
+    "bad_content",
+    ["null", "[]", '"string"', "42"],
+)
+@pytest.mark.asyncio
+async def test_restore_history_from_volume_returns_none_for_non_dict_json(
+    bad_content: str,
+    sample_workspace_id: str,
+    sample_user_id: str,
+    sample_session_id: str,
+) -> None:
+    """VAL-BACKEND-PERSIST-002: Returns None for non-dict JSON payloads."""
+    interp = MagicMock()
+    interp.volume_mount_path = "/home/daytona/memory"
+
+    async def _aread(path: str) -> str:
+        return bad_content
 
     interp.aread_file = _aread
 
