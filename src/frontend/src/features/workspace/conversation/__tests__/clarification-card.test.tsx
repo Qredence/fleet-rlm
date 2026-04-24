@@ -93,4 +93,22 @@ describe("ClarificationCard", () => {
     expect(container.querySelector("[data-receipt='true']")).not.toBeNull();
     expect(container.textContent).toContain("README.md");
   });
+
+  it("shows static resolved display when resolvedAnswer does not match any option label", () => {
+    const { container } = renderClarificationCard({
+      question: "Which file first?",
+      stepLabel: "File selection",
+      customOptionId: "",
+      options: [{ id: "readme", label: "README.md" }],
+      resolved: true,
+      resolvedAnswer: "Custom answer that does not match any option",
+    });
+
+    // Should not show interactive option list
+    expect(container.querySelector("[role='listbox']")).toBeNull();
+    expect(container.querySelector("[data-receipt='true']")).toBeNull();
+
+    // Should show the resolved answer text
+    expect(container.textContent).toContain("Custom answer that does not match any option");
+  });
 });

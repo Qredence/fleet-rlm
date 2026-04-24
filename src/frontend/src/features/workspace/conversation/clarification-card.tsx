@@ -43,12 +43,16 @@ export function ClarificationCard({ data, onResolve }: Props) {
               </div>
               <p className="text-muted-foreground typo-caption">{data.question}</p>
             </div>
-            <OptionList
-              id={data.stepLabel}
-              options={data.options}
-              selectionMode="single"
-              choice={resolvedOptionId}
-            />
+            {resolvedOptionId != null ? (
+              <OptionList
+                id={data.stepLabel}
+                options={data.options}
+                selectionMode="single"
+                choice={resolvedOptionId}
+              />
+            ) : (
+              <p className="text-foreground typo-label">{data.resolvedAnswer}</p>
+            )}
           </CardContent>
         </Card>
       </motion.div>
