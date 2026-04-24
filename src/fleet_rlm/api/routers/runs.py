@@ -39,7 +39,7 @@ def _parse_run_uuid(run_id: str) -> uuid.UUID:
     try:
         return uuid.UUID(run_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Run not found") from exc
+        raise HTTPException(status_code=404, detail="Run not found.") from exc
 
 
 async def _resolve_persisted_identity(
@@ -104,17 +104,22 @@ async def get_run_steps(
         created_by_user_id=persisted_identity.user_id,
     )
     if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail="Run not found.")
 
-    steps = await repository.get_run_steps(
+    total = await repository.count_run_steps(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
         workspace_id=persisted_identity.workspace_id,
         created_by_user_id=persisted_identity.user_id,
     )
-
-    total = len(steps)
-    paginated = steps[offset : offset + limit]
+    steps = await repository.get_run_steps(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        limit=limit,
+        offset=offset,
+    )
 
     return RunStepListResponse(
         items=[
@@ -130,7 +135,7 @@ async def get_run_steps(
                 latency_ms=s.latency_ms,
                 created_at=s.created_at.isoformat(),
             )
-            for s in paginated
+            for s in steps
         ],
         total=total,
         offset=offset,

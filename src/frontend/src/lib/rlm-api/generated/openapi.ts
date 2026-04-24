@@ -764,6 +764,11 @@ export interface components {
        */
       total: number;
       /**
+       * Offset
+       * @description Current pagination offset.
+       */
+      offset: number;
+      /**
        * Limit
        * @description Current page size.
        */
@@ -3059,6 +3064,8 @@ export interface operations {
         scope_id?: string | null;
         /** @description Page size */
         limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
       };
     };
     responses: {

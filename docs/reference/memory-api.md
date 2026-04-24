@@ -38,6 +38,7 @@ Return memory items filtered by scope and scope_id. Without filters, returns all
 | `scope` | string | no | `null` | `user`, `tenant`, `workspace`, `run`, `session` | Filter by memory scope |
 | `scope_id` | string | no | `null` | — | Filter by scope identifier |
 | `limit` | integer | no | `100` | 1-200 | Page size |
+| `offset` | integer | no | `0` | >= 0 | Pagination offset |
 
 #### Response
 
@@ -58,6 +59,7 @@ Return memory items filtered by scope and scope_id. Without filters, returns all
     }
   ],
   "total": 1,
+  "offset": 0,
   "limit": 100
 }
 ```
@@ -68,6 +70,7 @@ Return memory items filtered by scope and scope_id. Without filters, returns all
 |-------|------|-------------|
 | `items` | array | List of [`MemoryItemResponse`](#memoryitemresponse) objects |
 | `total` | integer | Total number of matching memory items |
+| `offset` | integer | Current pagination offset |
 | `limit` | integer | Current page size |
 
 #### Error Responses
@@ -107,6 +110,7 @@ Paginated memory item list response.
 |-------|------|-------------|
 | `items` | array | List of `MemoryItemResponse` objects |
 | `total` | integer | Total matching memory items |
+| `offset` | integer | Current pagination offset |
 | `limit` | integer | Current page size |
 
 ---

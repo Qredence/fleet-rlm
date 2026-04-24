@@ -88,7 +88,7 @@ class FleetRepository(
     """Backward-compatible facade combining all domain repositories."""
 
     def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
+        super().__init__(database)
 
 
 __all__ = [

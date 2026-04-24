@@ -1083,4 +1083,5 @@ class MemoryListResponse(BaseModel):
 
     items: list[MemoryItemResponse] = Field(description="Memory item list items.")
     total: int = Field(description="Total matching memory items.")
+    offset: int = Field(description="Current pagination offset.")
     limit: int = Field(description="Current page size.")

@@ -52,3 +52,20 @@ def test_download_url_removes_partial_temp_file_on_size_limit(
 
     assert created
     assert not created[0].exists()
+
+
+def test_fetch_document_text_rejects_local_paths() -> None:
+    result = document_tools.fetch_document_text("/etc/passwd")
+
+    assert result == {
+        "status": "error",
+        "error": "fetch_document_text only accepts HTTP(S) URLs.",
+    }
+
+
+def test_set_active_document_fails_without_document_cache() -> None:
+    result = document_tools.set_active_document("docs")
+
+    assert result["status"] == "error"
+    assert result["active_alias"] == "docs"
+    assert "without an agent document cache" in result["error"]

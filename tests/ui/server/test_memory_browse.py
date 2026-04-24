@@ -166,6 +166,44 @@ class _MemoryBrowseRepository:
         scope=None,
         scope_id=None,
         limit=100,
+        offset=0,
+    ):
+        items = self._matching_items(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            scope=scope,
+            scope_id=scope_id,
+        )
+        return items[offset : offset + limit]
+
+    async def count_memory_items(
+        self,
+        *,
+        tenant_id,
+        workspace_id=None,
+        user_id=None,
+        scope=None,
+        scope_id=None,
+    ):
+        return len(
+            self._matching_items(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                scope=scope,
+                scope_id=scope_id,
+            )
+        )
+
+    def _matching_items(
+        self,
+        *,
+        tenant_id,
+        workspace_id=None,
+        user_id=None,
+        scope=None,
+        scope_id=None,
     ):
         if tenant_id != self.tenant_id or workspace_id != self.workspace_id:
             return []
@@ -181,7 +219,7 @@ class _MemoryBrowseRepository:
             items = [item for item in items if item.scope == scope]
         if scope_id is not None:
             items = [item for item in items if item.scope_id == scope_id]
-        return items[:limit]
+        return items
 
     async def get_chat_session(self, **kwargs):
         raise NotImplementedError
@@ -211,6 +249,7 @@ def test_list_memory_returns_all_items(default_client, auth_headers, memory_repo
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 4
+    assert payload["offset"] == 0
     assert len(payload["items"]) == 4
     assert all("Other user's" not in item["content_text"] for item in payload["items"])
     assert all(
@@ -238,6 +277,21 @@ def test_list_memory_filters_by_scope(default_client, auth_headers, memory_repo)
     assert payload["total"] == 2
     assert len(payload["items"]) == 2
     assert all(item["scope"] == "session" for item in payload["items"])
+
+
+def test_list_memory_paginates_without_truncating_total(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        "/api/v1/memory?limit=1&offset=1",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 4
+    assert payload["offset"] == 1
+    assert payload["limit"] == 1
+    assert len(payload["items"]) == 1
 
 
 def test_list_memory_user_scope_returns_current_user_only(
@@ -326,7 +380,7 @@ def test_list_memory_respects_limit(default_client, auth_headers, memory_repo):
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 1
+    assert payload["total"] == 4
     assert len(payload["items"]) == 1
     assert payload["limit"] == 1
 

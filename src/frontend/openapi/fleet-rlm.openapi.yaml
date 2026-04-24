@@ -1087,6 +1087,16 @@ paths:
             default: 100
             title: Limit
           description: Page size
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset
+            default: 0
+            title: Offset
+          description: Pagination offset
       responses:
         "200":
           description: Successful Response
@@ -2117,6 +2127,10 @@ components:
           type: integer
           title: Total
           description: Total matching memory items.
+        offset:
+          type: integer
+          title: Offset
+          description: Current pagination offset.
         limit:
           type: integer
           title: Limit
@@ -2125,6 +2139,7 @@ components:
       required:
         - items
         - total
+        - offset
         - limit
       title: MemoryListResponse
       description: Paginated memory item list response.

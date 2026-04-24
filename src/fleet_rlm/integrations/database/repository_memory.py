@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from .engine import DatabaseManager
@@ -40,6 +40,81 @@ class MemoryRepository(RepositoryContextMixin):
 
     def __init__(self, database: DatabaseManager) -> None:
         self._db = database
+
+    def _build_memory_items_stmt(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        scope: MemoryScope | None = None,
+        scope_id: str | None = None,
+    ) -> Select[tuple[MemoryItem]] | None:
+        stmt: Select[tuple[MemoryItem]] = select(MemoryItem).where(
+            and_(
+                MemoryItem.tenant_id == tenant_id,
+                MemoryItem.workspace_id == workspace_id,
+            )
+        )
+
+        allowed_scopes = (
+            MemoryScope.USER,
+            MemoryScope.RUN,
+            MemoryScope.SESSION,
+        )
+        if scope is not None:
+            if user_id is not None and scope not in allowed_scopes:
+                return None
+            stmt = stmt.where(MemoryItem.scope == scope)
+        elif user_id is not None:
+            stmt = stmt.where(MemoryItem.scope.in_(allowed_scopes))
+
+        if user_id is not None:
+            run_owned_by_user = (
+                select(Run.id)
+                .where(
+                    and_(
+                        Run.tenant_id == tenant_id,
+                        Run.workspace_id == workspace_id,
+                        Run.created_by_user_id == user_id,
+                    )
+                )
+                .scalar_subquery()
+            )
+            session_owned_by_user = (
+                select(ChatSession.id)
+                .where(
+                    and_(
+                        ChatSession.tenant_id == tenant_id,
+                        ChatSession.workspace_id == workspace_id,
+                        ChatSession.user_id == user_id,
+                    )
+                )
+                .scalar_subquery()
+            )
+            stmt = stmt.where(
+                or_(
+                    and_(
+                        MemoryItem.user_id == user_id,
+                        MemoryItem.scope != MemoryScope.USER,
+                    ),
+                    and_(
+                        MemoryItem.scope == MemoryScope.USER,
+                        MemoryItem.scope_id == str(user_id),
+                    ),
+                    and_(
+                        MemoryItem.scope == MemoryScope.RUN,
+                        MemoryItem.run_id.in_(run_owned_by_user),
+                    ),
+                    and_(
+                        MemoryItem.scope == MemoryScope.SESSION,
+                        MemoryItem.session_id.in_(session_owned_by_user),
+                    ),
+                )
+            )
+        if scope_id is not None:
+            stmt = stmt.where(MemoryItem.scope_id == scope_id)
+        return stmt
 
     async def store_memory_item(self, request: MemoryItemCreateRequest) -> MemoryItem:
         scope = _coerce_enum(request.scope, MemoryScope)
@@ -91,6 +166,7 @@ class MemoryRepository(RepositoryContextMixin):
         scope: MemoryScope | None = None,
         scope_id: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryItem]:
         async with self._db.session() as session, session.begin():
             resolved_workspace_id = await self._resolve_workspace_id_in_session(
@@ -102,73 +178,52 @@ class MemoryRepository(RepositoryContextMixin):
             await self._set_request_context(
                 session, tenant_id, user_id=user_id, workspace_id=resolved_workspace_id
             )
-            stmt: Select[tuple[MemoryItem]] = select(MemoryItem).where(
-                and_(
-                    MemoryItem.tenant_id == tenant_id,
-                    MemoryItem.workspace_id == resolved_workspace_id,
-                )
+            stmt = self._build_memory_items_stmt(
+                tenant_id=tenant_id,
+                workspace_id=resolved_workspace_id,
+                user_id=user_id,
+                scope=scope,
+                scope_id=scope_id,
             )
-
-            allowed_scopes = (
-                MemoryScope.USER,
-                MemoryScope.RUN,
-                MemoryScope.SESSION,
+            if stmt is None:
+                return []
+            stmt = (
+                stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
             )
-            if scope is not None:
-                if user_id is not None and scope not in allowed_scopes:
-                    return []
-                stmt = stmt.where(MemoryItem.scope == scope)
-            elif user_id is not None:
-                stmt = stmt.where(MemoryItem.scope.in_(allowed_scopes))
-
-            if user_id is not None:
-                run_owned_by_user = (
-                    select(Run.id)
-                    .where(
-                        and_(
-                            Run.tenant_id == tenant_id,
-                            Run.workspace_id == resolved_workspace_id,
-                            Run.created_by_user_id == user_id,
-                        )
-                    )
-                    .scalar_subquery()
-                )
-                session_owned_by_user = (
-                    select(ChatSession.id)
-                    .where(
-                        and_(
-                            ChatSession.tenant_id == tenant_id,
-                            ChatSession.workspace_id == resolved_workspace_id,
-                            ChatSession.user_id == user_id,
-                        )
-                    )
-                    .scalar_subquery()
-                )
-                stmt = stmt.where(
-                    or_(
-                        and_(
-                            MemoryItem.user_id == user_id,
-                            MemoryItem.scope != MemoryScope.USER,
-                        ),
-                        and_(
-                            MemoryItem.scope == MemoryScope.USER,
-                            MemoryItem.scope_id == str(user_id),
-                        ),
-                        and_(
-                            MemoryItem.scope == MemoryScope.RUN,
-                            MemoryItem.run_id.in_(run_owned_by_user),
-                        ),
-                        and_(
-                            MemoryItem.scope == MemoryScope.SESSION,
-                            MemoryItem.session_id.in_(session_owned_by_user),
-                        ),
-                    )
-                )
-            if scope_id is not None:
-                stmt = stmt.where(MemoryItem.scope_id == scope_id)
-            stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(limit)
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    async def count_memory_items(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        scope: MemoryScope | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        async with self._db.session() as session, session.begin():
+            resolved_workspace_id = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            await self._set_request_context(
+                session, tenant_id, user_id=user_id, workspace_id=resolved_workspace_id
+            )
+            stmt = self._build_memory_items_stmt(
+                tenant_id=tenant_id,
+                workspace_id=resolved_workspace_id,
+                user_id=user_id,
+                scope=scope,
+                scope_id=scope_id,
+            )
+            if stmt is None:
+                return 0
+            count_stmt = select(func.count()).select_from(stmt.subquery())
+            result = await session.execute(count_stmt)
+            return int(result.scalar_one())
 
 
 __all__ = [

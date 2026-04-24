@@ -33,8 +33,7 @@ type OptionListSchemaInvariantInput = {
   choice?: OptionListSelection;
 };
 
-function selectionToIds(selection: OptionListSelection | undefined): string[] {
-  if (selection == null) return [];
+function selectionToIds(selection: Exclude<OptionListSelection, null>): string[] {
   if (typeof selection === "string") return [selection];
   return Array.isArray(selection) ? selection : [];
 }

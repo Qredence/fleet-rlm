@@ -167,18 +167,23 @@ def load_document(path: str, alias: str = "active") -> dict[str, Any]:
 
 @tool_fn
 def set_active_document(alias: str) -> dict[str, Any]:
-    """Set the active document alias for subsequent tool calls.
+    """Report that standalone document alias activation is unsupported.
 
-    This standalone version is a no-op placeholder.  The agent-bound
-    version provided by ``AgentRuntime`` updates the agent's document cache.
+    The agent-bound version provided by ``AgentRuntime`` updates the agent's
+    document cache. The standalone tool has no cache state to mutate, so it
+    fails explicitly instead of reporting a false-positive active alias.
 
     Args:
         alias: The document alias to set as active.
 
     Returns:
-        Dictionary with ``status`` and ``active_alias``.
+        Dictionary with ``status`` and an explanatory ``error``.
     """
-    return {"status": "ok", "active_alias": alias}
+    return {
+        "status": "error",
+        "active_alias": alias,
+        "error": "set_active_document is unavailable without an agent document cache.",
+    }
 
 
 @tool_fn
@@ -199,19 +204,19 @@ def list_documents() -> dict[str, Any]:
 
 
 def fetch_document_text(url_or_path: str) -> dict[str, Any]:
-    """Fetch and extract text from a URL or local file path.
+    """Fetch and extract text from an HTTP(S) document URL.
 
     Unlike :func:`load_document`, this function returns the raw document text
     directly so it can be used as a bridged sandbox tool — the sandbox RLM can
     call ``fetch_document_text(url)`` and immediately process the returned text
     without any host-side document caching.
 
-    Supports the same formats as :func:`load_document` (PDF via MarkItDown,
-    plain text, HTML, Office documents, etc.) and the same 50 MiB download cap
-    for URLs.
+    Supports the same remote formats as :func:`load_document` (PDF via
+    MarkItDown, plain text, HTML, Office documents, etc.) and the same 50 MiB
+    download cap.
 
     Args:
-        url_or_path: HTTP(S) URL or absolute/relative local file path.
+        url_or_path: HTTP(S) URL.
 
     Returns:
         A dict with:
@@ -228,13 +233,13 @@ def fetch_document_text(url_or_path: str) -> dict[str, Any]:
     stripped = url_or_path.strip()
     tmp_path: Path | None = None
     try:
-        if stripped.startswith(("http://", "https://")):
-            tmp_path = _download_url(stripped)
-            file_path = tmp_path
-        else:
-            file_path = Path(stripped)
-            if not file_path.exists():
-                return {"status": "error", "error": f"File not found: {stripped}"}
+        if not stripped.startswith(("http://", "https://")):
+            return {
+                "status": "error",
+                "error": "fetch_document_text only accepts HTTP(S) URLs.",
+            }
+        tmp_path = _download_url(stripped)
+        file_path = tmp_path
 
         text, metadata = _read_document_content(file_path)
         return {

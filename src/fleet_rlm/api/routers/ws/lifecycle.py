@@ -214,7 +214,7 @@ def cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, An
             "kind": "done",
             "text": message,
             "payload": {"cancelled": True},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "version": 2,
             "event_id": str(uuid.uuid4()),
         },

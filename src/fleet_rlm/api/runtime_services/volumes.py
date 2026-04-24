@@ -6,6 +6,7 @@ import asyncio
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Awaitable, NoReturn, cast
 
@@ -72,6 +73,23 @@ def normalize_volume_tree_path(root_path: str) -> str:
     if ".." in PurePosixPath(normalized_path).parts:
         raise HTTPException(status_code=400, detail="Invalid root path.")
     return normalized_path
+
+
+def normalize_volume_timestamp(value: Any) -> str | None:
+    """Return a stable ISO-8601 timestamp string for provider metadata."""
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, datetime):
+        created_at = (
+            value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        )
+        return created_at.isoformat()
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        formatted = isoformat()
+        if isinstance(formatted, str):
+            return formatted
+    return str(value)
 
 
 def raise_volume_file_error(exc: Exception) -> NoReturn:
@@ -225,9 +243,7 @@ async def load_volume_list(
                 id=str(workspace_volume.get("id") or workspace_volume_name),
                 name=str(workspace_volume.get("name") or workspace_volume_name),
                 state=str(workspace_volume.get("state") or "unknown"),
-                created_at=created_at
-                if created_at is None or isinstance(created_at, str)
-                else str(created_at),
+                created_at=normalize_volume_timestamp(created_at),
             )
         ],
     )

@@ -81,6 +81,7 @@ async def list_memory_items(
         Query(description="Filter by scope identifier."),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 100,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> MemoryListResponse:
     """Return memory items for the authenticated user, optionally filtered."""
     scope_filter = None
@@ -104,6 +105,13 @@ async def list_memory_items(
             detail="Database persistence is unavailable.",
         )
 
+    total = await repository.count_memory_items(
+        tenant_id=persisted_identity.tenant_id,
+        workspace_id=persisted_identity.workspace_id,
+        user_id=persisted_identity.user_id,
+        scope=scope_filter,
+        scope_id=scope_id,
+    )
     items = await repository.list_memory_items(
         tenant_id=persisted_identity.tenant_id,
         workspace_id=persisted_identity.workspace_id,
@@ -111,6 +119,7 @@ async def list_memory_items(
         scope=scope_filter,
         scope_id=scope_id,
         limit=limit,
+        offset=offset,
     )
 
     return MemoryListResponse(
@@ -135,6 +144,7 @@ async def list_memory_items(
             )
             for item in items
         ],
-        total=len(items),
+        total=total,
+        offset=offset,
         limit=limit,
     )

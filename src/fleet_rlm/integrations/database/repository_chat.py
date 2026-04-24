@@ -714,6 +714,8 @@ class ChatRepository(RepositoryContextMixin):
         run_id: uuid.UUID,
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> Sequence[RunStep]:
         async with self._db.session() as session, session.begin():
             resolved_workspace_id = await self._resolve_workspace_id_in_session(
@@ -739,8 +741,47 @@ class ChatRepository(RepositoryContextMixin):
                 )
                 .order_by(RunStep.step_index.asc())
             )
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit is not None:
+                stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             return result.scalars().all()
+
+    async def count_run_steps(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> int:
+        async with self._db.session() as session, session.begin():
+            resolved_workspace_id = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant_id,
+                user_id=created_by_user_id,
+                workspace_id=workspace_id,
+            )
+            await self._set_request_context(
+                session,
+                tenant_id,
+                created_by_user_id,
+                resolved_workspace_id,
+            )
+            stmt = (
+                select(func.count())
+                .select_from(RunStep)
+                .where(
+                    and_(
+                        RunStep.tenant_id == tenant_id,
+                        RunStep.workspace_id == resolved_workspace_id,
+                        RunStep.run_id == run_id,
+                    )
+                )
+            )
+            result = await session.execute(stmt)
+            return int(result.scalar_one())
 
 
 __all__ = [
