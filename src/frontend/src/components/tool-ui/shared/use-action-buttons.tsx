@@ -97,16 +97,15 @@ export function useActionButtons(
         return;
       }
 
-      if (onBeforeAction) {
-        const shouldProceed = await onBeforeAction(action.id);
-        if (!shouldProceed) {
-          setConfirmingActionId(null);
-          executionLockRef.current.release();
-          return;
-        }
-      }
-
       try {
+        if (onBeforeAction) {
+          const shouldProceed = await onBeforeAction(action.id);
+          if (!shouldProceed) {
+            setConfirmingActionId(null);
+            return;
+          }
+        }
+
         setExecutingActionId(action.id);
         await onAction(action.id);
       } finally {

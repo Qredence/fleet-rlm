@@ -94,40 +94,6 @@ export type Action = z.infer<typeof ActionSchema>;
 export type LocalAction = Action;
 export type DecisionAction = Action;
 
-export const DecisionResultSchema = z.object({
-  kind: z.literal("decision"),
-  version: z.literal(1),
-  decisionId: z.string().min(1),
-  actionId: z.string().min(1),
-  actionLabel: z.string().min(1),
-  at: z.string().datetime(),
-  payload: z.record(z.string(), z.unknown()).optional(),
-});
-
-export type DecisionResult<
-  TPayload extends Record<string, unknown> = Record<string, unknown>,
-> = Omit<z.infer<typeof DecisionResultSchema>, "payload"> & {
-  payload?: TPayload;
-};
-
-export function createDecisionResult<
-  TPayload extends Record<string, unknown> = Record<string, unknown>,
->(args: {
-  decisionId: string;
-  action: { id: string; label: string };
-  payload?: TPayload;
-}): DecisionResult<TPayload> {
-  return {
-    kind: "decision",
-    version: 1,
-    decisionId: args.decisionId,
-    actionId: args.action.id,
-    actionLabel: args.action.label,
-    at: new Date().toISOString(),
-    payload: args.payload,
-  };
-}
-
 export const ActionButtonsPropsSchema = z.object({
   actions: z.array(ActionSchema).min(1),
   align: z.enum(["left", "center", "right"]).optional(),
