@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+from fastapi import HTTPException
 
 from fleet_rlm.integrations.daytona import config as _daytona_config
 from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
+from fleet_rlm.utils.sandbox_ownership import (
+    SANDBOX_OWNER_LABEL,
+    sandbox_has_owner_label,
+    sandbox_owner_matches,
+)
 
 from ..schemas.core import SandboxDetailResponse, SandboxListItem, SandboxListResponse
 
@@ -14,6 +22,9 @@ from ..schemas.core import SandboxDetailResponse, SandboxListItem, SandboxListRe
 async def load_sandbox_list(
     page: int = 1,
     limit: int = 100,
+    *,
+    owner_labels: dict[str, str] | None = None,
+    allow_unlabeled_legacy: bool = False,
 ) -> SandboxListResponse:
     """List active Daytona sandboxes.
 
@@ -25,12 +36,26 @@ async def load_sandbox_list(
         config = _daytona_config.resolve_daytona_config()
         client = _daytona_runtime._build_daytona_client(config)
 
-        result = await _await_if_needed(
-            client.list(page=page, limit=limit),
+        labels_filter = _list_labels_filter(
+            owner_labels=owner_labels,
+            allow_unlabeled_legacy=allow_unlabeled_legacy,
+        )
+        result = await _list_sandboxes(
+            client,
+            page=page,
+            limit=limit,
+            labels_filter=labels_filter,
         )
         items: list[SandboxListItem] = []
         raw_items = getattr(result, "items", result) if result else []
         for sandbox in raw_items:
+            labels = _sandbox_labels(sandbox)
+            if not _sandbox_is_accessible(
+                labels,
+                owner_labels=owner_labels,
+                allow_unlabeled_legacy=allow_unlabeled_legacy,
+            ):
+                continue
             # Extract volume name from volumes or labels
             volume_name = None
             volumes = getattr(sandbox, "volumes", None)
@@ -50,11 +75,6 @@ async def load_sandbox_list(
             state = getattr(sandbox, "state", None)
             state_value = str(getattr(state, "value", state) or "unknown")
 
-            # Parse labels
-            labels = getattr(sandbox, "labels", None) or {}
-            if not isinstance(labels, dict):
-                labels = {}
-
             items.append(
                 SandboxListItem(
                     id=str(getattr(sandbox, "id", "")),
@@ -71,9 +91,9 @@ async def load_sandbox_list(
 
         return SandboxListResponse(
             items=items,
-            total=getattr(result, "total", len(items)),
+            total=len(items),
             page=getattr(result, "page", page),
-            total_pages=getattr(result, "total_pages", 1),
+            total_pages=max(1, math.ceil(len(items) / max(1, limit))),
         )
     finally:
         if client is not None:
@@ -82,7 +102,12 @@ async def load_sandbox_list(
                 await _await_if_needed(close())
 
 
-async def load_sandbox_detail(sandbox_id: str) -> SandboxDetailResponse:
+async def load_sandbox_detail(
+    sandbox_id: str,
+    *,
+    owner_labels: dict[str, str] | None = None,
+    allow_unlabeled_legacy: bool = False,
+) -> SandboxDetailResponse:
     """Get detailed information for a single Daytona sandbox by ID.
 
     Wraps the Daytona SDK ``client.get()`` method and normalizes sandbox
@@ -94,6 +119,11 @@ async def load_sandbox_detail(sandbox_id: str) -> SandboxDetailResponse:
         client = _daytona_runtime._build_daytona_client(config)
 
         sandbox = await _await_if_needed(client.get(sandbox_id))
+        _raise_if_sandbox_inaccessible(
+            sandbox,
+            owner_labels=owner_labels,
+            allow_unlabeled_legacy=allow_unlabeled_legacy,
+        )
 
         # Extract volume name from volumes
         volume_name = None
@@ -128,9 +158,7 @@ async def load_sandbox_detail(sandbox_id: str) -> SandboxDetailResponse:
         state_value = str(getattr(state, "value", state) or "unknown")
 
         # Parse labels
-        labels = getattr(sandbox, "labels", None) or {}
-        if not isinstance(labels, dict):
-            labels = {}
+        labels = _sandbox_labels(sandbox)
 
         # Parse env vars
         env_vars = getattr(sandbox, "env", None) or {}
@@ -189,7 +217,12 @@ async def load_sandbox_detail(sandbox_id: str) -> SandboxDetailResponse:
                 await _await_if_needed(close())
 
 
-async def delete_sandbox(sandbox_id: str) -> None:
+async def delete_sandbox(
+    sandbox_id: str,
+    *,
+    owner_labels: dict[str, str] | None = None,
+    allow_unlabeled_legacy: bool = False,
+) -> None:
     """Stop and delete a Daytona sandbox by ID.
 
     Wraps ``DaytonaSandboxSession.adelete()`` to perform a graceful stop
@@ -201,6 +234,11 @@ async def delete_sandbox(sandbox_id: str) -> None:
         client = _daytona_runtime._build_daytona_client(config)
 
         sandbox = await _await_if_needed(client.get(sandbox_id))
+        _raise_if_sandbox_inaccessible(
+            sandbox,
+            owner_labels=owner_labels,
+            allow_unlabeled_legacy=allow_unlabeled_legacy,
+        )
         session = _daytona_runtime.DaytonaSandboxSession(
             sandbox=sandbox,
             repo_url=None,
@@ -216,7 +254,12 @@ async def delete_sandbox(sandbox_id: str) -> None:
                 await _await_if_needed(close())
 
 
-async def archive_sandbox(sandbox_id: str) -> None:
+async def archive_sandbox(
+    sandbox_id: str,
+    *,
+    owner_labels: dict[str, str] | None = None,
+    allow_unlabeled_legacy: bool = False,
+) -> None:
     """Archive a Daytona sandbox by ID to cold storage.
 
     Wraps ``DaytonaSandboxSession.aarchive()`` to move the sandbox to
@@ -228,6 +271,11 @@ async def archive_sandbox(sandbox_id: str) -> None:
         client = _daytona_runtime._build_daytona_client(config)
 
         sandbox = await _await_if_needed(client.get(sandbox_id))
+        _raise_if_sandbox_inaccessible(
+            sandbox,
+            owner_labels=owner_labels,
+            allow_unlabeled_legacy=allow_unlabeled_legacy,
+        )
         session = _daytona_runtime.DaytonaSandboxSession(
             sandbox=sandbox,
             repo_url=None,
@@ -241,3 +289,67 @@ async def archive_sandbox(sandbox_id: str) -> None:
             close = getattr(client, "close", None)
             if callable(close):
                 await _await_if_needed(close())
+
+
+def _list_labels_filter(
+    *,
+    owner_labels: dict[str, str] | None,
+    allow_unlabeled_legacy: bool,
+) -> dict[str, str] | None:
+    if allow_unlabeled_legacy or not owner_labels:
+        return None
+    owner_value = owner_labels.get(SANDBOX_OWNER_LABEL)
+    return {SANDBOX_OWNER_LABEL: owner_value} if owner_value else None
+
+
+async def _list_sandboxes(
+    client: Any,
+    *,
+    page: int,
+    limit: int,
+    labels_filter: dict[str, str] | None,
+) -> Any:
+    if labels_filter:
+        try:
+            return await _await_if_needed(
+                client.list(labels=labels_filter, page=page, limit=limit)
+            )
+        except TypeError:
+            pass
+    return await _await_if_needed(client.list(page=page, limit=limit))
+
+
+def _sandbox_labels(sandbox: Any) -> dict[str, str]:
+    labels = getattr(sandbox, "labels", None) or {}
+    if not isinstance(labels, dict):
+        return {}
+    return {str(key): str(value) for key, value in labels.items()}
+
+
+def _sandbox_is_accessible(
+    labels: dict[str, str],
+    *,
+    owner_labels: dict[str, str] | None,
+    allow_unlabeled_legacy: bool,
+) -> bool:
+    owner_label = (owner_labels or {}).get(SANDBOX_OWNER_LABEL)
+    if not owner_label:
+        return bool(allow_unlabeled_legacy and not sandbox_has_owner_label(labels))
+    if sandbox_owner_matches(labels, owner_label=owner_label):
+        return True
+    return bool(allow_unlabeled_legacy and not sandbox_has_owner_label(labels))
+
+
+def _raise_if_sandbox_inaccessible(
+    sandbox: Any,
+    *,
+    owner_labels: dict[str, str] | None,
+    allow_unlabeled_legacy: bool,
+) -> None:
+    if _sandbox_is_accessible(
+        _sandbox_labels(sandbox),
+        owner_labels=owner_labels,
+        allow_unlabeled_legacy=allow_unlabeled_legacy,
+    ):
+        return
+    raise HTTPException(status_code=404, detail="Sandbox not found or inaccessible.")

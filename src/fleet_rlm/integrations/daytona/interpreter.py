@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import AbstractSet, Any, Callable, Protocol, cast
 
 import dspy
@@ -992,6 +992,7 @@ class DaytonaInterpreter(
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
         sandbox_spec: Any | None = None,
+        sandbox_labels: dict[str, str] | None = None,
         delete_session_on_shutdown: bool = True,
         delete_context_on_shutdown: bool = False,
         sub_lm: dspy.LM | None = None,
@@ -1013,6 +1014,7 @@ class DaytonaInterpreter(
         self.repo_ref = repo_ref
         self.context_paths = dedupe_paths(list(context_paths or []))
         self.sandbox_spec = sandbox_spec  # SandboxSpec with optional Image builder
+        self.sandbox_labels = dict(sandbox_labels or {})
         self.delete_session_on_shutdown = delete_session_on_shutdown
         self.delete_context_on_shutdown = delete_context_on_shutdown
         self.default_execution_profile = default_execution_profile
@@ -1099,6 +1101,7 @@ class DaytonaInterpreter(
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         (
@@ -1106,12 +1109,14 @@ class DaytonaInterpreter(
             normalized_repo_ref,
             normalized_context_paths,
             normalized_volume,
+            normalized_sandbox_labels,
             source_key,
         ) = self._normalized_workspace_config(
             repo_url=repo_url,
             repo_ref=repo_ref,
             context_paths=context_paths,
             volume_name=volume_name,
+            sandbox_labels=sandbox_labels,
         )
         should_recreate = force_new_session or self._session_needs_recreation(
             desired_volume=normalized_volume
@@ -1123,6 +1128,7 @@ class DaytonaInterpreter(
             repo_ref=normalized_repo_ref,
             context_paths=normalized_context_paths,
             volume_name=normalized_volume,
+            sandbox_labels=normalized_sandbox_labels,
         )
         if not should_recreate and self._session is not None:
             self._last_sandbox_transition = "reused"
@@ -1135,6 +1141,7 @@ class DaytonaInterpreter(
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         (
@@ -1142,12 +1149,14 @@ class DaytonaInterpreter(
             normalized_repo_ref,
             normalized_context_paths,
             normalized_volume,
+            normalized_sandbox_labels,
             source_key,
         ) = self._normalized_workspace_config(
             repo_url=repo_url,
             repo_ref=repo_ref,
             context_paths=context_paths,
             volume_name=volume_name,
+            sandbox_labels=sandbox_labels,
         )
         should_recreate = force_new_session or self._session_needs_recreation(
             desired_volume=normalized_volume
@@ -1159,6 +1168,7 @@ class DaytonaInterpreter(
             repo_ref=normalized_repo_ref,
             context_paths=normalized_context_paths,
             volume_name=normalized_volume,
+            sandbox_labels=normalized_sandbox_labels,
         )
         if not should_recreate and self._session is not None:
             self._last_sandbox_transition = "reused"
@@ -1171,17 +1181,24 @@ class DaytonaInterpreter(
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None,
     ) -> tuple[
         str | None,
         str | None,
         list[str],
         str | None,
+        dict[str, str],
         tuple[str | None, str | None, tuple[str, ...], str | None],
     ]:
         normalized_repo_url = str(repo_url or "").strip() or None
         normalized_repo_ref = str(repo_ref or "").strip() or None
         normalized_context_paths = dedupe_paths(list(context_paths or []))
         normalized_volume = str(volume_name or "").strip() or None
+        normalized_sandbox_labels = {
+            str(key): str(value)
+            for key, value in (sandbox_labels or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
         source_key = (
             normalized_repo_url,
             normalized_repo_ref,
@@ -1193,6 +1210,7 @@ class DaytonaInterpreter(
             normalized_repo_ref,
             normalized_context_paths,
             normalized_volume,
+            normalized_sandbox_labels,
             source_key,
         )
 
@@ -1203,11 +1221,14 @@ class DaytonaInterpreter(
         repo_ref: str | None,
         context_paths: list[str],
         volume_name: str | None,
+        sandbox_labels: dict[str, str],
     ) -> None:
         self.repo_url = repo_url
         self.repo_ref = repo_ref
         self.context_paths = context_paths
         self.volume_name = volume_name
+        if sandbox_labels:
+            self.sandbox_labels = dict(sandbox_labels)
 
     def _session_needs_recreation(self, *, desired_volume: str | None) -> bool:
         active_session = self._session
@@ -1511,6 +1532,28 @@ class DaytonaInterpreter(
             self._clear_persisted_session()
             return None, True
 
+    def _effective_sandbox_spec(self) -> SandboxSpec:
+        """Return the sandbox spec with current volume and owner labels applied."""
+        labels = dict(getattr(self.sandbox_spec, "labels", None) or {})
+        labels.update(self.sandbox_labels)
+        if isinstance(self.sandbox_spec, SandboxSpec):
+            return replace(
+                self.sandbox_spec,
+                volume_name=self.volume_name or self.sandbox_spec.volume_name,
+                labels=labels or None,
+            )
+        build_sandbox_spec = getattr(self.runtime, "build_sandbox_spec", None)
+        if callable(build_sandbox_spec):
+            return build_sandbox_spec(
+                volume_name=self.volume_name,
+                labels=labels or None,
+            )
+        return SandboxSpec(
+            volume_name=self.volume_name,
+            volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            labels=labels or None,
+        )
+
     async def _acreate_session_from_runtime(
         self,
         *,
@@ -1522,7 +1565,7 @@ class DaytonaInterpreter(
             ref=self.repo_ref,
             context_paths=list(self.context_paths),
             volume_name=self.volume_name,
-            spec=self.sandbox_spec,
+            spec=self._effective_sandbox_spec(),
         )
         return await self._afinalize_session(
             session,

@@ -6,12 +6,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import Select, and_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from .engine import DatabaseManager
 from .models_enums import MemoryKind, MemoryScope, MemorySource
 from .models_memory import MemoryItem
+from .models_runs import ChatSession, Run
 from .repository_shared import RepositoryContextMixin, _coerce_enum
 
 
@@ -86,6 +87,7 @@ class MemoryRepository(RepositoryContextMixin):
         *,
         tenant_id: uuid.UUID,
         workspace_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
         scope: MemoryScope | None = None,
         scope_id: str | None = None,
         limit: int = 100,
@@ -94,10 +96,11 @@ class MemoryRepository(RepositoryContextMixin):
             resolved_workspace_id = await self._resolve_workspace_id_in_session(
                 session,
                 tenant_id=tenant_id,
+                user_id=user_id,
                 workspace_id=workspace_id,
             )
             await self._set_request_context(
-                session, tenant_id, workspace_id=resolved_workspace_id
+                session, tenant_id, user_id=user_id, workspace_id=resolved_workspace_id
             )
             stmt: Select[tuple[MemoryItem]] = select(MemoryItem).where(
                 and_(
@@ -105,8 +108,62 @@ class MemoryRepository(RepositoryContextMixin):
                     MemoryItem.workspace_id == resolved_workspace_id,
                 )
             )
+
+            allowed_scopes = (
+                MemoryScope.USER,
+                MemoryScope.RUN,
+                MemoryScope.SESSION,
+            )
             if scope is not None:
+                if user_id is not None and scope not in allowed_scopes:
+                    return []
                 stmt = stmt.where(MemoryItem.scope == scope)
+            elif user_id is not None:
+                stmt = stmt.where(MemoryItem.scope.in_(allowed_scopes))
+
+            if user_id is not None:
+                run_owned_by_user = (
+                    select(Run.id)
+                    .where(
+                        and_(
+                            Run.tenant_id == tenant_id,
+                            Run.workspace_id == resolved_workspace_id,
+                            Run.created_by_user_id == user_id,
+                        )
+                    )
+                    .scalar_subquery()
+                )
+                session_owned_by_user = (
+                    select(ChatSession.id)
+                    .where(
+                        and_(
+                            ChatSession.tenant_id == tenant_id,
+                            ChatSession.workspace_id == resolved_workspace_id,
+                            ChatSession.user_id == user_id,
+                        )
+                    )
+                    .scalar_subquery()
+                )
+                stmt = stmt.where(
+                    or_(
+                        and_(
+                            MemoryItem.user_id == user_id,
+                            MemoryItem.scope != MemoryScope.USER,
+                        ),
+                        and_(
+                            MemoryItem.scope == MemoryScope.USER,
+                            MemoryItem.scope_id == str(user_id),
+                        ),
+                        and_(
+                            MemoryItem.scope == MemoryScope.RUN,
+                            MemoryItem.run_id.in_(run_owned_by_user),
+                        ),
+                        and_(
+                            MemoryItem.scope == MemoryScope.SESSION,
+                            MemoryItem.session_id.in_(session_owned_by_user),
+                        ),
+                    )
+                )
             if scope_id is not None:
                 stmt = stmt.where(MemoryItem.scope_id == scope_id)
             stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(limit)

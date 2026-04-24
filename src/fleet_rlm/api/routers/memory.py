@@ -107,6 +107,7 @@ async def list_memory_items(
     items = await repository.list_memory_items(
         tenant_id=persisted_identity.tenant_id,
         workspace_id=persisted_identity.workspace_id,
+        user_id=persisted_identity.user_id,
         scope=scope_filter,
         scope_id=scope_id,
         limit=limit,

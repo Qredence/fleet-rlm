@@ -150,11 +150,14 @@ class DaytonaChatRequestOptions:
     context_paths: list[str]
     batch_concurrency: int | None
     workspace_id: str
+    sandbox_labels: dict[str, str]
 
 
 def normalize_daytona_chat_request(
     msg: WSMessage,
     workspace_id: str,
+    *,
+    sandbox_labels: dict[str, str] | None = None,
 ) -> DaytonaChatRequestOptions:
     """Return a typed Daytona request payload for the canonical runtime."""
 
@@ -169,6 +172,7 @@ def normalize_daytona_chat_request(
         context_paths=context_paths,
         batch_concurrency=msg.batch_concurrency,
         workspace_id=workspace_id,
+        sandbox_labels=dict(sandbox_labels or {}),
     )
 
 
@@ -226,4 +230,5 @@ async def prepare_daytona_workspace_for_turn(
         repo_ref=request.repo_ref,
         context_paths=context_paths,
         volume_name=request.workspace_id,
+        sandbox_labels=request.sandbox_labels,
     )

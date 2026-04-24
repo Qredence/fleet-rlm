@@ -23,6 +23,7 @@ class _MemoryBrowseRepository:
     def __init__(self) -> None:
         self.tenant_id = uuid.uuid4()
         self.user_id = uuid.uuid4()
+        self.other_user_id = uuid.uuid4()
         self.workspace_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         self.items = [
@@ -30,6 +31,7 @@ class _MemoryBrowseRepository:
                 id=uuid.uuid4(),
                 tenant_id=self.tenant_id,
                 workspace_id=self.workspace_id,
+                user_id=self.user_id,
                 scope=MemoryScope.SESSION,
                 scope_id="session-1",
                 kind=MemoryKind.FACT,
@@ -44,6 +46,7 @@ class _MemoryBrowseRepository:
                 id=uuid.uuid4(),
                 tenant_id=self.tenant_id,
                 workspace_id=self.workspace_id,
+                user_id=self.user_id,
                 scope=MemoryScope.RUN,
                 scope_id="run-1",
                 kind=MemoryKind.SUMMARY,
@@ -58,6 +61,7 @@ class _MemoryBrowseRepository:
                 id=uuid.uuid4(),
                 tenant_id=self.tenant_id,
                 workspace_id=self.workspace_id,
+                user_id=self.user_id,
                 scope=MemoryScope.SESSION,
                 scope_id="session-2",
                 kind=MemoryKind.NOTE,
@@ -66,6 +70,81 @@ class _MemoryBrowseRepository:
                 content_text="Session started",
                 importance=30,
                 tags=["session"],
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
+                user_id=self.user_id,
+                scope=MemoryScope.USER,
+                scope_id=str(self.user_id),
+                kind=MemoryKind.NOTE,
+                source=MemorySource.USER_INPUT,
+                status=MemoryStatus.ACTIVE,
+                content_text="Current user's profile memory",
+                importance=40,
+                tags=["profile"],
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
+                user_id=self.other_user_id,
+                scope=MemoryScope.USER,
+                scope_id=str(self.other_user_id),
+                kind=MemoryKind.NOTE,
+                source=MemorySource.USER_INPUT,
+                status=MemoryStatus.ACTIVE,
+                content_text="Other user's profile memory",
+                importance=40,
+                tags=["profile"],
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
+                user_id=self.other_user_id,
+                scope=MemoryScope.SESSION,
+                scope_id="other-session",
+                kind=MemoryKind.NOTE,
+                source=MemorySource.USER_INPUT,
+                status=MemoryStatus.ACTIVE,
+                content_text="Other user's private memory",
+                importance=90,
+                tags=["private"],
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
+                user_id=self.other_user_id,
+                scope=MemoryScope.RUN,
+                scope_id="other-run",
+                kind=MemoryKind.NOTE,
+                source=MemorySource.USER_INPUT,
+                status=MemoryStatus.ACTIVE,
+                content_text="Other user's run memory",
+                importance=90,
+                tags=["private"],
+                created_at=now,
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
+                user_id=None,
+                scope=MemoryScope.WORKSPACE,
+                scope_id=str(self.workspace_id),
+                kind=MemoryKind.NOTE,
+                source=MemorySource.SYSTEM,
+                status=MemoryStatus.ACTIVE,
+                content_text="Shared workspace memory",
+                importance=10,
+                tags=["shared"],
                 created_at=now,
             ),
         ]
@@ -83,14 +162,22 @@ class _MemoryBrowseRepository:
         *,
         tenant_id,
         workspace_id=None,
+        user_id=None,
         scope=None,
         scope_id=None,
         limit=100,
     ):
-        if tenant_id != self.tenant_id:
+        if tenant_id != self.tenant_id or workspace_id != self.workspace_id:
             return []
-        items = self.items
+        allowed_scopes = {MemoryScope.USER, MemoryScope.RUN, MemoryScope.SESSION}
+        items = [
+            item
+            for item in self.items
+            if item.scope in allowed_scopes and item.user_id == user_id
+        ]
         if scope is not None:
+            if scope not in allowed_scopes:
+                return []
             items = [item for item in items if item.scope == scope]
         if scope_id is not None:
             items = [item for item in items if item.scope_id == scope_id]
@@ -123,8 +210,12 @@ def test_list_memory_returns_all_items(default_client, auth_headers, memory_repo
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 3
-    assert len(payload["items"]) == 3
+    assert payload["total"] == 4
+    assert len(payload["items"]) == 4
+    assert all("Other user's" not in item["content_text"] for item in payload["items"])
+    assert all(
+        item["scope"] != MemoryScope.WORKSPACE.value for item in payload["items"]
+    )
 
     first = payload["items"][0]
     assert first["scope"] == MemoryScope.SESSION.value
@@ -149,6 +240,20 @@ def test_list_memory_filters_by_scope(default_client, auth_headers, memory_repo)
     assert all(item["scope"] == "session" for item in payload["items"])
 
 
+def test_list_memory_user_scope_returns_current_user_only(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        "/api/v1/memory?scope=user",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["scope_id"] == str(memory_repo.user_id)
+    assert payload["items"][0]["content_text"] == "Current user's profile memory"
+
+
 def test_list_memory_filters_by_scope_and_scope_id(
     default_client, auth_headers, memory_repo
 ):
@@ -162,6 +267,56 @@ def test_list_memory_filters_by_scope_and_scope_id(
     assert len(payload["items"]) == 1
     assert payload["items"][0]["scope"] == "session"
     assert payload["items"][0]["scope_id"] == "session-1"
+
+
+def test_list_memory_rejects_other_user_scope_id(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        "/api/v1/memory?scope=session&scope_id=other-session",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 0
+    assert payload["items"] == []
+
+
+def test_list_memory_rejects_other_user_user_scope_id(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        f"/api/v1/memory?scope=user&scope_id={memory_repo.other_user_id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 0
+    assert payload["items"] == []
+
+
+def test_list_memory_excludes_non_caller_run_scope_id(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        "/api/v1/memory?scope=run&scope_id=other-run",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 0
+    assert payload["items"] == []
+
+
+def test_list_memory_workspace_scope_returns_empty(
+    default_client, auth_headers, memory_repo
+):
+    response = default_client.get(
+        "/api/v1/memory?scope=workspace",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["items"] == []
 
 
 def test_list_memory_respects_limit(default_client, auth_headers, memory_repo):

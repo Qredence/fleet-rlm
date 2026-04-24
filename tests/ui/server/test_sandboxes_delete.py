@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from daytona import DaytonaConnectionError, DaytonaNotFoundError
 
+from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
+
 
 @pytest.fixture
 def fake_daytona_delete(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
@@ -17,8 +19,11 @@ def fake_daytona_delete(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     deleted_ids: list[str] = []
 
     class _FakeSandbox:
-        def __init__(self, sandbox_id: str) -> None:
+        def __init__(
+            self, sandbox_id: str, labels: dict[str, str] | None = None
+        ) -> None:
             self.id = sandbox_id
+            self.labels = labels or {}
             self._stopped = False
             self._deleted = False
 
@@ -39,7 +44,15 @@ def fake_daytona_delete(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
         async def get(self, sandbox_id: str) -> _FakeSandbox:
             if sandbox_id == "sb-001":
-                return _FakeSandbox(sandbox_id)
+                return _FakeSandbox(
+                    sandbox_id,
+                    sandbox_owner_labels(tenant_claim="tenant-a", user_claim="user-a"),
+                )
+            if sandbox_id == "sb-other":
+                return _FakeSandbox(
+                    sandbox_id,
+                    {"managed-by": "fleet-rlm", SANDBOX_OWNER_LABEL: "other"},
+                )
             raise DaytonaNotFoundError(f"Sandbox {sandbox_id} not found")
 
         async def close(self) -> None:
@@ -80,6 +93,16 @@ def test_delete_sandbox_not_found_returns_404(
         "/api/v1/sandboxes/nonexistent", headers=auth_headers
     )
     assert response.status_code == 404
+
+
+def test_delete_sandbox_mismatched_owner_returns_404(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    fake_daytona_delete: SimpleNamespace,
+) -> None:
+    response = default_client.delete("/api/v1/sandboxes/sb-other", headers=auth_headers)
+    assert response.status_code == 404
+    assert fake_daytona_delete.deleted_ids == []
 
 
 def test_delete_sandbox_connection_error_returns_503(

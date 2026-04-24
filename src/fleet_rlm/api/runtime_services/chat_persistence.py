@@ -519,6 +519,9 @@ async def persist_memory_item_if_needed(
         await repository.store_memory_item(
             MemoryItemCreateRequest(
                 tenant_id=identity_rows.tenant_id,
+                workspace_id=identity_rows.workspace_id,
+                user_id=identity_rows.user_id,
+                run_id=active_run_db_id,
                 scope=MemoryScope.RUN
                 if active_run_db_id is not None
                 else MemoryScope.USER,

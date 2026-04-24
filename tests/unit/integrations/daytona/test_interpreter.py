@@ -18,6 +18,8 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
+from fleet_rlm.integrations.daytona.types import SandboxSpec
+from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
@@ -184,6 +186,7 @@ class _FakeRuntime:
         self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
         self.fail_next_resume: Exception | None = None
         self.fail_next_reconcile: Exception | None = None
+        self.last_spec: object | None = None
 
     async def acreate_workspace_session(
         self,
@@ -194,6 +197,7 @@ class _FakeRuntime:
         volume_name: str | None = None,
         spec: object | None = None,
     ) -> DaytonaSandboxSession:
+        self.last_spec = spec
         self.create_calls.append(
             (repo_url, ref, list(context_paths or []), volume_name)
         )
@@ -432,6 +436,37 @@ def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -
     ]
     assert interpreter._last_sandbox_transition == "reused"
     assert interpreter._last_workspace_reconfigured is True
+
+
+def test_daytona_interpreter_applies_owner_labels_to_created_sandbox_spec() -> None:
+    runtime = _FakeRuntime()
+    owner_labels = sandbox_owner_labels(
+        tenant_claim="tenant-a",
+        user_claim="user-a",
+        session_id="session-a",
+    )
+    interpreter = DaytonaInterpreter(
+        runtime=runtime,
+        volume_name="tenant-a",
+        sandbox_spec=SandboxSpec(
+            labels={
+                "env": "test",
+                SANDBOX_OWNER_LABEL: "untrusted-owner",
+            }
+        ),
+        sandbox_labels=owner_labels,
+    )
+
+    interpreter.start()
+
+    assert isinstance(runtime.last_spec, SandboxSpec)
+    assert runtime.last_spec.volume_name == "tenant-a"
+    assert runtime.last_spec.labels is not None
+    assert runtime.last_spec.labels["env"] == "test"
+    assert (
+        runtime.last_spec.labels[SANDBOX_OWNER_LABEL]
+        == owner_labels[SANDBOX_OWNER_LABEL]
+    )
 
 
 def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:

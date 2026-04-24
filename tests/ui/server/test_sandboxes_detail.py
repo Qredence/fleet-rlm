@@ -5,15 +5,34 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
 from daytona import DaytonaConnectionError, DaytonaNotFoundError
 
+from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
+from tests.ui.conftest import STAGING_TEST_JWT_SECRET
+
+
+def _staging_bearer_headers() -> dict[str, str]:
+    token = jwt.encode(
+        {
+            "tid": "tenant-a",
+            "oid": "user-a",
+            "email": "alice@example.com",
+            "name": "Alice",
+        },
+        STAGING_TEST_JWT_SECRET,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
 
 @pytest.fixture
 def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Stub Daytona client.get() with a single sandbox."""
+    owner_labels = sandbox_owner_labels(tenant_claim="tenant-a", user_claim="user-a")
     sandbox = SimpleNamespace(
         id="sb-001",
         name="fleet-rlm-20260401-120000",
@@ -26,7 +45,7 @@ def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
                 mount_path="/home/daytona/memory",
             ),
         ],
-        labels={"managed-by": "fleet-rlm", "env": "test"},
+        labels={"managed-by": "fleet-rlm", "env": "test", **owner_labels},
         cpu=2,
         memory=4,
         disk=20,
@@ -41,6 +60,10 @@ def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         network_block_all=False,
         network_allow_list="example.com",
     )
+    mismatched = SimpleNamespace(**{**sandbox.__dict__, "id": "sb-other"})
+    mismatched.labels = {"managed-by": "fleet-rlm", SANDBOX_OWNER_LABEL: "other"}
+    legacy = SimpleNamespace(**{**sandbox.__dict__, "id": "sb-legacy"})
+    legacy.labels = {}
 
     class _FakeAsyncDaytona:
         instances: list["_FakeAsyncDaytona"] = []
@@ -53,6 +76,10 @@ def fake_daytona_sandbox(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         async def get(self, sandbox_id: str) -> SimpleNamespace:
             if sandbox_id == "sb-001":
                 return sandbox
+            if sandbox_id == "sb-other":
+                return mismatched
+            if sandbox_id == "sb-legacy":
+                return legacy
             raise DaytonaNotFoundError(f"Sandbox {sandbox_id} not found")
 
         async def close(self) -> None:
@@ -87,7 +114,15 @@ def test_get_sandbox_detail_returns_expected_shape(
     assert payload["state"] == "started"
     assert payload["created_at"] == "2026-04-01T12:00:00Z"
     assert payload["volume_name"] == "vol-001"
-    assert payload["labels"] == {"managed-by": "fleet-rlm", "env": "test"}
+    assert payload["labels"]["managed-by"] == "fleet-rlm"
+    assert payload["labels"]["env"] == "test"
+    assert (
+        payload["labels"][SANDBOX_OWNER_LABEL]
+        == sandbox_owner_labels(
+            tenant_claim="tenant-a",
+            user_claim="user-a",
+        )[SANDBOX_OWNER_LABEL]
+    )
     assert payload["cpu"] == 2
     assert payload["memory"] == 4
     assert payload["disk"] == 20
@@ -113,6 +148,27 @@ def test_get_sandbox_detail_not_found_returns_404(
     fake_daytona_sandbox: SimpleNamespace,
 ) -> None:
     response = default_client.get("/api/v1/sandboxes/nonexistent", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_get_sandbox_detail_mismatched_owner_returns_404(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    fake_daytona_sandbox: SimpleNamespace,
+) -> None:
+    response = default_client.get("/api/v1/sandboxes/sb-other", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_get_sandbox_detail_legacy_allowed_only_in_local(
+    staging_client: TestClient,
+    fake_daytona_sandbox: SimpleNamespace,
+) -> None:
+    response = staging_client.get(
+        "/api/v1/sandboxes/sb-legacy",
+        headers=_staging_bearer_headers(),
+    )
+
     assert response.status_code == 404
 
 
