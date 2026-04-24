@@ -12,6 +12,8 @@ caching, URL fetching with size limits) use the builder in
 from __future__ import annotations
 
 import os
+import ipaddress
+import socket
 import tempfile
 import urllib.parse
 import urllib.request
@@ -31,6 +33,54 @@ _CONTENT_TYPE_SUFFIX_MAP = {
     "application/msword": ".doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 }
+
+
+def _is_private_download_address(address: str) -> bool:
+    """Return whether an IP address should be blocked for bridged downloads."""
+    ip = ipaddress.ip_address(address)
+    return any(
+        (
+            ip.is_loopback,
+            ip.is_private,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_reserved,
+            ip.is_unspecified,
+        )
+    )
+
+
+def _validate_download_url(url: str) -> None:
+    """Reject download URLs that target local or private network addresses."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Document downloads only support HTTP(S) URLs.")
+    if not parsed.hostname:
+        raise ValueError("Document download URL must include a hostname.")
+
+    hostname = parsed.hostname.strip().rstrip(".")
+    if hostname.lower() == "localhost":
+        raise ValueError("Document download URL targets a private network address.")
+
+    try:
+        if _is_private_download_address(hostname):
+            raise ValueError("Document download URL targets a private network address.")
+        return
+    except ValueError as exc:
+        if "private network" in str(exc):
+            raise
+
+    try:
+        resolved = socket.getaddrinfo(hostname, parsed.port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(
+            f"Unable to resolve document download host: {hostname}"
+        ) from exc
+
+    for result in resolved:
+        sockaddr = result[4]
+        if sockaddr and _is_private_download_address(str(sockaddr[0])):
+            raise ValueError("Document download URL targets a private network address.")
 
 
 def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
@@ -63,6 +113,7 @@ def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
 
 def _download_url(url: str) -> Path:
     """Download *url* to a temporary file and return the path."""
+    _validate_download_url(url)
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "fleet-rlm/1.0"},
