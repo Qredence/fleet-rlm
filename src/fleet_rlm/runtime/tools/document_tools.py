@@ -140,7 +140,8 @@ def _download_url(url: str) -> Path:
     )
     with opener.open(req, timeout=_DOWNLOAD_TIMEOUT_S) as response:  # noqa: S310
         headers = dict(response.headers)
-        final_url = response.geturl() or url
+        response_geturl = getattr(response, "geturl", None)
+        final_url = response_geturl() if callable(response_geturl) else url
         suffix = _suffix_from_url(final_url, headers)
 
         fd, tmp_path = tempfile.mkstemp(suffix=suffix)
