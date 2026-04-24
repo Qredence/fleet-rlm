@@ -24,6 +24,7 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
+mlartifacts/*
 
 # OS/editor
 .DS_Store
