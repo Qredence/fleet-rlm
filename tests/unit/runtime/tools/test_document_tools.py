@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import os
+from http.client import HTTPMessage
 from pathlib import Path
 import socket
 from typing import Any
@@ -147,10 +149,10 @@ def test_download_url_rejects_private_redirect_targets(
                 _ = timeout
                 redirect_handler.redirect_request(
                     request,
-                    None,
+                    io.BytesIO(b""),
                     302,
                     "Found",
-                    {},
+                    HTTPMessage(),
                     "http://169.254.169.254/latest/meta-data/",
                 )
                 raise AssertionError("private redirect should be blocked")

@@ -11,6 +11,7 @@ caching, URL fetching with size limits) use the builder in
 
 from __future__ import annotations
 
+import io
 import os
 import ipaddress
 import socket
@@ -90,7 +91,7 @@ class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
         req: urllib.request.Request,
-        fp: IO[bytes],
+        fp: IO[bytes] | None,
         code: int,
         msg: str,
         headers: HTTPMessage,
@@ -98,7 +99,8 @@ class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
     ) -> urllib.request.Request | None:
         safe_url = urllib.parse.urljoin(req.full_url, newurl)
         _validate_download_url(safe_url)
-        return super().redirect_request(req, fp, code, msg, headers, safe_url)
+        redirect_fp = fp if fp is not None else io.BytesIO()
+        return super().redirect_request(req, redirect_fp, code, msg, headers, safe_url)
 
 
 def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
