@@ -11,14 +11,16 @@ caching, URL fetching with size limits) use the builder in
 
 from __future__ import annotations
 
+import io
 import os
 import ipaddress
 import socket
 import tempfile
 import urllib.parse
 import urllib.request
+from http.client import HTTPMessage
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from fleet_rlm.runtime.tools._marker import tool_fn
 
@@ -83,6 +85,24 @@ def _validate_download_url(url: str) -> None:
             raise ValueError("Document download URL targets a private network address.")
 
 
+class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Validate each redirect target before urllib follows it."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes] | None,
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        safe_url = urllib.parse.urljoin(req.full_url, newurl)
+        _validate_download_url(safe_url)
+        redirect_fp = fp if fp is not None else io.BytesIO()
+        return super().redirect_request(req, redirect_fp, code, msg, headers, safe_url)
+
+
 def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
     """Derive a file suffix from URL path or Content-Type header."""
     parsed = urllib.parse.urlparse(url)
@@ -114,14 +134,17 @@ def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
 def _download_url(url: str) -> Path:
     """Download *url* to a temporary file and return the path."""
     _validate_download_url(url)
+    opener = urllib.request.build_opener(_ValidatingRedirectHandler())
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "fleet-rlm/1.0"},
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_S) as response:  # noqa: S310
+    with opener.open(req, timeout=_DOWNLOAD_TIMEOUT_S) as response:  # noqa: S310
         headers = dict(response.headers)
-        suffix = _suffix_from_url(url, headers)
+        response_geturl = getattr(response, "geturl", None)
+        final_url = response_geturl() if callable(response_geturl) else url
+        suffix = _suffix_from_url(final_url, headers)
 
         fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         cleanup_tmp = False
