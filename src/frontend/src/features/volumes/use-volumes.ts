@@ -60,18 +60,6 @@ interface VolumeFileContentResponse {
   truncated: boolean;
 }
 
-interface VolumeListItem {
-  id: string;
-  name: string;
-  state: string;
-  createdAt: string | null;
-}
-
-interface VolumeListResponse {
-  provider: VolumeProvider;
-  volumes: VolumeListItem[];
-}
-
 // ── Conversion ──────────────────────────────────────────────────────
 
 function toFsNode(node: VolumeTreeNode, provider: VolumeProvider): FsNode {
@@ -321,11 +309,6 @@ export const filesystemKeys = {
     [...filesystemKeys.all, "file", provider, path] as const,
 };
 
-export const volumesKeys = {
-  all: ["volumes"] as const,
-  list: (provider: VolumeProvider) => [...volumesKeys.all, "list", provider] as const,
-};
-
 // ── useFilesystem (tree) ────────────────────────────────────────────
 
 interface UseFilesystemReturn {
@@ -463,50 +446,6 @@ export function useFileContent(
     size: query.data?.size ?? 0,
     isLoading: query.isLoading,
     error: query.error,
-  };
-}
-
-// ── useVolumesList ──────────────────────────────────────────────────
-
-export interface UseVolumesListReturn {
-  volumes: VolumeListItem[];
-  isLoading: boolean;
-  error: Error | null;
-  refetch: () => void;
-}
-
-export function useVolumesList(provider: VolumeProvider): UseVolumesListReturn {
-  const mock = rlmApiConfig.mockMode;
-
-  const query = useQuery({
-    queryKey: volumesKeys.list(provider),
-    queryFn: async ({ signal }): Promise<VolumeListItem[]> => {
-      if (mock) {
-        return [
-          { id: "vol-memory", name: "memory", state: "ready", createdAt: null },
-          { id: "vol-artifacts", name: "artifacts", state: "ready", createdAt: null },
-          { id: "vol-buffers", name: "buffers", state: "ready", createdAt: null },
-          { id: "vol-meta", name: "meta", state: "ready", createdAt: null },
-        ];
-      }
-
-      const url = new URL("/api/v1/runtime/volumes", window.location.origin);
-      url.searchParams.set("provider", provider);
-      const resp = await rlmApiClient.get<VolumeListResponse>(
-        url.pathname + url.search,
-        signal,
-      );
-      return resp.volumes;
-    },
-    staleTime: mock ? Infinity : 30_000,
-    retry: false,
-  });
-
-  return {
-    volumes: query.data ?? [],
-    isLoading: query.isLoading,
-    error: query.error,
-    refetch: query.refetch,
   };
 }
 
