@@ -155,7 +155,10 @@ async def run_optimization_background(
 
     store: _RepoPersistence | _LocalPersistence
     if persistence == "repo":
-        assert repository is not None and identity is not None
+        if repository is None or identity is None:
+            raise ValueError(
+                "repository and identity are required for repo persistence"
+            )
         store = _RepoPersistence(repository, identity)
     else:
         store = _LocalPersistence()
@@ -245,14 +248,18 @@ async def run_optimization_background(
                 )
             else:
                 result = dict(
-                    run_module_optimization(
-                        spec,
-                        dataset_path=dataset_path,
-                        output_path=output_path,
-                        default_output_root=default_output_root,
-                        train_ratio=train_ratio,
-                        auto=auto,
-                        run_id=int(run_id),
+                    await run_blocking(
+                        partial(
+                            run_module_optimization,
+                            spec,
+                            dataset_path=dataset_path,
+                            output_path=output_path,
+                            default_output_root=default_output_root,
+                            train_ratio=train_ratio,
+                            auto=auto,
+                            run_id=int(run_id),
+                        ),
+                        timeout=OPTIMIZATION_TIMEOUT_SECONDS,
                     )
                 )
         else:
@@ -276,13 +283,17 @@ async def run_optimization_background(
                     timeout=OPTIMIZATION_TIMEOUT_SECONDS,
                 )
             else:
-                result = optimize_program_with_gepa(
-                    dataset_path=dataset_path,
-                    program_spec=program_spec,
-                    output_path=output_path,
-                    auto=auto,
-                    train_ratio=train_ratio,
-                    source="api_background",
+                result = await run_blocking(
+                    partial(
+                        optimize_program_with_gepa,
+                        dataset_path=dataset_path,
+                        program_spec=program_spec,
+                        output_path=output_path,
+                        auto=auto,
+                        train_ratio=train_ratio,
+                        source="api_background",
+                    ),
+                    timeout=OPTIMIZATION_TIMEOUT_SECONDS,
                 )
 
         # Log validation score to MLflow when available

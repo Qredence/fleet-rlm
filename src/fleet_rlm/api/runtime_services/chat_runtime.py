@@ -188,7 +188,9 @@ def _try_build_daytona_interpreter(volume_name: str | None) -> Any | None:
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
         return DaytonaInterpreter(volume_name=volume_name)
-    except (ImportError, DaytonaConfigError):
+    except ImportError:
+        return None
+    except DaytonaConfigError:
         return None
 
 

@@ -54,7 +54,6 @@ def build_chat_agent(
 ) -> Any:
     """Build the canonical DSPy chat agent using FleetAgent and AgentRuntime."""
     _ = (
-        docs_path,
         deep_react_max_iters,
         enable_adaptive_iters,
         rlm_max_iterations,
@@ -86,6 +85,8 @@ def build_chat_agent(
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
     )
+    if docs_path is not None:
+        agent.load_document(str(docs_path), alias="active")
 
     return agent
 

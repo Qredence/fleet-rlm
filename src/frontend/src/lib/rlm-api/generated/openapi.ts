@@ -134,7 +134,7 @@ export interface paths {
   "/api/v1/runtime/volumes": {
     /**
      * Get Volumes
-     * @description List all persistent volumes for the active workspace and provider.
+     * @description List the active workspace volume for the selected provider.
      */
     get: operations["get_volumes_api_v1_runtime_volumes_get"];
   };
@@ -2717,8 +2717,6 @@ export interface operations {
         max_depth?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
-        /** @description Optional specific volume name to browse. Defaults to the workspace-scoped volume. */
-        volume_name?: string | null;
       };
     };
     responses: {
@@ -2769,8 +2767,6 @@ export interface operations {
         max_bytes?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
-        /** @description Optional specific volume name to read from. Defaults to the workspace-scoped volume. */
-        volume_name?: string | null;
       };
     };
     responses: {
@@ -2814,7 +2810,7 @@ export interface operations {
   };
   /**
    * Get Volumes
-   * @description List all persistent volumes for the active workspace and provider.
+   * @description List the active workspace volume for the selected provider.
    */
   get_volumes_api_v1_runtime_volumes_get: {
     parameters: {

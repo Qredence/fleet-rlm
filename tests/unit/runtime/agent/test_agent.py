@@ -228,3 +228,36 @@ def test_build_chat_agent_returns_agent_runtime(monkeypatch: pytest.MonkeyPatch)
 
     agent = _factory.build_chat_agent(planner_lm=object())
     assert isinstance(agent, AgentRuntime)
+
+
+def test_build_chat_agent_supports_sync_context_manager(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Existing CLI/MCP call sites use build_chat_agent() in a sync with block."""
+    from fleet_rlm.runtime import factory as _factory
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.factory._require_planner_ready",
+        lambda *a, **kw: None,
+    )
+
+    with _factory.build_chat_agent(planner_lm=object()) as agent:
+        assert isinstance(agent, AgentRuntime)
+
+
+@pytest.mark.asyncio
+async def test_build_chat_agent_supports_async_context_manager(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Websocket runtime call sites can still use async context management."""
+    from fleet_rlm.runtime import factory as _factory
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.factory._require_planner_ready",
+        lambda *a, **kw: None,
+    )
+
+    async with _factory.build_chat_agent(planner_lm=object()) as agent:
+        assert isinstance(agent, AgentRuntime)

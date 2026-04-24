@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -147,6 +148,47 @@ def test_patch_nonexistent_session_returns_404(default_client, auth_headers):
         json={"title": "New Title"},
     )
     assert response.status_code == 404
+
+
+def test_patch_session_local_store_preserves_metadata(
+    default_client,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """PATCH with metadata_json passes the parameter to local-store update_chat_session."""
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    local_store._engines.clear()
+    default_client.app.state.server_state.repository = None
+
+    # Create a local session matching the auth headers tenant/user
+    session = local_store.create_session(
+        title="Local Session",
+        owner_tenant="tenant-a",
+        owner_user="user-a",
+    )
+
+    call_kwargs: dict[str, object] = {}
+    original_update = local_store.update_chat_session
+
+    def _capture_update(session_id: int, **kwargs: object) -> object:
+        call_kwargs.update(kwargs)
+        return original_update(session_id, **kwargs)
+
+    monkeypatch.setattr(local_store, "update_chat_session", _capture_update)
+
+    new_metadata = {"external_session_id": "ext-456", "tags": ["local"]}
+    response = default_client.patch(
+        f"/api/v1/sessions/{session.id}",
+        headers=auth_headers,
+        json={"metadata_json": new_metadata},
+    )
+
+    assert response.status_code == 200
+    assert call_kwargs.get("metadata_json") == new_metadata
 
 
 def test_patch_session_without_auth_returns_401(staging_client, patch_session_repo):

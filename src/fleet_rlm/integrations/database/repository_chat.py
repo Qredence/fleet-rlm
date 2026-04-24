@@ -681,10 +681,29 @@ class ChatRepository(RepositoryContextMixin):
         *,
         tenant_id: uuid.UUID,
         run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
     ) -> Run | None:
         async with self._db.session() as session, session.begin():
-            await self._set_request_context(session, tenant_id)
-            stmt = select(Run).where(and_(Run.tenant_id == tenant_id, Run.id == run_id))
+            resolved_workspace_id = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant_id,
+                user_id=created_by_user_id,
+                workspace_id=workspace_id,
+            )
+            await self._set_request_context(
+                session,
+                tenant_id,
+                created_by_user_id,
+                resolved_workspace_id,
+            )
+            stmt = select(Run).where(
+                and_(
+                    Run.tenant_id == tenant_id,
+                    Run.workspace_id == resolved_workspace_id,
+                    Run.id == run_id,
+                )
+            )
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
@@ -693,12 +712,31 @@ class ChatRepository(RepositoryContextMixin):
         *,
         tenant_id: uuid.UUID,
         run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
     ) -> Sequence[RunStep]:
         async with self._db.session() as session, session.begin():
-            await self._set_request_context(session, tenant_id)
+            resolved_workspace_id = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant_id,
+                user_id=created_by_user_id,
+                workspace_id=workspace_id,
+            )
+            await self._set_request_context(
+                session,
+                tenant_id,
+                created_by_user_id,
+                resolved_workspace_id,
+            )
             stmt = (
                 select(RunStep)
-                .where(and_(RunStep.tenant_id == tenant_id, RunStep.run_id == run_id))
+                .where(
+                    and_(
+                        RunStep.tenant_id == tenant_id,
+                        RunStep.workspace_id == resolved_workspace_id,
+                        RunStep.run_id == run_id,
+                    )
+                )
                 .order_by(RunStep.step_index.asc())
             )
             result = await session.execute(stmt)

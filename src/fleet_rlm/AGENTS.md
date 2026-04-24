@@ -233,7 +233,7 @@ These issues are documented for awareness. Workers should not attempt fixes unle
 
 - **Import-time side effects in runtime packages** — `runtime/factory.py`, `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime and quality packages do not yet.
 - **Empty module registry** — `runtime/quality/module_registry.py` has `_MODULE_ENTRYPOINTS = ()`. No optimizable modules are registered, so `list_module_metadata()` returns an empty list.
-- **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts ~25 arguments but only passes 3 into `AgentRuntime`. This is a known structural debt item.
+- **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts many legacy arguments but only passes the runtime-critical subset into `AgentRuntime`; `docs_path` is loaded onto the returned runtime. The remaining ignored arguments are a known structural debt item.
 - **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
 - **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.
 

@@ -38,6 +38,37 @@ def _make_fake_react():
     return _FakeReAct
 
 
+def _tools_by_name(tools: list[Any]) -> dict[str, Any]:
+    """Index raw callables or dspy.Tool wrappers by their exposed tool name."""
+    return {
+        getattr(tool, "name", None) or getattr(tool, "__name__", ""): tool
+        for tool in tools
+    }
+
+
+class _FakeInterpreter:
+    """Small Daytona-interpreter stand-in for runtime tool binding tests."""
+
+    verbose = False
+    _started = True
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.shutdown_called = False
+
+    def execute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(variables or {})
+        self.calls.append((code, payload))
+        return {"code": code, "variables": payload}
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
 @pytest.fixture()
 def mock_react(monkeypatch: pytest.MonkeyPatch):
     """Monkeypatch dspy.ReAct inside agent.py to avoid real LLM calls."""
@@ -197,6 +228,112 @@ class TestAgentInitWithDiscoveredTools:
         assert rt.agent is not None
         assert len(rt.tools) >= 1
 
+    def test_interpreter_tools_omitted_without_interpreter(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fleet_rlm.runtime.tools.buffer_tools import read_buffer
+        from fleet_rlm.runtime.tools.memory_tools import (
+            read_core_memory,
+            write_core_memory,
+        )
+        from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
+        from fleet_rlm.runtime.tools.sandbox_tools import execute_code
+
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [
+                delegate_to_rlm,
+                execute_code,
+                read_buffer,
+                read_core_memory,
+                write_core_memory,
+            ],
+        )
+
+        rt = AgentRuntime()
+        tools = _tools_by_name(rt.tools)
+
+        assert "delegate_to_rlm" not in tools
+        assert "execute_code" not in tools
+        assert "read_buffer" not in tools
+        assert "read_core_memory" in tools
+        assert "write_core_memory" in tools
+        assert tools["write_core_memory"](key="topic", value="runtime") == {
+            "status": "ok",
+            "key": "topic",
+            "value": "runtime",
+        }
+        assert tools["read_core_memory"](key="topic") == {
+            "status": "ok",
+            "key": "topic",
+            "value": "runtime",
+        }
+
+    def test_interpreter_tools_are_bound_to_runtime_backends(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fleet_rlm.runtime.tools.buffer_tools import (
+            clear_buffer,
+            read_buffer,
+            write_buffer,
+        )
+        from fleet_rlm.runtime.tools.memory_tools import (
+            read_core_memory,
+            write_core_memory,
+        )
+        from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
+        from fleet_rlm.runtime.tools.sandbox_tools import execute_code
+
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [
+                clear_buffer,
+                delegate_to_rlm,
+                execute_code,
+                read_buffer,
+                read_core_memory,
+                write_buffer,
+                write_core_memory,
+            ],
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.tools.rlm_delegate.build_recursive_subquery_rlm",
+            lambda **kwargs: (
+                lambda prompt, context: dspy.Prediction(answer=f"{prompt}:{context}")
+            ),
+        )
+        interpreter = _FakeInterpreter()
+
+        rt = AgentRuntime(interpreter=interpreter)
+        tools = _tools_by_name(rt.tools)
+
+        assert set(tools) == {
+            "clear_buffer",
+            "delegate_to_rlm",
+            "execute_code",
+            "read_buffer",
+            "read_core_memory",
+            "write_buffer",
+            "write_core_memory",
+        }
+        assert rt.react_tools is rt.tools
+        assert tools["execute_code"](code="SUBMIT(value=1)") == {
+            "status": "ok",
+            "code": "SUBMIT(value=1)",
+            "variables": {},
+        }
+        assert tools["write_buffer"](name="notes", content="hello")["status"] == "ok"
+        assert tools["read_buffer"](name="notes")["variables"] == {
+            "buffer_name": "notes"
+        }
+        assert tools["clear_buffer"](name="notes")["status"] == "ok"
+        assert tools["write_core_memory"](key="phase", value="bound")["status"] == "ok"
+        assert tools["read_core_memory"](key="phase")["value"] == "bound"
+        assert tools["delegate_to_rlm"](query="q", context="c") == {
+            "status": "ok",
+            "answer": "q:c",
+        }
+
     def test_max_iters_forwarded_to_agent(
         self, mock_react, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -293,6 +430,35 @@ class TestHistoryAccumulationAcrossTurns:
         result = runtime.chat_turn("test")
         assert isinstance(result, dspy.Prediction)
         assert result.response == "ok"
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_suppresses_success_after_cancellation(
+        self, runtime: AgentRuntime
+    ) -> None:
+        cancelled = False
+
+        def _fake_forward(
+            *, chat_history: dspy.History, user_message: str
+        ) -> dspy.Prediction:
+            _ = chat_history, user_message
+            nonlocal cancelled
+            cancelled = True
+            return dspy.Prediction(response="late response")
+
+        runtime.agent.forward = _fake_forward
+
+        events = [
+            event
+            async for event in runtime.aiter_chat_turn_stream(
+                "cancel me",
+                cancel_check=lambda: cancelled,
+            )
+        ]
+
+        assert [event.kind for event in events] == ["status", "done"]
+        assert events[-1].text == "[cancelled]"
+        assert events[-1].payload == {"cancelled": True, "history_turns": 0}
+        assert runtime.history_turns() == 0
 
 
 # ---------------------------------------------------------------------------

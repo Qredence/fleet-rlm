@@ -26,7 +26,7 @@ vi.mock("@/features/volumes/use-volumes", async () => {
   );
   return {
     ...actual,
-    useFileContent: (path: string | null, provider: string, _volumeName?: string | null) => {
+    useFileContent: (path: string | null, provider: string) => {
       fileContentCalls.push({ path, provider });
       return contentState;
     },
@@ -41,12 +41,10 @@ vi.mock("@/features/volumes/use-volumes", async () => {
       selector?: (state: {
         selectFile: (node: unknown) => void;
         clearSelectedFile: () => void;
-        selectedVolumeName: string | null;
-        selectVolume: (name: string | null) => void;
       }) => unknown,
     ) =>
       selector
-        ? selector({ selectFile, clearSelectedFile, selectedVolumeName: null, selectVolume: vi.fn() })
+        ? selector({ selectFile, clearSelectedFile })
         : null,
   };
 });

@@ -194,12 +194,6 @@ async def get_volume_tree(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
-    volume_name: Annotated[
-        str | None,
-        Query(
-            description="Optional specific volume name to browse. Defaults to the workspace-scoped volume."
-        ),
-    ] = None,
 ) -> VolumeTreeResponse:
     """List the runtime volume tree for the active workspace and provider."""
     return await load_volume_tree(
@@ -208,7 +202,6 @@ async def get_volume_tree(
         provider=provider,
         root_path=root_path,
         max_depth=max_depth,
-        volume_name=volume_name,
     )
 
 
@@ -241,12 +234,6 @@ async def get_volume_file_content(
             description="Optional runtime volume backend override. Defaults to the active sandbox provider."
         ),
     ] = None,
-    volume_name: Annotated[
-        str | None,
-        Query(
-            description="Optional specific volume name to read from. Defaults to the workspace-scoped volume."
-        ),
-    ] = None,
 ) -> VolumeFileContentResponse:
     """Read a text preview for a single file from the runtime volume."""
     return await load_volume_file_content(
@@ -255,7 +242,6 @@ async def get_volume_file_content(
         provider=provider,
         path=path,
         max_bytes=max_bytes,
-        volume_name=volume_name,
     )
 
 
@@ -274,7 +260,7 @@ async def get_volumes(
         ),
     ] = None,
 ) -> VolumeListResponse:
-    """List all persistent volumes for the active workspace and provider."""
+    """List the active workspace volume for the selected provider."""
     return await load_volume_list(
         state=state,
         identity=identity,

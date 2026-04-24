@@ -97,10 +97,11 @@ async def get_run_steps(
 
     run_uuid = _parse_run_uuid(run_id)
 
-    # Verify the run exists (tenant-scoped via RLS)
     run = await repository.get_run(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
     )
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -108,6 +109,8 @@ async def get_run_steps(
     steps = await repository.get_run_steps(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
     )
 
     total = len(steps)

@@ -22,14 +22,101 @@ if TYPE_CHECKING:
     from .agent import FleetAgent
 
 
-def _bind_sandbox_filesystem_tools(
-    tools: list[Any],
-    *,
-    interpreter: Any,
-) -> list[Any]:
-    """Replace unbound sandbox-filesystem stubs with interpreter-bound closures."""
+_INTERPRETER_TOOL_NAMES = frozenset(
+    {
+        "clear_buffer",
+        "delegate_to_rlm",
+        "execute_code",
+        "read_buffer",
+        "sandbox_create_directory",
+        "sandbox_delete_file",
+        "sandbox_find_in_files",
+        "sandbox_get_file_info",
+        "sandbox_list_files",
+        "sandbox_move_file",
+        "sandbox_read_file",
+        "sandbox_replace_in_files",
+        "sandbox_search_files",
+        "sandbox_write_file",
+        "write_buffer",
+    }
+)
+
+
+def _tool_name(tool: Any) -> str | None:
+    return getattr(tool, "name", None) or getattr(
+        getattr(tool, "func", tool), "__name__", None
+    )
+
+
+def _coerce_sandbox_result(raw: Any) -> dict[str, Any]:
+    payload = getattr(raw, "output", raw)
+    if isinstance(payload, dict):
+        result = dict(payload)
+        result.setdefault("status", "ok")
+        return result
+    if payload is None:
+        return {"status": "ok"}
+    return {"status": "ok", "output": str(payload)}
+
+
+def _tool_description(tool: Any) -> str:
+    return (
+        getattr(tool, "desc", None)
+        or getattr(getattr(tool, "func", tool), "__doc__", "")
+        or ""
+    )
+
+
+def _wrap_tool(tool: Any, func: Callable[..., Any]) -> Any:
     from dspy import Tool
 
+    name = _tool_name(tool)
+    if name is None:
+        return tool
+    return Tool(func, name=name, desc=_tool_description(tool))
+
+
+def _execute_sandbox_tool(
+    interpreter: Any,
+    code: str,
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    raw = interpreter.execute(code, variables or {})
+    return _coerce_sandbox_result(raw)
+
+
+def _bound_runtime_tool_factories(
+    *,
+    runtime: AgentRuntime,
+    interpreter: Any | None,
+) -> dict[str, Callable[..., Any]]:
+    factories: dict[str, Callable[..., Any]] = {}
+
+    def read_core_memory(key: str = "") -> dict[str, Any]:
+        if key:
+            return {
+                "status": "ok",
+                "key": key,
+                "value": runtime.core_memory.get(key),
+            }
+        return {"status": "ok", "entries": dict(runtime.core_memory)}
+
+    def write_core_memory(key: str, value: str) -> dict[str, Any]:
+        runtime.core_memory[key] = value
+        return {"status": "ok", "key": key, "value": value}
+
+    factories["read_core_memory"] = read_core_memory
+    factories["write_core_memory"] = write_core_memory
+
+    if interpreter is None:
+        return factories
+
+    from fleet_rlm.runtime.tools.rlm_delegate import (
+        _delegate_interpreter,
+        delegate_to_rlm as _delegate_to_rlm,
+        set_delegate_interpreter,
+    )
     from fleet_rlm.runtime.tools.sandbox_filesystem import (
         _SandboxFilesystemToolContext,
         _sandbox_create_directory_impl,
@@ -44,57 +131,114 @@ def _bind_sandbox_filesystem_tools(
         _sandbox_write_file_impl,
     )
 
-    ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
+    sandbox_ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
 
-    _bound_factories: dict[str, Callable[..., Any]] = {
-        "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(ctx, path=path),
-        "sandbox_read_file": lambda path: _sandbox_read_file_impl(ctx, path=path),
-        "sandbox_write_file": lambda path, content: _sandbox_write_file_impl(
-            ctx, path=path, content=content
-        ),
-        "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(
-            ctx, path=path
-        ),
-        "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(ctx, path=path),
-        "sandbox_move_file": lambda source, destination: _sandbox_move_file_impl(
-            ctx, source=source, destination=destination
-        ),
-        "sandbox_search_files": lambda path, pattern: _sandbox_search_files_impl(
-            ctx, path=path, pattern=pattern
-        ),
-        "sandbox_find_in_files": lambda path, pattern: _sandbox_find_in_files_impl(
-            ctx, path=path, pattern=pattern
-        ),
-        "sandbox_replace_in_files": lambda files, pattern, replacement: (
-            _sandbox_replace_in_files_impl(
-                ctx, files=files, pattern=pattern, replacement=replacement
-            )
-        ),
-        "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(
-            ctx, path=path
-        ),
-    }
+    def execute_code(
+        code: str,
+        variables: dict[str, Any] | None = None,
+        timeout: int = 30,
+    ) -> dict[str, Any]:
+        _ = timeout
+        return _coerce_sandbox_result(interpreter.execute(code, variables or {}))
 
-    def _tool_name(tool: Any) -> str | None:
-        return getattr(tool, "name", None) or getattr(
-            getattr(tool, "func", tool), "__name__", None
+    def read_buffer(name: str = "default") -> dict[str, Any]:
+        return _execute_sandbox_tool(
+            interpreter,
+            "items = get_buffer(buffer_name)\n"
+            "SUBMIT(status='ok', name=buffer_name, items=items)",
+            {"buffer_name": name},
         )
 
+    def write_buffer(name: str, content: str) -> dict[str, Any]:
+        return _execute_sandbox_tool(
+            interpreter,
+            "add_buffer(buffer_name, content)\n"
+            "items = get_buffer(buffer_name)\n"
+            "SUBMIT(status='ok', name=buffer_name, item_count=len(items))",
+            {"buffer_name": name, "content": content},
+        )
+
+    def clear_buffer(name: str = "default") -> dict[str, Any]:
+        return _execute_sandbox_tool(
+            interpreter,
+            "clear_buffer(buffer_name)\nSUBMIT(status='ok', name=buffer_name)",
+            {"buffer_name": name},
+        )
+
+    def delegate_to_rlm(query: str, context: str = "") -> dict[str, Any]:
+        token = set_delegate_interpreter(interpreter)
+        try:
+            return _delegate_to_rlm(query=query, context=context)
+        finally:
+            _delegate_interpreter.reset(token)
+
+    factories.update(
+        {
+            "clear_buffer": clear_buffer,
+            "delegate_to_rlm": delegate_to_rlm,
+            "execute_code": execute_code,
+            "read_buffer": read_buffer,
+            "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(
+                sandbox_ctx, path=path
+            ),
+            "sandbox_read_file": lambda path: _sandbox_read_file_impl(
+                sandbox_ctx, path=path
+            ),
+            "sandbox_write_file": lambda path, content: _sandbox_write_file_impl(
+                sandbox_ctx, path=path, content=content
+            ),
+            "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(
+                sandbox_ctx, path=path
+            ),
+            "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(
+                sandbox_ctx, path=path
+            ),
+            "sandbox_move_file": lambda source, destination: _sandbox_move_file_impl(
+                sandbox_ctx, source=source, destination=destination
+            ),
+            "sandbox_search_files": lambda path, pattern: _sandbox_search_files_impl(
+                sandbox_ctx, path=path, pattern=pattern
+            ),
+            "sandbox_find_in_files": lambda path, pattern: _sandbox_find_in_files_impl(
+                sandbox_ctx, path=path, pattern=pattern
+            ),
+            "sandbox_replace_in_files": lambda files, pattern, replacement: (
+                _sandbox_replace_in_files_impl(
+                    sandbox_ctx,
+                    files=files,
+                    pattern=pattern,
+                    replacement=replacement,
+                )
+            ),
+            "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(
+                sandbox_ctx, path=path
+            ),
+            "write_buffer": write_buffer,
+        }
+    )
+    return factories
+
+
+def _bind_runtime_tools(
+    tools: list[Any],
+    *,
+    runtime: AgentRuntime,
+    interpreter: Any | None,
+) -> list[Any]:
+    """Bind runtime-backed stubs and remove unavailable interpreter tools."""
+    bound_factories = _bound_runtime_tool_factories(
+        runtime=runtime,
+        interpreter=interpreter,
+    )
     result: list[Any] = []
     for tool in tools:
         name = _tool_name(tool)
-        if name in _bound_factories:
-            result.append(
-                Tool(
-                    _bound_factories[name],
-                    name=name,
-                    desc=getattr(tool, "desc", None)
-                    or getattr(getattr(tool, "func", tool), "__doc__", "")
-                    or "",
-                )
-            )
-        else:
-            result.append(tool)
+        if name in bound_factories:
+            result.append(_wrap_tool(tool, bound_factories[name]))
+            continue
+        if interpreter is None and name in _INTERPRETER_TOOL_NAMES:
+            continue
+        result.append(tool)
     return result
 
 
@@ -142,15 +286,14 @@ class AgentRuntime:
 
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
-
-        # Bind sandbox filesystem tools when an interpreter is present
-        if interpreter is not None:
-            base_tools = _bind_sandbox_filesystem_tools(
-                base_tools,
-                interpreter=interpreter,
-            )
+        base_tools = _bind_runtime_tools(
+            base_tools,
+            runtime=self,
+            interpreter=interpreter,
+        )
 
         self.tools: list[Any] = base_tools + list(extra_tools or [])
+        self.react_tools: list[Any] = self.tools
 
         # Initialise agent with the discovered tool set
         self.agent: FleetAgent = FleetAgent(
@@ -186,9 +329,26 @@ class AgentRuntime:
         self.history = dspy.History(messages=messages)
         return result
 
+    async def achat_turn(self, user_message: str) -> dspy.Prediction:
+        """Run one chat turn from async callers without blocking the event loop."""
+        return await asyncio.to_thread(self.chat_turn, user_message)
+
     # -----------------------------------------------------------------
     # Async context manager (required by ChatAgentProtocol)
     # -----------------------------------------------------------------
+
+    def __enter__(self) -> AgentRuntime:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> bool:
+        _ = exc_type, exc_val, exc_tb
+        self.shutdown()
+        return False
 
     async def __aenter__(self) -> AgentRuntime:
         return self
@@ -199,21 +359,46 @@ class AgentRuntime:
         exc_val: BaseException | None,
         exc_tb: Any | None,
     ) -> bool:
+        _ = exc_type, exc_val, exc_tb
+        await self.ashutdown()
+        return False
+
+    def shutdown(self) -> None:
         if self.interpreter is not None:
-            ashutdown = getattr(self.interpreter, "ashutdown", None)
-            if callable(ashutdown):
+            shutdown = getattr(self.interpreter, "shutdown", None)
+            if callable(shutdown):
                 try:
-                    await ashutdown()
+                    shutdown()
                 except Exception:
                     pass
             else:
-                shutdown = getattr(self.interpreter, "shutdown", None)
-                if callable(shutdown):
+                ashutdown = getattr(self.interpreter, "ashutdown", None)
+                if callable(ashutdown):
                     try:
-                        shutdown()
+                        from fleet_rlm.integrations.daytona.async_compat import (
+                            _run_async_compat,
+                        )
+
+                        _run_async_compat(ashutdown)
                     except Exception:
                         pass
-        return False
+
+    async def ashutdown(self) -> None:
+        if self.interpreter is None:
+            return
+        ashutdown = getattr(self.interpreter, "ashutdown", None)
+        if callable(ashutdown):
+            try:
+                await ashutdown()
+            except Exception:
+                pass
+            return
+        shutdown = getattr(self.interpreter, "shutdown", None)
+        if callable(shutdown):
+            try:
+                await asyncio.to_thread(shutdown)
+            except Exception:
+                pass
 
     # -----------------------------------------------------------------
     # ChatAgentProtocol surface
@@ -303,6 +488,14 @@ class AgentRuntime:
                 kind="error",
                 text=str(exc),
                 payload={"history_turns": self.history_turns()},
+            )
+            return
+
+        if cancel_check is not None and cancel_check():
+            yield StreamEvent(
+                kind="done",
+                text="[cancelled]",
+                payload={"cancelled": True, "history_turns": self.history_turns()},
             )
             return
 

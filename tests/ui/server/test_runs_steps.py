@@ -19,6 +19,8 @@ class _RunStepsRepository:
         self.tenant_id = uuid.uuid4()
         self.user_id = uuid.uuid4()
         self.workspace_id = uuid.uuid4()
+        self.foreign_workspace_id = uuid.uuid4()
+        self.calls: list[tuple[str, uuid.UUID, uuid.UUID | None, uuid.UUID | None]] = []
         now = datetime.now(timezone.utc)
         self.run = SimpleNamespace(
             id=uuid.uuid4(),
@@ -28,11 +30,20 @@ class _RunStepsRepository:
             created_at=now,
             updated_at=now,
         )
+        self.foreign_run = SimpleNamespace(
+            id=uuid.uuid4(),
+            tenant_id=self.tenant_id,
+            workspace_id=self.foreign_workspace_id,
+            status=RunStatus.COMPLETED,
+            created_at=now,
+            updated_at=now,
+        )
         self.steps = [
             SimpleNamespace(
                 id=uuid.uuid4(),
                 run_id=self.run.id,
                 tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
                 step_index=0,
                 step_type=RunStepType.LLM_CALL,
                 tool_name=None,
@@ -45,6 +56,7 @@ class _RunStepsRepository:
                 id=uuid.uuid4(),
                 run_id=self.run.id,
                 tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
                 step_index=1,
                 step_type=RunStepType.TOOL_CALL,
                 tool_name="search",
@@ -57,6 +69,7 @@ class _RunStepsRepository:
                 id=uuid.uuid4(),
                 run_id=self.run.id,
                 tenant_id=self.tenant_id,
+                workspace_id=self.workspace_id,
                 step_index=2,
                 step_type=RunStepType.OUTPUT,
                 tool_name=None,
@@ -75,13 +88,37 @@ class _RunStepsRepository:
             workspace_id=self.workspace_id,
         )
 
-    async def get_run(self, *, tenant_id, run_id):
-        if tenant_id == self.tenant_id and run_id == self.run.id:
+    async def get_run(
+        self,
+        *,
+        tenant_id,
+        run_id,
+        workspace_id=None,
+        created_by_user_id=None,
+    ):
+        self.calls.append(("get_run", run_id, workspace_id, created_by_user_id))
+        if (
+            tenant_id == self.tenant_id
+            and run_id == self.run.id
+            and workspace_id == self.workspace_id
+        ):
             return self.run
         return None
 
-    async def get_run_steps(self, *, tenant_id, run_id):
-        if tenant_id == self.tenant_id and run_id == self.run.id:
+    async def get_run_steps(
+        self,
+        *,
+        tenant_id,
+        run_id,
+        workspace_id=None,
+        created_by_user_id=None,
+    ):
+        self.calls.append(("get_run_steps", run_id, workspace_id, created_by_user_id))
+        if (
+            tenant_id == self.tenant_id
+            and run_id == self.run.id
+            and workspace_id == self.workspace_id
+        ):
             return self.steps
         return []
 
@@ -145,6 +182,20 @@ def test_get_run_steps_returns_expected_shape(
     assert third["tokens_in"] is None
     assert third["tokens_out"] is None
     assert third["latency_ms"] == 50
+    assert run_steps_repo.calls == [
+        (
+            "get_run",
+            run_steps_repo.run.id,
+            run_steps_repo.workspace_id,
+            run_steps_repo.user_id,
+        ),
+        (
+            "get_run_steps",
+            run_steps_repo.run.id,
+            run_steps_repo.workspace_id,
+            run_steps_repo.user_id,
+        ),
+    ]
 
 
 def test_get_run_steps_pagination(default_client, auth_headers, run_steps_repo):
@@ -167,6 +218,19 @@ def test_get_run_steps_nonexistent_run_returns_404(default_client, auth_headers)
         f"/api/v1/runs/{uuid.uuid4()}/steps",
         headers=auth_headers,
     )
+    assert response.status_code == 404
+
+
+def test_get_run_steps_foreign_workspace_returns_404(
+    default_client,
+    auth_headers,
+    run_steps_repo,
+):
+    response = default_client.get(
+        f"/api/v1/runs/{run_steps_repo.foreign_run.id}/steps",
+        headers=auth_headers,
+    )
+
     assert response.status_code == 404
 
 

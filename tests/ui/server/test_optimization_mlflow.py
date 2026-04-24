@@ -247,6 +247,62 @@ def test_background_runner_marks_planner_bootstrap_failure_as_failed(
     complete_mock.assert_not_called()
 
 
+def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
+    from fleet_rlm.api.routers.optimization.background import (
+        OPTIMIZATION_TIMEOUT_SECONDS,
+    )
+
+    complete_mock = MagicMock()
+    fake_result = {
+        "train_examples": 3,
+        "validation_examples": 1,
+        "validation_score": 0.91,
+        "output_path": None,
+        "manifest_path": None,
+    }
+    run_mod_mock = MagicMock(return_value=fake_result)
+    spec_mock = MagicMock()
+    run_blocking_calls: list[tuple[object, int]] = []
+
+    async def _fake_run_blocking(func, *, timeout):
+        run_blocking_calls.append((func, timeout))
+        return func()
+
+    with (
+        patch(
+            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            return_value=spec_mock,
+        ),
+        patch(
+            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            run_mod_mock,
+        ),
+        patch(
+            "fleet_rlm.api.routers.optimization.background.run_blocking",
+            _fake_run_blocking,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+            MagicMock(),
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.complete_optimization_run",
+            complete_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.fail_optimization_run",
+            MagicMock(),
+        ),
+    ):
+        _run_local(**_make_runner_kwargs(tmp_path))
+
+    assert len(run_blocking_calls) == 1
+    assert run_blocking_calls[0][1] == OPTIMIZATION_TIMEOUT_SECONDS
+    run_mod_mock.assert_called_once()
+    assert run_mod_mock.call_args.kwargs.get("run_id") == 1
+    complete_mock.assert_called_once()
+
+
 def test_resolve_dataset_request_accepts_relative_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -269,6 +325,35 @@ def test_resolve_dataset_request_accepts_relative_path(
 
     assert resolved == dataset.resolve()
     assert dataset_ref == "nested/examples.jsonl"
+
+
+def test_gepa_background_rejects_none_repository(
+    tmp_path: Path,
+) -> None:
+    """When persistence is repo, None repository or identity raises ValueError."""
+    from fleet_rlm.api.routers.optimization.background import (
+        run_optimization_background,
+    )
+
+    dataset = tmp_path / "data.jsonl"
+    dataset.write_text('{"question": "hi", "answer": "hello"}\n')
+
+    with pytest.raises(ValueError, match="repository and identity are required"):
+        asyncio.run(
+            run_optimization_background(
+                run_id=1,
+                persistence="repo",
+                repository=None,
+                identity=None,
+                module_slug="test-mod",
+                dataset_path=dataset,
+                program_spec="QA",
+                output_path=None,
+                default_output_root=tmp_path,
+                auto="light",
+                train_ratio=0.8,
+            )
+        )
 
 
 def test_resolve_dataset_request_rejects_path_escape(
@@ -298,6 +383,10 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
     tmp_path: Path,
     module_slug: str | None,
 ) -> None:
+    from fleet_rlm.api.routers.optimization.background import (
+        OPTIMIZATION_TIMEOUT_SECONDS,
+    )
+
     start_run_mock = MagicMock()
     complete_mock = MagicMock()
     fake_result = {
@@ -308,6 +397,11 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
         "manifest_path": None,
     }
     optimize_mock = MagicMock(return_value=fake_result)
+    run_blocking_calls: list[tuple[object, int]] = []
+
+    async def _fake_run_blocking(func, *, timeout):
+        run_blocking_calls.append((func, timeout))
+        return func()
 
     kwargs = _make_runner_kwargs(tmp_path)
     kwargs["module_slug"] = module_slug
@@ -317,6 +411,10 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
         patch(
             "fleet_rlm.runtime.quality.gepa_optimization.optimize_program_with_gepa",
             optimize_mock,
+        ),
+        patch(
+            "fleet_rlm.api.routers.optimization.background.run_blocking",
+            _fake_run_blocking,
         ),
         patch(
             "fleet_rlm.integrations.local_store.update_optimization_run_phase",
@@ -334,6 +432,8 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
         _run_local(**kwargs)
 
     start_run_mock.assert_not_called()
+    assert len(run_blocking_calls) == 1
+    assert run_blocking_calls[0][1] == OPTIMIZATION_TIMEOUT_SECONDS
     optimize_mock.assert_called_once()
     assert optimize_mock.call_args.kwargs.get("source") == "api_background"
     complete_mock.assert_called_once()

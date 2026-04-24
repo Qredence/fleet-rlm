@@ -93,12 +93,9 @@ def _resolve_volume_backend(
     state: ServerState,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
-    volume_name: str | None = None,
 ) -> _ResolvedVolumeBackend:
     effective_provider = resolve_volume_provider(state=state, provider=provider)
-    effective_volume_name = volume_name or resolve_daytona_volume_name(
-        identity=identity, state=state
-    )
+    effective_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
     return _ResolvedVolumeBackend(
         provider=effective_provider,
         volume_name=effective_volume_name,
@@ -146,13 +143,10 @@ async def load_volume_tree(
     provider: VolumeProvider | None,
     root_path: str,
     max_depth: int,
-    volume_name: str | None = None,
 ) -> VolumeTreeResponse:
     """Load a normalized runtime volume tree for the selected provider."""
     normalized_root_path = normalize_volume_tree_path(root_path)
-    backend = _resolve_volume_backend(
-        state=state, identity=identity, provider=provider, volume_name=volume_name
-    )
+    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
     result = await _run_volume_operation(
         operation=backend.list_tree,
         volume_name=backend.volume_name,
@@ -171,13 +165,10 @@ async def load_volume_file_content(
     provider: VolumeProvider | None,
     path: str,
     max_bytes: int,
-    volume_name: str | None = None,
 ) -> VolumeFileContentResponse:
     """Load a text preview for a normalized runtime volume file path."""
     normalized_path = normalize_volume_file_path(path)
-    backend = _resolve_volume_backend(
-        state=state, identity=identity, provider=provider, volume_name=volume_name
-    )
+    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
     result = await _run_volume_operation(
         operation=backend.read_file_text,
         volume_name=backend.volume_name,
@@ -196,7 +187,7 @@ async def load_volume_list(
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
 ) -> VolumeListResponse:
-    """List all persistent volumes for the selected provider."""
+    """Return only the caller's active workspace volume for the selected provider."""
     effective_provider = resolve_volume_provider(state=state, provider=provider)
     if effective_provider != "daytona":
         raise HTTPException(status_code=400, detail="Unsupported volume provider.")
@@ -213,7 +204,30 @@ async def load_volume_list(
             status_code=502, detail=f"Volume list failed: {exc}"
         ) from exc
 
+    workspace_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
+    workspace_volume = next(
+        (volume for volume in volumes if volume.get("name") == workspace_volume_name),
+        None,
+    )
+    if workspace_volume is None:
+        workspace_volume = {
+            "id": workspace_volume_name,
+            "name": workspace_volume_name,
+            "state": "unknown",
+            "created_at": None,
+        }
+    created_at = workspace_volume.get("created_at")
+
     return VolumeListResponse(
         provider=effective_provider,
-        volumes=[VolumeListItem(**v) for v in volumes],
+        volumes=[
+            VolumeListItem(
+                id=str(workspace_volume.get("id") or workspace_volume_name),
+                name=str(workspace_volume.get("name") or workspace_volume_name),
+                state=str(workspace_volume.get("state") or "unknown"),
+                created_at=created_at
+                if created_at is None or isinstance(created_at, str)
+                else str(created_at),
+            )
+        ],
     )

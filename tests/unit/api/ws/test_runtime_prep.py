@@ -228,3 +228,23 @@ def test_new_chat_session_state_uses_identity_or_defaults() -> None:
     )
     assert fallback_session.canonical_workspace_id == "default-workspace"
     assert fallback_session.canonical_user_id == "default-user"
+
+
+def test_daytona_builder_returns_none_on_import_error(monkeypatch) -> None:
+    """When DaytonaConfigError import fails, _try_build_daytona_interpreter returns None without UnboundLocalError."""
+    from fleet_rlm.api.runtime_services.chat_runtime import (
+        _try_build_daytona_interpreter,
+    )
+
+    original_import = (
+        __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+    )
+
+    def _fail_daytona_config(name: str, *args: object, **kwargs: object) -> object:
+        if "daytona.config" in name or name == "fleet_rlm.integrations.daytona.config":
+            raise ImportError("no daytona config")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", _fail_daytona_config)
+    result = _try_build_daytona_interpreter("vol-1")
+    assert result is None

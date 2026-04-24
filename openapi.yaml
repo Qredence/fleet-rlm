@@ -682,18 +682,6 @@ paths:
           title: Provider
         description: Optional runtime volume backend override. Defaults to the active
           sandbox provider.
-      - name: volume_name
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Optional specific volume name to browse. Defaults to the workspace-scoped
-            volume.
-          title: Volume Name
-        description: Optional specific volume name to browse. Defaults to the workspace-scoped
-          volume.
       responses:
         '200':
           description: Successful Response
@@ -765,18 +753,6 @@ paths:
           title: Provider
         description: Optional runtime volume backend override. Defaults to the active
           sandbox provider.
-      - name: volume_name
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Optional specific volume name to read from. Defaults to the
-            workspace-scoped volume.
-          title: Volume Name
-        description: Optional specific volume name to read from. Defaults to the workspace-scoped
-          volume.
       responses:
         '200':
           description: Successful Response
@@ -809,7 +785,7 @@ paths:
       tags:
       - runtime
       summary: Get Volumes
-      description: List all persistent volumes for the active workspace and provider.
+      description: List the active workspace volume for the selected provider.
       operationId: get_volumes_api_v1_runtime_volumes_get
       security:
       - HTTPBearer: []
