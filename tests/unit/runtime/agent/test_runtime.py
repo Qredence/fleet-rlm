@@ -531,3 +531,74 @@ class TestCoreMemoryAccessibility:
         assert "persona" in runtime.core_memory
         assert "human" in runtime.core_memory
         assert "scratchpad" in runtime.core_memory
+
+
+# ---------------------------------------------------------------------------
+# VAL-BACKEND-RUNTIME-003: reset() respects clear_sandbox_buffers parameter
+# ---------------------------------------------------------------------------
+
+
+class TestResetClearsSandboxBuffers:
+    """VAL-BACKEND-RUNTIME-003: reset(clear_sandbox_buffers=...) actually clears buffers."""
+
+    def test_reset_clear_sandbox_buffers_true_clears_buffers(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [],
+        )
+        interpreter = _FakeInterpreter()
+        rt = AgentRuntime(interpreter=interpreter)
+
+        result = rt.reset(clear_sandbox_buffers=True)
+
+        assert result["status"] == "ok"
+        assert result["buffers_cleared"] is True
+        # The interpreter should have received a clear_buffer call
+        assert any("clear_buffer" in code for code, _vars in interpreter.calls)
+
+    def test_reset_clear_sandbox_buffers_false_preserves_buffers(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [],
+        )
+        interpreter = _FakeInterpreter()
+        rt = AgentRuntime(interpreter=interpreter)
+
+        result = rt.reset(clear_sandbox_buffers=False)
+
+        assert result["status"] == "ok"
+        assert result["buffers_cleared"] is False
+        # The interpreter should NOT have received a clear_buffer call
+        assert not any("clear_buffer" in code for code, _vars in interpreter.calls)
+
+    def test_reset_without_interpreter_ignores_clear_flag(
+        self, mock_react, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [],
+        )
+        rt = AgentRuntime(interpreter=None)
+
+        result = rt.reset(clear_sandbox_buffers=True)
+
+        assert result["status"] == "ok"
+        assert result["buffers_cleared"] is True
+        # No crash despite missing interpreter
+
+    def test_reset_clears_history(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [],
+        )
+        rt = AgentRuntime()
+        rt.history = dspy.History(messages=[{"user_message": "hi", "response": "hello"}])
+
+        rt.reset(clear_sandbox_buffers=False)
+
+        messages = list(getattr(rt.history, "messages", []) or [])
+        assert messages == []

@@ -424,7 +424,12 @@ class AgentRuntime:
         return self.import_session(data=state)
 
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
-        _ = clear_sandbox_buffers
+        if clear_sandbox_buffers and self.interpreter is not None:
+            _execute_sandbox_tool(
+                self.interpreter,
+                "clear_buffer()\nSUBMIT(status='ok')",
+                {},
+            )
         self.history = dspy.History(messages=[])
         return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
 

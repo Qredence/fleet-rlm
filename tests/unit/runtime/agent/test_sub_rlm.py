@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -22,6 +24,7 @@ class _StubInterpreter(LLMQueryMixin):
         self,
         *,
         max_llm_calls: int = 50,
+        llm_call_timeout: int = 60,
         depth: int = 0,
         max_depth: int = 2,
     ) -> None:
@@ -29,7 +32,7 @@ class _StubInterpreter(LLMQueryMixin):
             self,
             sub_lm=None,
             max_llm_calls=max_llm_calls,
-            llm_call_timeout=60,
+            llm_call_timeout=llm_call_timeout,
         )
         initialize_sub_rlm_state(self, depth=depth, max_depth=max_depth)
 
@@ -299,3 +302,41 @@ def test_build_delegate_child_fallback_no_session() -> None:
         )
         or child._session is None
     )
+
+
+# --- ThreadPoolExecutor timeout handling ---
+
+
+def test_llm_query_executor_survives_timeout() -> None:
+    """VAL-BACKEND-RUNTIME-001: After timeout, the executor remains usable.
+
+    With a single-worker pool, a long-running LM call blocks the executor.
+    Without the fix, the next quick call would be stuck in the queue behind
+    the zombie thread and also time out.  With the fix, a fresh executor is
+    created after each timeout so subsequent calls succeed promptly.
+    """
+    interp = _StubInterpreter(max_llm_calls=1, llm_call_timeout=0.1)
+
+    slow_started = threading.Event()
+
+    def _slow_lm(prompt: str) -> str:
+        slow_started.set()
+        time.sleep(5)  # Far longer than the 0.1s timeout
+        return "slow"
+
+    interp.sub_lm = _slow_lm  # type: ignore[assignment]
+
+    # First call starts the slow LM and times out
+    with pytest.raises(RuntimeError, match="timed out"):
+        interp._query_sub_lm("prompt")
+
+    # Wait until we are sure the slow thread has started
+    slow_started.wait(timeout=2)
+
+    # Second call should succeed on a fresh executor
+    def _fast_lm(prompt: str) -> str:
+        return "fast"
+
+    interp.sub_lm = _fast_lm  # type: ignore[assignment]
+    result = interp._query_sub_lm("prompt")
+    assert result == "fast"

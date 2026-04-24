@@ -205,6 +205,54 @@ def test_fleet_agent_signature_importable_without_network():
 
 
 # ---------------------------------------------------------------------------
+# VAL-BACKEND-RUNTIME-002: RLMReActAgent.forward does not pass max_iters
+# ---------------------------------------------------------------------------
+
+
+def test_rlm_react_agent_forward_omits_max_iters(monkeypatch: pytest.MonkeyPatch):
+    """RLMReActAgent.forward must not pass max_iters to dspy.ReAct.forward.
+
+    max_iters is a constructor argument; passing it to forward() is incorrect.
+    """
+    from fleet_rlm.runtime.agent.agent import RLMReActAgent
+    from fleet_rlm.runtime.agent.signatures import RLMReActChatSignature
+
+    call_kwargs: dict[str, Any] = {}
+
+    class _FakeReAct:
+        def __init__(self, *, signature, tools, max_iters, **kwargs):
+            self.signature = signature
+            self._max_iters = max_iters
+
+        def __call__(self, **kwargs):
+            call_kwargs.update(kwargs)
+            return dspy.Prediction(answer="fake")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.dspy.ReAct",
+        _FakeReAct,
+    )
+
+    agent = RLMReActAgent(
+        signature=RLMReActChatSignature,
+        tools=[],
+        max_iters=7,
+    )
+    history = dspy.History(messages=[])
+    agent.forward(
+        user_request="test",
+        history=history,
+        core_memory="",
+        max_iters=7,
+    )
+
+    assert "max_iters" not in call_kwargs
+    assert "user_request" in call_kwargs
+    assert "history" in call_kwargs
+    assert "core_memory" in call_kwargs
+
+
+# ---------------------------------------------------------------------------
 # Factory: build_chat_agent returns AgentRuntime
 # ---------------------------------------------------------------------------
 

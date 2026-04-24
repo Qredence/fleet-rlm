@@ -120,6 +120,12 @@ class LLMQueryMixin:
             return result if isinstance(result, str) else str(result)
         except FutureTimeoutError as exc:
             future.cancel()
+            # Running threads cannot be cancelled; discard the exhausted executor
+            # so subsequent calls get a fresh worker pool.
+            with self._sub_lm_executor_lock:
+                if self._sub_lm_executor is not None:
+                    self._sub_lm_executor.shutdown(wait=False)
+                    self._sub_lm_executor = None
             raise RuntimeError(
                 f"LLM call timed out after {self.llm_call_timeout}s. "
                 "Consider increasing llm_call_timeout or checking API connectivity."

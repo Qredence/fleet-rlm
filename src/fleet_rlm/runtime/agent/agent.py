@@ -88,9 +88,9 @@ class RLMReActAgent(dspy.Module):
         max_iters: int,
     ) -> dspy.Prediction:
         """DSPy-compatible forward pass through the ReAct agent."""
+        _ = max_iters
         return self.react(
             user_request=user_request,
             history=history,
             core_memory=core_memory,
-            max_iters=max_iters,
         )
