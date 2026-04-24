@@ -20,7 +20,7 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 
 ### Backend
 
-- **Language**: Python >= 3.10 (3.10, 3.11, 3.12 supported)
+- **Language**: Python >= 3.10 (3.10, 3.11, 3.12, 3.13 supported)
 - **Package manager**: `uv`
 - **Web framework**: FastAPI 0.135.3 with WebSocket support
 - **Runtime core**: DSPy 3.1.3 + recursive ReAct / `dspy.RLM` workbench agent
@@ -37,7 +37,7 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 - **Router**: TanStack Router (file-based routes)
 - **State**: Zustand + TanStack Query
 - **Build tool**: Vite+ (`vp` CLI) — not plain Vite
-- **Package manager**: `pnpm` 10.32.1 (explicitly required; do not use `bun`)
+- **Package manager**: `pnpm` 10.33.0 (explicitly required; do not use `bun`)
 - **Styling**: Tailwind CSS v4 + `tw-animate-css` + shadcn/Base UI primitives
 - **Testing**: Vitest (unit), Playwright (e2e)
 - **Markdown rendering**: `streamdown` + Shiki
@@ -272,10 +272,12 @@ Canonical HTTP surfaces (non-exhaustive):
 
 - `/health`, `/ready`
 - `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/*` — session CRUD and turns
+- `GET /api/v1/sessions/*` — session CRUD, turns, stats, restore, and export
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`, `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`, `GET /api/v1/runtime/volume/*`
+- `GET /api/v1/memory` — list memory items
+- `GET /api/v1/sandboxes/*` — sandbox list, detail, delete, archive
 - `GET/POST /api/v1/optimization/*` — optimization status, runs, datasets, modules, results, compare
 - `POST /api/v1/traces/feedback`
 

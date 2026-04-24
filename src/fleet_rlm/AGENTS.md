@@ -86,13 +86,21 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/sessions` — paginated session history with search/status filters
 - `GET /api/v1/sessions/{id}` — session detail with turn count
 - `GET /api/v1/sessions/{id}/turns` — paginated turn transcript
+- `GET /api/v1/sessions/{id}/stats` — aggregated usage stats
 - `DELETE /api/v1/sessions/{id}` — archive (soft-delete) session
+- `POST /api/v1/sessions/{id}/restore` — unarchive a session
+- `POST /api/v1/sessions/{id}/export` — export session as a GEPA dataset
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
 - `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/memory` — list memory items
+- `GET /api/v1/sandboxes` — list active sandboxes
+- `GET /api/v1/sandboxes/{id}` — sandbox detail
+- `DELETE /api/v1/sandboxes/{id}` — delete sandbox
+- `POST /api/v1/sandboxes/{id}/archive` — archive sandbox
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
 - `GET /api/v1/optimization/modules`
@@ -247,7 +255,7 @@ Mandatory baseline for backend or shared Python edits:
 
 Fast backend confidence:
 
-- `make test-fast`
+- `make test-fast` (alias for `make test`)
 
 Focused backend/runtime coverage:
 

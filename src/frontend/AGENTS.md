@@ -90,7 +90,7 @@ Assistant transcript/content modeling belongs under:
 
 ## Tech Stack
 
-- **Package manager:** `pnpm` (always `pnpm install --frozen-lockfile`)
+- **Package manager:** `pnpm` 10.33.0 (always `pnpm install --frozen-lockfile`)
 - **Build / lint / format:** Vite+ (`vp`) via `pnpm run ...`
 - **Framework:** React 19 + TypeScript 5.9+
 - **Router:** TanStack Router (file-based)
@@ -115,7 +115,7 @@ pnpm run build
 # Quality
 pnpm run type-check
 pnpm run lint                # vp lint
-pnpm run lint:robustness     # alias
+pnpm run lint:robustness     # alias for lint
 pnpm run format              # vp fmt
 pnpm run format:check        # vp fmt --check
 
@@ -235,6 +235,8 @@ VITE_FLEET_TRACE=true
 
 ```env
 VITE_FLEET_WS_URL
+VITE_FLEET_WORKSPACE_ID
+VITE_FLEET_USER_ID
 VITE_AGENTATION_ENDPOINT
 VITE_ENTRA_CLIENT_ID
 VITE_ENTRA_SCOPES
