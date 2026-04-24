@@ -8,6 +8,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
+from fleet_rlm.integrations.database import SandboxProvider
+
 RUNTIME_TEST_TIMEOUT_SECONDS = 20
 VOLUME_OPERATION_TIMEOUT_SECONDS = 30
 
@@ -57,3 +59,27 @@ async def run_blocking(
     if timeout is None:
         return await task
     return await asyncio.wait_for(task, timeout=timeout)
+
+
+def parse_model_identity(raw_model: object) -> tuple[str | None, str | None]:
+    """Extract (provider, model_name) from a raw model string.
+
+    Returns (None, None) for non-string input.
+    Returns (None, raw_model) for unqualified names.
+    Returns (provider, name) for ``provider/name`` format.
+    """
+    if not isinstance(raw_model, str):
+        return None, None
+    if "/" in raw_model:
+        provider, name = raw_model.split("/", 1)
+        return provider, name
+    return None, raw_model
+
+
+def resolve_sandbox_provider(raw: str) -> SandboxProvider:
+    """Map a config string to the SandboxProvider enum."""
+    normalized = raw.strip().lower()
+    try:
+        return SandboxProvider(normalized)
+    except ValueError:
+        return SandboxProvider.DAYTONA

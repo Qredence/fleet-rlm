@@ -33,12 +33,6 @@ uv run fleet web
 
 If you already have a `uv` project, skip `uv init` and just run `uv add fleet-rlm`.
 
-If you need the optional MCP surface, install the extra:
-
-```bash
-uv add "fleet-rlm[mcp]"
-```
-
 ## Option B: Install from Source (Contributors)
 
 ### 1. Clone and Install Dependencies
@@ -52,7 +46,7 @@ cd fleet-rlm
 uv sync --all-extras
 ```
 
-> **Note:** The `--all-extras` flag includes the `dev`, `mcp`, `server`, and `full` optional extras. `uv sync` also includes the default `dev` dependency group for this repo.
+> **Note:** The `--all-extras` flag includes the `dev`, `server`, and `full` optional extras. `uv sync` also includes the default `dev` dependency group for this repo.
 
 ### 2. Set Up Environment Variables
 

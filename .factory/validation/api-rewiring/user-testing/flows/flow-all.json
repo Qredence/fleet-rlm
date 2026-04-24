@@ -1,0 +1,115 @@
+{
+  "milestone": "api-rewiring",
+  "groupId": "flow-all",
+  "status": "partial",
+  "testedAt": "2026-04-21T00:00:00Z",
+  "isolation": {
+    "workingDirectory": "/Volumes/SSD-T7/qredence-environnement/fleet-rlm",
+    "noExternalServices": true,
+    "noBrowserAutomation": true
+  },
+  "toolsUsed": ["ls", "rg", "make", "uv"],
+  "assertionResults": [
+    {
+      "id": "VAL-CLEANUP-001",
+      "status": "pass",
+      "evidence": "ls /Volumes/SSD-T7/qredence-environnement/fleet-rlm/src/fleet_rlm/agent_host/ → 'No such file or directory'. Directory does not exist.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CLEANUP-002",
+      "status": "pass",
+      "evidence": "ls /Volumes/SSD-T7/qredence-environnement/fleet-rlm/src/fleet_rlm/worker/ → 'No such file or directory'. Directory does not exist.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CLEANUP-003",
+      "status": "pass",
+      "evidence": "rg 'fleet_rlm.(agent_host|worker)' src/fleet_rlm/ → exit code 1, zero matches. No dangling imports found.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CLEANUP-004",
+      "status": "pass",
+      "evidence": "ls tests/unit/agent_host/ → 'No such file or directory'. ls tests/unit/worker/ → 'No such file or directory'. Both test directories removed.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CLEANUP-005",
+      "status": "pass",
+      "evidence": "make test (uv run pytest -q -m 'not live_llm and not benchmark') completed with exit code 0. All dots (.) shown for passing tests, one 's' for skipped. 100% progress bar completed. Zero failures.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CLEANUP-006",
+      "status": "pass",
+      "evidence": "make lint → 'All checks passed!' (exit 0). make typecheck → 'All checks passed!' (exit 0). Both commands exited successfully.",
+      "notes": null
+    },
+    {
+      "id": "VAL-WS-001",
+      "status": "pass",
+      "evidence": "rg 'agent_host|fleet_rlm.worker' src/fleet_rlm/api/routers/ws/ → exit code 1, zero matches. No imports from fleet_rlm.agent_host or fleet_rlm.worker in ws directory. make test also passed.",
+      "notes": null
+    },
+    {
+      "id": "VAL-WS-002",
+      "status": "fail",
+      "evidence": "StreamEventKind in src/fleet_rlm/runtime/models/streaming.py includes legacy kinds: 'assistant_token', 'reasoning_step', 'trajectory_step', 'plan_update', 'rlm_executing', 'memory_update', 'hitl_request', 'hitl_resolved', 'command_ack', 'command_reject', 'final', 'cancelled'. src/fleet_rlm/runtime/agent/forced_routing.py emits kind='rlm_executing', kind='cancelled', kind='final' (used in rlm_only execution mode). WS tests in test_chat_stream.py use and assert 'assistant_token' and 'final' events from stream. The stream does NOT emit only the 8 simplified kinds.",
+      "notes": "The main non-rlm_only streaming path (streaming.py) does emit only simplified kinds. However, forced_routing.py (used in rlm_only mode) still emits 'rlm_executing', 'cancelled', 'final'. Also, StreamEventKind type definition itself retains all legacy kinds. Tests use legacy kinds (assistant_token, final) and assert them from the WS stream."
+    },
+    {
+      "id": "VAL-WS-003",
+      "status": "pass",
+      "evidence": "rg 'OrchestrationSessionContext' src/fleet_rlm/api/routers/ws/ → exit code 1, zero matches. No usage of OrchestrationSessionContext in ws routers.",
+      "notes": null
+    },
+    {
+      "id": "VAL-WS-004",
+      "status": "pass",
+      "evidence": "make test passed with exit code 0 (zero failures). WS auth tests in tests/ui/ws/ passed - identity derived from auth headers, not client-supplied values.",
+      "notes": null
+    },
+    {
+      "id": "VAL-WS-005",
+      "status": "pass",
+      "evidence": "make test passed with exit code 0. /api/v1/ws/execution/events endpoint tests passed as part of the test suite.",
+      "notes": null
+    },
+    {
+      "id": "VAL-FACTORY-001",
+      "status": "pass",
+      "evidence": "rg 'fleet_rlm.(agent_host|worker)' src/fleet_rlm/runtime/factory.py → exit code 1, zero matches. factory.py has no imports from agent_host or worker.",
+      "notes": null
+    },
+    {
+      "id": "VAL-FACTORY-002",
+      "status": "pass",
+      "evidence": "make test passed with exit code 0. Factory-related tests passed as part of the test suite.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "status": "pass",
+      "evidence": "make test passed with exit code 0. HTTP route tests in tests/ui/server/ all passed. No HTTP API regressions detected.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CROSS-005",
+      "status": "pass",
+      "evidence": "uv run fleet-rlm chat --help → exit code 0. Clean help output displayed: 'Start standalone in-process interactive terminal chat.' with all options shown. No import errors.",
+      "notes": null
+    },
+    {
+      "id": "VAL-CROSS-006",
+      "status": "pass",
+      "evidence": "rg 'agent_host|fleet_rlm.worker' src/fleet_rlm/__init__.py → exit code 1, zero matches. make test passed. Package exports do not reference agent_host or worker.",
+      "notes": null
+    }
+  ],
+  "frictions": [
+    "make test output is long and does not display final summary line explicitly in the terminal output captured; however exit code 0 confirms all tests passed."
+  ],
+  "blockers": [],
+  "summary": "Tested 16 assertions: 15 passed, 1 failed. VAL-WS-002 fails because the stream does NOT only emit the 8 simplified event kinds — forced_routing.py still emits legacy kinds (rlm_executing, cancelled, final) in rlm_only mode, and WS tests assert legacy kinds (assistant_token, final). All other assertions pass cleanly including make test (zero failures), make lint, make typecheck, all structural directory checks, and CLI help."
+}

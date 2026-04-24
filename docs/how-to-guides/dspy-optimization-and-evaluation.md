@@ -5,7 +5,7 @@ using the standardized evaluation subsystem in `runtime/quality/`.
 
 ## Overview
 
-Fleet-RLM includes several DSPy modules in the worker/runtime layer, each
+Fleet-RLM includes several DSPy modules in the runtime layer, each
 responsible for a recursive reasoning step such as reflection, decomposition,
 context selection, repair, or verification. The evaluation subsystem provides:
 
@@ -37,11 +37,11 @@ The following modules are registered in the module registry:
 
 | Slug                | Label                      | Program Spec                                                            |
 | ------------------- | -------------------------- | ----------------------------------------------------------------------- |
-| `reflect-and-revise`  | Reflect & Revise           | `fleet_rlm.runtime.agent.chat_agent:build_reflect_and_revise_program`  |
+| `reflect-and-revise`  | Reflect & Revise           | `fleet_rlm.runtime.agent.signatures:ReflectAndReviseWorkspaceStep` |
 | `context-selection`   | Recursive Context Selection | `fleet_rlm.runtime.content.context_assembly:build_context_program`    |
-| `decomposition`       | Recursive Decomposition    | `fleet_rlm.runtime.agent.decomposition:build_decomposition_program`   |
-| `repair`              | Recursive Repair           | `fleet_rlm.runtime.agent.repair:build_repair_program`                 |
-| `verification`        | Recursive Verification     | `fleet_rlm.runtime.agent.verification:build_verification_program`     |
+| `decomposition`       | Recursive Decomposition    | `fleet_rlm.runtime.agent.signatures:RecursiveDecompositionSignature` |
+| `repair`              | Recursive Repair           | `fleet_rlm.runtime.agent.signatures:RecursiveRepairSignature`    |
+| `verification`        | Recursive Verification     | `fleet_rlm.runtime.agent.signatures:RecursiveVerificationSignature` |
 
 ## Dataset Format
 
@@ -212,7 +212,7 @@ Each optimization run produces a JSON manifest:
 ```json
 {
   "dataset_path": "traces.json",
-  "module": "fleet_rlm.runtime.agent.chat_agent:build_reflect_and_revise_program",
+  "module": "fleet_rlm.runtime.agent.signatures:ReflectAndReviseWorkspaceStep",
   "train_examples": 80,
   "validation_examples": 20,
   "validation_score": 0.847,
@@ -289,9 +289,9 @@ the API (`GET /api/v1/optimization/modules`), and the frontend module picker.
 
 ## Architecture Rules
 
-- DSPy modules stay in the worker/runtime cognition layer
+- DSPy modules stay in the runtime cognition layer
 - GEPA runs are compute-intensive — use the CLI or async API, never the live request path
-- Agent Framework (`agent_host/`) remains orchestration-only
+- FastAPI transport (`api/`) remains transport-only; runtime orchestration stays in `runtime/`
 - FastAPI remains transport-only
 - Daytona remains the execution and durable-memory substrate
 - Evaluation artifacts live in Daytona-backed quality storage with local fallback

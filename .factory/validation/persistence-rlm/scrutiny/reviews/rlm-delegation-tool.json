@@ -1,0 +1,50 @@
+{
+  "featureId": "rlm-delegation-tool",
+  "reviewedAt": "2026-04-21T09:30:00.000Z",
+  "commitId": "3eafa359",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation is clean, well-tested, and correctly satisfies all three validation assertions (VAL-RLM-001/002/003). The worker chose a ContextVar-based injection pattern that makes the tool testable without closures and consistent with the memory_tools.py stub pattern. Two non-blocking concerns exist: (1) `interpreter.start()` and `build_recursive_subquery_rlm()` calls are outside the error-catching try/except block, so startup/build failures will propagate as unhandled exceptions rather than returning a structured error dict; (2) `AgentRuntime.chat_turn()` doesn't call `set_delegate_interpreter()`, so the tool will raise RuntimeError in real production execution if the LLM selects it — but this is consistent with the memory_tools.py stub pattern and the validation contract only required the tool to be correctly implemented and testable, not fully wired end-to-end.",
+    "issues": [
+      {
+        "file": "src/fleet_rlm/runtime/tools/rlm_delegate.py",
+        "line": 84,
+        "severity": "non_blocking",
+        "description": "interpreter.start() and build_recursive_subquery_rlm() are invoked before the try/except block (line ~90). If either throws, the exception propagates up as an unhandled exception rather than returning {status: error, error: ...}. Since the error handling wraps only the rlm() call, sandbox startup failures and RLM construction failures will cause the tool to raise instead of returning a structured error dict. The intent of the error handler seems to cover all runtime failures, not just rlm execution. Consider wrapping the entire post-interpreter-check body in the try/except."
+      },
+      {
+        "file": "src/fleet_rlm/runtime/agent/runtime.py",
+        "line": 614,
+        "severity": "non_blocking",
+        "description": "AgentRuntime.chat_turn() does not call set_delegate_interpreter(self.interpreter) before self.agent.forward(). If the LLM selects delegate_to_rlm, it will always raise RuntimeError at runtime because _delegate_interpreter is None. The module docstring says 'Set by the agent runtime before invoking the agent' but the wiring is absent. This is consistent with the memory_tools.py stub pattern (read_core_memory/write_core_memory also raise RuntimeError when called directly), but it means the tool effectively does not work in production through AgentRuntime without additional caller-side wiring."
+      },
+      {
+        "file": "src/fleet_rlm/runtime/tools/rlm_delegate.py",
+        "line": 62,
+        "severity": "non_blocking",
+        "description": "max_iterations=20 and max_llm_calls=50 are hardcoded constants. The feature description doesn't require configurability, but these values differ from the existing RLM configuration in _LegacyAgentRuntime (rlm_max_iterations=30, rlm_max_llm_calls=50). The lower max_iterations (20 vs 30) may be intentional for the simplified tool but is worth documenting explicitly."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The ContextVar injection pattern (ContextVar + set_X() helper that returns a Token) is used for interpreter injection in rlm_delegate.py but is not documented in AGENTS.md or the mission AGENTS.md as a canonical pattern. The worker invented it cleanly and consistently with the existing stub-tool pattern in memory_tools.py, but a future worker adding a similar tool might not know to use this pattern.",
+      "evidence": "src/fleet_rlm/runtime/tools/rlm_delegate.py:35-53 introduces _delegate_interpreter ContextVar and set_delegate_interpreter(). src/fleet_rlm/runtime/tools/memory_tools.py shows the alternative stub pattern (raise RuntimeError). Neither AGENTS.md nor the mission AGENTS.md documents when to use which pattern."
+    },
+    {
+      "area": "conventions",
+      "observation": "The mission AGENTS.md explicitly lists src/fleet_rlm/runtime/models/ as off-limits ('DO NOT MODIFY'). The feature description says to read builders.py, which is in runtime/models/. The worker correctly only read from models/builders.py and did not modify it, importing build_recursive_subquery_rlm as an existing function. This was the right approach but the constraint could confuse future workers.",
+      "evidence": "Mission AGENTS.md: 'src/fleet_rlm/runtime/models/ — model builders' listed as off-limits. Feature description says 'Read existing runtime/agent/recursive_runtime.py and runtime/models/builders.py'. Worker correctly read, not modified."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The integration between AgentRuntime.chat_turn() and set_delegate_interpreter() is a missing link that is not documented anywhere. The architecture.md describes the RLM Delegation Flow as working end-to-end, but the actual wiring (who calls set_delegate_interpreter before agent.forward) is not implemented and not documented. The library/architecture.md shows this as an implemented flow, which is misleading.",
+      "evidence": "src/fleet_rlm/runtime/agent/runtime.py:614 — AgentRuntime.chat_turn() calls self.agent.forward() without injecting interpreter into ContextVar. .factory/library/architecture.md describes 'RLM Delegation Flow' as step 1-4 working end-to-end. The gap between the two is undocumented."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The rlm-delegation-tool feature is correctly implemented: delegate_to_rlm is registered via @tool_fn and discoverable by discover_tools(), the sandbox create/reuse logic works correctly, and the structured return type (dict with status/answer/error) is properly implemented and tested with 13 unit tests. All validators (pytest, lint, typecheck) passed. Two non-blocking issues are noted: (1) startup and RLM construction exceptions bypass the structured error handler and propagate as raw exceptions, and (2) AgentRuntime.chat_turn() does not inject the interpreter via set_delegate_interpreter() before running the agent, meaning the tool would fail at runtime if selected by the LLM — this is consistent with the existing stub pattern in memory_tools.py and the validation contract did not require end-to-end wiring."
+}

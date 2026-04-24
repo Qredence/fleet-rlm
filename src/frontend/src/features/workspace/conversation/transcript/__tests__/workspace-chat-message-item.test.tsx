@@ -113,7 +113,7 @@ describe("WorkspaceChatMessageItem", () => {
     const { container, root } = mountMessage(message, {
       onResolveClarification,
     });
-    const radioButton = container.querySelector('button[aria-label="README.md"]');
+    const radioButton = container.querySelector('button[data-id="readme"]');
     const confirmButton = Array.from(container.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Confirm"),
     );

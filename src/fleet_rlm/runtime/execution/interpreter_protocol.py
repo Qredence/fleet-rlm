@@ -72,6 +72,7 @@ class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         pass
@@ -92,6 +93,7 @@ class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
         repo_ref: str | None,
         context_paths: list[str] | None,
         volume_name: str | None,
+        sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
     ) -> None:
         pass

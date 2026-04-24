@@ -6,13 +6,15 @@ import asyncio
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.daytona.volumes import (
+from fleet_rlm.integrations.daytona.filesystem import (
     alist_daytona_volume_tree,
+    alist_daytona_volumes,
     aread_daytona_volume_file_text,
 )
 
@@ -20,10 +22,12 @@ from ..auth import NormalizedIdentity
 from ..dependencies import ServerState
 from ..schemas.core import (
     VolumeFileContentResponse,
+    VolumeListItem,
+    VolumeListResponse,
     VolumeProvider,
     VolumeTreeResponse,
 )
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 
 VolumeOperation = Callable[[str, str, int], dict[str, Any] | Awaitable[dict[str, Any]]]
@@ -71,6 +75,23 @@ def normalize_volume_tree_path(root_path: str) -> str:
     return normalized_path
 
 
+def normalize_volume_timestamp(value: Any) -> str | None:
+    """Return a stable ISO-8601 timestamp string for provider metadata."""
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, datetime):
+        created_at = (
+            value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        )
+        return created_at.isoformat()
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        formatted = isoformat()
+        if isinstance(formatted, str):
+            return formatted
+    return str(value)
+
+
 def raise_volume_file_error(exc: Exception) -> NoReturn:
     """Convert provider-specific file read failures into stable HTTP errors."""
     message = str(exc).lower()
@@ -92,9 +113,10 @@ def _resolve_volume_backend(
     provider: VolumeProvider | None,
 ) -> _ResolvedVolumeBackend:
     effective_provider = resolve_volume_provider(state=state, provider=provider)
+    effective_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
     return _ResolvedVolumeBackend(
         provider=effective_provider,
-        volume_name=resolve_daytona_volume_name(identity=identity, state=state),
+        volume_name=effective_volume_name,
         list_tree=alist_daytona_volume_tree,
         read_file_text=aread_daytona_volume_file_text,
     )
@@ -175,3 +197,53 @@ async def load_volume_file_content(
         error_shaper=raise_volume_file_error,
     )
     return VolumeFileContentResponse(provider=backend.provider, **result)
+
+
+async def load_volume_list(
+    *,
+    state: ServerState,
+    identity: NormalizedIdentity,
+    provider: VolumeProvider | None,
+) -> VolumeListResponse:
+    """Return only the caller's active workspace volume for the selected provider."""
+    effective_provider = resolve_volume_provider(state=state, provider=provider)
+    if effective_provider != "daytona":
+        raise HTTPException(status_code=400, detail="Unsupported volume provider.")
+
+    try:
+        volumes = await asyncio.wait_for(
+            alist_daytona_volumes(),
+            timeout=VOLUME_OPERATION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Volume list timed out.") from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Volume list failed: {exc}"
+        ) from exc
+
+    workspace_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
+    workspace_volume = next(
+        (volume for volume in volumes if volume.get("name") == workspace_volume_name),
+        None,
+    )
+    if workspace_volume is None:
+        workspace_volume = {
+            "id": workspace_volume_name,
+            "name": workspace_volume_name,
+            "state": "unknown",
+            "created_at": None,
+        }
+    created_at = workspace_volume.get("created_at")
+
+    return VolumeListResponse(
+        provider=effective_provider,
+        volumes=[
+            VolumeListItem(
+                id=str(workspace_volume.get("id") or workspace_volume_name),
+                name=str(workspace_volume.get("name") or workspace_volume_name),
+                state=str(workspace_volume.get("state") or "unknown"),
+                created_at=normalize_volume_timestamp(created_at),
+            )
+        ],
+    )

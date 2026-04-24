@@ -55,7 +55,7 @@ class InterpreterConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Configuration for the RLMReActChatAgent."""
+    """Configuration for the agent."""
 
     max_iters: int = Field(
         default=60,

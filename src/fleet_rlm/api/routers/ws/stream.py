@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from fleet_rlm.agent_host import (
-    OrchestrationSessionContext,
-    ReplHookBridge,
-    build_orchestration_session_context,
-    stream_hosted_workspace_task,
-)
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.mlflow_context import (
     merge_trace_result_metadata as _merge_trace_result_metadata,
@@ -23,34 +18,43 @@ from fleet_rlm.integrations.observability.mlflow_context import (
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.worker import WorkspaceEvent
+from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
-from .execution_support import get_execution_emitter
 from .errors import handle_stream_error
 from .helpers import _try_send_json
+from .lifecycle import (
+    build_workspace_task_request,
+    cancelled_event_payload,
+    enqueue_latest_nonblocking,
+    get_execution_emitter,
+    handle_chat_disconnect,
+    handle_chat_loop_exception,
+    should_reload_docs_path,
+)
+from .messages import parse_ws_message_or_send_error, resolve_session_identity
+from .repl_bridge import ReplHookBridge
+from .session import (
+    switch_session_if_needed,
+)
+from .terminal import build_stream_event_dict, handle_terminal_stream_event
+from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
+from .types import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    SessionContext,
+    StreamEventLike,
+    WorkspaceEvent,
+    WorkspaceTaskRequest,
+)
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
     PreparedChatRuntime as _PreparedChatRuntime,
 )
-from .loop_exit import handle_chat_disconnect, handle_chat_loop_exception
-from .messages import parse_ws_message_or_send_error, resolve_session_identity
-from .session import (
-    switch_session_if_needed,
-)
-from .task_control import (
-    cancelled_event_payload,
-    enqueue_latest_nonblocking,
-    should_reload_docs_path,
-)
-from .terminal import build_stream_event_dict, handle_terminal_stream_event
-from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
-from .types import ChatAgentProtocol, LocalPersistFn, StreamEventLike
-from .worker_request import build_workspace_task_request
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +107,57 @@ def _is_terminal_transport_event(event: StreamEventLike) -> bool:
     """Return websocket-terminal semantics for worker and legacy runtime events."""
 
     return bool(getattr(event, "terminal", False)) or event.kind in {
-        "final",
-        "cancelled",
+        "done",
         "error",
     }
+
+
+def _build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
+    """Build canonical runtime stream kwargs from a workspace task request."""
+    kwargs: dict[str, Any] = {
+        "message": request.message,
+        "trace": request.trace,
+        "cancel_check": request.cancel_check,
+        "docs_path": request.docs_path,
+    }
+    if request.repo_url is not None:
+        kwargs["repo_url"] = request.repo_url
+    if request.repo_ref is not None:
+        kwargs["repo_ref"] = request.repo_ref
+    if request.context_paths is not None:
+        kwargs["context_paths"] = list(request.context_paths)
+    if request.batch_concurrency is not None:
+        kwargs["batch_concurrency"] = request.batch_concurrency
+    if request.workspace_id is not None:
+        kwargs["volume_name"] = request.workspace_id
+    return kwargs
+
+
+def _to_workspace_event(event: Any) -> WorkspaceEvent:
+    """Normalize a runtime-style stream event into a workspace event."""
+    raw_ts = getattr(event, "timestamp", None)
+    timestamp = raw_ts if isinstance(raw_ts, datetime) else datetime.now(timezone.utc)
+    return WorkspaceEvent(
+        kind=str(getattr(event, "kind", "status")),
+        text=str(getattr(event, "text", "") or ""),
+        payload=dict(getattr(event, "payload", {}) or {}),
+        timestamp=timestamp,
+        terminal=is_terminal_stream_event_kind(str(getattr(event, "kind", ""))),
+    )
+
+
+async def stream_agent_turn(
+    request: WorkspaceTaskRequest,
+) -> AsyncIterator[WorkspaceEvent]:
+    """Stream one workspace task directly through the agent without HITL wrapper."""
+    if request.execution_mode is not None:
+        request.agent.set_execution_mode(request.execution_mode)
+    if request.prepare is not None:
+        await request.prepare()
+    async for runtime_event in request.agent.aiter_chat_turn_stream(
+        **_build_agent_stream_kwargs(request)
+    ):
+        yield _to_workspace_event(runtime_event)
 
 
 async def run_streaming_turn(
@@ -114,7 +165,7 @@ async def run_streaming_turn(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
@@ -194,7 +245,7 @@ async def _stream_agent_events(
     websocket: WebSocket,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
-    orchestration_session: OrchestrationSessionContext | None,
+    orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     lifecycle: ExecutionLifecycleManager,
     hosted_repl_bridge: ReplHookBridge | None,
@@ -208,23 +259,29 @@ async def _stream_agent_events(
         cancel_check=cancel_check,
     )
 
-    with runtime_telemetry_enabled_context(analytics_enabled):
-        # The Agent Framework outer host owns hosted HITL plus hosted
-        # continuation/session policy while still preserving the worker seam.
-        async for worker_event in stream_hosted_workspace_task(
-            request=worker_request,
-            session=orchestration_session,
-            hosted_repl_bridge=hosted_repl_bridge,
-        ):
-            await _emit_stream_event(
-                websocket=websocket,
-                lifecycle=lifecycle,
-                step_builder=step_builder,
-                event=worker_event,
-                orchestration_session=orchestration_session,
-                persist_session_state=persist_session_state,
-                request_message=prepared_turn.message,
-            )
+    bridge_started = False
+    try:
+        if hosted_repl_bridge is not None:
+            hosted_repl_bridge.start()
+            bridge_started = True
+
+        with runtime_telemetry_enabled_context(analytics_enabled):
+            async for worker_event in stream_agent_turn(worker_request):
+                await _emit_stream_event(
+                    websocket=websocket,
+                    lifecycle=lifecycle,
+                    step_builder=step_builder,
+                    event=worker_event,
+                    orchestration_session=orchestration_session,
+                    persist_session_state=persist_session_state,
+                    request_message=prepared_turn.message,
+                )
+    finally:
+        if hosted_repl_bridge is not None and bridge_started:
+            try:
+                await hosted_repl_bridge.stop()
+            except Exception:
+                pass
 
     if not lifecycle.run_completed:
         lifecycle.raise_if_persistence_error()
@@ -237,13 +294,13 @@ async def _emit_stream_event(
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
-    orchestration_session: OrchestrationSessionContext | None = None,
+    orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
-    if event.kind == "final":
+    if event.kind == "done":
         payload = merge_trace_result_metadata(
             payload if isinstance(payload, dict) else None,
             response_preview=event.text,
@@ -318,16 +375,11 @@ async def _process_chat_message(
     def cancel_check() -> bool:
         return session.cancel_flag["cancelled"]
 
-    orchestration_session = (
-        session.orchestration_session
-        or build_orchestration_session_context(
-            session_record=session.session_record,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            session_id=sess_id,
-            key=session.active_key,
-            manifest_path=session.active_manifest_path,
-        )
+    orchestration_session = session.orchestration_session or SessionContext(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=sess_id,
+        session_record=session.session_record,
     )
     session.orchestration_session = orchestration_session
 

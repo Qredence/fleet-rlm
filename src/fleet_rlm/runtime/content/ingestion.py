@@ -146,4 +146,13 @@ def read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
             raise ValueError(
                 f"Binary file detected at '{path}'. Use a text file or supported document format (for example, PDF)."
             ) from exc
-        raise ValueError(f"Could not decode '{path}' as UTF-8 text.") from exc
+        # File is text-like but not UTF-8 (e.g. Latin-1 / Windows-1252).
+        # latin-1 decodes every byte 0x00–0xFF losslessly, so use it as a
+        # last-resort fallback rather than surfacing a confusing codec error.
+        logger.warning(
+            "File '%s' is not valid UTF-8; re-reading with latin-1 fallback.", path
+        )
+        return path.read_text(encoding="latin-1"), {
+            "source_type": "text",
+            "extraction_method": "read_text_latin1",
+        }

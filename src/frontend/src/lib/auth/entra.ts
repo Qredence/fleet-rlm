@@ -1,11 +1,3 @@
-import {
-  BrowserCacheLocation,
-  PublicClientApplication,
-  type AccountInfo,
-  type AuthenticationResult,
-  type PopupRequest,
-  type SilentRequest,
-} from "@azure/msal-browser";
 import { clearAccessToken, setAccessToken } from "@/lib/auth/token-store";
 import { trimOrEmpty } from "@/lib/utils/env";
 
@@ -34,6 +26,11 @@ export function isEntraAuthConfigured(): boolean {
   return !!entraAuthConfig.clientId && entraAuthConfig.scopes.length > 0;
 }
 
+// MSAL types only — no runtime import until getMsalClient() is called.
+type PublicClientApplication = import("@azure/msal-browser").PublicClientApplication;
+type AuthenticationResult = import("@azure/msal-browser").AuthenticationResult;
+type AccountInfo = import("@azure/msal-browser").AccountInfo;
+
 let msalClient: PublicClientApplication | null = null;
 let initPromise: Promise<PublicClientApplication> | null = null;
 
@@ -42,6 +39,8 @@ function getRedirectUri(): string {
   return new URL(entraAuthConfig.redirectPath, window.location.origin).toString();
 }
 
+// Loads @azure/msal-browser on first call — splits it from the main bundle.
+// Non-Entra deployments never download this 26 MB dependency.
 async function getMsalClient(): Promise<PublicClientApplication> {
   if (!isEntraAuthConfigured()) {
     throw new Error(
@@ -54,6 +53,7 @@ async function getMsalClient(): Promise<PublicClientApplication> {
   }
 
   if (!initPromise) {
+    const { PublicClientApplication, BrowserCacheLocation } = await import("@azure/msal-browser");
     const client = new PublicClientApplication({
       auth: {
         clientId: entraAuthConfig.clientId,
@@ -77,11 +77,10 @@ async function getMsalClient(): Promise<PublicClientApplication> {
 
 async function acquireAccessTokenForAccount(account: AccountInfo): Promise<AuthenticationResult> {
   const client = await getMsalClient();
-  const request: SilentRequest = {
+  const result = await client.acquireTokenSilent({
     account,
     scopes: [...entraAuthConfig.scopes],
-  };
-  const result = await client.acquireTokenSilent(request);
+  });
   if (!result.accessToken) {
     throw new Error("Entra login succeeded, but no API access token was returned.");
   }
@@ -106,11 +105,10 @@ export async function initializeEntraSession(): Promise<string | null> {
 
 export async function loginWithEntra(): Promise<string> {
   const client = await getMsalClient();
-  const request: PopupRequest = {
+  const result = await client.loginPopup({
     scopes: [...entraAuthConfig.scopes],
     prompt: "select_account",
-  };
-  const result = await client.loginPopup(request);
+  });
   const account = result.account ?? client.getActiveAccount();
   if (!account) {
     throw new Error("Microsoft sign-in completed without an active account.");

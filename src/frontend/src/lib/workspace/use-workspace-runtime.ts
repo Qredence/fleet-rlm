@@ -22,7 +22,10 @@ import type {
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
   return (
-    frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error"
+    frame.data.kind === "final" ||
+    frame.data.kind === "done" ||
+    frame.data.kind === "cancelled" ||
+    frame.data.kind === "error"
   );
 }
 
@@ -328,11 +331,75 @@ export function useWorkspace(): ChatRuntime {
     [onFrame, queryClient, sessionId, setMessages],
   );
 
-  const resolveClarification = useCallback(() => {
-    toast("Live backend mode", {
-      description: "Clarification cards are currently available when emitted by backend events.",
-    });
-  }, []);
+  const resolveClarification = useCallback(
+    async (msgId: string, answer: string) => {
+      const text = answer.trim();
+      if (!text || isTyping || isStreaming) return;
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId && m.type === "clarification" && m.clarificationData
+            ? {
+                ...m,
+                clarificationData: {
+                  ...m.clarificationData,
+                  resolved: true,
+                  resolvedAnswer: text,
+                },
+              }
+            : m,
+        ),
+      );
+
+      addMessage(toUserMessage(text));
+      useRunWorkbenchStore.getState().beginRun({ task: text });
+      setPhase("understanding");
+      setCreationPhase("understanding");
+      setIsTyping(true);
+      clearArtifactSteps();
+
+      let terminalSeen = false;
+      try {
+        await streamMessage(
+          text,
+          (frame) => {
+            if (isTerminalFrame(frame)) terminalSeen = true;
+            onFrame(frame);
+          },
+          queryClient,
+          { traceEnabled: true },
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown streaming error";
+        if (!terminalSeen) {
+          useRunWorkbenchStore.getState().failRun(message);
+          applyWsFrameToArtifacts({ type: "error", message });
+          setPhase("idle");
+          setCreationPhase("idle");
+        }
+        toast.error("Backend stream failed", { description: message });
+      } finally {
+        setIsTyping(false);
+        if (!terminalSeen) {
+          setPhase("idle");
+          setCreationPhase("idle");
+        }
+      }
+    },
+    [
+      addMessage,
+      clearArtifactSteps,
+      isStreaming,
+      isTyping,
+      onFrame,
+      queryClient,
+      setCreationPhase,
+      setIsTyping,
+      setMessages,
+      setPhase,
+      streamMessage,
+    ],
+  );
 
   const loadConversation = useCallback(
     (conversation: Conversation) => {

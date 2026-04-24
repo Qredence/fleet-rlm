@@ -47,7 +47,7 @@ The riskiest backend files are:
 - `src/fleet_rlm/api/routers/ws/turn_lifecycle.py` (run/turn lifecycle state)
 - `src/fleet_rlm/api/runtime_services/settings.py` (settings routes)
 - `src/fleet_rlm/api/runtime_services/diagnostics.py` (status/diagnostics)
-- `src/fleet_rlm/runtime/execution/streaming.py` (streaming context)
+- `src/fleet_rlm/runtime/execution/streaming_events.py` (streaming event construction)
 
 ## Common Failures
 

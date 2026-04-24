@@ -228,8 +228,8 @@ Give the system a task and optional context, and it will adapt its reasoning, to
 flowchart LR
   User["Task + optional context"] --> Workbench["Workbench"]
   Workbench --> WS["/api/v1/ws/execution"]
-  WS --> Host["agent_host workflow"]
-  Host --> Runtime["worker + recursive DSPy runtime"]
+  WS --> Transport["api/ transport"]
+  Transport --> Runtime["recursive DSPy runtime"]
   Runtime --> Daytona["Daytona sandbox"]
   Runtime --> Summary["execution_completed.summary"]
   Summary --> Workbench

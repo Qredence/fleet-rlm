@@ -3,17 +3,54 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Protocol
-
-from fleet_rlm.worker.contracts import WorkspaceTaskAgent
 
 from ...schemas import WSMessage
 
 LocalPersistFn = Callable[..., Awaitable[None]]
 PreStreamSetupFn = Callable[[], Awaitable[None]]
+
+
+@dataclass(slots=True)
+class WorkspaceEvent:
+    """Normalized event shape for websocket streaming."""
+
+    kind: str
+    text: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    terminal: bool = False
+
+
+@dataclass(slots=True)
+class WorkspaceTaskRequest:
+    """Input needed to execute one workspace task end-to-end."""
+
+    agent: Any
+    message: str
+    execution_mode: str | None = None
+    trace: bool = True
+    docs_path: str | None = None
+    repo_url: str | None = None
+    repo_ref: str | None = None
+    context_paths: list[str] | None = None
+    batch_concurrency: int | None = None
+    workspace_id: str | None = None
+    cancel_check: Callable[[], bool] | None = None
+    prepare: Callable[[], Awaitable[None]] | None = None
+
+
+@dataclass(slots=True)
+class SessionContext:
+    """Simplified session context for websocket streaming."""
+
+    workspace_id: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    session_record: dict[str, Any] | None = None
 
 
 class StreamEventLike(Protocol):
@@ -52,7 +89,7 @@ class MaintenanceInterpreterProtocol(Protocol):
     def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
 
 
-class ChatAgentProtocol(WorkspaceTaskAgent, Protocol):
+class ChatAgentProtocol(Protocol):
     """Subset of chat-agent behavior used by websocket runtime helpers."""
 
     interpreter: MaintenanceInterpreterProtocol | None
@@ -72,6 +109,20 @@ class ChatAgentProtocol(WorkspaceTaskAgent, Protocol):
     def history_turns(self) -> int: ...
 
     def set_execution_mode(self, execution_mode: str) -> None: ...
+
+    def aiter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
+    ) -> AsyncIterator[object]: ...
 
     def load_document(self, path: str, alias: str = "active") -> None: ...
 
@@ -99,11 +150,14 @@ class DaytonaChatRequestOptions:
     context_paths: list[str]
     batch_concurrency: int | None
     workspace_id: str
+    sandbox_labels: dict[str, str]
 
 
 def normalize_daytona_chat_request(
     msg: WSMessage,
     workspace_id: str,
+    *,
+    sandbox_labels: dict[str, str] | None = None,
 ) -> DaytonaChatRequestOptions:
     """Return a typed Daytona request payload for the canonical runtime."""
 
@@ -118,6 +172,7 @@ def normalize_daytona_chat_request(
         context_paths=context_paths,
         batch_concurrency=msg.batch_concurrency,
         workspace_id=workspace_id,
+        sandbox_labels=dict(sandbox_labels or {}),
     )
 
 
@@ -175,4 +230,5 @@ async def prepare_daytona_workspace_for_turn(
         repo_ref=request.repo_ref,
         context_paths=context_paths,
         volume_name=request.workspace_id,
+        sandbox_labels=request.sandbox_labels,
     )

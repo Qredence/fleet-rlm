@@ -301,6 +301,49 @@ class SessionDeleteResponse(BaseModel):
     )
 
 
+class SessionRestoreResponse(BaseModel):
+    """Result payload after restoring an archived session."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the session was restored successfully.",
+    )
+
+
+class SessionPatchRequest(BaseModel):
+    """Patch body for updating session metadata."""
+
+    title: str | None = Field(
+        default=None,
+        description="New human-readable session title.",
+    )
+    metadata_json: dict[str, Any] | None = Field(
+        default=None,
+        description="New metadata dictionary to merge or replace session metadata.",
+    )
+
+
+class SessionStatsResponse(BaseModel):
+    """Aggregated usage stats for a session."""
+
+    total_tokens_in: int = Field(
+        default=0,
+        description="Total input tokens across all turns.",
+    )
+    total_tokens_out: int = Field(
+        default=0,
+        description="Total output tokens across all turns.",
+    )
+    total_latency_ms: int = Field(
+        default=0,
+        description="Total latency in milliseconds across all turns.",
+    )
+    model_breakdown: dict[str, int] = Field(
+        default_factory=dict,
+        description="Mapping of model_name to turn count.",
+    )
+
+
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 
@@ -516,6 +559,28 @@ class VolumeFileContentResponse(BaseModel):
     truncated: bool = Field(
         default=False,
         description="Whether the returned file content was truncated to respect max_bytes.",
+    )
+
+
+class VolumeListItem(BaseModel):
+    """Single volume entry returned by the volume list endpoint."""
+
+    id: str = Field(description="Volume identifier.")
+    name: str = Field(description="Volume name.")
+    state: str = Field(default="", description="Volume state (e.g. ready, creating).")
+    created_at: str | None = Field(
+        default=None, description="ISO-8601 creation timestamp when available."
+    )
+
+
+class VolumeListResponse(BaseModel):
+    """Response for the volume list endpoint."""
+
+    provider: VolumeProvider = Field(
+        description="Runtime volume backend used to satisfy the request."
+    )
+    volumes: list[VolumeListItem] = Field(
+        default_factory=list, description="Available persistent volumes."
     )
 
 
@@ -831,6 +896,132 @@ class RunComparisonResponse(BaseModel):
     runs: list[RunComparisonItem] = Field(description="Compared run summaries.")
 
 
+class SandboxListItem(BaseModel):
+    """Single sandbox entry returned by the sandbox list endpoint."""
+
+    id: str = Field(description="Sandbox identifier.")
+    name: str = Field(description="Sandbox name.")
+    state: str = Field(description="Sandbox state (e.g. started, stopped, archived).")
+    created_at: str | None = Field(
+        default=None, description="ISO-8601 creation timestamp when available."
+    )
+    volume_name: str | None = Field(
+        default=None,
+        description="Name of the persistent volume attached to the sandbox.",
+    )
+    labels: dict[str, str] = Field(
+        default_factory=dict, description="Custom labels attached to the sandbox."
+    )
+    cpu: int | None = Field(default=None, description="Allocated CPU cores.")
+    memory: int | None = Field(default=None, description="Allocated memory in GiB.")
+    disk: int | None = Field(default=None, description="Allocated disk in GiB.")
+
+
+class SandboxDetailResponse(BaseModel):
+    """Detailed response for a single sandbox."""
+
+    id: str = Field(description="Sandbox identifier.")
+    name: str = Field(description="Sandbox name.")
+    state: str = Field(description="Sandbox state (e.g. started, stopped, archived).")
+    created_at: str | None = Field(
+        default=None, description="ISO-8601 creation timestamp when available."
+    )
+    volume_name: str | None = Field(
+        default=None,
+        description="Name of the persistent volume attached to the sandbox.",
+    )
+    labels: dict[str, str] = Field(
+        default_factory=dict, description="Custom labels attached to the sandbox."
+    )
+    cpu: int | None = Field(default=None, description="Allocated CPU cores.")
+    memory: int | None = Field(default=None, description="Allocated memory in GiB.")
+    disk: int | None = Field(default=None, description="Allocated disk in GiB.")
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables configured for the sandbox.",
+    )
+    image: str | None = Field(
+        default=None, description="Base image or declarative image used by the sandbox."
+    )
+    snapshot: str | None = Field(
+        default=None, description="Snapshot name used to create the sandbox."
+    )
+    language: str | None = Field(
+        default=None, description="Programming language of the sandbox."
+    )
+    auto_stop_interval: int | None = Field(
+        default=None,
+        description="Minutes of inactivity before auto-stopping.",
+    )
+    auto_archive_interval: int | None = Field(
+        default=None,
+        description="Minutes after stop before archiving to cold storage.",
+    )
+    auto_delete_interval: int | None = Field(
+        default=None,
+        description="Minutes after archive before permanent deletion.",
+    )
+    ephemeral: bool | None = Field(
+        default=None, description="Whether the sandbox is ephemeral."
+    )
+    network_block_all: bool | None = Field(
+        default=None, description="Whether all outbound network is blocked."
+    )
+    network_allow_list: str | None = Field(
+        default=None, description="Comma-separated list of allowed domains."
+    )
+    volumes: list[dict[str, Any]] = Field(
+        default_factory=list, description="Detailed volume mounts."
+    )
+
+
+class SandboxListResponse(BaseModel):
+    """Response for the sandbox list endpoint."""
+
+    items: list[SandboxListItem] = Field(
+        default_factory=list, description="Available sandboxes."
+    )
+    total: int = Field(description="Total number of sandboxes.")
+    page: int = Field(default=1, description="Current page number.")
+    total_pages: int = Field(default=1, description="Total number of pages.")
+
+
+class SandboxArchiveResponse(BaseModel):
+    """Result payload after archiving a sandbox."""
+
+    ok: bool = Field(
+        default=True,
+        description="Whether the sandbox was archived successfully.",
+    )
+
+
+class RunStepItem(BaseModel):
+    """Single execution step for a run."""
+
+    id: str = Field(description="Durable step identifier.")
+    step_index: int = Field(description="Step position within the run.")
+    step_type: str = Field(description="Step type (e.g. tool_call, reasoning).")
+    tool_name: str | None = Field(
+        default=None, description="Tool name when applicable."
+    )
+    tokens_in: int | None = Field(default=None, description="Input token count.")
+    tokens_out: int | None = Field(default=None, description="Output token count.")
+    latency_ms: int | None = Field(
+        default=None, description="Step latency in milliseconds."
+    )
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+
+
+class RunStepListResponse(BaseModel):
+    """Paginated execution step list for a run."""
+
+    items: list[RunStepItem] = Field(description="Step list items.")
+    total: int = Field(description="Total steps in run.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more steps exist beyond this page.")
+
+
 class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
 
@@ -866,3 +1057,31 @@ class TranscriptDatasetRequest(BaseModel):
     turns: list[TranscriptTurnInput] = Field(
         description="Transcript turns to convert into dataset rows.",
     )
+
+
+class MemoryItemResponse(BaseModel):
+    """Single memory item returned by the memory browse endpoint."""
+
+    id: str = Field(description="Durable memory item identifier.")
+    scope: str = Field(
+        description="Memory scope (e.g. user, tenant, workspace, run, session)."
+    )
+    scope_id: str = Field(description="Identifier within the scope.")
+    kind: str = Field(description="Memory kind (e.g. fact, observation, preference).")
+    source: str = Field(description="Memory source (e.g. user, agent, system).")
+    status: str = Field(description="Memory status (e.g. active, archived).")
+    content_text: str | None = Field(
+        default=None, description="Textual content when available."
+    )
+    importance: int = Field(description="Importance score (0-100).")
+    tags: list[str] = Field(default_factory=list, description="Associated tags.")
+    created_at: str = Field(description="ISO-8601 creation timestamp.")
+
+
+class MemoryListResponse(BaseModel):
+    """Paginated memory item list response."""
+
+    items: list[MemoryItemResponse] = Field(description="Memory item list items.")
+    total: int = Field(description="Total matching memory items.")
+    offset: int = Field(description="Current pagination offset.")
+    limit: int = Field(description="Current page size.")

@@ -2,21 +2,27 @@ import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/
 
 function isWsEventKind(value: string): value is WsEventKind {
   return [
-    "assistant_token",
-    "reasoning_step",
+    // Canonical backend kinds (v0.5+)
     "status",
-    "warning",
+    "text",
+    "reasoning",
     "tool_call",
     "tool_result",
+    "warning",
+    "error",
+    "done",
+    // Legacy kinds (retained for backward compatibility)
+    "assistant_token",
+    "reasoning_step",
     "trajectory_step",
     "final",
-    "error",
     "cancelled",
     "plan_update",
     "rlm_executing",
     "memory_update",
     "hitl_request",
     "hitl_resolved",
+    "clarification",
     "command_ack",
     "command_reject",
   ].includes(value);

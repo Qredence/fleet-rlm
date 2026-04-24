@@ -5,9 +5,7 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.terminal as ws_terminal
-import fleet_rlm.agent_host.terminal_flow as terminal_flow
-from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
-from fleet_rlm.worker import WorkspaceEvent
+from fleet_rlm.api.routers.ws.types import SessionContext, WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
@@ -77,7 +75,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         persist_calls: list[bool] = []
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
@@ -96,7 +94,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
 
         assert persist_calls == [True]
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["summary"]["status"] == "completed"
 
@@ -107,7 +105,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
@@ -126,7 +124,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
         )
 
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["summary"]["status"] == "completed"
 
@@ -175,7 +173,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
         event = WorkspaceEvent(
-            kind="final",
+            kind="done",
             text="claimed success",
             payload={
                 "runtime_degraded": True,
@@ -201,7 +199,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         )
 
         assert lifecycle.run_completed is True
-        assert websocket.sent[0]["data"]["kind"] == "final"
+        assert websocket.sent[0]["data"]["kind"] == "done"
         assert lifecycle.completed_with is not None
         assert lifecycle.completed_with["status"].name == "FAILED"
         assert lifecycle.completed_with["summary"]["status"] == "error"
@@ -209,33 +207,20 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
     asyncio.run(scenario())
 
 
-def test_handle_terminal_stream_event_delegates_to_terminal_flow(
-    monkeypatch,
-) -> None:
+def test_handle_terminal_stream_event_accepts_session_context() -> None:
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
         lifecycle = _LifecycleStub()
-        event = WorkspaceEvent(kind="final", text="done", timestamp=ts(), terminal=True)
-        session = OrchestrationSessionContext(
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
+        session = SessionContext(
             workspace_id="workspace-1",
             user_id="user-1",
             session_id="session-1",
             session_record={"manifest": {"metadata": {}}},
         )
-        delegated: dict[str, Any] = {}
 
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
-
-        async def fake_apply_terminal_event_policy(**kwargs: Any) -> bool:
-            delegated.update(kwargs)
-            return True
-
-        monkeypatch.setattr(
-            terminal_flow,
-            "apply_terminal_event_policy",
-            fake_apply_terminal_event_policy,
-        )
 
         await ws_terminal.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
@@ -250,8 +235,9 @@ def test_handle_terminal_stream_event_delegates_to_terminal_flow(
             request_message="hello",
         )
 
-        assert delegated["session"] is session
-        assert delegated["event"] is event
-        assert delegated["lifecycle"] is lifecycle
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["summary"]["status"] == "completed"
 
     asyncio.run(scenario())

@@ -11,13 +11,39 @@ from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.api.server_utils import owner_fingerprint, sanitize_id
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.integrations.database import ChatSessionStatus
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _register_reflect_and_revise_stub():
+    """Register a stub 'reflect-and-revise' module for contract tests."""
+    from fleet_rlm.runtime.quality.module_registry import (
+        ModuleOptimizationSpec,
+        _REGISTRY,
+        register_module,
+    )
+
+    spec = ModuleOptimizationSpec(
+        module_slug="reflect-and-revise",
+        label="Reflect & Revise",
+        program_spec="stub",
+        artifact_filename="stub.json",
+        input_keys=["user_request"],
+        required_dataset_keys=["user_request", "next_action"],
+        module_factory=lambda: None,
+        row_converter=lambda rows: rows,
+        metric_builder=lambda: None,
+    )
+    register_module(spec)
+    yield
+    _REGISTRY.pop("reflect-and-revise", None)
+
+
 _REQUIRED_HTTP_PATHS = {
     "/api/v1/auth/me",
+    "/api/v1/memory",
     "/api/v1/optimization/modules",
     "/api/v1/optimization/run",
     "/api/v1/optimization/runs",
@@ -27,6 +53,9 @@ _REQUIRED_HTTP_PATHS = {
     "/api/v1/runtime/tests/daytona",
     "/api/v1/runtime/tests/lm",
     "/api/v1/runtime/status",
+    "/api/v1/sandboxes",
+    "/api/v1/sandboxes/{sandbox_id}",
+    "/api/v1/sandboxes/{sandbox_id}/archive",
     "/api/v1/sessions/state",
     "/api/v1/traces/feedback",
 }
@@ -91,6 +120,10 @@ class SessionHistoryRepository:
         workspace_id,
         search,
         status,
+        created_after=None,
+        created_before=None,
+        model_name=None,
+        model_provider=None,
         limit,
         offset,
     ):
@@ -109,6 +142,18 @@ class SessionHistoryRepository:
                 for item in items
                 if needle in item.title.lower()
                 or needle in item.metadata_json["external_session_id"].lower()
+            ]
+        if model_name is not None:
+            items = [
+                item
+                for item in items
+                if getattr(item, "model_name", None) == model_name
+            ]
+        if model_provider is not None:
+            items = [
+                item
+                for item in items
+                if getattr(item, "model_provider", None) == model_provider
             ]
         total = len(items)
         return items[offset : offset + limit], total
@@ -230,17 +275,13 @@ def test_ws_router_split_modules_import() -> None:
     import fleet_rlm.api.routers.ws.artifacts as ws_artifacts
     import fleet_rlm.api.routers.ws.commands as ws_commands
     import fleet_rlm.api.routers.ws.completion as ws_completion
-    import fleet_rlm.api.routers.ws.execution_support as ws_execution_support
     import fleet_rlm.api.routers.ws.endpoint as ws_endpoint
     import fleet_rlm.api.routers.ws.errors as ws_errors
-    import fleet_rlm.api.routers.ws.failures as ws_failures
-    import fleet_rlm.api.routers.ws.hitl as ws_hitl
-    import fleet_rlm.api.routers.ws.loop_exit as ws_loop_exit
+    import fleet_rlm.api.routers.ws.lifecycle as ws_lifecycle
     import fleet_rlm.api.routers.ws.manifest as ws_manifest
     import fleet_rlm.api.routers.ws.messages as ws_messages
     import fleet_rlm.api.routers.ws.session as ws_session
     import fleet_rlm.api.routers.ws.stream as ws_stream
-    import fleet_rlm.api.routers.ws.task_control as ws_task_control
     import fleet_rlm.api.routers.ws.terminal as ws_terminal
     import fleet_rlm.api.routers.ws.turn_setup as ws_turn_setup
     import fleet_rlm.api.routers.ws.types as ws_types
@@ -254,19 +295,18 @@ def test_ws_router_split_modules_import() -> None:
     assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
     assert ws_completion.build_execution_completion_summary is not None
-    assert ws_execution_support.get_execution_emitter is not None
+    assert ws_lifecycle.get_execution_emitter is not None
     assert ws_errors.handle_stream_error is not None
-    assert ws_failures.classify_stream_failure is not None
-    assert ws_hitl.handle_resolve_hitl is not None
+    assert ws_lifecycle.classify_stream_failure is not None
     assert chat_persistence.ExecutionLifecycleManager is not None
-    assert ws_loop_exit.handle_chat_disconnect is not None
+    assert ws_lifecycle.handle_chat_disconnect is not None
     assert ws_manifest._manifest_path is not None
     assert ws_messages.parse_ws_message_or_send_error is not None
     assert chat_persistence.persist_session_state is not None
     assert chat_runtime.PreparedChatRuntime is not None
     assert ws_session.switch_session_if_needed is not None
     assert ws_stream._chat_message_loop is not None
-    assert ws_task_control.cancel_task is not None
+    assert ws_lifecycle.cancel_task is not None
     assert ws_terminal.handle_terminal_stream_event is not None
     assert chat_persistence.initialize_turn_lifecycle is not None
     assert ws_turn_setup.prepare_chat_message_turn is not None
@@ -299,10 +339,10 @@ def test_optimization_status_reports_unavailable_mlflow(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.api.routers.optimization import status as opt_status
 
-    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
-    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, False))
+    monkeypatch.setattr(opt_status, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(opt_status, "_get_mlflow_status", lambda: (True, False))
 
     response = default_client.get(
         "/api/v1/optimization/status",
@@ -608,6 +648,40 @@ def test_session_export_route_paginates_repository_turns(
     assert [call["offset"] for call in repository.turn_list_calls[-3:]] == [0, 2, 4]
 
 
+def test_sandbox_list_paginates_with_limit(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, int]] = []
+
+    async def fake_load_sandbox_list(
+        *, page: int, limit: int, **kwargs: object
+    ) -> dict[str, object]:
+        _ = kwargs
+        calls.append({"page": page, "limit": limit})
+        return {"items": [], "total": 0, "page": page, "total_pages": 0}
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.sandboxes.load_sandbox_list",
+        fake_load_sandbox_list,
+    )
+
+    response = default_client.get(
+        "/api/v1/sandboxes?limit=5",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert calls == [{"page": 1, "limit": 5}]
+
+    response = default_client.get(
+        "/api/v1/sandboxes?page=2&limit=10",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert calls == [{"page": 1, "limit": 5}, {"page": 2, "limit": 10}]
+
+
 def test_openapi_publishes_http_bearer_security_for_protected_routes(
     local_client: TestClient,
 ) -> None:
@@ -707,7 +781,7 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
+    from fleet_rlm.api.routers.optimization import datasets as opt_datasets
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -719,7 +793,7 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     def _unexpected_persist(**_: object) -> Path:
         raise AssertionError("persist_jsonl_rows should not run in local mode")
 
-    monkeypatch.setattr(optimization, "persist_jsonl_rows", _unexpected_persist)
+    monkeypatch.setattr(opt_datasets, "persist_jsonl_rows", _unexpected_persist)
 
     response = default_client.post(
         "/api/v1/optimization/transcript-datasets",
@@ -761,9 +835,9 @@ def test_async_optimization_run_accepts_dataset_id(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers import optimization
     from fleet_rlm.api.config import ServerRuntimeConfig
     from fleet_rlm.api.main import create_app
+    from fleet_rlm.api.routers.optimization import runs as opt_runs
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -777,8 +851,8 @@ def test_async_optimization_run_accepts_dataset_id(
         turns=[("What is 2+2?", "4")],
     )
 
-    monkeypatch.setattr(optimization, "_check_gepa_available", lambda: True)
-    monkeypatch.setattr(optimization, "_get_mlflow_status", lambda: (True, True))
+    monkeypatch.setattr(opt_runs, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(opt_runs, "_get_mlflow_status", lambda: (True, True))
 
     with TestClient(
         create_app(

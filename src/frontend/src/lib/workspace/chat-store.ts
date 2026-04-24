@@ -144,17 +144,36 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       request.batch_concurrency = options.batchConcurrency;
     }
 
+    // Collect frames arriving within the same animation frame and apply them in one
+    // Zustand update, reducing React reconciliations during high-throughput streaming.
+    // oxlint-disable-next-line prefer-const -- array is mutated via splice
+    let pendingFrames: WsServerMessage[] = [];
+    let rafScheduled = false;
+
+    const flushFrames = () => {
+      rafScheduled = false;
+      const frames = pendingFrames.splice(0);
+      if (frames.length === 0) return;
+      set((state) => ({
+        messages: frames.reduce(
+          (msgs, f) => applyWsFrameToMessages(msgs, f, queryClient).messages,
+          state.messages,
+        ),
+      }));
+      if (onFrameCallback) {
+        frames.forEach((f) => onFrameCallback(f));
+      }
+    };
+
     try {
       await streamChatOverWs(request as unknown as Parameters<typeof streamChatOverWs>[0], {
         signal: controller.signal,
         firstFrameTimeoutMs,
         onFrame: (frame) => {
-          set((state) => ({
-            messages: applyWsFrameToMessages(state.messages, frame, queryClient).messages,
-          }));
-
-          if (onFrameCallback) {
-            onFrameCallback(frame);
+          pendingFrames.push(frame);
+          if (!rafScheduled) {
+            rafScheduled = true;
+            requestAnimationFrame(flushFrames);
           }
         },
       });
@@ -166,6 +185,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       set({ error: message });
       throw error;
     } finally {
+      // Flush any frames that arrived after the last rAF tick but before the stream ended.
+      flushFrames();
       if (get().streamController === controller) {
         set({ isStreaming: false, streamController: null });
       }

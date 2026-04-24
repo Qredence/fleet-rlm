@@ -1,0 +1,39 @@
+{
+  "featureId": "delete-agent-host-worker",
+  "reviewedAt": "2026-04-21T00:00:00.000Z",
+  "commitId": "6cec4a48",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The deletion of agent_host/ and worker/ is complete and correct. All 15 deleted files are accounted for. All import sites were updated to use the new local paths in api/routers/ws/. The migration faithfully preserves the original terminal event ordering semantics (persist → complete_run → send for final events; send → persist → complete_run for cancelled/error). The new stream_agent_turn() async generator correctly replaces stream_hosted_workspace_task(), and ReplHookBridge lifecycle (start/stop in try/finally) is properly managed in both stream.py and turn_runner.py. The HITL stub correctly returns False for all inputs. One non-blocking type annotation imprecision: stream_agent_turn is declared to return AsyncIterator[WorkspaceEvent] but is a generator function (uses yield), which should strictly be AsyncGenerator[WorkspaceEvent, None]. In practice both are structurally equivalent and the type checker accepted it.",
+    "issues": [
+      {
+        "file": "src/fleet_rlm/api/routers/ws/stream.py",
+        "line": 150,
+        "severity": "non_blocking",
+        "description": "stream_agent_turn uses yield (making it an async generator function) but is annotated with return type AsyncIterator[WorkspaceEvent]. Technically should be AsyncGenerator[WorkspaceEvent, None]. No runtime impact, but slightly imprecise. Did not cause a typecheck failure because AsyncGenerator is structurally compatible with AsyncIterator."
+      },
+      {
+        "file": "src/fleet_rlm/AGENTS.md",
+        "line": 50,
+        "severity": "non_blocking",
+        "description": "At commit 6cec4a48, src/fleet_rlm/AGENTS.md still referenced the deleted agent_host/ and worker/ directories (lines 50, 135, 137). Root AGENTS.md also had stale references. These were corrected in the follow-up commit 8916178f. The feature description did not explicitly require AGENTS.md updates, and make test/lint/typecheck all pass, but the docs were left inconsistent for one commit."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The deletion feature left AGENTS.md (both root and src/fleet_rlm/AGENTS.md) referencing the deleted agent_host/ and worker/ directories at commit 6cec4a48. A follow-up commit (8916178f) fixed them. The backend-refactor skill's work procedure does not mention updating AGENTS.md when deleting directories. Adding a step like 'For deletion features: update AGENTS.md references after deletion' would prevent this gap.",
+      "evidence": "git show 6cec4a48:src/fleet_rlm/AGENTS.md | grep 'agent_host' shows lines 50, 135, 137 still present. Fixed by 8916178f. backend-refactor SKILL.md step 5 only says 'Delete the directories/files, then grep for dangling imports and fix them.'"
+    },
+    {
+      "area": "skills",
+      "observation": "The transcript skeleton shows 0 tool calls recorded (toolCallCount: 0), which indicates the transcript capture was incomplete for this session. The handoff contents and the commit itself are richly detailed, so work was done, but reviewers have no transcript evidence to corroborate the worker's process.",
+      "evidence": "jq query on worker-transcripts.jsonl for session 536d82bb returned toolCallCount: 0, firstToolCall: null."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. All agent_host/ and worker/ directories are deleted, all dangling imports fixed, and the new ws/ local implementations (types.py dataclasses, repl_bridge.py, startup_status.py, inlined terminal.py policy) correctly replicate the original behavior without HITL/checkpoint logic. All 1140 tests pass, lint clean, typecheck clean. Two non-blocking findings: (1) stream_agent_turn return type annotation uses AsyncIterator instead of AsyncGenerator — cosmetically imprecise but functionally correct; (2) AGENTS.md documentation was left stale at this commit (both root and src/fleet_rlm/AGENTS.md still referenced deleted directories) and was only corrected in the next commit 8916178f."
+}

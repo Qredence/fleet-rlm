@@ -1,0 +1,46 @@
+{
+  "milestone": "api-rewiring",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "lint": { "passed": true, "command": "make lint", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "make typecheck", "exitCode": 0 },
+    "test": { "passed": true, "command": "make test", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": [],
+    "reviewedFeatures": ["fix-ws-event-types-and-factory", "fix-cli-event-kinds"]
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added 'StreamEventKind Terminal Filter Inconsistency' to .factory/library/runtime-patterns.md documenting (1) TERMINAL_STREAM_EVENT_KINDS constant not reused in _activate_live_event_queue which hardcodes {final, cancelled, error}, missing 'done', and (2) 'error' being filtered alongside legacy kinds silently drops nested-runtime error events.",
+      "sourceFeature": "fix-ws-event-types-and-factory,fix-cli-event-kinds"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document that factory.py (runtime/factory.py) is now a thin wrapper: build_chat_agent accepts ~20 legacy parameters but only threads max_iters, history_max_turns, and extra_tools through to AgentRuntime. All other parameters (sandbox_spec, runtime, volume_name, secret_name, guardrail_mode, etc.) are silently ignored. Callers should not rely on these parameters having effect until factory.py is fully rewired.",
+      "evidence": "Two reviewers independently noted that factory.py's build_chat_agent signature lists ~20 params but AgentRuntime only accepts 4. Callers in bootstrap/CLI that pass sandbox_spec or guardrail_mode will get no-op behavior without error. This is significant tech debt affecting configuration correctness.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify whether StreamEventKind.warning is an actively emitted kind or reserved for future use. No code in the current streaming layer emits kind='warning' directly — guardrail warnings are embedded in the 'done' event payload under 'guardrail_warnings'. If 'warning' is meant to be a live stream event, the emission path is missing. If it's reserved, document that.",
+      "evidence": "Reviewer grep found zero emit paths for kind='warning' in src/. The StreamEventKind Literal and TurnState.apply() include 'warning', but no StreamEvent with kind='warning' is ever constructed.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Unused FleetAgent import in factory.py suppressed with # noqa: F401.",
+      "reason": "non_blocking stylistic concern. FleetAgent is imported as an explicit re-export contract companion (AgentRuntime wraps it). No behavior impact. Not worth escalating."
+    }
+  ],
+  "previousRound": ".factory/validation/api-rewiring/scrutiny/synthesis-round1.json"
+}

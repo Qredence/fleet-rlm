@@ -1,0 +1,75 @@
+{
+  "featureId": "docs-update-stale-references",
+  "reviewedAt": "2026-04-21T20:15:00Z",
+  "commitId": "c5b0424c26e1bd41de67d3e83ca49abf5e081ac5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The worker correctly updated the explicitly requested stale references: volumes.py→filesystem.py in module-map.md, removed volumes.py from architecture.md, updated streaming_events.py docstring, and removed references to deleted streaming.py, streaming_context.py, server_utils.py, and worker/streaming.py across docs/ and scaffold/. All validators (lint, typecheck, test) pass. However, the worker's verification was incomplete: several stale runtime module references to renamed/deleted files (chat_agent.py → agent.py, recursive_runtime.py → runtime.py) remain in current (non-historical) documentation. Additionally, docs/index.md and a how-to guide still reference the deleted agent_host/ layer as current architecture. The worker claimed 'zero remaining stale references' but missed these.",
+    "issues": [
+      {
+        "file": "docs/reference/module-map.md",
+        "line": 52,
+        "severity": "non_blocking",
+        "description": "Mermaid diagram still references deleted 'runtime/agent/chat_agent.py' instead of current 'runtime/agent/agent.py'."
+      },
+      {
+        "file": "docs/reference/module-map.md",
+        "line": 64,
+        "severity": "non_blocking",
+        "description": "Dependency table still references deleted 'runtime/agent/chat_agent.py' for tool list and execution streaming."
+      },
+      {
+        "file": "docs/reference/module-map.md",
+        "line": 66,
+        "severity": "non_blocking",
+        "description": "Dependency table still references deleted 'runtime/agent/recursive_runtime.py' instead of current 'runtime/agent/runtime.py'."
+      },
+      {
+        "file": "docs/reference/adr/001-rlm-runtime-architecture.md",
+        "line": 88,
+        "severity": "non_blocking",
+        "description": "Still references deleted 'src/fleet_rlm/runtime/agent/chat_agent.py' as the primary agent class."
+      },
+      {
+        "file": "docs/reference/adr/001-rlm-runtime-architecture.md",
+        "line": 92,
+        "severity": "non_blocking",
+        "description": "Still references deleted 'src/fleet_rlm/runtime/agent/chat_agent.py' and 'src/fleet_rlm/runtime/agent/recursive_runtime.py' in ADR file list."
+      },
+      {
+        "file": "docs/README.md",
+        "line": 33,
+        "severity": "non_blocking",
+        "description": "'Runtime truth' section still lists deleted 'runtime/agent/chat_agent.py' and 'runtime/agent/recursive_runtime.py'."
+      },
+      {
+        "file": "docs/index.md",
+        "line": 24,
+        "severity": "non_blocking",
+        "description": "'Source of Truth' section still lists 'src/fleet_rlm/agent_host/' as a current layer, but the directory has been deleted and consolidated into api/ and runtime/."
+      },
+      {
+        "file": "docs/how-to-guides/dspy-optimization-and-evaluation.md",
+        "line": 294,
+        "severity": "non_blocking",
+        "description": "Still references 'Agent Framework (agent_host/) remains orchestration-only' but agent_host/ has been deleted."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "When renaming core runtime agent files (chat_agent.py → agent.py, recursive_runtime.py → runtime.py), the corresponding documentation updates in non-obvious places like docs/README.md, docs/reference/adr/*.md, and docs/reference/module-map.md mermaid diagrams are easy to miss. The root AGENTS.md reading order was updated correctly, but satellite docs were not fully swept.",
+      "evidence": "docs/reference/module-map.md:52 mermaid AGENT --> CHAT['runtime/agent/chat_agent.py']; docs/reference/adr/001-rlm-runtime-architecture.md:88 'The primary agent class (src/fleet_rlm/runtime/agent/chat_agent.py) extends'; docs/README.md:33 'Runtime truth: src/fleet_rlm/runtime/agent/chat_agent.py, src/fleet_rlm/runtime/agent/recursive_runtime.py'"
+    },
+    {
+      "area": "conventions",
+      "observation": "The deleted agent_host/ directory still appears in current-facing docs (docs/index.md 'Source of Truth' and docs/how-to-guides/dspy-optimization-and-evaluation.md) as an active layer, even though it was consolidated into api/ and runtime/ in earlier milestones.",
+      "evidence": "docs/index.md:24 'outer host policy in src/fleet_rlm/agent_host/'; docs/how-to-guides/dspy-optimization-and-evaluation.md:294 'Agent Framework (agent_host/) remains orchestration-only'"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The core requested changes were completed correctly and validators pass, but the worker's verification was incomplete. Stale references to renamed runtime agent files (chat_agent.py → agent.py, recursive_runtime.py → runtime.py) remain in docs/reference/module-map.md, docs/reference/adr/001-rlm-runtime-architecture.md, and docs/README.md. Additionally, docs/index.md and docs/how-to-guides/dspy-optimization-and-evaluation.md still reference the deleted agent_host/ directory as a current architecture layer. These should be corrected in a follow-up."
+}

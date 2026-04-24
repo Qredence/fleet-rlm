@@ -16,6 +16,9 @@ Implementation-facing contracts, interfaces, and current-state facts.
 
 - [Auth Modes](auth.md)
 - [Database Architecture](database.md)
+- [Sandbox API](sandbox-api.md)
+- [Runs API](runs-api.md)
+- [Memory API](memory-api.md)
 - [Sandbox File System](sandbox-fs.md)
 - [Daytona Runtime Architecture](daytona-runtime-architecture.md)
 

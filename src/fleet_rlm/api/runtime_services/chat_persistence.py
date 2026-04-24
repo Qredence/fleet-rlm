@@ -13,7 +13,10 @@ from fleet_rlm.api.events import (
     ExecutionStep,
     ExecutionStepBuilder,
 )
-from fleet_rlm.api.server_utils import parse_model_identity, resolve_sandbox_provider
+from fleet_rlm.api.runtime_services.common import (
+    parse_model_identity,
+    resolve_sandbox_provider,
+)
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 from fleet_rlm.integrations.database import (
@@ -45,7 +48,7 @@ _EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
 
 
 def _new_persistence_required_error(code: str, message: str) -> RuntimeError:
-    from ..routers.ws.failures import PersistenceRequiredError
+    from ..routers.ws.lifecycle import PersistenceRequiredError
 
     return PersistenceRequiredError(code, message)
 
@@ -516,6 +519,9 @@ async def persist_memory_item_if_needed(
         await repository.store_memory_item(
             MemoryItemCreateRequest(
                 tenant_id=identity_rows.tenant_id,
+                workspace_id=identity_rows.workspace_id,
+                user_id=identity_rows.user_id,
+                run_id=active_run_db_id,
                 scope=MemoryScope.RUN
                 if active_run_db_id is not None
                 else MemoryScope.USER,

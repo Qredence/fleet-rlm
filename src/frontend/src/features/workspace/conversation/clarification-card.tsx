@@ -1,14 +1,8 @@
-import { useId, useState } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
-import { CircleCheck, MessageSquare, Pencil } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import { CircleCheck, MessageSquare } from "lucide-react";
 import type { ChatMessage } from "@/features/workspace/use-workspace";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { cn } from "@/lib/utils";
+import { OptionList } from "@/components/tool-ui/option-list";
 
 interface Props {
   data: NonNullable<ChatMessage["clarificationData"]>;
@@ -16,18 +10,18 @@ interface Props {
 }
 
 export function ClarificationCard({ data, onResolve }: Props) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [customText, setCustomText] = useState("");
-  const customAnswerId = useId();
-  const isCustom = selectedId === data.customOptionId;
-  const canConfirm = selectedId !== null && (!isCustom || customText.trim().length > 0);
   const prefersReduced = useReducedMotion();
 
-  const handleConfirm = () => {
-    if (!canConfirm) return;
-    const selected = data.options.find((o) => o.id === selectedId);
-    const answer = isCustom ? customText.trim() : selected?.label || "";
-    onResolve(answer);
+  const resolvedOptionId = data.resolved
+    ? (data.options.find((o) => o.label === data.resolvedAnswer)?.id ?? null)
+    : undefined;
+
+  const handleAction = async (actionId: string, selection: string[] | string | null) => {
+    if (actionId !== "confirm") return;
+    const selectedId = typeof selection === "string" ? selection : null;
+    if (!selectedId) return;
+    const option = data.options.find((o) => o.id === selectedId);
+    if (option) onResolve(option.label);
   };
 
   // ── Resolved state ────────────────────────────────────────────
@@ -49,9 +43,16 @@ export function ClarificationCard({ data, onResolve }: Props) {
               </div>
               <p className="text-muted-foreground typo-caption">{data.question}</p>
             </div>
-            <Badge variant="secondary" className="w-fit px-3 py-1.5 text-sm">
-              {data.resolvedAnswer}
-            </Badge>
+            {resolvedOptionId != null ? (
+              <OptionList
+                id={data.stepLabel}
+                options={data.options}
+                selectionMode="single"
+                choice={resolvedOptionId}
+              />
+            ) : (
+              <p className="text-foreground typo-label">{data.resolvedAnswer}</p>
+            )}
           </CardContent>
         </Card>
       </motion.div>
@@ -78,97 +79,13 @@ export function ClarificationCard({ data, onResolve }: Props) {
             </div>
             <p className="text-foreground typo-label">{data.question}</p>
           </div>
-
-          <ToggleGroup
-            type="single"
-            value={selectedId ?? ""}
-            onValueChange={(nextValue) => {
-              setSelectedId(nextValue || null);
-              if (nextValue !== data.customOptionId) {
-                setCustomText("");
-              }
-            }}
-            className="w-full flex-col"
-            variant="card"
-            aria-label={data.question}
-          >
-            {data.options.map((option) => {
-              const isSelected = selectedId === option.id;
-              const isWriteOwn = option.id === data.customOptionId;
-
-              return (
-                <div key={option.id} className="flex flex-col gap-2">
-                  <ToggleGroupItem
-                    value={option.id}
-                    className="group/clarification-option w-full"
-                    aria-label={option.label}
-                  >
-                    <div
-                      className={cn(
-                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                        isSelected ? "border-foreground" : "border-muted-foreground/40",
-                      )}
-                      aria-hidden="true"
-                    >
-                      <div
-                        className={cn(
-                          "size-2.5 rounded-full bg-foreground transition-transform",
-                          isSelected ? "scale-100" : "scale-0",
-                        )}
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        {isWriteOwn ? (
-                          <Pencil className="shrink-0 text-muted-foreground" aria-hidden="true" />
-                        ) : null}
-                        <span className="text-left text-foreground typo-label">{option.label}</span>
-                      </div>
-                      {option.description ? (
-                        <p className="mt-0.5 text-left text-muted-foreground typo-caption">
-                          {option.description}
-                        </p>
-                      ) : null}
-                    </div>
-                  </ToggleGroupItem>
-
-                  <AnimatePresence>
-                    {isWriteOwn && isSelected && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={
-                          prefersReduced ? { duration: 0.01 } : { duration: 0.2, ease: "easeOut" }
-                        }
-                        className="overflow-hidden"
-                      >
-                        <Field className="ml-7">
-                          <FieldLabel className="sr-only" htmlFor={customAnswerId}>
-                            Describe your specific requirement
-                          </FieldLabel>
-                          <Textarea
-                            id={customAnswerId}
-                            value={customText}
-                            onChange={(event) => setCustomText(event.currentTarget.value)}
-                            placeholder="Describe your specific requirement&#x2026;"
-                            rows={2}
-                            className="min-h-16 bg-background"
-                          />
-                        </Field>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </ToggleGroup>
-
-          <div className="flex justify-end">
-            <Button size="sm" disabled={!canConfirm} onClick={handleConfirm}>
-              Confirm
-            </Button>
-          </div>
+          <OptionList
+            id={data.stepLabel}
+            options={data.options}
+            selectionMode="single"
+            actions={[{ id: "confirm", label: "Confirm", variant: "default" }]}
+            onAction={handleAction}
+          />
         </CardContent>
       </Card>
     </motion.div>

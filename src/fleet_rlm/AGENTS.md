@@ -47,11 +47,10 @@ Artifacts and areas to treat carefully:
 
 Active top-level areas under `src/fleet_rlm/`:
 
-- `agent_host/`: Microsoft Agent Framework outer host that wraps the worker seam, hosted policy, terminal flow, and HITL checkpointing
-- `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities
+- `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
-- `integrations/`: config, database, observability, MCP, and external-system integrations
+- `integrations/`: config, database, observability, and external-system integrations
 - `scaffold/`: packaged Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
@@ -68,7 +67,6 @@ Preserve these command surfaces:
 - `fleet web`
 - `fleet-rlm chat`
 - `fleet-rlm serve-api`
-- `fleet-rlm serve-mcp`
 - `fleet-rlm init`
 - `fleet-rlm daytona-smoke`
 
@@ -87,13 +85,21 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/sessions` — paginated session history with search/status filters
 - `GET /api/v1/sessions/{id}` — session detail with turn count
 - `GET /api/v1/sessions/{id}/turns` — paginated turn transcript
+- `GET /api/v1/sessions/{id}/stats` — aggregated usage stats
 - `DELETE /api/v1/sessions/{id}` — archive (soft-delete) session
+- `POST /api/v1/sessions/{id}/restore` — unarchive a session
+- `POST /api/v1/sessions/{id}/export` — export session as a GEPA dataset
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
 - `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/memory` — list memory items
+- `GET /api/v1/sandboxes` — list active sandboxes
+- `GET /api/v1/sandboxes/{id}` — sandbox detail
+- `DELETE /api/v1/sandboxes/{id}` — delete sandbox
+- `POST /api/v1/sandboxes/{id}/archive` — archive sandbox
 - `GET /api/v1/optimization/status`
 - `POST /api/v1/optimization/run`
 - `GET /api/v1/optimization/modules`
@@ -132,9 +138,9 @@ Auth, persistence, and observability constraints:
 
 Layering rules:
 
-- Keep Agent Framework outer-host orchestration in `agent_host/`; it owns hosted policy, terminal flow, HITL checkpointing, and the worker seam
+- Keep hosted policy, terminal flow, and HITL checkpointing in `api/`; the outer-host responsibilities now live alongside transport logic
 - Keep transport logic in `api/` only
-- Keep recursive business/runtime behavior in `worker/`, `runtime/`, or `integrations/daytona/`
+- Keep recursive business/runtime behavior in `runtime/` or `integrations/daytona/`
 - Keep runtime config imports lightweight; config/package-root modules must not import DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks as import-time side effects
 - Reuse existing helpers before introducing new compatibility wrappers
 
@@ -142,19 +148,16 @@ Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
 - Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
-- Keep the main cognition loop in `runtime/agent/chat_agent.py` and `runtime/agent/recursive_runtime.py`
+- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent), `runtime/agent/runtime.py` (AgentRuntime), and `runtime/agent/chat_session_state.py`
 - Keep Daytona execution and durable workspace/session semantics in `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py`
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
 - Keep shared evaluation infrastructure in `runtime/quality/datasets.py`, `runtime/quality/scoring_helpers.py`, `runtime/quality/artifacts.py`, `runtime/quality/module_registry.py`, and `runtime/quality/optimization_runner.py`
 - Keep per-module optimization entrypoints in `runtime/quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
-- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend
+- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `_MODULE_ENTRYPOINTS` is currently empty and must be populated for the registry to function.
 - GEPA runs offline only — never in the live request path
-- Keep grouped tool helpers under:
-  - `runtime/tools/content/*`
-  - `runtime/tools/sandbox/*`
-  - root `runtime/tools/*` only for shared/filesystem/batch/llm entrypoints
+- Keep grouped tool helpers under root `runtime/tools/*`
 
 API ownership:
 
@@ -192,8 +195,8 @@ Daytona-specific boundaries:
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
-- Keep Daytona volume browsing in `integrations/daytona/volumes.py`
-- Keep Daytona volume readiness/state normalization in `integrations/daytona/runtime_helpers.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
+- Keep Daytona filesystem operations (repo staging, workspace creation, volume browsing) in `integrations/daytona/filesystem.py`
+- Keep Daytona sandbox lifecycle, client building, snapshot creation, and volume readiness in `integrations/daytona/runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
@@ -223,13 +226,22 @@ Backend setup and runtime:
 - `uv sync --all-extras`
 - `uv run fleet web`
 - `uv run fleet-rlm serve-api --port 8000`
-- `uv run fleet-rlm serve-mcp --transport stdio`
 - `uv run python scripts/openapi_tools.py generate`
 - `uv run python scripts/openapi_tools.py validate`
 
 Daytona workflow:
 
 - `uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]`
+
+## Known Pre-Existing Issues
+
+These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
+
+- **Import-time side effects in runtime packages** — `runtime/factory.py`, `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime and quality packages do not yet.
+- **Empty module registry** — `runtime/quality/module_registry.py` has `_MODULE_ENTRYPOINTS = ()`. No optimizable modules are registered, so `list_module_metadata()` returns an empty list.
+- **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts many legacy arguments but only passes the runtime-critical subset into `AgentRuntime`; `docs_path` is loaded onto the returned runtime. The remaining ignored arguments are a known structural debt item.
+- **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
+- **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.
 
 ## Validation by Change Type
 
@@ -241,7 +253,7 @@ Mandatory baseline for backend or shared Python edits:
 
 Fast backend confidence:
 
-- `make test-fast`
+- `make test-fast` (alias for `make test`)
 
 Focused backend/runtime coverage:
 

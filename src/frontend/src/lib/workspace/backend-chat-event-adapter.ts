@@ -530,14 +530,16 @@ function applyEvent(
   const { kind, text, payload } = frame.data;
 
   switch (kind) {
-    case "assistant_token": {
+    case "assistant_token":
+    case "text": {
       return {
         messages: appendAssistantToken(messages, text),
         terminal: false,
         errored: false,
       };
     }
-    case "reasoning_step": {
+    case "reasoning_step":
+    case "reasoning": {
       return {
         messages: appendReasoningEvent(messages, text, "live", payload),
         terminal: false,
@@ -646,6 +648,48 @@ function applyEvent(
         queryClient.invalidateQueries({ queryKey: ["memory"] });
       }
       return { messages: next, terminal: false, errored: false };
+    }
+    case "clarification": {
+      const clarPayload = asRecord(payload);
+      const question =
+        asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
+      const messageId =
+        asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
+      const stepLabel =
+        asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
+      const rawOptions = clarPayload?.options;
+      const options: { id: string; label: string; description?: string }[] = Array.isArray(
+        rawOptions,
+      )
+        ? rawOptions.flatMap((item) => {
+            const rec = asRecord(item);
+            if (!rec) return [];
+            const id = asOptionalText(rec.id);
+            const label = asOptionalText(rec.label);
+            if (!id || !label) return [];
+            const description = asOptionalText(rec.description);
+            return description != null ? [{ id, label, description }] : [{ id, label }];
+          })
+        : [];
+      return {
+        messages: [
+          ...messages,
+          {
+            id: messageId,
+            type: "clarification" as const,
+            content: question,
+            phase: DEFAULT_PHASE,
+            clarificationData: {
+              question,
+              stepLabel,
+              options,
+              customOptionId: "",
+            },
+          },
+        ],
+        terminal: false,
+        errored: false,
+      };
     }
     case "hitl_request": {
       const hitlPayload = asRecord(payload?.hitl ?? payload);
@@ -776,7 +820,16 @@ function applyEvent(
         errored: false,
       };
     }
-    case "final": {
+    case "final":
+    case "done": {
+      // A "done" event with payload["cancelled"]=True marks a cancelled turn.
+      if (payload && payload["cancelled"] === true) {
+        let next = finishReasoning(messages);
+        next = finalizeTraceParts(next);
+        next = appendSystem(next, text || "Request cancelled.");
+        return { messages: next, terminal: true, errored: false };
+      }
+
       let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
       next = finishReasoning(next);
       next = finalizeTraceParts(next);

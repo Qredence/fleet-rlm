@@ -69,7 +69,9 @@ jobs:
         run: |
           # TODO: Remove this ignore once Pygments ships a patched release for
           # GHSA-5239-wwwm-4pmq / CVE-2026-4539.
-          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
+          # TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
+          # pulls pip 26.0.1 / CVE-2026-3219.
+          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219
           uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
 
       - name: Lint with Ruff

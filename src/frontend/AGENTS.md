@@ -90,7 +90,7 @@ Assistant transcript/content modeling belongs under:
 
 ## Tech Stack
 
-- **Package manager:** `pnpm` (always `pnpm install --frozen-lockfile`)
+- **Package manager:** `pnpm` 10.33.0 (always `pnpm install --frozen-lockfile`)
 - **Build / lint / format:** Vite+ (`vp`) via `pnpm run ...`
 - **Framework:** React 19 + TypeScript 5.9+
 - **Router:** TanStack Router (file-based)
@@ -115,7 +115,7 @@ pnpm run build
 # Quality
 pnpm run type-check
 pnpm run lint                # vp lint
-pnpm run lint:robustness     # alias
+pnpm run lint:robustness     # alias for lint
 pnpm run format              # vp fmt
 pnpm run format:check        # vp fmt --check
 
@@ -235,6 +235,8 @@ VITE_FLEET_TRACE=true
 
 ```env
 VITE_FLEET_WS_URL
+VITE_FLEET_WORKSPACE_ID
+VITE_FLEET_USER_ID
 VITE_AGENTATION_ENDPOINT
 VITE_ENTRA_CLIENT_ID
 VITE_ENTRA_SCOPES
@@ -287,35 +289,35 @@ npx shadcn@latest add "https://ai-sdk.dev/elements/api/registry/{component}.json
 
 #### Canonical AI Components (actively used — reuse these)
 
-| Component | Location | Consumers | Purpose |
-|-----------|----------|-----------|---------|
-| `Message` | `ai-elements/message.tsx` | workspace chat (5 files) | Chat message shell with Streamdown rendering, branch support, actions |
-| `Conversation` | `ai-elements/conversation.tsx` | workspace-message-list, chat-empty-state | StickToBottom scroll container with empty state & download |
-| `Reasoning` | `ai-elements/reasoning.tsx` | 4 workspace files | Collapsible thinking block with duration tracking |
-| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | execution-inspector-tab | Step-by-step reasoning timeline |
-| `Tool` | `ai-elements/tool.tsx` | render-primitives, trace-part-renderers | Tool call/result display with status badges |
-| `Sources` | `ai-elements/sources.tsx` | trace-part-renderers | Collapsible source list (Book icon + count) |
-| `Suggestion` | `ai-elements/suggestion.tsx` | workspace-chat-empty-state | Scrollable suggestion pills with onClick handler |
-| `PromptInput` | `ai-elements/prompt-input/` | workspace-composer | Full composer input (textarea + attachments + send) |
-| `InlineCitation` | `ai-elements/inline-citation.tsx` | trace-part-renderers | Inline numbered citation badges |
-| `Task` | `ai-elements/task.tsx` | trace-part-renderers | Task status display component |
-| `Shimmer` | `product/text-shimmer.tsx` | reasoning, answer-block, trace-renderers | Animated text shimmer (loading state) |
-| `Streamdown` | `ui/streamdown.tsx` | 5 workspace files | Canonical markdown renderer (streaming-safe) |
+| Component        | Location                           | Consumers                                | Purpose                                                               |
+| ---------------- | ---------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `Message`        | `ai-elements/message.tsx`          | workspace chat (5 files)                 | Chat message shell with Streamdown rendering, branch support, actions |
+| `Conversation`   | `ai-elements/conversation.tsx`     | workspace-message-list, chat-empty-state | StickToBottom scroll container with empty state & download            |
+| `Reasoning`      | `ai-elements/reasoning.tsx`        | 4 workspace files                        | Collapsible thinking block with duration tracking                     |
+| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | execution-inspector-tab                  | Step-by-step reasoning timeline                                       |
+| `Tool`           | `ai-elements/tool.tsx`             | render-primitives, trace-part-renderers  | Tool call/result display with status badges                           |
+| `Sources`        | `ai-elements/sources.tsx`          | trace-part-renderers                     | Collapsible source list (Book icon + count)                           |
+| `Suggestion`     | `ai-elements/suggestion.tsx`       | workspace-chat-empty-state               | Scrollable suggestion pills with onClick handler                      |
+| `PromptInput`    | `ai-elements/prompt-input/`        | workspace-composer                       | Full composer input (textarea + attachments + send)                   |
+| `InlineCitation` | `ai-elements/inline-citation.tsx`  | trace-part-renderers                     | Inline numbered citation badges                                       |
+| `Task`           | `ai-elements/task.tsx`             | trace-part-renderers                     | Task status display component                                         |
+| `Shimmer`        | `product/text-shimmer.tsx`         | reasoning, answer-block, trace-renderers | Animated text shimmer (loading state)                                 |
+| `Streamdown`     | `ui/streamdown.tsx`                | 5 workspace files                        | Canonical markdown renderer (streaming-safe)                          |
 
 #### Removed Registry Components
 
 The following prompt-kit / AI SDK Elements components were previously installed but had zero consumers and were removed during consolidation. Do not reinstall them:
 
-| Component | Was At | Replacement |
-|-----------|--------|-------------|
-| `Markdown` | `ai-elements/markdown.tsx` | `Streamdown` is canonical |
-| `Message` (prompt-kit) | `ui/message.tsx` | Hand-rolled `ai-elements/message.tsx` |
-| `ChatContainer` | `ai-elements/chat-container.tsx` | `Conversation` |
-| `ScrollButton` | `ai-elements/scroll-button.tsx` | `ConversationScrollButton` |
-| `PromptSuggestion` | `ai-elements/prompt-suggestion.tsx` | `Suggestion` |
-| `Source` (prompt-kit) | `ai-elements/source.tsx` | `Sources` |
-| `ResponseStream` | `ai-elements/response-stream.tsx` | N/A — no use case |
-| `Attachments` | `ai-elements/attachments.tsx` | N/A — no use case |
+| Component              | Was At                              | Replacement                           |
+| ---------------------- | ----------------------------------- | ------------------------------------- |
+| `Markdown`             | `ai-elements/markdown.tsx`          | `Streamdown` is canonical             |
+| `Message` (prompt-kit) | `ui/message.tsx`                    | Hand-rolled `ai-elements/message.tsx` |
+| `ChatContainer`        | `ai-elements/chat-container.tsx`    | `Conversation`                        |
+| `ScrollButton`         | `ai-elements/scroll-button.tsx`     | `ConversationScrollButton`            |
+| `PromptSuggestion`     | `ai-elements/prompt-suggestion.tsx` | `Suggestion`                          |
+| `Source` (prompt-kit)  | `ai-elements/source.tsx`            | `Sources`                             |
+| `ResponseStream`       | `ai-elements/response-stream.tsx`   | N/A — no use case                     |
+| `Attachments`          | `ai-elements/attachments.tsx`       | N/A — no use case                     |
 
 #### Markdown Renderers — One Canonical Choice
 

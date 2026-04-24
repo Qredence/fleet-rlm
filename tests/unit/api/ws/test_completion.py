@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fleet_rlm.api.routers.ws.completion import build_execution_completion_summary
-from fleet_rlm.worker import WorkspaceEvent
+from fleet_rlm.api.routers.ws.types import WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
 
@@ -9,7 +9,7 @@ def test_build_execution_completion_summary_preserves_run_result_and_guarantees_
     None
 ):
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="done",
         payload={
             "runtime": {"run_id": "runtime-run", "runtime_mode": "daytona_pilot"},
@@ -32,13 +32,13 @@ def test_build_execution_completion_summary_preserves_run_result_and_guarantees_
     assert summary["status"] == "completed"
     assert summary["warnings"] == ["slow"]
     assert summary["summary"]["duration_ms"] == 12
-    assert summary["summary"]["termination_reason"] == "final"
+    assert summary["summary"]["termination_reason"] == "done"
     assert summary["final_artifact"]["value"]["summary"] == "done"
 
 
 def test_build_execution_completion_summary_builds_fallback_final_artifact() -> None:
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="answer text",
         payload={"runtime_mode": "daytona_pilot", "sources": [{"id": "src-1"}]},
         timestamp=ts(),
@@ -62,7 +62,7 @@ def test_build_execution_completion_summary_prefers_top_level_final_artifact_whe
     None
 ):
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="raw fallback text",
         payload={
             "runtime_mode": "daytona_pilot",
@@ -111,7 +111,7 @@ def test_build_execution_completion_summary_builds_error_summary() -> None:
 
 def test_build_execution_completion_summary_marks_tool_error_final_as_error() -> None:
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="claimed success",
         payload={
             "runtime_degraded": True,
@@ -128,7 +128,7 @@ def test_build_execution_completion_summary_marks_tool_error_final_as_error() ->
     )
 
     assert summary["status"] == "error"
-    assert summary["termination_reason"] == "final"
+    assert summary["termination_reason"] == "done"
     assert summary["final_artifact"]["value"]["summary"] == "claimed success"
 
 
@@ -136,7 +136,7 @@ def test_build_execution_completion_summary_surfaces_human_review_terminal_state
     None
 ):
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="Need a human to review the risky repair.",
         payload={
             "recursive_repair": {
@@ -173,7 +173,7 @@ def test_build_execution_completion_summary_surfaces_human_review_terminal_state
 
 def test_build_execution_completion_summary_normalizes_human_review_payload() -> None:
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="Need review",
         payload={
             "human_review": {
@@ -201,7 +201,7 @@ def test_build_execution_completion_summary_normalizes_human_review_payload() ->
 
 def test_build_execution_completion_summary_omits_human_review_when_absent() -> None:
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="done",
         payload={"summary": {"duration_ms": 1}},
         timestamp=ts(),
@@ -222,7 +222,7 @@ def test_build_execution_completion_summary_normalizes_recursive_repair_human_re
     None
 ):
     event = WorkspaceEvent(
-        kind="final",
+        kind="done",
         text="Need review",
         payload={
             "recursive_repair": {

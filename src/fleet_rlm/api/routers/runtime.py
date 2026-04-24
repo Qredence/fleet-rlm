@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any, TypeAlias
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
 
-from ..dependencies import HTTPIdentityDep, ServerStateDep, require_http_identity
+from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..runtime_services import (
     apply_runtime_settings_patch,
     build_runtime_settings_snapshot,
     build_runtime_status_response,
     load_volume_file_content,
+    load_volume_list,
     load_volume_tree,
     run_daytona_connection_test,
     run_lm_connection_test,
@@ -24,6 +26,7 @@ from ..schemas.core import (
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
     RuntimeStatusResponse,
+    VolumeListResponse,
     VolumeProvider,
     VolumeFileContentResponse,
     VolumeTreeResponse,
@@ -32,7 +35,6 @@ from ..schemas.core import (
 router = APIRouter(
     prefix="/runtime",
     tags=["runtime"],
-    dependencies=[Depends(require_http_identity)],
 )
 
 OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
@@ -78,15 +80,26 @@ VOLUME_FILE_RESPONSES: OpenAPIResponses = {
     },
 }
 
+VOLUME_LIST_RESPONSES: OpenAPIResponses = {
+    **AUTH_ERROR_RESPONSES,
+    400: {"description": "The requested volume provider is not supported."},
+    502: {"description": "The runtime volume provider failed to list volumes."},
+    504: {"description": "Volume list timed out before the backend returned a result."},
+}
+
 
 @router.get(
     "/settings",
     response_model=RuntimeSettingsSnapshot,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot:
+async def get_runtime_settings(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
-    return build_runtime_settings_snapshot(state=state)
+    _ = identity
+    return await asyncio.to_thread(build_runtime_settings_snapshot, state=state)
 
 
 @router.patch(
@@ -96,9 +109,11 @@ async def get_runtime_settings(state: ServerStateDep) -> RuntimeSettingsSnapshot
 )
 async def patch_runtime_settings(
     state: ServerStateDep,
+    identity: HTTPIdentityDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
+    _ = identity
     return await apply_runtime_settings_patch(
         state=state,
         request=request,
@@ -112,8 +127,12 @@ async def patch_runtime_settings(
     response_model=RuntimeConnectivityTestResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestResponse:
+async def test_lm_connection(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeConnectivityTestResponse:
     """Verify that the planner and delegate language-model configuration can load."""
+    _ = identity
     return await run_lm_connection_test(
         state=state,
         planner_loader=get_planner_lm_from_env,
@@ -128,8 +147,10 @@ async def test_lm_connection(state: ServerStateDep) -> RuntimeConnectivityTestRe
 )
 async def test_daytona_connection(
     state: ServerStateDep,
+    identity: HTTPIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     """Run the Daytona preflight and connectivity check exposed in runtime diagnostics."""
+    _ = identity
     return await run_daytona_connection_test(state=state)
 
 
@@ -138,9 +159,13 @@ async def test_daytona_connection(
     response_model=RuntimeStatusResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_runtime_status(state: ServerStateDep) -> RuntimeStatusResponse:
+async def get_runtime_status(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
-    return build_runtime_status_response(state=state)
+    _ = identity
+    return await asyncio.to_thread(build_runtime_status_response, state=state)
 
 
 @router.get(
@@ -217,4 +242,27 @@ async def get_volume_file_content(
         provider=provider,
         path=path,
         max_bytes=max_bytes,
+    )
+
+
+@router.get(
+    "/volumes",
+    response_model=VolumeListResponse,
+    responses=VOLUME_LIST_RESPONSES,
+)
+async def get_volumes(
+    state: ServerStateDep,
+    identity: HTTPIdentityDep,
+    provider: Annotated[
+        VolumeProvider | None,
+        Query(
+            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
+        ),
+    ] = None,
+) -> VolumeListResponse:
+    """List the active workspace volume for the selected provider."""
+    return await load_volume_list(
+        state=state,
+        identity=identity,
+        provider=provider,
     )

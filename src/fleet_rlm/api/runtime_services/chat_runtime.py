@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -16,10 +16,10 @@ from fleet_rlm.runtime.factory import build_chat_agent
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
 from ..dependencies import ServerState
-from ..server_utils import sanitize_id as _sanitize_id
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 if TYPE_CHECKING:
-    from fleet_rlm.agent_host.sessions import OrchestrationSessionContext
+    from ..routers.ws.types import SessionContext
 
 
 @dataclass(slots=True)
@@ -45,7 +45,7 @@ class ChatSessionState:
     active_run_db_id: uuid.UUID | None = None
     lifecycle: Any | None = None
     last_loaded_docs_path: str | None = None
-    orchestration_session: OrchestrationSessionContext | None = None
+    orchestration_session: SessionContext | None = None
 
 
 def set_interpreter_default_profile(
@@ -181,8 +181,25 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     }
 
 
+def _try_build_daytona_interpreter(volume_name: str | None) -> Any | None:
+    """Instantiate a DaytonaInterpreter if Daytona credentials are configured."""
+    try:
+        from fleet_rlm.integrations.daytona.config import DaytonaConfigError
+        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+
+        return DaytonaInterpreter(volume_name=volume_name)
+    except ImportError:
+        return None
+    except DaytonaConfigError:
+        return None
+
+
 def build_chat_agent_context(runtime: PreparedChatRuntime):
-    return cast(Any, build_chat_agent(**_chat_agent_builder_kwargs(runtime)))
+    kwargs = _chat_agent_builder_kwargs(runtime)
+    interpreter = _try_build_daytona_interpreter(runtime.cfg.volume_name)
+    if interpreter is not None:
+        kwargs["interpreter"] = interpreter
+    return build_chat_agent(**kwargs)
 
 
 def new_chat_session_state(

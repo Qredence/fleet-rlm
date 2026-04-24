@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed recursive DSPy runtime. It layers a thin FastAPI/WebSocket transport shell and a narrow Microsoft Agent Framework outer host over a core recursive worker/runtime that executes tasks in Daytona sandboxes.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed DSPy ReAct agent runtime. It layers a thin FastAPI/WebSocket transport shell over a single DSPy ReAct agent that executes tasks in Daytona sandboxes.
 
 The repo ships as a single Python package (`fleet-rlm`) with a bundled React frontend. Published installs include built frontend assets, so end users do not need a separate frontend build step.
 
@@ -20,7 +20,7 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 
 ### Backend
 
-- **Language**: Python >= 3.10 (3.10, 3.11, 3.12 supported)
+- **Language**: Python >= 3.10 (3.10, 3.11, 3.12, 3.13 supported)
 - **Package manager**: `uv`
 - **Web framework**: FastAPI 0.135.3 with WebSocket support
 - **Runtime core**: DSPy 3.1.3 + recursive ReAct / `dspy.RLM` workbench agent
@@ -29,7 +29,6 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 - **Auth**: `dev` mode or Entra (Azure AD) bearer-token validation
 - **Observability**: PostHog, MLflow
 - **CLI**: Typer + argparse (`fleet` and `fleet-rlm` entrypoints)
-- **MCP**: Optional FastMCP server surface
 
 ### Frontend
 
@@ -37,18 +36,17 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 - **Router**: TanStack Router (file-based routes)
 - **State**: Zustand + TanStack Query
 - **Build tool**: Vite+ (`vp` CLI) — not plain Vite
-- **Package manager**: `pnpm` 10.32.1 (explicitly required; do not use `bun`)
+- **Package manager**: `pnpm` 10.33.0 (explicitly required; do not use `bun`)
 - **Styling**: Tailwind CSS v4 + `tw-animate-css` + shadcn/Base UI primitives
 - **Testing**: Vitest (unit), Playwright (e2e)
 - **Markdown rendering**: `streamdown` + Shiki
 
 ## Architecture and Code Organization
 
-The backend is organized into four layers, innermost first:
+The backend is organized into two layers, innermost first:
 
-1. **Worker / Runtime Core** — recursive chat/runtime logic
-   - `src/fleet_rlm/worker/` — workspace task stream boundary, streaming contracts
-   - `src/fleet_rlm/runtime/agent/` — main cognition loop (`chat_agent.py`, `recursive_runtime.py`, DSPy signatures)
+1. **DSPy ReAct Agent** — single agent with tool registry
+   - `src/fleet_rlm/runtime/agent/` — agent module (`agent.py`), runtime (`runtime.py`), chat orchestration (`chat.py`), session state, signatures
    - `src/fleet_rlm/runtime/execution/` — execution drivers and event assembly
    - `src/fleet_rlm/runtime/models/` — runtime model construction and registry
    - `src/fleet_rlm/runtime/content/` — content-oriented helpers
@@ -60,10 +58,7 @@ The backend is organized into four layers, innermost first:
    - `src/fleet_rlm/integrations/database/` — async Neon/Postgres persistence (`FleetRepository`)
    - `src/fleet_rlm/integrations/local_store.py` — lightweight SQLite sidecar
 
-3. **Agent Framework Outer Host** — hosted policy layer
-   - `src/fleet_rlm/agent_host/` — workflow, HITL checkpointing, terminal flow, sessions, execution events, REPL bridge
-
-4. **Transport Shell** — auth, routing, websockets, SPA serving
+3. **Transport Shell** — auth, routing, websockets, SPA serving
    - `src/fleet_rlm/api/main.py` — app factory, lifespan, route mounting, SPA asset resolution
    - `src/fleet_rlm/api/bootstrap.py` — runtime bootstrap, LM loading, persistence init
    - `src/fleet_rlm/api/routers/` — HTTP routers and websocket endpoints
@@ -75,7 +70,6 @@ The backend is organized into four layers, innermost first:
 Other backend areas:
 
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
-- `src/fleet_rlm/integrations/mcp/` — MCP integration
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
 - `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
 - `src/fleet_rlm/scaffold/` — curated packaged Claude Code translation assets (exposed by `fleet-rlm init`)
@@ -111,7 +105,6 @@ uv sync --extra dev           # install with dev extras only
 ```bash
 uv run fleet web              # start Web UI + API server (delegates to fleet-rlm serve-api)
 uv run fleet-rlm serve-api --port 8000
-uv run fleet-rlm serve-mcp --transport stdio
 uv run fleet-rlm chat --trace-mode compact
 ```
 
@@ -172,7 +165,7 @@ make release                  # clean + check + security + build-release
 - **Docstrings**: required for modules and public functions
 - **Type hints**: required on all function signatures
 - **Import rules**: config/package-root modules must not have import-time side effects (no DSPy, provider SDKs, MLflow runtime helpers, or PostHog callbacks at import time)
-- **Layering**: keep transport logic in `api/`, business logic in `runtime/` or `src/fleet_rlm/integrations/daytona/`, and hosted policy in `agent_host/`
+- **Layering**: keep transport logic in `api/`, business logic in `runtime/` or `src/fleet_rlm/integrations/daytona/`
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `test:`, `chore:`
 
 ### Frontend
@@ -276,10 +269,12 @@ Canonical HTTP surfaces (non-exhaustive):
 
 - `/health`, `/ready`
 - `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/*` — session CRUD and turns
+- `GET /api/v1/sessions/*` — session CRUD, turns, stats, restore, and export
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`, `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`, `GET /api/v1/runtime/volume/*`
+- `GET /api/v1/memory` — list memory items
+- `GET /api/v1/sandboxes/*` — sandbox list, detail, delete, archive
 - `GET/POST /api/v1/optimization/*` — optimization status, runs, datasets, modules, results, compare
 - `POST /api/v1/traces/feedback`
 
@@ -364,9 +359,9 @@ Backend reading order for understanding the runtime story:
 
 1. `src/fleet_rlm/api/main.py`
 2. `src/fleet_rlm/api/routers/ws/endpoint.py`
-3. `src/fleet_rlm/agent_host/workflow.py`
-4. `src/fleet_rlm/worker/streaming.py`
-5. `src/fleet_rlm/runtime/factory.py`
-6. `src/fleet_rlm/runtime/agent/chat_agent.py`
+3. `src/fleet_rlm/runtime/factory.py`
+4. `src/fleet_rlm/runtime/agent/agent.py`
+5. `src/fleet_rlm/runtime/agent/runtime.py`
+6. `src/fleet_rlm/runtime/agent/chat_session_state.py`
 7. `src/fleet_rlm/integrations/daytona/interpreter.py`
 8. `src/fleet_rlm/integrations/daytona/runtime.py`

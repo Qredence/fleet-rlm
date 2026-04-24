@@ -1,0 +1,56 @@
+{
+  "featureId": "delete-legacy-tool-files",
+  "reviewedAt": "2026-04-21T12:45:00Z",
+  "commitId": "f7a12c83",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation correctly deletes all listed legacy tool files and directories, removes build_tool_list from __init__.py, deletes the HITL stub and its command branch, rewires interpreter.py to import LLMQueryMixin from the new runtime/execution/llm_query.py location, and cleans up all corresponding test files. make test, make lint, and make typecheck all passed. A few stale docstring references to deleted artifacts remain, but none affect runtime behavior.",
+    "issues": [
+      {
+        "file": "src/fleet_rlm/runtime/agent/commands.py",
+        "line": 95,
+        "severity": "non_blocking",
+        "description": "Stale docstring reference to :func:`build_tool_list` in execute_command docstring. The function no longer exists; docstring should be updated to reference discover_tools() or the current tool registry mechanism."
+      },
+      {
+        "file": "src/fleet_rlm/runtime/tools/document_tools.py",
+        "line": 10,
+        "severity": "non_blocking",
+        "description": "Stale docstring references deleted file ``runtime/tools/content/document.py``. Should be updated or removed since the content/ directory no longer exists."
+      },
+      {
+        "file": "src/fleet_rlm/runtime/tools/buffer_tools.py",
+        "line": 10,
+        "severity": "non_blocking",
+        "description": "Stale docstring references deleted file ``runtime/tools/sandbox/common.py``. Should be updated or removed since the sandbox/ directory no longer exists."
+      },
+      {
+        "file": "src/fleet_rlm/runtime/tools/memory_tools.py",
+        "line": 10,
+        "severity": "non_blocking",
+        "description": "Stale docstring references deleted file ``runtime/tools/sandbox/memory.py``. Should be updated or removed since the sandbox/ directory no longer exists."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "src/fleet_rlm/AGENTS.md still documents runtime/tools/content/* and runtime/tools/sandbox/* as active 'grouped tool helpers' directories, but both were deleted in this feature. The backend agent instructions should be updated to remove these directories from the package map and tool ownership rules.",
+      "evidence": "src/fleet_rlm/AGENTS.md lines referencing 'runtime/tools/content/*' and 'runtime/tools/sandbox/*' under 'Keep grouped tool helpers under:'"
+    },
+    {
+      "area": "skills",
+      "observation": "The backend-refactor skill's dangling-import verification example uses a generic pattern (rg 'from fleet_rlm\\.(agent_host|worker)') that doesn't match deletion features targeting runtime/tools/. The worker correctly adapted the pattern to target the specific deleted modules, which suggests the skill's example is fine as a starting point but workers must adapt it per feature.",
+      "evidence": "Worker handoff shows custom rg pattern: rg 'from fleet_rlm\\.runtime\\.tools\\.(llm_tools|shared|sandbox_delegate_tools|batch_tools|content|sandbox)' src/"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The feature description mentioned fixing an import of 'rlm_query_tool_name' from llm_tools.py in interpreter.py, but the actual dangling import was LLMQueryMixin. This indicates the feature description was slightly out of sync with the codebase state, but the worker correctly identified and fixed the real import.",
+      "evidence": "git show f7a12c83^:src/fleet_rlm/integrations/daytona/interpreter.py line 46 imports LLMQueryMixin; no rlm_query_tool_name exists in the parent commit's llm_tools.py"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature delete-legacy-tool-files passes review. All legacy tool files, directories, the HITL stub, and corresponding tests were correctly deleted. Dangling imports were fixed, interpreter.py was rewired to the new runtime/execution/llm_query.py module, and build_tool_list was removed from __init__.py. Validation commands (make test, make lint, make typecheck) all passed. Minor non-blocking docstring cleanup remains in commands.py, document_tools.py, buffer_tools.py, and memory_tools.py, plus AGENTS.md needs updating to reflect the deleted directories."
+}

@@ -92,7 +92,7 @@ class TestSymbolicOutput:
         assert "SUBMIT" in desc
 
     def test_metadata_summary_truncates_large_output(self):
-        from fleet_rlm.runtime.tools.llm_tools import metadata_summary
+        from fleet_rlm.runtime.execution.llm_query import metadata_summary
 
         large = "x" * 50000
         result = metadata_summary(large, preview_length=200, label="Result")
@@ -100,7 +100,7 @@ class TestSymbolicOutput:
         assert len(result) < 300
 
     def test_metadata_summary_passes_small_output(self):
-        from fleet_rlm.runtime.tools.llm_tools import metadata_summary
+        from fleet_rlm.runtime.execution.llm_query import metadata_summary
 
         small = "hello world"
         assert metadata_summary(small) == "hello world"
@@ -129,7 +129,7 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_depth_enforcement(self):
         """sub_rlm refuses at max depth."""
-        from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+        from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
         mixin = LLMQueryMixin()
         mixin._sub_rlm_depth = 2
@@ -143,7 +143,7 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_budget_enforcement(self):
         """sub_rlm refuses when budget exhausted."""
-        from fleet_rlm.runtime.tools.llm_tools import LLMQueryMixin
+        from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
         mixin = LLMQueryMixin()
         mixin._sub_rlm_depth = 0
@@ -190,20 +190,6 @@ class TestSubRLMRecursion:
 
 class TestAutoRouting:
     """Verify long prompts auto-route to variable-mode RLM."""
-
-    def test_has_interpreter_true(self):
-        from fleet_rlm.runtime.tools.sandbox.delegate import _has_interpreter
-
-        agent = MagicMock()
-        agent.interpreter._started = True
-        assert _has_interpreter(agent) is True
-
-    def test_has_interpreter_false_no_interpreter(self):
-        from fleet_rlm.runtime.tools.sandbox.delegate import _has_interpreter
-
-        agent = MagicMock()
-        agent.interpreter = None
-        assert _has_interpreter(agent) is False
 
     def test_registry_long_doc_modules_variable_mode(self):
         from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
@@ -262,38 +248,3 @@ class TestLongContext:
             tools = call_kwargs.get("tools", [])
             # custom_tool + sub_rlm + sub_rlm_batched
             assert len(tools) == 3
-
-
-# ── Reward function quality gates ────────────────────────────────────
-
-
-class TestQualityGates:
-    """Verify reward functions correctly score predictions."""
-
-    def test_grounded_perfect_score(self):
-        from fleet_rlm.runtime.models.rewards import grounded_answer_reward
-
-        pred = dspy.Prediction(
-            answer="Complete answer with details.",
-            citations=[{"src": "doc1"}, {"src": "doc2"}],
-            confidence=0.95,
-        )
-        assert grounded_answer_reward({}, pred) == pytest.approx(1.0)
-
-    def test_grounded_zero_score(self):
-        from fleet_rlm.runtime.models.rewards import grounded_answer_reward
-
-        pred = dspy.Prediction(answer="", citations=[], confidence=0)
-        assert grounded_answer_reward({}, pred) == pytest.approx(0.0)
-
-    def test_variable_mode_meaningful(self):
-        from fleet_rlm.runtime.models.rewards import variable_mode_answer_reward
-
-        pred = dspy.Prediction(answer="A meaningful multi-word answer here.")
-        assert variable_mode_answer_reward({}, pred) == 1.0
-
-    def test_variable_mode_empty(self):
-        from fleet_rlm.runtime.models.rewards import variable_mode_answer_reward
-
-        pred = dspy.Prediction(answer="")
-        assert variable_mode_answer_reward({}, pred) == 0.0

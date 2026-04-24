@@ -212,6 +212,7 @@ async def start_mlflow_server(
                 "1",
             ],
             start_new_session=True,
+            env=os.environ.copy(),
         )
 
         attempts = max(

@@ -10,53 +10,15 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".signatures",
         "AssembleRecursiveWorkspaceContext",
     ),
-    "AssembleRecursiveWorkspaceContextModule": (
-        ".recursive_context_selection",
-        "AssembleRecursiveWorkspaceContextModule",
-    ),
-    "PlanRecursiveRepair": (
-        ".signatures",
-        "PlanRecursiveRepair",
-    ),
-    "PlanRecursiveRepairModule": (
-        ".recursive_repair",
-        "PlanRecursiveRepairModule",
-    ),
-    "PlanRecursiveSubqueries": (
-        ".signatures",
-        "PlanRecursiveSubqueries",
-    ),
-    "PlanRecursiveSubqueriesModule": (
-        ".recursive_decomposition",
-        "PlanRecursiveSubqueriesModule",
-    ),
-    "RLMReActChatAgent": (".chat_agent", "RLMReActChatAgent"),
-    "ReflectAndReviseWorkspaceStepModule": (
-        ".recursive_reflection",
-        "ReflectAndReviseWorkspaceStepModule",
-    ),
+    "AgentRuntime": (".runtime", "AgentRuntime"),
+    "FleetAgent": (".agent", "FleetAgent"),
+    "FleetAgentSignature": (".agent", "FleetAgentSignature"),
     "RLMReActChatSignature": (".signatures", "RLMReActChatSignature"),
     "ReflectAndReviseWorkspaceStep": (
         ".signatures",
         "ReflectAndReviseWorkspaceStep",
     ),
     "RecursiveSubQuerySignature": (".signatures", "RecursiveSubQuerySignature"),
-    "RecursiveVerificationStatus": (
-        ".recursive_verification",
-        "RecursiveVerificationStatus",
-    ),
-    "VerifyRecursiveAggregation": (
-        ".signatures",
-        "VerifyRecursiveAggregation",
-    ),
-    "VerifyRecursiveAggregationModule": (
-        ".recursive_verification",
-        "VerifyRecursiveAggregationModule",
-    ),
-    "spawn_delegate_sub_agent_async": (
-        ".recursive_runtime",
-        "spawn_delegate_sub_agent_async",
-    ),
     "COMMAND_DISPATCH": (".commands", "COMMAND_DISPATCH"),
     "execute_command": (".commands", "execute_command"),
 }

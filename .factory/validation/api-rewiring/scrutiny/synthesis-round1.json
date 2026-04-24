@@ -1,0 +1,70 @@
+{
+  "milestone": "api-rewiring",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "lint": { "passed": true, "command": "make lint", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "make typecheck", "exitCode": 0 },
+    "test": { "passed": true, "command": "make test", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 2,
+    "failed": 1,
+    "failedFeatures": ["ws-endpoint-rewiring"]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "ws-endpoint-rewiring",
+      "severity": "blocking",
+      "description": "VAL-WS-002 NOT SATISFIED: Simplified event types never implemented. The streaming layer (src/fleet_rlm/runtime/execution/streaming.py) still emits 'trajectory_step', 'reasoning_step', 'final', 'cancelled', 'assistant_token', 'hitl_request', etc. The feature required simplified event types only: status, text, reasoning, tool_call, tool_result, warning, error, done. None of 'text', 'reasoning', or 'done' exist in StreamEventKind. No code was changed and no test covers this.",
+      "file": "src/fleet_rlm/runtime/execution/streaming.py",
+      "line": 393
+    },
+    {
+      "featureId": "ws-endpoint-rewiring",
+      "severity": "blocking",
+      "description": "factory.py not rewired to FleetAgent: The feature explicitly required 'Update factory.py to construct the new FleetAgent.' factory.py still imports and uses RLMReActChatAgent from fleet_rlm.runtime.agent.chat_agent. The new FleetAgent (defined in src/fleet_rlm/runtime/agent/agent.py) and its AgentRuntime (runtime/agent/runtime.py) were created in milestone 1 but factory.py was never rewired to use them.",
+      "file": "src/fleet_rlm/runtime/factory.py",
+      "line": 11
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added .factory/library/quality-tooling.md documenting (1) check_agents_md_freshness.py Node.js frontend path resolution behavior added in commit 8916178f, and (2) check_docs_quality.py gap: backtick-wrapped path references in docs/*.md prose are not validated.",
+      "sourceFeature": "cross-area-api-cli"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills/backend-refactor",
+      "suggestion": "Add an explicit step for deletion features: after deleting directories and fixing dangling imports, update AGENTS.md files (root + src/fleet_rlm/AGENTS.md) to remove references to the deleted directories. The current skill procedure (step 5) only says to grep for dangling imports in source files — it doesn't mention documentation files.",
+      "evidence": "Feature 'delete-agent-host-worker' (commit 6cec4a48) left both root AGENTS.md and src/fleet_rlm/AGENTS.md referencing the deleted agent_host/ and worker/ directories. A follow-up commit (8916178f) in a later feature had to fix these. The backend-refactor skill's deletion step did not prompt the worker to check docs.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills/backend-refactor",
+      "suggestion": "Strengthen the TDD step to require behavioral tests for every item in the feature's 'expectedBehavior' and 'fulfills' list — not just structural/import checks. Specifically: test runners should assert on observable runtime behavior (event kinds emitted, types returned, data shapes), not just that certain symbols are absent or that callable() returns True.",
+      "evidence": "Feature 'ws-endpoint-rewiring' had VAL-WS-002 in its 'fulfills' list (simplified event types) and in 'expectedBehavior', but the worker wrote only import-absence and callability assertions. No test checked what event kinds the streaming layer actually emits. The gap went undetected because the feature's verificationSteps also lacked a behavioral check.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add an orchestration rule: for features with a 'fulfills' array, the feature's 'verificationSteps' must include at least one step that verifies each behavioral assertion in 'expectedBehavior'. If a verification step for a behavioral item cannot be expressed as a grep/rg pattern or make command, the feature description should include a specific test file to run.",
+      "evidence": "Feature 'ws-endpoint-rewiring' listed VAL-WS-002 (simplified event types) in 'fulfills' and 'expectedBehavior' but its 'verificationSteps' contained no check for it — only checks for absent imports. The reviewer confirmed that the absence of a behavioral verification step directly enabled the gap to pass undetected.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "src/fleet_rlm/AGENTS.md Package Map section still lists 'agent_host/' and 'worker/' as active package areas (from ws-endpoint-rewiring reviewer).",
+      "reason": "already-fixed — the cross-area-api-cli feature (commit 8916178f) updated AGENTS.md to remove these stale references. The observation was valid at commit 91cdcf11 but no longer applies to the current HEAD."
+    },
+    {
+      "observation": "Transcript skeleton for session 536d82bb showed 0 tool calls (toolCallCount: 0), indicating incomplete transcript capture for delete-agent-host-worker (from delete-agent-host-worker reviewer).",
+      "reason": "ambiguous — this appears to be a transcript capture infrastructure gap, not a codebase or convention issue. No actionable fix is available to workers. Rejected to avoid polluting library or AGENTS.md with non-actionable content."
+    }
+  ],
+  "previousRound": null
+}

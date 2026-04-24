@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export UV_LINK_MODE=copy
-uv sync --all-extras --dev
-(cd src/frontend && pnpm install --frozen-lockfile)
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# Install dependencies
+uv sync --all-extras

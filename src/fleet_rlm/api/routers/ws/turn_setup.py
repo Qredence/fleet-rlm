@@ -16,6 +16,7 @@ from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .helpers import _try_send_json
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
+from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 from .types import (
     ChatAgentProtocol,
     DaytonaChatRequestOptions,
@@ -77,8 +78,19 @@ def _build_prepare_stream(
     agent: ChatAgentProtocol,
     msg: WSMessage,
     workspace_id: str,
+    owner_tenant_claim: str,
+    owner_user_claim: str,
+    sess_id: str,
 ) -> tuple[DaytonaChatRequestOptions, PreStreamSetupFn]:
-    daytona_request = normalize_daytona_chat_request(msg, workspace_id=workspace_id)
+    daytona_request = normalize_daytona_chat_request(
+        msg,
+        workspace_id=workspace_id,
+        sandbox_labels=sandbox_owner_labels(
+            tenant_claim=owner_tenant_claim,
+            user_claim=owner_user_claim,
+            session_id=sess_id,
+        ),
+    )
 
     async def _prepare_stream() -> None:
         await prepare_daytona_workspace_for_turn(
@@ -170,6 +182,9 @@ async def prepare_chat_message_turn(
         agent=agent,
         msg=msg,
         workspace_id=workspace_id,
+        owner_tenant_claim=session.owner_tenant_claim,
+        owner_user_claim=session.owner_user_claim,
+        sess_id=sess_id,
     )
     sandbox_provider = "daytona"
 

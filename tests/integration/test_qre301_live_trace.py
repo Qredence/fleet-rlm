@@ -51,7 +51,7 @@ def _wait_for_chat_terminal(chat_ws, *, timeout_seconds: float) -> list[dict]:
         if msg.get("type") != "event":
             continue
         kind = msg.get("data", {}).get("kind")
-        if kind in {"final", "error", "cancelled"}:
+        if kind in {"done", "error"}:
             return messages
     raise AssertionError("Timed out waiting for terminal chat event")
 
@@ -115,13 +115,12 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                         msg
                         for msg in reversed(chat_messages)
                         if msg.get("type") == "event"
-                        and msg.get("data", {}).get("kind")
-                        in {"final", "error", "cancelled"}
+                        and msg.get("data", {}).get("kind") in {"done", "error"}
                     ),
                     None,
                 )
                 assert chat_terminal is not None
-                assert chat_terminal.get("data", {}).get("kind") == "final"
+                assert chat_terminal.get("data", {}).get("kind") == "done"
 
                 # Persist a file artifact explicitly through command dispatch.
                 chat_ws.send_json(

@@ -61,23 +61,15 @@ class TranscriptEvent(BaseModel):
 
 
 StreamEventKind = Literal[
-    "assistant_token",
     "status",
-    "warning",
-    "reasoning_step",
+    "text",
+    "reasoning",
     "tool_call",
     "tool_result",
-    "trajectory_step",
-    "plan_update",
-    "rlm_executing",
-    "memory_update",
-    "hitl_request",
-    "hitl_resolved",
-    "command_ack",
-    "command_reject",
-    "final",
+    "warning",
     "error",
-    "cancelled",
+    "done",
+    "clarification",
 ]
 
 
@@ -117,7 +109,7 @@ class TurnState:
 
     def apply(self, event: StreamEvent) -> None:
         """Apply one event to state in a deterministic way."""
-        if event.kind == "assistant_token":
+        if event.kind == "text":
             token = event.text
             self.assistant_tokens.append(token)
             self.stream_chunks.append(token)
@@ -140,7 +132,7 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind == "reasoning_step":
+        if event.kind == "reasoning":
             if event.text:
                 self.reasoning_lines.append(event.text)
                 self.thought_chunks.append(event.text)
@@ -156,42 +148,27 @@ class TurnState:
                 self.tool_timeline.append(event.text)
             return
 
-        if event.kind == "trajectory_step":
-            step_data = event.payload.get("step_data", {})
-            if step_data:
-                current_steps = self.trajectory.get("steps", [])
-                current_steps.append(step_data)
-                self.trajectory["steps"] = current_steps
+        if event.kind == "clarification":
+            # UI-only event; no state mutation needed
             return
 
-        if event.kind in ("plan_update", "rlm_executing", "memory_update"):
-            if event.text:
-                # Maintain CLI backward compatibility by casting these as status/timeline noise
-                self.status_lines.append(event.text)
-                self.tool_timeline.append(event.text)
-            return
-
-        if event.kind == "final":
-            final_text = event.text or self.transcript_text
-            self.final_text = final_text
-            self.transcript_text = final_text
-            self.trajectory = dict(event.payload.get("trajectory", {}) or {})
-            self.final_reasoning = event.payload.get("final_reasoning", "")
+        if event.kind == "done":
+            # A "done" event with payload["cancelled"]=True marks a cancelled turn.
+            if event.payload.get("cancelled"):
+                self.cancelled = True
+                cancelled_text = event.text or self.transcript_text
+                self.final_text = cancelled_text
+                self.transcript_text = cancelled_text
+            else:
+                final_text = event.text or self.transcript_text
+                self.final_text = final_text
+                self.transcript_text = final_text
+                self.trajectory = dict(event.payload.get("trajectory", {}) or {})
+                self.final_reasoning = event.payload.get("final_reasoning", "")
             self.history_turns = int(
                 event.payload.get("history_turns", self.history_turns)
             )
             self.done = True
-            return
-
-        if event.kind == "cancelled":
-            self.cancelled = True
-            self.done = True
-            cancelled_text = event.text or self.transcript_text
-            self.final_text = cancelled_text
-            self.transcript_text = cancelled_text
-            self.history_turns = int(
-                event.payload.get("history_turns", self.history_turns)
-            )
             return
 
         if event.kind == "error":

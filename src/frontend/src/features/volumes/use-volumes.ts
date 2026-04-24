@@ -418,11 +418,12 @@ export function useFileContent(
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
 
-      const qs = new URLSearchParams({
+      const params: Record<string, string> = {
         path,
         max_bytes: "200000",
         provider,
-      }).toString();
+      };
+      const qs = new URLSearchParams(params).toString();
       const resp = await rlmApiClient.get<VolumeFileContentResponse>(
         `/api/v1/runtime/volume/file?${qs}`,
         signal,

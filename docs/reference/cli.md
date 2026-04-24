@@ -21,7 +21,6 @@ Run fleet-rlm demos and experimental runtimes.
 Commands:
   init        Bootstrap Claude Code scaffold assets to user-level directory.
   serve-api   Run the FastAPI server surface (used by `fleet web`).
-  serve-mcp   Run optional FastMCP server surface (requires `--extra mcp`).
   chat        Start standalone in-process interactive terminal chat.
   daytona-smoke  Run a native Daytona smoke validation without invoking an LM.
 ```
@@ -83,45 +82,6 @@ uv run fleet-rlm serve-api
 
 # Bind to all interfaces on custom port
 uv run fleet-rlm serve-api --host 0.0.0.0 --port 8080
-```
-
-### `fleet-rlm serve-mcp`
-
-Run the FastMCP server for Model Context Protocol integration. Requires the `mcp` extra to be installed.
-
-For a package install, add the extra with:
-
-```bash
-uv add "fleet-rlm[mcp]"
-```
-
-```text
-Usage: fleet-rlm serve-mcp [OPTIONS]
-
-Options:
-  --transport TEXT    FastMCP transport: stdio, sse, streamable-http [default: stdio]
-  --host TEXT         Host for HTTP transports [default: 127.0.0.1]
-  --port INTEGER      Port for HTTP transports [default: 8001]
-  --help              Show this message and exit.
-```
-
-**Transport Modes:**
-
-- `stdio`: Standard input/output (default, for CLI tools like Claude Desktop)
-- `sse`: Server-Sent Events over HTTP
-- `streamable-http`: Streamable HTTP transport
-
-**Examples:**
-
-```bash
-# Start MCP server with stdio transport (for Claude Desktop)
-uv run fleet-rlm serve-mcp
-
-# Start MCP server with SSE transport
-uv run fleet-rlm serve-mcp --transport sse --port 8001
-
-# Start with streamable-http transport
-uv run fleet-rlm serve-mcp --transport streamable-http --host 0.0.0.0 --port 8001
 ```
 
 ### `fleet-rlm chat`
@@ -249,6 +209,5 @@ uv run fleet volume_name=my-custom-volume
 
 ## See Also
 
-- [Using the MCP Server](../how-to-guides/using-mcp-server.md) — MCP setup and Claude Desktop integration
 - [Installation](../how-to-guides/installation.md) — Setup and dependency installation
 - [Runtime Settings](../how-to-guides/runtime-settings.md) — Configuring LLM models and runtime behavior

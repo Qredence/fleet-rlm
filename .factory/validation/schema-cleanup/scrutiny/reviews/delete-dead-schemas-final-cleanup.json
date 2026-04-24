@@ -1,0 +1,22 @@
+{
+  "featureId": "delete-dead-schemas-final-cleanup",
+  "milestone": "schema-cleanup",
+  "reviewedAt": "2026-04-21T13:20:00Z",
+  "commitId": "42e406c31529e34d7829bfae9db2bb9f40c3f404",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation cleanly deletes the three dead API schema files (task.py, session.py, base.py) and removes their exports from api/schemas/__init__.py. The diff is minimal and precise — 82 lines removed across 4 files with no unintended changes. The worker correctly identified that only SessionCreate, SessionUpdate, and SessionResponse were actually imported in __init__.py; Task* symbols and CamelCaseModel were never present there. No dangling imports remain anywhere in src/ or tests/. The only test reference to a deleted symbol is a negative assertion in test_api_contract_routes.py:841 (`assert \"TaskResponse\" not in schema_names`), which correctly validates the cleanup rather than being a dangling dependency. The worker followed the backend-refactor skill procedure, ran the full validation pipeline (make lint, make typecheck, make test, make check), and verified CLI functionality.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The feature description and validation-contract.md list TaskCreate, TaskUpdate, TaskResponse, and CamelCaseModel as symbols that must be removed from api/schemas/__init__.py, but these were never actually imported there to begin with. Only SessionCreate, SessionUpdate, SessionResponse were present. The worker handled this correctly, but future feature descriptions could be tightened by verifying what actually exists before prescribing removals.",
+      "evidence": "git show 42e406c31529e34d7829bfae9db2bb9f40c3f404^:src/fleet_rlm/api/schemas/__init__.py shows only Session* imports pre-deletion"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Clean pass. All three dead schema files are deleted, __init__.py is correctly cleaned, no dangling imports or dead test files remain, and full validation (make check) passed. The implementation is minimal, correct, and well-verified."
+}

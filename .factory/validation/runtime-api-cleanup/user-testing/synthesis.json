@@ -1,0 +1,36 @@
+{
+  "milestone": "runtime-api-cleanup",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-RT-001",
+    "VAL-RT-002",
+    "VAL-RT-003",
+    "VAL-CROSS-001",
+    "VAL-CROSS-002",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004",
+    "VAL-CROSS-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "notes": [
+    "Backend-only milestone with no browser/UI surface. All validation performed via shell commands (pytest, ruff, ty, make, ripgrep).",
+    "VAL-RT-001: ripgrep confirmed zero remaining imports of removed runtime/execution/streaming.py module.",
+    "VAL-RT-002: uv run pytest tests/unit/api/ws/ -q passed with 100% success (all ws tests pass after helper consolidation).",
+    "VAL-RT-003: ripgrep confirmed zero dangling imports of deleted modules (server_utils.py, startup_status.py, task_control.py, loop_exit.py, worker_request.py, execution_support.py, failures.py).",
+    "VAL-CROSS-001: make test passed (all backend tests green, excluding live_llm and benchmark).",
+    "VAL-CROSS-002: make typecheck passed with zero errors.",
+    "VAL-CROSS-003: make lint and make format-check both passed cleanly.",
+    "VAL-CROSS-004: make check passed completely, including backend tests, typecheck, lint, format-check, release hygiene, docs freshness, frontend type-check, frontend lint, frontend unit tests, frontend build, and OpenAPI sync.",
+    "VAL-CROSS-005: No NEW banned top-level imports were introduced by this milestone. The import dspy in streaming_events.py is pre-existing (from before runtime-api-cleanup). The ws/lifecycle.py and runtime_services/common.py consolidations contain no banned top-level imports. Known pre-existing import-time side effects in api.main and integrations.daytona (documented in AGENTS.md Known Pre-Existing Issues) were unchanged by this milestone."
+  ],
+  "previousRound": null
+}

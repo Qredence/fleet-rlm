@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Column, Integer, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 _DEFAULT_DB_DIR = Path(".data")
@@ -61,7 +62,7 @@ def _migrate_optimization_runs(engine: Any) -> None:
                         f"ALTER TABLE optimization_runs ADD COLUMN {col_name} {col_type}"
                     )
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
 
@@ -74,6 +75,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
         ("owner_user", "VARCHAR(255)"),
         ("workspace_id", "VARCHAR(255)"),
         ("_monotonic_turn_counter", "INTEGER DEFAULT 0 NOT NULL"),
+        ("model_provider", "VARCHAR(128)"),
     ]
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
@@ -81,7 +83,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
                 conn.execute(
                     text(f"ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}")
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         # Best-effort index for ownership queries
         try:
@@ -91,7 +93,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
                     "ON chat_sessions (owner_tenant, owner_user, updated_at DESC)"
                 )
             )
-        except Exception:
+        except (OperationalError, ProgrammingError):
             # This index is an opportunistic local-store optimization; startup should
             # not fail if a legacy SQLite version or partial schema cannot create it.
             pass
@@ -110,7 +112,7 @@ def _migrate_dataset_columns(engine: Any) -> None:
                 conn.execute(
                     text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}")
                 )
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
 
@@ -136,7 +138,7 @@ def _migrate_evaluation_tables(engine: Any) -> None:
         for _name, ddl in indexes:
             try:
                 conn.execute(text(ddl))
-            except Exception:
+            except (OperationalError, ProgrammingError):
                 # Evaluation tables are best-effort local developer persistence; index
                 # creation failure should not block the app from serving requests.
                 pass
@@ -191,6 +193,7 @@ class ChatSession(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(default="New Session", max_length=255)
     status: SessionStatus = Field(default=SessionStatus.ACTIVE)
+    model_provider: str | None = Field(default=None, max_length=128)
     model_name: str | None = Field(default=None, max_length=255)
     external_session_id: str | None = Field(default=None, max_length=255, index=True)
     owner_tenant: str | None = Field(default=None, max_length=255)
@@ -504,6 +507,10 @@ def list_sessions(
     owner_user: str | None = None,
     search: str | None = None,
     status: SessionStatus | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> tuple[list[ChatSession], int]:
@@ -528,6 +535,14 @@ def list_sessions(
                 (ChatSession.title.contains(search))  # type: ignore
                 | (ChatSession.external_session_id.like(like_pat))  # type: ignore
             )
+        if created_after is not None:
+            base = base.where(ChatSession.created_at >= created_after)
+        if created_before is not None:
+            base = base.where(ChatSession.created_at <= created_before)
+        if model_name is not None:
+            base = base.where(ChatSession.model_name == model_name)
+        if model_provider is not None:
+            base = base.where(ChatSession.model_provider == model_provider)
 
         from sqlalchemy import func
 
@@ -562,6 +577,36 @@ def get_chat_session(
         return row
 
 
+def update_chat_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+    title: str | None = None,
+    metadata_json: dict[str, Any] | None = None,
+) -> ChatSession | None:
+    """Update a session's title and/or metadata.
+
+    Returns the updated session row, or None if not found or not owned.
+    Local store only supports title updates; metadata_json is ignored.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return None
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return None
+        if owner_user is not None and row.owner_user != owner_user:
+            return None
+        if title is not None:
+            row.title = title
+        row.updated_at = _utc_now()
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
 def archive_session(
     session_id: int,
     *,
@@ -581,6 +626,33 @@ def archive_session(
         if owner_user is not None and row.owner_user != owner_user:
             return False
         row.status = SessionStatus.ARCHIVED
+        row.updated_at = _utc_now()
+        db.add(row)
+        db.commit()
+        return True
+
+
+def restore_session(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> bool:
+    """Restore an archived session by setting status to ACTIVE.
+
+    Returns True if the session was found and restored, False otherwise.
+    """
+    with get_session() as db:
+        row = db.get(ChatSession, session_id)
+        if row is None:
+            return False
+        if owner_tenant is not None and row.owner_tenant != owner_tenant:
+            return False
+        if owner_user is not None and row.owner_user != owner_user:
+            return False
+        if row.status != SessionStatus.ARCHIVED:
+            return False
+        row.status = SessionStatus.ACTIVE
         row.updated_at = _utc_now()
         db.add(row)
         db.commit()
