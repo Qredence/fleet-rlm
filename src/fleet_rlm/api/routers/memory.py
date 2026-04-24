@@ -83,6 +83,16 @@ async def list_memory_items(
     limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 100,
 ) -> MemoryListResponse:
     """Return memory items for the authenticated user, optionally filtered."""
+    scope_filter = None
+    if scope is not None:
+        try:
+            scope_filter = MemoryScope(scope)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid scope: {scope}",
+            ) from exc
+
     persisted_identity = await _resolve_persisted_identity(
         state=state,
         repository=repository,
@@ -93,16 +103,6 @@ async def list_memory_items(
             status_code=503,
             detail="Database persistence is unavailable.",
         )
-
-    scope_filter = None
-    if scope is not None:
-        try:
-            scope_filter = MemoryScope(scope)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid scope: {scope}",
-            ) from exc
 
     items = await repository.list_memory_items(
         tenant_id=persisted_identity.tenant_id,

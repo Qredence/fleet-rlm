@@ -105,13 +105,9 @@ const GraphStepNode = memo(function GraphStepNode({
 
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <NodeBadge>{formatActorLabel(data.actorKind)}</NodeBadge>
-            {typeof data.depth === "number" && (
-              <NodeBadge>Depth {data.depth}</NodeBadge>
-            )}
+            {typeof data.depth === "number" && <NodeBadge>Depth {data.depth}</NodeBadge>}
             {data.actorId && (
-              <NodeBadge className="whitespace-pre-wrap wrap-break-word">
-                {data.actorId}
-              </NodeBadge>
+              <NodeBadge className="whitespace-pre-wrap wrap-break-word">{data.actorId}</NodeBadge>
             )}
           </div>
 

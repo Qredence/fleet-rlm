@@ -57,9 +57,7 @@ export function ActionButtons({
               action.isConfirming &&
                 "ring-destructive ring-2 ring-offset-2 motion-safe:animate-pulse",
             )}
-            aria-label={
-              action.shortcut ? `${label} (${action.shortcut})` : label
-            }
+            aria-label={action.shortcut ? `${label} (${action.shortcut})` : label}
           >
             {action.isLoading && (
               <svg
@@ -83,9 +81,7 @@ export function ActionButtons({
                 />
               </svg>
             )}
-            {action.icon && !action.isLoading && (
-              <span className="mr-2">{action.icon}</span>
-            )}
+            {action.icon && !action.isLoading && <span className="mr-2">{action.icon}</span>}
             {label}
             {action.shortcut && !action.isLoading && (
               <kbd className="border-border bg-muted ml-2.5 hidden rounded-lg border px-2 py-0.5 font-mono text-xs font-medium sm:inline-block">

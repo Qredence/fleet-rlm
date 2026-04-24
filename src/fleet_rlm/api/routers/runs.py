@@ -84,6 +84,8 @@ async def get_run_steps(
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> RunStepListResponse:
     """Return paginated execution steps for a run."""
+    run_uuid = _parse_run_uuid(run_id)
+
     persisted_identity = await _resolve_persisted_identity(
         state=state,
         repository=repository,
@@ -94,8 +96,6 @@ async def get_run_steps(
             status_code=503,
             detail="Database persistence is unavailable.",
         )
-
-    run_uuid = _parse_run_uuid(run_id)
 
     run = await repository.get_run(
         tenant_id=persisted_identity.tenant_id,

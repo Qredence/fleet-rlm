@@ -651,11 +651,16 @@ function applyEvent(
     }
     case "clarification": {
       const clarPayload = asRecord(payload);
-      const question = asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
-      const messageId = asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
-      const stepLabel = asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
+      const question =
+        asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
+      const messageId =
+        asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
+      const stepLabel =
+        asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
       const rawOptions = clarPayload?.options;
-      const options: { id: string; label: string; description?: string }[] = Array.isArray(rawOptions)
+      const options: { id: string; label: string; description?: string }[] = Array.isArray(
+        rawOptions,
+      )
         ? rawOptions.flatMap((item) => {
             const rec = asRecord(item);
             if (!rec) return [];

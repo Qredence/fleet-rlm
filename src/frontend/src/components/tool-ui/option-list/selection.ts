@@ -6,17 +6,11 @@ export function parseSelectionToIdSet(
   maxSelections?: number,
 ): Set<string> {
   if (mode === "single") {
-    const single =
-      typeof value === "string"
-        ? value
-        : Array.isArray(value)
-          ? value[0]
-          : null;
+    const single = typeof value === "string" ? value : Array.isArray(value) ? value[0] : null;
     return single ? new Set([single]) : new Set();
   }
 
-  const arr =
-    typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  const arr = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
 
   return new Set(maxSelections ? arr.slice(0, maxSelections) : arr);
 }

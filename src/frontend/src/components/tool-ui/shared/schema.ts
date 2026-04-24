@@ -39,12 +39,7 @@ export const ToolUIRoleSchema = z.enum([
 
 export type ToolUIRole = z.infer<typeof ToolUIRoleSchema>;
 
-export const ToolUIReceiptOutcomeSchema = z.enum([
-  "success",
-  "partial",
-  "failed",
-  "cancelled",
-]);
+export const ToolUIReceiptOutcomeSchema = z.enum(["success", "partial", "failed", "cancelled"]);
 
 export type ToolUIReceiptOutcome = z.infer<typeof ToolUIReceiptOutcomeSchema>;
 
@@ -81,9 +76,7 @@ export const ActionSchema = z.object({
    */
   sentence: z.string().optional(),
   confirmLabel: z.string().optional(),
-  variant: z
-    .enum(["default", "destructive", "secondary", "ghost", "outline"])
-    .optional(),
+  variant: z.enum(["default", "destructive", "secondary", "ghost", "outline"]).optional(),
   icon: z.custom<ReactNode>().optional(),
   loading: z.boolean().optional(),
   disabled: z.boolean().optional(),
@@ -118,8 +111,6 @@ export const SerializableActionsConfigSchema = z.object({
   confirmTimeout: z.number().positive().optional(),
 });
 
-export type SerializableActionsConfig = z.infer<
-  typeof SerializableActionsConfigSchema
->;
+export type SerializableActionsConfig = z.infer<typeof SerializableActionsConfigSchema>;
 
 export type SerializableAction = z.infer<typeof SerializableActionSchema>;

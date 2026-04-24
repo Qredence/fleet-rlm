@@ -22,9 +22,7 @@ export const OptionListOptionSchema = z.object({
 
 export type OptionListSelection = string[] | string | null;
 
-const OptionListSelectionSchema = z
-  .union([z.array(z.string()), z.string(), z.null()])
-  .optional();
+const OptionListSelectionSchema = z.union([z.array(z.string()), z.string(), z.null()]).optional();
 
 type OptionListSchemaInvariantInput = {
   options: Array<{ id: string }>;
@@ -41,10 +39,7 @@ function selectionToIds(selection: OptionListSelection | undefined): string[] {
   return Array.isArray(selection) ? selection : [];
 }
 
-function validateOptionListInvariants(
-  data: OptionListSchemaInvariantInput,
-  ctx: z.RefinementCtx,
-) {
+function validateOptionListInvariants(data: OptionListSchemaInvariantInput, ctx: z.RefinementCtx) {
   if (
     data.minSelections !== undefined &&
     data.maxSelections !== undefined &&
@@ -89,8 +84,7 @@ function validateOptionListInvariants(
       if (!optionIds.has(selectionId)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path:
-            typeof selection === "string" ? [fieldName] : [fieldName, index],
+          path: typeof selection === "string" ? [fieldName] : [fieldName, index],
           message: `Selection id "${selectionId}" must exist in options.`,
         });
       }
@@ -145,9 +139,7 @@ const OptionListPropsSchemaBase = z.object({
    * ```
    */
   choice: OptionListSelectionSchema,
-  actions: z
-    .union([z.array(ActionSchema), SerializableActionsConfigSchema])
-    .optional(),
+  actions: z.union([z.array(ActionSchema), SerializableActionsConfigSchema]).optional(),
   minSelections: z.number().min(0).optional(),
   maxSelections: z.number().min(1).optional(),
 });
@@ -182,29 +174,21 @@ export const SerializableOptionListSchema = OptionListPropsSchemaBase.omit({
   .extend({
     options: z.array(OptionListOptionSchema.omit({ icon: true })),
     actions: z
-      .union([
-        z.array(SerializableActionSchema),
-        SerializableActionsConfigSchema,
-      ])
+      .union([z.array(SerializableActionSchema), SerializableActionsConfigSchema])
       .optional(),
   })
   .strict()
   .superRefine(validateOptionListInvariants);
 
-export type SerializableOptionList = z.infer<
-  typeof SerializableOptionListSchema
->;
+export type SerializableOptionList = z.infer<typeof SerializableOptionListSchema>;
 
 const SerializableOptionListSchemaContract = defineToolUiContract(
   "OptionList",
   SerializableOptionListSchema,
 );
 
-export const parseSerializableOptionList: (
-  input: unknown,
-) => SerializableOptionList = SerializableOptionListSchemaContract.parse;
+export const parseSerializableOptionList: (input: unknown) => SerializableOptionList =
+  SerializableOptionListSchemaContract.parse;
 
-export const safeParseSerializableOptionList: (
-  input: unknown,
-) => SerializableOptionList | null =
+export const safeParseSerializableOptionList: (input: unknown) => SerializableOptionList | null =
   SerializableOptionListSchemaContract.safeParse;

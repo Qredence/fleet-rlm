@@ -1,23 +1,9 @@
 "use client";
 
-import {
-  useMemo,
-  useState,
-  useCallback,
-  useEffect,
-  useRef,
-  Fragment,
-} from "react";
+import { useMemo, useState, useCallback, useEffect, useRef, Fragment } from "react";
 import type { KeyboardEvent } from "react";
-import type {
-  OptionListProps,
-  OptionListSelection,
-  OptionListOption,
-} from "./schema";
-import {
-  normalizeSelectionForOptions,
-  parseSelectionToIdSet,
-} from "./selection";
+import type { OptionListProps, OptionListSelection, OptionListOption } from "./schema";
+import { normalizeSelectionForOptions, parseSelectionToIdSet } from "./selection";
 import { ActionButtons } from "../shared/action-buttons";
 import { normalizeActionsConfig } from "../shared/actions-config";
 import type { Action } from "../shared/schema";
@@ -49,11 +35,7 @@ interface SelectionIndicatorProps {
   disabled?: boolean;
 }
 
-function SelectionIndicator({
-  mode,
-  isSelected,
-  disabled,
-}: SelectionIndicatorProps) {
+function SelectionIndicator({ mode, isSelected, disabled }: SelectionIndicatorProps) {
   const shape = mode === "single" ? "rounded-full" : "rounded";
 
   return (
@@ -67,9 +49,7 @@ function SelectionIndicator({
       )}
     >
       {mode === "multi" && isSelected && <Check className="size-3" />}
-      {mode === "single" && isSelected && (
-        <span className="size-2 rounded-full bg-current" />
-      )}
+      {mode === "single" && isSelected && <span className="size-2 rounded-full bg-current" />}
     </div>
   );
 }
@@ -133,9 +113,7 @@ function OptionItem({
             disabled={option.disabled}
           />
         </span>
-        {option.icon && (
-          <span className="flex h-6 items-center">{option.icon}</span>
-        )}
+        {option.icon && <span className="flex h-6 items-center">{option.icon}</span>}
         <div className="flex flex-col text-left">
           <span className="leading-6 text-pretty">{option.label}</span>
           {option.description && (
@@ -185,16 +163,12 @@ function OptionListConfirmation({
       >
         {confirmedOptions.map((option, index) => (
           <Fragment key={option.id}>
-            {index > 0 && (
-              <Separator className="my-1.5" orientation="horizontal" />
-            )}
+            {index > 0 && <Separator className="my-1.5" orientation="horizontal" />}
             <div className="flex items-start gap-3 py-1">
               <span className="flex h-6 items-center">
                 <Check className="text-primary size-4 shrink-0" />
               </span>
-              {option.icon && (
-                <span className="flex h-6 items-center">{option.icon}</span>
-              )}
+              {option.icon && <span className="flex h-6 items-center">{option.icon}</span>}
               <div className="flex flex-col text-left">
                 <span className="text-base leading-6 font-medium text-pretty @md/option-list:text-sm">
                   {option.label}
@@ -242,21 +216,13 @@ export function OptionList({
   }
 
   const effectiveMaxSelections = selectionMode === "single" ? 1 : maxSelections;
-  const optionIds = useMemo(
-    () => new Set(options.map((option) => option.id)),
-    [options],
-  );
+  const optionIds = useMemo(() => new Set(options.map((option) => option.id)), [options]);
 
-  const [uncontrolledSelected, setUncontrolledSelected] = useState<Set<string>>(
-    () =>
-      normalizeSelectionForOptions(
-        parseSelectionToIdSet(
-          defaultValue,
-          selectionMode,
-          effectiveMaxSelections,
-        ),
-        optionIds,
-      ),
+  const [uncontrolledSelected, setUncontrolledSelected] = useState<Set<string>>(() =>
+    normalizeSelectionForOptions(
+      parseSelectionToIdSet(defaultValue, selectionMode, effectiveMaxSelections),
+      optionIds,
+    ),
   );
 
   const selectedIds = useMemo(() => {
@@ -265,13 +231,7 @@ export function OptionList({
         ? parseSelectionToIdSet(value, selectionMode, effectiveMaxSelections)
         : uncontrolledSelected;
     return normalizeSelectionForOptions(parsed, optionIds);
-  }, [
-    value,
-    uncontrolledSelected,
-    selectionMode,
-    effectiveMaxSelections,
-    optionIds,
-  ]);
+  }, [value, uncontrolledSelected, selectionMode, effectiveMaxSelections, optionIds]);
 
   const selectedCount = selectedIds.size;
 
@@ -287,19 +247,11 @@ export function OptionList({
 
       return { option, isSelected, isDisabled };
     });
-  }, [
-    options,
-    selectedIds,
-    selectionMode,
-    effectiveMaxSelections,
-    selectedCount,
-  ]);
+  }, [options, selectedIds, selectionMode, effectiveMaxSelections, selectedCount]);
 
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [activeIndex, setActiveIndex] = useState(() => {
-    const firstSelected = optionStates.findIndex(
-      (s) => s.isSelected && !s.isDisabled,
-    );
+    const firstSelected = optionStates.findIndex((s) => s.isSelected && !s.isDisabled);
     if (firstSelected >= 0) return firstSelected;
     const firstEnabled = optionStates.findIndex((s) => !s.isDisabled);
     return firstEnabled >= 0 ? firstEnabled : 0;
@@ -308,11 +260,7 @@ export function OptionList({
   useEffect(() => {
     if (optionStates.length === 0) return;
     setActiveIndex((prev) => {
-      if (
-        prev < 0 ||
-        prev >= optionStates.length ||
-        optionStates[prev]?.isDisabled
-      ) {
+      if (prev < 0 || prev >= optionStates.length || optionStates[prev]?.isDisabled) {
         const firstEnabled = optionStates.findIndex((s) => !s.isDisabled);
         return firstEnabled >= 0 ? firstEnabled : 0;
       }
@@ -323,11 +271,7 @@ export function OptionList({
   const updateSelection = useCallback(
     (next: Set<string>) => {
       const normalizedNext = normalizeSelectionForOptions(
-        parseSelectionToIdSet(
-          Array.from(next),
-          selectionMode,
-          effectiveMaxSelections,
-        ),
+        parseSelectionToIdSet(Array.from(next), selectionMode, effectiveMaxSelections),
         optionIds,
       );
 
@@ -339,14 +283,7 @@ export function OptionList({
 
       onChange?.(convertIdSetToSelection(normalizedNext, selectionMode));
     },
-    [
-      effectiveMaxSelections,
-      selectionMode,
-      uncontrolledSelected,
-      value,
-      onChange,
-      optionIds,
-    ],
+    [effectiveMaxSelections, selectionMode, uncontrolledSelected, value, onChange, optionIds],
   );
 
   const toggleSelection = useCallback(
@@ -389,10 +326,7 @@ export function OptionList({
     return toSelectionState(empty);
   }, [toSelectionState, updateSelection]);
 
-  const customActions = useMemo(
-    () => normalizeActionsConfig(actions),
-    [actions],
-  );
+  const customActions = useMemo(() => normalizeActionsConfig(actions), [actions]);
 
   const handleFooterAction = useCallback(
     async (actionId: string) => {
@@ -418,8 +352,7 @@ export function OptionList({
     } satisfies ReturnType<typeof normalizeActionsConfig>;
   }, [customActions]);
 
-  const isConfirmDisabled =
-    selectedCount < minSelections || selectedCount === 0;
+  const isConfirmDisabled = selectedCount < minSelections || selectedCount === 0;
   const hasNothingToClear = selectedCount === 0;
 
   const focusOptionAt = useCallback((index: number) => {
@@ -526,9 +459,7 @@ export function OptionList({
         ...action,
         disabled: action.disabled || isDisabledByValidation,
         label:
-          action.id === "confirm" &&
-          selectionMode === "multi" &&
-          selectedCount > 0
+          action.id === "confirm" && selectionMode === "multi" && selectedCount > 0
             ? `${action.label} (${selectedCount})`
             : action.label,
       };
@@ -612,8 +543,7 @@ export function OptionList({
               onAction={handleFooterAction}
               onBeforeAction={
                 onBeforeAction
-                  ? (actionId) =>
-                      onBeforeAction(actionId, toSelectionState(selectedIds))
+                  ? (actionId) => onBeforeAction(actionId, toSelectionState(selectedIds))
                   : undefined
               }
             />

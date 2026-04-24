@@ -25,9 +25,7 @@ function inferVariant(action: Action): Action {
   return action;
 }
 
-export function normalizeActionsConfig(
-  actions?: ActionsProp,
-): ActionsConfig | null {
+export function normalizeActionsConfig(actions?: ActionsProp): ActionsConfig | null {
   if (!actions) return null;
 
   const rawItems = Array.isArray(actions) ? actions : (actions.items ?? []);

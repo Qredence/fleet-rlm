@@ -25,7 +25,7 @@ const subscribe = (cb: () => void) => {
 const getSnapshot = () => plugins;
 
 // SSR/test environments get the initial plugin set (no mermaid) synchronously.
-const getServerSnapshot = () => ({ cjk, code, math } as Plugins);
+const getServerSnapshot = () => ({ cjk, code, math }) as Plugins;
 
 export function useStreamdownPlugins(): Plugins {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

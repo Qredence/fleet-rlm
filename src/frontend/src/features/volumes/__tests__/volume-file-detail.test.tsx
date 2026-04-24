@@ -36,10 +36,7 @@ vi.mock("@/features/volumes/use-volumes", async () => {
         selectFile: (node: unknown) => void;
         clearSelectedFile: () => void;
       }) => unknown,
-    ) =>
-      selector
-        ? selector({ selectFile, clearSelectedFile })
-        : null,
+    ) => (selector ? selector({ selectFile, clearSelectedFile }) : null),
   };
 });
 
