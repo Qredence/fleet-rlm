@@ -72,7 +72,6 @@ Other backend areas:
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
 - `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
-- `src/fleet_rlm/scaffold/` — curated packaged Claude Code translation assets (exposed by `fleet-rlm init`)
 - `src/fleet_rlm/ui/dist` — **generated** bundled frontend assets for Python package distributions
 
 Frontend organization:
@@ -114,7 +113,7 @@ uv run fleet-rlm chat --trace-mode compact
 make format                   # ruff format src tests
 make format-check             # ruff format --check
 make lint                     # ruff check
-make typecheck                # ty check src (excludes scaffold)
+make typecheck                # ty check src
 make test                     # pytest excluding live_llm and benchmark
 make test-unit                # unit tests only
 make test-ui                  # UI/server tests only
@@ -225,7 +224,7 @@ GitHub Actions runs on push to `main`/`master` and on PRs:
 - **Supported versions**: 0.4.x and later
 - **Vulnerability reporting**: email `contact@qredence.ai` — do **not** open public GitHub issues for security vulnerabilities
 - **Static analysis**:
-  - `bandit` runs on `src/fleet_rlm` (excluding `tests` and `scaffold`)
+  - `bandit` runs on `src/fleet_rlm` (excluding `tests`)
   - `pip-audit` scans for known vulnerabilities (currently ignores GHSA-5239-wwwm-4pmq until Pygments patches it)
 - **Auth modes**:
   - `dev` — permissive local development mode

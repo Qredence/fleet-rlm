@@ -9,7 +9,7 @@ PYTEST_FAST_MARKERS = not live_llm and not benchmark
 	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server sync-scaffold
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server
 
 help:
 	@echo "Setup:"
@@ -55,7 +55,6 @@ help:
 	@echo "  make precommit-run    - Run pre-commit on all files"
 	@echo "  make cli              - Show fleet-rlm CLI help"
 	@echo "  make mlflow           - Start a local MLflow OSS tracking server on port 5001"
-	@echo "  make sync-scaffold    - Reminder that src/fleet_rlm/scaffold is curated, not auto-synced"
 
 install:
 	uv sync
@@ -79,8 +78,7 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src \
-		--exclude "src/fleet_rlm/scaffold/**"
+	uv run ty check src
 
 test:
 	uv run pytest -q -m "$(PYTEST_FAST_MARKERS)"
@@ -124,7 +122,7 @@ check-security:
 	# TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
 	# pulls pip 26.0.1 / CVE-2026-3219.
 	uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219
-	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
+	uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 check-deps:
 	uvx deptry .
@@ -229,8 +227,3 @@ frontend-check:
 
 release-artifacts:
 	$(MAKE) build-release
-
-sync-scaffold:
-	@echo "src/fleet_rlm/scaffold is a curated Claude Code translation layer for fleet-rlm."
-	@echo "It is not auto-synced from .claude."
-	@echo "Update the packaged scaffold assets directly and validate with 'uv run fleet-rlm init --list'."
