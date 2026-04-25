@@ -110,6 +110,10 @@ jobs:
           cd src/frontend
           pnpm install --frozen-lockfile
 
+      - name: Duplicate code detection
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: ./scripts/run_duplicate_check.zsh
+
       - name: Install Playwright browser
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |

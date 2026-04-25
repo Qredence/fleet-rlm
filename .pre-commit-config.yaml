@@ -49,3 +49,10 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+
+      - id: duplicate-code-check
+        name: Detect duplicate handwritten source blocks
+        entry: ./scripts/run_duplicate_check.zsh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

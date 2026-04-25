@@ -6,7 +6,7 @@ PYTEST_FAST_MARKERS = not live_llm and not benchmark
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-ui test-integration test-e2e \
-	check quality-gate check-release check-docs check-security check-deps check-frontend api-check api-sync \
+	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server sync-scaffold
@@ -35,6 +35,7 @@ help:
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality checks"
+	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
 	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"
@@ -102,7 +103,7 @@ test-e2e:
 		echo "No src/frontend/package.json found, skipping frontend e2e tests."; \
 	fi
 
-check: lint format-check typecheck test check-release check-docs check-frontend
+check: lint format-check typecheck test check-release check-docs check-duplicates check-frontend
 
 quality-gate: check
 
@@ -113,6 +114,9 @@ check-release:
 
 check-docs:
 	uv run python scripts/check_docs_quality.py
+
+check-duplicates:
+	./scripts/run_duplicate_check.zsh
 
 check-security:
 	# TODO: Remove this ignore once Pygments ships a patched release for
