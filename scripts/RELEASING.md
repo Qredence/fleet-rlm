@@ -75,7 +75,11 @@ uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 # TODO: Remove this ignore once Pygments ships a patched release for
 # GHSA-5239-wwwm-4pmq / CVE-2026-4539.
-uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
+# TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
+# pulls pip 26.0.1 / CVE-2026-3219.
+# TODO: Remove the DiskCache ignore once upstream ships a patched release
+# or DSPy removes the transitive dependency.
+uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2025-69872
 uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 if [ -f src/frontend/package.json ]; then

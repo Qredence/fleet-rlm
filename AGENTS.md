@@ -225,7 +225,7 @@ GitHub Actions runs on push to `main`/`master` and on PRs:
 - **Vulnerability reporting**: email `contact@qredence.ai` — do **not** open public GitHub issues for security vulnerabilities
 - **Static analysis**:
   - `bandit` runs on `src/fleet_rlm` (excluding `tests`)
-  - `pip-audit` scans for known vulnerabilities (currently ignores GHSA-5239-wwwm-4pmq until Pygments patches it)
+  - `pip-audit` scans for known vulnerabilities (currently ignores GHSA-5239-wwwm-4pmq until Pygments patches it, CVE-2026-3219 from the transient `uvx pip-audit` runtime, and CVE-2025-69872 until DiskCache/DSPy has a patched path)
 - **Auth modes**:
   - `dev` — permissive local development mode
   - `entra` — real Entra bearer-token validation plus Neon-backed tenant admission
