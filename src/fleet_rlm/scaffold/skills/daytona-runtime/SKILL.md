@@ -69,7 +69,7 @@ meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json
 
 Legacy path (`workspaces/...`) is still read as a migration fallback.
 
-## Claude Code Delegation
+## Sibling Skills
 
-- Use `rlm-specialist` when a Claude Code task needs Daytona-aware runtime debugging.
-- Use `rlm-orchestrator` when the goal is repo-aware workbench execution or long-context processing in the Daytona path.
+- Pair with `rlm-debug` for Daytona-aware runtime debugging and contract failure diagnosis.
+- Pair with `rlm-long-context` when the goal is repo-aware workbench execution or long-context processing on the Daytona path.

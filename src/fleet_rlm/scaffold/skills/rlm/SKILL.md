@@ -13,7 +13,8 @@ works today.
 
 - `fleet-rlm` exposes one shared conversational runtime built on ReAct plus `dspy.RLM`.
 - `daytona_pilot` is the primary runtime path. Daytona is the interpreter/sandbox backend.
-- The live product surfaces are `Workbench`, `Volumes`, and `Settings`.
+- The live product surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`.
+- The top-level chat entry point is `FleetAgent` at `runtime/agent/agent.py` (a thin `dspy.ReAct` wrapper). The recursive engine is `dspy.RLM` built in `runtime/models/builders.py` and exercised via `runtime/tools/rlm_delegate.py`.
 
 ## Canonical Commands
 
@@ -35,12 +36,12 @@ uv run fleet-rlm daytona-smoke --repo <url> [--ref <branch>]
 
 ## Claude Code Usage
 
-Use the scaffold as an alternative operating surface for `fleet-rlm`:
+Load this skill when you need to map a user request onto the fleet-rlm runtime model. Pair with the sibling skills below for specific tasks:
 
-- Load this skill when you need to map a user request onto the fleet runtime model
-- Delegate long-context orchestration to `rlm-orchestrator`
-- Delegate runtime or integration debugging to `rlm-specialist`
-- Delegate leaf chunk analysis to `rlm-subcall`
+- `daytona-runtime` — Daytona execution, volume layout, smoke validation
+- `rlm-execute` — running Python in a Daytona sandbox with durable persistence
+- `rlm-long-context` — processing documents that exceed a single context window
+- `rlm-batch` / `rlm-memory` / `rlm-debug` — batched recursive work, session memory, failure diagnosis
 
 ## Practical Rules
 
@@ -53,37 +54,7 @@ Use the scaffold as an alternative operating surface for `fleet-rlm`:
 
 - `daytona-runtime` for Daytona-specific execution, workspace volume, and smoke-test guidance
 - `rlm-debug` for failure diagnosis and contract debugging
-- `rlm-subcall` for leaf chunk analysis. Invoke with a dict like:
-
-```yaml
-chunk_path: /tmp/chunks/chunk_0001.txt
-query: "What modules does DSPy provide?"
-chunk_id: chunk_0001
-```
-
-The subagent returns structured JSON with `relevant`, `missing`, and
-`suggested_queries` fields. Collect all results, then synthesize.
-
-### Synthesize in the Sandbox
-
-```python
-result = interp.execute("""
-import json
-
-findings = []
-for r in all_results:
-    for item in r.get('relevant', []):
-        if item['confidence'] in ('high', 'medium'):
-            findings.append(item)
-
-seen = set()
-unique = [f for f in findings if f['point'] not in seen and not seen.add(f['point'])]
-
-SUBMIT(findings=unique, total=len(unique))
-""", variables={'all_results': all_results})
-```
-
----
+- `rlm-long-context` for leaf-chunk decomposition of a document that exceeds a single context
 
 ## Full RLM Mode — dspy.RLM with DaytonaInterpreter
 

@@ -154,7 +154,7 @@ python3 .skills/rlm-long-context/scripts/rlm_repl.py exec <<'PY'
 summary_tasks = []
 for chunk_path in chunk_paths:
     task = {
-        "subagent": "rlm-subcall",
+        "delegate": "sub_rlm",
         "instruction": "summarize",
         "chunk_path": chunk_path,
         "max_output": 500

@@ -27,15 +27,15 @@ description: (EXPERIMENTAL) Research implementation for RLM long-context process
 Main Agent (Orchestrator)
   +-- Query-Guided Selection (filter chunks by relevance)
   +-- Semantic Chunking (content-aware boundaries)
-  +-- Parallel subagent delegation with caching
+  +-- Parallel sub_rlm dispatch via runtime/tools/rlm_delegate.py
        |
   +----+----+
   v    v    v
  Chunk A  Chunk B  Chunk C (skipped if low relevance)
   |    |
   v    v
- rlm-subcall    rlm-subcall
-  |    |
+ sub_rlm        sub_rlm        (child Daytona sandboxes, bounded by
+  |    |                       max_iterations / max_llm_calls)
   +----+----> Result Caching + Streaming (early exit)
        v
   Hierarchical Merge (>1M tokens: chunk > summary > synthesis)
@@ -73,12 +73,11 @@ python3 src/fleet_rlm/scaffold/skills/rlm-long-context/scripts/codebase_concat.p
 For detailed code examples, see [references/advanced-techniques.md](references/advanced-techniques.md).
 For whole-codebase analysis, see [references/codebase-processing.md](references/codebase-processing.md).
 
-### 3. Delegate to Subagents
+### 3. Delegate to Child RLMs
 
-For each selected chunk, invoke `rlm-subcall`:
+For each selected chunk, delegate to a child `dspy.RLM` via the runtime's delegation tool (`src/fleet_rlm/runtime/tools/rlm_delegate.py`). Inside a parent RLM's sandbox this is exposed as `sub_rlm()` / `sub_rlm_batched()`; from the host ReAct tool registry it is `delegate_to_rlm()`. Each call input describes the chunk and the leaf query:
 
 ```yaml
-subagent: rlm-subcall
 input:
   query: "Find all ERROR entries and their timestamps"
   chunk_path: ".claude/rlm_state/chunks/chunk_001.txt"
