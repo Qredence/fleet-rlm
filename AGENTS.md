@@ -72,7 +72,6 @@ Other backend areas:
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
 - `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
-- `src/fleet_rlm/scaffold/` — curated packaged Claude Code translation assets (exposed by `fleet-rlm init`)
 - `src/fleet_rlm/ui/dist` — **generated** bundled frontend assets for Python package distributions
 
 Frontend organization:
@@ -114,7 +113,7 @@ uv run fleet-rlm chat --trace-mode compact
 make format                   # ruff format src tests
 make format-check             # ruff format --check
 make lint                     # ruff check
-make typecheck                # ty check src (excludes scaffold)
+make typecheck                # ty check src
 make test                     # pytest excluding live_llm and benchmark
 make test-unit                # unit tests only
 make test-ui                  # UI/server tests only
@@ -225,7 +224,7 @@ GitHub Actions runs on push to `main`/`master` and on PRs:
 - **Supported versions**: 0.4.x and later
 - **Vulnerability reporting**: email `contact@qredence.ai` — do **not** open public GitHub issues for security vulnerabilities
 - **Static analysis**:
-  - `bandit` runs on `src/fleet_rlm` (excluding `tests` and `scaffold`)
+  - `bandit` runs on `src/fleet_rlm` (excluding `tests`)
   - `pip-audit` scans for known vulnerabilities (currently ignores GHSA-5239-wwwm-4pmq until Pygments patches it)
 - **Auth modes**:
   - `dev` — permissive local development mode
@@ -257,7 +256,11 @@ The shared backend/frontend runtime contract is **Daytona-only**:
 - `execution_mode` is a per-turn execution hint.
 - Daytona request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
 - Durable mounted-volume roots: `memory/`, `artifacts/`, `buffers/`, `meta/`
-- Session manifests on durable storage: `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`
+- Recursive RLM children are isolated by backend policy: `RLM_CHILD_ISOLATION_MODE=auto` forks no-volume parents and uses clean child sandboxes with `meta/rlm-children/...` volume subpaths for volume-mounted parents; `context` is a local/debug opt-out only.
+- `RLM_CHILD_FORK_FALLBACK=clean|fail` controls no-volume fork failure behavior; child sandboxes are deleted after each recursive task and child artifacts are not promoted automatically.
+- Bridged `llm_query*` callbacks share `rlm_max_llm_calls` across recursive child interpreters; sandbox `sub_rlm()` / `sub_rlm_batched()` callbacks dispatch through the Daytona bridge.
+- Local host-checkout codebase delegation without `repo_url` stages a bounded evidence snapshot into the isolated child sandbox at `artifacts/rlm-inputs/local_workspace_snapshot.txt`.
+- Session manifests on durable storage: `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`; manifest `state` restores history, core memory, loaded document paths, and Daytona interpreter state.
 - Daytona idle lifecycle timers: `auto_stop_interval=30` (minutes), `auto_archive_interval=60` (minutes)
 
 Canonical websocket surfaces:

@@ -2135,12 +2135,17 @@ components:
           type: integer
           title: Limit
           description: Current page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether more results exist beyond this page.
       type: object
       required:
         - items
         - total
         - offset
         - limit
+        - has_more
       title: MemoryListResponse
       description: Paginated memory item list response.
     OptimizationRunCreatedResponse:

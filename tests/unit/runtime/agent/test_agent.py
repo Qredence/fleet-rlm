@@ -6,6 +6,7 @@ dspy.ReAct is monkeypatched to avoid real LLM calls.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import dspy
@@ -276,6 +277,27 @@ def test_build_chat_agent_returns_agent_runtime(monkeypatch: pytest.MonkeyPatch)
 
     agent = _factory.build_chat_agent(planner_lm=object())
     assert isinstance(agent, AgentRuntime)
+
+
+def test_build_chat_agent_threads_delegate_lm_into_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.runtime import factory as _factory
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.factory._require_planner_ready",
+        lambda *a, **kw: None,
+    )
+
+    delegate_lm = object()
+    interpreter = SimpleNamespace()
+    _factory.build_chat_agent(
+        planner_lm=object(),
+        interpreter=interpreter,
+        delegate_lm=delegate_lm,
+    )
+
+    assert interpreter.sub_lm is delegate_lm
 
 
 def test_build_chat_agent_supports_sync_context_manager(

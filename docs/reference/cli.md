@@ -6,7 +6,7 @@ This document describes the CLI surfaces for `fleet-rlm`.
 
 There are two command entrypoints:
 
-- **`fleet-rlm`**: Typer-based command group with subcommands for initialization, server modes, and terminal chat
+- **`fleet-rlm`**: Typer-based command group with subcommands for server modes, optimization, and terminal chat
 - **`fleet`**: Lightweight launcher for terminal chat and Web UI startup
 
 ## `fleet-rlm` Commands
@@ -19,46 +19,42 @@ Usage: fleet-rlm [OPTIONS] COMMAND [ARGS]...
 Run fleet-rlm demos and experimental runtimes.
 
 Commands:
-  init        Bootstrap Claude Code scaffold assets to user-level directory.
   serve-api   Run the FastAPI server surface (used by `fleet web`).
+  optimize    Run DSPy optimization workflows.
   chat        Start standalone in-process interactive terminal chat.
   daytona-smoke  Run a native Daytona smoke validation without invoking an LM.
 ```
 
-### `fleet-rlm init`
+### `fleet-rlm optimize`
 
-Bootstrap Claude Code scaffold assets to a user-level directory. Copies bundled RLM skills, agents, teams, and hooks from the installed `fleet-rlm` package to `~/.claude/` (or a custom target).
+Run GEPA offline optimization for a registered DSPy module.
 
 ```text
-Usage: fleet-rlm init [OPTIONS]
+Usage: fleet-rlm optimize [OPTIONS] MODULE [DATASET]
+
+Arguments:
+  MODULE    Registered module slug to optimize (use 'list' to see available modules). [required]
+  DATASET   Path to JSON or JSONL dataset. [optional]
 
 Options:
-  --target PATH     Target directory (defaults to ~/.claude)
-  --force           Overwrite existing files
-  --skills-only     Install only skills, not agents
-  --agents-only     Install only agents, not skills
-  --teams-only      Install only team templates
-  --hooks-only      Install only hook templates
-  --no-teams        Skip installing team templates
-  --no-hooks        Skip installing hook templates
-  --list            List available scaffold assets (no install)
-  --help            Show this message and exit.
+  --output-path, -o PATH   Where to save the optimized DSPy module artifact.
+  --train-ratio FLOAT      Training split ratio for GEPA compilation. [default: 0.8]
+  --auto TEXT              GEPA optimization intensity: light, medium, or heavy. [default: light]
+  --report                 Print a markdown report summary after optimization.
+  --help, -h               Show this message and exit.
 ```
 
 **Examples:**
 
 ```bash
-# Install all scaffold assets to default location
-uv run fleet-rlm init
+# Optimize a module with default settings
+uv run fleet-rlm optimize my-module dataset.jsonl
 
-# List available assets without installing
-uv run fleet-rlm init --list
+# Run heavy optimization with a custom output path
+uv run fleet-rlm optimize my-module dataset.jsonl --auto heavy --output-path ./artifacts/optimized.pkl
 
-# Install only skills to custom location
-uv run fleet-rlm init --target ~/my-project/.claude --skills-only
-
-# Force overwrite existing files
-uv run fleet-rlm init --force
+# Generate an optimization report
+uv run fleet-rlm optimize my-module dataset.jsonl --report
 ```
 
 ### `fleet-rlm serve-api`

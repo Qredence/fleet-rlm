@@ -585,7 +585,7 @@ async def test_persist_session_metadata_noop_on_invalid_uuid(
 # ---------------------------------------------------------------------------
 
 
-def _make_runtime(monkeypatch: Any) -> Any:
+def _make_runtime(monkeypatch: Any, *, interpreter: Any | None = None) -> Any:
     """Construct a minimal AgentRuntime with mocked LLM components."""
     from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
@@ -601,7 +601,7 @@ def _make_runtime(monkeypatch: Any) -> Any:
         "fleet_rlm.runtime.agent.runtime.discover_tools",
         lambda: [],
     )
-    return AgentRuntime()
+    return AgentRuntime(interpreter=interpreter)
 
 
 def test_export_session_produces_valid_schema(
@@ -660,6 +660,38 @@ def test_import_session_restores_history(
     assert isinstance(runtime.history, dspy.History)
     msgs = list(runtime.history.messages)
     assert msgs[0]["user_message"] == "Hello"
+
+
+def test_import_session_replaces_stale_core_memory_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    sample_session_id: str,
+) -> None:
+    runtime = _make_runtime(monkeypatch)
+    runtime.core_memory["stale"] = "old"
+
+    exported = export_session(runtime, sample_session_id)
+    exported["core_memory"] = {"fresh": "new"}
+
+    import_session(runtime, exported)
+
+    assert runtime.core_memory["fresh"] == "new"
+    assert runtime.core_memory["persona"]
+    assert "stale" not in runtime.core_memory
+
+
+def test_import_session_restores_loaded_documents(
+    monkeypatch: pytest.MonkeyPatch,
+    sample_session_id: str,
+) -> None:
+    runtime = _make_runtime(monkeypatch)
+    runtime.loaded_document_paths = ["/docs/a.md"]
+
+    exported = export_session(runtime, sample_session_id)
+    runtime.loaded_document_paths = ["/docs/stale.md"]
+
+    import_session(runtime, exported)
+
+    assert runtime.loaded_document_paths == ["/docs/a.md"]
 
 
 def test_import_session_returns_correct_session_id(
@@ -723,6 +755,50 @@ def test_agent_runtime_import_session_method(
     result = runtime.import_session(exported)
     assert result["status"] == "ok"
     assert result["history_turns"] == 2
+
+
+def test_agent_runtime_export_import_threads_daytona_state(
+    monkeypatch: pytest.MonkeyPatch,
+    sample_session_id: str,
+) -> None:
+    class _FakeInterpreter:
+        def __init__(self) -> None:
+            self.imported: dict[str, Any] | None = None
+
+        def export_session_state(self) -> dict[str, Any]:
+            return {"daytona": {"sandbox_id": "sbx-1"}}
+
+        def import_session_state(self, state: dict[str, Any]) -> None:
+            self.imported = state
+
+    interpreter = _FakeInterpreter()
+    runtime = _make_runtime(monkeypatch, interpreter=interpreter)
+    runtime._db_session_id = sample_session_id
+
+    exported = runtime.export_session_state()
+    assert exported["daytona"]["sandbox_id"] == "sbx-1"
+
+    runtime.import_session_state(exported)
+    assert interpreter.imported == exported
+
+
+def test_agent_runtime_reset_clears_session_local_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _make_runtime(monkeypatch)
+    runtime.history = dspy.History(messages=[{"user_message": "hi"}])
+    runtime.core_memory["stale"] = "old"
+    runtime.loaded_document_paths = ["/docs/a.md"]
+    runtime.batch_concurrency = 8
+
+    result = runtime.reset(clear_sandbox_buffers=False)
+
+    assert result == {"status": "ok", "buffers_cleared": False}
+    assert list(runtime.history.messages) == []
+    assert "stale" not in runtime.core_memory
+    assert runtime.core_memory["persona"]
+    assert runtime.loaded_document_paths == []
+    assert runtime.batch_concurrency is None
 
 
 # ---------------------------------------------------------------------------

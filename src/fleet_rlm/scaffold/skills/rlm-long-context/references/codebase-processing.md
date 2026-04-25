@@ -127,10 +127,9 @@ PY
 
 ## Delegation with File Context
 
-When delegating to subagents, include file path:
+When delegating to child RLMs via `sub_rlm()` / `delegate_to_rlm()`, include file path:
 
 ```yaml
-subagent: rlm-subcall
 input:
   query: "Find all authentication-related functions"
   chunk_path: ".claude/rlm_state/chunks/chunk_0005.txt"

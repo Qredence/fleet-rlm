@@ -120,14 +120,6 @@ class FakeDaytonaWorkspaceSession:
         ]
 
 
-class FakeDaytonaWorkspaceInterpreter:
-    def __init__(self, session: FakeDaytonaWorkspaceSession) -> None:
-        self._session = session
-
-    def _ensure_session_sync(self) -> FakeDaytonaWorkspaceSession:
-        return self._session
-
-
 class FakeDaytonaRuntime:
     def __init__(self, session: FakeDaytonaSession | None = None) -> None:
         self.session = session or FakeDaytonaSession()
@@ -204,7 +196,6 @@ __all__ = [
     "FakeDaytonaRuntime",
     "FakeDaytonaSession",
     "FakeDaytonaStorageSession",
-    "FakeDaytonaWorkspaceInterpreter",
     "FakeDaytonaWorkspaceSession",
     "daytona_runtime",
     "daytona_session",

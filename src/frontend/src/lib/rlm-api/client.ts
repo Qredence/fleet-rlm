@@ -56,6 +56,42 @@ async function parseError(response: Response): Promise<never> {
   throw new RlmApiError(response.status, detail);
 }
 
+function createTimedSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): { cleanup: () => void; signal: AbortSignal } {
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(
+    () => timeoutController.abort(),
+    timeoutMs ?? rlmApiConfig.timeoutMs,
+  );
+
+  return {
+    cleanup: () => clearTimeout(timeoutId),
+    signal: signal ? anySignal([signal, timeoutController.signal]) : timeoutController.signal,
+  };
+}
+
+function getAuthHeaders(headers: Record<string, string>): Record<string, string> {
+  const accessToken = getAccessToken();
+  return {
+    ...headers,
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+  };
+}
+
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    return await parseError(response);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
 async function requestJson<T>(
   method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
@@ -66,41 +102,23 @@ async function requestJson<T>(
     timeoutMs?: number;
   },
 ): Promise<T> {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(
-    () => timeoutController.abort(),
-    options?.timeoutMs ?? rlmApiConfig.timeoutMs,
-  );
-
-  const signal = options?.signal
-    ? anySignal([options.signal, timeoutController.signal])
-    : timeoutController.signal;
+  const { cleanup, signal } = createTimedSignal(options?.signal, options?.timeoutMs);
 
   try {
-    const accessToken = getAccessToken();
     const response = await fetch(buildUrl(path), {
       method,
       signal,
-      headers: {
+      headers: getAuthHeaders({
         Accept: "application/json",
         ...(options?.body ? { "Content-Type": "application/json" } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...options?.headers,
-      },
+      }),
       ...(options?.body && method !== "GET" ? { body: JSON.stringify(options.body) } : {}),
     });
 
-    if (!response.ok) {
-      return await parseError(response);
-    }
-
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return await parseJsonResponse(response);
   } finally {
-    clearTimeout(timeoutId);
+    cleanup();
   }
 }
 
@@ -112,39 +130,21 @@ async function requestFormData<T>(
     timeoutMs?: number;
   },
 ): Promise<T> {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(
-    () => timeoutController.abort(),
-    options?.timeoutMs ?? rlmApiConfig.timeoutMs,
-  );
-
-  const signal = options?.signal
-    ? anySignal([options.signal, timeoutController.signal])
-    : timeoutController.signal;
+  const { cleanup, signal } = createTimedSignal(options?.signal, options?.timeoutMs);
 
   try {
-    const accessToken = getAccessToken();
     const response = await fetch(buildUrl(path), {
       method: "POST",
       signal,
-      headers: {
+      headers: getAuthHeaders({
         Accept: "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
+      }),
       body: formData,
     });
 
-    if (!response.ok) {
-      return await parseError(response);
-    }
-
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return await parseJsonResponse(response);
   } finally {
-    clearTimeout(timeoutId);
+    cleanup();
   }
 }
 

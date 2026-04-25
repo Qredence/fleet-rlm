@@ -70,13 +70,13 @@ If you need to run the phases manually instead of using `make release-check`:
 uv run pytest
 uv run ruff check src tests
 uv run ruff format --check src tests
-uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
+uv run ty check src
 uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 # TODO: Remove this ignore once Pygments ships a patched release for
 # GHSA-5239-wwwm-4pmq / CVE-2026-4539.
 uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq
-uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
+uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 if [ -f src/frontend/package.json ]; then
   cd src/frontend
@@ -145,7 +145,7 @@ uv pip install --python .venv-release-smoke/bin/python \
   --extra-index-url https://pypi.org/simple \
   fleet-rlm==0.4.99
 source .venv-release-smoke/bin/activate
-python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
+python -m uvicorn fleet_rlm.api.app:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
 for i in {1..30}; do

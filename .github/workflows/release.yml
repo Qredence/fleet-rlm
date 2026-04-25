@@ -72,7 +72,7 @@ jobs:
           # TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
           # pulls pip 26.0.1 / CVE-2026-3219.
           uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219
-          uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
+          uvx bandit -q -r src/fleet_rlm -x tests -lll
 
       - name: Lint with Ruff
         run: |
@@ -80,7 +80,7 @@ jobs:
           uv run ruff format --check src tests
 
       - name: Type-check with ty
-        run: uv run ty check src --exclude "src/fleet_rlm/scaffold/**"
+        run: uv run ty check src
 
       - name: Run tests
         env:
@@ -109,6 +109,10 @@ jobs:
         run: |
           cd src/frontend
           pnpm install --frozen-lockfile
+
+      - name: Duplicate code detection
+        # This script scans backend and frontend sources, so keep it repo-wide.
+        run: ./scripts/run_duplicate_check.zsh
 
       - name: Install Playwright browser
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
@@ -254,7 +258,7 @@ jobs:
           ROOT_HEADERS=$(mktemp)
           ROOT_BODY=$(mktemp)
 
-          python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
+          python -m uvicorn fleet_rlm.api.app:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
           SERVER_PID=$!
 
           cleanup() {
@@ -395,3 +399,24 @@ jobs:
           prerelease: false
           files: dist/*
           body_path: release_notes.md
+
+      - name: Publish deployment observability summary
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag_version }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.normalized_version }}
+          DEPLOYMENT_METRICS_URL: ${{ vars.DEPLOYMENT_METRICS_URL }}
+          DEPLOYMENT_ALERTS_URL: ${{ vars.DEPLOYMENT_ALERTS_URL }}
+          DEPLOYMENT_POSTHOG_DASHBOARD_URL: ${{ vars.DEPLOYMENT_POSTHOG_DASHBOARD_URL }}
+          DEPLOYMENT_HEALTHCHECK_URL: ${{ vars.DEPLOYMENT_HEALTHCHECK_URL }}
+          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+        run: |
+          python scripts/deployment_observability.py \
+            --environment pypi \
+            --package-name fleet-rlm \
+            --package-url "https://pypi.org/project/fleet-rlm/${RELEASE_VERSION}/" \
+            --release-tag "$RELEASE_TAG" \
+            --release-version "$RELEASE_VERSION" \
+            --annotate-posthog \
+            --step-summary "$GITHUB_STEP_SUMMARY" \
+            --smoke-check "Smoke-test-testpypi passed before publish: installed wheel served /health and packaged UI."

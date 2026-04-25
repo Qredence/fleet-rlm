@@ -773,6 +773,11 @@ export interface components {
        * @description Current page size.
        */
       limit: number;
+      /**
+       * Has More
+       * @description Whether more results exist beyond this page.
+       */
+      has_more: boolean;
     };
     /**
      * OptimizationRunCreatedResponse

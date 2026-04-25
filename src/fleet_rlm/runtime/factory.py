@@ -6,15 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-import dspy
-
-from fleet_rlm.runtime.agent.agent import FleetAgent  # noqa: F401
-from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.config import configure_planner_from_env
 
 
 def _require_planner_ready(env_file: Path | None = None) -> None:
     """Ensure the DSPy planner LM is configured."""
+    import dspy
+
     ready = configure_planner_from_env(env_file=env_file)
     if not ready and dspy.settings.lm is None:
         raise RuntimeError(
@@ -51,8 +49,12 @@ def build_chat_agent(
     delegate_lm: Any | None = None,
     delegate_max_calls_per_turn: int = 8,
     delegate_result_truncation_chars: int = 8000,
+    rlm_child_isolation_mode: Literal["auto", "context"] = "auto",
+    rlm_child_fork_fallback: Literal["clean", "fail"] = "clean",
 ) -> Any:
     """Build the canonical DSPy chat agent using FleetAgent and AgentRuntime."""
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
     _ = (
         deep_react_max_iters,
         enable_adaptive_iters,
@@ -67,17 +69,37 @@ def build_chat_agent(
         interpreter_async_execute,
         delete_session_on_shutdown,
         sandbox_spec,
-        sub_lm,
         guardrail_mode,
         max_output_chars,
         min_substantive_chars,
-        delegate_lm,
         delegate_max_calls_per_turn,
         delegate_result_truncation_chars,
+        rlm_child_isolation_mode,
+        rlm_child_fork_fallback,
     )
 
     if planner_lm is None:
         _require_planner_ready(env_file)
+
+    if interpreter is not None:
+        effective_sub_lm = sub_lm if sub_lm is not None else delegate_lm
+        if effective_sub_lm is not None:
+            setattr(interpreter, "sub_lm", effective_sub_lm)
+        setattr(interpreter, "rlm_max_iterations", max(1, int(rlm_max_iterations)))
+        setattr(interpreter, "max_llm_calls", max(1, int(rlm_max_llm_calls)))
+        setattr(interpreter, "_sub_rlm_max_depth", max(0, int(max_depth)))
+        setattr(interpreter, "child_isolation_mode", rlm_child_isolation_mode)
+        setattr(interpreter, "child_fork_fallback", rlm_child_fork_fallback)
+        setattr(
+            interpreter,
+            "delegate_max_calls_per_turn",
+            max(1, int(delegate_max_calls_per_turn)),
+        )
+        setattr(
+            interpreter,
+            "delegate_result_truncation_chars",
+            max(0, int(delegate_result_truncation_chars)),
+        )
 
     agent = AgentRuntime(
         interpreter=interpreter,

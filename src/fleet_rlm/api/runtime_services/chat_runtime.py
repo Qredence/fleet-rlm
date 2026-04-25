@@ -167,6 +167,8 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
         "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
         "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
         "max_depth": runtime.cfg.rlm_max_depth,
+        "rlm_child_isolation_mode": runtime.cfg.rlm_child_isolation_mode,
+        "rlm_child_fork_fallback": runtime.cfg.rlm_child_fork_fallback,
         "timeout": runtime.cfg.timeout,
         "secret_name": runtime.cfg.secret_name,
         "volume_name": runtime.cfg.volume_name,
@@ -181,13 +183,24 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     }
 
 
-def _try_build_daytona_interpreter(volume_name: str | None) -> Any | None:
+def _try_build_daytona_interpreter(cfg: ServerRuntimeConfig) -> Any | None:
     """Instantiate a DaytonaInterpreter if Daytona credentials are configured."""
     try:
         from fleet_rlm.integrations.daytona.config import DaytonaConfigError
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
-        return DaytonaInterpreter(volume_name=volume_name)
+        return DaytonaInterpreter(
+            volume_name=cfg.volume_name,
+            timeout=cfg.timeout,
+            max_llm_calls=cfg.rlm_max_llm_calls,
+            max_recursion_depth=cfg.rlm_max_depth,
+            rlm_max_iterations=cfg.rlm_max_iterations,
+            child_isolation_mode=cfg.rlm_child_isolation_mode,
+            child_fork_fallback=cfg.rlm_child_fork_fallback,
+            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
+            async_execute=cfg.interpreter_async_execute,
+        )
     except ImportError:
         return None
     except DaytonaConfigError:
@@ -196,7 +209,7 @@ def _try_build_daytona_interpreter(volume_name: str | None) -> Any | None:
 
 def build_chat_agent_context(runtime: PreparedChatRuntime):
     kwargs = _chat_agent_builder_kwargs(runtime)
-    interpreter = _try_build_daytona_interpreter(runtime.cfg.volume_name)
+    interpreter = _try_build_daytona_interpreter(runtime.cfg)
     if interpreter is not None:
         kwargs["interpreter"] = interpreter
     return build_chat_agent(**kwargs)

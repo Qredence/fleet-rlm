@@ -6,7 +6,6 @@ and diagnostics. Commands are organized by use case:
 Core commands:
     - chat: Standalone in-process interactive terminal chat
     - serve-api: Optional FastAPI server surface
-    - init: Bootstrap Claude Code scaffold assets
     - daytona-smoke: Native Daytona runtime smoke validation
 
 Usage:
@@ -25,7 +24,6 @@ from typing import Any, Callable, cast
 import typer
 
 from .commands import (
-    init_command,
     optimize_command,
     serve_api_command,
 )
@@ -67,7 +65,6 @@ def _require_config(*, error_message: str | None = None) -> Any:
     return require_current_app_config(error_message=error_message)
 
 
-_register_command("init", init_command)
 _register_command("serve-api", serve_api_command)
 _register_command("optimize", optimize_command)
 

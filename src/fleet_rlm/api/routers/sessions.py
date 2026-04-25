@@ -15,6 +15,14 @@ from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 from ..auth import AuthError, resolve_admitted_identity
 from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..runtime_services.session_helpers import (
+    optional_string as _optional_string,
+    parse_legacy_session_id as _parse_legacy_session_id,
+    parse_legacy_session_key_owner as _parse_legacy_session_key_owner,
+    parse_session_uuid as _parse_session_uuid,
+    session_external_id as _session_external_id,
+    string_or_default as _string_or_default,
+)
 from ..schemas.core import (
     DatasetResponse,
     SessionDeleteResponse,
@@ -54,35 +62,6 @@ SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
     **SESSIONS_ERROR_RESPONSES,
     404: {"description": "Session not found."},
 }
-
-
-def _string_or_default(value: object, default: str) -> str:
-    return value if isinstance(value, str) and value else default
-
-
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _parse_session_uuid(session_id: str) -> uuid.UUID:
-    try:
-        return uuid.UUID(session_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Session not found") from exc
-
-
-def _parse_legacy_session_id(session_id: str) -> int:
-    try:
-        return int(session_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Session not found") from exc
-
-
-def _session_external_id(metadata: object) -> str | None:
-    if not isinstance(metadata, dict):
-        return None
-    metadata_dict = cast(dict[str, object], metadata)
-    return _optional_string(metadata_dict.get("external_session_id"))
 
 
 async def _resolve_persisted_identity(
@@ -149,23 +128,6 @@ def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
         user_message=turn.user_message,
         assistant_message=turn.assistant_message,
         created_at=turn.created_at.isoformat(),
-    )
-
-
-def _parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None]:
-    if not isinstance(key, str):
-        return None, None
-    if key.startswith("owner:"):
-        return None, None
-    workspace_id, separator, remainder = key.partition(":")
-    if not separator:
-        return None, None
-    user_id, separator, _session_id = remainder.partition(":")
-    if not separator:
-        return None, None
-    return (
-        workspace_id or None,
-        user_id or None,
     )
 
 

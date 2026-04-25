@@ -6,10 +6,11 @@ PYTEST_FAST_MARKERS = not live_llm and not benchmark
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-ui test-integration test-e2e \
-	check quality-gate check-release check-docs check-security check-deps check-frontend api-check api-sync \
+	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server sync-scaffold
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server \
+	cloud-preflight
 
 help:
 	@echo "Setup:"
@@ -35,6 +36,7 @@ help:
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality checks"
+	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd (requires frontend pnpm install)"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
 	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"
@@ -48,13 +50,15 @@ help:
 	@echo "  make release          - Run clean + check + security + release artifacts"
 	@echo "  make release-check    - Alias for release"
 	@echo ""
+	@echo "Cloud:"
+	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
+	@echo ""
 	@echo "Utility:"
 	@echo "  make clean            - Remove caches and local generated artifacts"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
 	@echo "  make cli              - Show fleet-rlm CLI help"
 	@echo "  make mlflow           - Start a local MLflow OSS tracking server on port 5001"
-	@echo "  make sync-scaffold    - Reminder that src/fleet_rlm/scaffold is curated, not auto-synced"
 
 install:
 	uv sync
@@ -78,8 +82,7 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src \
-		--exclude "src/fleet_rlm/scaffold/**"
+	uv run ty check src
 
 test:
 	uv run pytest -q -m "$(PYTEST_FAST_MARKERS)"
@@ -102,7 +105,7 @@ test-e2e:
 		echo "No src/frontend/package.json found, skipping frontend e2e tests."; \
 	fi
 
-check: lint format-check typecheck test check-release check-docs check-frontend
+check: lint format-check typecheck test check-release check-docs check-duplicates check-frontend
 
 quality-gate: check
 
@@ -114,13 +117,16 @@ check-release:
 check-docs:
 	uv run python scripts/check_docs_quality.py
 
+check-duplicates:
+	./scripts/run_duplicate_check.zsh
+
 check-security:
 	# TODO: Remove this ignore once Pygments ships a patched release for
 	# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
 	# TODO: Remove the pip ignore once the uvx pip-audit runtime no longer
 	# pulls pip 26.0.1 / CVE-2026-3219.
 	uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219
-	uvx bandit -q -r src/fleet_rlm -x tests,src/fleet_rlm/scaffold -lll
+	uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 check-deps:
 	uvx deptry .
@@ -226,7 +232,13 @@ frontend-check:
 release-artifacts:
 	$(MAKE) build-release
 
-sync-scaffold:
-	@echo "src/fleet_rlm/scaffold is a curated Claude Code translation layer for fleet-rlm."
-	@echo "It is not auto-synced from .claude."
-	@echo "Update the packaged scaffold assets directly and validate with 'uv run fleet-rlm init --list'."
+cloud-preflight:
+	@echo "Checking fastapi CLI is available in the locked env..."
+	uv run fastapi --help >/dev/null
+	@echo "Importing fleet_rlm.api.app..."
+	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
+		uv run python -c "from fleet_rlm.api.app import app; print(f'{app.title} {app.version}')"
+	@echo "Enumerating routes from create_app()..."
+	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
+		uv run python -c "from fleet_rlm.api.main import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
+	@echo "cloud-preflight OK"

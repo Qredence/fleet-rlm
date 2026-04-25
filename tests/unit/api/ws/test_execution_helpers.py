@@ -461,5 +461,51 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
     assert agent.areset_calls == 0
 
 
+@pytest.mark.asyncio
+async def test_switch_session_restores_manifest_state_when_cache_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_state = {
+        "schema_version": "1",
+        "session_id": "session-a",
+        "turns": [{"user_message": "hi", "response": "there"}],
+        "core_memory": {"scratchpad": "saved"},
+        "daytona": {"sandbox_id": "sbx-1"},
+    }
+
+    async def _load_manifest(agent: Any, path: str) -> dict[str, Any]:
+        _ = agent
+        assert path.endswith("react-session-session-a.json")
+        return {"state": manifest_state}
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.ws.manifest.load_manifest_from_volume",
+        _load_manifest,
+    )
+
+    state = SimpleNamespace(sessions={})
+    agent = FakeChatAgent()
+
+    await switch_session_if_needed(
+        state=cast(Any, state),
+        agent=cast(Any, agent),
+        interpreter=agent.interpreter,
+        workspace_id="tenant-a",
+        user_id="user-a",
+        owner_tenant_claim="tenant-a",
+        owner_user_claim="user-a",
+        sess_id="session-a",
+        active_key=None,
+        session_record=None,
+        last_loaded_docs_path=None,
+        local_persist=_noop_persist,
+    )
+
+    assert agent.aimport_session_state_calls == 1
+    assert agent._session_state == manifest_state
+    cached = state.sessions[session_key("tenant-a", "user-a", "session-a")]
+    assert cached["manifest"]["state"] == manifest_state
+
+
 async def _noop_persist(*, include_volume_save: bool = True) -> None:
     _ = include_volume_save

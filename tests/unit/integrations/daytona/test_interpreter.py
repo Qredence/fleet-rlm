@@ -13,7 +13,10 @@ from dspy.primitives.code_interpreter import CodeInterpreterError
 
 from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+from fleet_rlm.integrations.daytona.interpreter import (
+    DaytonaInterpreter,
+    RLMChildIsolationError,
+)
 from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
@@ -158,13 +161,15 @@ class _FakeProcess:
 
 
 class _FakeSandbox:
-    def __init__(self) -> None:
-        self.id = "sbx-123"
+    def __init__(self, sandbox_id: str = "sbx-123") -> None:
+        self.id = sandbox_id
         self.code_interpreter = _FakeCodeInterpreter()
         self.fs = _FakeFs()
         self.process = _FakeProcess()
+        self.delete_calls = 0
 
     def delete(self) -> None:
+        self.delete_calls += 1
         return None
 
 
@@ -184,8 +189,10 @@ class _FakeRuntime:
         ] = []
         self.resume_calls: list[tuple[str, str | None]] = []
         self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
+        self.fork_calls: list[tuple[str | None, str | None]] = []
         self.fail_next_resume: Exception | None = None
         self.fail_next_reconcile: Exception | None = None
+        self.fail_next_fork: Exception | None = None
         self.last_spec: object | None = None
 
     async def acreate_workspace_session(
@@ -271,6 +278,30 @@ class _FakeRuntime:
     ) -> DaytonaSandboxSession:
         raise AssertionError(
             "internal Daytona flow should use areconcile_workspace_session"
+        )
+
+    def fork_sandbox(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str | None = None,
+        timeout: float = 60.0,
+    ) -> DaytonaSandboxSession:
+        del timeout
+        self.fork_calls.append((session.sandbox_id, name))
+        if self.fail_next_fork is not None:
+            exc = self.fail_next_fork
+            self.fail_next_fork = None
+            raise exc
+        return DaytonaSandboxSession(
+            sandbox=_FakeSandbox("sbx-fork"),
+            repo_url=session.repo_url,
+            ref=session.ref,
+            volume_name=session.volume_name,
+            workspace_path=session.workspace_path,
+            context_sources=list(session.context_sources),
+            volume_mount_path=session.volume_mount_path,
+            context_id=None,
         )
 
 
@@ -605,29 +636,130 @@ def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code
         )
 
 
-def test_bridge_tools_prefers_dspy_rlm_injected_llm_query() -> None:
-    """When dspy.RLM injects llm_query into interpreter._tools, the bridge
-    should use that version (fresh counter per forward) rather than the
-    interpreter's own LLMQueryMixin method."""
+def test_invoke_tool_prefers_fleet_shared_llm_query_budget() -> None:
+    """Fleet-owned llm_query callbacks must bypass dspy.RLM's fresh counters."""
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
-    # Simulate dspy.RLM injection via interpreter.tools.update(...)
-    calls: list[str] = []
+    injected_calls: list[str] = []
+    fleet_calls: list[str] = []
 
     def injected_llm_query(prompt: str) -> str:
-        calls.append(prompt)
+        injected_calls.append(prompt)
         return "injected"
 
+    def fleet_llm_query(prompt: str) -> str:
+        fleet_calls.append(prompt)
+        return "fleet"
+
     interpreter.tools = {"llm_query": injected_llm_query}
+    interpreter.llm_query = fleet_llm_query  # type: ignore[method-assign]
 
     bridge = interpreter._bridge_tools()
     assert bridge["llm_query"] is injected_llm_query
 
-    # invoke_tool should also use the injected version
     result = interpreter._invoke_tool("llm_query", ["hello"], {})
-    assert result == "injected"
-    assert calls == ["hello"]
+    assert result == "fleet"
+    assert fleet_calls == ["hello"]
+    assert injected_calls == []
+
+
+def test_invoke_tool_prefers_fleet_shared_llm_query_batched_budget() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    injected_calls: list[list[str]] = []
+    fleet_calls: list[list[str]] = []
+
+    def injected_llm_query_batched(prompts: list[str]) -> list[str]:
+        injected_calls.append(prompts)
+        return ["injected"]
+
+    def fleet_llm_query_batched(prompts: list[str]) -> list[str]:
+        fleet_calls.append(prompts)
+        return [f"fleet:{prompt}" for prompt in prompts]
+
+    interpreter.tools = {"llm_query_batched": injected_llm_query_batched}
+    interpreter.llm_query_batched = fleet_llm_query_batched  # type: ignore[method-assign]
+
+    result = interpreter._invoke_tool("llm_query_batched", [["a", "b"]], {})
+
+    assert result == ["fleet:a", "fleet:b"]
+    assert fleet_calls == [["a", "b"]]
+    assert injected_calls == []
+
+
+def test_invoke_tool_dispatches_bridged_sub_rlm() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    calls: list[tuple[str, str]] = []
+
+    def fake_sub_rlm(prompt: str, context: str = "") -> str:
+        calls.append((prompt, context))
+        return "child answer"
+
+    interpreter.sub_rlm = fake_sub_rlm  # type: ignore[method-assign]
+
+    result = interpreter._invoke_tool(
+        "sub_rlm",
+        ["solve this"],
+        {"context": "parent context"},
+    )
+
+    assert result == "child answer"
+    assert calls == [("solve this", "parent context")]
+
+
+def test_invoke_tool_dispatches_bridged_sub_rlm_batched() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_sub_rlm_batched(prompts: list[str], context: str = "") -> list[str]:
+        calls.append((prompts, context))
+        return [f"answer:{prompt}" for prompt in prompts]
+
+    interpreter.sub_rlm_batched = fake_sub_rlm_batched  # type: ignore[method-assign]
+
+    result = interpreter._invoke_tool(
+        "sub_rlm_batched",
+        [["a", "b"]],
+        {"context": "ctx"},
+    )
+
+    assert result == ["answer:a", "answer:b"]
+    assert calls == [(["a", "b"], "ctx")]
+
+
+def test_sub_rlm_sandbox_code_is_routed_through_bridge() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    bridge = interpreter._bridge_tools()
+
+    assert "sub_rlm" in bridge
+    assert interpreter._requires_bridge("answer = sub_rlm('hello')", bridge)
+    assert not interpreter._requires_bridge("answer = 1 + 1", bridge)
+
+
+def test_bridge_detection_ignores_callback_names_in_comments_and_strings() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    bridge = interpreter._bridge_tools()
+    code = "# sub_rlm('not a call')\ntext = \"llm_query('also not a call')\""
+
+    assert not interpreter._requires_bridge(code, bridge)
+    interpreter._reject_unsupported_recursive_callbacks("text = \"rlm_query('nope')\"")
+
+
+def test_bridge_detection_handles_attribute_callback_calls() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    bridge = interpreter._bridge_tools()
+
+    assert interpreter._requires_bridge("callbacks.sub_rlm('hello')", bridge)
 
 
 def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
@@ -746,7 +878,7 @@ def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_san
     assert delete_calls == 0
 
 
-def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> None:
+def test_daytona_interpreter_auto_child_forks_when_no_volume() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
     interpreter._session = runtime.session
@@ -757,8 +889,112 @@ def test_daytona_interpreter_build_delegate_child_reuses_parent_session() -> Non
     assert isinstance(child, DaytonaInterpreter)
     assert child is not interpreter
     assert child._session is not None
+    assert child._session.sandbox is not parent_sandbox
+    assert child._session.sandbox_id == "sbx-fork"
+    assert child._session.context_id is None
+    assert child.delete_session_on_shutdown is True
+    assert runtime.fork_calls
+    assert child.child_isolation_metadata == {
+        "mode": "auto",
+        "strategy": "fork",
+        "parent_sandbox_id": "sbx-123",
+        "child_sandbox_id": "sbx-fork",
+    }
+
+
+def test_daytona_interpreter_context_mode_reuses_parent_session() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime, child_isolation_mode="context")
+    interpreter._session = runtime.session
+    parent_sandbox = runtime.session.sandbox
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert isinstance(child, DaytonaInterpreter)
+    assert child._session is not None
     assert child._session.sandbox is parent_sandbox
     assert child._session.context_id is None
+    assert child.delete_context_on_shutdown is True
+    assert child.delete_session_on_shutdown is False
+    assert runtime.fork_calls == []
+    assert child.child_isolation_metadata == {
+        "mode": "context",
+        "strategy": "context",
+        "parent_sandbox_id": "sbx-123",
+        "child_sandbox_id": "sbx-123",
+    }
+
+
+def test_daytona_interpreter_auto_child_uses_clean_subpath_with_volume() -> None:
+    runtime = _FakeRuntime()
+    runtime.session.volume_name = "workspace-volume"
+    interpreter = DaytonaInterpreter(runtime=runtime, volume_name="workspace-volume")
+    interpreter._session = runtime.session
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert isinstance(child, DaytonaInterpreter)
+    assert child._session is None
+    assert child.volume_name == "workspace-volume"
+    assert child.volume_subpath is not None
+    assert child.volume_subpath.startswith("meta/rlm-children/sbx-123/")
+    assert child.delete_session_on_shutdown is True
+    assert child.delete_context_on_shutdown is False
+    assert runtime.fork_calls == []
+    assert child.child_isolation_metadata is not None
+    assert child.child_isolation_metadata["strategy"] == "clean"
+    assert child.child_isolation_metadata["reason"] == "durable_volume_mounted"
+    assert child.child_isolation_metadata["volume_name"] == "workspace-volume"
+    assert child.child_isolation_metadata["volume_subpath"] == child.volume_subpath
+
+
+def test_daytona_interpreter_fork_failure_retries_clean_child() -> None:
+    runtime = _FakeRuntime()
+    runtime.fail_next_fork = RuntimeError("fork unavailable")
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter._session = runtime.session
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert isinstance(child, DaytonaInterpreter)
+    assert runtime.fork_calls
+    assert child._session is None
+    assert child.volume_name is None
+    assert child.volume_subpath is None
+    assert child.child_isolation_metadata is not None
+    assert child.child_isolation_metadata["strategy"] == "clean"
+    assert child.child_isolation_metadata["reason"] == "fork_failed"
+    assert child.child_isolation_metadata["fallback_from"] == "fork"
+    assert child.child_isolation_metadata["fallback_status"] == "used"
+
+
+def test_daytona_interpreter_fork_failure_can_fail_closed() -> None:
+    runtime = _FakeRuntime()
+    runtime.fail_next_fork = RuntimeError("fork unavailable")
+    interpreter = DaytonaInterpreter(runtime=runtime, child_fork_fallback="fail")
+    interpreter._session = runtime.session
+
+    with pytest.raises(RLMChildIsolationError) as exc_info:
+        interpreter.build_delegate_child(remaining_llm_budget=10)
+
+    assert exc_info.value.metadata["strategy"] == "fork"
+    assert exc_info.value.metadata["fallback_status"] == "disabled"
+    assert "fork unavailable" in exc_info.value.metadata["error"]
+
+
+def test_daytona_interpreter_child_shutdown_deletes_forked_sandbox() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter._session = runtime.session
+
+    child = interpreter.build_delegate_child(remaining_llm_budget=10)
+    forked_sandbox = child._session.sandbox
+
+    child.shutdown()
+
+    assert forked_sandbox.delete_calls == 1
+    assert child._session is None
+    assert child._persisted_sandbox_id is None
 
 
 def test_daytona_interpreter_child_inherits_parent_sandbox_labels() -> None:

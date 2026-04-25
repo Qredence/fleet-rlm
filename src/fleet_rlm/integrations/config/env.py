@@ -133,6 +133,20 @@ class RlmSettings(BaseModel):
         default=8000,
         description="Maximum delegate response size before truncating for safety.",
     )
+    child_isolation_mode: Literal["auto", "context"] = Field(
+        default="auto",
+        description=(
+            "Recursive RLM child isolation policy. 'auto' creates isolated child "
+            "sandboxes; 'context' keeps legacy same-sandbox fresh-context execution."
+        ),
+    )
+    child_fork_fallback: Literal["clean", "fail"] = Field(
+        default="clean",
+        description=(
+            "Fallback policy when no-volume child sandbox fork fails. 'clean' retries "
+            "with a clean child sandbox; 'fail' returns the fork failure."
+        ),
+    )
     stdout_summary_threshold: int = Field(
         default=10000,
         description="Threshold for stdout summarization.",

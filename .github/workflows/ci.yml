@@ -184,6 +184,10 @@ jobs:
           cd src/frontend
           vp install
 
+      - name: Duplicate code detection
+        if: steps.frontend.outputs.enabled == 'true'
+        run: ./scripts/run_duplicate_check.zsh
+
       - name: Install Playwright browser
         if: steps.frontend.outputs.enabled == 'true'
         run: |

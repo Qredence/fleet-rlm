@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 
 import pytest
@@ -42,17 +41,8 @@ def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     help_text = _normalized_help_text(result.stdout)
-    for command in ("init", "serve-api", "chat", "daytona-smoke"):
+    for command in ("serve-api", "chat", "daytona-smoke"):
         assert command in help_text
-
-
-def test_init_list_shows_all_categories():
-    result = runner.invoke(app, ["init", "--list"])
-    assert result.exit_code == 0
-    assert "Available Skills:" in result.stdout
-    assert "Available Agents:" in result.stdout
-    assert "Available Teams:" in result.stdout
-    assert "Available Hooks:" in result.stdout
 
 
 def test_daytona_smoke_help_exposes_repo_and_ref_options():
@@ -67,72 +57,6 @@ def test_optimize_list_does_not_require_dataset():
     result = runner.invoke(app, ["optimize", "list"])
     assert result.exit_code == 0
     assert "Available modules:" in result.stdout
-
-
-def test_init_default_installs_all_categories(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(app, ["init", "--target", str(target)])
-    assert result.exit_code == 0
-    assert (target / "skills").exists()
-    assert (target / "agents").exists()
-    assert (target / "teams").exists()
-    assert (target / "hooks").exists()
-
-
-def test_init_teams_only(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(app, ["init", "--target", str(target), "--teams-only"])
-    assert result.exit_code == 0
-    assert (target / "teams").exists()
-    assert not (target / "skills").exists()
-    assert not (target / "agents").exists()
-    assert not (target / "hooks").exists()
-
-
-def test_init_hooks_only(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(app, ["init", "--target", str(target), "--hooks-only"])
-    assert result.exit_code == 0
-    assert (target / "hooks").exists()
-    assert not (target / "skills").exists()
-    assert not (target / "agents").exists()
-    assert not (target / "teams").exists()
-
-
-def test_init_no_teams_no_hooks(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(
-        app, ["init", "--target", str(target), "--no-teams", "--no-hooks"]
-    )
-    assert result.exit_code == 0
-    assert (target / "skills").exists()
-    assert (target / "agents").exists()
-    assert not (target / "teams").exists()
-    assert not (target / "hooks").exists()
-
-
-def test_init_rejects_multiple_only_modes(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(
-        app, ["init", "--target", str(target), "--skills-only", "--agents-only"]
-    )
-    assert result.exit_code == 1
-    assert (
-        "Only one --*-only mode" in result.stdout
-        or "Only one --*-only mode" in result.stderr
-    )
-
-
-def test_init_rejects_only_mode_with_exclusion(tmp_path: Path):
-    target = tmp_path / "claude"
-    result = runner.invoke(
-        app, ["init", "--target", str(target), "--teams-only", "--no-hooks"]
-    )
-    assert result.exit_code == 1
-    assert (
-        "--*-only modes cannot be combined" in result.stdout
-        or "--*-only modes cannot be combined" in result.stderr
-    )
 
 
 def test_resolve_server_volume_name_defaults_to_persistent_volume():

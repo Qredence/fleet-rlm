@@ -1,6 +1,6 @@
 # Explanation
 
-Conceptual documentation for the current maintained product and runtime. Historical audits and migration notes live under `docs/historical/` and `docs/notes/`.
+Conceptual documentation for the current maintained product and runtime.
 
 ## Current Concepts
 
@@ -10,6 +10,10 @@ Conceptual documentation for the current maintained product and runtime. Histori
 - [User Interaction Flows](user-flows.md)
 - [Component UML](component-uml.md)
 
-## Current-State Notes
+## Frontend
 
-- [Current Architecture and Transition Note](../notes/current-architecture-transition.md)
+- [Frontend Product Surface Guide](frontend-product-surface.md)
+
+## Architecture & Wiring
+
+- [Wiring Analysis](wiring-analysis.md)

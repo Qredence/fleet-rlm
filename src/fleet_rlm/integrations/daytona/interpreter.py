@@ -8,7 +8,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, replace
-from typing import AbstractSet, Any, Callable, Protocol, cast
+from typing import Any, Callable, Protocol, cast
 
 import dspy
 from dspy.primitives import CodeInterpreterError, FinalOutput
@@ -47,6 +47,21 @@ from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
+from .bridge_callbacks import (
+    bridge_tools,
+    invoke_tool,
+    reject_unsupported_recursive_callbacks,
+    requires_bridge,
+)
+from .child_isolation import (
+    ChildForkFallback,
+    ChildIsolationMode,
+    RLMChildIsolationError,
+    _UNSET,
+    build_delegate_child as _build_delegate_child_policy,
+    normalize_child_fork_fallback,
+    normalize_child_isolation_mode,
+)
 from .interpreter_assets import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _FINAL_OUTPUT_MARKER,
@@ -94,12 +109,17 @@ class _DaytonaInterpreterLike(
     timeout: int
     execute_timeout: int | None
     volume_name: str | None
+    volume_subpath: str | None
     repo_url: str | None
     repo_ref: str | None
     context_paths: list[str]
     sandbox_spec: SandboxSpec | None
     sandbox_labels: dict[str, str]
     sub_lm: Any
+    rlm_max_iterations: int
+    child_isolation_mode: ChildIsolationMode
+    child_fork_fallback: ChildForkFallback
+    child_isolation_metadata: dict[str, Any] | None
     llm_call_timeout: float
     delete_session_on_shutdown: bool
     delete_context_on_shutdown: bool
@@ -145,13 +165,24 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         delete_session_on_shutdown: bool,
         delete_context_on_shutdown: bool = False,
         remaining_llm_budget: int,
+        volume_name: str | None | object = _UNSET,
+        volume_subpath: str | None | object = _UNSET,
     ) -> Any:
+        child_volume_name = (
+            self.volume_name if volume_name is _UNSET else cast(str | None, volume_name)
+        )
+        child_volume_subpath = (
+            self.volume_subpath
+            if volume_subpath is _UNSET
+            else cast(str | None, volume_subpath)
+        )
         return cast(Any, self).__class__(
             runtime=runtime,
             owns_runtime=owns_runtime,
             timeout=self.timeout,
             execute_timeout=self.execute_timeout,
-            volume_name=self.volume_name,
+            volume_name=child_volume_name,
+            volume_subpath=child_volume_subpath,
             repo_url=self.repo_url,
             repo_ref=self.repo_ref,
             context_paths=list(self.context_paths),
@@ -161,6 +192,14 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             delete_context_on_shutdown=delete_context_on_shutdown,
             sub_lm=self.sub_lm,
             max_llm_calls=remaining_llm_budget,
+            max_recursion_depth=self._sub_rlm_max_depth,
+            rlm_max_iterations=self.rlm_max_iterations,
+            child_isolation_mode=self.child_isolation_mode,
+            child_fork_fallback=self.child_fork_fallback,
+            delegate_max_calls_per_turn=getattr(self, "delegate_max_calls_per_turn", 8),
+            delegate_result_truncation_chars=getattr(
+                self, "delegate_result_truncation_chars", 8000
+            ),
             llm_call_timeout=self.llm_call_timeout,
             default_execution_profile=ExecutionProfile.RLM_DELEGATE,
             async_execute=self.async_execute,
@@ -205,6 +244,9 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             "_check_and_increment_llm_calls",
             self._check_and_increment_llm_calls,
         )
+        remaining_budget = getattr(self, "_remaining_llm_budget", None)
+        if callable(remaining_budget):
+            setattr(child, "_remaining_llm_budget", remaining_budget)
         parent_depth = getattr(self, "_sub_rlm_depth", 0)
         parent_max = getattr(self, "_sub_rlm_max_depth", 2)
         initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
@@ -746,245 +788,22 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         raise CodeInterpreterError(f"Unsupported value type: {type(value).__name__}")
 
 
-def _parent_session_for_child(interpreter: Any) -> DaytonaSandboxSession | None:
-    fn = getattr(interpreter, "_parent_session_for_child", None)
-    if callable(fn) and hasattr(type(interpreter), "_parent_session_for_child"):
-        return fn()
-    parent_session = getattr(interpreter, "_session", None)
-    if parent_session is None or getattr(parent_session, "sandbox", None) is None:
-        return None
-    return parent_session
-
-
-def _build_child_interpreter(
-    interpreter: Any,
-    *,
-    runtime: DaytonaSandboxRuntime,
-    owns_runtime: bool,
-    delete_session_on_shutdown: bool,
-    delete_context_on_shutdown: bool = False,
-    remaining_llm_budget: int,
-) -> Any:
-    fn = getattr(interpreter, "_build_child_interpreter", None)
-    if callable(fn) and hasattr(type(interpreter), "_build_child_interpreter"):
-        return fn(
-            runtime=runtime,
-            owns_runtime=owns_runtime,
-            delete_session_on_shutdown=delete_session_on_shutdown,
-            delete_context_on_shutdown=delete_context_on_shutdown,
-            remaining_llm_budget=remaining_llm_budget,
-        )
-    return interpreter.__class__(
-        runtime=runtime,
-        owns_runtime=owns_runtime,
-        timeout=interpreter.timeout,
-        execute_timeout=interpreter.execute_timeout,
-        volume_name=interpreter.volume_name,
-        repo_url=interpreter.repo_url,
-        repo_ref=interpreter.repo_ref,
-        context_paths=list(interpreter.context_paths),
-        sandbox_spec=getattr(interpreter, "sandbox_spec", None),
-        sandbox_labels=interpreter.sandbox_labels,
-        delete_session_on_shutdown=delete_session_on_shutdown,
-        delete_context_on_shutdown=delete_context_on_shutdown,
-        sub_lm=interpreter.sub_lm,
-        max_llm_calls=remaining_llm_budget,
-        llm_call_timeout=interpreter.llm_call_timeout,
-        default_execution_profile=ExecutionProfile.RLM_DELEGATE,
-        async_execute=interpreter.async_execute,
-    )
-
-
-def _attach_shared_parent_session(
-    child: Any,
-    *,
-    parent_session: DaytonaSandboxSession,
-    runtime: DaytonaSandboxRuntime,
-) -> None:
-    fn = getattr(child, "_attach_shared_parent_session", None)
-    if callable(fn) and hasattr(type(child), "_attach_shared_parent_session"):
-        fn(child, parent_session=parent_session, runtime=runtime)
-        return
-    child._session = DaytonaSandboxSession(
-        sandbox=parent_session.sandbox,
-        repo_url=parent_session.repo_url,
-        ref=parent_session.ref,
-        volume_name=parent_session.volume_name,
-        workspace_path=parent_session.workspace_path,
-        context_sources=list(parent_session.context_sources),
-        volume_mount_path=parent_session.volume_mount_path,
-        context_id=None,
-    )
-    child._session._runtime_ref = runtime
-    try:
-        child._session.bind_current_async_owner()
-    except RuntimeError as exc:
-        logger = logging.getLogger(__name__)
-        logger.debug(
-            "Failed to bind Daytona sandbox session to current async owner: %s",
-            exc,
-        )
-    child._persisted_sandbox_id = parent_session.sandbox_id
-    child._persisted_workspace_path = parent_session.workspace_path
-
-
-def _propagate_parent_recursion_state(child: Any, parent: Any) -> None:
-    fn = getattr(parent, "_propagate_parent_recursion_state", None)
-    if callable(fn) and hasattr(type(parent), "_propagate_parent_recursion_state"):
-        fn(child)
-        return
-    from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
-
-    setattr(
-        child,
-        "_check_and_increment_llm_calls",
-        parent._check_and_increment_llm_calls,
-    )
-    parent_depth = getattr(parent, "_sub_rlm_depth", 0)
-    parent_max = getattr(parent, "_sub_rlm_max_depth", 2)
-    initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
-
-
 def build_delegate_child(
     interpreter: Any,
     *,
     remaining_llm_budget: int,
 ) -> Any:
-    """Build a child interpreter for sub_rlm() calls.
-
-    Optimization: reuses the parent's sandbox session with a fresh
-    execution context instead of creating a new container (~30-60s saved).
-    Falls back to a new sandbox if the parent has no active session.
-
-    Uses Daytona's ``sandbox.code_interpreter.create_context()`` for
-    isolation — see https://www.daytona.io/docs/sdk-reference
-    """
+    """Build a recursive RLM child interpreter using the isolation policy."""
     fn = getattr(interpreter, "build_delegate_child", None)
     owner_impl = getattr(type(interpreter), "build_delegate_child", None)
     owner_func = getattr(owner_impl, "__func__", owner_impl)
     daytona_func = getattr(DaytonaInterpreter, "build_delegate_child", None)
     if callable(fn) and owner_func is not None and owner_func is not daytona_func:
         return fn(remaining_llm_budget=remaining_llm_budget)
-    parent_session = _parent_session_for_child(interpreter)
-    if parent_session is not None:
-        child = _build_child_interpreter(
-            interpreter,
-            runtime=interpreter.runtime,
-            owns_runtime=False,
-            delete_session_on_shutdown=False,
-            delete_context_on_shutdown=True,
-            remaining_llm_budget=remaining_llm_budget,
-        )
-        _attach_shared_parent_session(
-            child,
-            parent_session=parent_session,
-            runtime=interpreter.runtime,
-        )
-    else:
-        runtime = DaytonaSandboxRuntime(config=interpreter.runtime._resolved_config)
-        child = _build_child_interpreter(
-            interpreter,
-            runtime=runtime,
-            owns_runtime=True,
-            delete_session_on_shutdown=True,
-            remaining_llm_budget=remaining_llm_budget,
-        )
-
-    _propagate_parent_recursion_state(child, interpreter)
-    return child
-
-
-def reject_unsupported_recursive_callbacks(
-    interpreter: Any,
-    code: str,
-    *,
-    callbacks: tuple[str, ...] = _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
-) -> None:
-    for callback_name in callbacks:
-        if f"{callback_name}(" not in code:
-            continue
-        raise CodeInterpreterError(
-            f"{callback_name}() is not available inside Daytona sandbox code. "
-            "Use llm_query()/llm_query_batched() for semantic callbacks; "
-            "recursive rlm_query* tools are agent-level only."
-        )
-
-
-def bridge_tools(
-    interpreter: Any,
-    *,
-    native_tool_names: AbstractSet[str] = _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
-) -> dict[str, Callable[..., Any]]:
-    tools = {
-        name: tool
-        for name, tool in interpreter._tools.items()
-        if name not in native_tool_names
-    }
-    # Prefer dspy.RLM-injected llm_query (fresh per-forward counter + sub_lm);
-    # fall back to interpreter methods when running outside dspy.RLM.
-    if "llm_query" not in tools:
-        tools["llm_query"] = interpreter.llm_query
-    if "llm_query_batched" not in tools:
-        tools["llm_query_batched"] = interpreter.llm_query_batched
-    # True-RLM symbolic recursion primitives (Algorithm 1, arXiv 2512.24601v2).
-    # These allow sandbox code to call sub_rlm() inside loops.
-    if "sub_rlm" not in tools and hasattr(interpreter, "sub_rlm"):
-        tools["sub_rlm"] = interpreter.sub_rlm
-    if "sub_rlm_batched" not in tools and hasattr(interpreter, "sub_rlm_batched"):
-        tools["sub_rlm_batched"] = interpreter.sub_rlm_batched
-    # Host-side document fetching bridged into the sandbox so RLM code can
-    # call fetch_document_text(url) directly instead of delegating back to
-    # the host agent via delegate_to_rlm.
-    if "fetch_document_text" not in tools:
-        from fleet_rlm.runtime.tools.document_tools import fetch_document_text
-
-        tools["fetch_document_text"] = fetch_document_text
-    return tools
-
-
-def requires_bridge(
-    interpreter: Any,
-    code: str,
-    tools: dict[str, Callable[..., Any]],
-) -> bool:
-    for tool_name in tools:
-        if f"{tool_name}(" in code:
-            return True
-    return False
-
-
-def invoke_tool(
-    interpreter: Any,
-    name: str,
-    args: list[Any],
-    kwargs: dict[str, Any],
-) -> Any:
-    try:
-        # Prefer dspy.RLM-injected tools (fresh counter + sub_lm per forward());
-        # fall back to interpreter methods for standalone use.
-        if name in interpreter._tools:
-            value = interpreter._tools[name](*args, **kwargs)
-        elif name == "llm_query":
-            prompt = args[0] if args else kwargs.get("prompt", "")
-            value = interpreter.llm_query(str(prompt))
-        elif name == "llm_query_batched":
-            prompts = args[0] if args else kwargs.get("prompts", [])
-            if not isinstance(prompts, list):
-                prompts = []
-            value = interpreter.llm_query_batched([str(item) for item in prompts])
-        elif name == "fetch_document_text":
-            from fleet_rlm.runtime.tools.document_tools import fetch_document_text
-
-            value = fetch_document_text(*args, **kwargs)
-        else:
-            raise RuntimeError(f"Unknown host callback: {name}")
-        try:
-            json.dumps(value)
-            return value
-        except TypeError:
-            return str(value)
-    except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+    return _build_delegate_child_policy(
+        interpreter,
+        remaining_llm_budget=remaining_llm_budget,
+    )
 
 
 class DaytonaInterpreter(
@@ -1002,6 +821,7 @@ class DaytonaInterpreter(
         timeout: int = 900,
         execute_timeout: int | None = None,
         volume_name: str | None = None,
+        volume_subpath: str | None = None,
         repo_url: str | None = None,
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
@@ -1011,6 +831,12 @@ class DaytonaInterpreter(
         delete_context_on_shutdown: bool = False,
         sub_lm: dspy.LM | None = None,
         max_llm_calls: int = 50,
+        max_recursion_depth: int = 2,
+        rlm_max_iterations: int = 30,
+        child_isolation_mode: ChildIsolationMode | str = "auto",
+        child_fork_fallback: ChildForkFallback | str = "clean",
+        delegate_max_calls_per_turn: int = 8,
+        delegate_result_truncation_chars: int = 8000,
         llm_call_timeout: int = 60,
         default_execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
         async_execute: bool = True,
@@ -1023,6 +849,7 @@ class DaytonaInterpreter(
         self.timeout = timeout
         self.execute_timeout = execute_timeout or timeout
         self.volume_name = volume_name
+        self.volume_subpath = str(volume_subpath or "").strip() or None
         self.volume_mount_path = str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH)
         self.repo_url = repo_url
         self.repo_ref = repo_ref
@@ -1033,6 +860,14 @@ class DaytonaInterpreter(
         self.delete_context_on_shutdown = delete_context_on_shutdown
         self.default_execution_profile = default_execution_profile
         self.async_execute = async_execute
+        self.rlm_max_iterations = max(1, int(rlm_max_iterations))
+        self.child_isolation_mode = normalize_child_isolation_mode(child_isolation_mode)
+        self.child_fork_fallback = normalize_child_fork_fallback(child_fork_fallback)
+        self.delegate_max_calls_per_turn = max(1, int(delegate_max_calls_per_turn))
+        self.delegate_result_truncation_chars = max(
+            0, int(delegate_result_truncation_chars)
+        )
+        self.child_isolation_metadata: dict[str, Any] | None = None
 
         initialize_llm_query_state(
             self,
@@ -1040,7 +875,7 @@ class DaytonaInterpreter(
             max_llm_calls=max_llm_calls,
             llm_call_timeout=llm_call_timeout,
         )
-        initialize_sub_rlm_state(self)
+        initialize_sub_rlm_state(self, max_depth=max_recursion_depth)
         self.output_fields: list[dict[str, Any]] | None
         self._tools: dict[str, Callable[..., Any]]
         self.execution_event_callback: Callable[[dict[str, Any]], None] | None
@@ -1332,6 +1167,10 @@ class DaytonaInterpreter(
             str(daytona_state.get("volume_name", "") or "").strip() or None
         )
         self.volume_name = self._persisted_volume_name or self.volume_name
+        self.volume_subpath = (
+            str(daytona_state.get("volume_subpath", "") or "").strip()
+            or self.volume_subpath
+        )
         self._session_source_key = (
             self.repo_url,
             self.repo_ref,
@@ -1375,6 +1214,7 @@ class DaytonaInterpreter(
                     if self._session is not None
                     else self._persisted_volume_name or self.volume_name
                 ),
+                "volume_subpath": self.volume_subpath,
             }
         }
 
@@ -1394,6 +1234,10 @@ class DaytonaInterpreter(
             return
         session = await self._aensure_session_impl()
         await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
+        if self.child_isolation_metadata and session.sandbox_id:
+            self.child_isolation_metadata.setdefault(
+                "child_sandbox_id", session.sandbox_id
+            )
         self._started = True
 
     def shutdown(self) -> None:
@@ -1554,17 +1398,22 @@ class DaytonaInterpreter(
             return replace(
                 self.sandbox_spec,
                 volume_name=self.volume_name or self.sandbox_spec.volume_name,
+                volume_subpath=(
+                    self.volume_subpath or self.sandbox_spec.volume_subpath
+                ),
                 labels=labels or None,
             )
         build_sandbox_spec = getattr(self.runtime, "build_sandbox_spec", None)
         if callable(build_sandbox_spec):
             return build_sandbox_spec(
                 volume_name=self.volume_name,
+                volume_subpath=self.volume_subpath,
                 labels=labels or None,
             )
         return SandboxSpec(
             volume_name=self.volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            volume_subpath=self.volume_subpath,
             labels=labels or None,
         )
 
@@ -1771,6 +1620,10 @@ class DaytonaInterpreter(
             metadata["workspace_path"] = workspace_path
         if volume_name:
             metadata["volume_name"] = volume_name
+        if self.volume_subpath:
+            metadata["volume_subpath"] = self.volume_subpath
+        if self.child_isolation_metadata:
+            metadata["child_isolation"] = dict(self.child_isolation_metadata)
         if self._last_sandbox_transition:
             metadata["sandbox_transition"] = self._last_sandbox_transition
         if self._runtime_failure_category:
@@ -1806,6 +1659,7 @@ class DaytonaInterpreter(
 
 __all__ = [
     "DaytonaInterpreter",
+    "RLMChildIsolationError",
     "build_delegate_child",
     "bridge_tools",
     "invoke_tool",

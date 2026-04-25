@@ -10,7 +10,7 @@ import pytest
 # should not trigger a remote model-cost fetch.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
-pytest_plugins = ("tests.unit.fixtures_react", "tests.unit.fixtures_daytona")
+pytest_plugins = ("tests.unit.fixtures_daytona",)
 
 
 def _suite_from_path(path: Path) -> str | None:

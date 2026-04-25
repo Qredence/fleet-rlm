@@ -6,14 +6,17 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .engine import DatabaseManager
 from .models_enums import MemoryKind, MemoryScope, MemorySource
 from .models_memory import MemoryItem
 from .models_runs import ChatSession, Run
-from .repository_shared import RepositoryContextMixin, _coerce_enum
+from .repository_shared import (
+    RepositoryContextMixin,
+    _coerce_enum,
+    _count_from_stmt,
+)
 
 
 @dataclass(frozen=True)
@@ -37,9 +40,6 @@ class MemoryItemCreateRequest:
 
 class MemoryRepository(RepositoryContextMixin):
     """Memory item storage and retrieval operations."""
-
-    def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
 
     def _build_memory_items_stmt(
         self,
@@ -120,19 +120,11 @@ class MemoryRepository(RepositoryContextMixin):
         scope = _coerce_enum(request.scope, MemoryScope)
         kind = _coerce_enum(request.kind, MemoryKind)
         source = _coerce_enum(request.source, MemorySource)
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.user_id,
-                workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             stmt = (
                 insert(MemoryItem)
                 .values(
@@ -168,16 +160,11 @@ class MemoryRepository(RepositoryContextMixin):
         limit: int = 100,
         offset: int = 0,
     ) -> list[MemoryItem]:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session, tenant_id, user_id=user_id, workspace_id=resolved_workspace_id
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = self._build_memory_items_stmt(
                 tenant_id=tenant_id,
                 workspace_id=resolved_workspace_id,
@@ -202,16 +189,11 @@ class MemoryRepository(RepositoryContextMixin):
         scope: MemoryScope | None = None,
         scope_id: str | None = None,
     ) -> int:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session, tenant_id, user_id=user_id, workspace_id=resolved_workspace_id
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = self._build_memory_items_stmt(
                 tenant_id=tenant_id,
                 workspace_id=resolved_workspace_id,
@@ -221,9 +203,7 @@ class MemoryRepository(RepositoryContextMixin):
             )
             if stmt is None:
                 return 0
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            result = await session.execute(count_stmt)
-            return int(result.scalar_one())
+            return await _count_from_stmt(session, stmt)
 
 
 __all__ = [

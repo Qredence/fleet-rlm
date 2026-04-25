@@ -20,7 +20,6 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 
 - [Deploying the API Server](deploying-server.md)
 - [Using Notebooks](using-notebooks.md)
-- [Using Claude Code Agents](using-claude-code-agents.md)
 
 ## Reliability
 

@@ -59,6 +59,12 @@ class ServerRuntimeConfig(BaseSettings):
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_max_depth: int = 2
+    rlm_child_isolation_mode: Literal["auto", "context"] = Field(
+        default="auto", alias="RLM_CHILD_ISOLATION_MODE"
+    )
+    rlm_child_fork_fallback: Literal["clean", "fail"] = Field(
+        default="clean", alias="RLM_CHILD_FORK_FALLBACK"
+    )
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
     interpreter_async_execute: bool = True
@@ -99,6 +105,7 @@ class ServerRuntimeConfig(BaseSettings):
     entra_jwks_url: str | None = None
     entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
+    serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
 
     @field_validator(
         "agent_model",
@@ -137,6 +144,8 @@ class ServerRuntimeConfig(BaseSettings):
             rlm_max_iterations=config.agent.rlm_max_iterations,
             rlm_max_llm_calls=config.rlm_settings.max_llm_calls,
             rlm_max_depth=config.rlm_settings.max_depth,
+            rlm_child_isolation_mode=config.rlm_settings.child_isolation_mode,
+            rlm_child_fork_fallback=config.rlm_settings.child_fork_fallback,
             delegate_max_calls_per_turn=config.rlm_settings.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=config.rlm_settings.delegate_result_truncation_chars,
             interpreter_async_execute=config.interpreter.async_execute,
@@ -216,6 +225,12 @@ class ServerRuntimeConfig(BaseSettings):
             and "CORS_ALLOWED_ORIGINS" not in values
         ):
             values["cors_allowed_origins"] = ["*"] if app_env == "local" else []
+
+        # serve_ui defaults to True in local, False in staging/production.
+        # This keeps `fleet web` working while producing an API-only build
+        # for managed hosts (e.g., FastAPI Cloud).
+        if "serve_ui" not in values and "FLEET_RLM_SERVE_UI" not in values:
+            values["serve_ui"] = app_env == "local"
 
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:

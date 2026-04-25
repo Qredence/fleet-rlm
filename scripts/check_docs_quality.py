@@ -22,6 +22,7 @@ EXTERNAL_PREFIXES = (
 )
 
 LEGACY_DOC_DIRS = ("artifacts", "plans", "references", "reviews")
+INACTIVE_DOC_DIRS = ("internal",)
 LEGACY_EXPLANATION_MARKERS = (
     Path("explanation/README.md"),
     Path("explanation/architecture.md"),
@@ -35,7 +36,12 @@ CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
 
 def iter_docs_files(docs_root: Path) -> list[Path]:
-    return sorted(p for p in docs_root.rglob("*.md") if p.is_file())
+    return sorted(
+        p
+        for p in docs_root.rglob("*.md")
+        if p.is_file()
+        and not any(part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts)
+    )
 
 
 @functools.lru_cache(maxsize=None)

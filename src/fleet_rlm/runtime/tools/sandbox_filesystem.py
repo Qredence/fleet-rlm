@@ -57,6 +57,22 @@ def _get_sandbox_fs(ctx: _SandboxFilesystemToolContext) -> Any:
     return fs
 
 
+def _get_sandbox_session(ctx: _SandboxFilesystemToolContext) -> Any:
+    """Return the active Daytona sandbox session from the interpreter."""
+    if ctx.interpreter is None:
+        raise RuntimeError(
+            "sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter."
+        )
+    session = getattr(ctx.interpreter, "_session", None)
+    if session is None:
+        aget = getattr(ctx.interpreter, "aget_session", None)
+        if callable(aget):
+            session = _run_async_compat(aget)
+    if session is None:
+        raise RuntimeError("No Daytona sandbox session available.")
+    return session
+
+
 def _resolve_sandbox_path(ctx: _SandboxFilesystemToolContext, path: str) -> str:
     """Resolve *path* relative to the interpreter workspace path."""
     if ctx.interpreter is None:
@@ -71,6 +87,39 @@ def _resolve_sandbox_path(ctx: _SandboxFilesystemToolContext, path: str) -> str:
     return path
 
 
+def _run_session_fs_call(
+    ctx: _SandboxFilesystemToolContext,
+    path: str,
+    method_name: str,
+    *args: Any,
+) -> Any:
+    """Run a sandbox filesystem call after rebinding stale SDK handles.
+
+    Daytona async SDK objects are event-loop-bound.  ReAct tool calls often run
+    from worker threads, so using the raw ``sandbox.fs`` handle can raise
+    "Future attached to a different loop".  The session knows how to refresh the
+    sandbox handle for the current loop; call through it before touching ``fs``.
+    """
+    session = _get_sandbox_session(ctx)
+
+    async def _invoke() -> Any:
+        rebind = getattr(session, "_arebind_sandbox_if_needed", None)
+        if callable(rebind):
+            await rebind()
+        sandbox = getattr(session, "sandbox", None)
+        fs = getattr(sandbox, "fs", None)
+        if fs is None:
+            raise RuntimeError("No Daytona filesystem available.")
+        resolve = getattr(session, "_resolve_sandbox_path", None)
+        resolved = (
+            resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
+        )
+        method = getattr(fs, method_name)
+        return await _await_if_needed(method(resolved, *args))
+
+    return _run_async_compat(_invoke)
+
+
 # ---------------------------------------------------------------------------
 # Internal implementations (bound by AgentRuntime)
 # ---------------------------------------------------------------------------
@@ -80,9 +129,8 @@ def _sandbox_list_files_impl(
     ctx: _SandboxFilesystemToolContext, path: str = "."
 ) -> dict[str, Any]:
     """List files and directories in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    entries = _run_async_compat(lambda: _await_if_needed(fs.list_files(resolved)))
+    entries = _run_session_fs_call(ctx, path, "list_files")
     files: list[dict[str, Any]] = []
     dirs: list[dict[str, Any]] = []
     for entry in entries:
@@ -115,9 +163,8 @@ def _sandbox_read_file_impl(
     ctx: _SandboxFilesystemToolContext, path: str
 ) -> dict[str, Any]:
     """Read a text file from the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    raw = _run_async_compat(lambda: _await_if_needed(fs.download_file(resolved)))
+    raw = _run_session_fs_call(ctx, path, "download_file")
     if raw is None:
         content = ""
     elif isinstance(raw, str):
@@ -136,10 +183,22 @@ def _sandbox_write_file_impl(
     ctx: _SandboxFilesystemToolContext, path: str, content: str
 ) -> dict[str, Any]:
     """Write a text file to the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
     payload = content.encode("utf-8")
-    _run_async_compat(lambda: _await_if_needed(fs.upload_file(payload, resolved)))
+    session = _get_sandbox_session(ctx)
+
+    async def _upload() -> Any:
+        rebind = getattr(session, "_arebind_sandbox_if_needed", None)
+        if callable(rebind):
+            await rebind()
+        fs = getattr(getattr(session, "sandbox", None), "fs", None)
+        if fs is None:
+            raise RuntimeError("No Daytona filesystem available.")
+        resolve = getattr(session, "_resolve_sandbox_path", None)
+        upload_path = resolve(path) if callable(resolve) else resolved
+        return await _await_if_needed(fs.upload_file(payload, upload_path))
+
+    _run_async_compat(_upload)
     return {
         "status": "ok",
         "path": resolved,
@@ -178,9 +237,8 @@ def _sandbox_create_directory_impl(
                 },
             ],
         }
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    _run_async_compat(lambda: _await_if_needed(fs.create_folder(resolved, "755")))
+    _run_session_fs_call(ctx, path, "create_folder", "755")
     return {"status": "ok", "path": resolved}
 
 
@@ -188,9 +246,8 @@ def _sandbox_delete_file_impl(
     ctx: _SandboxFilesystemToolContext, path: str
 ) -> dict[str, Any]:
     """Delete a file or directory from the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    _run_async_compat(lambda: _await_if_needed(fs.delete_file(resolved)))
+    _run_session_fs_call(ctx, path, "delete_file")
     return {"status": "ok", "path": resolved, "deleted": True}
 
 
@@ -200,12 +257,9 @@ def _sandbox_move_file_impl(
     destination: str,
 ) -> dict[str, Any]:
     """Move or rename a file or directory in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved_source = _resolve_sandbox_path(ctx, source)
     resolved_dest = _resolve_sandbox_path(ctx, destination)
-    _run_async_compat(
-        lambda: _await_if_needed(fs.move_files(resolved_source, resolved_dest))
-    )
+    _run_session_fs_call(ctx, source, "move_files", resolved_dest)
     return {
         "status": "ok",
         "source": resolved_source,
@@ -217,11 +271,8 @@ def _sandbox_search_files_impl(
     ctx: _SandboxFilesystemToolContext, path: str, pattern: str
 ) -> dict[str, Any]:
     """Search files by name pattern (glob) in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    result = _run_async_compat(
-        lambda: _await_if_needed(fs.search_files(resolved, pattern))
-    )
+    result = _run_session_fs_call(ctx, path, "search_files", pattern)
     files = []
     if isinstance(result, dict):
         files = result.get("files", [])
@@ -240,11 +291,8 @@ def _sandbox_find_in_files_impl(
     ctx: _SandboxFilesystemToolContext, path: str, pattern: str
 ) -> dict[str, Any]:
     """Search file contents by text pattern (grep-like) in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    matches = _run_async_compat(
-        lambda: _await_if_needed(fs.find_files(resolved, pattern))
-    )
+    matches = _run_session_fs_call(ctx, path, "find_files", pattern)
     hits: list[dict[str, Any]] = []
     for match in matches:
         if isinstance(match, dict):

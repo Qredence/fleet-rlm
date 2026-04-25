@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import Select, and_, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,11 +35,36 @@ def _coerce_enum(value: Any, enum_cls: type) -> Any:
     return value if isinstance(value, enum_cls) else enum_cls(value)
 
 
-class _RepositoryState:
+async def _count_from_stmt(session: AsyncSession, stmt: Select[Any]) -> int:
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    return int((await session.execute(count_stmt)).scalar_one() or 0)
+
+
+class RepositoryContextMixin:
     _db: DatabaseManager
 
+    def __init__(self, database: DatabaseManager) -> None:
+        self._db = database
+        super().__init__()
 
-class RepositoryContextMixin(_RepositoryState):
+    @asynccontextmanager
+    async def _scoped_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> AsyncIterator[tuple[AsyncSession, uuid.UUID]]:
+        async with self._db.session() as session, session.begin():
+            resolved = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            await self._set_request_context(session, tenant_id, user_id, resolved)
+            yield session, resolved
+
     async def _set_request_context(
         self,
         session: AsyncSession,

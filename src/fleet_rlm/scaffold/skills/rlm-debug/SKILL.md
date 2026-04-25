@@ -70,7 +70,7 @@ The riskiest backend files are:
 - `sandbox_output` frames are transcript/debug traces
 - `/api/v1/ws/execution` remains the canonical workbench stream
 
-## Claude Code Delegation
+## Sibling Skills
 
-- Use `rlm-specialist` for cross-runtime debugging and architecture fixes
-- Use `daytona-runtime` for Daytona-specific volume and execution debugging
+- Use `daytona-runtime` for Daytona-specific volume and execution debugging.
+- Use `rlm-long-context` when the failure is tied to recursive chunk dispatch rather than single-turn runtime state.

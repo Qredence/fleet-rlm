@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .engine import DatabaseManager
 from .models_enums import JobStatus, JobType, SandboxProvider, SandboxSessionStatus
 from .models_jobs import Job
 from .models_sandbox import SandboxSession
@@ -43,21 +42,13 @@ class JobLeaseRequest:
 class JobsRepository(RepositoryContextMixin):
     """Job queue and sandbox session operations."""
 
-    def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
-
     async def create_job(self, request: JobCreateRequest) -> Job:
         status = _coerce_enum(request.status, JobStatus)
         job_type = _coerce_enum(request.job_type, JobType)
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session, request.tenant_id, workspace_id=workspace_id
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             insert_stmt = insert(Job).values(
                 tenant_id=request.tenant_id,
                 workspace_id=workspace_id,
@@ -96,15 +87,10 @@ class JobsRepository(RepositoryContextMixin):
         stale_locked_before = available_before - timedelta(
             seconds=request.lease_timeout_seconds
         )
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session, request.tenant_id, workspace_id=workspace_id
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             stmt = (
                 select(Job)
                 .where(
@@ -152,19 +138,11 @@ class JobsRepository(RepositoryContextMixin):
         created_by_user_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = insert(SandboxSession).values(
                 tenant_id=tenant_id,
                 workspace_id=resolved_workspace_id,
