@@ -105,6 +105,7 @@ class ServerRuntimeConfig(BaseSettings):
     entra_jwks_url: str | None = None
     entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
+    serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
 
     @field_validator(
         "agent_model",
@@ -224,6 +225,12 @@ class ServerRuntimeConfig(BaseSettings):
             and "CORS_ALLOWED_ORIGINS" not in values
         ):
             values["cors_allowed_origins"] = ["*"] if app_env == "local" else []
+
+        # serve_ui defaults to True in local, False in staging/production.
+        # This keeps `fleet web` working while producing an API-only build
+        # for managed hosts (e.g., FastAPI Cloud).
+        if "serve_ui" not in values and "FLEET_RLM_SERVE_UI" not in values:
+            values["serve_ui"] = app_env == "local"
 
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:

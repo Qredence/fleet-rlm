@@ -9,7 +9,8 @@ PYTEST_FAST_MARKERS = not live_llm and not benchmark
 	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server \
+	cloud-preflight
 
 help:
 	@echo "Setup:"
@@ -48,6 +49,9 @@ help:
 	@echo "  make build-release    - Build + verify publishable distributions with synced UI assets"
 	@echo "  make release          - Run clean + check + security + release artifacts"
 	@echo "  make release-check    - Alias for release"
+	@echo ""
+	@echo "Cloud:"
+	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
 	@echo ""
 	@echo "Utility:"
 	@echo "  make clean            - Remove caches and local generated artifacts"
@@ -227,3 +231,14 @@ frontend-check:
 
 release-artifacts:
 	$(MAKE) build-release
+
+cloud-preflight:
+	@echo "Checking fastapi CLI is available in the locked env..."
+	uv run fastapi --help >/dev/null
+	@echo "Importing fleet_rlm.api.app..."
+	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
+		uv run python -c "from fleet_rlm.api.app import app; print(f'{app.title} {app.version}')"
+	@echo "Enumerating routes from create_app()..."
+	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
+		uv run python -c "from fleet_rlm.api.main import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
+	@echo "cloud-preflight OK"

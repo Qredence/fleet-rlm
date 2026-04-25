@@ -183,6 +183,21 @@ def _mount_ui_unavailable_root(app: FastAPI) -> None:
         return JSONResponse(payload, status_code=503)
 
 
+def _mount_api_only_root(app: FastAPI) -> None:
+    """Expose a minimal JSON banner at `/` for API-only deploys."""
+
+    @app.get("/", include_in_schema=False)
+    async def api_only_root():
+        return JSONResponse(
+            {
+                "name": app.title,
+                "version": app.version,
+                "docs": "/docs",
+                "openapi": "/openapi.json",
+            }
+        )
+
+
 def _annotate_validation_error_schemas(app: FastAPI) -> None:
     """Fill FastAPI-generated validation schemas with property descriptions."""
 
@@ -264,10 +279,13 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         # Scalar docs are optional and only enabled when scalar_fastapi is installed.
         pass
 
-    ui_dir = _resolve_ui_dist_dir()
-    if ui_dir is not None:
-        _mount_spa(app, ui_dir)
+    if cfg.serve_ui:
+        ui_dir = _resolve_ui_dist_dir()
+        if ui_dir is not None:
+            _mount_spa(app, ui_dir)
+        else:
+            _mount_ui_unavailable_root(app)
     else:
-        _mount_ui_unavailable_root(app)
+        _mount_api_only_root(app)
 
     return app

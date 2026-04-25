@@ -52,6 +52,39 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert (
         cfg.entra_issuer_template == "https://login.microsoftonline.com/{tenantid}/v2.0"
     )
+    assert cfg.serve_ui is True
+
+
+def test_serve_ui_defaults_false_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FLEET_RLM_SERVE_UI", raising=False)
+    cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="dev",
+        auth_required=True,
+        dev_jwt_secret="prod-secret",
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        cors_allowed_origins=["https://app.example.com"],
+    )
+    assert cfg.serve_ui is False
+
+
+def test_serve_ui_respects_explicit_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FLEET_RLM_SERVE_UI", "true")
+    cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="dev",
+        auth_required=True,
+        dev_jwt_secret="prod-secret",
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        cors_allowed_origins=["https://app.example.com"],
+    )
+    assert cfg.serve_ui is True
 
 
 def test_default_config_uses_volume_name_env(monkeypatch: pytest.MonkeyPatch):

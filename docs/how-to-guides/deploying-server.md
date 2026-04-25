@@ -280,6 +280,119 @@ readinessProbe:
   periodSeconds: 5
 ```
 
+## Deploying to FastAPI Cloud
+
+[FastAPI Cloud](https://fastapicloud.com) is the managed platform from the FastAPI team (currently in private beta). It deploys Python apps via a single `fastapi deploy` command and offers a first-class **Neon** Postgres integration — the same provider Fleet-RLM uses locally.
+
+This guide assumes you have a FastAPI Cloud account and have run `fastapi login` once to authenticate the CLI.
+
+### Prerequisites
+
+1. The repository is cleanly committed (FastAPI Cloud uploads your working tree).
+2. `pyproject.toml` already declares the app entrypoint (present by default):
+
+   ```toml
+   [tool.fastapi]
+   entrypoint = "fleet_rlm.api.app:app"
+   ```
+
+3. `fastapi[standard]` is in your project dependencies (present by default).
+4. `uv.lock` is committed so the build environment is reproducible.
+
+### 1. Rotate secrets before deploy
+
+Any value that previously lived in a local `.env` must be rotated before being injected into a shared cloud environment. Minimum rotation checklist:
+
+- `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
+- `DSPY_LLM_API_KEY` / `DSPY_LM_API_KEY` (LLM provider key)
+- `DAYTONA_API_KEY`
+- `POSTHOG_API_KEY`
+- `MLFLOW_CRYPTO_KEK_PASSPHRASE` (if MLflow is enabled)
+- `DEV_JWT_SECRET` (only if you deploy with `AUTH_MODE=dev`)
+- Neon `DATABASE_URL` / `DATABASE_ADMIN_URL` — see note below
+
+If you plan to use the FastAPI Cloud Neon integration, skip rotating Neon credentials here: the platform provisions a new `DATABASE_URL` and injects it at deploy time.
+
+### 2. Wire the Neon integration
+
+In the FastAPI Cloud dashboard, link the Neon add-on and point it at the **same Neon project/branch** you use locally. The integration automatically injects `DATABASE_URL` (pooled endpoint) into your deploy. Use the pooled endpoint for runtime connections; reserve the direct endpoint (`DATABASE_ADMIN_URL`) for migrations.
+
+### 3. Set environment variables
+
+Configure these in the FastAPI Cloud dashboard before deploying. This is the minimum API-only config for a smoke test:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `APP_ENV` | `production` | Enables production guardrails in `validate_startup_or_raise` |
+| `AUTH_MODE` | `entra` (recommended) or `dev` | `entra` requires the Entra variables below |
+| `AUTH_REQUIRED` | `true` | Required in staging/production |
+| `DATABASE_REQUIRED` | `true` | Fail fast if Neon isn't reachable at startup |
+| `DATABASE_URL` | (injected by Neon add-on) | Pooled endpoint |
+| `DSPY_LM_MODEL` | e.g. `openai/gpt-4o` | LiteLLM model identifier with provider prefix |
+| `DSPY_DELEGATE_LM_MODEL` | e.g. `openai/gpt-4o-mini` | Optional but recommended |
+| `DSPY_LLM_API_KEY` | (secret) | LLM provider key |
+| `CORS_ALLOWED_ORIGINS` | `https://<your-frontend-host>` | Comma-separated; `*` is rejected in production |
+| `FLEET_RLM_SERVE_UI` | `false` | API-only deploy; frontend is hosted separately |
+| `MLFLOW_ENABLED` | `false` (or `true` with a remote `MLFLOW_TRACKING_URI`) | Local auto-start is disabled automatically when `APP_ENV=production` |
+| `MLFLOW_AUTO_START` | `false` | Belt-and-braces; prevents any local subprocess start |
+| `POSTHOG_ENABLED` | `true` or `false` | |
+| `POSTHOG_API_KEY` | (secret) | Required when `POSTHOG_ENABLED=true` |
+| `DAYTONA_API_KEY` | (secret) | Required if sandbox execution is used |
+| `DAYTONA_API_URL` | (optional override) | Defaults to Daytona's managed endpoint |
+
+If `AUTH_MODE=entra`, also set:
+
+- `ENTRA_JWKS_URL`
+- `ENTRA_AUDIENCE`
+- `ENTRA_ISSUER_TEMPLATE` (must contain `{tenantid}`)
+
+### 4. Pre-flight locally
+
+Run the included preflight target to catch problems before the cloud build:
+
+```bash
+make cloud-preflight
+```
+
+This confirms the `fastapi` CLI is in the locked env, the app imports cleanly, and all routes enumerate.
+
+### 5. Deploy
+
+```bash
+fastapi deploy
+```
+
+FastAPI Cloud reads `[tool.fastapi].entrypoint`, installs from `pyproject.toml` + `uv.lock`, and serves the app at a generated URL.
+
+### 6. Verify the deployment
+
+```bash
+curl https://<assigned-host>/health
+# => {"ok": true, "version": "0.5.0"}
+
+curl https://<assigned-host>/ready
+# => {"ready": true, "planner": "ready", "database": "ready", ...}
+
+curl https://<assigned-host>/docs
+# => Swagger UI HTML
+```
+
+Scaling note: FastAPI Cloud scales to zero. The first request after idling will pay startup cost — `/health` responds immediately (the LLM warmup is scheduled as a background task), but `/ready` may briefly return `false` while the planner LM initializes.
+
+### 7. Point your frontend at the cloud API
+
+Because `FLEET_RLM_SERVE_UI=false`, the cloud box serves JSON at `/` and does not ship the React SPA. Deploy the frontend separately (Vercel / Netlify / Cloudflare Pages) and:
+
+1. Set `VITE_API_BASE_URL=https://<assigned-host>` in the frontend's build environment.
+2. Add the frontend's public origin(s) to `CORS_ALLOWED_ORIGINS` on the API (this triggers a redeploy).
+
+### Troubleshooting
+
+- **`/` returns 503 instead of the JSON banner** — `FLEET_RLM_SERVE_UI` is probably `true` (the default in local). Set it to `false` for API-only cloud deploys.
+- **Startup fails with `AUTH_REQUIRED must be true...`** — `validate_startup_or_raise` rejects insecure production configs. Set `AUTH_REQUIRED=true` and verify CORS does not contain `*`.
+- **`/ready` returns `database: "error"`** — Neon integration either isn't linked or the pooled endpoint is unreachable. Check the dashboard and re-run `fastapi deploy`.
+- **MLflow still trying to start locally** — set both `MLFLOW_ENABLED=false` and `MLFLOW_AUTO_START=false`, or point `MLFLOW_TRACKING_URI` at a remote server.
+
 ## Deployment Examples
 
 ### Dockerfile
