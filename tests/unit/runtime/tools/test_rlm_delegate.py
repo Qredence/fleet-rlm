@@ -5,6 +5,7 @@ Covers VAL-RLM-001 through VAL-RLM-003 from the validation contract.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -53,11 +54,18 @@ class _FakeChildSession:
 
 
 class _FakeParentInterpreter:
-    def __init__(self, child: _FakeChildInterpreter, *, remaining: int = 50) -> None:
-        self.child = child
+    def __init__(
+        self,
+        child: _FakeChildInterpreter | list[_FakeChildInterpreter],
+        *,
+        remaining: int = 50,
+    ) -> None:
+        self.children = child if isinstance(child, list) else [child]
+        self.child = self.children[0]
         self.remaining = remaining
-        self.verbose = child.verbose
+        self.verbose = self.child.verbose
         self.build_calls: list[int] = []
+        self.lease_calls: list[int] = []
 
     def _remaining_llm_budget(self) -> int:
         return self.remaining
@@ -66,7 +74,17 @@ class _FakeParentInterpreter:
         self, *, remaining_llm_budget: int
     ) -> _FakeChildInterpreter:
         self.build_calls.append(remaining_llm_budget)
-        return self.child
+        index = min(len(self.build_calls) - 1, len(self.children) - 1)
+        return self.children[index]
+
+    def _install_child_budget_lease(
+        self,
+        child: _FakeChildInterpreter,
+        lease: int,
+    ) -> None:
+        self.lease_calls.append(lease)
+        child.max_llm_calls = lease
+        child.child_isolation_metadata["llm_budget_lease"] = lease
 
 
 # ---------------------------------------------------------------------------
@@ -79,8 +97,16 @@ def test_delegate_to_rlm_has_fleet_tool_marker() -> None:
     assert getattr(rlm_delegate_mod.delegate_to_rlm, "__is_fleet_tool__", False) is True
 
 
+def test_delegate_to_rlm_batched_has_fleet_tool_marker() -> None:
+    """delegate_to_rlm_batched is marked with @tool_fn for registry discovery."""
+    assert (
+        getattr(rlm_delegate_mod.delegate_to_rlm_batched, "__is_fleet_tool__", False)
+        is True
+    )
+
+
 def test_delegate_to_rlm_in_discover_tools() -> None:
-    """VAL-RLM-001: discover_tools() includes delegate_to_rlm in the registry."""
+    """VAL-RLM-001: discover_tools() includes RLM delegation tools."""
     from fleet_rlm.runtime.tools import discover_tools
 
     tools = discover_tools()
@@ -88,6 +114,9 @@ def test_delegate_to_rlm_in_discover_tools() -> None:
 
     assert "delegate_to_rlm" in names, (
         f"delegate_to_rlm not found in registry. Found: {sorted(names)}"
+    )
+    assert "delegate_to_rlm_batched" in names, (
+        f"delegate_to_rlm_batched not found in registry. Found: {sorted(names)}"
     )
 
 
@@ -101,6 +130,7 @@ def test_delegate_to_rlm_valid_for_react() -> None:
     tools = discover_tools()
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
     assert "delegate_to_rlm" in names
+    assert "delegate_to_rlm_batched" in names
 
     # dspy.ReAct construction with the full tool list must not raise
     react = dspy.ReAct(FleetAgentSignature, tools=tools, max_iters=1)
@@ -424,6 +454,139 @@ def test_delegate_to_rlm_rejects_exhausted_budget() -> None:
     assert result["status"] == "error"
     assert result["reason"] == "budget_exhausted"
     assert interpreter.build_calls == []
+
+
+def test_delegate_to_rlm_batched_preserves_order_and_leases_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Batched delegation returns ordered answers and bounded sibling budgets."""
+    import dspy
+
+    children = [_FakeChildInterpreter(started=True) for _ in range(3)]
+    interpreter = _FakeParentInterpreter(children, remaining=5)
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            return dspy.Prediction(answer=f"answer:{kw['prompt']}:{kw['context']}")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm_batched(
+            ["alpha", "beta", "gamma"],
+            context="shared",
+        )
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result == {
+        "status": "ok",
+        "results": [
+            {"query": "alpha", "answer": "answer:alpha:shared"},
+            {"query": "beta", "answer": "answer:beta:shared"},
+            {"query": "gamma", "answer": "answer:gamma:shared"},
+        ],
+    }
+    assert sorted(interpreter.build_calls) == [1, 2, 2]
+    assert sorted(interpreter.lease_calls) == [1, 2, 2]
+    assert [child.shutdown_calls for child in children] == [1, 1, 1]
+
+
+def test_delegate_to_rlm_batched_reports_partial_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failed siblings are reported without dropping successful child answers."""
+    import dspy
+
+    children = [_FakeChildInterpreter(started=True) for _ in range(3)]
+    interpreter = _FakeParentInterpreter(children, remaining=6)
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            if kw["prompt"] == "bad":
+                raise RuntimeError("child failed")
+            return dspy.Prediction(answer=f"ok:{kw['prompt']}")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm_batched(["good", "bad", "later"])
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "error"
+    assert result["results"] == [
+        {"query": "good", "answer": "ok:good"},
+        {"query": "later", "answer": "ok:later"},
+    ]
+    assert result["errors"] == [
+        {
+            "index": 1,
+            "query": "bad",
+            "reason": "child_error",
+            "error": "child failed",
+        }
+    ]
+    assert [child.shutdown_calls for child in children] == [1, 1, 1]
+
+
+def test_delegate_to_rlm_batched_overlaps_child_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sibling child RLMs run concurrently rather than serially."""
+    import dspy
+
+    children = [_FakeChildInterpreter(started=True) for _ in range(3)]
+    interpreter = _FakeParentInterpreter(children, remaining=6)
+    barrier = threading.Barrier(3)
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            barrier.wait(timeout=2)
+            return dspy.Prediction(answer=f"done:{kw['prompt']}")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"])
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "ok"
+    assert [item["answer"] for item in result["results"]] == [
+        "done:a",
+        "done:b",
+        "done:c",
+    ]
+
+
+def test_delegate_to_rlm_batched_rejects_exhausted_budget() -> None:
+    children = [_FakeChildInterpreter(started=True) for _ in range(3)]
+    interpreter = _FakeParentInterpreter(children, remaining=2)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"])
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "error"
+    assert result["reason"] == "budget_exhausted"
+    assert interpreter.build_calls == []
+    assert [error["reason"] for error in result["errors"]] == [
+        "budget_exhausted",
+        "budget_exhausted",
+        "budget_exhausted",
+    ]
 
 
 def test_delegate_to_rlm_writes_large_document_to_child_only(

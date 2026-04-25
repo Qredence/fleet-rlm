@@ -26,6 +26,7 @@ _INTERPRETER_TOOL_NAMES = frozenset(
     {
         "clear_buffer",
         "delegate_to_rlm",
+        "delegate_to_rlm_batched",
         "execute_code",
         "read_buffer",
         "sandbox_create_directory",
@@ -123,6 +124,7 @@ def _bound_runtime_tool_factories(
     from fleet_rlm.runtime.tools.rlm_delegate import (
         _delegate_interpreter,
         delegate_to_rlm as _delegate_to_rlm,
+        delegate_to_rlm_batched as _delegate_to_rlm_batched,
         set_delegate_interpreter,
     )
     from fleet_rlm.runtime.tools.sandbox_filesystem import (
@@ -184,10 +186,22 @@ def _bound_runtime_tool_factories(
         finally:
             _delegate_interpreter.reset(token)
 
+    def delegate_to_rlm_batched(
+        queries: list[str], context: str = "", document_url: str = ""
+    ) -> dict[str, Any]:
+        token = set_delegate_interpreter(interpreter)
+        try:
+            return _delegate_to_rlm_batched(
+                queries=queries, context=context, document_url=document_url
+            )
+        finally:
+            _delegate_interpreter.reset(token)
+
     factories.update(
         {
             "clear_buffer": clear_buffer,
             "delegate_to_rlm": delegate_to_rlm,
+            "delegate_to_rlm_batched": delegate_to_rlm_batched,
             "execute_code": execute_code,
             "read_buffer": read_buffer,
             "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(

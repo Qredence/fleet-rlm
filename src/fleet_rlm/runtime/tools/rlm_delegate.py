@@ -1,7 +1,7 @@
 """Simplified delegate_to_rlm tool for RLM delegation in a Daytona sandbox.
 
-Registers a single module-level ``delegate_to_rlm`` function marked with
-``@tool_fn`` so that ``discover_tools()`` can collect it.
+Registers module-level ``delegate_to_rlm`` tools marked with ``@tool_fn`` so
+that ``discover_tools()`` can collect them.
 
 The tool uses a ``contextvars.ContextVar`` to hold the active Daytona
 interpreter for the current agent turn.  Call ``set_delegate_interpreter()``
@@ -25,9 +25,10 @@ import logging
 import os
 import re
 from collections.abc import Mapping, Sequence
-from contextvars import ContextVar
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import ContextVar, copy_context
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
@@ -76,6 +77,12 @@ def delegate_to_rlm(
     invoking this tool (or via the surrounding agent runtime context that
     initialises the Daytona interpreter).
 
+    Use this for one child task. For multiple independent child tasks, prefer
+    ``delegate_to_rlm_batched`` so siblings can run concurrently. When work is
+    already inside one Daytona sandbox, prefer ``execute_code`` with
+    ``llm_query_batched()`` or ``sub_rlm_batched()`` so Python can batch and
+    aggregate inside the RLM loop.
+
     When ``document_url`` is provided, the document is fetched and extracted on
     the host before the RLM runs.  The full text is injected into the RLM
     context so sandbox code can access it without a separate download step.
@@ -107,17 +114,171 @@ def delegate_to_rlm(
             "an agent runtime context that initialises the interpreter."
         )
 
-    remaining_budget = _remaining_llm_budget(interpreter)
-    if remaining_budget <= 0:
+    llm_budget = _remaining_llm_budget(interpreter)
+    if llm_budget <= 0:
         return {
             "status": "error",
             "reason": "budget_exhausted",
             "error": "LLM call budget exhausted - cannot spawn delegate_to_rlm child.",
         }
 
+    return _run_delegate_child(
+        interpreter,
+        query,
+        context,
+        document_url,
+        llm_budget,
+    )
+
+
+@tool_fn
+def delegate_to_rlm_batched(
+    queries: list[str],
+    context: str = "",
+    document_url: str | None = None,
+) -> dict[str, Any]:
+    """Delegate independent child RLM tasks concurrently.
+
+    Use this when the top-level agent has already identified independent
+    analyses (for example Child A, Child B, Child C) and should fan them out
+    directly instead of making several sequential ``delegate_to_rlm`` calls.
+
+    Prefer sandbox-side batching when the work is already inside one Daytona
+    RLM: use ``execute_code`` with ``llm_query_batched()`` for lightweight
+    semantic prompts over sandbox data, or ``sub_rlm_batched()`` for multiple
+    recursive child RLM tasks from generated Python code.
+
+    Args:
+        queries: Ordered list of independent child RLM prompts.
+        context: Shared context supplied to every child.
+        document_url: Optional HTTP(S) document to stage for each child.
+
+    Returns:
+        A dict with ``status`` and ordered successful ``results``. When one or
+        more children fail, ``status`` is ``"error"`` and ``errors`` contains
+        per-query diagnostics while successful siblings remain in ``results``.
+    """
+    interpreter = _delegate_interpreter.get()
+    if interpreter is None:
+        raise RuntimeError(
+            "delegate_to_rlm_batched requires a bound Daytona interpreter. "
+            "Set the interpreter via set_delegate_interpreter() or run within "
+            "an agent runtime context that initialises the interpreter."
+        )
+
+    normalized_queries = [str(query) for query in queries or []]
+    if not normalized_queries:
+        return {"status": "ok", "results": []}
+    blank_indexes = [
+        index for index, query in enumerate(normalized_queries) if not query.strip()
+    ]
+    if blank_indexes:
+        return {
+            "status": "error",
+            "reason": "invalid_query",
+            "results": [],
+            "errors": [
+                {
+                    "index": index,
+                    "query": normalized_queries[index],
+                    "reason": "invalid_query",
+                    "error": "delegate_to_rlm_batched queries cannot be empty.",
+                }
+                for index in blank_indexes
+            ],
+        }
+
+    remaining_budget = _remaining_llm_budget(interpreter)
+    try:
+        leases = _delegate_budget_leases(remaining_budget, len(normalized_queries))
+    except RuntimeError as exc:
+        return {
+            "status": "error",
+            "reason": "budget_exhausted",
+            "results": [],
+            "errors": [
+                {
+                    "index": index,
+                    "query": query,
+                    "reason": "budget_exhausted",
+                    "error": str(exc),
+                }
+                for index, query in enumerate(normalized_queries)
+            ],
+        }
+
+    result_by_index: dict[int, dict[str, Any]] = {}
+    error_by_index: dict[int, dict[str, Any]] = {}
+    workers = max(1, min(len(normalized_queries), 4))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_index = {
+            pool.submit(
+                copy_context().run,
+                _run_delegate_child,
+                interpreter,
+                query,
+                context,
+                document_url,
+                leases[index],
+            ): index
+            for index, query in enumerate(normalized_queries)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            query = normalized_queries[index]
+            try:
+                raw_child_result = future.result()
+                child_result = (
+                    raw_child_result
+                    if isinstance(raw_child_result, dict)
+                    else {"status": "error", "error": str(raw_child_result)}
+                )
+            except Exception as exc:
+                child_result = {"status": "error", "error": str(exc)}
+            child_result = cast(dict[str, Any], child_result)
+
+            if child_result.get("status") == "ok":
+                result_by_index[index] = {
+                    "query": query,
+                    "answer": str(child_result.get("answer", "")),
+                }
+                continue
+
+            error_by_index[index] = {
+                "index": index,
+                "query": query,
+                "reason": str(child_result.get("reason", "child_error")),
+                "error": str(child_result.get("error", "unknown child error")),
+            }
+
+    results = [
+        result_by_index[index]
+        for index in range(len(normalized_queries))
+        if index in result_by_index
+    ]
+    errors = [
+        error_by_index[index]
+        for index in range(len(normalized_queries))
+        if index in error_by_index
+    ]
+    if errors:
+        return {"status": "error", "results": results, "errors": errors}
+    return {"status": "ok", "results": results}
+
+
+def _run_delegate_child(
+    interpreter: Any,
+    query: str,
+    context: str,
+    document_url: str | None,
+    llm_budget: int,
+) -> dict[str, Any]:
+    """Build, run, validate, and clean up one delegated child RLM."""
     child = None
     try:
-        child = interpreter.build_delegate_child(remaining_llm_budget=remaining_budget)
+        child = interpreter.build_delegate_child(remaining_llm_budget=llm_budget)
+        _install_delegate_budget_lease(interpreter, child, llm_budget)
         resolved_context = _resolve_delegate_context(
             child=child,
             query=query,
@@ -133,13 +294,13 @@ def delegate_to_rlm(
             1,
             min(
                 int(getattr(child, "rlm_max_iterations", 20)),
-                int(remaining_budget),
+                int(llm_budget),
             ),
         )
         rlm = build_recursive_subquery_rlm(
             interpreter=child,
             max_iterations=max_iterations,
-            max_llm_calls=remaining_budget,
+            max_llm_calls=llm_budget,
             verbose=bool(
                 getattr(child, "verbose", getattr(interpreter, "verbose", False))
             ),
@@ -189,6 +350,34 @@ def _remaining_llm_budget(interpreter: Any) -> int:
     else:
         remaining = int(getattr(interpreter, "max_llm_calls", 50))
     return max(0, remaining)
+
+
+def _delegate_budget_leases(remaining: int, child_count: int) -> list[int]:
+    if child_count <= 0:
+        return []
+    if remaining < child_count:
+        raise RuntimeError(
+            "LLM call budget exhausted - cannot spawn "
+            f"{child_count} delegate_to_rlm children with only {remaining} "
+            "semantic call(s) remaining."
+        )
+    base, extra = divmod(remaining, child_count)
+    return [base + (1 if index < extra else 0) for index in range(child_count)]
+
+
+def _install_delegate_budget_lease(
+    interpreter: Any,
+    child: Any,
+    lease: int,
+) -> None:
+    install = getattr(interpreter, "_install_child_budget_lease", None)
+    if callable(install):
+        install(child, lease)
+    else:
+        setattr(child, "max_llm_calls", max(1, int(lease)))
+    metadata = getattr(child, "child_isolation_metadata", None)
+    if isinstance(metadata, dict):
+        metadata["llm_budget_lease"] = max(1, int(lease))
 
 
 def _resolve_delegate_context(
@@ -539,4 +728,4 @@ def _record_child_sandbox_id(child: Any) -> None:
         metadata.setdefault("child_sandbox_id", sandbox_id)
 
 
-__all__ = ["delegate_to_rlm", "set_delegate_interpreter"]
+__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched", "set_delegate_interpreter"]

@@ -27,6 +27,11 @@ def execute_code(
     and volume-access helpers.  Use ``variables`` to inject Python values
     into the sandbox scope before execution.
 
+    Prefer this tool when data is already available in the sandbox and Python
+    should orchestrate batching or aggregation. Use ``llm_query_batched()`` in
+    the submitted code for many lightweight semantic prompts, and use
+    ``sub_rlm_batched()`` for multiple independent recursive child RLM tasks.
+
     Args:
         code: Python source code to execute in the sandbox.
         variables: Optional mapping of variable names to values injected into

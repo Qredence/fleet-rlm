@@ -250,13 +250,17 @@ class TestAgentInitWithDiscoveredTools:
             read_core_memory,
             write_core_memory,
         )
-        from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
+        from fleet_rlm.runtime.tools.rlm_delegate import (
+            delegate_to_rlm,
+            delegate_to_rlm_batched,
+        )
         from fleet_rlm.runtime.tools.sandbox_tools import execute_code
 
         monkeypatch.setattr(
             "fleet_rlm.runtime.agent.runtime.discover_tools",
             lambda: [
                 delegate_to_rlm,
+                delegate_to_rlm_batched,
                 execute_code,
                 read_buffer,
                 read_core_memory,
@@ -268,6 +272,7 @@ class TestAgentInitWithDiscoveredTools:
         tools = _tools_by_name(rt.tools)
 
         assert "delegate_to_rlm" not in tools
+        assert "delegate_to_rlm_batched" not in tools
         assert "execute_code" not in tools
         assert "read_buffer" not in tools
         assert "read_core_memory" in tools
@@ -295,7 +300,10 @@ class TestAgentInitWithDiscoveredTools:
             read_core_memory,
             write_core_memory,
         )
-        from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
+        from fleet_rlm.runtime.tools.rlm_delegate import (
+            delegate_to_rlm,
+            delegate_to_rlm_batched,
+        )
         from fleet_rlm.runtime.tools.sandbox_tools import execute_code
 
         monkeypatch.setattr(
@@ -303,6 +311,7 @@ class TestAgentInitWithDiscoveredTools:
             lambda: [
                 clear_buffer,
                 delegate_to_rlm,
+                delegate_to_rlm_batched,
                 execute_code,
                 read_buffer,
                 read_core_memory,
@@ -324,6 +333,7 @@ class TestAgentInitWithDiscoveredTools:
         assert set(tools) == {
             "clear_buffer",
             "delegate_to_rlm",
+            "delegate_to_rlm_batched",
             "execute_code",
             "read_buffer",
             "read_core_memory",
@@ -346,6 +356,13 @@ class TestAgentInitWithDiscoveredTools:
         assert tools["delegate_to_rlm"](query="q", context="c") == {
             "status": "ok",
             "answer": "q:c",
+        }
+        assert tools["delegate_to_rlm_batched"](queries=["q1", "q2"], context="c") == {
+            "status": "ok",
+            "results": [
+                {"query": "q1", "answer": "q1:c"},
+                {"query": "q2", "answer": "q2:c"},
+            ],
         }
 
     def test_max_iters_forwarded_to_agent(
