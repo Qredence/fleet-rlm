@@ -94,9 +94,9 @@ from fleet_rlm.cli.runners import run_long_context
 result = run_long_context(
     docs_path="README.md",
     query="Summarize the architecture",
-    mode="analyze",
+    mode="summarize",
 )
-print(result["answer"])
+print(result["summary"])
 ```
 
 ## Import Verification

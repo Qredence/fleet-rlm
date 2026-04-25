@@ -61,7 +61,7 @@ DSPY_LLM_API_KEY=sk-your-api-key-here
 # DSPY_LM_API_KEY=your-anthropic-key
 ```
 
-For other supported models, see the [LiteLLM model availability](../litellm-models.md) guide.
+For other supported models, see the [LiteLLM model availability](../reference/litellm-models.md) guide.
 
 ### 3. Environment Variables Reference
 

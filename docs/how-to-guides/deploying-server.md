@@ -239,7 +239,7 @@ Response:
 ```json
 {
   "ok": true,
-  "version": "0.4.99"
+  "version": "0.5.0"
 }
 ```
 

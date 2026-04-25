@@ -30,8 +30,17 @@
 * [Explanation](explanation/index.md)
   * [Product Spec](explanation/product-spec.md)
   * [fleet-rlm Concepts](explanation/concepts.md)
+  * [Architecture Overview](explanation/architecture.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
+  * [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
+  * [Wiring Analysis](explanation/wiring-analysis.md)
+
+## Specs
+
+* [Specs](specs/index.md)
+  * [Optimization Page Spec](specs/optimization-page.md)
+  * [Frontend Simplification Design](specs/frontend-simplification-design.md)
 
 ## Reference
 
@@ -43,29 +52,22 @@
   * [Database Architecture](reference/database.md)
   * [Sandbox API](reference/sandbox-api.md)
   * [Runs API](reference/runs-api.md)
-  * [Memory API](reference/memory-api.md)
+  * [Memory API](reference/retired/memory-api.md)
   * [Sandbox File System](reference/sandbox-fs.md)
   * [Source Layout](reference/source-layout.md)
   * [Frontend Architecture](reference/frontend-architecture.md)
   * [Frontend Feature Spec](reference/frontend-feature-spec.md)
   * [Frontend Backend Integration](reference/frontend-backend-integration.md)
   * [Daytona Runtime Architecture](reference/daytona-runtime-architecture.md)
+  * [LiteLLM Proxy Models](reference/litellm-models.md)
   * [Codebase Map](reference/codebase-map.md)
   * [Module Map](reference/module-map.md)
   * [Architecture Decision Records](reference/adr/README.md)
     * [ADR-001: RLM Runtime Architecture](reference/adr/001-rlm-runtime-architecture.md)
     * [ADR-003: Neon/Postgres with RLS](reference/adr/003-neon-postgres-rls-persistence.md)
     * [ADR-004: Dual Auth Modes](reference/adr/004-dual-auth-modes.md)
-  * [Release Notes 0.4.99](reference/release-notes-0.4.99.md)
-  * [Release Notes 0.4.94](reference/release-notes-0.4.94.md)
-
-## Architecture & Internals
-
-* [Architecture Overview](architecture.md)
-* [Frontend Product Surface Guide](guides/frontend-product-surface.md)
-* [Optimization Page Spec](specs/optimization-page.md)
-* [Wiring Analysis](wiring-analysis.md)
-* [Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)
+  * [Release Notes 0.4.99](reference/release-notes/0.4.99.md)
+  * [Release Notes 0.4.94](reference/release-notes/0.4.94.md)
 
 ## Internal History
 

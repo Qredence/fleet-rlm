@@ -19,12 +19,12 @@ Then open `http://localhost:8000`.
 ## Current Docs
 
 - [Product Spec](explanation/product-spec.md)
-- [Architecture Overview](architecture.md)
+- [Architecture Overview](explanation/architecture.md)
 - [Reference Index](reference/index.md)
 - [Explanation Index](explanation/index.md)
-- [Frontend Product Surface Guide](guides/frontend-product-surface.md)
+- [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
 - [Optimization Page Spec](specs/optimization-page.md)
-- [Wiring Analysis](wiring-analysis.md)
+- [Wiring Analysis](explanation/wiring-analysis.md)
 - [Runtime Settings](how-to-guides/runtime-settings.md)
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Frontend/Backend Integration](reference/frontend-backend-integration.md)
@@ -33,27 +33,27 @@ Then open `http://localhost:8000`.
 
 - [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
 - [Runs API](reference/runs-api.md) — Execution trace step browsing
-- [Memory API](reference/memory-api.md) — Scoped memory item queries
+- [Memory API](reference/retired/memory-api.md) — Retired product surface
 
 ## Use the Product
 
 - [Installation](how-to-guides/installation.md)
 - [Runtime settings](how-to-guides/runtime-settings.md)
 - [Troubleshooting](how-to-guides/troubleshooting.md)
-- [LiteLLM proxy model availability](litellm-models.md)
+- [LiteLLM proxy model availability](reference/litellm-models.md)
 
 ## Build and Integrate
 
 - [HTTP and WebSocket API](reference/http-api.md)
 - [Sandbox API](reference/sandbox-api.md)
 - [Runs API](reference/runs-api.md)
-- [Memory API](reference/memory-api.md)
+- [Memory API](reference/retired/memory-api.md)
 - [Python API](reference/python-api.md)
 - [CLI reference](reference/cli.md)
 
 ## Understand the System
 
-- [Architecture overview](architecture.md)
+- [Architecture overview](explanation/architecture.md)
 - [Concepts](explanation/concepts.md)
 - [User interaction flows](explanation/user-flows.md)
 - [Component UML](explanation/component-uml.md)

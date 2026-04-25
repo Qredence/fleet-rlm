@@ -10,7 +10,6 @@ This document summarizes the current backend package layout with the live runtim
 | `src/fleet_rlm/integrations/daytona/` | Daytona substrate | interpreter, runtime/session lifecycle, filesystem helpers, diagnostics, and volume access |
 | `src/fleet_rlm/api/` | transport shell | FastAPI app factory, auth, routers, schemas, websocket transport, runtime services, and event shaping |
 | `src/fleet_rlm/cli/` | operator surface | `fleet` / `fleet-rlm` entrypoints, command registration, and terminal UX |
-| `src/fleet_rlm/scaffold/` | packaged guidance | init assets, agent prompts, skills, hooks, and team templates |
 | `src/fleet_rlm/ui/` | packaged UI assets | built frontend artifacts for installed distributions |
 | `src/fleet_rlm/utils/` | shared helpers | small reusable utilities |
 
@@ -21,7 +20,6 @@ graph TB
     CLI["cli/"] --> API
     CLI --> RUNTIME
     CLI --> INTEGRATIONS
-    CLI --> SCAFFOLD
 
     API["api/"] --> RUNTIME["runtime/"]
     API --> INTEGRATIONS["integrations/"]
@@ -81,7 +79,6 @@ Key files:
   - `api/*`
   - `runtime/*`
   - `integrations/*`
-  - `scaffold/*`
 
 Key files:
 

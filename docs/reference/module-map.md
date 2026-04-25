@@ -9,7 +9,6 @@ graph TB
     CLI["cli/"] --> API["api/"]
     CLI --> RUNTIME["runtime/"]
     CLI --> INTEGRATIONS["integrations/"]
-    CLI --> SCAFFOLD["scaffold/"]
 
     API --> RUNTIME
     API --> INTEGRATIONS
@@ -96,7 +95,7 @@ graph LR
 | Package | Role | Notable files |
 | --- | --- | --- |
 | `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
-| `integrations/database/` | Persistence boundary | `engine.py`, `models.py`, `repository.py`, `types.py` |
+| `integrations/database/` | Persistence boundary | `engine.py`, `fleet_repository.py`, `models_base.py`, `models_enums.py`, `models_identity.py`, `models_jobs.py`, `models_memory.py`, `models_optimization.py`, `models_runs.py`, `models_sandbox.py`, `repository_chat.py`, `repository_identity.py`, `repository_jobs.py`, `repository_memory.py`, `repository_optimization.py`, `repository_shared.py`, `types.py` |
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |

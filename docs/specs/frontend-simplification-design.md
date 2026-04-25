@@ -54,4 +54,4 @@ This is a structural cleanup, not a visual redesign and not a frontend/backend c
 - No backend route, websocket, or generated OpenAPI contract changes are part of this cleanup.
 - Workspace is the only in-scope feature for the first pass.
 - The preferred policy is balanced reduction: aggressively delete duplicate and speculative wrappers, but allow a few broader feature modules instead of exploding the tree into many tiny components.
-- When execution mode is enabled, write this design to `docs/superpowers/specs/2026-04-16-frontend-simplification-design.md` before creating the implementation plan.
+- When execution mode is enabled, write this design to `docs/specs/frontend-simplification-design.md` before creating the implementation plan.

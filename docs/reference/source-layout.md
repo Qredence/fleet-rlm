@@ -10,9 +10,8 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `AGENTS.md` | Backend-specific contributor guidance. |
 | `api/` | FastAPI transport, auth, schemas, routers, websocket lifecycle, runtime services, and event shaping. |
 | `cli/` | `fleet` / `fleet-rlm` entrypoints, command registration, runtime helpers, and terminal UX. |
-| `integrations/` | Config, database, observability, MCP, Daytona, and local-store integrations. |
+| `integrations/` | Config, database, observability, Daytona, and local-store integrations. |
 | `runtime/` | Shared agent loop, execution helpers, content processing, tools, runtime models, and offline quality. |
-| `scaffold/` | Bundled init assets: skills, agents, hooks, and team inboxes. |
 | `ui/` | Packaged frontend build assets used by installed distributions. |
 | `utils/` | Small shared helpers. |
 
@@ -55,11 +54,9 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `messages.py` | Websocket message parsing and validation. |
 | `terminal.py` | Terminal event shaping and ordering. |
 | `completion.py` | Completion summary and workbench hydration payload assembly. |
-| `hitl.py` | Human-in-the-loop request handling. |
 | `manifest.py` | Session manifest handling. |
 | `artifacts.py` | Artifact event helpers. |
-| `execution_support.py` | Passive execution event emitter wiring. |
-| `errors.py`, `helpers.py`, `lifecycle.py`, `types.py` | Focused helpers for errors, shutdown, task control, request normalization, and websocket utility code. |
+| `errors.py`, `helpers.py`, `lifecycle.py`, `types.py` | Focused helpers for errors, shutdown, request normalization, and websocket utility code. |
 
 ## `runtime/`
 
@@ -90,14 +87,10 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `observability/` | PostHog and MLflow integrations plus trace/request-context helpers. |
 | `daytona/` | Daytona interpreter backend, bridge/runtime helpers, diagnostics, and volume access. |
 
-## Scaffold and Assets
+## Packaged Assets
 
 | Path | Description |
 | --- | --- |
-| `scaffold/agents/` | Bundled agent prompt assets. |
-| `scaffold/hooks/` | Bundled local hook assets. |
-| `scaffold/skills/` | Bundled Codex/Claude skills exposed by `fleet-rlm init`. |
-| `scaffold/teams/` | Bundled team/inbox templates. |
 | `ui/dist/` | Packaged frontend assets for installed distributions. |
 
 ## Verification

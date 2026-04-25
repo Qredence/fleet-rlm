@@ -11,16 +11,16 @@
 ## Reference
 
 - **[Reference Index](reference/index.md)** — CLI, HTTP/WebSocket API, Python API, auth modes, database, sandbox surfaces, source layout.
-- **[Frontend Product Surface Guide](guides/frontend-product-surface.md)**
+- **[Frontend Product Surface Guide](explanation/frontend-product-surface.md)**
 - **[Optimization Page Spec](specs/optimization-page.md)**
 
 ## Architecture & Internals
 
 Read these after you've seen the product:
 
-- **[Architecture Overview](architecture.md)** — current layer ownership model.
-- **[Wiring Analysis](wiring-analysis.md)**
-- **[Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)**
+- **[Architecture Overview](explanation/architecture.md)** — current layer ownership model.
+- **[Wiring Analysis](explanation/wiring-analysis.md)**
+- **[Frontend Simplification Design](specs/frontend-simplification-design.md)**
 - **[Current Architecture and Transition Note](internal/history/current-architecture-transition.md)** — active migration boundary (internal).
 - **[Historical Phase Notes](internal/history/)** — migration history for context when reading diffs.
 
@@ -36,7 +36,7 @@ Read these after you've seen the product:
 
 - [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
 - [Runs API](reference/runs-api.md) — Execution trace step browsing
-- [Memory API](reference/memory-api.md) — Scoped memory item queries
+- [Memory API](reference/retired/memory-api.md) — Retired product surface
 
 ## Complete Table Of Contents
 
