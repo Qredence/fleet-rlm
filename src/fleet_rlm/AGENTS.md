@@ -30,7 +30,6 @@ Backend source-of-truth files:
 Artifacts and areas to treat carefully:
 
 - The bundled UI dist output is generated from the frontend build, not handwritten backend source, and may be absent in a fresh source checkout until packaging/build steps run
-- `src/fleet_rlm/scaffold/` is curated packaged guidance; update it directly rather than auto-syncing from `.claude/`
 - `migrations/` and database-facing schema changes should stay aligned with persistence behavior
 - `openapi.yaml` is generated from backend route/schema metadata and should be regenerated, not manually patched
 
@@ -51,7 +50,6 @@ Active top-level areas under `src/fleet_rlm/`:
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
 - `integrations/`: config, database, observability, and external-system integrations
-- `scaffold/`: packaged Claude Code translation assets exposed by `fleet-rlm init`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
 
@@ -67,7 +65,6 @@ Preserve these command surfaces:
 - `fleet web`
 - `fleet-rlm chat`
 - `fleet-rlm serve-api`
-- `fleet-rlm init`
 - `fleet-rlm daytona-smoke`
 
 Important CLI/runtime nuances:
