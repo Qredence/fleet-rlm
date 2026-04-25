@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -163,10 +165,7 @@ def _find_files_impl(
     try:
         from ripgrepy import Ripgrepy  # ty: ignore[unresolved-import]
     except ImportError:
-        return {
-            "status": "error",
-            "error": "ripgrepy not installed (install with 'interactive' extra)",
-        }
+        return _find_files_with_rg_cli(pattern=pattern, path=path, include=include)
 
     rg = Ripgrepy(pattern, path).json().with_filename().line_number().max_count(50)
     if include:
@@ -196,6 +195,86 @@ def _find_files_impl(
         "status": "ok",
         "pattern": pattern,
         "search_path": path,
+        "include": include or "all files",
+        "count": len(hits),
+        "hits": hits[:20],
+    }
+
+
+def _find_files_with_rg_cli(
+    *, pattern: str, path: str = ".", include: str = ""
+) -> dict[str, Any]:
+    """Fallback content search using the ripgrep CLI shipped with the package."""
+    base = Path(path).resolve()
+    if not base.exists():
+        return {
+            "status": "error",
+            "pattern": pattern,
+            "path": path,
+            "error": f"Path not found: {base}",
+        }
+
+    cmd = [
+        "rg",
+        "--json",
+        "--with-filename",
+        "--line-number",
+        "--max-count",
+        "50",
+    ]
+    if include:
+        cmd.extend(["--glob", include])
+    cmd.extend([pattern, str(base)])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        return {
+            "status": "error",
+            "pattern": pattern,
+            "path": path,
+            "error": "ripgrep CLI not available",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "error",
+            "pattern": pattern,
+            "path": path,
+            "error": "ripgrep search timed out",
+        }
+
+    if proc.returncode not in {0, 1}:
+        return {
+            "status": "error",
+            "pattern": pattern,
+            "path": path,
+            "error": proc.stderr.strip() or f"ripgrep exited {proc.returncode}",
+        }
+
+    hits: list[dict[str, Any]] = []
+    for line in proc.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if item.get("type") != "match":
+            continue
+        data = item.get("data", {})
+        path_text = data.get("path", {}).get("text", "")
+        line_no = data.get("line_number")
+        line_text = data.get("lines", {}).get("text", "").rstrip("\n")
+        hits.append({"path": path_text, "line": line_no, "text": line_text})
+
+    return {
+        "status": "ok",
+        "pattern": pattern,
+        "search_path": str(base),
         "include": include or "all files",
         "count": len(hits),
         "hits": hits[:20],

@@ -188,6 +188,8 @@ class _TerminalChatSession:
             delegate_lm=delegate_lm,
             delegate_max_calls_per_turn=self.config.rlm_settings.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=self.config.rlm_settings.delegate_result_truncation_chars,
+            rlm_child_isolation_mode=self.config.rlm_settings.child_isolation_mode,
+            rlm_child_fork_fallback=self.config.rlm_settings.child_fork_fallback,
         )
 
         lm_context = build_dspy_context(lm=planner_lm) if planner_lm else nullcontext()

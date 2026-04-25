@@ -35,14 +35,17 @@ class _StubInterpreter(LLMQueryMixin):
             llm_call_timeout=llm_call_timeout,
         )
         initialize_sub_rlm_state(self, depth=depth, max_depth=max_depth)
+        self.child_budgets: list[int] = []
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
+        self.child_budgets.append(remaining_llm_budget)
         child = _StubInterpreter(
             max_llm_calls=remaining_llm_budget,
             depth=self._sub_rlm_depth + 1,
             max_depth=self._sub_rlm_max_depth,
         )
         child._check_and_increment_llm_calls = self._check_and_increment_llm_calls
+        child._remaining_llm_budget = self._remaining_llm_budget
         return child
 
     def start(self) -> None:
@@ -52,7 +55,7 @@ class _StubInterpreter(LLMQueryMixin):
         pass
 
 
-def _make_fake_prediction(answer: str = "test answer") -> Any:
+def _make_fake_prediction(answer: Any = "test answer") -> Any:
     pred = MagicMock()
     pred.answer = answer
     return pred
@@ -81,6 +84,43 @@ def test_sub_rlm_rejects_exhausted_budget() -> None:
     interp._llm_call_count = 5
     with pytest.raises(RuntimeError, match="budget exhausted"):
         interp.sub_rlm("hello")
+
+
+def test_sub_rlm_batched_siblings_share_llm_budget() -> None:
+    interp = _StubInterpreter(max_llm_calls=2, depth=0, max_depth=2)
+
+    with pytest.raises(RuntimeError, match="cannot spawn 3 sub_rlm children"):
+        interp.sub_rlm_batched(["a", "b", "c"])
+
+    assert interp._llm_call_count == 0
+    assert interp.child_budgets == []
+
+
+def test_sub_rlm_batched_siblings_receive_bounded_budget_leases() -> None:
+    interp = _StubInterpreter(max_llm_calls=5, depth=0, max_depth=2)
+
+    def _fake_build(**kwargs: Any) -> MagicMock:
+        child = kwargs["interpreter"]
+
+        def _module(*, prompt: str, context: str) -> Any:
+            _ = context
+            child._check_and_increment_llm_calls(1)
+            child._check_and_increment_llm_calls(1)
+            return _make_fake_prediction(f"answer {prompt}")
+
+        return MagicMock(side_effect=_module)
+
+    with (
+        patch(
+            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            side_effect=_fake_build,
+        ),
+        pytest.raises(RuntimeError, match="sub_rlm_batched failed"),
+    ):
+        interp.sub_rlm_batched(["a", "b", "c"])
+
+    assert interp._llm_call_count <= 5
+    assert sorted(interp.child_budgets) == [1, 2, 2]
 
 
 # --- Successful execution ---
@@ -116,6 +156,36 @@ def test_sub_rlm_passes_context() -> None:
         interp.sub_rlm("classify", context="extra info")
 
     mock_module.assert_called_once_with(prompt="classify", context="extra info")
+
+
+def test_sub_rlm_null_answer_raises_runtime_error() -> None:
+    interp = _StubInterpreter(max_llm_calls=50, depth=0, max_depth=2)
+
+    with (
+        patch(
+            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            return_value=MagicMock(return_value=_make_fake_prediction(None)),
+        ),
+        pytest.raises(RuntimeError, match="without SUBMIT"),
+    ):
+        interp.sub_rlm("no submit")
+
+
+def test_sub_rlm_detects_broker_error_in_child_prediction() -> None:
+    interp = _StubInterpreter(max_llm_calls=50, depth=0, max_depth=2)
+    prediction = _make_fake_prediction("misleading answer")
+    prediction.trajectory = [
+        {"output": "[Error] Broker server failed to start within timeout"}
+    ]
+
+    with (
+        patch(
+            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            return_value=MagicMock(return_value=prediction),
+        ),
+        pytest.raises(RuntimeError, match="broker unavailable"),
+    ):
+        interp.sub_rlm("broker issue")
 
 
 def test_sub_rlm_batched_returns_ordered_results() -> None:
@@ -211,11 +281,11 @@ def test_rlm_query_still_blocked_in_sandbox_code() -> None:
     reject_unsupported_recursive_callbacks(interp, 'result = sub_rlm("hi")')
 
 
-# --- Sandbox reuse optimization ---
+# --- Child sandbox isolation policy ---
 
 
-def test_build_delegate_child_reuses_parent_sandbox() -> None:
-    """When parent has active session, child shares sandbox via fresh context."""
+def test_build_delegate_child_context_mode_reuses_parent_sandbox() -> None:
+    """Context mode preserves legacy same-sandbox fresh-context behavior."""
     from fleet_rlm.integrations.daytona.interpreter import build_delegate_child
     from fleet_rlm.integrations.daytona.runtime import (
         DaytonaSandboxSession,
@@ -251,6 +321,11 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
     parent.sub_lm = None
     parent.llm_call_timeout = 30
     parent.async_execute = True
+    parent.rlm_max_iterations = 30
+    parent.child_isolation_mode = "context"
+    parent.child_fork_fallback = "clean"
+    parent.delegate_max_calls_per_turn = 8
+    parent.delegate_result_truncation_chars = 8000
     parent._sub_rlm_depth = 0
     parent._sub_rlm_max_depth = 2
     parent._session = parent_session
@@ -266,42 +341,29 @@ def test_build_delegate_child_reuses_parent_sandbox() -> None:
     assert child._session.context_id is None
 
 
-def test_build_delegate_child_fallback_no_session() -> None:
-    """When parent has no session, child creates new sandbox."""
-    from fleet_rlm.integrations.daytona.interpreter import build_delegate_child
+def test_build_delegate_child_auto_fallback_no_session() -> None:
+    """When parent has no session, auto mode creates a clean child sandbox."""
+    from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
-    parent = MagicMock()
-    parent.runtime = MagicMock()
-    parent.runtime._resolved_config = SimpleNamespace(
+    runtime = MagicMock()
+    runtime._resolved_config = SimpleNamespace(
         api_key="test-key",
         api_url="https://daytona.invalid",
         target=None,
     )
-    parent.timeout = 60
-    parent.execute_timeout = 60
-    parent.volume_name = "vol"
-    parent.repo_url = None
-    parent.repo_ref = None
-    parent.context_paths = []
-    parent.sandbox_spec = None
-    parent.sub_lm = None
-    parent.llm_call_timeout = 30
-    parent.async_execute = True
-    parent._sub_rlm_depth = 0
-    parent._sub_rlm_max_depth = 2
-    parent._session = None  # No active session
-    parent._parent_session_for_child.return_value = None
-
-    child = build_delegate_child(parent, remaining_llm_budget=10)
-
-    # Verify fallback path was taken (child has no real session)
-    assert (
-        not isinstance(
-            getattr(child, "_session", None),
-            type(None),
-        )
-        or child._session is None
+    parent = DaytonaInterpreter(
+        runtime=runtime,
+        child_isolation_mode="auto",
+        child_fork_fallback="clean",
     )
+
+    child = parent.build_delegate_child(remaining_llm_budget=10)
+
+    assert child._session is None
+    assert child.delete_session_on_shutdown is True
+    assert child.child_isolation_metadata["mode"] == "auto"
+    assert child.child_isolation_metadata["strategy"] == "clean"
+    assert child.child_isolation_metadata["reason"] == "no_parent_session"
 
 
 # --- ThreadPoolExecutor timeout handling ---

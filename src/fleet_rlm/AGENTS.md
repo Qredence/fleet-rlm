@@ -192,6 +192,9 @@ Websocket/runtime contract rules:
 Daytona-specific boundaries:
 
 - Keep Daytona-specific behavior under `integrations/daytona/*`
+- Keep recursive child sandbox policy in `integrations/daytona/child_isolation.py`; `interpreter.py` should delegate to it instead of growing new child-creation branches inline.
+- Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge_callbacks.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
+- Keep low-level Daytona client, volume-state normalization, and durable volume layout helpers in `integrations/daytona/runtime_support.py`; `runtime.py` should stay focused on sandbox/session lifecycle.
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
@@ -199,6 +202,12 @@ Daytona-specific boundaries:
 - Keep Daytona sandbox lifecycle, client building, snapshot creation, and volume readiness in `integrations/daytona/runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
+- Keep recursive RLM child creation centralized in `integrations/daytona/interpreter.py::build_delegate_child`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.
+- Default recursive isolation is `RLM_CHILD_ISOLATION_MODE=auto`: fork no-volume parents, use clean child sandboxes with `meta/rlm-children/...` volume subpaths for volume-mounted parents, and delete child sandboxes after every recursive task. `context` mode is a local/debug opt-out only.
+- Dispatch bridged `llm_query*` and `sub_rlm*` callbacks through Daytona interpreter methods so recursion depth and `rlm_max_llm_calls` remain shared across recursive children.
+- For local host-checkout codebase questions without `repo_url`, keep `delegate_to_rlm()` snapshot staging bounded and explicit: write relevant local evidence to the isolated child sandbox under `artifacts/rlm-inputs/local_workspace_snapshot.txt`; do not silently share the parent filesystem.
+- Restore session manifests as replacement state: default core memory plus persisted memory, loaded document paths, conversation history, and Daytona interpreter state. Do not merge stale session-local memory into a new identity.
+- Do not auto-promote child sandbox files or artifacts into the parent; recursive child results return through the RLM answer.
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
 - Keep `rlm_query` as the shared agent-level recursive entrypoint; `rlm_query_batched` remains Daytona-only
 - Daytona idle lifecycle is timer-driven:
@@ -237,7 +246,7 @@ Daytona workflow:
 
 These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
 
-- **Import-time side effects in runtime packages** — `runtime/factory.py`, `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime and quality packages do not yet.
+- **Import-time side effects in runtime packages** — `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime models and quality packages do not yet.
 - **Empty module registry** — `runtime/quality/module_registry.py` has `_MODULE_ENTRYPOINTS = ()`. No optimizable modules are registered, so `list_module_metadata()` returns an empty list.
 - **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts many legacy arguments but only passes the runtime-critical subset into `AgentRuntime`; `docs_path` is loaded onto the returned runtime. The remaining ignored arguments are a known structural debt item.
 - **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.

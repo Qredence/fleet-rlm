@@ -43,6 +43,14 @@ _INTERPRETER_TOOL_NAMES = frozenset(
 )
 
 
+def _default_core_memory() -> dict[str, str]:
+    return {
+        "persona": "I am a helpful AI assistant focused on writing high-quality code.",
+        "human": "The user is a developer working on this project.",
+        "scratchpad": "",
+    }
+
+
 def _tool_name(tool: Any) -> str | None:
     return getattr(tool, "name", None) or getattr(
         getattr(tool, "func", tool), "__name__", None
@@ -272,11 +280,7 @@ class AgentRuntime:
         self.interpreter: Any | None = interpreter
         self.history: dspy.History = dspy.History(messages=[])
         self.history_max_turns: int | None = history_max_turns
-        self.core_memory: dict[str, str] = {
-            "persona": "I am a helpful AI assistant focused on writing high-quality code.",
-            "human": "The user is a developer working on this project.",
-            "scratchpad": "",
-        }
+        self.core_memory: dict[str, str] = self.default_core_memory()
 
         # Session-management hooks used by the websocket layer
         self._db_session_id: str | object | None = None
@@ -408,6 +412,10 @@ class AgentRuntime:
     # ChatAgentProtocol surface
     # -----------------------------------------------------------------
 
+    @staticmethod
+    def default_core_memory() -> dict[str, str]:
+        return _default_core_memory()
+
     def history_turns(self) -> int:
         return len(list(getattr(self.history, "messages", []) or []))
 
@@ -419,13 +427,21 @@ class AgentRuntime:
         self.loaded_document_paths.append(path)
 
     def export_session_state(self) -> dict[str, Any]:
-        return self.export_session(session_id=str(self._db_session_id or "unknown"))
+        payload = self.export_session(session_id=str(self._db_session_id or "unknown"))
+        interpreter_state = self._export_interpreter_session_state()
+        if interpreter_state:
+            payload.update(interpreter_state)
+        return payload
 
     def import_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        return self.import_session(data=state)
+        summary = self.import_session(data=state)
+        self._import_interpreter_session_state(state)
+        return summary
 
     async def aimport_session_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        return self.import_session(data=state)
+        summary = self.import_session(data=state)
+        await self._aimport_interpreter_session_state(state)
+        return summary
 
     def reset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         if clear_sandbox_buffers and self.interpreter is not None:
@@ -435,10 +451,42 @@ class AgentRuntime:
                 {},
             )
         self.history = dspy.History(messages=[])
+        self.core_memory = self.default_core_memory()
+        self.loaded_document_paths = []
+        self.batch_concurrency = None
         return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
 
     async def areset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:
         return self.reset(clear_sandbox_buffers=clear_sandbox_buffers)
+
+    def _export_interpreter_session_state(self) -> dict[str, Any]:
+        if self.interpreter is None:
+            return {}
+        export_state = getattr(self.interpreter, "export_session_state", None)
+        if not callable(export_state):
+            return {}
+        try:
+            exported = export_state()
+        except Exception:
+            return {}
+        return exported if isinstance(exported, dict) else {}
+
+    def _import_interpreter_session_state(self, state: dict[str, Any]) -> None:
+        if self.interpreter is None or "daytona" not in state:
+            return
+        import_state = getattr(self.interpreter, "import_session_state", None)
+        if not callable(import_state):
+            return
+        import_state(state)
+
+    async def _aimport_interpreter_session_state(self, state: dict[str, Any]) -> None:
+        if self.interpreter is None or "daytona" not in state:
+            return
+        async_import_state = getattr(self.interpreter, "aimport_session_state", None)
+        if callable(async_import_state):
+            await async_import_state(state)
+            return
+        self._import_interpreter_session_state(state)
 
     async def execute_command(
         self, command: str, args: dict[str, Any]

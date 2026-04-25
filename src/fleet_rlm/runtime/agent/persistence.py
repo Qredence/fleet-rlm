@@ -326,6 +326,9 @@ def export_session(
     payload = serialize_history(history, session_id)
     core_memory = getattr(runtime, "core_memory", {})
     payload["core_memory"] = dict(core_memory) if isinstance(core_memory, dict) else {}
+    loaded_document_paths = getattr(runtime, "loaded_document_paths", None)
+    if isinstance(loaded_document_paths, list):
+        payload["loaded_document_paths"] = [str(item) for item in loaded_document_paths]
     return payload
 
 
@@ -335,7 +338,7 @@ def import_session(
 ) -> dict[str, Any]:
     """Restore session state into an ``AgentRuntime`` from an exported dict.
 
-    Restores conversation history and merges core memory entries.
+    Restores conversation history, core memory, and session-local document state.
 
     Args:
         runtime: An :class:`~fleet_rlm.runtime.agent.runtime.AgentRuntime`
@@ -348,11 +351,12 @@ def import_session(
     restored = deserialize_history(data)
     runtime.history = restored
 
-    core_memory = data.get("core_memory")
-    if isinstance(core_memory, dict):
-        existing_cm = getattr(runtime, "core_memory", None)
-        if isinstance(existing_cm, dict):
-            existing_cm.update(core_memory)
+    runtime.core_memory = _restored_core_memory(runtime, data.get("core_memory"))
+    loaded_document_paths = data.get("loaded_document_paths")
+    if isinstance(loaded_document_paths, list):
+        runtime.loaded_document_paths = [str(item) for item in loaded_document_paths]
+    elif hasattr(runtime, "loaded_document_paths"):
+        runtime.loaded_document_paths = []
 
     turns_count = len(list(getattr(restored, "messages", []) or []))
     return {
@@ -360,3 +364,14 @@ def import_session(
         "session_id": str(data.get("session_id", "")),
         "history_turns": turns_count,
     }
+
+
+def _restored_core_memory(runtime: Any, persisted: Any) -> dict[str, str]:
+    default_core_memory = getattr(runtime, "default_core_memory", None)
+    if callable(default_core_memory):
+        restored = default_core_memory()
+    else:
+        restored = {}
+    if isinstance(persisted, dict):
+        restored.update({str(key): str(value) for key, value in persisted.items()})
+    return restored

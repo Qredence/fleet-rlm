@@ -73,6 +73,37 @@ Responsibilities:
 - Repo checkout, workspace path staging, and durable mounted volumes
 - Provider-specific diagnostics and volume normalization
 
+### Recursive RLM isolation
+
+Recursive RLM work has two entry points:
+
+- `delegate_to_rlm()` from the host ReAct tool registry
+- `sub_rlm()` / `sub_rlm_batched()` from code running inside a `dspy.RLM`
+
+Both entry points use `DaytonaInterpreter.build_delegate_child()` so child creation follows one backend-owned policy. The default policy is `RLM_CHILD_ISOLATION_MODE=auto`:
+
+- if the parent has no durable mounted volume, fork the parent Daytona sandbox into a child sandbox;
+- if a durable volume is mounted, create a clean child Daytona sandbox with the same repo/ref/context paths and a child-specific `volume_subpath`;
+- if fork creation fails and `RLM_CHILD_FORK_FALLBACK=clean`, retry with a clean child sandbox;
+- delete child sandboxes after each recursive task.
+
+`RLM_CHILD_ISOLATION_MODE=context` is retained only as a backend/local debugging opt-out. It preserves the previous same-sandbox fresh-context behavior and should not be treated as the production isolation contract. Child outputs return through the RLM answer; child files and artifacts are not promoted to the parent automatically.
+
+When the parent turn is analyzing a local host checkout and no `repo_url` is available to recreate that checkout in a clean child sandbox, `delegate_to_rlm()` writes a bounded text snapshot of relevant local repository files into the child sandbox under `artifacts/rlm-inputs/local_workspace_snapshot.txt` and adds that path to the child context. This preserves child sandbox isolation while giving the child enough explicit evidence to inspect local code.
+
+Sandbox code can call `llm_query()`, `llm_query_batched()`, `sub_rlm()`, and `sub_rlm_batched()` through the Daytona bridge. These callbacks dispatch to Fleet's interpreter methods, not DSPy's per-forward injected counters, so `rlm_max_llm_calls` is one shared semantic-call budget across a recursive tree. `sub_rlm_batched()` keeps the runtime parallelism cap at 4 while sharing that same budget across sibling children.
+
+### Stateful restore
+
+Session manifests on durable storage are the authoritative local restart-restore source. The manifest `state` payload restores:
+
+- `dspy.History` conversation turns;
+- `AgentRuntime` core memory, applied as default core memory plus persisted keys;
+- session-local loaded document paths;
+- Daytona interpreter state, including sandbox ID, workspace path, repo/ref/context paths, volume name, and volume subpath.
+
+Importing a session replaces session-local memory and document state instead of merging into the currently active runtime. Empty or missing state resets history, core memory, loaded documents, and sandbox buffers so switching sessions cannot leak stale agent context.
+
 ### 4. Offline quality
 
 Primary files:

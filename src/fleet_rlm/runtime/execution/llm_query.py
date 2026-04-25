@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import threading
+from collections.abc import Mapping, Sequence
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
@@ -18,10 +19,13 @@ from concurrent.futures import (
     TimeoutError as FutureTimeoutError,
 )
 from typing import Any
+from unittest.mock import Mock
 
 import dspy
 
 logger = logging.getLogger(__name__)
+
+_BROKER_ERROR_MARKER = "Broker server failed to start"
 
 
 class LLMQueryMixin:
@@ -289,6 +293,7 @@ class LLMQueryMixin:
                 f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached."
             )
 
+        leases = self._sub_rlm_budget_leases(len(prompts))
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
         workers = max(1, min(len(prompts), 4))
@@ -300,6 +305,7 @@ class LLMQueryMixin:
                     self._execute_sub_rlm,
                     p,
                     context,
+                    leases[i],
                 ): i
                 for i, p in enumerate(prompts)
             }
@@ -321,7 +327,12 @@ class LLMQueryMixin:
 
         return [results[i] for i in range(len(prompts))]
 
-    def _execute_sub_rlm(self, prompt: str, context: str = "") -> str:
+    def _execute_sub_rlm(
+        self,
+        prompt: str,
+        context: str = "",
+        llm_budget_lease: int | None = None,
+    ) -> str:
         """Spawn a child dspy.RLM interpreter and return its answer."""
         # Late imports to avoid circular dependencies
         from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
@@ -331,35 +342,153 @@ class LLMQueryMixin:
             raise RuntimeError(
                 "LLM call budget exhausted — cannot spawn sub_rlm child."
             )
+        child_budget = remaining
+        if llm_budget_lease is not None:
+            child_budget = max(0, min(remaining, int(llm_budget_lease)))
+        if child_budget <= 0:
+            raise RuntimeError(
+                "LLM call budget exhausted — cannot spawn sub_rlm child."
+            )
 
-        child = self.build_delegate_child(remaining_llm_budget=remaining)
+        child = self.build_delegate_child(remaining_llm_budget=child_budget)
+        if llm_budget_lease is not None:
+            self._install_child_budget_lease(child, child_budget)
+        max_iterations = max(
+            1, min(getattr(self, "rlm_max_iterations", 30), child_budget)
+        )
 
         child_module = build_recursive_subquery_rlm(
             interpreter=child,
-            max_iterations=min(30, remaining),
-            max_llm_calls=remaining,
+            max_iterations=max_iterations,
+            max_llm_calls=child_budget,
             verbose=False,
             sub_lm=self.sub_lm,
         )
 
         try:
             child.start()
+            metadata = getattr(child, "child_isolation_metadata", None)
+            session = getattr(child, "_session", None)
+            sandbox_id = getattr(session, "sandbox_id", None)
+            if isinstance(metadata, dict) and sandbox_id:
+                metadata.setdefault("child_sandbox_id", sandbox_id)
             prediction = child_module(prompt=prompt, context=context or "")
-            answer = str(getattr(prediction, "answer", "") or "")
-            return answer
+            return _validated_child_answer(prediction)
         except Exception as exc:
             logger.warning("sub_rlm child failed: %s", exc, exc_info=True)
             raise RuntimeError(f"sub_rlm failed: {exc}") from exc
         finally:
             try:
                 child.shutdown()
+                metadata = getattr(child, "child_isolation_metadata", None)
+                if isinstance(metadata, dict):
+                    metadata["cleanup_status"] = "deleted"
+                logger.info("sub_rlm child cleanup complete: %s", metadata)
             except Exception:
+                metadata = getattr(child, "child_isolation_metadata", None)
+                if isinstance(metadata, dict):
+                    metadata["cleanup_status"] = "failed"
+                logger.warning("sub_rlm child cleanup failed: %s", metadata)
                 pass  # Child may already be stopped
 
     def _remaining_llm_budget(self) -> int:
         """Return how many LLM calls remain in the shared budget."""
         with self._llm_call_lock:
             return max(0, self.max_llm_calls - self._llm_call_count)
+
+    def _sub_rlm_budget_leases(self, child_count: int) -> list[int]:
+        remaining = self._remaining_llm_budget()
+        if remaining < child_count:
+            raise RuntimeError(
+                f"LLM call budget exhausted — cannot spawn {child_count} sub_rlm "
+                f"children with only {remaining} semantic call(s) remaining."
+            )
+        base, extra = divmod(remaining, child_count)
+        return [base + (1 if idx < extra else 0) for idx in range(child_count)]
+
+    def _install_child_budget_lease(self, child: Any, lease: int) -> None:
+        parent_check = self._check_and_increment_llm_calls
+        parent_remaining = self._remaining_llm_budget
+        lock = threading.Lock()
+        consumed = 0
+        lease = max(0, int(lease))
+
+        def _check_and_increment(n: int = 1) -> None:
+            nonlocal consumed
+            n_int = int(n)
+            if n_int < 0:
+                raise ValueError("LLM call increment cannot be negative")
+            with lock:
+                if consumed + n_int > lease:
+                    raise RuntimeError(
+                        f"LLM budget lease exceeded: {consumed} + {n_int} > {lease}."
+                    )
+                parent_check(n_int)
+                consumed += n_int
+
+        def _remaining() -> int:
+            with lock:
+                local_remaining = max(0, lease - consumed)
+            return min(local_remaining, parent_remaining())
+
+        child._check_and_increment_llm_calls = _check_and_increment
+        child._remaining_llm_budget = _remaining
+        child.max_llm_calls = lease
+        metadata = getattr(child, "child_isolation_metadata", None)
+        if isinstance(metadata, dict):
+            metadata["llm_budget_lease"] = lease
+
+
+def _validated_child_answer(prediction: Any) -> str:
+    if _contains_marker(prediction, _BROKER_ERROR_MARKER):
+        raise RuntimeError("Daytona broker unavailable during child RLM execution.")
+    raw_answer = getattr(prediction, "answer", None)
+    if raw_answer is None:
+        raise RuntimeError("Child RLM completed without SUBMIT(answer=...).")
+    return str(raw_answer)
+
+
+def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
+    if _depth > 6:
+        return False
+    if isinstance(value, str):
+        return marker in value
+    if value is None or isinstance(value, (bool, int, float)):
+        return False
+    if isinstance(value, Mapping):
+        return any(
+            _contains_marker(item, marker, _depth=_depth + 1)
+            for pair in value.items()
+            for item in pair
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
+    value_dict = getattr(value, "__dict__", None)
+    if isinstance(value_dict, dict):
+        filtered = {
+            key: item
+            for key, item in value_dict.items()
+            if key
+            in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
+        }
+        if _contains_marker(filtered, marker, _depth=_depth + 1):
+            return True
+    if not isinstance(value, Mock):
+        for attr in (
+            "answer",
+            "reasoning",
+            "code",
+            "trajectory",
+            "repl_history",
+            "history",
+        ):
+            try:
+                attr_value = getattr(value, attr)
+            except Exception:
+                continue
+            if _contains_marker(attr_value, marker, _depth=_depth + 1):
+                return True
+    return False
 
 
 def metadata_summary(

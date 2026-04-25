@@ -8,6 +8,7 @@ Fleet-rlm extends DSPy with `dspy.RLM`, a recursive language model runtime that 
 
 - **Long-context reasoning**: The sandbox can load and process documents that exceed typical context limits
 - **Code execution**: Run Python code to explore data, manipulate files, and call APIs
+- **Isolated recursion**: Delegate calls and nested `sub_rlm()` calls run in child Daytona sandboxes by default
 - **Tool orchestration**: Use sandbox helpers (`peek`, `grep`, `chunk_by_size`) alongside LLM reasoning
 - **MLflow tracing**: Capture execution traces for debugging and optimization
 
@@ -291,6 +292,17 @@ result = rlm(
 print(result.answer)
 ```
 
+By default, child RLMs are isolated from their parent sandbox:
+
+- `delegate_to_rlm()` builds a child interpreter before constructing `dspy.RLM`.
+- `sub_rlm()` and `sub_rlm_batched()` use the same child-builder policy from inside RLM code.
+- With `RLM_CHILD_ISOLATION_MODE=auto`, parents without a durable volume fork a child Daytona sandbox.
+- With a durable volume mounted, children use clean Daytona sandboxes mounted at child-specific subpaths under `meta/rlm-children/`.
+- `RLM_CHILD_ISOLATION_MODE=context` preserves the previous same-sandbox fresh-context behavior for local debugging.
+- Child sandboxes are deleted after each recursive task, and child files are not promoted to the parent automatically.
+- Inside sandbox code, `llm_query()`, `llm_query_batched()`, `sub_rlm()`, and `sub_rlm_batched()` are bridged back to Fleet's interpreter methods. This keeps recursion depth and `max_llm_calls` accounting shared across the full recursive tree instead of using DSPy's fresh per-forward callback counters.
+- For local codebase questions where no `repo_url` is available, `delegate_to_rlm()` writes a bounded snapshot of relevant host repository files to the isolated child sandbox at `artifacts/rlm-inputs/local_workspace_snapshot.txt` and points the child context at that file.
+
 ## dspy.RLM Runtime Configuration
 
 The `dspy.RLM` class extends DSPy with Daytona sandbox execution. Configure it through `DaytonaInterpreter`.
@@ -325,13 +337,24 @@ interpreter = DaytonaInterpreter(
 
     # Execution limits
     max_llm_calls=100,              # Max LLM calls per session
+    max_recursion_depth=2,          # Max nested sub_rlm depth
+    rlm_max_iterations=30,          # Max child RLM iterations
     llm_call_timeout=120,           # Timeout per LLM call (seconds)
     execute_timeout=300,            # Timeout per code execution (seconds)
+    child_isolation_mode="auto",    # auto isolated child sandboxes
+    child_fork_fallback="clean",    # retry clean child if fork fails
 
     # Execution profile
     default_execution_profile=ExecutionProfile.RLM_DELEGATE,
 )
 ```
+
+Backend environment controls:
+
+| Variable | Values | Default | Purpose |
+| --- | --- | --- | --- |
+| `RLM_CHILD_ISOLATION_MODE` | `auto`, `context` | `auto` | `auto` isolates recursive RLM work in child sandboxes; `context` uses the legacy same-sandbox fresh context. |
+| `RLM_CHILD_FORK_FALLBACK` | `clean`, `fail` | `clean` | When no-volume fork creation fails, retry a clean child sandbox or fail closed. |
 
 ### Execution Profiles
 
@@ -415,6 +438,14 @@ Delegate configuration:
 | `delegate_result_truncation_chars` | Truncate delegate results longer than this                     |
 | `rlm_max_iterations`               | Max iterations for delegate RLM                                |
 | `rlm_max_llm_calls`                | Max LLM calls for delegate RLM                                 |
+| `RLM_CHILD_ISOLATION_MODE`         | Backend isolation policy for delegate and nested child RLMs    |
+| `RLM_CHILD_FORK_FALLBACK`          | Fork failure behavior in no-volume `auto` isolation            |
+
+`rlm_max_llm_calls` is a shared budget for bridged semantic callbacks (`llm_query*`) across delegate and nested child interpreters. It does not count every DSPy planner iteration. `sub_rlm_batched()` may run up to 4 child tasks concurrently, but sibling children still reserve from the same parent budget.
+
+## Stateful Session Restore
+
+Volume manifests persist the runtime state used for local restart restore. The saved `state` includes conversation history, core memory, session-local loaded documents, and Daytona interpreter state. On import, Fleet restores default core memory plus persisted keys, then replaces stale session-local memory and document state. Empty/new sessions reset history, core memory, loaded document paths, and sandbox buffers before serving the new identity.
 
 ## MLflow Tracing Integration
 

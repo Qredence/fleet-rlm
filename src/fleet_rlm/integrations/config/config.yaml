@@ -40,6 +40,8 @@ rlm_settings:
   max_output_chars: 100000
   delegate_max_calls_per_turn: 8
   delegate_result_truncation_chars: 8000
+  child_isolation_mode: ${oc.env:RLM_CHILD_ISOLATION_MODE,auto}
+  child_fork_fallback: ${oc.env:RLM_CHILD_FORK_FALLBACK,clean}
   stdout_summary_threshold: 10000
   stdout_summary_prefix_len: 200
   verbose: True

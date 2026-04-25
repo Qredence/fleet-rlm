@@ -51,10 +51,14 @@ class _FakeInterpreter:
 
     verbose = False
     _started = True
+    rlm_max_iterations = 20
+    sub_lm = None
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.shutdown_called = False
+        self.child_build_calls: list[int] = []
+        self.child_isolation_metadata = {"mode": "test", "strategy": "fake"}
 
     def execute(
         self,
@@ -67,6 +71,16 @@ class _FakeInterpreter:
 
     def shutdown(self) -> None:
         self.shutdown_called = True
+
+    def _remaining_llm_budget(self) -> int:
+        return 50
+
+    def build_delegate_child(self, *, remaining_llm_budget: int) -> "_FakeInterpreter":
+        self.child_build_calls.append(remaining_llm_budget)
+        return self
+
+    def start(self) -> None:
+        self._started = True
 
 
 @pytest.fixture()

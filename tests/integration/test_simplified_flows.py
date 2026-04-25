@@ -617,10 +617,21 @@ async def test_rlm_delegation_with_mocked_interpreter_and_rlm(
         set_delegate_interpreter,
     )
 
-    interpreter = SimpleNamespace(
+    child = SimpleNamespace(
         _started=True,
         verbose=False,
         volume_mount_path="/home/daytona/memory",
+        sub_lm=None,
+        rlm_max_iterations=20,
+        child_isolation_metadata={},
+    )
+    child.start = lambda: None
+    child.shutdown = lambda: None
+
+    interpreter = SimpleNamespace(
+        verbose=False,
+        build_delegate_child=lambda *, remaining_llm_budget: child,
+        _remaining_llm_budget=lambda: 50,
     )
 
     mock_prediction = dspy.Prediction(answer="Mocked RLM answer")

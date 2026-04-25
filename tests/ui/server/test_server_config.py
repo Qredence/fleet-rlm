@@ -121,6 +121,8 @@ def test_server_runtime_config_from_app_config_maps_shared_settings() -> None:
             "max_depth": 4,
             "delegate_max_calls_per_turn": 3,
             "delegate_result_truncation_chars": 987,
+            "child_isolation_mode": "context",
+            "child_fork_fallback": "fail",
             "max_output_chars": 4321,
         },
     )
@@ -136,6 +138,8 @@ def test_server_runtime_config_from_app_config_maps_shared_settings() -> None:
     assert cfg.rlm_max_iterations == 17
     assert cfg.rlm_max_llm_calls == 88
     assert cfg.rlm_max_depth == 4
+    assert cfg.rlm_child_isolation_mode == "context"
+    assert cfg.rlm_child_fork_fallback == "fail"
     assert cfg.delegate_max_calls_per_turn == 3
     assert cfg.delegate_result_truncation_chars == 987
     assert cfg.interpreter_async_execute is False

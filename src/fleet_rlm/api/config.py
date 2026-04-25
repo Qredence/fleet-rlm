@@ -59,6 +59,12 @@ class ServerRuntimeConfig(BaseSettings):
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_max_depth: int = 2
+    rlm_child_isolation_mode: Literal["auto", "context"] = Field(
+        default="auto", alias="RLM_CHILD_ISOLATION_MODE"
+    )
+    rlm_child_fork_fallback: Literal["clean", "fail"] = Field(
+        default="clean", alias="RLM_CHILD_FORK_FALLBACK"
+    )
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
     interpreter_async_execute: bool = True
@@ -137,6 +143,8 @@ class ServerRuntimeConfig(BaseSettings):
             rlm_max_iterations=config.agent.rlm_max_iterations,
             rlm_max_llm_calls=config.rlm_settings.max_llm_calls,
             rlm_max_depth=config.rlm_settings.max_depth,
+            rlm_child_isolation_mode=config.rlm_settings.child_isolation_mode,
+            rlm_child_fork_fallback=config.rlm_settings.child_fork_fallback,
             delegate_max_calls_per_turn=config.rlm_settings.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=config.rlm_settings.delegate_result_truncation_chars,
             interpreter_async_execute=config.interpreter.async_execute,

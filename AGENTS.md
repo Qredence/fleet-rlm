@@ -257,7 +257,11 @@ The shared backend/frontend runtime contract is **Daytona-only**:
 - `execution_mode` is a per-turn execution hint.
 - Daytona request controls: `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`
 - Durable mounted-volume roots: `memory/`, `artifacts/`, `buffers/`, `meta/`
-- Session manifests on durable storage: `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`
+- Recursive RLM children are isolated by backend policy: `RLM_CHILD_ISOLATION_MODE=auto` forks no-volume parents and uses clean child sandboxes with `meta/rlm-children/...` volume subpaths for volume-mounted parents; `context` is a local/debug opt-out only.
+- `RLM_CHILD_FORK_FALLBACK=clean|fail` controls no-volume fork failure behavior; child sandboxes are deleted after each recursive task and child artifacts are not promoted automatically.
+- Bridged `llm_query*` callbacks share `rlm_max_llm_calls` across recursive child interpreters; sandbox `sub_rlm()` / `sub_rlm_batched()` callbacks dispatch through the Daytona bridge.
+- Local host-checkout codebase delegation without `repo_url` stages a bounded evidence snapshot into the isolated child sandbox at `artifacts/rlm-inputs/local_workspace_snapshot.txt`.
+- Session manifests on durable storage: `meta/workspaces/<workspace_id>/users/<user_id>/react-session-<session_id>.json`; manifest `state` restores history, core memory, loaded document paths, and Daytona interpreter state.
 - Daytona idle lifecycle timers: `auto_stop_interval=30` (minutes), `auto_archive_interval=60` (minutes)
 
 Canonical websocket surfaces:
