@@ -273,4 +273,3 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     return app
 
 
-app = create_app()

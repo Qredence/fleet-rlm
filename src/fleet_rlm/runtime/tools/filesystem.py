@@ -224,7 +224,7 @@ def _find_files_with_rg_cli(
     ]
     if include:
         cmd.extend(["--glob", include])
-    cmd.extend([pattern, str(base)])
+    cmd.extend(["--", pattern, str(base)])
 
     try:
         proc = subprocess.run(

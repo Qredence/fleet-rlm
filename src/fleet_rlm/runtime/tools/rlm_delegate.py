@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
@@ -201,6 +202,8 @@ def _resolve_delegate_context(
     embed_threshold = 100_000  # chars
     stripped_url = (document_url or "").strip()
     if not stripped_url.startswith(("http://", "https://")):
+        if not _uses_local_host_checkout(child):
+            return resolved_context
         return _append_local_workspace_context(
             child=child,
             query=query,
@@ -348,6 +351,15 @@ def _append_local_workspace_context(
     ).strip()
 
 
+def _uses_local_host_checkout(child: Any) -> bool:
+    repo_url = str(getattr(child, "repo_url", "") or "").strip()
+    if repo_url:
+        return False
+    session = getattr(child, "_session", None)
+    session_repo_url = str(getattr(session, "repo_url", "") or "").strip()
+    return not session_repo_url
+
+
 def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:
     if not _needs_local_workspace_snapshot(query + "\n" + context):
         return None
@@ -360,14 +372,11 @@ def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:
         return None
 
     terms = _snapshot_terms(query + "\n" + context)
-    ranked = sorted(
-        candidates,
-        key=lambda path: _snapshot_score(path, terms),
-        reverse=True,
-    )
-    selected = [path for path in ranked if _snapshot_score(path, terms) > 0][:24]
+    scored_candidates = [(_snapshot_score(path, terms), path) for path in candidates]
+    ranked = sorted(scored_candidates, key=lambda item: item[0], reverse=True)
+    selected = [path for score, path in ranked if score > 0][:24]
     if not selected:
-        selected = ranked[:12]
+        selected = [path for _, path in ranked[:12]]
 
     manifest = "\n".join(str(path.relative_to(root)) for path in candidates[:400])
     sections = [
@@ -383,10 +392,10 @@ def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:
     for path in selected:
         rel = path.relative_to(root)
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                excerpt = handle.read(12_000)
         except OSError:
             continue
-        excerpt = text[: min(len(text), 12_000)]
         section = f"\n\n--- FILE: {rel} ---\n{excerpt}"
         if len(section) > remaining_chars:
             break
@@ -447,12 +456,12 @@ def _workspace_snapshot_candidates(root: Path) -> list[Path]:
         base = root / root_name
         if not base.is_dir():
             continue
-        for path in base.rglob("*"):
-            if not path.is_file() or path.suffix not in suffixes:
-                continue
-            if any(part in ignored_parts for part in path.relative_to(root).parts):
-                continue
-            paths.append(path)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [name for name in dirnames if name not in ignored_parts]
+            for filename in filenames:
+                path = Path(dirpath) / filename
+                if path.suffix in suffixes:
+                    paths.append(path)
     return sorted(paths, key=lambda p: str(p.relative_to(root)))
 
 

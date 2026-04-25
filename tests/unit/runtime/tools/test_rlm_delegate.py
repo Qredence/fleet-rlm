@@ -5,9 +5,11 @@ Covers VAL-RLM-001 through VAL-RLM-003 from the validation contract.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
+
+from fleet_rlm.runtime.tools import rlm_delegate as rlm_delegate_mod
 
 
 class _FakeChildInterpreter:
@@ -15,6 +17,7 @@ class _FakeChildInterpreter:
         self._started = started
         self.verbose = verbose
         self.sub_lm = None
+        self.repo_url: str | None = None
         self.rlm_max_iterations = 20
         self.child_isolation_metadata: dict[str, Any] = {
             "mode": "auto",
@@ -70,9 +73,7 @@ class _FakeParentInterpreter:
 
 def test_delegate_to_rlm_has_fleet_tool_marker() -> None:
     """VAL-RLM-001: delegate_to_rlm is marked with @tool_fn (__is_fleet_tool__)."""
-    from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
-
-    assert getattr(delegate_to_rlm, "__is_fleet_tool__", False) is True
+    assert getattr(rlm_delegate_mod.delegate_to_rlm, "__is_fleet_tool__", False) is True
 
 
 def test_delegate_to_rlm_in_discover_tools() -> None:
@@ -110,17 +111,12 @@ def test_delegate_to_rlm_valid_for_react() -> None:
 
 def test_delegate_to_rlm_raises_without_interpreter() -> None:
     """delegate_to_rlm raises RuntimeError when no interpreter is in context."""
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        delegate_to_rlm,
-    )
-
-    token = _delegate_interpreter.set(None)
+    token = rlm_delegate_mod._delegate_interpreter.set(None)
     try:
         with pytest.raises(RuntimeError, match="bound Daytona interpreter"):
-            delegate_to_rlm("test query")
+            rlm_delegate_mod.delegate_to_rlm("test query")
     finally:
-        _delegate_interpreter.reset(token)
+        rlm_delegate_mod._delegate_interpreter.reset(token)
 
 
 def test_delegate_to_rlm_starts_sandbox_when_not_started(
@@ -128,8 +124,6 @@ def test_delegate_to_rlm_starts_sandbox_when_not_started(
 ) -> None:
     """VAL-RLM-002: delegate_to_rlm starts the isolated child sandbox."""
     import dspy
-
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
 
     child = _FakeChildInterpreter(started=False, verbose=False)
     interpreter = _FakeParentInterpreter(child)
@@ -161,8 +155,6 @@ def test_delegate_to_rlm_reuses_started_sandbox(
     """VAL-RLM-002: delegate_to_rlm does not restart an already-started child."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
 
@@ -191,8 +183,6 @@ def test_delegate_to_rlm_builds_rlm_with_interpreter(
 ) -> None:
     """VAL-RLM-002: delegate_to_rlm constructs dspy.RLM using the bound interpreter."""
     import dspy
-
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
 
     child = _FakeChildInterpreter(started=True, verbose=True)
     interpreter = _FakeParentInterpreter(child, remaining=17)
@@ -229,8 +219,6 @@ def test_delegate_to_rlm_returns_ok_dict(
     """VAL-RLM-003: delegate_to_rlm returns dict with status='ok' and answer."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
     mock_prediction = dspy.Prediction(answer="structured answer from RLM")
@@ -256,8 +244,6 @@ def test_delegate_to_rlm_returns_error_dict_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-RLM-003: delegate_to_rlm returns dict with status='error' on exception."""
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
 
@@ -289,8 +275,6 @@ def test_delegate_to_rlm_result_is_string_or_dict(
     """VAL-RLM-003: Result is a string or dict consumable by the agent."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
     mock_prediction = dspy.Prediction(answer="agent-consumable result")
@@ -318,8 +302,6 @@ def test_delegate_to_rlm_none_document_url_is_ignored(
     """Raw JSON null optional args do not crash delegate context resolution."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
     mock_prediction = dspy.Prediction(answer="ok")
@@ -334,7 +316,7 @@ def test_delegate_to_rlm_none_document_url_is_ignored(
     try:
         result = rlm_delegate_mod.delegate_to_rlm(
             "empty answer query",
-            document_url=None,  # type: ignore[arg-type]
+            document_url=cast(str, None),
         )
     finally:
         rlm_delegate_mod._delegate_interpreter.reset(token)
@@ -348,8 +330,6 @@ def test_delegate_to_rlm_null_answer_returns_error(
 ) -> None:
     """A child that never SUBMITs an answer is surfaced as a structured error."""
     import dspy
-
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
 
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
@@ -379,8 +359,6 @@ def test_delegate_to_rlm_empty_string_answer_is_allowed(
     """An explicit empty string answer remains a successful child result."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
     mock_prediction = dspy.Prediction(answer="")
@@ -407,8 +385,6 @@ def test_delegate_to_rlm_detects_broker_error_in_prediction_state(
     """Hidden child trajectory broker failures are not returned as status:ok."""
     import dspy
 
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
     mock_prediction = dspy.Prediction(answer="misleading answer")
@@ -433,8 +409,6 @@ def test_delegate_to_rlm_detects_broker_error_in_prediction_state(
 
 
 def test_delegate_to_rlm_rejects_exhausted_budget() -> None:
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child, remaining=0)
 
@@ -456,7 +430,6 @@ def test_delegate_to_rlm_writes_large_document_to_child_only(
     import dspy
 
     import fleet_rlm.runtime.tools.document_tools as document_tools
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
 
     child = _FakeChildInterpreter(started=False, verbose=False)
     interpreter = _FakeParentInterpreter(child)
@@ -497,8 +470,6 @@ def test_delegate_to_rlm_stages_local_workspace_snapshot_for_codebase_tasks(
 ) -> None:
     """Clean child sandboxes get explicit local repo context for codebase tasks."""
     import dspy
-
-    import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
 
     (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n")
     src_dir = tmp_path / "src" / "demo"
@@ -542,6 +513,49 @@ def test_delegate_to_rlm_stages_local_workspace_snapshot_for_codebase_tasks(
     )
 
 
+def test_delegate_to_rlm_skips_local_workspace_snapshot_for_repo_children(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Repo-backed child sandboxes already have target repo context."""
+    import dspy
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    src_dir = tmp_path / "src" / "demo"
+    src_dir.mkdir(parents=True)
+    (src_dir / "runtime.py").write_text(
+        "def build_delegate_child():\n    return 'sandbox budget session'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    child = _FakeChildInterpreter(started=True, verbose=False)
+    child.repo_url = "https://github.com/example/repo.git"
+    interpreter = _FakeParentInterpreter(child)
+    seen_contexts: list[str] = []
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            seen_contexts.append(str(kw.get("context", "")))
+            return dspy.Prediction(answer="repo-backed answer")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm(
+            "Inspect the codebase implementation for sandbox budget session restore",
+        )
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "ok"
+    assert child.session.write_calls == []
+    assert "local_workspace_snapshot.txt" not in seen_contexts[0]
+
+
 # ---------------------------------------------------------------------------
 # set_delegate_interpreter utility
 # ---------------------------------------------------------------------------
@@ -551,26 +565,16 @@ def test_set_delegate_interpreter_returns_token() -> None:
     """set_delegate_interpreter returns a Token that can reset the variable."""
     from contextvars import Token
 
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        set_delegate_interpreter,
-    )
-
-    token = set_delegate_interpreter(None)
+    token = rlm_delegate_mod.set_delegate_interpreter(None)
     assert isinstance(token, Token)
-    _delegate_interpreter.reset(token)
+    rlm_delegate_mod._delegate_interpreter.reset(token)
 
 
 def test_set_delegate_interpreter_sets_value() -> None:
     """set_delegate_interpreter makes the interpreter visible to delegate_to_rlm."""
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        set_delegate_interpreter,
-    )
-
     sentinel = object()
-    token = set_delegate_interpreter(sentinel)
+    token = rlm_delegate_mod.set_delegate_interpreter(sentinel)
     try:
-        assert _delegate_interpreter.get() is sentinel
+        assert rlm_delegate_mod._delegate_interpreter.get() is sentinel
     finally:
-        _delegate_interpreter.reset(token)
+        rlm_delegate_mod._delegate_interpreter.reset(token)

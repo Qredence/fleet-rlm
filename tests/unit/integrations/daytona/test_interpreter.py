@@ -742,6 +742,26 @@ def test_sub_rlm_sandbox_code_is_routed_through_bridge() -> None:
     assert not interpreter._requires_bridge("answer = 1 + 1", bridge)
 
 
+def test_bridge_detection_ignores_callback_names_in_comments_and_strings() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    bridge = interpreter._bridge_tools()
+    code = "# sub_rlm('not a call')\ntext = \"llm_query('also not a call')\""
+
+    assert not interpreter._requires_bridge(code, bridge)
+    interpreter._reject_unsupported_recursive_callbacks("text = \"rlm_query('nope')\"")
+
+
+def test_bridge_detection_handles_attribute_callback_calls() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    bridge = interpreter._bridge_tools()
+
+    assert interpreter._requires_bridge("callbacks.sub_rlm('hello')", bridge)
+
+
 def test_bridge_tools_falls_back_to_interpreter_llm_query() -> None:
     """When no dspy.RLM injection has happened, bridge_tools falls back to
     the interpreter's LLMQueryMixin.llm_query method."""

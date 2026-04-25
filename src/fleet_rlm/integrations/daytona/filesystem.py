@@ -29,11 +29,11 @@ from .diagnostics import DaytonaDiagnosticError
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     _aensure_daytona_volume_layout,
-    _aensure_remote_directory,
     _arun_admin_code,
     _await_volume_ready,
     _build_daytona_client,
 )
+from .runtime_support import aensure_remote_directory as _aensure_remote_directory
 from .types import ContextSource
 
 # ---------------------------------------------------------------------------

@@ -28,14 +28,9 @@ DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = (
     _runtime_support.DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 )
 _aensure_daytona_volume_layout = _runtime_support.aensure_daytona_volume_layout
-_aensure_remote_directory = _runtime_support.aensure_remote_directory
 _await_volume_ready = _runtime_support.await_volume_ready
 _build_daytona_client = _runtime_support.build_daytona_client
-_canonicalize_volume_state_token = _runtime_support.canonicalize_volume_state_token
 _daytona_import_error = _runtime_support.daytona_import_error
-_raise_if_volume_error = _runtime_support.raise_if_volume_error
-_volume_state_details = _runtime_support.volume_state_details
-_volume_state_missing = _runtime_support.volume_state_missing
 
 
 # ---------------------------------------------------------------------------

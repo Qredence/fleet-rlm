@@ -1,95 +1,87 @@
 """Async Neon/Postgres persistence package for fleet-rlm."""
 
-from .engine import (
-    DatabaseManager,
-    select_database_url,
-    to_async_database_url,
-    to_sync_database_url,
-)
-from .models_base import Base
-from .models_enums import (
-    ArtifactKind,
-    ArtifactProvider,
-    BillingSource,
-    ChatSessionStatus,
-    ChatTurnStatus,
-    DatasetFormat,
-    DatasetSource,
-    ExternalTraceProvider,
-    JobStatus,
-    JobType,
-    MembershipRole,
-    MemoryKind,
-    MemoryScope,
-    MemorySource,
-    MemoryStatus,
-    OptimizationRunStatus,
-    OutboxStatus,
-    PromptSnapshotType,
-    RunStatus,
-    RunStepType,
-    RunType,
-    SandboxProvider,
-    SandboxSessionStatus,
-    SubscriptionStatus,
-    TenantPlan,
-    TenantStatus,
-    VolumeObjectType,
-    WorkspaceRole,
-    WorkspaceStatus,
-    WorkspaceVolumeStatus,
-)
-from .models_identity import (
-    Membership,
-    Tenant,
-    User,
-    Workspace,
-    WorkspaceMembership,
-    WorkspaceRuntimeSetting,
-)
-from .models_jobs import Job, OutboxEvent, TenantSubscription
-from .models_memory import MemoryItem, MemoryLink
-from .models_optimization import (
-    Dataset,
-    DatasetExample,
-    EvaluationResult,
-    OptimizationModule,
-    OptimizationRun,
-    PromptSnapshot,
-)
-from .models_runs import (
-    Artifact,
-    ChatSession,
-    ChatTurn,
-    ExecutionEvent,
-    ExternalTrace,
-    RLMProgram,
-    RLMTrace,
-    Run,
-    RunStep,
-    SessionStateSnapshot,
-    TraceFeedback,
-)
-from .models_sandbox import SandboxSession, VolumeObject, WorkspaceVolume
-from .repository_chat import ChatRepository
-from .repository_identity import IdentityRepository
-from .repository_jobs import JobsRepository
-from .repository_memory import MemoryRepository
-from .repository_optimization import OptimizationRepository
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-class FleetRepository(
-    IdentityRepository,
-    ChatRepository,
-    OptimizationRepository,
-    MemoryRepository,
-    JobsRepository,
-):
-    """Backward-compatible facade combining all domain repositories."""
-
-    def __init__(self, database: DatabaseManager) -> None:
-        super().__init__(database)
-
+if TYPE_CHECKING:
+    from .engine import (
+        DatabaseManager,
+        select_database_url,
+        to_async_database_url,
+        to_sync_database_url,
+    )
+    from .fleet_repository import FleetRepository
+    from .models_base import Base
+    from .models_enums import (
+        ArtifactKind,
+        ArtifactProvider,
+        BillingSource,
+        ChatSessionStatus,
+        ChatTurnStatus,
+        DatasetFormat,
+        DatasetSource,
+        ExternalTraceProvider,
+        JobStatus,
+        JobType,
+        MembershipRole,
+        MemoryKind,
+        MemoryScope,
+        MemorySource,
+        MemoryStatus,
+        OptimizationRunStatus,
+        OutboxStatus,
+        PromptSnapshotType,
+        RunStatus,
+        RunStepType,
+        RunType,
+        SandboxProvider,
+        SandboxSessionStatus,
+        SubscriptionStatus,
+        TenantPlan,
+        TenantStatus,
+        VolumeObjectType,
+        WorkspaceRole,
+        WorkspaceStatus,
+        WorkspaceVolumeStatus,
+    )
+    from .models_identity import (
+        Membership,
+        Tenant,
+        User,
+        Workspace,
+        WorkspaceMembership,
+        WorkspaceRuntimeSetting,
+    )
+    from .models_jobs import Job, OutboxEvent, TenantSubscription
+    from .models_memory import MemoryItem, MemoryLink
+    from .models_optimization import (
+        Dataset,
+        DatasetExample,
+        EvaluationResult,
+        OptimizationModule,
+        OptimizationRun,
+        PromptSnapshot,
+    )
+    from .models_runs import (
+        Artifact,
+        ChatSession,
+        ChatTurn,
+        ExecutionEvent,
+        ExternalTrace,
+        RLMProgram,
+        RLMTrace,
+        Run,
+        RunStep,
+        SessionStateSnapshot,
+        TraceFeedback,
+    )
+    from .models_sandbox import SandboxSession, VolumeObject, WorkspaceVolume
+    from .repository_chat import ChatRepository
+    from .repository_identity import IdentityRepository
+    from .repository_jobs import JobsRepository
+    from .repository_memory import MemoryRepository
+    from .repository_optimization import OptimizationRepository
 
 __all__ = [
     "Artifact",
@@ -165,3 +157,88 @@ __all__ = [
     "to_async_database_url",
     "to_sync_database_url",
 ]
+
+_IMPORT_MAP: dict[str, tuple[str, str]] = {
+    "Artifact": ("fleet_rlm.integrations.database.models_runs", "Artifact"),
+    "ArtifactKind": ("fleet_rlm.integrations.database.models_enums", "ArtifactKind"),
+    "ArtifactProvider": ("fleet_rlm.integrations.database.models_enums", "ArtifactProvider"),
+    "Base": ("fleet_rlm.integrations.database.models_base", "Base"),
+    "BillingSource": ("fleet_rlm.integrations.database.models_enums", "BillingSource"),
+    "ChatRepository": ("fleet_rlm.integrations.database.repository_chat", "ChatRepository"),
+    "ChatSession": ("fleet_rlm.integrations.database.models_runs", "ChatSession"),
+    "ChatSessionStatus": ("fleet_rlm.integrations.database.models_enums", "ChatSessionStatus"),
+    "ChatTurn": ("fleet_rlm.integrations.database.models_runs", "ChatTurn"),
+    "ChatTurnStatus": ("fleet_rlm.integrations.database.models_enums", "ChatTurnStatus"),
+    "Dataset": ("fleet_rlm.integrations.database.models_optimization", "Dataset"),
+    "DatasetExample": ("fleet_rlm.integrations.database.models_optimization", "DatasetExample"),
+    "DatasetFormat": ("fleet_rlm.integrations.database.models_enums", "DatasetFormat"),
+    "DatasetSource": ("fleet_rlm.integrations.database.models_enums", "DatasetSource"),
+    "DatabaseManager": ("fleet_rlm.integrations.database.engine", "DatabaseManager"),
+    "EvaluationResult": ("fleet_rlm.integrations.database.models_optimization", "EvaluationResult"),
+    "ExecutionEvent": ("fleet_rlm.integrations.database.models_runs", "ExecutionEvent"),
+    "ExternalTrace": ("fleet_rlm.integrations.database.models_runs", "ExternalTrace"),
+    "ExternalTraceProvider": ("fleet_rlm.integrations.database.models_enums", "ExternalTraceProvider"),
+    "FleetRepository": ("fleet_rlm.integrations.database.fleet_repository", "FleetRepository"),
+    "IdentityRepository": ("fleet_rlm.integrations.database.repository_identity", "IdentityRepository"),
+    "Job": ("fleet_rlm.integrations.database.models_jobs", "Job"),
+    "JobStatus": ("fleet_rlm.integrations.database.models_enums", "JobStatus"),
+    "JobType": ("fleet_rlm.integrations.database.models_enums", "JobType"),
+    "JobsRepository": ("fleet_rlm.integrations.database.repository_jobs", "JobsRepository"),
+    "Membership": ("fleet_rlm.integrations.database.models_identity", "Membership"),
+    "MembershipRole": ("fleet_rlm.integrations.database.models_enums", "MembershipRole"),
+    "MemoryItem": ("fleet_rlm.integrations.database.models_memory", "MemoryItem"),
+    "MemoryKind": ("fleet_rlm.integrations.database.models_enums", "MemoryKind"),
+    "MemoryLink": ("fleet_rlm.integrations.database.models_memory", "MemoryLink"),
+    "MemoryRepository": ("fleet_rlm.integrations.database.repository_memory", "MemoryRepository"),
+    "MemoryScope": ("fleet_rlm.integrations.database.models_enums", "MemoryScope"),
+    "MemorySource": ("fleet_rlm.integrations.database.models_enums", "MemorySource"),
+    "MemoryStatus": ("fleet_rlm.integrations.database.models_enums", "MemoryStatus"),
+    "OptimizationModule": ("fleet_rlm.integrations.database.models_optimization", "OptimizationModule"),
+    "OptimizationRepository": ("fleet_rlm.integrations.database.repository_optimization", "OptimizationRepository"),
+    "OptimizationRun": ("fleet_rlm.integrations.database.models_optimization", "OptimizationRun"),
+    "OptimizationRunStatus": ("fleet_rlm.integrations.database.models_enums", "OptimizationRunStatus"),
+    "OutboxEvent": ("fleet_rlm.integrations.database.models_jobs", "OutboxEvent"),
+    "OutboxStatus": ("fleet_rlm.integrations.database.models_enums", "OutboxStatus"),
+    "PromptSnapshot": ("fleet_rlm.integrations.database.models_optimization", "PromptSnapshot"),
+    "PromptSnapshotType": ("fleet_rlm.integrations.database.models_enums", "PromptSnapshotType"),
+    "RLMProgram": ("fleet_rlm.integrations.database.models_runs", "RLMProgram"),
+    "RLMTrace": ("fleet_rlm.integrations.database.models_runs", "RLMTrace"),
+    "Run": ("fleet_rlm.integrations.database.models_runs", "Run"),
+    "RunStatus": ("fleet_rlm.integrations.database.models_enums", "RunStatus"),
+    "RunStep": ("fleet_rlm.integrations.database.models_runs", "RunStep"),
+    "RunStepType": ("fleet_rlm.integrations.database.models_enums", "RunStepType"),
+    "RunType": ("fleet_rlm.integrations.database.models_enums", "RunType"),
+    "SandboxProvider": ("fleet_rlm.integrations.database.models_enums", "SandboxProvider"),
+    "SandboxSession": ("fleet_rlm.integrations.database.models_sandbox", "SandboxSession"),
+    "SandboxSessionStatus": ("fleet_rlm.integrations.database.models_enums", "SandboxSessionStatus"),
+    "SessionStateSnapshot": ("fleet_rlm.integrations.database.models_runs", "SessionStateSnapshot"),
+    "SubscriptionStatus": ("fleet_rlm.integrations.database.models_enums", "SubscriptionStatus"),
+    "Tenant": ("fleet_rlm.integrations.database.models_identity", "Tenant"),
+    "TenantPlan": ("fleet_rlm.integrations.database.models_enums", "TenantPlan"),
+    "TenantStatus": ("fleet_rlm.integrations.database.models_enums", "TenantStatus"),
+    "TenantSubscription": ("fleet_rlm.integrations.database.models_jobs", "TenantSubscription"),
+    "TraceFeedback": ("fleet_rlm.integrations.database.models_runs", "TraceFeedback"),
+    "User": ("fleet_rlm.integrations.database.models_identity", "User"),
+    "VolumeObject": ("fleet_rlm.integrations.database.models_sandbox", "VolumeObject"),
+    "VolumeObjectType": ("fleet_rlm.integrations.database.models_enums", "VolumeObjectType"),
+    "Workspace": ("fleet_rlm.integrations.database.models_identity", "Workspace"),
+    "WorkspaceMembership": ("fleet_rlm.integrations.database.models_identity", "WorkspaceMembership"),
+    "WorkspaceRole": ("fleet_rlm.integrations.database.models_enums", "WorkspaceRole"),
+    "WorkspaceRuntimeSetting": ("fleet_rlm.integrations.database.models_identity", "WorkspaceRuntimeSetting"),
+    "WorkspaceStatus": ("fleet_rlm.integrations.database.models_enums", "WorkspaceStatus"),
+    "WorkspaceVolume": ("fleet_rlm.integrations.database.models_sandbox", "WorkspaceVolume"),
+    "WorkspaceVolumeStatus": ("fleet_rlm.integrations.database.models_enums", "WorkspaceVolumeStatus"),
+    "select_database_url": ("fleet_rlm.integrations.database.engine", "select_database_url"),
+    "to_async_database_url": ("fleet_rlm.integrations.database.engine", "to_async_database_url"),
+    "to_sync_database_url": ("fleet_rlm.integrations.database.engine", "to_sync_database_url"),
+}
+
+
+def __getattr__(name: str) -> object:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    module_name, attr_name = _IMPORT_MAP[name]
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)

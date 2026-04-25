@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import json
+import ast
+from collections.abc import Mapping
 from typing import AbstractSet, Any, Callable
 
 from dspy.primitives import CodeInterpreterError
@@ -22,7 +23,7 @@ def reject_unsupported_recursive_callbacks(
     """Reject agent-level recursive callbacks from raw sandbox code."""
     _ = interpreter
     for callback_name in callbacks:
-        if f"{callback_name}(" not in code:
+        if not _mentions_callback_call(code, {callback_name}):
             continue
         raise CodeInterpreterError(
             f"{callback_name}() is not available inside Daytona sandbox code. "
@@ -64,7 +65,7 @@ def requires_bridge(
 ) -> bool:
     """Return whether code mentions one of the bridged callback names."""
     _ = interpreter
-    return any(f"{tool_name}(" in code for tool_name in tools)
+    return _mentions_callback_call(code, set(tools))
 
 
 def invoke_tool(
@@ -101,13 +102,45 @@ def invoke_tool(
             value = fetch_document_text(*args, **kwargs)
         else:
             raise RuntimeError(f"Unknown host callback: {name}")
-        try:
-            json.dumps(value)
-            return value
-        except TypeError:
-            return str(value)
+        return _json_safe_value(value)
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _mentions_callback_call(code: str, names: AbstractSet[str]) -> bool:
+    if not names:
+        return False
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return any(f"{name}(" in code for name in names)
+    return any(
+        isinstance(node, ast.Call) and _call_name(node.func) in names
+        for node in ast.walk(tree)
+    )
+
+
+def _call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _json_safe_value(value: Any, *, _depth: int = 0) -> Any:
+    if _depth > 6:
+        return str(value)
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_safe_value(item, _depth=_depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item, _depth=_depth + 1) for item in value]
+    return str(value)
 
 
 def _callback_arg(
