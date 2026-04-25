@@ -399,3 +399,24 @@ jobs:
           prerelease: false
           files: dist/*
           body_path: release_notes.md
+
+      - name: Publish deployment observability summary
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag_version }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.normalized_version }}
+          DEPLOYMENT_METRICS_URL: ${{ vars.DEPLOYMENT_METRICS_URL }}
+          DEPLOYMENT_ALERTS_URL: ${{ vars.DEPLOYMENT_ALERTS_URL }}
+          DEPLOYMENT_POSTHOG_DASHBOARD_URL: ${{ vars.DEPLOYMENT_POSTHOG_DASHBOARD_URL }}
+          DEPLOYMENT_HEALTHCHECK_URL: ${{ vars.DEPLOYMENT_HEALTHCHECK_URL }}
+          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+        run: |
+          python scripts/deployment_observability.py \
+            --environment pypi \
+            --package-name fleet-rlm \
+            --package-url "https://pypi.org/project/fleet-rlm/${RELEASE_VERSION}/" \
+            --release-tag "$RELEASE_TAG" \
+            --release-version "$RELEASE_VERSION" \
+            --annotate-posthog \
+            --step-summary "$GITHUB_STEP_SUMMARY" \
+            --smoke-check "Smoke-test-testpypi passed before publish: installed wheel served /health and packaged UI."
