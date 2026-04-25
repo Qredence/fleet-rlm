@@ -303,7 +303,6 @@ This guide assumes you have a FastAPI Cloud account and have run `fastapi login`
 
 Any value that previously lived in a local `.env` must be rotated before being injected into a shared cloud environment. Minimum rotation checklist:
 
-- `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
 - `DSPY_LLM_API_KEY` / `DSPY_LM_API_KEY` (LLM provider key)
 - `DAYTONA_API_KEY`
 - `POSTHOG_API_KEY`
@@ -312,6 +311,8 @@ Any value that previously lived in a local `.env` must be rotated before being i
 - Neon `DATABASE_URL` / `DATABASE_ADMIN_URL` — see note below
 
 If you plan to use the FastAPI Cloud Neon integration, skip rotating Neon credentials here: the platform provisions a new `DATABASE_URL` and injects it at deploy time.
+
+Daytona is the only supported runtime substrate for sandbox execution. Do not configure retired alternative-provider secrets for new deploys.
 
 ### 2. Wire the Neon integration
 
@@ -390,7 +391,7 @@ Because `FLEET_RLM_SERVE_UI=false`, the cloud box serves JSON at `/` and does no
 
 - **`/` returns 503 instead of the JSON banner** — `FLEET_RLM_SERVE_UI` is probably `true` (the default in local). Set it to `false` for API-only cloud deploys.
 - **Startup fails with `AUTH_REQUIRED must be true...`** — `validate_startup_or_raise` rejects insecure production configs. Set `AUTH_REQUIRED=true` and verify CORS does not contain `*`.
-- **`/ready` returns `database: "error"`** — Neon integration either isn't linked or the pooled endpoint is unreachable. Check the dashboard and re-run `fastapi deploy`.
+- **`/ready` returns `database: "missing"` or `database: "degraded"`** — Neon integration either isn't linked or the pooled endpoint is unreachable. Check the dashboard and re-run `fastapi deploy`.
 - **MLflow still trying to start locally** — set both `MLFLOW_ENABLED=false` and `MLFLOW_AUTO_START=false`, or point `MLFLOW_TRACKING_URI` at a remote server.
 
 ## Deployment Examples

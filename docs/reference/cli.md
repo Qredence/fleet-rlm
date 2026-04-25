@@ -25,6 +25,38 @@ Commands:
   daytona-smoke  Run a native Daytona smoke validation without invoking an LM.
 ```
 
+### `fleet-rlm optimize`
+
+Run GEPA offline optimization for a registered DSPy module.
+
+```text
+Usage: fleet-rlm optimize [OPTIONS] MODULE [DATASET]
+
+Arguments:
+  MODULE    Registered module slug to optimize (use 'list' to see available modules). [required]
+  DATASET   Path to JSON or JSONL dataset. [optional]
+
+Options:
+  --output-path, -o PATH   Where to save the optimized DSPy module artifact.
+  --train-ratio FLOAT      Training split ratio for GEPA compilation. [default: 0.8]
+  --auto TEXT              GEPA optimization intensity: light, medium, or heavy. [default: light]
+  --report                 Print a markdown report summary after optimization.
+  --help, -h               Show this message and exit.
+```
+
+**Examples:**
+
+```bash
+# Optimize a module with default settings
+uv run fleet-rlm optimize my-module dataset.jsonl
+
+# Run heavy optimization with a custom output path
+uv run fleet-rlm optimize my-module dataset.jsonl --auto heavy --output-path ./artifacts/optimized.pkl
+
+# Generate an optimization report
+uv run fleet-rlm optimize my-module dataset.jsonl --report
+```
+
 ### `fleet-rlm serve-api`
 
 Run the FastAPI HTTP/WebSocket server. This is the backend for the Web UI and is invoked by `fleet web`.
