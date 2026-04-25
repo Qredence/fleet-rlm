@@ -14,7 +14,7 @@ def dedupe_paths(paths: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for item in paths:
-        normalized = str(item or "").strip()
+        normalized = (item or "").strip()
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)

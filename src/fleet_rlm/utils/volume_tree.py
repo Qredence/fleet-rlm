@@ -9,8 +9,7 @@ from pathlib import PurePosixPath
 
 
 def entry_name(entry_path: str) -> str:
-    raw = entry_path.rstrip("/")
-    return raw.rsplit("/", 1)[-1] if "/" in raw else raw
+    return PurePosixPath(entry_path.rstrip("/")).name
 
 
 def stable_tree_id(path: str) -> str:
@@ -58,7 +57,6 @@ def resolve_mounted_volume_path(
         candidate if candidate.is_absolute() else PurePosixPath(default) / candidate
     )
     normalized = posixpath.normpath(normalized)
-    normalized = str(PurePosixPath(normalized))
 
     if normalized != allowed and not normalized.startswith(allowed + "/"):
         raise ValueError(

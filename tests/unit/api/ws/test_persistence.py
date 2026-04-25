@@ -218,3 +218,48 @@ def test_complete_run_drains_batched_steps_before_shutdown() -> None:
         assert emitter.events[-1].type == "execution_completed"
 
     asyncio.run(scenario())
+
+
+def test_lifecycle_without_repository_does_not_start_persist_worker() -> None:
+    class _RecordingEmitter:
+        def __init__(self) -> None:
+            self.events: list[Any] = []
+
+        async def emit(self, event: Any) -> None:
+            self.events.append(event)
+
+    async def scenario() -> None:
+        emitter = _RecordingEmitter()
+        lifecycle = ws_persistence.ExecutionLifecycleManager(
+            run_id="run-1",
+            workspace_id="workspace-1",
+            user_id="user-1",
+            session_id="session-1",
+            execution_emitter=emitter,
+            step_builder=SimpleNamespace(),
+            repository=None,
+            identity_rows=None,
+            active_run_db_id=None,
+            strict_persistence=False,
+            session_record={},
+        )
+
+        await lifecycle.emit_started()
+        await lifecycle.persist_step(
+            ExecutionStep(
+                id="step-1",
+                type="tool",
+                label="step 1",
+                timestamp=1.0,
+            )
+        )
+        await lifecycle.complete_run(RunStatus.COMPLETED)
+
+        assert lifecycle._persist_worker_task is None
+        assert lifecycle._persist_queue is None
+        assert [event.type for event in emitter.events] == [
+            "execution_started",
+            "execution_completed",
+        ]
+
+    asyncio.run(scenario())

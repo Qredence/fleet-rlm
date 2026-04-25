@@ -33,8 +33,7 @@ async def load_sandbox_list(
     """
     client: Any | None = None
     try:
-        config = _daytona_config.resolve_daytona_config()
-        client = _daytona_runtime._build_daytona_client(config)
+        client = _build_daytona_client()
 
         labels_filter = _list_labels_filter(
             owner_labels=owner_labels,
@@ -56,38 +55,7 @@ async def load_sandbox_list(
                 allow_unlabeled_legacy=allow_unlabeled_legacy,
             ):
                 continue
-            # Extract volume name from volumes or labels
-            volume_name = None
-            volumes = getattr(sandbox, "volumes", None)
-            if volumes and isinstance(volumes, list):
-                first_volume = volumes[0]
-                # volumes may be strings or VolumeMount objects
-                if isinstance(first_volume, str):
-                    volume_name = first_volume or None
-                else:
-                    volume_name = getattr(first_volume, "volume_id", None)
-                    if volume_name is None:
-                        volume_name = getattr(first_volume, "name", None)
-                    if volume_name is None:
-                        volume_name = getattr(first_volume, "id", None)
-
-            # Parse state
-            state = getattr(sandbox, "state", None)
-            state_value = str(getattr(state, "value", state) or "unknown")
-
-            items.append(
-                SandboxListItem(
-                    id=str(getattr(sandbox, "id", "")),
-                    name=str(getattr(sandbox, "name", "")),
-                    state=state_value,
-                    created_at=getattr(sandbox, "created_at", None),
-                    volume_name=volume_name,
-                    labels=labels,
-                    cpu=getattr(sandbox, "cpu", None),
-                    memory=getattr(sandbox, "memory", None),
-                    disk=getattr(sandbox, "disk", None),
-                )
-            )
+            items.append(_sandbox_list_item(sandbox=sandbox, labels=labels))
 
         return SandboxListResponse(
             items=items,
@@ -96,10 +64,7 @@ async def load_sandbox_list(
             total_pages=max(1, math.ceil(len(items) / max(1, limit))),
         )
     finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                await _await_if_needed(close())
+        await _close_daytona_client(client)
 
 
 async def load_sandbox_detail(
@@ -115,106 +80,16 @@ async def load_sandbox_detail(
     """
     client: Any | None = None
     try:
-        config = _daytona_config.resolve_daytona_config()
-        client = _daytona_runtime._build_daytona_client(config)
-
-        sandbox = await _await_if_needed(client.get(sandbox_id))
+        client = _build_daytona_client()
+        sandbox = await _get_sandbox(client, sandbox_id)
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
             allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
-
-        # Extract volume name from volumes
-        volume_name = None
-        volume_mounts: list[dict[str, Any]] = []
-        volumes = getattr(sandbox, "volumes", None)
-        if volumes and isinstance(volumes, list):
-            for vol in volumes:
-                if isinstance(vol, str):
-                    volume_mounts.append({"id": vol, "name": vol})
-                    if volume_name is None:
-                        volume_name = vol or None
-                else:
-                    vol_id = getattr(vol, "volume_id", None)
-                    vol_name = getattr(vol, "name", None)
-                    vol_path = getattr(vol, "mount_path", None)
-                    if vol_id is None:
-                        vol_id = getattr(vol, "id", None)
-                    if vol_name is None:
-                        vol_name = vol_id
-                    mount = {
-                        "id": vol_id,
-                        "name": vol_name,
-                        "mount_path": vol_path,
-                    }
-                    mount = {k: v for k, v in mount.items() if v is not None}
-                    volume_mounts.append(mount)
-                    if volume_name is None:
-                        volume_name = vol_id or vol_name
-
-        # Parse state
-        state = getattr(sandbox, "state", None)
-        state_value = str(getattr(state, "value", state) or "unknown")
-
-        # Parse labels
-        labels = _sandbox_labels(sandbox)
-
-        # Parse env vars
-        env_vars = getattr(sandbox, "env", None) or {}
-        if not isinstance(env_vars, dict):
-            env_vars = {}
-
-        # Parse image info
-        image = getattr(sandbox, "image", None)
-        image_name = None
-        if image is not None:
-            image_name = getattr(image, "name", None)
-            if image_name is None:
-                image_name = getattr(image, "image", None)
-            if image_name is None:
-                image_name = str(image) if image else None
-
-        # Parse resources
-        resources = getattr(sandbox, "resources", None)
-        cpu = getattr(sandbox, "cpu", None)
-        memory = getattr(sandbox, "memory", None)
-        disk = getattr(sandbox, "disk", None)
-        if resources is not None:
-            if cpu is None:
-                cpu = getattr(resources, "cpu", None)
-            if memory is None:
-                memory = getattr(resources, "memory", None)
-            if disk is None:
-                disk = getattr(resources, "disk", None)
-
-        return SandboxDetailResponse(
-            id=str(getattr(sandbox, "id", "")),
-            name=str(getattr(sandbox, "name", "")),
-            state=state_value,
-            created_at=getattr(sandbox, "created_at", None),
-            volume_name=volume_name,
-            labels=labels,
-            cpu=cpu,
-            memory=memory,
-            disk=disk,
-            env_vars=env_vars,
-            image=image_name,
-            snapshot=getattr(sandbox, "snapshot", None),
-            language=getattr(sandbox, "language", None),
-            auto_stop_interval=getattr(sandbox, "auto_stop_interval", None),
-            auto_archive_interval=getattr(sandbox, "auto_archive_interval", None),
-            auto_delete_interval=getattr(sandbox, "auto_delete_interval", None),
-            ephemeral=getattr(sandbox, "ephemeral", None),
-            network_block_all=getattr(sandbox, "network_block_all", None),
-            network_allow_list=getattr(sandbox, "network_allow_list", None),
-            volumes=volume_mounts,
-        )
+        return _sandbox_detail_response(sandbox)
     finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                await _await_if_needed(close())
+        await _close_daytona_client(client)
 
 
 async def delete_sandbox(
@@ -230,28 +105,16 @@ async def delete_sandbox(
     """
     client: Any | None = None
     try:
-        config = _daytona_config.resolve_daytona_config()
-        client = _daytona_runtime._build_daytona_client(config)
-
-        sandbox = await _await_if_needed(client.get(sandbox_id))
+        client = _build_daytona_client()
+        sandbox = await _get_sandbox(client, sandbox_id)
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
             allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
-        session = _daytona_runtime.DaytonaSandboxSession(
-            sandbox=sandbox,
-            repo_url=None,
-            ref=None,
-            volume_name=None,
-            workspace_path="/",
-        )
-        await session.adelete()
+        await _management_session(sandbox).adelete()
     finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                await _await_if_needed(close())
+        await _close_daytona_client(client)
 
 
 async def archive_sandbox(
@@ -267,28 +130,43 @@ async def archive_sandbox(
     """
     client: Any | None = None
     try:
-        config = _daytona_config.resolve_daytona_config()
-        client = _daytona_runtime._build_daytona_client(config)
-
-        sandbox = await _await_if_needed(client.get(sandbox_id))
+        client = _build_daytona_client()
+        sandbox = await _get_sandbox(client, sandbox_id)
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
             allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
-        session = _daytona_runtime.DaytonaSandboxSession(
-            sandbox=sandbox,
-            repo_url=None,
-            ref=None,
-            volume_name=None,
-            workspace_path="/",
-        )
-        await session.aarchive()
+        await _management_session(sandbox).aarchive()
     finally:
-        if client is not None:
-            close = getattr(client, "close", None)
-            if callable(close):
-                await _await_if_needed(close())
+        await _close_daytona_client(client)
+
+
+def _build_daytona_client() -> Any:
+    config = _daytona_config.resolve_daytona_config()
+    return _daytona_runtime._build_daytona_client(config)
+
+
+async def _close_daytona_client(client: Any | None) -> None:
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if callable(close):
+        await _await_if_needed(close())
+
+
+async def _get_sandbox(client: Any, sandbox_id: str) -> Any:
+    return await _await_if_needed(client.get(sandbox_id))
+
+
+def _management_session(sandbox: Any) -> Any:
+    return _daytona_runtime.DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/",
+    )
 
 
 def _list_labels_filter(
@@ -324,6 +202,140 @@ def _sandbox_labels(sandbox: Any) -> dict[str, str]:
     if not isinstance(labels, dict):
         return {}
     return {str(key): str(value) for key, value in labels.items()}
+
+
+def _sandbox_state(sandbox: Any) -> str:
+    state = getattr(sandbox, "state", None)
+    return str(getattr(state, "value", state) or "unknown")
+
+
+def _volume_mount_id(volume: Any) -> Any:
+    if isinstance(volume, str):
+        return volume
+    volume_id = getattr(volume, "volume_id", None)
+    if volume_id is None:
+        volume_id = getattr(volume, "id", None)
+    return volume_id
+
+
+def _volume_mount_name(volume: Any, volume_id: Any) -> Any:
+    if isinstance(volume, str):
+        return volume
+    volume_name = getattr(volume, "name", None)
+    return volume_id if volume_name is None else volume_name
+
+
+def _sandbox_volume_name(sandbox: Any) -> Any:
+    volumes = getattr(sandbox, "volumes", None)
+    if not volumes or not isinstance(volumes, list):
+        return None
+    first_volume = volumes[0]
+    if isinstance(first_volume, str):
+        return first_volume or None
+    volume_id = getattr(first_volume, "volume_id", None)
+    if volume_id is None:
+        volume_id = getattr(first_volume, "name", None)
+    if volume_id is None:
+        volume_id = getattr(first_volume, "id", None)
+    return volume_id
+
+
+def _sandbox_volume_mounts(sandbox: Any) -> tuple[Any, list[dict[str, Any]]]:
+    volume_name = None
+    volume_mounts: list[dict[str, Any]] = []
+    volumes = getattr(sandbox, "volumes", None)
+    if not volumes or not isinstance(volumes, list):
+        return volume_name, volume_mounts
+
+    for volume in volumes:
+        volume_id = _volume_mount_id(volume)
+        volume_mount_name = _volume_mount_name(volume, volume_id)
+        if isinstance(volume, str):
+            mount = {"id": volume, "name": volume}
+        else:
+            mount = {
+                "id": volume_id,
+                "name": volume_mount_name,
+                "mount_path": getattr(volume, "mount_path", None),
+            }
+            mount = {key: value for key, value in mount.items() if value is not None}
+        volume_mounts.append(mount)
+        if volume_name is None:
+            volume_name = volume_id or volume_mount_name
+    return volume_name, volume_mounts
+
+
+def _sandbox_env_vars(sandbox: Any) -> dict[str, Any]:
+    env_vars = getattr(sandbox, "env", None) or {}
+    return env_vars if isinstance(env_vars, dict) else {}
+
+
+def _sandbox_image_name(sandbox: Any) -> str | None:
+    image = getattr(sandbox, "image", None)
+    if image is None:
+        return None
+    image_name = getattr(image, "name", None)
+    if image_name is None:
+        image_name = getattr(image, "image", None)
+    if image_name is None:
+        return str(image) if image else None
+    return image_name
+
+
+def _sandbox_resources(sandbox: Any) -> tuple[Any, Any, Any]:
+    resources = getattr(sandbox, "resources", None)
+    cpu = getattr(sandbox, "cpu", None)
+    memory = getattr(sandbox, "memory", None)
+    disk = getattr(sandbox, "disk", None)
+    if resources is not None:
+        if cpu is None:
+            cpu = getattr(resources, "cpu", None)
+        if memory is None:
+            memory = getattr(resources, "memory", None)
+        if disk is None:
+            disk = getattr(resources, "disk", None)
+    return cpu, memory, disk
+
+
+def _sandbox_list_item(*, sandbox: Any, labels: dict[str, str]) -> SandboxListItem:
+    return SandboxListItem(
+        id=str(getattr(sandbox, "id", "")),
+        name=str(getattr(sandbox, "name", "")),
+        state=_sandbox_state(sandbox),
+        created_at=getattr(sandbox, "created_at", None),
+        volume_name=_sandbox_volume_name(sandbox),
+        labels=labels,
+        cpu=getattr(sandbox, "cpu", None),
+        memory=getattr(sandbox, "memory", None),
+        disk=getattr(sandbox, "disk", None),
+    )
+
+
+def _sandbox_detail_response(sandbox: Any) -> SandboxDetailResponse:
+    volume_name, volume_mounts = _sandbox_volume_mounts(sandbox)
+    cpu, memory, disk = _sandbox_resources(sandbox)
+    return SandboxDetailResponse(
+        id=str(getattr(sandbox, "id", "")),
+        name=str(getattr(sandbox, "name", "")),
+        state=_sandbox_state(sandbox),
+        created_at=getattr(sandbox, "created_at", None),
+        volume_name=volume_name,
+        labels=_sandbox_labels(sandbox),
+        cpu=cpu,
+        memory=memory,
+        disk=disk,
+        env_vars=_sandbox_env_vars(sandbox),
+        image=_sandbox_image_name(sandbox),
+        snapshot=getattr(sandbox, "snapshot", None),
+        language=getattr(sandbox, "language", None),
+        auto_stop_interval=getattr(sandbox, "auto_stop_interval", None),
+        auto_archive_interval=getattr(sandbox, "auto_archive_interval", None),
+        auto_delete_interval=getattr(sandbox, "auto_delete_interval", None),
+        ephemeral=getattr(sandbox, "ephemeral", None),
+        network_block_all=getattr(sandbox, "network_block_all", None),
+        network_allow_list=getattr(sandbox, "network_allow_list", None),
+        volumes=volume_mounts,
+    )
 
 
 def _sandbox_is_accessible(

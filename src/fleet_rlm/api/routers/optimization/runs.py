@@ -9,7 +9,7 @@ import os
 import uuid
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import (
     APIRouter,
@@ -112,6 +112,375 @@ def _run_module_optimization(
     )
 
 
+def _ensure_gepa_runtime_available() -> None:
+    if not _check_gepa_available():
+        raise HTTPException(
+            status_code=503,
+            detail="GEPA teleprompt module is not available.",
+        )
+    mlflow_configured, mlflow_enabled = _get_mlflow_status()
+    if not mlflow_enabled:
+        detail = (
+            "MLflow is not enabled. GEPA optimization requires MLflow."
+            if not mlflow_configured
+            else "MLflow is unavailable. GEPA optimization requires a reachable MLflow tracking server."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=detail,
+        )
+
+
+def _resolve_effective_program_spec(request: GEPAOptimizationRequest) -> str:
+    if request.module_slug:
+        from fleet_rlm.runtime.quality.module_registry import get_module_spec
+
+        spec = get_module_spec(request.module_slug)
+        if spec is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown module slug: {request.module_slug!r}",
+            )
+        return spec.program_spec
+    if not request.program_spec:
+        raise HTTPException(
+            status_code=400,
+            detail="Either module_slug or program_spec must be provided.",
+        )
+    return request.program_spec
+
+
+def _resolve_blocking_output_path(output_path: str | None) -> Path | None:
+    if not output_path:
+        return None
+    if os.path.isabs(output_path):
+        raise HTTPException(
+            status_code=400,
+            detail="Absolute paths are not allowed. Use a relative path.",
+        )
+    base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
+    safe_root = os.path.join(base_root, "")
+    resolved_output = os.path.realpath(os.path.join(safe_root, output_path))
+    if not resolved_output.startswith(safe_root):
+        raise HTTPException(
+            status_code=400,
+            detail="Path escapes the allowed data directory.",
+        )
+    return Path(resolved_output)
+
+
+async def _create_repo_blocking_run(
+    *,
+    request: GEPAOptimizationRequest,
+    repository: Any,
+    persisted_identity: Any,
+    program_spec: str,
+    dataset_ref: str,
+) -> str:
+    workspace_id = _require_workspace_id(persisted_identity)
+    dataset_uuid = (
+        _parse_uuid_id(
+            request.dataset_id,
+            detail=f"Dataset {request.dataset_id} not found.",
+        )
+        if request.dataset_id is not None
+        else None
+    )
+    created_run = await repository.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=persisted_identity.tenant_id,
+            workspace_id=workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            optimizer="GEPA",
+            program_spec=program_spec,
+            module_slug=request.module_slug,
+            dataset_id=dataset_uuid,
+            auto=request.auto,
+            train_ratio=request.train_ratio,
+            metadata_json={"dataset_path": dataset_ref},
+        )
+    )
+    return str(created_run.id)
+
+
+async def _create_local_blocking_run(
+    *,
+    request: GEPAOptimizationRequest,
+    program_spec: str,
+    dataset_ref: str,
+) -> int | None:
+    from fleet_rlm.integrations.local_store import (
+        create_optimization_run as _db_create_run,
+    )
+
+    created_run = await asyncio.to_thread(
+        _db_create_run,
+        program_spec=program_spec,
+        auto=request.auto,
+        train_ratio=request.train_ratio,
+        module_slug=request.module_slug,
+        dataset_id=int(request.dataset_id) if request.dataset_id is not None else None,
+        dataset_path=dataset_ref,
+    )
+    return created_run.id
+
+
+async def _create_blocking_run_record(
+    *,
+    request: GEPAOptimizationRequest,
+    repository: Any | None,
+    persisted_identity: Any | None,
+    program_spec: str,
+    dataset_ref: str,
+) -> str | int | None:
+    if repository is not None and persisted_identity is not None:
+        try:
+            return await _create_repo_blocking_run(
+                request=request,
+                repository=repository,
+                persisted_identity=persisted_identity,
+                program_spec=program_spec,
+                dataset_ref=dataset_ref,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to create optimization run in Postgres", exc_info=exc
+            )
+            return None
+
+    try:
+        return await _create_local_blocking_run(
+            request=request,
+            program_spec=program_spec,
+            dataset_ref=dataset_ref,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to create optimization run in local database", exc_info=exc
+        )
+        return None
+
+
+async def _execute_blocking_optimization(
+    *,
+    request: GEPAOptimizationRequest,
+    dataset: Path,
+    output_path: Path | None,
+    program_spec: str,
+    db_run_id: str | int | None,
+) -> dict:
+    if request.module_slug:
+        return await run_blocking(
+            partial(
+                _run_module_optimization,
+                module_slug=request.module_slug,
+                dataset_path=dataset,
+                output_path=output_path,
+                default_output_root=OPTIMIZATION_DATA_ROOT,
+                auto=request.auto,
+                train_ratio=request.train_ratio,
+                run_id=db_run_id if isinstance(db_run_id, int) else None,
+            ),
+            timeout=OPTIMIZATION_TIMEOUT_SECONDS,
+        )
+    return await run_blocking(
+        partial(
+            _run_gepa_optimization,
+            dataset_path=dataset,
+            program_spec=program_spec,
+            output_path=output_path,
+            auto=request.auto,
+            train_ratio=request.train_ratio,
+        ),
+        timeout=OPTIMIZATION_TIMEOUT_SECONDS,
+    )
+
+
+async def _mark_repo_blocking_run_failed(
+    *,
+    repository: Any,
+    persisted_identity: Any,
+    db_run_id: str,
+    error: str,
+) -> None:
+    await repository.fail_optimization_run(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=uuid.UUID(db_run_id),
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        error=error,
+    )
+
+
+async def _mark_local_blocking_run_failed(*, db_run_id: int, error: str) -> None:
+    from fleet_rlm.integrations.local_store import fail_optimization_run
+
+    await asyncio.to_thread(fail_optimization_run, db_run_id, error=error)
+
+
+async def _mark_blocking_run_failed(
+    *,
+    db_run_id: str | int | None,
+    repository: Any | None,
+    persisted_identity: Any | None,
+    error: str,
+) -> None:
+    if db_run_id is None:
+        return
+    if (
+        repository is not None
+        and persisted_identity is not None
+        and isinstance(db_run_id, str)
+    ):
+        try:
+            await _mark_repo_blocking_run_failed(
+                repository=repository,
+                persisted_identity=persisted_identity,
+                db_run_id=db_run_id,
+                error=error,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to mark GEPA optimization run %s as failed in Postgres",
+                db_run_id,
+            )
+        return
+
+    try:
+        assert isinstance(db_run_id, int)
+        await _mark_local_blocking_run_failed(db_run_id=db_run_id, error=error)
+    except Exception:
+        logger.exception(
+            "Failed to mark GEPA optimization run %s as failed in database",
+            db_run_id,
+        )
+
+
+async def _mark_repo_blocking_run_complete(
+    *,
+    repository: Any,
+    persisted_identity: Any,
+    db_run_id: str,
+    result: dict,
+) -> None:
+    run_uuid = uuid.UUID(db_run_id)
+    await repository.save_evaluation_results(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        results=result.get("evaluation_results", []),
+    )
+    await repository.save_prompt_snapshots(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        snapshots=result.get("prompt_snapshots", []),
+    )
+    await repository.complete_optimization_run(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        train_examples=result.get("train_examples", 0),
+        validation_examples=result.get("validation_examples", 0),
+        validation_score=result.get("validation_score"),
+        output_path=result.get("output_path"),
+        manifest_path=result.get("manifest_path"),
+    )
+
+
+async def _mark_local_blocking_run_complete(
+    *,
+    db_run_id: int,
+    result: dict,
+) -> None:
+    from fleet_rlm.integrations.local_store import complete_optimization_run
+
+    await asyncio.to_thread(
+        complete_optimization_run,
+        db_run_id,
+        train_examples=result.get("train_examples", 0),
+        validation_examples=result.get("validation_examples", 0),
+        validation_score=result.get("validation_score"),
+        output_path=result.get("output_path"),
+        manifest_path=result.get("manifest_path"),
+    )
+
+
+async def _mark_blocking_run_complete(
+    *,
+    db_run_id: str | int | None,
+    repository: Any | None,
+    persisted_identity: Any | None,
+    result: dict,
+) -> None:
+    if db_run_id is None:
+        return
+    if (
+        repository is not None
+        and persisted_identity is not None
+        and isinstance(db_run_id, str)
+    ):
+        try:
+            await _mark_repo_blocking_run_complete(
+                repository=repository,
+                persisted_identity=persisted_identity,
+                db_run_id=db_run_id,
+                result=result,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to mark GEPA optimization run %s as complete in Postgres",
+                db_run_id,
+            )
+        return
+
+    try:
+        assert isinstance(db_run_id, int)
+        await _mark_local_blocking_run_complete(db_run_id=db_run_id, result=result)
+    except Exception:
+        logger.exception(
+            "Failed to mark GEPA optimization run %s as complete", db_run_id
+        )
+
+
+def _blocking_optimization_response(
+    *,
+    result: dict,
+    request: GEPAOptimizationRequest,
+    program_spec: str,
+) -> GEPAOptimizationResponse:
+    return GEPAOptimizationResponse(
+        ok=True,
+        optimizer=result.get("optimizer", "GEPA"),
+        program_spec=result.get("program_spec", program_spec),
+        train_examples=result.get("train_examples", 0),
+        validation_examples=result.get("validation_examples", 0),
+        validation_score=result.get("validation_score"),
+        output_path=result.get("output_path"),
+        manifest_path=result.get("manifest_path"),
+        module_slug=request.module_slug,
+    )
+
+
+def _failed_blocking_optimization_response(
+    *,
+    exc: Exception,
+    request: GEPAOptimizationRequest,
+    program_spec: str,
+) -> GEPAOptimizationResponse:
+    return GEPAOptimizationResponse(
+        ok=False,
+        program_spec=program_spec,
+        train_examples=0,
+        validation_examples=0,
+        module_slug=request.module_slug,
+        error=str(exc),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -143,260 +512,55 @@ async def run_optimization(
         repository=repository,
         identity=identity,
     )
-    if not _check_gepa_available():
-        raise HTTPException(
-            status_code=503,
-            detail="GEPA teleprompt module is not available.",
-        )
-    mlflow_configured, mlflow_enabled = _get_mlflow_status()
-    if not mlflow_enabled:
-        detail = (
-            "MLflow is not enabled. GEPA optimization requires MLflow."
-            if not mlflow_configured
-            else "MLflow is unavailable. GEPA optimization requires a reachable MLflow tracking server."
-        )
-        raise HTTPException(
-            status_code=503,
-            detail=detail,
-        )
-
-    # Resolve program_spec from module_slug when provided
-    effective_program_spec = request.program_spec
-    if request.module_slug:
-        from fleet_rlm.runtime.quality.module_registry import get_module_spec
-
-        spec = get_module_spec(request.module_slug)
-        if spec is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown module slug: {request.module_slug!r}",
-            )
-        effective_program_spec = spec.program_spec
-    elif not request.program_spec:
-        raise HTTPException(
-            status_code=400,
-            detail="Either module_slug or program_spec must be provided.",
-        )
+    _ensure_gepa_runtime_available()
+    effective_program_spec = _resolve_effective_program_spec(request)
 
     dataset, dataset_ref = await _resolve_dataset_request(
         request,
         repository=repository,
         persisted_identity=persisted_identity,
     )
-    base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
-    safe_root = os.path.join(base_root, "")
-
-    output_path: Path | None = None
-    if request.output_path:
-        if os.path.isabs(request.output_path):
-            raise HTTPException(
-                status_code=400,
-                detail="Absolute paths are not allowed. Use a relative path.",
-            )
-        resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
-        if not resolved_output.startswith(safe_root):
-            raise HTTPException(
-                status_code=400,
-                detail="Path escapes the allowed data directory.",
-            )
-        output_path = Path(resolved_output)
-
-    db_run_id: str | int | None = None
-    if repository is not None and persisted_identity is not None:
-        try:
-            workspace_id = _require_workspace_id(persisted_identity)
-            dataset_uuid = (
-                _parse_uuid_id(
-                    request.dataset_id,
-                    detail=f"Dataset {request.dataset_id} not found.",
-                )
-                if request.dataset_id is not None
-                else None
-            )
-            created_run = await repository.create_optimization_run(
-                OptimizationRunCreateRequest(
-                    tenant_id=persisted_identity.tenant_id,
-                    workspace_id=workspace_id,
-                    created_by_user_id=persisted_identity.user_id,
-                    optimizer="GEPA",
-                    program_spec=effective_program_spec,
-                    module_slug=request.module_slug,
-                    dataset_id=dataset_uuid,
-                    auto=request.auto,
-                    train_ratio=request.train_ratio,
-                    metadata_json={"dataset_path": dataset_ref},
-                )
-            )
-            db_run_id = str(created_run.id)
-        except Exception as exc:
-            logger.exception(
-                "Failed to create optimization run in Postgres", exc_info=exc
-            )
-    else:
-        try:
-            from fleet_rlm.integrations.local_store import (
-                create_optimization_run as _db_create_run,
-            )
-
-            db_run_id = (
-                await asyncio.to_thread(
-                    _db_create_run,
-                    program_spec=effective_program_spec,
-                    auto=request.auto,
-                    train_ratio=request.train_ratio,
-                    module_slug=request.module_slug,
-                    dataset_id=int(request.dataset_id)
-                    if request.dataset_id is not None
-                    else None,
-                    dataset_path=dataset_ref,
-                )
-            ).id
-        except Exception as exc:
-            logger.exception(
-                "Failed to create optimization run in local database", exc_info=exc
-            )
+    output_path = _resolve_blocking_output_path(request.output_path)
+    db_run_id = await _create_blocking_run_record(
+        request=request,
+        repository=repository,
+        persisted_identity=persisted_identity,
+        program_spec=effective_program_spec,
+        dataset_ref=dataset_ref,
+    )
 
     try:
-        if request.module_slug:
-            result = await run_blocking(
-                partial(
-                    _run_module_optimization,
-                    module_slug=request.module_slug,
-                    dataset_path=dataset,
-                    output_path=output_path,
-                    default_output_root=OPTIMIZATION_DATA_ROOT,
-                    auto=request.auto,
-                    train_ratio=request.train_ratio,
-                    run_id=db_run_id if isinstance(db_run_id, int) else None,
-                ),
-                timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-            )
-        else:
-            result = await run_blocking(
-                partial(
-                    _run_gepa_optimization,
-                    dataset_path=dataset,
-                    program_spec=effective_program_spec,
-                    output_path=output_path,
-                    auto=request.auto,
-                    train_ratio=request.train_ratio,
-                ),
-                timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-            )
+        result = await _execute_blocking_optimization(
+            request=request,
+            dataset=dataset,
+            output_path=output_path,
+            program_spec=effective_program_spec,
+            db_run_id=db_run_id,
+        )
     except Exception as exc:
         logger.exception("GEPA optimization failed")
-        if db_run_id is not None:
-            if (
-                repository is not None
-                and persisted_identity is not None
-                and isinstance(db_run_id, str)
-            ):
-                try:
-                    await repository.fail_optimization_run(
-                        tenant_id=persisted_identity.tenant_id,
-                        run_id=uuid.UUID(db_run_id),
-                        workspace_id=persisted_identity.workspace_id,
-                        created_by_user_id=persisted_identity.user_id,
-                        error=str(exc),
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to mark GEPA optimization run %s as failed in Postgres",
-                        db_run_id,
-                    )
-            else:
-                try:
-                    from fleet_rlm.integrations.local_store import (
-                        fail_optimization_run,
-                    )
-
-                    assert isinstance(db_run_id, int)
-                    await asyncio.to_thread(
-                        fail_optimization_run, db_run_id, error=str(exc)
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to mark GEPA optimization run %s as failed in database",
-                        db_run_id,
-                    )
-        return GEPAOptimizationResponse(
-            ok=False,
-            program_spec=effective_program_spec,
-            train_examples=0,
-            validation_examples=0,
-            module_slug=request.module_slug,
+        await _mark_blocking_run_failed(
+            db_run_id=db_run_id,
+            repository=repository,
+            persisted_identity=persisted_identity,
             error=str(exc),
         )
+        return _failed_blocking_optimization_response(
+            exc=exc,
+            request=request,
+            program_spec=effective_program_spec,
+        )
 
-    if db_run_id is not None:
-        if (
-            repository is not None
-            and persisted_identity is not None
-            and isinstance(db_run_id, str)
-        ):
-            try:
-                run_uuid = uuid.UUID(db_run_id)
-                await repository.save_evaluation_results(
-                    tenant_id=persisted_identity.tenant_id,
-                    run_id=run_uuid,
-                    workspace_id=persisted_identity.workspace_id,
-                    created_by_user_id=persisted_identity.user_id,
-                    results=result.get("evaluation_results", []),
-                )
-                await repository.save_prompt_snapshots(
-                    tenant_id=persisted_identity.tenant_id,
-                    run_id=run_uuid,
-                    workspace_id=persisted_identity.workspace_id,
-                    created_by_user_id=persisted_identity.user_id,
-                    snapshots=result.get("prompt_snapshots", []),
-                )
-                await repository.complete_optimization_run(
-                    tenant_id=persisted_identity.tenant_id,
-                    run_id=run_uuid,
-                    workspace_id=persisted_identity.workspace_id,
-                    created_by_user_id=persisted_identity.user_id,
-                    train_examples=result.get("train_examples", 0),
-                    validation_examples=result.get("validation_examples", 0),
-                    validation_score=result.get("validation_score"),
-                    output_path=result.get("output_path"),
-                    manifest_path=result.get("manifest_path"),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to mark GEPA optimization run %s as complete in Postgres",
-                    db_run_id,
-                )
-        else:
-            try:
-                from fleet_rlm.integrations.local_store import (
-                    complete_optimization_run,
-                )
-
-                assert isinstance(db_run_id, int)
-                await asyncio.to_thread(
-                    complete_optimization_run,
-                    db_run_id,
-                    train_examples=result.get("train_examples", 0),
-                    validation_examples=result.get("validation_examples", 0),
-                    validation_score=result.get("validation_score"),
-                    output_path=result.get("output_path"),
-                    manifest_path=result.get("manifest_path"),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to mark GEPA optimization run %s as complete", db_run_id
-                )
-
-    return GEPAOptimizationResponse(
-        ok=True,
-        optimizer=result.get("optimizer", "GEPA"),
-        program_spec=result.get("program_spec", effective_program_spec),
-        train_examples=result.get("train_examples", 0),
-        validation_examples=result.get("validation_examples", 0),
-        validation_score=result.get("validation_score"),
-        output_path=result.get("output_path"),
-        manifest_path=result.get("manifest_path"),
-        module_slug=request.module_slug,
+    await _mark_blocking_run_complete(
+        db_run_id=db_run_id,
+        repository=repository,
+        persisted_identity=persisted_identity,
+        result=result,
+    )
+    return _blocking_optimization_response(
+        result=result,
+        request=request,
+        program_spec=effective_program_spec,
     )
 
 

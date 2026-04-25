@@ -10,19 +10,8 @@ import re
 
 
 def regex_extract(text: str, pattern: str, flags: int = 0) -> list:
-    """Extract all regex matches from text using a compiled pattern.
-
-    Args:
-        text: The source text to search within.
-        pattern: The regular expression pattern to match.
-        flags: Optional regex flags (e.g., re.IGNORECASE, re.MULTILINE).
-
-    Returns:
-        A list of all matches found.
-    """
-
-    compiled = re.compile(pattern, flags)
-    return compiled.findall(text)
+    """Return all non-overlapping matches of pattern in text."""
+    return re.findall(pattern, text, flags)
 
 
 __all__ = ["regex_extract"]

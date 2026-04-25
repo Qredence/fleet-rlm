@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 def sanitize_for_log(value: object) -> str:
-    """Strip control characters for safe log interpolation."""
+    """Escape CR and LF for safe log interpolation."""
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
 
