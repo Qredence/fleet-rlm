@@ -2,14 +2,6 @@
 
 * [Documentation Home](index.md)
 * [fleet-rlm Documentation](README.md)
-* [Product Spec](explanation/product-spec.md)
-* [Architecture Overview](architecture.md)
-* [Current Architecture and Transition Note](notes/current-architecture-transition.md)
-* [Frontend Product Surface Guide](guides/frontend-product-surface.md)
-* [Optimization Page Spec](specs/optimization-page.md)
-* [Wiring Analysis](wiring-analysis.md)
-* [Reference Index](reference/index.md)
-* [Explanation Index](explanation/index.md)
 
 ## Tutorials
 
@@ -28,12 +20,18 @@
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
   * [DSPy Integration Guide](how-to-guides/dspy-integration.md)
   * [Deploying the API Server](how-to-guides/deploying-server.md)
-
-  * [Using with Claude Code](how-to-guides/using-claude-code-agents.md)
   * [Jupyter Notebook Workflows](how-to-guides/using-notebooks.md)
   * [MLflow Tracing, Feedback, Eval, and Optimization](how-to-guides/mlflow-workflows.md)
   * [Performance Regression Guardrail](how-to-guides/performance-regression-guardrail.md)
   * [Troubleshooting](how-to-guides/troubleshooting.md)
+
+## Explanation
+
+* [Explanation](explanation/index.md)
+  * [Product Spec](explanation/product-spec.md)
+  * [fleet-rlm Concepts](explanation/concepts.md)
+  * [User Interaction Flows](explanation/user-flows.md)
+  * [Component UML](explanation/component-uml.md)
 
 ## Reference
 
@@ -61,29 +59,32 @@
   * [Release Notes 0.4.99](reference/release-notes-0.4.99.md)
   * [Release Notes 0.4.94](reference/release-notes-0.4.94.md)
 
-## Explanation
+## Architecture & Internals
 
-* [Explanation](explanation/index.md)
-  * [Product Spec](explanation/product-spec.md)
-  * [fleet-rlm Concepts](explanation/concepts.md)
-  * [User Interaction Flows](explanation/user-flows.md)
-  * [Component UML](explanation/component-uml.md)
+* [Architecture Overview](architecture.md)
+* [Frontend Product Surface Guide](guides/frontend-product-surface.md)
+* [Optimization Page Spec](specs/optimization-page.md)
+* [Wiring Analysis](wiring-analysis.md)
+* [Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)
 
-## Historical Notes
+## Internal History
 
-* [Phase 1: Worker Boundary Extraction](notes/phase-1-worker-boundary.md)
-* [Phase 2: Websocket Transport Thinning](notes/phase-2-ws-thinning.md)
-* [Phase 3: Orchestration Seams](notes/phase-3-orchestration-seams.md)
-* [Phase 4: Outer Orchestration](notes/phase-4-outer-orchestration.md)
-* [Phase 5: Session Orchestration](notes/phase-5-session-orchestration.md)
-* [Phase 6: Terminal Orchestration](notes/phase-6-terminal-orchestration.md)
-* [Phase 7/8: Agent Framework Transition](notes/phase-7-8-agent-framework-transition.md)
-* [Phase 9: Agent Host HITL Migration](notes/phase-9-agent-host-hitl-migration.md)
-* [Phase 10: Agent host session migration](notes/phase-10-agent-host-session-migration.md)
-* [Phase 11: Agent Host REPL Bridge](notes/phase-11-agent-host-repl-bridge.md)
-* [Phase 12: DSPy Recursive Module GEPA](notes/phase-12-dspy-recursive-module-gepa.md)
-* [Phase 13: Recursive Context Assembly](notes/phase-13-recursive-context-assembly.md)
-* [Phase 14: Recursive Decomposition Module](notes/phase-14-recursive-decomposition-module.md)
-* [Phase 15: Recursive Verification Module](notes/phase-15-recursive-verification-module.md)
-* [Phase 17: Recursive Repair Module](notes/phase-17-recursive-repair-module.md)
-* [Phase 18: Working Backend Frontend Path](notes/phase-18-working-backend-frontend-path.md)
+Migration notes kept for context when reading diffs. Not part of the current user or developer path.
+
+* [Current Architecture and Transition Note](internal/history/current-architecture-transition.md)
+* [Phase 1: Worker Boundary Extraction](internal/history/phase-1-worker-boundary.md)
+* [Phase 2: Websocket Transport Thinning](internal/history/phase-2-ws-thinning.md)
+* [Phase 3: Orchestration Seams](internal/history/phase-3-orchestration-seams.md)
+* [Phase 4: Outer Orchestration](internal/history/phase-4-outer-orchestration.md)
+* [Phase 5: Session Orchestration](internal/history/phase-5-session-orchestration.md)
+* [Phase 6: Terminal Orchestration](internal/history/phase-6-terminal-orchestration.md)
+* [Phase 7/8: Agent Framework Transition](internal/history/phase-7-8-agent-framework-transition.md)
+* [Phase 9: Agent Host HITL Migration](internal/history/phase-9-agent-host-hitl-migration.md)
+* [Phase 10: Agent Host Session Migration](internal/history/phase-10-agent-host-session-migration.md)
+* [Phase 11: Agent Host REPL Bridge](internal/history/phase-11-agent-host-repl-bridge.md)
+* [Phase 12: DSPy Recursive Module GEPA](internal/history/phase-12-dspy-recursive-module-gepa.md)
+* [Phase 13: Recursive Context Assembly](internal/history/phase-13-recursive-context-assembly.md)
+* [Phase 14: Recursive Decomposition Module](internal/history/phase-14-recursive-decomposition-module.md)
+* [Phase 15: Recursive Verification Module](internal/history/phase-15-recursive-verification-module.md)
+* [Phase 17: Recursive Repair Module](internal/history/phase-17-recursive-repair-module.md)
+* [Phase 18: Working Backend Frontend Path](internal/history/phase-18-working-backend-frontend-path.md)

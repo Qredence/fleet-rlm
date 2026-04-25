@@ -1,26 +1,28 @@
 # Documentation Home
 
-`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product path is the live workspace runtime, the durable volume browser, the optimization surface, runtime settings and diagnostics, and the session history and replay view. Historical audits and migration notes are kept separate so the current docs stay readable.
+`fleet-rlm` is a Daytona-backed recursive DSPy workbench. Start with the tutorials and how-to guides below; move down into explanation and reference when you need conceptual or implementation detail.
 
-## Start Here
+## Start Here (User Path)
 
-- [README](README.md) for the top-level docs landing page
-- [Product Spec](explanation/product-spec.md) for the user-facing product contract
-- [Architecture Overview](architecture.md) for the current layer ownership model
-- [Reference Index](reference/index.md) for implementation-facing contracts
-- [Explanation Index](explanation/index.md) for conceptual docs
-- [Current Architecture and Transition Note](notes/current-architecture-transition.md) for the active migration boundary
+1. **[Tutorials](tutorials/index.md)** — learn by doing: basic usage, document analysis, interactive chat.
+2. **[How-to Guides](how-to-guides/index.md)** — solve specific problems: installation, deployment, DSPy integration, troubleshooting, MLflow workflows.
+3. **[Explanation](explanation/index.md)** — understand the product: spec, concepts, user flows.
 
-## Current Docs
+## Reference
 
-- [Tutorials](tutorials/index.md)
-- [How-to Guides](how-to-guides/index.md)
-- [Reference](reference/index.md)
-- [Explanation](explanation/index.md)
-- [Frontend Product Surface Guide](guides/frontend-product-surface.md)
-- [Optimization Page Spec](specs/optimization-page.md)
-- [Wiring Analysis](wiring-analysis.md)
-- [Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)
+- **[Reference Index](reference/index.md)** — CLI, HTTP/WebSocket API, Python API, auth modes, database, sandbox surfaces, source layout.
+- **[Frontend Product Surface Guide](guides/frontend-product-surface.md)**
+- **[Optimization Page Spec](specs/optimization-page.md)**
+
+## Architecture & Internals
+
+Read these after you've seen the product:
+
+- **[Architecture Overview](architecture.md)** — current layer ownership model.
+- **[Wiring Analysis](wiring-analysis.md)**
+- **[Frontend Simplification Design](superpowers/specs/2026-04-16-frontend-simplification-design.md)**
+- **[Current Architecture and Transition Note](internal/history/current-architecture-transition.md)** — active migration boundary (internal).
+- **[Historical Phase Notes](internal/history/)** — migration history for context when reading diffs.
 
 ## Current Product Surfaces
 
@@ -30,7 +32,7 @@
 - [Settings](explanation/product-spec.md)
 - [History](reference/frontend-backend-integration.md)
 
-## New API Reference Surfaces
+## API Reference Surfaces
 
 - [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
 - [Runs API](reference/runs-api.md) — Execution trace step browsing

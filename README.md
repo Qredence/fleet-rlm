@@ -7,40 +7,66 @@
 
 ![thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace whose center of gravity is a Daytona-backed recursive DSPy runtime. The repo layers that core behind a thin FastAPI/WebSocket transport and a narrow hosted-policy orchestration layer.
+`fleet-rlm` is a web workspace for running **recursive language-model tasks** on top of DSPy and Daytona sandboxes. You chat with a ReAct agent in the browser; when a task is larger than a single context window, the agent delegates pieces to isolated sub-sandboxes, each running a bounded `dspy.RLM` per [arXiv 2512.24601v2](https://arxiv.org/abs/2512.24601).
 
-[Docs](docs/) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md)
+**Who it's for.** DSPy users who want a UI-driven workspace for long-context tasks, recursive decomposition, and sandboxed code execution — without hand-rolling the transport, persistence, and sandbox plumbing.
 
-## What This Repo Is Now
+**What it removes.** Writing your own WebSocket transport, session persistence, Daytona sandbox lifecycle, execution-trace UI, and recursive-delegation policy around a DSPy program. `fleet-rlm` ships all of that behind a single `uv run fleet web`.
 
-The maintained backend is easiest to read in this order:
+**Try it in 30 seconds.** See [Quick Start](#quick-start) below.
 
-1. **Recursive DSPy runtime core**
-   - `src/fleet_rlm/runtime/agent/*`
-   - `src/fleet_rlm/runtime/models/*`
-   - `src/fleet_rlm/integrations/daytona/*`
-2. **Thin transport shell**
-   - `src/fleet_rlm/api/main.py`
-   - `src/fleet_rlm/api/routers/ws/*`
-   - `src/fleet_rlm/api/runtime_services/*`
-3. **Offline DSPy quality and optimization layer**
-   - `src/fleet_rlm/runtime/quality/*`
+[Docs](docs/) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [arXiv paper](https://arxiv.org/abs/2512.24601)
 
-That means:
+## Project Status
 
-- `runtime/agent/agent.py` and `runtime/agent/runtime.py` are the main cognition loop.
-- `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the execution and durable-memory substrate.
-- FastAPI/WebSocket modules are transport: auth, request parsing, session extraction, lifecycle, and event-envelope delivery.
+Solo-maintained by [@Zochory](https://github.com/Zochory). External contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). No SLA; issues are reviewed as capacity allows.
 
-The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
+## Architecture at a Glance
 
-## Why This Repo Exists
+Two layers, both `dspy.*`, both real:
 
-- Use a shared recursive DSPy + Daytona workspace for task execution, chat turns, run inspection, and runtime diagnostics.
-- Keep the product path goal-first rather than repo-first.
-- Preserve one shared frontend and websocket contract instead of parallel runtime modes.
-- Ship thin transport and hosting layers around the runtime core rather than duplicating runtime logic in API or orchestration wrappers.
-- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, and WebSocket workflows.
+- **Chat surface** — `dspy.ReAct` for interactive turn-taking. Lives at `src/fleet_rlm/runtime/agent/agent.py` as `FleetAgent`.
+- **Recursive engine** — `dspy.RLM` running inside a child Daytona sandbox. Built in `src/fleet_rlm/runtime/models/builders.py`; the recursive sub-query variant is `build_recursive_subquery_rlm()`. Implements Algorithm 1 from [arXiv 2512.24601v2](https://arxiv.org/abs/2512.24601): inputs stored as REPL variables, sub-queries bounded by `max_iterations` and `max_llm_calls`.
+
+### How the ReAct Agent Delegates to `dspy.RLM`
+
+The chat agent does *not* directly hand a task to a child RLM. Delegation is mediated by a specific ReAct tool, `delegate_to_rlm`, registered the same way as any other tool in the agent's tool registry:
+
+```
+User prompt
+   ↓
+FleetAgent  (dspy.ReAct, host LLM)
+   │   decides the task exceeds one context and picks the tool:
+   ↓
+delegate_to_rlm(query, context="", document_url="")
+   │   — src/fleet_rlm/runtime/tools/rlm_delegate.py
+   │   — reads the active Daytona interpreter from a ContextVar
+   │   — checks remaining LLM-call budget; returns error if exhausted
+   │   — interpreter.build_delegate_child()   ← isolated child Daytona sandbox
+   │   — optionally fetches document_url into the child's context
+   ↓
+build_recursive_subquery_rlm(
+    interpreter=child,
+    max_iterations=min(child.rlm_max_iterations, remaining_budget),
+    max_llm_calls=remaining_budget,
+)
+   │   constructs the dspy.RLM bound to the child sandbox
+   ↓
+rlm(prompt=query, context=...)
+   │   child RLM runs REPL-variable-mode: may call llm_query(),
+   │   sub_rlm(), sub_rlm_batched() to recurse further inside its sandbox
+   ↓
+{"status": "ok", "answer": "..."}        ← bubbles back into the ReAct trace
+```
+
+Two entry points exist, and they share one budget:
+
+1. `delegate_to_rlm()` — from the host ReAct agent's tool registry (above).
+2. `sub_rlm()` / `sub_rlm_batched()` — from Python code already running *inside* a `dspy.RLM` sandbox, reaching back out through the Daytona bridge to spawn a further child.
+
+Both go through `DaytonaInterpreter.build_delegate_child()` so child creation follows one backend-owned policy (default: `RLM_CHILD_ISOLATION_MODE=auto` — fork the parent sandbox if no durable volume is mounted, otherwise create a clean child with a child-specific `volume_subpath`). `rlm_max_llm_calls` is a single shared semantic-call budget across the entire recursive tree; `sub_rlm_batched()` caps sibling parallelism at 4.
+
+Full details, including the local-workspace-snapshot fallback when a parent turn has no `repo_url` to recreate in the child, live in [`docs/architecture.md`](docs/architecture.md#recursive-rlm-isolation).
 
 ## Quick Start
 
@@ -105,7 +131,7 @@ The product is goal-first rather than repo-first. Repositories are one possible 
 This package exposes two command entrypoints:
 
 - `fleet`: lightweight launcher for terminal chat and `fleet web`
-- `fleet-rlm`: fuller Typer CLI for API, scaffold, and Daytona flows
+- `fleet-rlm`: fuller Typer CLI for API and Daytona flows
 
 Common commands:
 
@@ -119,9 +145,6 @@ uv run fleet-rlm chat --trace-mode verbose
 
 # FastAPI server
 uv run fleet-rlm serve-api --port 8000
-
-# Scaffold bundled Claude Code assets
-uv run fleet-rlm init --list
 
 # Experimental Daytona validation
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
@@ -168,7 +191,37 @@ pnpm run build
 
 This repo explicitly uses `pnpm` for frontend work even though the packaged frontend is built with Vite+ under the hood.
 
-## Maintenance
+## Repo Layout
+
+The maintained backend is easiest to read in this order:
+
+1. **Recursive DSPy runtime core**
+   - `src/fleet_rlm/runtime/agent/*`
+   - `src/fleet_rlm/runtime/models/*`
+   - `src/fleet_rlm/integrations/daytona/*`
+2. **Thin transport shell**
+   - `src/fleet_rlm/api/main.py`
+   - `src/fleet_rlm/api/routers/ws/*`
+   - `src/fleet_rlm/api/runtime_services/*`
+3. **Offline DSPy quality and optimization layer**
+   - `src/fleet_rlm/runtime/quality/*`
+
+That means:
+
+- `runtime/agent/agent.py` and `runtime/agent/runtime.py` are the main cognition loop.
+- `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the execution and durable-memory substrate.
+- FastAPI/WebSocket modules are transport: auth, request parsing, session extraction, lifecycle, and event-envelope delivery.
+
+The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.
+
+## Design Principles
+
+- Keep the backend thin: transport + sandbox orchestration only, no business logic in API layers.
+- Preserve one shared frontend and WebSocket contract instead of parallel runtime modes.
+- Ship a UI that surfaces the runtime's streaming events, code execution, and artifacts rather than hiding them.
+- Expose both a user-facing Web UI and integration surfaces for CLI, HTTP, and WebSocket workflows.
+
+## Maintenance Commands
 
 Common maintenance commands from the repo root:
 
@@ -224,7 +277,7 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 
 - [Documentation index](docs/index.md)
 - [Architecture overview](docs/architecture.md)
-- [Current architecture and transition note](docs/notes/current-architecture-transition.md)
+- [Current architecture and transition note](docs/internal/history/current-architecture-transition.md)
 - [Focused codebase map](docs/reference/codebase-map.md)
 - [Python backend module map](docs/reference/module-map.md)
 - [Adaptive RLM product spec](docs/explanation/product-spec.md)

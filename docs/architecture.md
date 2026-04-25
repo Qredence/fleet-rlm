@@ -2,6 +2,20 @@
 
 `fleet-rlm` is a Daytona-backed recursive runtime wrapped by a thin transport shell and a narrow hosted-policy layer.
 
+## Design Principles
+
+Three choices drive the shape of this codebase. They are intentional, not accidents of scope:
+
+1. **The backend is intentionally thin.** The Python layer is a transport + orchestration shell over `dspy.ReAct`, `dspy.RLM`, and Daytona sandboxes. "Intelligence" lives in DSPy (upstream) and in how recursive child sandboxes are scheduled (this repo). Expect to find plumbing in `src/fleet_rlm/api/` and policy in `src/fleet_rlm/runtime/` — not business logic mixed into request handlers.
+
+2. **The UI is treated as core, not peripheral.** The runtime emits streaming events, code-execution results, and artifacts that only make sense in an interactive surface. Hiding them behind CLI-only access would throw away most of the runtime's observability. That is why `src/frontend/` is comparable in line count to `src/fleet_rlm/` — the UI is surfacing work the runtime does, not duplicating it.
+
+3. **Two agent layers, both `dspy.*`, both real.**
+   - **Chat surface:** `dspy.ReAct` at `src/fleet_rlm/runtime/agent/agent.py` handles turn-taking, tool dispatch, and the user-visible conversation loop.
+   - **Recursive engine:** `dspy.RLM` at `src/fleet_rlm/runtime/models/builders.py` (with delegation at `src/fleet_rlm/runtime/tools/rlm_delegate.py`) implements Algorithm 1 from [arXiv 2512.24601v2](https://arxiv.org/abs/2512.24601). Inputs are stored as REPL variables inside a child Daytona sandbox; sub-queries are dispatched recursively, bounded by `max_iterations` and `max_llm_calls`; sandboxes are isolated per delegation.
+
+   The chat agent is the entry point; the recursive engine runs when a task exceeds what a single ReAct context can handle. Both use DSPy's module abstractions and share a single LLM-call budget across a recursive tree (see the `Recursive RLM isolation` section below).
+
 ## Current Layering
 
 1. **Thin FastAPI/WebSocket transport** in `src/fleet_rlm/api/`

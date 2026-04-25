@@ -1,6 +1,6 @@
 # Explanation
 
-Conceptual documentation for the current maintained product and runtime. Historical audits and migration notes live under `docs/historical/` and `docs/notes/`.
+Conceptual documentation for the current maintained product and runtime. Historical audits and migration notes live under `docs/internal/history/`.
 
 ## Current Concepts
 
@@ -12,4 +12,4 @@ Conceptual documentation for the current maintained product and runtime. Histori
 
 ## Current-State Notes
 
-- [Current Architecture and Transition Note](../notes/current-architecture-transition.md)
+- [Current Architecture and Transition Note](../internal/history/current-architecture-transition.md)
