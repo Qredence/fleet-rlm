@@ -64,7 +64,7 @@ def set_delegate_interpreter(interpreter: Any | None) -> Any:
 def delegate_to_rlm(
     query: str,
     context: str = "",
-    document_url: str = "",
+    document_url: str | None = None,
 ) -> dict[str, Any]:
     """Delegate a query to a recursive dspy.RLM running in a Daytona sandbox.
 
@@ -243,9 +243,24 @@ def _resolve_delegate_context(
     doc_path = f"artifacts/rlm-inputs/doc_{doc_hash}.txt"
     if not getattr(child, "_started", False):
         child.start()
-    session = child._ensure_session_sync()
-    _record_child_sandbox_id(child)
-    written_path = session.write_file(doc_path, doc_text)
+    try:
+        session = child._ensure_session_sync()
+        _record_child_sandbox_id(child)
+        written_path = session.write_file(doc_path, doc_text)
+    except Exception as exc:
+        logger.warning(
+            "delegate_to_rlm: failed to persist document from %s to child: %s",
+            stripped_url,
+            exc,
+        )
+        fallback = doc_text[:embed_threshold]
+        doc_snippet = (
+            f"\n\n--- Document fetched from {stripped_url} "
+            f"({char_count} chars; truncated after {len(fallback)} chars because "
+            "sandbox staging failed) ---\n"
+            f"{fallback}\n--- End of truncated document ---"
+        )
+        return (base_context + doc_snippet).strip()
     logger.info(
         "delegate_to_rlm: persisted document from %s to child path %s (%d chars)",
         stripped_url,
@@ -355,9 +370,13 @@ def _uses_local_host_checkout(child: Any) -> bool:
     repo_url = str(getattr(child, "repo_url", "") or "").strip()
     if repo_url:
         return False
+    volume_name = str(getattr(child, "volume_name", "") or "").strip()
+    if volume_name:
+        return False
     session = getattr(child, "_session", None)
     session_repo_url = str(getattr(session, "repo_url", "") or "").strip()
-    return not session_repo_url
+    session_volume_name = str(getattr(session, "volume_name", "") or "").strip()
+    return not session_repo_url and not session_volume_name
 
 
 def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:
@@ -413,20 +432,18 @@ def _needs_local_workspace_snapshot(text: str) -> bool:
     indicators = {
         "codebase",
         "repository",
-        "repo",
-        "source",
         "implementation",
         "inspect",
-        "files",
         "architecture",
         "sandbox",
         "budget",
-        "session",
-        "restore",
-        "recursive",
         "sub_rlm",
         "delegate_to_rlm",
         "daytona",
+        "dspy",
+        "fleet",
+        "interpreter",
+        "rlm",
     }
     return any(indicator in lowered for indicator in indicators)
 

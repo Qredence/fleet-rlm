@@ -36,7 +36,7 @@ help:
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality checks"
-	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd"
+	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd (requires frontend pnpm install)"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
 	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"

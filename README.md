@@ -277,7 +277,7 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 
 - [Documentation index](docs/index.md)
 - [Architecture overview](docs/architecture.md)
-- [Current architecture and transition note](docs/internal/history/current-architecture-transition.md)
+- [Recursive RLM isolation architecture](docs/architecture.md#recursive-rlm-isolation)
 - [Focused codebase map](docs/reference/codebase-map.md)
 - [Python backend module map](docs/reference/module-map.md)
 - [Adaptive RLM product spec](docs/explanation/product-spec.md)

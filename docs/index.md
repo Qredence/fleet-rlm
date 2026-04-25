@@ -18,11 +18,9 @@
 
 Read these after you've seen the product:
 
-- **[Architecture Overview](explanation/architecture.md)** — current layer ownership model.
+- **[Architecture Overview](architecture.md)** — current layer ownership model.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Frontend Simplification Design](specs/frontend-simplification-design.md)**
-- **[Current Architecture and Transition Note](internal/history/current-architecture-transition.md)** — active migration boundary (internal).
-- **[Historical Phase Notes](internal/history/)** — migration history for context when reading diffs.
 
 ## Current Product Surfaces
 

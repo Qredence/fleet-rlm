@@ -32,3 +32,4 @@ class MemoryListResponse(BaseModel):
     total: int = Field(description="Total matching memory items.")
     offset: int = Field(description="Current pagination offset.")
     limit: int = Field(description="Current page size.")
+    has_more: bool = Field(description="Whether more results exist beyond this page.")

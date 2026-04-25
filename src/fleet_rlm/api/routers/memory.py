@@ -147,4 +147,5 @@ async def list_memory_items(
         total=total,
         offset=offset,
         limit=limit,
+        has_more=offset + len(items) < total,
     )

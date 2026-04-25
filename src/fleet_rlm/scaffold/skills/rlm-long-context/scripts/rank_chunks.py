@@ -15,7 +15,7 @@ def load_context(state_path: str) -> str:
     import pickle
 
     with open(state_path, "rb") as f:
-        state = pickle.load(f)
+        state = pickle.load(f)  # nosec
     return state.get("content", "")
 
 

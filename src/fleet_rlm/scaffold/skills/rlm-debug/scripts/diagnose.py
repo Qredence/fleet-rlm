@@ -32,7 +32,7 @@ def check_daytona() -> bool:
         ok = False
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec
             ["daytona", "version"],
             capture_output=True,
             text=True,

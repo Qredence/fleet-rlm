@@ -5,7 +5,7 @@ Covers VAL-RLM-001 through VAL-RLM-003 from the validation contract.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -18,6 +18,7 @@ class _FakeChildInterpreter:
         self.verbose = verbose
         self.sub_lm = None
         self.repo_url: str | None = None
+        self.volume_name: str | None = None
         self.rlm_max_iterations = 20
         self.child_isolation_metadata: dict[str, Any] = {
             "mode": "auto",
@@ -42,6 +43,8 @@ class _FakeChildInterpreter:
 
 class _FakeChildSession:
     def __init__(self) -> None:
+        self.repo_url: str | None = None
+        self.volume_name: str | None = None
         self.write_calls: list[tuple[str, str]] = []
 
     def write_file(self, path: str, content: str) -> str:
@@ -316,7 +319,7 @@ def test_delegate_to_rlm_none_document_url_is_ignored(
     try:
         result = rlm_delegate_mod.delegate_to_rlm(
             "empty answer query",
-            document_url=cast(str, None),
+            document_url=None,
         )
     finally:
         rlm_delegate_mod._delegate_interpreter.reset(token)
@@ -464,6 +467,57 @@ def test_delegate_to_rlm_writes_large_document_to_child_only(
     assert child.shutdown_calls == 1
 
 
+def test_delegate_to_rlm_embeds_truncated_large_document_when_child_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Large document_url payloads degrade to truncated context if staging fails."""
+    import dspy
+
+    import fleet_rlm.runtime.tools.document_tools as document_tools
+
+    child = _FakeChildInterpreter(started=False, verbose=False)
+    interpreter = _FakeParentInterpreter(child)
+    doc_text = "x" * 100_001
+    seen_contexts: list[str] = []
+
+    def _failing_write(path: str, content: str) -> str:
+        _ = path, content
+        raise OSError("sandbox write unavailable")
+
+    child.session.write_file = _failing_write
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            seen_contexts.append(str(kw.get("context", "")))
+            return dspy.Prediction(answer="fallback result")
+
+        return _module
+
+    monkeypatch.setattr(
+        document_tools,
+        "fetch_document_text",
+        lambda url: {"status": "ok", "text": doc_text, "char_count": len(doc_text)},
+    )
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm(
+            "read the document",
+            document_url="https://example.com/doc.txt",
+        )
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "ok"
+    assert (
+        "truncated after 100000 chars because sandbox staging failed"
+        in seen_contexts[0]
+    )
+    assert child.start_calls == 1
+    assert child.shutdown_calls == 1
+
+
 def test_delegate_to_rlm_stages_local_workspace_snapshot_for_codebase_tasks(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -538,6 +592,49 @@ def test_delegate_to_rlm_skips_local_workspace_snapshot_for_repo_children(
         def _module(**kw: Any) -> dspy.Prediction:
             seen_contexts.append(str(kw.get("context", "")))
             return dspy.Prediction(answer="repo-backed answer")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
+    try:
+        result = rlm_delegate_mod.delegate_to_rlm(
+            "Inspect the codebase implementation for sandbox budget session restore",
+        )
+    finally:
+        rlm_delegate_mod._delegate_interpreter.reset(token)
+
+    assert result["status"] == "ok"
+    assert child.session.write_calls == []
+    assert "local_workspace_snapshot.txt" not in seen_contexts[0]
+
+
+def test_delegate_to_rlm_skips_local_workspace_snapshot_for_volume_children(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Volume-backed child sandboxes already have mounted workspace context."""
+    import dspy
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    src_dir = tmp_path / "src" / "demo"
+    src_dir.mkdir(parents=True)
+    (src_dir / "runtime.py").write_text(
+        "def build_delegate_child():\n    return 'sandbox budget session'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    child = _FakeChildInterpreter(started=True, verbose=False)
+    child.volume_name = "workspace-volume"
+    interpreter = _FakeParentInterpreter(child)
+    seen_contexts: list[str] = []
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            seen_contexts.append(str(kw.get("context", "")))
+            return dspy.Prediction(answer="volume-backed answer")
 
         return _module
 

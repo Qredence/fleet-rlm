@@ -224,6 +224,7 @@ def _annotate_validation_error_schemas(app: FastAPI) -> None:
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
+    """Create the FastAPI application instance."""
     cfg = resolve_runtime_config(config)
 
     cfg.validate_startup_or_raise()
@@ -289,3 +290,6 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         _mount_api_only_root(app)
 
     return app
+
+
+app = create_app()

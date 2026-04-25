@@ -145,7 +145,7 @@ uv pip install --python .venv-release-smoke/bin/python \
   --extra-index-url https://pypi.org/simple \
   fleet-rlm==0.4.99
 source .venv-release-smoke/bin/activate
-python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
+python -m uvicorn fleet_rlm.api.app:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true; wait $SERVER_PID 2>/dev/null || true' EXIT
 for i in {1..30}; do

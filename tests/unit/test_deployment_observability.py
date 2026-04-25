@@ -6,6 +6,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def _load_module():
     script_path = (

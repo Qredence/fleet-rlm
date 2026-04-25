@@ -1,16 +1,16 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 
 set -euo pipefail
 
-script_dir=${0:A:h}
-repo_root=${script_dir:h}
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
 
 cd "$repo_root"
 
 jscpd_bin="src/frontend/node_modules/.bin/jscpd"
 
-if [[ ! -x "$jscpd_bin" ]]; then
-  print -u2 "Unable to run jscpd: expected $jscpd_bin. Run 'cd src/frontend && pnpm install --frozen-lockfile' first."
+if [ ! -x "$jscpd_bin" ]; then
+  printf '%s\n' "Unable to run jscpd: expected $jscpd_bin. Run 'cd src/frontend && pnpm install --frozen-lockfile' first." >&2
   exit 1
 fi
 

@@ -19,7 +19,7 @@ Then open `http://localhost:8000`.
 ## Current Docs
 
 - [Product Spec](explanation/product-spec.md)
-- [Architecture Overview](explanation/architecture.md)
+- [Architecture Overview](architecture.md)
 - [Reference Index](reference/index.md)
 - [Explanation Index](explanation/index.md)
 - [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
@@ -53,7 +53,7 @@ Then open `http://localhost:8000`.
 
 ## Understand the System
 
-- [Architecture overview](explanation/architecture.md)
+- [Architecture overview](architecture.md)
 - [Concepts](explanation/concepts.md)
 - [User interaction flows](explanation/user-flows.md)
 - [Component UML](explanation/component-uml.md)

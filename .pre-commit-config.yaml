@@ -52,7 +52,7 @@ repos:
 
       - id: duplicate-code-check
         name: Detect duplicate handwritten source blocks
-        entry: ./scripts/run_duplicate_check.zsh
+        entry: bash -lc 'cd src/frontend && pnpm install --frozen-lockfile && cd ../.. && ./scripts/run_duplicate_check.zsh'
         language: system
         pass_filenames: false
         stages: [pre-push]

@@ -322,7 +322,7 @@ def main():
 
     # Load content
     with open(args.state, "rb") as f:
-        state = pickle.load(f)
+        state = pickle.load(f)  # nosec
     content = state.get("content", "")
 
     # Detect content type

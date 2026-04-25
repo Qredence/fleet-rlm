@@ -1,5 +1,5 @@
 """FastAPI application entrypoint for ASGI servers and tooling."""
 
-from fleet_rlm.api.main import create_app
+from fleet_rlm.api.main import app
 
-app = create_app()
+__all__ = ["app"]

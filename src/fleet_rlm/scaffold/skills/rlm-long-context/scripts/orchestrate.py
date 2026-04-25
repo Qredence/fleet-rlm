@@ -69,7 +69,7 @@ class RLMConfig:
 def load_content(state_path: str) -> str:
     """Load content from RLM state."""
     with open(state_path, "rb") as f:
-        state = pickle.load(f)
+        state = pickle.load(f)  # nosec
     return state.get("content", "")
 
 

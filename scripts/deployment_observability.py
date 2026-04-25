@@ -1,3 +1,5 @@
+"""Build release observability summaries and emit optional PostHog deploy markers."""
+
 from __future__ import annotations
 
 import argparse
@@ -155,6 +157,7 @@ def emit_posthog_deploy_marker(
     release_tag: str | None,
     release_version: str | None,
 ) -> AnnotationResult:
+    """Emit a release deployment marker to PostHog when credentials are configured."""
     api_key = _clean(os.getenv("POSTHOG_API_KEY"))
     host = _clean(os.getenv("POSTHOG_HOST")) or "https://eu.i.posthog.com"
 
@@ -222,6 +225,7 @@ def build_summary(
     args: argparse.Namespace,
     posthog_result: AnnotationResult | None,
 ) -> str:
+    """Render the GitHub Actions Markdown step summary for a release deploy."""
     lines = [
         f"## Deployment observability ({args.environment})",
         "",
@@ -299,6 +303,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the deploy observability summary CLI."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 

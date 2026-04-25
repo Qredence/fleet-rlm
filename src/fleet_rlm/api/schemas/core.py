@@ -2,26 +2,124 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from .base import AuthMeResponse, HealthResponse, ReadyResponse
+from .feedback import TraceFeedbackRequest, TraceFeedbackResponse
+from .memory import MemoryItemResponse, MemoryListResponse
+from .optimization import (
+    DatasetDetailResponse,
+    DatasetListResponse,
+    DatasetResponse,
+    EvaluationResultItem,
+    EvaluationResultsResponse,
+    GEPAModuleInfo,
+    GEPAOptimizationRequest,
+    GEPAOptimizationResponse,
+    GEPAStatusResponse,
+    OptimizationRunCreatedResponse,
+    OptimizationRunResponse,
+    PromptSnapshotItem,
+    RunComparisonItem,
+    RunComparisonResponse,
+)
+from .runtime import (
+    RuntimeActiveModels,
+    RuntimeConnectivityTestResponse,
+    RuntimeSettingsSnapshot,
+    RuntimeSettingsUpdateRequest,
+    RuntimeSettingsUpdateResponse,
+    RuntimeStatusResponse,
+    RuntimeTestCache,
+)
+from .sandbox import (
+    RunStepItem,
+    RunStepListResponse,
+    SandboxArchiveResponse,
+    SandboxDetailResponse,
+    SandboxListItem,
+    SandboxListResponse,
+)
+from .sessions import (
+    SessionDeleteResponse,
+    SessionDetailResponse,
+    SessionExportRequest,
+    SessionListItem,
+    SessionListResponse,
+    SessionPatchRequest,
+    SessionRestoreResponse,
+    SessionStateResponse,
+    SessionStateSummary,
+    SessionStatsResponse,
+    TranscriptDatasetRequest,
+    TranscriptTurnInput,
+    TurnItem,
+    TurnListResponse,
+)
+from .volumes import (
+    VolumeFileContentResponse,
+    VolumeListItem,
+    VolumeListResponse,
+    VolumeProvider,
+    VolumeTreeNode,
+    VolumeTreeResponse,
+)
+from .websocket import WSCommandMessage, WSCommandResult, WSMessage
 
-if TYPE_CHECKING:
-    from .base import *  # noqa: F403
-    from .feedback import *  # noqa: F403
-    from .memory import *  # noqa: F403
-    from .optimization import *  # noqa: F403
-    from .runtime import *  # noqa: F403
-    from .sandbox import *  # noqa: F403
-    from .sessions import *  # noqa: F403
-    from .volumes import *  # noqa: F403
-    from .websocket import *  # noqa: F403
-
-# Runtime lazy re-exports to preserve import compatibility
-from .base import *  # noqa: F403
-from .feedback import *  # noqa: F403
-from .memory import *  # noqa: F403
-from .optimization import *  # noqa: F403
-from .runtime import *  # noqa: F403
-from .sandbox import *  # noqa: F403
-from .sessions import *  # noqa: F403
-from .volumes import *  # noqa: F403
-from .websocket import *  # noqa: F403
+__all__ = [
+    "AuthMeResponse",
+    "DatasetDetailResponse",
+    "DatasetListResponse",
+    "DatasetResponse",
+    "EvaluationResultItem",
+    "EvaluationResultsResponse",
+    "GEPAModuleInfo",
+    "GEPAOptimizationRequest",
+    "GEPAOptimizationResponse",
+    "GEPAStatusResponse",
+    "HealthResponse",
+    "MemoryItemResponse",
+    "MemoryListResponse",
+    "OptimizationRunCreatedResponse",
+    "OptimizationRunResponse",
+    "PromptSnapshotItem",
+    "ReadyResponse",
+    "RunComparisonItem",
+    "RunComparisonResponse",
+    "RunStepItem",
+    "RunStepListResponse",
+    "RuntimeActiveModels",
+    "RuntimeConnectivityTestResponse",
+    "RuntimeSettingsSnapshot",
+    "RuntimeSettingsUpdateRequest",
+    "RuntimeSettingsUpdateResponse",
+    "RuntimeStatusResponse",
+    "RuntimeTestCache",
+    "SandboxArchiveResponse",
+    "SandboxDetailResponse",
+    "SandboxListItem",
+    "SandboxListResponse",
+    "SessionDeleteResponse",
+    "SessionDetailResponse",
+    "SessionExportRequest",
+    "SessionListItem",
+    "SessionListResponse",
+    "SessionPatchRequest",
+    "SessionRestoreResponse",
+    "SessionStateResponse",
+    "SessionStateSummary",
+    "SessionStatsResponse",
+    "TraceFeedbackRequest",
+    "TraceFeedbackResponse",
+    "TranscriptDatasetRequest",
+    "TranscriptTurnInput",
+    "TurnItem",
+    "TurnListResponse",
+    "VolumeFileContentResponse",
+    "VolumeListItem",
+    "VolumeListResponse",
+    "VolumeProvider",
+    "VolumeTreeNode",
+    "VolumeTreeResponse",
+    "WSCommandMessage",
+    "WSCommandResult",
+    "WSMessage",
+]
