@@ -44,6 +44,7 @@ plans/
 PLANS.md
 TASKS.md
 docs/notes/
+docs/internal/
 docs/reference/adr/
 docs/superpowers/
 docs/plans/
