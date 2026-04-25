@@ -271,5 +271,3 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         _mount_ui_unavailable_root(app)
 
     return app
-
-
