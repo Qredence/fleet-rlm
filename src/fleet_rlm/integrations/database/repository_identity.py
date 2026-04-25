@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .engine import DatabaseManager
 from .models_enums import MembershipRole, TenantStatus
 from .models_identity import Tenant, User
 from .repository_shared import RepositoryContextMixin, _utc_now
@@ -24,9 +23,6 @@ class IdentityUpsertResult:
 
 class IdentityRepository(RepositoryContextMixin):
     """Tenant, user, and workspace identity operations."""
-
-    def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
 
     async def upsert_tenant(
         self,

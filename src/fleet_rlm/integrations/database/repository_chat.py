@@ -11,7 +11,6 @@ from typing import Any
 from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from .engine import DatabaseManager
 from .models_enums import (
     ArtifactKind,
     ArtifactProvider,
@@ -23,7 +22,12 @@ from .models_enums import (
     SandboxProvider,
 )
 from .models_runs import Artifact, ChatSession, ChatTurn, Run, RunStep
-from .repository_shared import RepositoryContextMixin, _coerce_enum, _utc_now
+from .repository_shared import (
+    RepositoryContextMixin,
+    _coerce_enum,
+    _count_from_stmt,
+    _utc_now,
+)
 
 
 @dataclass(frozen=True)
@@ -118,23 +122,12 @@ class ChatTurnCreateRequest:
 class ChatRepository(RepositoryContextMixin):
     """Chat session, turn, run, step, and artifact operations."""
 
-    def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
-
     async def create_run(self, request: RunCreateRequest) -> Run:
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.created_by_user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.created_by_user_id,
-                workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.created_by_user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             stmt = insert(Run).values(
                 tenant_id=request.tenant_id,
                 workspace_id=workspace_id,
@@ -179,20 +172,11 @@ class ChatRepository(RepositoryContextMixin):
         request: ChatSessionUpsertRequest,
     ) -> ChatSession:
         status = _coerce_enum(request.status, ChatSessionStatus)
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.user_id,
-                workspace_id,
-            )
-
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             values: dict[str, object] = {
                 "tenant_id": request.tenant_id,
                 "workspace_id": workspace_id,
@@ -231,20 +215,11 @@ class ChatRepository(RepositoryContextMixin):
 
     async def append_chat_turn(self, request: ChatTurnCreateRequest) -> ChatTurn:
         status = _coerce_enum(request.status, ChatTurnStatus)
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.user_id,
-                workspace_id,
-            )
-
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             session_stmt = (
                 select(ChatSession)
                 .where(
@@ -340,13 +315,12 @@ class ChatRepository(RepositoryContextMixin):
             if model_provider is not None:
                 stmt = stmt.where(ChatSession.model_provider == model_provider)
 
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            total = (await session.execute(count_stmt)).scalar_one()
+            total = await _count_from_stmt(session, stmt)
             items_stmt = (
                 stmt.order_by(ChatSession.updated_at.desc()).offset(offset).limit(limit)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
-            return items, int(total)
+            return items, total
 
     async def get_chat_session(
         self,
@@ -391,13 +365,12 @@ class ChatRepository(RepositoryContextMixin):
             )
             if workspace_id is not None:
                 stmt = stmt.where(ChatTurn.workspace_id == workspace_id)
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            total = (await session.execute(count_stmt)).scalar_one()
+            total = await _count_from_stmt(session, stmt)
             items_stmt = stmt.order_by(ChatTurn.turn_index.asc()).offset(offset)
             if limit > 0:
                 items_stmt = items_stmt.limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
-            return items, int(total)
+            return items, total
 
     async def update_chat_session(
         self,
@@ -527,15 +500,10 @@ class ChatRepository(RepositoryContextMixin):
 
     async def append_step(self, request: RunStepCreateRequest) -> RunStep:
         step_type = _coerce_enum(request.step_type, RunStepType)
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session, request.tenant_id, workspace_id=workspace_id
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             stmt = insert(RunStep).values(
                 tenant_id=request.tenant_id,
                 workspace_id=workspace_id,
@@ -633,7 +601,6 @@ class ChatRepository(RepositoryContextMixin):
         """
         async with self._db.session() as session, session.begin():
             await self._set_request_context(session, tenant_id, user_id, workspace_id)
-            # Verify session exists and is owned
             session_stmt: Select[tuple[ChatSession]] = select(ChatSession).where(
                 and_(
                     ChatSession.tenant_id == tenant_id,
@@ -650,7 +617,6 @@ class ChatRepository(RepositoryContextMixin):
             if session_row is None:
                 return None
 
-            # Aggregate stats from turns
             stmt: Select[tuple[ChatTurn]] = select(ChatTurn).where(
                 and_(
                     ChatTurn.tenant_id == tenant_id,
@@ -684,19 +650,11 @@ class ChatRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> Run | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = select(Run).where(
                 and_(
                     Run.tenant_id == tenant_id,
@@ -717,19 +675,11 @@ class ChatRepository(RepositoryContextMixin):
         limit: int | None = None,
         offset: int = 0,
     ) -> Sequence[RunStep]:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = (
                 select(RunStep)
                 .where(
@@ -756,19 +706,11 @@ class ChatRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> int:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = (
                 select(func.count())
                 .select_from(RunStep)

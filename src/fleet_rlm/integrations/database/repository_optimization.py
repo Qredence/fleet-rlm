@@ -5,12 +5,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import Select, and_, delete, func, select, text, update
+from sqlalchemy import Select, and_, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
-from .engine import DatabaseManager
 from .models_enums import (
     DatasetFormat,
     DatasetSource,
@@ -25,7 +24,11 @@ from .models_optimization import (
     OptimizationRun,
     PromptSnapshot,
 )
-from .repository_shared import RepositoryContextMixin, _utc_now
+from .repository_shared import (
+    RepositoryContextMixin,
+    _count_from_stmt,
+    _utc_now,
+)
 
 
 @dataclass(frozen=True)
@@ -62,28 +65,17 @@ class OptimizationRunCreateRequest:
 class OptimizationRepository(RepositoryContextMixin):
     """Dataset, optimization run, evaluation, and prompt-snapshot operations."""
 
-    def __init__(self, database: DatabaseManager) -> None:
-        self._db = database
-
     async def create_dataset(
         self,
         request: DatasetCreateRequest,
         *,
         examples: Sequence[dict[str, Any]] | None = None,
     ) -> Dataset:
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.created_by_user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.created_by_user_id,
-                workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.created_by_user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             module = await self._ensure_optimization_module_in_session(
                 session,
                 tenant_id=request.tenant_id,
@@ -164,19 +156,11 @@ class OptimizationRepository(RepositoryContextMixin):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Dataset], int]:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt: Select[tuple[Dataset]] = select(Dataset).where(
                 and_(
                     Dataset.tenant_id == tenant_id,
@@ -187,13 +171,12 @@ class OptimizationRepository(RepositoryContextMixin):
                 stmt = stmt.where(
                     Dataset.metadata_json["module_slug"].as_string() == module_slug
                 )
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            total = (await session.execute(count_stmt)).scalar_one()
+            total = await _count_from_stmt(session, stmt)
             items_stmt = (
                 stmt.order_by(Dataset.created_at.desc()).offset(offset).limit(limit)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
-            return items, int(total)
+            return items, total
 
     async def get_dataset(
         self,
@@ -203,19 +186,11 @@ class OptimizationRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> Dataset | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = select(Dataset).where(
                 and_(
                     Dataset.tenant_id == tenant_id,
@@ -235,19 +210,11 @@ class OptimizationRepository(RepositoryContextMixin):
         limit: int = 10,
         offset: int = 0,
     ) -> tuple[list[DatasetExample], int]:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt: Select[tuple[DatasetExample]] = select(DatasetExample).where(
                 and_(
                     DatasetExample.tenant_id == tenant_id,
@@ -255,33 +222,24 @@ class OptimizationRepository(RepositoryContextMixin):
                     DatasetExample.dataset_id == dataset_id,
                 )
             )
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            total = (await session.execute(count_stmt)).scalar_one()
+            total = await _count_from_stmt(session, stmt)
             items_stmt = (
                 stmt.order_by(DatasetExample.row_index.asc())
                 .offset(offset)
                 .limit(limit)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
-            return items, int(total)
+            return items, total
 
     async def create_optimization_run(
         self,
         request: OptimizationRunCreateRequest,
     ) -> OptimizationRun:
-        async with self._db.session() as session, session.begin():
-            workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=request.tenant_id,
-                user_id=request.created_by_user_id,
-                workspace_id=request.workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                request.tenant_id,
-                request.created_by_user_id,
-                workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=request.tenant_id,
+            user_id=request.created_by_user_id,
+            workspace_id=request.workspace_id,
+        ) as (session, workspace_id):
             module = await self._ensure_optimization_module_in_session(
                 session,
                 tenant_id=request.tenant_id,
@@ -322,19 +280,11 @@ class OptimizationRepository(RepositoryContextMixin):
         limit: int = 50,
         offset: int = 0,
     ) -> list[OptimizationRun]:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt: Select[tuple[OptimizationRun]] = select(OptimizationRun).where(
                 and_(
                     OptimizationRun.tenant_id == tenant_id,
@@ -358,19 +308,11 @@ class OptimizationRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = select(OptimizationRun).where(
                 and_(
                     OptimizationRun.tenant_id == tenant_id,
@@ -389,19 +331,11 @@ class OptimizationRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = (
                 update(OptimizationRun)
                 .where(
@@ -432,19 +366,11 @@ class OptimizationRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = (
                 update(OptimizationRun)
                 .where(
@@ -478,19 +404,11 @@ class OptimizationRepository(RepositoryContextMixin):
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
-        async with self._db.session() as session, session.begin():
-            resolved_workspace_id = await self._resolve_workspace_id_in_session(
-                session,
-                tenant_id=tenant_id,
-                user_id=created_by_user_id,
-                workspace_id=workspace_id,
-            )
-            await self._set_request_context(
-                session,
-                tenant_id,
-                created_by_user_id,
-                resolved_workspace_id,
-            )
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
             stmt = (
                 update(OptimizationRun)
                 .where(
@@ -625,15 +543,14 @@ class OptimizationRepository(RepositoryContextMixin):
                     EvaluationResult.optimization_run_id == run_id,
                 )
             )
-            count_stmt = select(func.count()).select_from(stmt.subquery())
-            total = (await session.execute(count_stmt)).scalar_one()
+            total = await _count_from_stmt(session, stmt)
             items_stmt = (
                 stmt.order_by(EvaluationResult.example_index.asc())
                 .offset(offset)
                 .limit(limit)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
-            return items, int(total)
+            return items, total
 
     async def save_prompt_snapshots(
         self,
@@ -897,7 +814,7 @@ class OptimizationRepository(RepositoryContextMixin):
             except Exception:
                 return {"raw": raw}
             if isinstance(decoded, dict):
-                return cast(dict[str, Any], decoded)
+                return decoded
             return {"value": decoded}
         return {"value": raw}
 

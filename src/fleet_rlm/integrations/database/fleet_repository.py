@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .engine import DatabaseManager
 from .repository_chat import ChatRepository
 from .repository_identity import IdentityRepository
 from .repository_jobs import JobsRepository
@@ -18,6 +17,3 @@ class FleetRepository(
     JobsRepository,
 ):
     """Backward-compatible facade combining all domain repositories."""
-
-    def __init__(self, database: DatabaseManager) -> None:
-        super().__init__(database)
