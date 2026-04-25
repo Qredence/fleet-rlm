@@ -230,7 +230,7 @@ GitHub Actions runs on push to `main`/`master` and on PRs:
   - `dev` — permissive local development mode
   - `entra` — real Entra bearer-token validation plus Neon-backed tenant admission
 - **Settings protection**: `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
-- **Secrets**: use `.env` for local development (never commit it); in production use Modal secrets or equivalent
+- **Secrets**: use `.env` for local development (never commit it); in production use the deployment platform's secret manager or equivalent
 
 ## Generated and Synced Artifacts
 

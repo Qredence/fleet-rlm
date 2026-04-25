@@ -42,5 +42,6 @@ Implementation-facing contracts, interfaces, and current-state facts.
 
 ## Historical Reference Material
 
+- [Release Notes 0.5.0](release-notes/0.5.0.md)
 - [Release Notes 0.4.99](release-notes/0.4.99.md)
 - [Release Notes 0.4.94](release-notes/0.4.94.md)

@@ -66,5 +66,6 @@
     * [ADR-001: RLM Runtime Architecture](reference/adr/001-rlm-runtime-architecture.md)
     * [ADR-003: Neon/Postgres with RLS](reference/adr/003-neon-postgres-rls-persistence.md)
     * [ADR-004: Dual Auth Modes](reference/adr/004-dual-auth-modes.md)
+  * [Release Notes 0.5.0](reference/release-notes/0.5.0.md)
   * [Release Notes 0.4.99](reference/release-notes/0.4.99.md)
   * [Release Notes 0.4.94](reference/release-notes/0.4.94.md)

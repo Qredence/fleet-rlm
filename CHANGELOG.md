@@ -6,64 +6,96 @@ All notable changes to this project are documented in this file.
 
 - No unreleased changes yet.
 
-## [0.5.0] - 2026-04-10
+## [0.5.0] - 2026-04-25
 
 ### Highlights (User Impact)
 
-- Reworked settings into a reusable in-shell dialog/sheet with shared routed and overlay rendering, so operators can open runtime controls from the command palette, sidebar, and warning CTAs without leaving the active workspace.
-- Refreshed the workspace shell, composer, sidebar, workbench, and empty-state presentation across desktop and mobile layouts while keeping the Volumes surface focused on provider-scoped durable storage instead of live workspace files.
-- Expanded the Daytona-backed `dspy.RLM` runtime with prompt-as-variable execution, metadata-only long-context handling, and `sub_rlm()` symbolic recursion so larger prompts and recursive reasoning stay inside the sandbox instead of overloading the model context window.
-- Added Daytona sandbox lifecycle and code-intelligence controls, including snapshots, LSP-powered completions/symbols, resource sizing, hot resize, graceful stop/delete, idle keepalive refresh, and per-sandbox network policy controls.
-- Added MLflow token-usage tracking and configurable automatic assessment hooks, while also hardening trace finalization and Daytona session resume behavior across async ownership boundaries.
+- Fleet-RLM is now a Daytona-only recursive workbench: the runtime, docs, API contract, settings, and Volumes surface all assume Daytona as the only supported execution substrate.
+- Rebuilt the agent core around a smaller DSPy ReAct `FleetAgent`, direct tool discovery, durable session/history persistence, recursive `rlm_query` / `sub_rlm()` delegation, and isolated child sandboxes.
+- Added the Optimization surface and API for DSPy evaluation/GEPA runs, datasets, module metadata, prompt snapshots, scoring, run comparison, and MLflow-backed quality workflows.
+- Expanded the runtime HTTP API with session history, session stats/restore/export, sandbox list/detail/delete/archive, run-step inspection, memory listing, trace feedback, and runtime diagnostics.
+- Refreshed the Workbench, History, Volumes, Optimization, and Settings UI around feature-owned modules, a clearer workspace shell, richer trace timelines, HITL state, and in-shell runtime controls.
+- Hardened release packaging for PyPI with bundled frontend assets, TestPyPI smoke testing, PyPI trusted publishing, generated GitHub release notes, and deployment observability summaries.
 
 ### Breaking Changes
 
-- **Change:** Removed the dedicated `analyze_long_document` tool from the runtime, CLI, MCP, and websocket manifest surfaces now that long-document handling routes through variable-mode RLM execution and the remaining summary/extraction flows.
-  **Outcome:** Callers that still reference `analyze_long_document` must migrate to the supported variable-mode runtime modules and the remaining long-context tool entrypoints.
-- **Change:** Retired the scaffolded `modal-sandbox` skill and rewrote the bundled RLM skill guidance around Daytona-backed durable-volume and interpreter workflows.
-  **Outcome:** Contributors extending the built-in skill pack should target the Daytona runtime model rather than the old Modal-specific sandbox guidance.
+- **Change:** Removed the Modal runtime surface and finalized Daytona as the only supported runtime substrate.
+  **Outcome:** Deployments, docs, settings, Volumes, sandbox controls, and recursive execution must target Daytona. Modal provider configuration, Modal-specific setup guides, and Modal runtime assumptions are no longer supported.
+- **Change:** Removed the optional FastMCP server surface and related docs/dependencies.
+  **Outcome:** External MCP clients should no longer expect Fleet-RLM to expose its own MCP server. Use the HTTP/WebSocket API, CLI, and Daytona bridge callbacks instead.
+- **Change:** Removed the `fleet-rlm init` scaffold command and pruned unused scaffold references from docs, tests, and Makefile targets.
+  **Outcome:** Project initialization is no longer a published CLI surface; contributors should follow the documented `uv`/`pnpm` setup and packaged skill guidance.
+- **Change:** Removed the dedicated `analyze_long_document` runtime/tool/manifest surface.
+  **Outcome:** Long-context and document workflows now route through variable-mode RLM execution, host-side document fetching, and the remaining document/summary tool paths.
+- **Change:** Replaced the legacy Agent Framework / hosted-worker orchestration path with the simplified DSPy ReAct runtime and FleetAgent-owned session model.
+  **Outcome:** Internal imports and extension points must use `src/fleet_rlm/runtime/*`, `src/fleet_rlm/api/runtime_services/*`, and `src/fleet_rlm/integrations/daytona/*`; old `agent_host`, `worker`, and orchestration shim assumptions are retired.
+- **Change:** Retired frontend product routes remain unsupported: `taxonomy`, `skills`, `memory`, and `analytics` continue to fall through to `/404`.
+  **Outcome:** The supported shell is Workbench, History, Volumes, Optimization, and Settings. Memory remains available as an API-only surface.
 
 ### Added
 
-- **Change:** Added reusable frontend modules for `SettingsDialog`, settings-section helpers/content, `open-settings` event dispatch, and a breadcrumb primitive for dialog navigation chrome.
-  **Outcome:** Settings can now render as a desktop dialog or mobile bottom sheet from anywhere in the shell while keeping one shared implementation for section state and copy.
-- **Change:** Added focused frontend tests covering settings-event dispatch semantics and the simplified sidebar/empty-state expectations.
-  **Outcome:** The new in-shell settings flow has regression coverage around dialog handoff, focus-return plumbing, and the lighter shell presentation.
-- **Change:** Added provider-scoped durable-volume coverage and supporting browser behavior for the dedicated Volumes surface.
-  **Outcome:** Operators can switch between Modal and Daytona durable storage explicitly without mixing long-lived files into the active workspace transcript/workbench flow.
-- **Change:** Added Daytona snapshot discovery/management helpers, LSP-backed completion and document-symbol tools, plus sandbox controls for resources, hot resize, graceful stop/delete, idle timeout refresh, auto-delete, and network firewall configuration.
-  **Outcome:** Daytona sandboxes are easier to tune, inspect, and secure during long-running RLM sessions without rebuilding environments for every adjustment.
-- **Change:** Added `sub_rlm()` symbolic recursion, prompt-as-variable runtime modules, and metadata-only variable-mode history handling on the shared `dspy.RLM` path.
-  **Outcome:** Large prompts and decomposed reasoning can stay in the REPL-backed runtime, with the model operating on metadata previews and recursive helper calls instead of raw prompt expansion.
-- **Change:** Added MLflow token-usage tracking and automatic assessment configuration for runtime traces.
-  **Outcome:** Operators can quantify model usage more precisely and opt into richer automated scoring when the trace data supports it.
+- **Change:** Added a simplified `FleetAgent` runtime with tool discovery, core memory, DSPy history persistence, `delegate_to_rlm`, `rlm_query`, batched RLM delegation, and child sandbox isolation.
+  **Outcome:** Recursive work can run through one clearer agent/runtime path while preserving traceable subtask delegation and bounded local-workspace evidence snapshots.
+- **Change:** Added Optimization APIs and UI for datasets, runs, module metadata, per-example scoring, prompt snapshots, comparison, and GEPA execution.
+  **Outcome:** Operators can evaluate and optimize DSPy modules from the product shell instead of relying only on ad hoc scripts.
+- **Change:** Added session, run, sandbox, memory, runtime, trace-feedback, and volume schemas plus expanded HTTP surfaces for session history, stats, restore, sandbox lifecycle, run steps, and API-only memory browsing.
+  **Outcome:** API consumers get a broader supported contract for inspecting and managing Fleet-RLM workspaces.
+- **Change:** Added Daytona filesystem/volume tools, snapshot management, LSP completions/symbols, hot resize, graceful stop/delete, archive, auto-stop refresh, resource sizing, and network firewall controls.
+  **Outcome:** Long-running sandboxes can be inspected, tuned, secured, and archived without rebuilding the runtime.
+- **Change:** Added host-side document fetching and redirect validation for bridged document ingestion.
+  **Outcome:** Document workflows are more reliable and defend against redirect-based SSRF attempts before content reaches the sandbox.
+- **Change:** Added release workflow observability summaries and PyPI/TestPyPI packaging smoke checks.
+  **Outcome:** The published package is verified to install, import, serve `/health`, and serve bundled UI assets before PyPI publishing completes.
 
 ### Changed
 
-- **Change:** Updated command palette actions, workspace runtime settings entrypoints, and the sidebar settings button to request the shared settings dialog before falling back to route navigation.
-  **Outcome:** Operators can open settings in context, jump straight to runtime controls when prompted, and return focus to the initiating control after closing the overlay.
-- **Change:** Converted the routed settings screen into a thin wrapper around the shared dialog content and moved section metadata/rendering into `settings-content`.
-  **Outcome:** The `/settings` route and shell overlay stay visually and functionally aligned without duplicating large amounts of settings UI logic.
-- **Change:** Refreshed base shell/UI primitives, including the Base UI switch wrapper, sidebar group-label typography, and desktop settings header chrome.
-  **Outcome:** Settings and shell surfaces read more consistently with the current design system and tokenized typography.
-- **Change:** Reworked the workspace shell and workbench presentation, including the floating sidebar, header spacing, empty state, composer shell, dropdown interactions, and canvas-aware layout behavior.
-  **Outcome:** The primary workspace feels more cohesive and intentional, with fewer visual overlaps and clearer hierarchy between navigation, chat, and inspection surfaces.
-- **Change:** Updated the Volumes page copy and layout to describe mounted durable volumes explicitly instead of treating them as part of the live workspace runtime surface.
-  **Outcome:** The storage model is easier to understand, especially when switching between Daytona and Modal-backed durable volume views.
-- **Change:** Reworked variable-mode execution to align with the native `dspy.RLM` API and reuse the parent Daytona sandbox for child `sub_rlm()` calls whenever possible.
-  **Outcome:** Recursive long-context execution now stays closer to DSPy’s built-in variable semantics while avoiding unnecessary 30-60 second sandbox spin-ups for each child call.
-- **Change:** Updated bundled skill/docs guidance to reflect Daytona-first sandbox usage and switched contributor-facing frontend setup references from `bun` to `pnpm`.
-  **Outcome:** The documented workflow now matches the repo’s actual runtime and package-manager choices, which reduces setup drift for contributors.
+- **Change:** Reorganized backend boundaries around `runtime/`, `integrations/daytona/`, `api/runtime_services/`, domain-specific database repositories, and Pydantic schema modules.
+  **Outcome:** Runtime, transport, persistence, and provider responsibilities are easier to locate and validate.
+- **Change:** Reworked the websocket lifecycle and workbench event model around canonical stream kinds, richer trace rows, passive event subscriptions, HITL state, and explicit finalization behavior.
+  **Outcome:** Workbench transcripts and inspection panels receive more predictable event streams during long-running recursive work.
+- **Change:** Reorganized frontend feature ownership into `features/{layout,workspace,volumes,settings,optimization,history}`, shared product components, and canonical AI Elements.
+  **Outcome:** Workbench, Volumes, Optimization, Settings, and History are easier to maintain without route-wrapper or screen-level coupling.
+- **Change:** Reworked Settings into a shared routed/overlay dialog implementation and refreshed the workspace shell, composer, support rail, inspector, Volumes detail panel, and empty states.
+  **Outcome:** Operators can open runtime controls in context, inspect runs more quickly, and use a more consistent product shell across desktop and mobile.
+- **Change:** Updated deployment docs for API-only cloud preflight checks and `FLEET_RLM_SERVE_UI=false` deployments.
+  **Outcome:** Hosted API deployments can run without serving the bundled frontend while keeping local packaged-UI installs intact.
+- **Change:** Updated package dependencies around Daytona, FastAPI, DSPy, MLflow MCP, LiteLLM, SQLAlchemy async support, and frontend security overrides.
+  **Outcome:** Runtime and release builds align with the supported Daytona/DSPy stack and current security requirements.
+- **Change:** Refreshed `AGENTS.md`, backend/frontend agent guides, architecture docs, API references, testing strategy, installation/deployment guides, and OpenAPI artifacts for the 0.5.0 contract.
+  **Outcome:** Contributor and agent workflows now describe the implementation that is being released.
 
 ### Fixed
 
-- **Change:** Finalized MLflow traces with explicit terminal states, gated retrieval groundedness scoring on complete retriever coverage, and reset Daytona interpreter contexts safely after loop-owner mismatches before session resume.
-  **Outcome:** Trace health is more trustworthy, automatic assessments avoid false assumptions, and resumed Daytona sessions are less likely to trip event-loop ownership errors during long-running work.
+- **Change:** Hardened auth/session ownership checks across HTTP and websocket flows, including sandbox and memory scoping to authenticated users.
+  **Outcome:** User-scoped runtime data is less likely to leak across sessions or tenants.
+- **Change:** Fixed Daytona broker timeout handling, volume readiness, runtime diagnostics, workspace document loading, child interpreter labels, circular variable serialization, and loop-owner detach/resume behavior.
+  **Outcome:** Daytona-backed sessions recover more predictably and surface degraded runs explicitly instead of producing misleading responses.
+- **Change:** Fixed MLflow trace finalization, token usage tracking, automatic assessment gating, PostHog/MLflow config initialization, and trace lookup metadata handling.
+  **Outcome:** Observability data is more complete and safer to consume for evaluation workflows.
+- **Change:** Fixed API/router issues around double auth enforcement, missing response models, 204 OpenAPI validation, blocking filesystem I/O in async handlers, runtime settings recovery, and release metadata drift.
+  **Outcome:** Server behavior is more predictable under both local and release validation lanes.
+- **Change:** Fixed frontend regressions around workspace warning keys, reasoning auto-close, action-button locks, clarification answers, run-step tests, copy timers, routing/session hydration, and generated API sync.
+  **Outcome:** The product shell is less brittle during long-running runs, user clarification, and API-contract updates.
 
 ### Removed
 
-- **Change:** Removed the dedicated routed settings-page chrome, the workspace empty-state "Operator workspace" badge, and the redundant conversation icon in saved-session rows.
-  **Outcome:** The workspace shell is lighter, and settings no longer feel like a separate full-page surface.
+- **Change:** Removed Modal setup docs, Modal-specific scaffold assets, stale hook files, legacy provider paths, old MCP server docs, and obsolete architecture/history snapshots.
+  **Outcome:** The repository no longer documents or packages unsupported runtime surfaces.
+- **Change:** Removed dead API schema files, websocket helper shims, old runtime/tool modules, unreferenced frontend components, stale route shims, and unused dependency paths.
+  **Outcome:** The codebase is smaller and the supported product surface is clearer.
+- **Change:** Removed the old `src/fleet_rlm/integrations/providers/daytona/*` package in favor of `src/fleet_rlm/integrations/daytona/*`.
+  **Outcome:** Daytona integration ownership is canonical and no longer split across provider namespaces.
+
+### Merged Pull Requests
+
+- [#235](https://github.com/Qredence/fleet-rlm/pull/235): Aggressive backend housekeeping.
+- [#234](https://github.com/Qredence/fleet-rlm/pull/234): Validate document download redirects.
+- [#231](https://github.com/Qredence/fleet-rlm/pull/231): Fix bridged document fetching and remove MCP surface.
+- [#221](https://github.com/Qredence/fleet-rlm/pull/221): Consolidate workspace panel surfaces.
+- [#219](https://github.com/Qredence/fleet-rlm/pull/219): Split Daytona runtime helpers and update SDK usage.
+- [#216](https://github.com/Qredence/fleet-rlm/pull/216): Reorganize workspace UI into domain modules.
+- [#200](https://github.com/Qredence/fleet-rlm/pull/200): Add the Optimization surface and runtime quality workflows.
+- [#166](https://github.com/Qredence/fleet-rlm/pull/166): Simplify the RLM architecture.
 
 ## [0.4.99] - 2026-03-22
 
