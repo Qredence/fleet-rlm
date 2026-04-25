@@ -8,7 +8,6 @@
   - `cli/`
   - `integrations/`
   - `runtime/`
-  - `scaffold/`
   - `utils/`
 - `tests/ui/`: API + websocket behavior tests for server surfaces.
 - `tests/integration/`: integration tests across DB/runtime boundaries.
