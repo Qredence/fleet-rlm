@@ -16,12 +16,13 @@ from .models_enums import (
     ArtifactProvider,
     ChatSessionStatus,
     ChatTurnStatus,
+    ExternalTraceProvider,
     RunStatus,
     RunStepType,
     RunType,
     SandboxProvider,
 )
-from .models_runs import Artifact, ChatSession, ChatTurn, Run, RunStep
+from .models_runs import Artifact, ChatSession, ChatTurn, ExternalTrace, Run, RunStep
 from .repository_shared import (
     RepositoryContextMixin,
     _coerce_enum,
@@ -724,6 +725,50 @@ class ChatRepository(RepositoryContextMixin):
             )
             result = await session.execute(stmt)
             return int(result.scalar_one())
+
+    async def store_rlm_trace(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        trace_id: str,
+        workspace_id: uuid.UUID | None = None,
+        run_step_id: uuid.UUID | None = None,
+        summary_text: str | None = None,
+        payload_json: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
+    ) -> uuid.UUID:
+        """Persist an RLM child trajectory trace to the external_traces table."""
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            metadata = dict(payload_json or {})
+            if summary_text:
+                metadata["summary_text"] = summary_text
+            if latency_ms is not None:
+                metadata["latency_ms"] = latency_ms
+            stmt = (
+                insert(ExternalTrace)
+                .values(
+                    tenant_id=tenant_id,
+                    workspace_id=resolved_workspace_id,
+                    run_id=run_id,
+                    provider=ExternalTraceProvider.MLFLOW,
+                    trace_id=trace_id,
+                    metadata_json=metadata,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_external_traces_tenant_provider_trace_id",
+                    set_={
+                        "metadata": metadata,
+                        "updated_at": _utc_now(),
+                    },
+                )
+                .returning(ExternalTrace.id)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one()
 
 
 __all__ = [

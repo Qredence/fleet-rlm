@@ -179,6 +179,12 @@ def propagate_parent_recursion_state(child: Any, parent: Any) -> None:
     parent_max = getattr(parent, "_sub_rlm_max_depth", 2)
     initialize_sub_rlm_state(child, depth=parent_depth + 1, max_depth=parent_max)
 
+    # Propagate host-mediated evidence bridge references to children
+    for attr in ("_host_repository", "_host_identity", "_host_run_id"):
+        parent_val = getattr(parent, attr, None)
+        if parent_val is not None:
+            setattr(child, attr, parent_val)
+
 
 def build_delegate_child(
     interpreter: Any,
