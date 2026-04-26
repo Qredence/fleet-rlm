@@ -288,6 +288,7 @@ class AgentRuntime:
         max_iters: int = 10,
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
+        repository: Any | None = None,
     ) -> None:
         from .agent import FleetAgent
 
@@ -298,7 +299,7 @@ class AgentRuntime:
 
         # Session-management hooks used by the websocket layer
         self._db_session_id: str | object | None = None
-        self._repository: Any | None = None
+        self._repository: Any | None = repository
         self._identity_rows: Any | None = None
 
         # Execution and document state

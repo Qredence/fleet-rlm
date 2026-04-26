@@ -24,6 +24,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar, copy_context
@@ -276,6 +277,7 @@ def _run_delegate_child(
 ) -> dict[str, Any]:
     """Build, run, validate, and clean up one delegated child RLM."""
     child = None
+    started_at = time.time()
     try:
         child = interpreter.build_delegate_child(remaining_llm_budget=llm_budget)
         _install_delegate_budget_lease(interpreter, child, llm_budget)
@@ -314,6 +316,14 @@ def _run_delegate_child(
         prediction = rlm(prompt=query, context=resolved_context)
         raw_answer = getattr(prediction, "answer", None)
         answer = "" if raw_answer is None else str(raw_answer)
+
+        _persist_child_trace(
+            interpreter,
+            query,
+            answer,
+            prediction,
+            started_at,
+        )
     except Exception as exc:
         logger.warning("delegate_to_rlm execution failed: %s", exc)
         return {"status": "error", "error": str(exc)}
@@ -726,6 +736,51 @@ def _record_child_sandbox_id(child: Any) -> None:
     sandbox_id = getattr(session, "sandbox_id", None)
     if sandbox_id:
         metadata.setdefault("child_sandbox_id", sandbox_id)
+
+
+def _persist_child_trace(
+    interpreter: Any,
+    query: str,
+    answer: str,
+    prediction: Any,
+    started_at: float,
+) -> None:
+    """Persist child RLM trajectory to NeonDB via the host repository."""
+    import asyncio
+    import uuid as _uuid
+
+    repository = getattr(interpreter, "_host_repository", None)
+    identity = getattr(interpreter, "_host_identity", None)
+    run_id = getattr(interpreter, "_host_run_id", None)
+    if repository is None or identity is None or run_id is None:
+        return
+
+    trajectory = getattr(prediction, "trajectory", None)
+    payload: dict[str, Any] = {"query": query}
+    if answer:
+        payload["answer_preview"] = answer[:500]
+    if isinstance(trajectory, dict):
+        payload["trajectory"] = trajectory
+    elif isinstance(trajectory, list):
+        payload["trajectory"] = trajectory
+
+    latency_ms = int((time.time() - started_at) * 1000)
+    trace_id = f"rlm-child-{_uuid.uuid4().hex[:12]}"
+
+    try:
+        asyncio.run(
+            repository.store_rlm_trace(
+                tenant_id=identity.tenant_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                workspace_id=identity.workspace_id,
+                summary_text=answer[:500] if answer else None,
+                payload_json=payload,
+                latency_ms=latency_ms,
+            )
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist RLM child trace: %s", exc)
 
 
 __all__ = ["delegate_to_rlm", "delegate_to_rlm_batched", "set_delegate_interpreter"]

@@ -198,6 +198,7 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
             "delegate_lm": "delegate-lm",
             "delegate_max_calls_per_turn": 3,
             "delegate_result_truncation_chars": 500,
+            "repository": None,
         }
     ]
 

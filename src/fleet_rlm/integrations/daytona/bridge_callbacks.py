@@ -55,6 +55,20 @@ def bridge_tools(
         from fleet_rlm.runtime.tools.document_tools import fetch_document_text
 
         tools["fetch_document_text"] = fetch_document_text
+
+    from .evidence_bridge import (
+        fetch_evidence,
+        list_evidence,
+        store_evidence,
+    )
+
+    for name, fn in (
+        ("store_evidence", store_evidence),
+        ("fetch_evidence", fetch_evidence),
+        ("list_evidence", list_evidence),
+    ):
+        if name not in tools:
+            tools[name] = lambda *a, _fn=fn, _i=interpreter, **kw: _fn(_i, *a, **kw)
     return tools
 
 
@@ -100,6 +114,19 @@ def invoke_tool(
             from fleet_rlm.runtime.tools.document_tools import fetch_document_text
 
             value = fetch_document_text(*args, **kwargs)
+        elif name in ("store_evidence", "fetch_evidence", "list_evidence"):
+            from .evidence_bridge import (
+                fetch_evidence,
+                list_evidence,
+                store_evidence,
+            )
+
+            _evidence_fns = {
+                "store_evidence": store_evidence,
+                "fetch_evidence": fetch_evidence,
+                "list_evidence": list_evidence,
+            }
+            value = _evidence_fns[name](interpreter, *args, **kwargs)
         else:
             raise RuntimeError(f"Unknown host callback: {name}")
         return _json_safe_value(value)

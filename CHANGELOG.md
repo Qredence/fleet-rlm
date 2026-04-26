@@ -74,6 +74,8 @@ All notable changes to this project are documented in this file.
   **Outcome:** Observability data is more complete and safer to consume for evaluation workflows.
 - **Change:** Fixed API/router issues around double auth enforcement, missing response models, 204 OpenAPI validation, blocking filesystem I/O in async handlers, runtime settings recovery, and release metadata drift.
   **Outcome:** Server behavior is more predictable under both local and release validation lanes.
+- **Change:** Added explicit package markers for integration, config, execution, and terminal helper packages.
+  **Outcome:** Installed wheels can import the packaged FastAPI app and serve the bundled UI during release smoke tests.
 - **Change:** Fixed frontend regressions around workspace warning keys, reasoning auto-close, action-button locks, clarification answers, run-step tests, copy timers, routing/session hydration, and generated API sync.
   **Outcome:** The product shell is less brittle during long-running runs, user clarification, and API-contract updates.
 

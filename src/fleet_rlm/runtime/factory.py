@@ -51,6 +51,7 @@ def build_chat_agent(
     delegate_result_truncation_chars: int = 8000,
     rlm_child_isolation_mode: Literal["auto", "context"] = "auto",
     rlm_child_fork_fallback: Literal["clean", "fail"] = "clean",
+    repository: Any | None = None,
 ) -> Any:
     """Build the canonical DSPy chat agent using FleetAgent and AgentRuntime."""
     from fleet_rlm.runtime.agent.runtime import AgentRuntime
@@ -106,6 +107,7 @@ def build_chat_agent(
         max_iters=react_max_iters,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
+        repository=repository,
     )
     if docs_path is not None:
         agent.load_document(str(docs_path), alias="active")

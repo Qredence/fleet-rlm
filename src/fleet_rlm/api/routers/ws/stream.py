@@ -174,6 +174,8 @@ async def run_streaming_turn(
 
     lifecycle = prepared_turn.lifecycle
     step_builder = prepared_turn.step_builder
+    if interpreter is not None and hasattr(lifecycle, "active_run_db_id"):
+        interpreter._host_run_id = lifecycle.active_run_db_id
     await lifecycle.emit_started()
     ws_loop = asyncio.get_running_loop()
     repl_hook_bridge = ReplHookBridge(
@@ -573,8 +575,11 @@ async def _resolve_session_target(
         identity_rows=runtime.identity_rows,
     )
     agent._db_session_id = (session.session_record or {}).get("db_session_id")
-    agent._repository = runtime.repository
     agent._identity_rows = runtime.identity_rows
+    if agent.interpreter is not None:
+        agent.interpreter._host_repository = runtime.repository
+        agent.interpreter._host_identity = runtime.identity_rows
+        agent.interpreter._host_run_id = None
     return _ResolvedSessionTarget(
         workspace_id=workspace_id,
         user_id=user_id,

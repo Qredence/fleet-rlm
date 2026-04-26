@@ -180,6 +180,7 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
         "delegate_lm": runtime.delegate_lm,
         "delegate_max_calls_per_turn": runtime.cfg.delegate_max_calls_per_turn,
         "delegate_result_truncation_chars": runtime.cfg.delegate_result_truncation_chars,
+        "repository": runtime.repository,
     }
 
 
@@ -189,7 +190,7 @@ def _try_build_daytona_interpreter(cfg: ServerRuntimeConfig) -> Any | None:
         from fleet_rlm.integrations.daytona.config import DaytonaConfigError
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
-        return DaytonaInterpreter(
+        interpreter = DaytonaInterpreter(
             volume_name=cfg.volume_name,
             timeout=cfg.timeout,
             max_llm_calls=cfg.rlm_max_llm_calls,
@@ -201,6 +202,10 @@ def _try_build_daytona_interpreter(cfg: ServerRuntimeConfig) -> Any | None:
             delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
             async_execute=cfg.interpreter_async_execute,
         )
+        interpreter._host_repository = None
+        interpreter._host_identity = None
+        interpreter._host_run_id = None
+        return interpreter
     except ImportError:
         return None
     except DaytonaConfigError:
