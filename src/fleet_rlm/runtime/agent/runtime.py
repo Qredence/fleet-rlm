@@ -242,6 +242,29 @@ def _bound_runtime_tool_factories(
             "write_buffer": write_buffer,
         }
     )
+
+    def recursive_workspace(
+        query: str,
+        context: str = "",
+        max_passes: int = 3,
+    ) -> dict[str, Any]:
+        """Run a multi-pass recursive analysis with decomposition and verification."""
+        from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+
+        module = RecursiveWorkspaceModule(
+            interpreter=interpreter,
+            max_passes=max_passes,
+            verbose=False,
+            sub_lm=getattr(interpreter, "sub_lm", None),
+        )
+        prediction = module(user_request=query, context=context)
+        return {
+            "status": str(getattr(prediction, "status", "ok")),
+            "answer": str(getattr(prediction, "answer", "")),
+            "passes": int(getattr(prediction, "passes", 0)),
+        }
+
+    factories["recursive_workspace"] = recursive_workspace
     return factories
 
 

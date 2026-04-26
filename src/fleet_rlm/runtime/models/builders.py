@@ -8,13 +8,18 @@ from typing import Any
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import (
+    AssembleRecursiveWorkspaceContext,
     ClarificationQuestionSignature,
     GroundedAnswerWithCitations,
     MemoryActionIntentSignature,
     MemoryStructureAuditSignature,
     MemoryStructureMigrationPlanSignature,
+    PlanRecursiveRepair,
+    PlanRecursiveSubqueries,
     RecursiveSubQuerySignature,
+    ReflectAndReviseWorkspaceStep,
     RLMVariableSignature,
+    VerifyRecursiveAggregation,
     VolumeFileTreeSignature,
 )
 from fleet_rlm.runtime.content.chunking import (
@@ -590,4 +595,244 @@ class ClarificationQuestionPlanningModule(_MemoryTreePrimedModule):
                 available_context=available_context,
             ),
             operation_risk=risk_norm,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Recursive workspace orchestrator (Level 4 RLM)
+# ---------------------------------------------------------------------------
+
+
+class RecursiveWorkspaceModule(dspy.Module):
+    """Multi-pass recursive orchestrator using the workspace signatures.
+
+    Runs a bounded loop: assemble context → plan decomposition → execute
+    subqueries → verify → reflect (finalize / recurse / repair). Each
+    sub-module is a ``dspy.RLM`` so the LLM writes code at every step.
+    Evidence is persisted across passes via the host-mediated NeonDB bridge.
+    """
+
+    def __init__(
+        self,
+        *,
+        interpreter: Any,
+        max_iterations: int = 20,
+        max_llm_calls: int = 50,
+        max_passes: int = 3,
+        max_repair_attempts: int = 2,
+        subquery_budget: int = 4,
+        context_budget_chars: int = 32_000,
+        verbose: bool = False,
+        sub_lm: dspy.LM | None = None,
+    ) -> None:
+        super().__init__()
+        self.interpreter = interpreter
+        self.max_passes = max_passes
+        self.max_repair_attempts = max_repair_attempts
+        self.subquery_budget = subquery_budget
+        self.context_budget_chars = context_budget_chars
+
+        rlm_kwargs: dict[str, Any] = {
+            "interpreter": interpreter,
+            "max_iterations": max_iterations,
+            "max_llm_calls": max_llm_calls,
+            "verbose": verbose,
+            "sub_lm": sub_lm,
+        }
+
+        self._assembler = create_runtime_rlm(
+            signature=AssembleRecursiveWorkspaceContext, **rlm_kwargs
+        )
+        self._planner = create_runtime_rlm(
+            signature=PlanRecursiveSubqueries, **rlm_kwargs
+        )
+        self._verifier = create_runtime_rlm(
+            signature=VerifyRecursiveAggregation, **rlm_kwargs
+        )
+        self._reflector = create_runtime_rlm(
+            signature=ReflectAndReviseWorkspaceStep, **rlm_kwargs
+        )
+        self._repairer = create_runtime_rlm(signature=PlanRecursiveRepair, **rlm_kwargs)
+
+    def forward(
+        self,
+        *,
+        user_request: str,
+        context: str = "",
+        working_memory_catalog: list[str] | None = None,
+    ) -> dspy.Prediction:
+        plan = f"Initial: {user_request}"
+        evidence_catalog: list[str] = []
+        latest_result = context
+        repair_count = 0
+
+        for pass_idx in range(self.max_passes):
+            loop_state = self._loop_state_summary(pass_idx, repair_count)
+
+            memory_catalog = working_memory_catalog or self._fetch_memory_catalog()
+            assemble = self._assembler(
+                user_request=user_request,
+                current_plan=plan,
+                loop_state=loop_state,
+                working_memory_catalog=memory_catalog,
+                recent_sandbox_evidence_catalog=evidence_catalog,
+                latest_tool_or_code_result=latest_result,
+                context_budget=self.context_budget_chars,
+            )
+            assembled_context = str(getattr(assemble, "assembled_context_summary", ""))
+
+            decomposition = self._planner(
+                user_request=user_request,
+                assembled_recursive_context=assembled_context,
+                current_plan=plan,
+                loop_state=loop_state,
+                latest_sandbox_evidence=latest_result,
+                subquery_budget=self.subquery_budget,
+            )
+            subqueries = list(getattr(decomposition, "subqueries", []) or [])
+            mode = str(getattr(decomposition, "decomposition_mode", "single_pass"))
+            aggregation_plan = str(getattr(decomposition, "aggregation_plan", ""))
+
+            if not subqueries:
+                subqueries = [user_request]
+            outputs = self._execute_subqueries(subqueries, assembled_context, mode)
+            latest_result = "\n---\n".join(outputs)
+
+            self._store_pass_evidence(pass_idx, outputs)
+            evidence_catalog = [
+                f"pass_{pass_idx}_output_{i}" for i in range(len(outputs))
+            ]
+
+            verification = self._verifier(
+                user_request=user_request,
+                assembled_recursive_context=assembled_context,
+                decomposition_plan_summary=aggregation_plan,
+                collected_subquery_outputs=outputs,
+                latest_sandbox_evidence=latest_result,
+            )
+            status = str(getattr(verification, "verification_status", "sufficient"))
+            verified_summary = str(
+                getattr(verification, "verified_summary", latest_result)
+            )
+
+            if status == "sufficient":
+                return dspy.Prediction(
+                    answer=verified_summary,
+                    passes=pass_idx + 1,
+                    status="sufficient",
+                )
+
+            reflection = self._reflector(
+                user_request=user_request,
+                working_memory_summary=assembled_context,
+                current_plan=plan,
+                latest_sandbox_evidence=latest_result,
+                latest_tool_or_code_result=verified_summary,
+                loop_state=loop_state,
+            )
+            action = str(getattr(reflection, "next_action", "finalize"))
+            plan = str(getattr(reflection, "revised_plan", plan))
+
+            if action == "finalize":
+                return dspy.Prediction(
+                    answer=verified_summary,
+                    passes=pass_idx + 1,
+                    status="finalized",
+                )
+            if action == "request_human_review":
+                return dspy.Prediction(
+                    answer=verified_summary,
+                    passes=pass_idx + 1,
+                    status="needs_human_review",
+                    missing=list(getattr(verification, "missing_evidence", [])),
+                )
+            if action == "repair_and_retry" and repair_count < self.max_repair_attempts:
+                repair = self._repairer(
+                    user_request=user_request,
+                    assembled_recursive_context=assembled_context,
+                    verification_summary=verified_summary,
+                    latest_sandbox_evidence=latest_result,
+                    latest_failure_signals=str(
+                        getattr(verification, "contradictions", [])
+                    ),
+                    repair_budget=max(1, self.subquery_budget // 2),
+                )
+                repair_queries = list(getattr(repair, "repair_subqueries", []) or [])
+                if repair_queries:
+                    repair_outputs = self._execute_subqueries(
+                        repair_queries, assembled_context, "serial"
+                    )
+                    latest_result = "\n---\n".join(repair_outputs)
+                repair_count += 1
+                continue
+
+        return dspy.Prediction(
+            answer=latest_result,
+            passes=self.max_passes,
+            status="budget_exhausted",
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _execute_subqueries(
+        self,
+        subqueries: list[str],
+        context: str,
+        mode: str,
+    ) -> list[str]:
+        from fleet_rlm.runtime.tools.rlm_delegate import (
+            _delegate_interpreter,
+            delegate_to_rlm,
+            delegate_to_rlm_batched,
+            set_delegate_interpreter,
+        )
+
+        if mode == "fan_out" and len(subqueries) > 1:
+            token = set_delegate_interpreter(self.interpreter)
+            try:
+                result = delegate_to_rlm_batched(queries=subqueries, context=context)
+            finally:
+                _delegate_interpreter.reset(token)
+            if result.get("status") == "ok":
+                return [r.get("answer", "") for r in result.get("results", [])]
+            return [str(result.get("errors", "execution failed"))]
+
+        outputs: list[str] = []
+        for query in subqueries:
+            token = set_delegate_interpreter(self.interpreter)
+            try:
+                result = delegate_to_rlm(query=query, context=context)
+            finally:
+                _delegate_interpreter.reset(token)
+            outputs.append(result.get("answer", result.get("error", "")))
+        return outputs
+
+    def _fetch_memory_catalog(self) -> list[str]:
+        from fleet_rlm.integrations.daytona.evidence_bridge import list_evidence
+
+        result = list_evidence(self.interpreter, scope="run", limit=50)
+        return [
+            f"{item['scope_id']}:{item['kind']}" for item in result.get("items", [])
+        ]
+
+    def _store_pass_evidence(self, pass_idx: int, outputs: list[str]) -> None:
+        from fleet_rlm.integrations.daytona.evidence_bridge import store_evidence
+
+        for i, output in enumerate(outputs):
+            store_evidence(
+                self.interpreter,
+                key=f"pass_{pass_idx}_output_{i}",
+                content=output[:10_000],
+                kind="context",
+                scope="run",
+                tags=[f"pass:{pass_idx}", "orchestrator"],
+            )
+
+    def _loop_state_summary(self, pass_idx: int, repair_count: int) -> str:
+        return (
+            f"pass={pass_idx + 1}/{self.max_passes}, "
+            f"repairs={repair_count}/{self.max_repair_attempts}, "
+            f"subquery_budget={self.subquery_budget}"
         )

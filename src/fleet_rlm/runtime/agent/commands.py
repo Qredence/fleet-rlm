@@ -102,6 +102,11 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
     "write_to_file": ("write_to_file", ["path", "content"], ["append"]),
     "edit_core_memory": ("edit_core_memory", ["section", "content"], ["mode"]),
     "reset": ("reset", [], ["clear_sandbox_buffers"]),
+    "recursive_workspace": (
+        "recursive_workspace",
+        ["query"],
+        ["context", "max_passes"],
+    ),
 }
 
 # Commands whose tools may block the event loop and should be offloaded.
@@ -130,6 +135,7 @@ _BLOCKING_COMMANDS = frozenset(
         "write_to_file",
         "read_buffer",
         "find_files",
+        "recursive_workspace",
     }
 )
 

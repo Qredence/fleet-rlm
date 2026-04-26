@@ -18,6 +18,7 @@ from fleet_rlm.runtime.agent.signatures import (
     MemoryActionIntentSignature,
     MemoryStructureAuditSignature,
     MemoryStructureMigrationPlanSignature,
+    ReflectAndReviseWorkspaceStep,
     SummarizeLongDocument,
     VolumeFileTreeSignature,
 )
@@ -27,6 +28,7 @@ from fleet_rlm.runtime.models.builders import (
     MemoryActionPlanningModule,
     MemoryMigrationPlanningModule,
     MemoryStructureAuditPlanningModule,
+    RecursiveWorkspaceModule,
     RLMVariableExecutionModule,
     RuntimeModuleBuildConfig,
     _create_configured_runtime_rlm,
@@ -152,6 +154,12 @@ RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
         class_name="ClarificationQuestionPlanningModule",
         doc="Compose context gathering + ``ClarificationQuestionSignature`` into one runtime module.",
         module_class=ClarificationQuestionPlanningModule,
+    ),
+    "recursive_workspace": RuntimeModuleDefinition(
+        signature=ReflectAndReviseWorkspaceStep,
+        class_name="RecursiveWorkspaceModule",
+        doc="Multi-pass recursive workspace orchestrator with decomposition, verification, and repair.",
+        module_class=RecursiveWorkspaceModule,
     ),
 }
 

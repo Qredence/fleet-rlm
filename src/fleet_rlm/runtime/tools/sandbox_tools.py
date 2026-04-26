@@ -51,4 +51,39 @@ def execute_code(
     )
 
 
-__all__ = ["execute_code"]
+@tool_fn
+def recursive_workspace(
+    query: str,
+    context: str = "",
+    max_passes: int = 3,
+) -> dict[str, Any]:
+    """Run a multi-pass recursive analysis with decomposition, verification, and self-repair.
+
+    Use this for complex tasks that benefit from iterative refinement:
+    multi-step analysis, large document processing, or multi-faceted
+    research where a single delegate_to_rlm call is insufficient.
+
+    The orchestrator runs a bounded loop: assemble context from prior
+    evidence, plan decomposition into subqueries, execute them via
+    child RLM sandboxes, verify the aggregated results for contradictions
+    or gaps, and reflect on whether to finalize, recurse deeper, or
+    self-repair.
+
+    Args:
+        query: The complex task or question to analyze recursively.
+        context: Optional initial context to seed the first pass.
+        max_passes: Maximum number of recursive passes (default 3).
+
+    Returns:
+        Dictionary with ``status``, ``answer``, and ``passes`` count.
+
+    Raises:
+        RuntimeError: When called without a bound ``AgentRuntime`` interpreter.
+    """
+    raise RuntimeError(
+        "recursive_workspace requires an active AgentRuntime with a Daytona interpreter. "
+        "Obtain a bound tool list via the agent runtime instead of calling directly."
+    )
+
+
+__all__ = ["execute_code", "recursive_workspace"]
