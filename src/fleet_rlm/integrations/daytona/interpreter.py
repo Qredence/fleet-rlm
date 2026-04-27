@@ -813,6 +813,14 @@ class DaytonaInterpreter(
 ):
     """Stateful Daytona interpreter that plugs into canonical ``dspy.RLM`` flows."""
 
+    # Host-mediated evidence bridge references (v0.5.1+). Populated by the
+    # WebSocket stream layer once identity is resolved; read by
+    # ``integrations.daytona.evidence_bridge``. Declared at class level so
+    # type-checkers can see them.
+    _host_repository: Any | None = None
+    _host_identity: Any | None = None
+    _host_run_id: Any | None = None
+
     def __init__(
         self,
         *,

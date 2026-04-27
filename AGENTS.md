@@ -74,6 +74,16 @@ Other backend areas:
 - `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
 - `src/fleet_rlm/ui/dist` — **generated** bundled frontend assets for Python package distributions
 
+Evaluation and benchmarks (maintained alongside the backend):
+
+- `scripts/evaluate_rlm_capabilities.py` — unified harness that runs the S-NIAH, OOLONG, and workspace benchmarks against real Daytona + LLM infrastructure (`--benchmark {sniah, oolong, workspace, all}`)
+- `scripts/oolong_official_eval.py` — adapter plugging fleet-rlm's RLM stack into the official `primeintellect/oolong-rlm` HuggingFace dataset and `_synth_score()` rubric; ports DSPy v3 None-safety patches locally (does not modify the venv)
+- `scripts/benchmarks/sniah.py`, `scripts/benchmarks/oolong.py` — synthetic dataset generators + scoring helpers
+- `scripts/consolidate_rlm_results.py` — aggregates per-benchmark summary JSONs into `output/rlm-eval-full/RESULTS.md`
+- `oolong_rlm/` — **vendored** snapshot of `primeintellect/oolong-rlm` v0.1.9 pulled via `prime env pull` (reference only; do not import at runtime — the venv's `verifiers` stack has incompatible transitive deps)
+- `output/rlm-eval-full/` — per-run benchmark outputs (`{sniah,oolong,oolong-official}/…-{results,summary}.json` + `RESULTS.md`)
+- `docs/explanation/rlm-capability-evaluation.md` — methodology and paper comparison
+
 Frontend organization:
 
 - `src/frontend/src/routes/` — file-based route definitions

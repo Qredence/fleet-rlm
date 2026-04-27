@@ -1,0 +1,138 @@
+# Fleet-RLM Just Posted Paper-Comparable RLM Results
+
+**Meta description:** Fleet-RLM's latest branch adds benchmark harnesses, an official OOLONG adapter, and docs showing paper-comparable recursive language model results.
+
+It is easy to call something a recursive language model when what you really built is a prompt wrapper around a bigger context window. This branch matters because it does the harder thing: it measures fleet-rlm against the same benchmark environment used in published RLM research and documents exactly what passed, what failed, and what still needs work.
+
+For fleet-rlm, that changes the conversation. The project is no longer only arguing from architecture diagrams and API surfaces. It is now shipping an evaluation story, a reproducible benchmark harness, and a clearer explanation of what its RLM stack actually proves in practice.
+
+## What changed in this branch
+
+The current `release/v0.5.1` work is centered on one theme: turning fleet-rlm's RLM claims into inspectable evidence.
+
+The branch adds:
+
+- A unified evaluation harness in `scripts/evaluate_rlm_capabilities.py`
+- Synthetic benchmark generators in `scripts/benchmarks/sniah.py` and `scripts/benchmarks/oolong.py`
+- An official OOLONG adapter in `scripts/oolong_official_eval.py`
+- A consolidated report in `output/rlm-eval-full/RESULTS.md`
+- A dedicated explanation doc in `docs/explanation/rlm-capability-evaluation.md`
+- Release-facing surfacing in `README.md`, `CHANGELOG.md`, `docs/explanation/index.md`, and the package version bump to `0.5.1`
+
+That combination is important. A benchmark script on its own is internal tooling. A benchmark script plus published methodology, result summaries, caveats, and reproduction commands is product evidence.
+
+## What the evaluation actually measured
+
+The branch evaluates fleet-rlm across the first three capability layers of its stack:
+
+- **L1:** code execution in a Daytona sandbox
+- **L2:** storing large context as a REPL variable instead of sending it directly to the model
+- **L3:** recursive sub-calls for aggregation and semantic subqueries
+
+The measured results are the headline of the branch:
+
+| Benchmark | What it stresses | Result |
+|---|---|---|
+| S-NIAH | retrieval from very large context | **100%** on 50 tasks |
+| Synthetic OOLONG | counting, extraction, classification over structured data | **0.74** average |
+| Official OOLONG (`trec_coarse` @ 128K) | paper-comparable recursive aggregation | **0.9167** average |
+
+The most important number is the official OOLONG result. Fleet-rlm was run against the published `oolongbench/oolong-synth` dataset with the official `_synth_score()` rubric ported from Prime Intellect's `primeintellect/oolong-rlm` v0.1.9 environment. On that run, fleet-rlm plus Gemini 3.1 Pro scored **0.9167**, versus the paper's published **0.565** baseline for RLM(GPT-5) on the same benchmark family.
+
+That does not mean "fleet-rlm beats the paper" in a blanket sense. It means something narrower and more useful:
+
+- The implementation is not fake RLM marketing language
+- The runtime can solve paper-grade long-context tasks through code execution and recursive calls
+- The project now has a benchmark that can be rerun release after release
+
+## Why the explanation doc matters
+
+The strongest part of this branch is not only the score. It is the way the score is explained.
+
+`docs/explanation/rlm-capability-evaluation.md` does three things well:
+
+1. It defines what fleet-rlm means by an RLM in operational terms.
+2. It shows which concrete layers were exercised by each benchmark.
+3. It separates proven capability from deferred work instead of collapsing everything into one success claim.
+
+That last point is important. Many agent and long-context projects publish screenshots, anecdotes, or a single synthetic demo. This branch instead says:
+
+- L1 through L3 have evidence
+- L4 still has blockers
+- Here are the exact blockers
+- Here is how to reproduce the results anyway
+
+That makes the evaluation more credible because it is falsifiable.
+
+## What this means for fleet-rlm
+
+The practical implication is that fleet-rlm is moving from "interesting recursive workspace" to "measured recursive workspace."
+
+For the product, that means:
+
+- The Workbench and Optimization surfaces can point to real benchmark evidence instead of only architectural intent.
+- The `dspy.RLM` plus `DaytonaInterpreter` integration becomes a defendable core, not just an implementation detail.
+- Future regressions in recursion, sandbox execution, or large-context handling now have a baseline that can catch them.
+
+For users evaluating agent infrastructure, the branch sends a clearer signal too. If you want a UI-first DSPy workspace that can handle long-context tasks by writing and running code in a sandbox, fleet-rlm now has public evidence that its L1 to L3 path works on both synthetic and paper-aligned workloads.
+
+## What has not been proven yet
+
+This branch is disciplined about what it does not claim, and that is one of its strengths.
+
+The main unproven area is **L4**, the multi-pass recursive orchestrator represented by `RecursiveWorkspaceModule`. The workspace benchmark was deferred after the real runs exposed two concrete bugs:
+
+- A `NoneType.strip()` failure in `delegate_to_rlm` output handling
+- Sandbox name collisions during batched child spawning
+
+So the current branch does **not** prove that fleet-rlm's full decompose -> verify -> repair loop is production-ready. It proves that the lower layers are real and strong, while the higher orchestration layer still needs engineering work before it can be benchmarked honestly.
+
+That distinction matters because L4 is where fleet-rlm becomes more than an RLM wrapper. It is the layer that should eventually make recursive codebase analysis, multi-step verification, and repair-driven execution reliable at the product level.
+
+## Practical application: how to inspect or rerun the work
+
+If you want to understand or validate the branch, start with these artifacts:
+
+- `docs/explanation/rlm-capability-evaluation.md` for the narrative
+- `output/rlm-eval-full/RESULTS.md` for the aggregate results
+- `scripts/oolong_official_eval.py` for the paper-comparable adapter
+- `scripts/evaluate_rlm_capabilities.py` for the general harness
+
+To rerun the paper-comparable path:
+
+```bash
+# from repo root
+uv tool install -U prime
+prime env pull primeintellect/oolong-rlm
+uv run python scripts/oolong_official_eval.py \
+  --subset synth \
+  --split validation \
+  --dataset-name trec_coarse \
+  --context-len 131072 \
+  --limit 20 \
+  --output-dir output/rlm-eval-full/oolong-official
+```
+
+This is a useful workflow even if you are not trying to publish a paper. It gives the project one canonical answer to the question, "does this recursive stack still work on an external benchmark?"
+
+## The next steps that matter most
+
+The next branch should not be "add more benchmark prose." It should close the gap between the impressive L1-L3 story and the still-deferred L4 story.
+
+The highest-value next steps are:
+
+1. Fix `None` answer handling in `src/fleet_rlm/runtime/tools/rlm_delegate.py`.
+2. Fix sandbox naming in the Daytona child-spawn path to prevent collisions under concurrency.
+3. Rerun the workspace benchmark and publish the first honest L4 result.
+4. Expand the official OOLONG sample size beyond the current 12-task stop point.
+5. Repeat the evaluation across alternative model backends to separate pipeline quality from model-family advantage.
+
+If those land, fleet-rlm stops being a project with strong recursive primitives and starts becoming a project with a full recursive orchestration claim backed by evidence.
+
+## Conclusion
+
+- This branch is important because it converts fleet-rlm's RLM story into measurable, reproducible evidence.
+- The official OOLONG adapter is the key asset because it ties fleet-rlm to an external paper-grade benchmark instead of an internal demo.
+- The next meaningful milestone is not another score bump. It is closing the two L4 blockers and proving the recursive workspace loop under the same level of scrutiny.
+
+If you are following fleet-rlm as an adaptive recursive workspace, this is the release where the evaluation story becomes part of the product, not an afterthought.

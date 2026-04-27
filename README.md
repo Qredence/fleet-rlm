@@ -68,6 +68,25 @@ Both go through `DaytonaInterpreter.build_delegate_child()` so child creation fo
 
 Full details, including the local-workspace-snapshot fallback when a parent turn has no `repo_url` to recreate in the child, live in [`docs/architecture.md`](docs/architecture.md#recursive-rlm-isolation).
 
+## RLM Capability Evaluation
+
+Fleet-RLM's RLM capabilities were empirically benchmarked against the published
+[RLM paper (arXiv 2512.24601v2)](https://arxiv.org/abs/2512.24601) and Prime Intellect's
+official `primeintellect/oolong-rlm` environment:
+
+| Benchmark | Paper RLM(GPT-5) | Fleet-RLM + Gemini 3.1 Pro |
+|---|---|---|
+| S-NIAH (50 tasks, 50K–200K chars) | (solved) | **100.0%** |
+| **OOLONG-Official (`trec_coarse` @ 128K)** | **56.5%** | **91.67%** (+35.2 pp) |
+| OOLONG synthetic (30 tasks) | 56.5% (reference) | 74.0% |
+
+The OOLONG-Official row uses the exact HuggingFace dataset and scoring rubric from the
+paper's reference environment, via `scripts/oolong_official_eval.py`. See
+[`docs/explanation/rlm-capability-evaluation.md`](docs/explanation/rlm-capability-evaluation.md)
+for the full methodology, per-benchmark breakdown, and ASCII diagrams of the evaluation
+stack. Full results, including caveats and deferred L4 work, live in
+[`output/rlm-eval-full/RESULTS.md`](output/rlm-eval-full/RESULTS.md).
+
 ## Quick Start
 
 Add `fleet-rlm` to a `uv`-managed project and launch the Web UI:
@@ -278,6 +297,7 @@ This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_
 - [Documentation index](docs/index.md)
 - [Architecture overview](docs/architecture.md)
 - [Recursive RLM isolation architecture](docs/architecture.md#recursive-rlm-isolation)
+- [RLM Capability Evaluation](docs/explanation/rlm-capability-evaluation.md)
 - [Focused codebase map](docs/reference/codebase-map.md)
 - [Python backend module map](docs/reference/module-map.md)
 - [Adaptive RLM product spec](docs/explanation/product-spec.md)

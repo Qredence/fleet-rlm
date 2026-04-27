@@ -49,7 +49,11 @@ Active top-level areas under `src/fleet_rlm/`:
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
+  - `runtime/models/builders.py` hosts the runtime RLM factories including `build_recursive_subquery_rlm`, `build_variable_mode_rlm`, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
+  - `runtime/tools/rlm_delegate.py` owns `delegate_to_rlm` / `delegate_to_rlm_batched` plus host-side trajectory persistence into `external_traces`
 - `integrations/`: config, database, observability, and external-system integrations
+  - `integrations/daytona/evidence_bridge.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` to sandbox code via `bridge_callbacks.py`; `DATABASE_URL` is never exposed to the sandbox
+  - `integrations/database/repository_chat.py::store_rlm_trace` persists RLM child trajectories to `external_traces`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
 
