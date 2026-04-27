@@ -363,7 +363,10 @@ jobs:
           version = os.environ["RELEASE_VERSION"]
           changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
 
-          section_header = re.compile(rf"^## \[{re.escape(version)}\] - .*$", re.MULTILINE)
+          section_header = re.compile(
+              rf"^## \[(?P<version>{re.escape(version)})\] - (?P<date>.+)$",
+              re.MULTILINE,
+          )
           match = section_header.search(changelog)
           if not match:
               print(f"::error::Could not find CHANGELOG section for version {version}")
@@ -371,13 +374,22 @@ jobs:
 
           next_header = re.compile(r"^## \[", re.MULTILINE)
           next_match = next_header.search(changelog, match.end())
-          section = changelog[match.start() : next_match.start()].strip() if next_match else changelog[match.start() :].strip()
+          section = (
+              changelog[match.start() : next_match.start()].strip()
+              if next_match
+              else changelog[match.start() :].strip()
+          )
+          lines = section.splitlines()
+          section_body = "\n".join(lines[1:]).strip()
+          release_date = match.group("date").strip()
 
           body = "\n".join(
               [
-                  f"## Release v{version}",
+                  f"# fleet-rlm v{version}",
                   "",
-                  section,
+                  f"Released {release_date}.",
+                  "",
+                  section_body,
                   "",
                   "### Installation",
                   "",
