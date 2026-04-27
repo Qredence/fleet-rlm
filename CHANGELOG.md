@@ -6,6 +6,101 @@ All notable changes to this project are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.5.1] - 2026-04-27
+
+### Highlights (User Impact)
+
+- Published an empirical RLM capability evaluation with paper-comparable numbers:
+  S-NIAH 100% (50/50), synthetic OOLONG 0.74, and the official Prime Intellect
+  `primeintellect/oolong-rlm` benchmark at **0.9167** on `trec_coarse` @ 128K
+  tokens — +35.2 percentage points above the paper's RLM(GPT-5) baseline
+  ([arXiv 2512.24601v2](https://arxiv.org/abs/2512.24601), Table 1).
+- Added a reusable evaluation harness (`scripts/evaluate_rlm_capabilities.py`) and
+  an adapter (`scripts/oolong_official_eval.py`) that plugs fleet-rlm's
+  `DaytonaInterpreter` + `dspy.RLM` into the published OOLONG dataset and scoring
+  rubric — so future releases can re-measure against the same paper benchmark.
+- Added host-mediated evidence persistence and a multi-pass recursive workspace
+  orchestrator (`RecursiveWorkspaceModule`) for L4-style decomposition/verification/repair.
+- Documented the capability evaluation methodology in
+  `docs/explanation/rlm-capability-evaluation.md` with ASCII component and flow
+  diagrams that are viewable in any Markdown renderer.
+
+### Added
+
+- **Change:** Added `RecursiveWorkspaceModule` in `src/fleet_rlm/runtime/models/builders.py`
+  composing the five recursive workspace signatures (assemble → plan → execute → verify
+  → reflect/repair) into one `dspy.Module`, plus a `recursive_workspace` command and tool
+  stub.
+  **Outcome:** Operators can invoke a multi-pass recursive orchestrator via the
+  ReAct agent or the command dispatch without writing their own loop.
+- **Change:** Added host-mediated evidence persistence via
+  `src/fleet_rlm/integrations/daytona/evidence_bridge.py` with bridge registration in
+  `bridge_callbacks.py` and host-attribute propagation in `child_isolation.py`.
+  **Outcome:** Sandbox code can call `store_evidence`/`fetch_evidence`/`list_evidence`
+  to share durable findings across recursive child RLM runs without exposing `DATABASE_URL`
+  to the sandbox.
+- **Change:** Added `FleetRepository.store_rlm_trace()` and wired host-side trajectory
+  persistence from `rlm_delegate.py` into the `external_traces` table.
+  **Outcome:** RLM child run trajectories are now captured in NeonDB instead of vanishing
+  when the sandbox shuts down.
+- **Change:** Added three benchmark suites: S-NIAH generator and scorer
+  (`scripts/benchmarks/sniah.py`), OOLONG-style aggregation generator and scorer
+  (`scripts/benchmarks/oolong.py`), and a 10-task workspace benchmark dataset
+  (generated from the evaluation tooling and maintained outside the committed checkout)
+  covering codebase analysis.
+  **Outcome:** Reproducible evaluation coverage for L1/L2/L3/L4 capability claims.
+- **Change:** Added `scripts/evaluate_rlm_capabilities.py` as a unified harness with
+  `--benchmark {sniah, oolong, workspace, all}`, warm-up, `--max-tasks`, MLflow logging,
+  and per-benchmark aggregate summaries.
+  **Outcome:** One entry point runs every capability benchmark against real Daytona + LLM
+  infrastructure with consistent output formatting.
+- **Change:** Added `scripts/oolong_official_eval.py` — an adapter loading the official
+  `oolongbench/oolong-synth` dataset and running it through fleet-rlm's RLM stack with
+  the official `_synth_score()` rubric ported verbatim from `primeintellect/oolong-rlm`
+  v0.1.9.
+  **Outcome:** Fleet-rlm can be evaluated against the paper's canonical benchmark for
+  directly comparable numbers.
+- **Change:** Added `scripts/consolidate_rlm_results.py` to aggregate per-benchmark
+  summary JSONs into a single human-readable `RESULTS.md` report with paper comparison.
+  **Outcome:** Final evaluation output is shareable without manual aggregation.
+- **Change:** Added `docs/explanation/rlm-capability-evaluation.md` explaining what each
+  benchmark proves, paper comparison tables, infrastructure discoveries, ASCII diagrams
+  of the evaluation stack, and reproduction steps.
+  **Outcome:** The capability claim ("fleet-rlm is a real RLM implementation at
+  paper-grade quality") is backed by explicit, inspectable evidence in the docs.
+- **Change:** Added unit tests for `RecursiveWorkspaceModule`
+  (`tests/unit/runtime/agent/test_recursive_workspace.py`, 17 tests) and evidence
+  bridge (`tests/unit/integrations/daytona/test_evidence_bridge.py`, 13 tests).
+  **Outcome:** Structural correctness of the new L4 orchestrator and evidence-bridge
+  code paths is covered by 30 new unit tests.
+
+### Changed
+
+- **Change:** Threaded `FleetRepository` through `build_chat_agent()` and
+  `AgentRuntime.__init__` so the agent runtime receives its repository at construction
+  time (removed the post-hoc monkey-patch at `ws/stream.py:576`).
+  **Outcome:** Tool closures built in `_bound_runtime_tool_factories()` can rely on
+  `runtime._repository` being populated from agent creation onward.
+- **Change:** Updated the WebSocket stream layer to propagate `_host_repository`,
+  `_host_identity`, and `_host_run_id` onto the interpreter for evidence-bridge use.
+  **Outcome:** Sandbox code can use the host-mediated evidence APIs without extra
+  wiring per session.
+
+### Fixed
+
+- **Change:** Patched DSPy v3 None-safety issues in the official OOLONG adapter:
+  `_strip_code_fences()` now tolerates `None` code blocks and `REPLHistory.append()`
+  tolerates `None` reasoning/code/output fields.
+  **Outcome:** Fleet-rlm's RLM loop no longer crashes with
+  `AttributeError: 'NoneType' object has no attribute 'strip'` when the LLM returns
+  reasoning-only responses. The patches are adapter-local (do not modify the venv).
+
+### Documentation
+
+- **Change:** Added the evaluation explanation to `docs/explanation/index.md` so it is
+  discoverable from the Explanation section landing page.
+  **Outcome:** The RLM capability story is linked from the main docs entry point.
+
 ## [0.5.0] - 2026-04-25
 
 ### Highlights (User Impact)
@@ -773,6 +868,8 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.1]: https://github.com/Qredence/fleet-rlm/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Qredence/fleet-rlm/compare/v0.4.99...v0.5.0
 [0.4.3]: https://github.com/Qredence/fleet-rlm/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Qredence/fleet-rlm/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Qredence/fleet-rlm/compare/v0.4.0...v0.4.1

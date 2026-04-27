@@ -40,7 +40,9 @@ def iter_docs_files(docs_root: Path) -> list[Path]:
         p
         for p in docs_root.rglob("*.md")
         if p.is_file()
-        and not any(part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts)
+        and not any(
+            part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts
+        )
     )
 
 

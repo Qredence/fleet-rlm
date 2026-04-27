@@ -175,7 +175,9 @@ async def run_streaming_turn(
     lifecycle = prepared_turn.lifecycle
     step_builder = prepared_turn.step_builder
     if interpreter is not None and hasattr(lifecycle, "active_run_db_id"):
-        interpreter._host_run_id = lifecycle.active_run_db_id
+        # interpreter is typed as `object | None` here; use setattr so ty
+        # accepts the dynamic attribute (declared on DaytonaInterpreter).
+        setattr(interpreter, "_host_run_id", lifecycle.active_run_db_id)
     await lifecycle.emit_started()
     ws_loop = asyncio.get_running_loop()
     repl_hook_bridge = ReplHookBridge(

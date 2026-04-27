@@ -79,6 +79,12 @@ class StreamEventLike(Protocol):
 class MaintenanceInterpreterProtocol(Protocol):
     """Interpreter capability needed for session manifest volume I/O."""
 
+    # Host-mediated evidence bridge references — populated by the WS stream
+    # layer once identity is resolved; read by evidence_bridge.py.
+    _host_repository: Any | None
+    _host_identity: Any | None
+    _host_run_id: Any | None
+
     async def aexecute(
         self,
         code: str,
