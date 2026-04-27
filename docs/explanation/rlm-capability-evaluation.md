@@ -90,7 +90,7 @@ Boxes with `[external]` are remote services (API calls).
 |               |                                   |                 |
 |               v                                   |                 |
 |   +--------------------------+                    |                 |
-|   | _run_rlm_on_interpreter()|                    |                 |
+|   | run_rlm_task()           |                    |                 |
 |   +-----------+--------------+                    |                 |
 |               |                 +---------------+ |                 |
 |               |                 | DSPy v3       | |                 |

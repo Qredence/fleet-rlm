@@ -24,6 +24,7 @@ import ast
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import UTC, datetime
@@ -192,10 +193,19 @@ def _dnd_parse_answer(answer: str) -> int | str | list[str]:
     return answer
 
 
+def _extract_boxed_answer(answer: str) -> str:
+    """Unwrap a LaTeX-style \\boxed{...} answer when present."""
+    match = re.search(r"\\boxed\{([^}]*)\}", answer)
+    if match:
+        return match.group(1).strip()
+    return answer
+
+
 def _dnd_score(answer_raw: str, output: str) -> float:
     """Score a DnD subset response using the official OOLONG scoring logic."""
     gold = _dnd_parse_answer(answer_raw)
-    trimmed_output = _dnd_parse_answer((output or "").strip())
+    normalized_output = _extract_boxed_answer((output or "").strip())
+    trimmed_output = _dnd_parse_answer(normalized_output)
 
     if isinstance(gold, int) and isinstance(trimmed_output, int):
         return float(0.75 ** abs(gold - trimmed_output))

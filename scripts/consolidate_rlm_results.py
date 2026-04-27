@@ -24,10 +24,10 @@ DEFAULT_INPUT = ROOT / "output/rlm-eval-full"
 # Paper reference numbers (arXiv 2512.24601v2, Table 1, RLM(GPT-5) row)
 PAPER_BASELINES = {
     "sniah": "not directly reported (RLM generally solves S-NIAH)",
-    "oolong": "56.5%",
-    "oolong_pairs": "58.0%",
-    "codeqa": "62.0%",
-    "browsecomp_plus": "91.3%",
+    "oolong": 0.5650,
+    "oolong_pairs": 0.5800,
+    "codeqa": 0.6200,
+    "browsecomp_plus": 0.9130,
 }
 
 
@@ -40,12 +40,28 @@ def _load(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _load_first(*paths: Path) -> dict[str, Any] | None:
+    """Return the first decodable JSON object from the provided candidate paths."""
+    for path in paths:
+        loaded = _load(path)
+        if loaded is not None:
+            return loaded
+    return None
+
+
 def _fmt_percent(val: float) -> str:
     return f"{val * 100:.1f}%"
 
 
 def _fmt_score(val: float) -> str:
     return f"{val:.4f}"
+
+
+def _fmt_baseline(label: str) -> str:
+    baseline = PAPER_BASELINES[label]
+    if isinstance(baseline, str):
+        return baseline
+    return _fmt_score(baseline)
 
 
 def _fmt_sniah(summary: dict[str, Any]) -> list[str]:
@@ -115,7 +131,7 @@ def _fmt_oolong_official(summary: dict[str, Any]) -> list[str]:
         "",
         f"- **Tasks**: {summary['tasks_total']}",
         f"- **Avg score**: {_fmt_score(summary['avg_score'])} "
-        f"(paper RLM(GPT-5): {PAPER_BASELINES['oolong']})",
+        f"(paper RLM(GPT-5): {_fmt_baseline('oolong')})",
         f"- **Dataset**: {summary.get('dataset_name') or 'all'}",
         f"- **Context length**: {summary.get('context_len') or 'mixed'}",
         f"- **Perfect (≥0.99)**: {summary.get('perfect_scores', 0)}",
@@ -181,10 +197,22 @@ def _fmt_workspace(summary: dict[str, Any]) -> list[str]:
 
 
 def build_report(input_dir: Path) -> str:
-    sniah = _load(input_dir / "sniah/sniah-summary.json")
-    oolong = _load(input_dir / "oolong/oolong-summary.json")
-    oolong_official = _load(input_dir / "oolong-official/oolong-official-summary.json")
-    workspace = _load(input_dir / "workspace/workspace-summary.json")
+    sniah = _load_first(
+        input_dir / "sniah-summary.json",
+        input_dir / "sniah/sniah-summary.json",
+    )
+    oolong = _load_first(
+        input_dir / "oolong-summary.json",
+        input_dir / "oolong/oolong-summary.json",
+    )
+    oolong_official = _load_first(
+        input_dir / "oolong-official-summary.json",
+        input_dir / "oolong-official/oolong-official-summary.json",
+    )
+    workspace = _load_first(
+        input_dir / "workspace-summary.json",
+        input_dir / "workspace/workspace-summary.json",
+    )
 
     sections: list[str] = [
         "# Fleet-RLM Capability Evaluation — Full Results",
@@ -253,7 +281,7 @@ def build_report(input_dir: Path) -> str:
         sections.append(f"| S-NIAH | (solved) | {_fmt_percent(sniah['accuracy'])} |")
     if oolong_official:
         sections.append(
-            f"| OOLONG-Official | {PAPER_BASELINES['oolong']} | "
+            f"| OOLONG-Official | {_fmt_baseline('oolong')} | "
             f"{_fmt_score(oolong_official['avg_score'])} |"
         )
     if oolong:

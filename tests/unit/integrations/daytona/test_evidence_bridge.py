@@ -104,9 +104,13 @@ class TestStoreEvidence:
 
         interp = _interpreter(repository=mock_repo, identity=identity, run_id=run_id)
 
+        def _fake_run(coro):
+            coro.close()
+            return mock_item
+
         with patch(
             "fleet_rlm.integrations.daytona.evidence_bridge.asyncio.run",
-            side_effect=lambda coro: mock_item,
+            side_effect=_fake_run,
         ):
             result = store_evidence(
                 interp,

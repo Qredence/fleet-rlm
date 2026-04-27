@@ -580,6 +580,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         default=str(ROOT / ".data/datasets/rlm-recursive-workspace-benchmark.json"),
+        help=(
+            "Workspace benchmark dataset JSON. The default points at a generated "
+            "local file and may not exist in a fresh checkout."
+        ),
     )
     parser.add_argument("--output-dir", default=str(ROOT / "output/rlm-eval"))
     parser.add_argument(
@@ -646,7 +650,15 @@ def _run_workspace_benchmark(
 ) -> None:
     """Run the workspace (L4 orchestrator) benchmark."""
     dataset_path = Path(args.dataset)
-    tasks = load_benchmark(dataset_path)
+    try:
+        tasks = load_benchmark(dataset_path)
+    except FileNotFoundError as exc:
+        logger.error(
+            "%s The workspace benchmark dataset is maintained outside the committed "
+            "checkout; provide --dataset with a generated benchmark JSON.",
+            exc,
+        )
+        raise SystemExit(1) from exc
     if args.task_ids:
         tasks = [t for t in tasks if t["id"] in args.task_ids]
     if args.max_tasks is not None:
