@@ -79,9 +79,9 @@ Evaluation and benchmarks (maintained alongside the backend):
 - `scripts/evaluate_rlm_capabilities.py` — unified harness that runs the S-NIAH, OOLONG, and workspace benchmarks against real Daytona + LLM infrastructure (`--benchmark {sniah, oolong, workspace, all}`)
 - `scripts/oolong_official_eval.py` — adapter plugging fleet-rlm's RLM stack into the official `primeintellect/oolong-rlm` HuggingFace dataset and `_synth_score()` rubric; ports DSPy v3 None-safety patches locally (does not modify the venv)
 - `scripts/benchmarks/sniah.py`, `scripts/benchmarks/oolong.py` — synthetic dataset generators + scoring helpers
-- `scripts/consolidate_rlm_results.py` — aggregates per-benchmark summary JSONs and writes a generated `RESULTS.md` under `output/rlm-eval-full/` when the evaluation workflow is run
+- `scripts/consolidate_rlm_results.py` — aggregates per-benchmark summary JSONs and writes a generated `RESULTS.md` under the evaluation output directory when the evaluation workflow is run
 - `oolong_rlm/` — **vendored** snapshot of `primeintellect/oolong-rlm` v0.1.9 pulled via `prime env pull` (reference only; do not import at runtime — the venv's `verifiers` stack has incompatible transitive deps)
-- Generated evaluation artifacts are written under `output/rlm-eval-full/` at runtime (for example `{sniah,oolong,oolong-official}/…-{results,summary}.json` and `RESULTS.md`); this directory is produced by benchmark runs and may not exist in a fresh checkout
+- Generated evaluation artifacts are written into the runtime evaluation output directory (for example per-benchmark `{results,summary}.json` files and a consolidated `RESULTS.md`); these outputs are produced by benchmark runs and may not exist in a fresh checkout
 - `docs/explanation/rlm-capability-evaluation.md` — methodology and paper comparison
 
 Frontend organization:
