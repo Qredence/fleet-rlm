@@ -45,8 +45,9 @@ All notable changes to this project are documented in this file.
   when the sandbox shuts down.
 - **Change:** Added three benchmark suites: S-NIAH generator and scorer
   (`scripts/benchmarks/sniah.py`), OOLONG-style aggregation generator and scorer
-  (`scripts/benchmarks/oolong.py`), and a 10-task workspace benchmark
-  (`.data/datasets/rlm-recursive-workspace-benchmark.json`) covering codebase analysis.
+  (`scripts/benchmarks/oolong.py`), and a 10-task workspace benchmark dataset
+  (generated from the evaluation tooling and maintained outside the committed checkout)
+  covering codebase analysis.
   **Outcome:** Reproducible evaluation coverage for L1/L2/L3/L4 capability claims.
 - **Change:** Added `scripts/evaluate_rlm_capabilities.py` as a unified harness with
   `--benchmark {sniah, oolong, workspace, all}`, warm-up, `--max-tasks`, MLflow logging,

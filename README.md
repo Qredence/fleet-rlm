@@ -84,8 +84,9 @@ The OOLONG-Official row uses the exact HuggingFace dataset and scoring rubric fr
 paper's reference environment, via `scripts/oolong_official_eval.py`. See
 [`docs/explanation/rlm-capability-evaluation.md`](docs/explanation/rlm-capability-evaluation.md)
 for the full methodology, per-benchmark breakdown, and ASCII diagrams of the evaluation
-stack. Full results, including caveats and deferred L4 work, live in
-[`output/rlm-eval-full/RESULTS.md`](output/rlm-eval-full/RESULTS.md).
+stack. Full results, including caveats and deferred L4 work, are generated locally at
+`output/rlm-eval-full/RESULTS.md`; use the docs page above as the stable checked-in
+reference in this repository.
 
 ## Quick Start
 

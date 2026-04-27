@@ -263,10 +263,14 @@ def score_oolong_numeric(answer: str, expected: int) -> float:
 
 def score_oolong_classification(answer: str, expected_counts: dict[str, int]) -> float:
     """Average 0.75^|y_i - ŷ_i| across categories."""
+    if not answer:
+        return 0.0
+
+    normalized_answer = str(answer).lower()
     scores = []
     for category, expected_val in expected_counts.items():
         pattern = rf"{category}\s*[=:]\s*(\d+)"
-        match = re.search(pattern, answer.lower())
+        match = re.search(pattern, normalized_answer)
         if match:
             predicted = int(match.group(1))
             scores.append(0.75 ** abs(expected_val - predicted))

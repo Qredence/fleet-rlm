@@ -91,7 +91,7 @@ def _fmt_oolong(summary: dict[str, Any]) -> list[str]:
         "",
         f"- **Tasks**: {summary['tasks_total']}",
         f"- **Avg score**: {_fmt_score(summary['avg_score'])} "
-        f"(paper metric: 0.75^|y−ŷ|; paper RLM(GPT-5): {PAPER_BASELINES['oolong']})",
+        f"(paper metric: 0.75^|y−ŷ|)",
         f"- **Perfect (≥0.99)**: {summary.get('perfect_scores', 0)}",
         f"- **Near-miss (0.5–0.99)**: {summary.get('near_miss', 0)}",
         f"- **Failures (<0.5)**: {summary.get('failures', 0)}",
@@ -105,6 +105,32 @@ def _fmt_oolong(summary: dict[str, Any]) -> list[str]:
         lines.append("|---|---|")
         for ttype, score in sorted(summary["by_type"].items()):
             lines.append(f"| {ttype} | {_fmt_score(score)} |")
+
+    return lines
+
+
+def _fmt_oolong_official(summary: dict[str, Any]) -> list[str]:
+    lines = [
+        "## OOLONG Benchmark — Official Prime Intellect Environment",
+        "",
+        f"- **Tasks**: {summary['tasks_total']}",
+        f"- **Avg score**: {_fmt_score(summary['avg_score'])} "
+        f"(paper RLM(GPT-5): {PAPER_BASELINES['oolong']})",
+        f"- **Dataset**: {summary.get('dataset_name') or 'all'}",
+        f"- **Context length**: {summary.get('context_len') or 'mixed'}",
+        f"- **Perfect (≥0.99)**: {summary.get('perfect_scores', 0)}",
+        f"- **Near-miss (0.5–0.99)**: {summary.get('near_miss', 0)}",
+        f"- **Failures (<0.5)**: {summary.get('failures', 0)}",
+    ]
+
+    if summary.get("by_answer_type"):
+        lines.append("")
+        lines.append("### Score by answer type")
+        lines.append("")
+        lines.append("| Type | Score |")
+        lines.append("|---|---|")
+        for answer_type, score in sorted(summary["by_answer_type"].items()):
+            lines.append(f"| {answer_type} | {_fmt_score(score)} |")
 
     return lines
 
@@ -157,6 +183,7 @@ def _fmt_workspace(summary: dict[str, Any]) -> list[str]:
 def build_report(input_dir: Path) -> str:
     sniah = _load(input_dir / "sniah/sniah-summary.json")
     oolong = _load(input_dir / "oolong/oolong-summary.json")
+    oolong_official = _load(input_dir / "oolong-official/oolong-official-summary.json")
     workspace = _load(input_dir / "workspace/workspace-summary.json")
 
     sections: list[str] = [
@@ -182,6 +209,12 @@ def build_report(input_dir: Path) -> str:
         sections.append("---")
         sections.append("")
 
+    if oolong_official:
+        sections.extend(_fmt_oolong_official(oolong_official))
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+
     if workspace:
         sections.extend(_fmt_workspace(workspace))
         sections.append("")
@@ -192,14 +225,22 @@ def build_report(input_dir: Path) -> str:
         [
             "## Summary: What This Proves",
             "",
-            "- **L1 (Code execution)**: Every successful task demonstrates the RLM "
-            "writes Python, executes it in Daytona, and returns structured output via SUBMIT().",
-            "- **L2 (Large context as REPL variable)**: S-NIAH tasks process 50K–200K char "
-            "haystacks without the LLM seeing them in-context.",
-            "- **L3 (Recursive sub-calls)**: Exercised via OOLONG classification tasks that "
-            "require iterating over hundreds of items.",
-            "- **L4 (Recursive workspace orchestration)**: Multi-pass decomposition + "
-            "verification + repair loop, measurable via workspace benchmark.",
+            (
+                "- **L1 (Code execution)**: Every successful task demonstrates the RLM "
+                + "writes Python, executes it in Daytona, and returns structured output via SUBMIT()."
+            ),
+            (
+                "- **L2 (Large context as REPL variable)**: S-NIAH tasks process 50K–200K char "
+                + "haystacks without the LLM seeing them in-context."
+            ),
+            (
+                "- **L3 (Recursive sub-calls)**: Exercised via OOLONG classification tasks that "
+                + "require iterating over hundreds of items."
+            ),
+            (
+                "- **L4 (Recursive workspace orchestration)**: Multi-pass decomposition + "
+                + "verification + repair loop, measurable via workspace benchmark."
+            ),
             "",
             "## Paper Comparison",
             "",
@@ -210,10 +251,14 @@ def build_report(input_dir: Path) -> str:
 
     if sniah:
         sections.append(f"| S-NIAH | (solved) | {_fmt_percent(sniah['accuracy'])} |")
+    if oolong_official:
+        sections.append(
+            f"| OOLONG-Official | {PAPER_BASELINES['oolong']} | "
+            f"{_fmt_score(oolong_official['avg_score'])} |"
+        )
     if oolong:
         sections.append(
-            f"| OOLONG | {PAPER_BASELINES['oolong']} | "
-            f"{_fmt_score(oolong['avg_score'])} |"
+            f"| OOLONG (synthetic) | — | {_fmt_score(oolong['avg_score'])} |"
         )
 
     return "\n".join(sections) + "\n"

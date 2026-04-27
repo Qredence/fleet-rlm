@@ -6,6 +6,17 @@
 - **Short description**: Oolong long-context benchmark using RLM (Recursive Language Model) with Python REPL
 - **Tags**: long-context, rlm, python, multi-turn, repl
 
+### Vendoring / Attribution / License
+
+This directory contains a vendored snapshot of the upstream
+`primeintellect/oolong-rlm` environment from
+`PrimeIntellect-ai/research-environments`.
+
+When copying or updating files from upstream, preserve the upstream license
+terms and any required attribution or notice text alongside the vendored files
+in this directory. The upstream Apache 2.0 license used for this snapshot is
+included here as [`LICENSE`](LICENSE).
+
 ### How It Works
 
 This environment implements the [Oolong benchmark](https://arxiv.org/abs/2511.02817) for evaluating long-context understanding capabilities using the `RLMEnv`.

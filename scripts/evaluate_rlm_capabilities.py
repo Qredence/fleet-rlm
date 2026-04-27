@@ -35,7 +35,7 @@ if str(SRC) not in sys.path:
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / ".env")
 
 logger = logging.getLogger("rlm_eval")
 
@@ -46,7 +46,17 @@ logger = logging.getLogger("rlm_eval")
 
 
 def load_benchmark(path: Path) -> list[dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Benchmark dataset not found: {path}. "
+            "Provide --dataset with a valid JSON benchmark file."
+        )
+    if not path.is_file():
+        raise ValueError(f"Benchmark dataset path is not a file: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Benchmark dataset is not valid JSON: {path}") from exc
     if not isinstance(data, list):
         raise ValueError(f"Expected JSON array, got {type(data).__name__}")
     return data
@@ -121,14 +131,11 @@ def run_single_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def run_multi_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
-    """Execute a task with RecursiveWorkspaceModule (multi-pass orchestrator)."""
+def build_workspace_module(interpreter: Any) -> Any:
+    """Create the shared RecursiveWorkspaceModule used for workspace benchmarks."""
     from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
 
-    query = task["user_request"]
-    started_at = time.time()
-
-    module = RecursiveWorkspaceModule(
+    return RecursiveWorkspaceModule(
         interpreter=interpreter,
         max_passes=3,
         max_repair_attempts=1,
@@ -136,6 +143,12 @@ def run_multi_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
         verbose=False,
         sub_lm=getattr(interpreter, "sub_lm", None),
     )
+
+
+def run_multi_pass(task: dict[str, Any], module: Any) -> dict[str, Any]:
+    """Execute a task with RecursiveWorkspaceModule (multi-pass orchestrator)."""
+    query = task["user_request"]
+    started_at = time.time()
 
     try:
         prediction = module(user_request=query, context="")
@@ -168,9 +181,13 @@ def evaluate_task(
     task: dict[str, Any],
     interpreter: Any,
     *,
+    run_single: bool = True,
     run_multi: bool = True,
+    workspace_module: Any | None = None,
 ) -> dict[str, Any]:
     """Run both modes on a single task and score them."""
+    if not run_single and not run_multi:
+        raise ValueError("At least one of run_single or run_multi must be enabled")
     task_id = task["id"]
     expected = task.get("expected_answer_contains", [])
     difficulty = task.get("difficulty", "unknown")
@@ -179,62 +196,69 @@ def evaluate_task(
         "Evaluating task %s (%s, difficulty=%s)", task_id, task["task"], difficulty
     )
 
-    # Single pass
-    single = run_single_pass(task, interpreter)
-    single_coverage, single_found, single_missing = coverage_score(
-        single["answer"], expected
-    )
-    single["coverage_score"] = single_coverage
-    single["found_keywords"] = single_found
-    single["missing_keywords"] = single_missing
-    single["quality"] = length_quality_signal(single["answer"])
-
-    logger.info(
-        "  single_pass: coverage=%.2f, elapsed=%dms, status=%s",
-        single_coverage,
-        single["elapsed_ms"],
-        single["status"],
-    )
-
     result: dict[str, Any] = {
         "task_id": task_id,
         "task_type": task["task"],
         "difficulty": difficulty,
         "requires_multi_pass": task.get("requires_multi_pass", False),
-        "single_pass": single,
     }
 
-    if not run_multi:
-        return result
+    if run_single:
+        single = run_single_pass(task, interpreter)
+        single_coverage, single_found, single_missing = coverage_score(
+            single["answer"], expected
+        )
+        single["coverage_score"] = single_coverage
+        single["found_keywords"] = single_found
+        single["missing_keywords"] = single_missing
+        single["quality"] = length_quality_signal(single["answer"])
+        result["single_pass"] = single
 
-    # Multi pass
-    multi = run_multi_pass(task, interpreter)
-    multi_coverage, multi_found, multi_missing = coverage_score(
-        multi["answer"], expected
-    )
-    multi["coverage_score"] = multi_coverage
-    multi["found_keywords"] = multi_found
-    multi["missing_keywords"] = multi_missing
-    multi["quality"] = length_quality_signal(multi["answer"])
+        logger.info(
+            "  single_pass: coverage=%.2f, elapsed=%dms, status=%s",
+            single_coverage,
+            single["elapsed_ms"],
+            single["status"],
+        )
 
-    logger.info(
-        "  multi_pass:  coverage=%.2f, elapsed=%dms, passes=%d, status=%s",
-        multi_coverage,
-        multi["elapsed_ms"],
-        multi["passes"],
-        multi["status"],
-    )
+    if run_multi:
+        module = workspace_module or build_workspace_module(interpreter)
+        multi = run_multi_pass(task, module)
+        multi_coverage, multi_found, multi_missing = coverage_score(
+            multi["answer"], expected
+        )
+        multi["coverage_score"] = multi_coverage
+        multi["found_keywords"] = multi_found
+        multi["missing_keywords"] = multi_missing
+        multi["quality"] = length_quality_signal(multi["answer"])
+        result["multi_pass"] = multi
 
-    result["multi_pass"] = multi
-    result["coverage_delta"] = multi_coverage - single_coverage
-    result["multi_pass_better"] = multi_coverage > single_coverage
+        logger.info(
+            "  multi_pass:  coverage=%.2f, elapsed=%dms, passes=%d, status=%s",
+            multi_coverage,
+            multi["elapsed_ms"],
+            multi["passes"],
+            multi["status"],
+        )
+
+    if "single_pass" in result and "multi_pass" in result:
+        result["coverage_delta"] = (
+            result["multi_pass"]["coverage_score"]
+            - result["single_pass"]["coverage_score"]
+        )
+        result["multi_pass_better"] = (
+            result["multi_pass"]["coverage_score"]
+            > result["single_pass"]["coverage_score"]
+        )
 
     return result
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute aggregate statistics across all evaluated tasks."""
-    single_scores = [r["single_pass"]["coverage_score"] for r in results]
+    single_scores = [
+        r["single_pass"]["coverage_score"] for r in results if "single_pass" in r
+    ]
     multi_scores = [
         r["multi_pass"]["coverage_score"] for r in results if "multi_pass" in r
     ]
@@ -247,13 +271,19 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     summary = {
         "total_tasks": len(results),
+        "single_pass_tasks": len(single_scores),
+        "multi_pass_tasks": len(multi_scores),
         "single_pass_avg_coverage": _avg(single_scores),
         "multi_pass_avg_coverage": _avg(multi_scores),
         "multi_pass_wins": sum(1 for r in results if r.get("multi_pass_better", False)),
         "hard_tasks": {
             "count": len(hard_tasks),
             "single_avg": _avg(
-                [r["single_pass"]["coverage_score"] for r in hard_tasks]
+                [
+                    r["single_pass"]["coverage_score"]
+                    for r in hard_tasks
+                    if "single_pass" in r
+                ]
             ),
             "multi_avg": _avg(
                 [
@@ -266,7 +296,11 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "easy_tasks": {
             "count": len(easy_tasks),
             "single_avg": _avg(
-                [r["single_pass"]["coverage_score"] for r in easy_tasks]
+                [
+                    r["single_pass"]["coverage_score"]
+                    for r in easy_tasks
+                    if "single_pass" in r
+                ]
             ),
             "multi_avg": _avg(
                 [
@@ -276,7 +310,9 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 ]
             ),
         },
-        "total_single_elapsed_ms": sum(r["single_pass"]["elapsed_ms"] for r in results),
+        "total_single_elapsed_ms": sum(
+            r["single_pass"]["elapsed_ms"] for r in results if "single_pass" in r
+        ),
         "total_multi_elapsed_ms": sum(
             r["multi_pass"]["elapsed_ms"] for r in results if "multi_pass" in r
         ),
@@ -293,6 +329,9 @@ def log_to_mlflow(
     results: list[dict[str, Any]],
     summary: dict[str, Any],
     output_dir: Path,
+    *,
+    results_filename: str,
+    summary_filename: str,
 ) -> None:
     """Log evaluation results to MLflow if configured."""
     try:
@@ -317,6 +356,8 @@ def log_to_mlflow(
             mlflow.log_params(
                 {
                     "total_tasks": summary["total_tasks"],
+                    "single_pass_tasks": summary.get("single_pass_tasks", 0),
+                    "multi_pass_tasks": summary.get("multi_pass_tasks", 0),
                     "hard_tasks": summary["hard_tasks"]["count"],
                     "easy_tasks": summary["easy_tasks"]["count"],
                 }
@@ -332,8 +373,8 @@ def log_to_mlflow(
                     "easy_multi_avg": summary["easy_tasks"]["multi_avg"],
                 }
             )
-            mlflow.log_artifact(str(output_dir / "results.json"))
-            mlflow.log_artifact(str(output_dir / "summary.json"))
+            mlflow.log_artifact(str(output_dir / results_filename))
+            mlflow.log_artifact(str(output_dir / summary_filename))
 
         logger.info("MLflow experiment logged: %s", experiment_name)
     except Exception as exc:
@@ -384,7 +425,7 @@ def run_sniah_benchmark(
     output_dir: Path,
 ) -> dict[str, Any]:
     """Run the S-NIAH (needle-in-a-haystack) benchmark suite."""
-    from scripts.benchmarks.sniah import (
+    from benchmarks.sniah import (
         aggregate_sniah_results,
         generate_sniah_dataset,
         score_sniah,
@@ -422,6 +463,9 @@ def run_sniah_benchmark(
                 "expected": task["expected_answer"],
                 "needle_depth": task["needle_depth"],
                 "needle_type": task["needle_type"],
+                "haystack_target_chars": task.get(
+                    "haystack_target_chars", task["haystack_chars"]
+                ),
                 "haystack_chars": task["haystack_chars"],
                 "elapsed_ms": elapsed_ms,
                 "status": result.get("status", "error"),
@@ -459,7 +503,7 @@ def run_oolong_benchmark(
     output_dir: Path,
 ) -> dict[str, Any]:
     """Run the OOLONG-style aggregation benchmark suite."""
-    from scripts.benchmarks.oolong import (
+    from benchmarks.oolong import (
         aggregate_oolong_results,
         generate_oolong_dataset,
         score_oolong_task,
@@ -560,7 +604,10 @@ def _parse_args() -> argparse.Namespace:
         help="Run multi-pass only (skip single-pass)",
     )
     parser.add_argument("--verbose", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.single_only and args.multi_only:
+        parser.error("--single-only and --multi-only cannot be used together")
+    return args
 
 
 def _init_interpreter() -> Any:
@@ -606,13 +653,19 @@ def _run_workspace_benchmark(
         tasks = tasks[: args.max_tasks]
     logger.info("Workspace: loaded %d tasks from %s", len(tasks), dataset_path)
 
+    run_single = not args.multi_only
+    run_multi = not args.single_only
+    workspace_module = build_workspace_module(interpreter) if run_multi else None
+
     results: list[dict[str, Any]] = []
     for task in tasks:
         try:
             result = evaluate_task(
                 task,
                 interpreter,
-                run_multi=not args.single_only,
+                run_single=run_single,
+                run_multi=run_multi,
+                workspace_module=workspace_module,
             )
             results.append(result)
         except Exception as exc:
@@ -627,13 +680,28 @@ def _run_workspace_benchmark(
     (output_dir / "workspace-summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    log_to_mlflow(results, summary, output_dir)
+    log_to_mlflow(
+        results,
+        summary,
+        output_dir,
+        results_filename="workspace-results.json",
+        summary_filename="workspace-summary.json",
+    )
 
     print("\n--- Workspace Benchmark ---")
     print(f"Tasks: {summary['total_tasks']}")
-    print(f"Single-pass avg: {summary['single_pass_avg_coverage']:.2%}")
-    print(f"Multi-pass  avg: {summary['multi_pass_avg_coverage']:.2%}")
-    print(f"Multi-pass wins: {summary['multi_pass_wins']}/{summary['total_tasks']}")
+    if summary["single_pass_tasks"]:
+        print(f"Single-pass avg: {summary['single_pass_avg_coverage']:.2%}")
+    else:
+        print("Single-pass avg: n/a")
+    if summary["multi_pass_tasks"]:
+        print(f"Multi-pass  avg: {summary['multi_pass_avg_coverage']:.2%}")
+    else:
+        print("Multi-pass  avg: n/a")
+    if summary["single_pass_tasks"] and summary["multi_pass_tasks"]:
+        print(f"Multi-pass wins: {summary['multi_pass_wins']}/{summary['total_tasks']}")
+    else:
+        print("Multi-pass wins: n/a")
 
 
 def _print_sniah_summary(summary: dict[str, Any]) -> None:

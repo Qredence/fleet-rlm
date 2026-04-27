@@ -46,7 +46,7 @@ os.environ.setdefault("HF_DATASETS_CACHE", str(_HF_CACHE / "datasets"))
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / ".env")
 
 logger = logging.getLogger("oolong_official_eval")
 
@@ -79,12 +79,24 @@ def _patch_dspy_rlm() -> None:
 
         original_append = _repl_types.REPLHistory.append
 
-        def _safe_append(self, *, reasoning=None, code=None, output=None):
+        def _safe_append(self, *args, **kwargs):
+            if len(args) > 3:
+                raise TypeError(
+                    f"REPLHistory.append accepts at most 3 positional values, got {len(args)}"
+                )
+            names = ("reasoning", "code", "output")
+            merged = dict(kwargs)
+            for name, value in zip(names, args):
+                merged.setdefault(name, value)
             return original_append(
                 self,
-                reasoning=reasoning if isinstance(reasoning, str) else "",
-                code=code if isinstance(code, str) else "",
-                output=output if isinstance(output, str) else "",
+                reasoning=merged["reasoning"]
+                if isinstance(merged.get("reasoning"), str)
+                else "",
+                code=merged["code"] if isinstance(merged.get("code"), str) else "",
+                output=merged["output"]
+                if isinstance(merged.get("output"), str)
+                else "",
             )
 
         _repl_types.REPLHistory.append = _safe_append
@@ -113,7 +125,8 @@ def _synth_attempt_answer_parse(answer: str) -> tuple[str, str]:
         if len(answer) < 20:
             return answer, parse_confidence
         else:
-            return answer.split()[-1], parse_confidence
+            parts = answer.split()
+            return parts[-1] if parts else "", parse_confidence
     candidate_answer = answer.split(":")[-1].strip()
     candidate_answer = candidate_answer.replace("*", "")
     candidate_answer = candidate_answer.replace("[", "")
@@ -145,7 +158,7 @@ def _synth_score(answer_raw: str, answer_type: str, output: str) -> float:
             if "datetime" not in answer_raw
             else datetime.strptime(answer_raw, "[datetime.date(%Y, %m, %d)]")
         )
-    except (ValueError, SyntaxError):
+    except (ValueError, SyntaxError, TypeError, IndexError):
         return 0.0
     trimmed_output, _ = _synth_attempt_answer_parse(output)
 
@@ -157,13 +170,13 @@ def _synth_score(answer_raw: str, answer_type: str, output: str) -> float:
     elif answer_type == "ANSWER_TYPE.NUMERIC":
         try:
             return float(0.75 ** abs(int(gold) - int(trimmed_output)))
-        except Exception:
+        except (TypeError, ValueError):
             pass
     elif answer_type == "ANSWER_TYPE.DATE":
         try:
             parsed = dateutil.parser.parse(str(trimmed_output))
             return 1.0 if parsed == gold else 0.0
-        except Exception:
+        except (OverflowError, TypeError, ValueError):
             pass
     return 0.0
 

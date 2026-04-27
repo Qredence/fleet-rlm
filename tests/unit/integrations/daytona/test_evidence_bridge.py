@@ -271,21 +271,16 @@ class TestHostAttributePropagation:
             propagate_parent_recursion_state,
         )
 
-        parent = MagicMock()
-        parent._sub_rlm_depth = 0
-        parent._sub_rlm_max_depth = 2
-        parent._check_and_increment_llm_calls = MagicMock()
-        parent._remaining_llm_budget = MagicMock(return_value=50)
-        del parent._host_repository
-        del parent._host_identity
-        del parent._host_run_id
-
-        child = MagicMock()
-        child._sub_rlm_depth = 0
-        child._sub_rlm_max_depth = 2
+        parent = SimpleNamespace(
+            _sub_rlm_depth=0,
+            _sub_rlm_max_depth=2,
+            _check_and_increment_llm_calls=MagicMock(),
+            _remaining_llm_budget=MagicMock(return_value=50),
+        )
+        child = SimpleNamespace(_sub_rlm_depth=0, _sub_rlm_max_depth=2)
 
         propagate_parent_recursion_state(child, parent)
 
-        # Child should not have _host_* set via propagation
-        # (MagicMock auto-creates attrs, so check they weren't explicitly set)
-        assert not hasattr(parent, "_host_repository")
+        assert "_host_repository" not in child.__dict__
+        assert "_host_identity" not in child.__dict__
+        assert "_host_run_id" not in child.__dict__

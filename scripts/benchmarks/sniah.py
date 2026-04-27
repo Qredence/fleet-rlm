@@ -272,6 +272,7 @@ def generate_sniah_dataset(count: int = DEFAULT_COUNT, seed: int = 42) -> list[d
             {
                 "id": f"sniah-{i + 1:03d}",
                 "benchmark": "sniah",
+                "haystack_target_chars": haystack_size,
                 "haystack_chars": len(full_text),
                 "needle_depth": depth,
                 "needle_type": needle_type,
@@ -305,7 +306,7 @@ def aggregate_sniah_results(results: list[dict]) -> dict:
 
     for r in results:
         d = str(r.get("needle_depth", "?"))
-        s = str(r.get("haystack_chars", "?"))
+        s = str(r.get("haystack_target_chars", r.get("haystack_chars", "?")))
         t = str(r.get("needle_type", "?"))
         by_depth.setdefault(d, []).append(r["score"])
         by_size.setdefault(s, []).append(r["score"])
@@ -345,7 +346,7 @@ def main() -> None:
     )
 
     print(f"Generated {len(tasks)} S-NIAH tasks → {output}")
-    sizes = set(t["haystack_chars"] for t in tasks)
+    sizes = set(t["haystack_target_chars"] for t in tasks)
     depths = set(t["needle_depth"] for t in tasks)
     types = set(t["needle_type"] for t in tasks)
     print(f"  Sizes: {sorted(sizes)}")
