@@ -237,9 +237,9 @@ release-artifacts:
 cloud-preflight:
 	@echo "Checking fastapi CLI is available in the locked env..."
 	uv run fastapi --help >/dev/null
-	@echo "Importing fleet_rlm.api.app..."
+	@echo "Importing configured FastAPI entrypoint..."
 	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
-		uv run python -c "from fleet_rlm.api.app import app; print(f'{app.title} {app.version}')"
+		uv run python -c "from asgi import app; print(f'{app.title} {app.version}')"
 	@echo "Enumerating routes from create_app()..."
 	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
 		uv run python -c "from fleet_rlm.api.main import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
