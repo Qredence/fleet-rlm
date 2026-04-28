@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision = "0010_target_postgres_schema"
-down_revision = "0009_remove_modal_runtime_surface"
+down_revision = None
 branch_labels = None
 depends_on = None
 

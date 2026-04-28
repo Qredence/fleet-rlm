@@ -22,7 +22,15 @@ from .models_enums import (
     RunType,
     SandboxProvider,
 )
-from .models_runs import Artifact, ChatSession, ChatTurn, ExternalTrace, Run, RunStep
+from .models_runs import (
+    Artifact,
+    ChatSession,
+    ChatTurn,
+    ExternalTrace,
+    Run,
+    RunStep,
+    TraceFeedback,
+)
 from .repository_shared import (
     RepositoryContextMixin,
     _coerce_enum,
@@ -618,28 +626,35 @@ class ChatRepository(RepositoryContextMixin):
             if session_row is None:
                 return None
 
-            stmt: Select[tuple[ChatTurn]] = select(ChatTurn).where(
-                and_(
-                    ChatTurn.tenant_id == tenant_id,
-                    ChatTurn.session_id == session_id,
-                )
+            turn_filter = and_(
+                ChatTurn.tenant_id == tenant_id,
+                ChatTurn.session_id == session_id,
             )
             if workspace_id is not None:
-                stmt = stmt.where(ChatTurn.workspace_id == workspace_id)
-            turns = list((await session.execute(stmt)).scalars().all())
+                turn_filter = and_(turn_filter, ChatTurn.workspace_id == workspace_id)
 
-            total_tokens_in = sum((t.tokens_in or 0) for t in turns)
-            total_tokens_out = sum((t.tokens_out or 0) for t in turns)
-            total_latency_ms = sum((t.latency_ms or 0) for t in turns)
-            model_breakdown: dict[str, int] = {}
-            for t in turns:
-                name = t.model_name or "unknown"
-                model_breakdown[name] = model_breakdown.get(name, 0) + 1
+            agg_stmt = select(
+                func.coalesce(func.sum(ChatTurn.tokens_in), 0),
+                func.coalesce(func.sum(ChatTurn.tokens_out), 0),
+                func.coalesce(func.sum(ChatTurn.latency_ms), 0),
+            ).where(turn_filter)
+            agg_row = (await session.execute(agg_stmt)).one()
+
+            breakdown_stmt = (
+                select(
+                    func.coalesce(ChatTurn.model_name, "unknown"),
+                    func.count(),
+                )
+                .where(turn_filter)
+                .group_by(func.coalesce(ChatTurn.model_name, "unknown"))
+            )
+            breakdown_rows = (await session.execute(breakdown_stmt)).all()
+            model_breakdown = {str(name): int(cnt) for name, cnt in breakdown_rows}
 
             return {
-                "total_tokens_in": total_tokens_in,
-                "total_tokens_out": total_tokens_out,
-                "total_latency_ms": total_latency_ms,
+                "total_tokens_in": int(agg_row[0]),
+                "total_tokens_out": int(agg_row[1]),
+                "total_latency_ms": int(agg_row[2]),
                 "model_breakdown": model_breakdown,
             }
 
@@ -726,6 +741,40 @@ class ChatRepository(RepositoryContextMixin):
             result = await session.execute(stmt)
             return int(result.scalar_one())
 
+    async def get_run_steps_paginated(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[RunStep], int]:
+        """Return run steps with total count in one session round-trip."""
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            base_filter = and_(
+                RunStep.tenant_id == tenant_id,
+                RunStep.workspace_id == resolved_workspace_id,
+                RunStep.run_id == run_id,
+            )
+            count_stmt = select(func.count()).select_from(RunStep).where(base_filter)
+            total = int((await session.execute(count_stmt)).scalar_one())
+
+            items_stmt = (
+                select(RunStep)
+                .where(base_filter)
+                .order_by(RunStep.step_index.asc())
+                .offset(offset)
+                .limit(limit)
+            )
+            items = list((await session.execute(items_stmt)).scalars().all())
+            return items, total
+
     async def store_rlm_trace(
         self,
         *,
@@ -769,6 +818,74 @@ class ChatRepository(RepositoryContextMixin):
             )
             result = await session.execute(stmt)
             return result.scalar_one()
+
+    async def store_trace_feedback(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        trace_id: str,
+        is_correct: bool,
+        workspace_id: uuid.UUID | None = None,
+        reviewer_user_id: uuid.UUID | None = None,
+        comment: str | None = None,
+        expected_response: str | None = None,
+        provider: ExternalTraceProvider = ExternalTraceProvider.MLFLOW,
+        client_request_id: str | None = None,
+        run_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
+        turn_id: uuid.UUID | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> uuid.UUID:
+        """Persist human feedback for an external trace.
+
+        Upserts the ``external_traces`` row by (tenant, provider, trace_id) so
+        feedback always has a valid FK target, then inserts a ``trace_feedback``
+        row. Returns the trace_feedback row id.
+        """
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=reviewer_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            trace_stmt = (
+                insert(ExternalTrace)
+                .values(
+                    tenant_id=tenant_id,
+                    workspace_id=resolved_workspace_id,
+                    run_id=run_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    provider=provider,
+                    trace_id=trace_id,
+                    client_request_id=client_request_id,
+                    metadata_json={},
+                )
+                .on_conflict_do_update(
+                    constraint="uq_external_traces_tenant_provider_trace_id",
+                    set_={"updated_at": _utc_now()},
+                )
+                .returning(ExternalTrace.id)
+            )
+            external_trace_id = (await session.execute(trace_stmt)).scalar_one()
+
+            feedback_stmt = (
+                insert(TraceFeedback)
+                .values(
+                    tenant_id=tenant_id,
+                    workspace_id=resolved_workspace_id,
+                    external_trace_id=external_trace_id,
+                    run_id=run_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    reviewer_user_id=reviewer_user_id,
+                    is_correct=is_correct,
+                    comment=comment,
+                    expected_response=expected_response,
+                    metadata_json=metadata_json or {},
+                )
+                .returning(TraceFeedback.id)
+            )
+            return (await session.execute(feedback_stmt)).scalar_one()
 
 
 __all__ = [

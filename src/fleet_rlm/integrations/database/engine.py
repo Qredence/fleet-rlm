@@ -116,6 +116,11 @@ class DatabaseManager:
                 self._database_url,
                 echo=self._echo,
                 pool_pre_ping=True,
+                pool_size=3,
+                max_overflow=5,
+                pool_timeout=30,
+                pool_recycle=180,
+                connect_args={"server_settings": {"jit": "off"}},
                 future=True,
             )
         return self._engine

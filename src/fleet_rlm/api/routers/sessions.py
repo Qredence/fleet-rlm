@@ -11,10 +11,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, Path, Query
 
 from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
-
-from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..dependencies import (
+    HTTPIdentityDep,
+    PersistedIdentityDep,
+    RepositoryDep,
+    ServerStateDep,
+)
 from ..runtime_services.session_helpers import (
     optional_string as _optional_string,
     parse_legacy_session_id as _parse_legacy_session_id,
@@ -42,7 +44,7 @@ from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 _TURN_COUNT_QUERY_LIMIT = 1
-_TRANSCRIPT_EXPORT_PAGE_SIZE = 1_000
+_TRANSCRIPT_EXPORT_MAX_TURNS = 10_000
 
 OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
@@ -64,61 +66,37 @@ SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
 }
 
 
-async def _resolve_persisted_identity(
-    *,
-    state: ServerStateDep,
-    repository: RepositoryDep,
-    identity: HTTPIdentityDep,
-) -> IdentityUpsertResult | None:
-    if repository is None:
-        return None
-    if state.config.auth_mode == "entra":
-        try:
-            return await resolve_admitted_identity(repository, identity)
-        except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=exc.message,
-            ) from exc
-    return await repository.upsert_identity(
-        entra_tenant_id=identity.tenant_claim,
-        entra_user_id=identity.user_claim,
-        email=identity.email,
-        full_name=identity.name,
-    )
-
-
-async def _load_all_repository_turns(
+async def _load_repository_turns_for_export(
     *,
     repository,
     tenant_id: uuid.UUID,
     session_id: uuid.UUID,
     user_id: uuid.UUID | None,
     workspace_id: uuid.UUID | None,
-    page_size: int | None = None,
 ) -> list[ChatTurn]:
-    """Load every turn for a persisted session without truncating large transcripts."""
+    """Load turns for export, capped at ``_TRANSCRIPT_EXPORT_MAX_TURNS``.
 
-    resolved_page_size = page_size or _TRANSCRIPT_EXPORT_PAGE_SIZE
-    turns: list[ChatTurn] = []
-    offset = 0
-    total = 0
-    while True:
-        page, total = await repository.list_chat_turns(
-            tenant_id=tenant_id,
-            session_id=session_id,
-            user_id=user_id,
-            workspace_id=workspace_id,
-            limit=resolved_page_size,
-            offset=offset,
+    Raises HTTP 413 if the session exceeds the cap so the server does not
+    attempt to materialize unbounded transcripts.
+    """
+
+    turns, total = await repository.list_chat_turns(
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        limit=_TRANSCRIPT_EXPORT_MAX_TURNS,
+        offset=0,
+    )
+    if total > _TRANSCRIPT_EXPORT_MAX_TURNS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Session has {total} turns; export is limited to "
+                f"{_TRANSCRIPT_EXPORT_MAX_TURNS} turns."
+            ),
         )
-        if not page:
-            break
-        turns.extend(page)
-        offset += len(page)
-        if offset >= total:
-            break
-    return turns
+    return list(turns)
 
 
 def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
@@ -233,6 +211,7 @@ async def list_sessions_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     search: Annotated[
         str | None, Query(description="Full-text search on title")
     ] = None,
@@ -257,11 +236,6 @@ async def list_sessions_endpoint(
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
     """Return paginated session history filtered by the caller's ownership."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         status_filter = None
         if status:
@@ -359,16 +333,12 @@ async def get_session_detail(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session to inspect.")
     ],
 ) -> SessionDetailResponse:
     """Return full session detail with turn count."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         session_uuid = _parse_session_uuid(session_id)
         session = await repository.get_chat_session(
@@ -444,16 +414,12 @@ async def patch_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session to update.")
     ],
 ) -> SessionDetailResponse:
     """Update session title and/or metadata."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         session_uuid = _parse_session_uuid(session_id)
         session = await repository.update_chat_session(
@@ -535,6 +501,7 @@ async def get_session_turns(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session whose turns to list.")
     ],
@@ -542,11 +509,6 @@ async def get_session_turns(
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> TurnListResponse:
     """Return paginated turns for a session."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         session_uuid = _parse_session_uuid(session_id)
         session = await repository.get_chat_session(
@@ -618,16 +580,12 @@ async def get_session_stats(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session whose stats to retrieve.")
     ],
 ) -> SessionStatsResponse:
     """Return aggregated usage stats for a session."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         session_uuid = _parse_session_uuid(session_id)
         stats = await repository.get_session_stats(
@@ -687,16 +645,12 @@ async def delete_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session to archive.")
     ],
 ) -> SessionDeleteResponse:
     """Archive a session (soft delete)."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         archived = await repository.archive_chat_session(
             tenant_id=persisted_identity.tenant_id,
@@ -740,16 +694,12 @@ async def restore_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session to restore.")
     ],
 ) -> SessionRestoreResponse:
     """Restore an archived session to active status."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         session_uuid = _parse_session_uuid(session_id)
         session = await repository.get_chat_session(
@@ -823,16 +773,12 @@ async def export_session_endpoint(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     session_id: Annotated[
         str, Path(description="Identifier of the session to export as a dataset.")
     ],
 ) -> DatasetResponse:
     """Export a session as a GEPA dataset."""
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is not None and persisted_identity is not None:
         from fleet_rlm.api.runtime_services.optimization_datasets import (
             build_transcript_dataset_rows,
@@ -858,7 +804,7 @@ async def export_session_endpoint(
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        turns = await _load_all_repository_turns(
+        turns = await _load_repository_turns_for_export(
             repository=repository,
             tenant_id=persisted_identity.tenant_id,
             session_id=session_uuid,

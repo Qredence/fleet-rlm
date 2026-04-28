@@ -117,27 +117,50 @@ class IdentityRepository(RepositoryContextMixin):
         email: str | None = None,
         full_name: str | None = None,
     ) -> IdentityUpsertResult:
-        tenant = await self.upsert_tenant(
-            entra_tenant_id=entra_tenant_id,
-            display_name=entra_tenant_id,
-        )
-        user = await self.upsert_user(
-            tenant_id=tenant.id,
-            entra_user_id=entra_user_id,
-            email=email,
-            full_name=full_name,
-        )
-        workspace_id = await self.resolve_workspace_id(
-            tenant_id=tenant.id,
-            user_id=user.id,
-        )
-        return IdentityUpsertResult(
-            tenant_id=tenant.id,
-            tenant_status=tenant.status,
-            user_id=user.id,
-            membership_role=MembershipRole.MEMBER,
-            workspace_id=workspace_id,
-        )
+        async with self._db.session() as session, session.begin():
+            insert_stmt = insert(Tenant).values(
+                entra_tenant_id=entra_tenant_id,
+                display_name=entra_tenant_id,
+            )
+            tenant_stmt = insert_stmt.on_conflict_do_update(
+                index_elements=[Tenant.entra_tenant_id],
+                set_={
+                    "display_name": func.coalesce(
+                        insert_stmt.excluded.display_name,
+                        Tenant.display_name,
+                    ),
+                    "updated_at": _utc_now(),
+                },
+            ).returning(Tenant)
+            tenant = (await session.execute(tenant_stmt)).scalar_one()
+
+            await self._set_request_context(session, tenant.id)
+            user = await self._upsert_user_in_session(
+                session,
+                tenant_id=tenant.id,
+                entra_user_id=entra_user_id,
+                email=email,
+                full_name=full_name,
+            )
+            await self._set_request_context(session, tenant.id, user.id)
+            await self._ensure_membership_in_session(
+                session,
+                tenant_id=tenant.id,
+                user_id=user.id,
+                membership_role=MembershipRole.MEMBER,
+            )
+            workspace_id = await self._resolve_workspace_id_in_session(
+                session,
+                tenant_id=tenant.id,
+                user_id=user.id,
+            )
+            return IdentityUpsertResult(
+                tenant_id=tenant.id,
+                tenant_status=tenant.status,
+                user_id=user.id,
+                membership_role=MembershipRole.MEMBER,
+                workspace_id=workspace_id,
+            )
 
     async def resolve_tenant_by_entra_claim(
         self,

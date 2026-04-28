@@ -173,7 +173,6 @@ async def test_migrations_apply_and_core_tables_exist(
             ("workspaces", "slug"),
         }
         assert control_plane_indexes == {
-            "ix_execution_events_run_sequence",
             "ix_jobs_workspace_status_available",
             "ix_tenant_subscriptions_status",
             "ix_tenants_status",

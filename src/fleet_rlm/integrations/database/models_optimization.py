@@ -171,7 +171,6 @@ class DatasetExample(Base):
         UniqueConstraint(
             "dataset_id", "row_index", name="uq_dataset_examples_dataset_row_index"
         ),
-        Index("ix_dataset_examples_dataset_row_index", "dataset_id", "row_index"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

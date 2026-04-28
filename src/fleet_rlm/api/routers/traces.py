@@ -1,7 +1,8 @@
-"""Trace feedback endpoints backed by MLflow."""
+"""Trace feedback endpoints backed by MLflow, mirrored to Neon."""
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -10,9 +11,11 @@ from fastapi import APIRouter, HTTPException
 from fleet_rlm.integrations.observability import log_trace_feedback, resolve_trace
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
-from ..dependencies import HTTPIdentityDep
+from ..dependencies import HTTPIdentityDep, PersistedIdentityDep, RepositoryDep
 from ..runtime_services.common import RUNTIME_TEST_TIMEOUT_SECONDS, run_blocking
 from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/traces", tags=["traces"])
 
@@ -91,6 +94,8 @@ def _assert_feedback_access(
 async def create_trace_feedback(
     request: TraceFeedbackRequest,
     identity: HTTPIdentityDep,
+    repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> TraceFeedbackResponse:
     """Record human feedback and optional ground truth for an MLflow trace."""
     config = MlflowConfig.from_env()
@@ -161,6 +166,36 @@ async def create_trace_feedback(
             status_code=503,
             detail=f"Failed to log MLflow feedback: {exc}",
         ) from exc
+
+    if repository is not None and persisted_identity is not None:
+        try:
+            await repository.store_trace_feedback(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=persisted_identity.workspace_id,
+                reviewer_user_id=persisted_identity.user_id,
+                trace_id=resolved_trace_id,
+                client_request_id=resolved_client_request_id,
+                is_correct=request.is_correct,
+                comment=request.comment,
+                expected_response=request.expected_response,
+                metadata_json={
+                    "source": "mlflow",
+                    "mlflow_outcome": {
+                        "feedback_logged": bool(outcome.get("feedback_logged", False)),
+                        "expectation_logged": bool(
+                            outcome.get("expectation_logged", False)
+                        ),
+                    },
+                },
+            )
+        except Exception as exc:
+            # Best-effort: MLflow write already succeeded, so do not fail the
+            # request if the Neon mirror write errors.
+            logger.warning(
+                "trace_feedback_neon_persist_failed",
+                extra={"trace_id": resolved_trace_id},
+                exc_info=exc,
+            )
 
     return TraceFeedbackResponse(
         trace_id=resolved_trace_id,

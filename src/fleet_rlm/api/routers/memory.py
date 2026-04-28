@@ -7,10 +7,8 @@ from typing import Annotated, Any, TypeAlias
 from fastapi import APIRouter, HTTPException, Query
 
 from fleet_rlm.integrations.database import MemoryScope
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
-from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..dependencies import PersistedIdentityDep, RepositoryDep
 from ..schemas.core import MemoryItemResponse, MemoryListResponse
 
 router = APIRouter(
@@ -35,30 +33,6 @@ MEMORY_ERROR_RESPONSES: OpenAPIResponses = {
 }
 
 
-async def _resolve_persisted_identity(
-    *,
-    state: ServerStateDep,
-    repository: RepositoryDep,
-    identity: HTTPIdentityDep,
-) -> IdentityUpsertResult | None:
-    if repository is None:
-        return None
-    if state.config.auth_mode == "entra":
-        try:
-            return await resolve_admitted_identity(repository, identity)
-        except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=exc.message,
-            ) from exc
-    return await repository.upsert_identity(
-        entra_tenant_id=identity.tenant_claim,
-        entra_user_id=identity.user_claim,
-        email=identity.email,
-        full_name=identity.name,
-    )
-
-
 @router.get(
     "",
     response_model=MemoryListResponse,
@@ -67,9 +41,8 @@ async def _resolve_persisted_identity(
     description="Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.",
 )
 async def list_memory_items(
-    state: ServerStateDep,
-    identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     scope: Annotated[
         str | None,
         Query(
@@ -94,25 +67,13 @@ async def list_memory_items(
                 detail=f"Invalid scope: {scope}",
             ) from exc
 
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is None or persisted_identity is None:
         raise HTTPException(
             status_code=503,
             detail="Database persistence is unavailable.",
         )
 
-    total = await repository.count_memory_items(
-        tenant_id=persisted_identity.tenant_id,
-        workspace_id=persisted_identity.workspace_id,
-        user_id=persisted_identity.user_id,
-        scope=scope_filter,
-        scope_id=scope_id,
-    )
-    items = await repository.list_memory_items(
+    items, total = await repository.list_memory_items_paginated(
         tenant_id=persisted_identity.tenant_id,
         workspace_id=persisted_identity.workspace_id,
         user_id=persisted_identity.user_id,

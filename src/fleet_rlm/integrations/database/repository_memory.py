@@ -205,6 +205,39 @@ class MemoryRepository(RepositoryContextMixin):
                 return 0
             return await _count_from_stmt(session, stmt)
 
+    async def list_memory_items_paginated(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        scope: MemoryScope | None = None,
+        scope_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[MemoryItem], int]:
+        """Return memory items with total count in one session round-trip."""
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            stmt = self._build_memory_items_stmt(
+                tenant_id=tenant_id,
+                workspace_id=resolved_workspace_id,
+                user_id=user_id,
+                scope=scope,
+                scope_id=scope_id,
+            )
+            if stmt is None:
+                return [], 0
+            total = await _count_from_stmt(session, stmt)
+            items_stmt = (
+                stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
+            )
+            items = list((await session.execute(items_stmt)).scalars().all())
+            return items, total
+
 
 __all__ = [
     "MemoryItemCreateRequest",

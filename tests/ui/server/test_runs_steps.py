@@ -143,6 +143,34 @@ class _RunStepsRepository:
             return len(self.steps)
         return 0
 
+    async def get_run_steps_paginated(
+        self,
+        *,
+        tenant_id,
+        run_id,
+        workspace_id=None,
+        created_by_user_id=None,
+        limit=50,
+        offset=0,
+    ):
+        self.calls.append(
+            (
+                "get_run_steps_paginated",
+                run_id,
+                workspace_id,
+                created_by_user_id,
+                limit,
+                offset,
+            )
+        )
+        if (
+            tenant_id == self.tenant_id
+            and run_id == self.run.id
+            and workspace_id == self.workspace_id
+        ):
+            return self.steps[offset : offset + limit], len(self.steps)
+        return [], 0
+
     async def get_chat_session(self, **kwargs):
         raise NotImplementedError
 
@@ -211,13 +239,7 @@ def test_get_run_steps_returns_expected_shape(
             run_steps_repo.user_id,
         ),
         (
-            "count_run_steps",
-            run_steps_repo.run.id,
-            run_steps_repo.workspace_id,
-            run_steps_repo.user_id,
-        ),
-        (
-            "get_run_steps",
+            "get_run_steps_paginated",
             run_steps_repo.run.id,
             run_steps_repo.workspace_id,
             run_steps_repo.user_id,

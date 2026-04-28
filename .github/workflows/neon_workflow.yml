@@ -36,10 +36,16 @@ jobs:
       || github.event.action == 'opened'
       || github.event.action == 'reopened')
     runs-on: ubuntu-latest
+    # contents: read  -> allow checkout
+    # pull-requests: write  -> allow schema-diff-action to post PR comments
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Get branch expiration date as an env variable (2 weeks from now)
         id: get_expiration_date
         run: echo "EXPIRES_AT=$(date -u --date '+14 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       - name: Create Neon Branch
         id: create_neon_branch
         uses: neondatabase/create-branch-action@fb620d43d4c565abaf088b848a4e28e5c4ea4d9c # v6
@@ -49,41 +55,34 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
           expires_at: ${{ env.EXPIRES_AT }}
 
-# The step above creates a new Neon branch.
-# You may want to do something with the new branch, such as run migrations, run tests
-# on it, or send the connection details to a hosting platform environment.
-# The branch DATABASE_URL is available to you via:
-# "${{ steps.create_neon_branch.outputs.db_url_with_pooler }}".
-# It's important you don't log the DATABASE_URL as output as it contains a username and
-# password for your database.
-# For example, you can uncomment the lines below to run a database migration command:
-#      - name: Run Migrations
-#        run: npm run db:migrate
-#        env:
-#          # to use pooled connection
-#          DATABASE_URL: "${{ steps.create_neon_branch.outputs.db_url_with_pooler }}"
-#          # OR to use unpooled connection
-#          # DATABASE_URL: "${{ steps.create_neon_branch.outputs.db_url }}"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# Following the step above, which runs database migrations, you may want to check
-# for schema changes in your database. We recommend using the following action to
-# post a comment to your pull request with the schema diff. For this action to work,
-# you also need to give permissions to the workflow job to be able to post comments
-# and read your repository contents. Add the following permissions to the workflow job:
-#
-# permissions:
-#   contents: read
-#   pull-requests: write
-#
-# You can also check out https://github.com/neondatabase/schema-diff-action for more
-# information on how to use the schema diff action.
-# You can uncomment the lines below to enable the schema diff action.
-#      - name: Post Schema Diff Comment to PR
-#        uses: neondatabase/schema-diff-action@v1
-#        with:
-#          project_id: ${{ vars.NEON_PROJECT_ID }}
-#          compare_branch: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
-#          api_key: ${{ secrets.NEON_API_KEY }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install migration dependencies
+        # Alembic uses the sync psycopg driver; install just the packages needed
+        # to run `alembic upgrade head` so we avoid installing the full project.
+        run: uv sync --frozen --only-group dev || uv pip install --system alembic 'psycopg[binary]' sqlalchemy python-dotenv
+
+      - name: Run Migrations
+        env:
+          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
+          DATABASE_ADMIN_URL: ${{ steps.create_neon_branch.outputs.db_url }}
+        run: uv run alembic upgrade head
+
+      - name: Post Schema Diff Comment to PR
+        uses: neondatabase/schema-diff-action@v1
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          compare_branch: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
+          api_key: ${{ secrets.NEON_API_KEY }}
 
   delete_neon_branch:
     name: Delete Neon Branch

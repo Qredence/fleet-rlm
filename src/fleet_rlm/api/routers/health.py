@@ -1,11 +1,19 @@
 """Health and readiness endpoints."""
 
+from __future__ import annotations
+
+import asyncio
+import logging
+
 from fastapi import APIRouter
 
 from ..dependencies import ServerStateDep
 from ..schemas.core import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
+logger = logging.getLogger(__name__)
+
+_READY_DB_PING_TIMEOUT_SECONDS = 2.0
 
 
 @router.get(
@@ -23,13 +31,27 @@ def health() -> HealthResponse:
     response_model=ReadyResponse,
     responses={503: {"description": "Readiness evaluation could not complete."}},
 )
-def ready(state: ServerStateDep) -> ReadyResponse:
-    """Report whether critical startup dependencies are ready for requests."""
+async def ready(state: ServerStateDep) -> ReadyResponse:
+    """Report whether critical startup dependencies are ready for requests.
+
+    Verifies DB connectivity with a short-timeout ping so a sleeping Neon
+    compute reports ``degraded`` instead of ``ready``.
+    """
     cfg = state.config
     planner_ready = state.planner_lm is not None
 
-    if state.repository is not None:
-        database_status = "ready"
+    if state.db_manager is not None:
+        try:
+            await asyncio.wait_for(
+                state.db_manager.ping(),
+                timeout=_READY_DB_PING_TIMEOUT_SECONDS,
+            )
+            database_status = "ready"
+        except TimeoutError:
+            database_status = "degraded"
+        except Exception as exc:
+            logger.warning("ready_db_ping_failed", exc_info=exc)
+            database_status = "degraded"
     elif cfg.database_required:
         database_status = "missing"
     else:

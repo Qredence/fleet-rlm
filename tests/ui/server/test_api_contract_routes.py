@@ -608,7 +608,7 @@ def test_session_export_route_uses_repository_transcript(
     assert payload["name"].startswith("Repository Session")
 
 
-def test_session_export_route_paginates_repository_turns(
+def test_session_export_route_loads_repository_turns_in_one_call(
     default_client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -620,7 +620,6 @@ def test_session_export_route_paginates_repository_turns(
     db_path = tmp_path / "local.db"
     monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
-    monkeypatch.setattr(sessions_router, "_TRANSCRIPT_EXPORT_PAGE_SIZE", 2)
     local_store._engines.clear()
 
     repository = SessionHistoryRepository()
@@ -645,7 +644,50 @@ def test_session_export_route_paginates_repository_turns(
     assert response.status_code == 200
     payload = response.json()
     assert payload["row_count"] == 5
-    assert [call["offset"] for call in repository.turn_list_calls[-3:]] == [0, 2, 4]
+    # Export now issues a single bounded list_chat_turns call instead of paging.
+    assert repository.turn_list_calls[-1]["offset"] == 0
+    assert (
+        repository.turn_list_calls[-1]["limit"]
+        == sessions_router._TRANSCRIPT_EXPORT_MAX_TURNS
+    )
+
+
+def test_session_export_route_rejects_oversized_sessions(
+    default_client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Sessions larger than the export cap return HTTP 413."""
+    from fleet_rlm.api.routers import sessions as sessions_router
+    from fleet_rlm.integrations import local_store
+
+    db_path = tmp_path / "local.db"
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+    monkeypatch.setattr(sessions_router, "_TRANSCRIPT_EXPORT_MAX_TURNS", 2)
+    local_store._engines.clear()
+
+    repository = SessionHistoryRepository()
+    repository.turns = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            turn_index=index,
+            user_message=f"Question {index}",
+            assistant_message=f"Answer {index}",
+            created_at=repository.session.created_at,
+        )
+        for index in range(5)
+    ]
+    default_client.app.state.server_state.repository = repository
+
+    response = default_client.post(
+        f"/api/v1/sessions/{repository.session.id}/export",
+        headers=auth_headers,
+        json={"module_slug": "reflect-and-revise"},
+    )
+
+    assert response.status_code == 413
 
 
 def test_sandbox_list_paginates_with_limit(

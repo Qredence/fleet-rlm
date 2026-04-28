@@ -7,10 +7,12 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
-
-from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..dependencies import (
+    HTTPIdentityDep,
+    PersistedIdentityDep,
+    RepositoryDep,
+    ServerStateDep,
+)
 from ..schemas.core import RunStepItem, RunStepListResponse
 
 router = APIRouter(
@@ -42,30 +44,6 @@ def _parse_run_uuid(run_id: str) -> uuid.UUID:
         raise HTTPException(status_code=404, detail="Run not found.") from exc
 
 
-async def _resolve_persisted_identity(
-    *,
-    state: ServerStateDep,
-    repository: RepositoryDep,
-    identity: HTTPIdentityDep,
-) -> IdentityUpsertResult | None:
-    if repository is None:
-        return None
-    if state.config.auth_mode == "entra":
-        try:
-            return await resolve_admitted_identity(repository, identity)
-        except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=exc.message,
-            ) from exc
-    return await repository.upsert_identity(
-        entra_tenant_id=identity.tenant_claim,
-        entra_user_id=identity.user_claim,
-        email=identity.email,
-        full_name=identity.name,
-    )
-
-
 @router.get(
     "/{run_id}/steps",
     response_model=RunStepListResponse,
@@ -77,6 +55,7 @@ async def get_run_steps(
     state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
+    persisted_identity: PersistedIdentityDep,
     run_id: Annotated[
         str, Path(description="Identifier of the run whose steps to list.")
     ],
@@ -86,11 +65,6 @@ async def get_run_steps(
     """Return paginated execution steps for a run."""
     run_uuid = _parse_run_uuid(run_id)
 
-    persisted_identity = await _resolve_persisted_identity(
-        state=state,
-        repository=repository,
-        identity=identity,
-    )
     if repository is None or persisted_identity is None:
         raise HTTPException(
             status_code=503,
@@ -106,13 +80,7 @@ async def get_run_steps(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
 
-    total = await repository.count_run_steps(
-        tenant_id=persisted_identity.tenant_id,
-        run_id=run_uuid,
-        workspace_id=persisted_identity.workspace_id,
-        created_by_user_id=persisted_identity.user_id,
-    )
-    steps = await repository.get_run_steps(
+    steps, total = await repository.get_run_steps_paginated(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
         workspace_id=persisted_identity.workspace_id,

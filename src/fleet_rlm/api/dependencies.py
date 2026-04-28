@@ -10,9 +10,10 @@ from fastapi import Depends, HTTPException, Request, Security, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
+from fleet_rlm.integrations.database.types import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint
 
-from .auth import AuthError, AuthProvider, NormalizedIdentity
+from .auth import AuthError, AuthProvider, NormalizedIdentity, resolve_admitted_identity
 from .config import ServerRuntimeConfig
 from .events import ExecutionEventEmitter
 
@@ -156,6 +157,34 @@ async def require_http_identity(
 
 
 HTTPIdentityDep = Annotated[NormalizedIdentity, Depends(require_http_identity)]
+
+
+async def resolve_persisted_identity(
+    state: ServerStateDep,
+    repository: RepositoryDep,
+    identity: HTTPIdentityDep,
+) -> IdentityUpsertResult | None:
+    """Resolve the caller's persisted identity, or None if DB is unavailable."""
+    if repository is None:
+        return None
+    if state.config.auth_mode == "entra":
+        try:
+            return await resolve_admitted_identity(repository, identity)
+        except AuthError as exc:
+            raise HTTPException(
+                status_code=exc.status_code, detail=exc.message
+            ) from exc
+    return await repository.upsert_identity(
+        entra_tenant_id=identity.tenant_claim,
+        entra_user_id=identity.user_claim,
+        email=identity.email,
+        full_name=identity.name,
+    )
+
+
+PersistedIdentityDep = Annotated[
+    IdentityUpsertResult | None, Depends(resolve_persisted_identity)
+]
 
 
 def get_request_identity(request: Request) -> NormalizedIdentity | None:

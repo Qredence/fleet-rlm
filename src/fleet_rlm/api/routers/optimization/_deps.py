@@ -14,16 +14,35 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
-from ...auth import AuthError, resolve_admitted_identity
 from ...dependencies import (
     HTTPIdentityDep,
+    PersistedIdentityDep,
     RepositoryDep,
     ServerStateDep,
+    resolve_persisted_identity,
 )
 from ...schemas.core import (
     DatasetResponse,
     OptimizationRunResponse,
 )
+
+# Backward-compatible re-export for existing callers in datasets.py and runs.py.
+_resolve_persisted_identity = resolve_persisted_identity
+
+__all__ = [
+    "AUTH_ERROR_RESPONSES",
+    "DatasetResponse",
+    "HTTPIdentityDep",
+    "OptimizationContext",
+    "OptimizationRunResponse",
+    "OPTIMIZATION_DATA_ROOT",
+    "OPTIMIZATION_TIMEOUT_SECONDS",
+    "OpenAPIResponses",
+    "PersistedIdentityDep",
+    "RepositoryDep",
+    "ServerStateDep",
+    "_resolve_persisted_identity",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -70,30 +89,6 @@ def _parse_uuid_id(value: str, *, detail: str) -> uuid.UUID:
         return uuid.UUID(value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=detail) from exc
-
-
-async def _resolve_persisted_identity(
-    *,
-    state: ServerStateDep,
-    repository: RepositoryDep,
-    identity: HTTPIdentityDep,
-) -> IdentityUpsertResult | None:
-    if repository is None:
-        return None
-    if state.config.auth_mode == "entra":
-        try:
-            return await resolve_admitted_identity(repository, identity)
-        except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=exc.message,
-            ) from exc
-    return await repository.upsert_identity(
-        entra_tenant_id=identity.tenant_claim,
-        entra_user_id=identity.user_claim,
-        email=identity.email,
-        full_name=identity.name,
-    )
 
 
 def _extract_metadata_str(metadata: object, key: str) -> str | None:

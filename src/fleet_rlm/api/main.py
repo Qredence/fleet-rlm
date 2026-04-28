@@ -80,7 +80,11 @@ def _resolve_ui_dist_dir() -> Path | None:
 
 
 def _register_api_routes(app: FastAPI) -> None:
-    """Register health and /api/v1 route groups on app."""
+    """Register health and /api/v1 route groups on app.
+
+    Must be called **before** ``_mount_spa`` so the SPA catch-all does not
+    shadow API or docs paths.
+    """
     app.include_router(health.router)
 
     api_router = APIRouter(prefix="/api/v1")
@@ -89,8 +93,52 @@ def _register_api_routes(app: FastAPI) -> None:
     app.include_router(api_router)
 
 
+def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]:
+    """Return (reserved_paths, reserved_prefixes) derived from mounted routes.
+
+    Used by the SPA catch-all to avoid serving index.html for paths that
+    correspond to real API, docs, or static-mount routes. Building this at
+    mount time (rather than hardcoding) means new routers automatically
+    become non-SPA paths.
+    """
+    reserved_paths: set[str] = set()
+    reserved_prefixes: set[str] = set()
+
+    for route in app.routes:
+        raw_path = getattr(route, "path", None)
+        if not raw_path or raw_path == "/":
+            continue
+        # Skip the SPA catch-all itself, once it has been registered.
+        if raw_path == "/{full_path:path}":
+            continue
+
+        stripped = raw_path.lstrip("/")
+        # Paths with a dynamic segment (e.g. "/api/v1/sessions/{session_id}")
+        # become a prefix rule for their static leading segment.
+        first_segment = stripped.split("/", 1)[0]
+        if "{" in first_segment:
+            continue
+        if "{" in stripped:
+            reserved_prefixes.add(f"{first_segment}/")
+            continue
+        reserved_paths.add(stripped)
+        reserved_prefixes.add(f"{first_segment}/")
+
+    return reserved_paths, reserved_prefixes
+
+
 def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
-    """Mount built frontend assets and SPA fallback route."""
+    """Mount built frontend assets and SPA fallback route.
+
+    MUST be called **after** all API routers are registered on ``app``.
+    The reserved-path set used by the catch-all is derived from
+    ``app.routes`` at mount time.
+    """
+    # Safety: catching a misordered call early, before it masks real bugs.
+    assert any(getattr(r, "path", "").startswith("/api/") for r in app.routes), (
+        "_mount_spa must be called after API routes are registered"
+    )
+
     assets_dir = ui_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -101,6 +149,12 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         )
 
     ui_root = ui_dir.resolve()
+    index_path = ui_root / "index.html"
+    # Cached at mount time. If the index is deleted after boot that is an
+    # operational issue, not a request-path concern.
+    index_exists = index_path.is_file()
+
+    reserved_paths, reserved_prefixes = _collect_reserved_top_level_paths(app)
 
     def resolve_ui_file(full_path: str) -> Path | None:
         requested_path = (ui_root / full_path).resolve(strict=False)
@@ -114,21 +168,12 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         normalized_path = full_path.strip("/")
         if normalized_path == "":
             return True
-
-        reserved_prefixes = ("api/", "docs/", "redoc/", "scalar/")
-        reserved_paths = {
-            "api",
-            "docs",
-            "health",
-            "openapi.json",
-            "ready",
-            "redoc",
-            "scalar",
-        }
         if normalized_path in reserved_paths:
             return False
-        if normalized_path.startswith(reserved_prefixes):
-            return False
+        for prefix in reserved_prefixes:
+            if normalized_path.startswith(prefix):
+                return False
+        # Only serve the SPA index for extensionless paths (client-side routes).
         return Path(normalized_path).suffix == ""
 
     @app.get("/{full_path:path}", include_in_schema=False)
@@ -137,17 +182,13 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         if requested_file is not None:
             return FileResponse(requested_file)
 
-        index_path = ui_root / "index.html"
-        index_exists = await asyncio.to_thread(index_path.exists)
         if index_exists and should_serve_spa_index(full_path):
             return FileResponse(index_path)
 
         if index_exists:
             raise HTTPException(status_code=404, detail="Not Found")
 
-        return JSONResponse(
-            await asyncio.to_thread(_ui_unavailable_payload), status_code=503
-        )
+        return JSONResponse(_ui_unavailable_payload(), status_code=503)
 
 
 def _ui_unavailable_payload() -> dict[str, str]:
@@ -179,8 +220,7 @@ def _mount_ui_unavailable_root(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     async def ui_unavailable_root():
-        payload = await asyncio.to_thread(_ui_unavailable_payload)
-        return JSONResponse(payload, status_code=503)
+        return JSONResponse(_ui_unavailable_payload(), status_code=503)
 
 
 def _mount_api_only_root(app: FastAPI) -> None:
@@ -188,22 +228,31 @@ def _mount_api_only_root(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     async def api_only_root():
-        return JSONResponse(
-            {
-                "name": app.title,
-                "version": app.version,
-                "docs": "/docs",
-                "openapi": "/openapi.json",
-            }
-        )
+        banner: dict[str, Any] = {
+            "name": app.title,
+            "version": app.version,
+        }
+        if app.docs_url:
+            banner["docs"] = app.docs_url
+        if app.openapi_url:
+            banner["openapi"] = app.openapi_url
+        return JSONResponse(banner)
 
 
 def _annotate_validation_error_schemas(app: FastAPI) -> None:
-    """Fill FastAPI-generated validation schemas with property descriptions."""
+    """Fill FastAPI-generated validation schemas with property descriptions.
+
+    Results are cached via ``app.openapi_schema`` so the schema walk runs
+    exactly once per app lifetime, matching the FastAPI docs guidance at
+    https://fastapi.tiangolo.com/how-to/extending-openapi/#cache-the-generated-schema.
+    """
 
     original_openapi = app.openapi
 
     def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+
         schema = original_openapi()
         components = schema.get("components", {}).get("schemas", {})
 
@@ -218,9 +267,25 @@ def _annotate_validation_error_schemas(app: FastAPI) -> None:
                 ):
                     properties[property_name]["description"] = description
 
+        app.openapi_schema = schema
         return schema
 
     app.openapi = cast(Any, custom_openapi)
+
+
+def _docs_enabled(cfg: ServerRuntimeConfig) -> bool:
+    """Return whether docs/openapi URLs should be mounted.
+
+    Enabled for local/staging environments. Disabled in production to avoid
+    leaking the full API surface to unauthenticated clients. Override by
+    setting ``FLEET_RLM_EXPOSE_DOCS=1`` if operators need them temporarily.
+    """
+    import os
+
+    override = os.getenv("FLEET_RLM_EXPOSE_DOCS", "").strip().lower()
+    if override in {"1", "true", "yes"}:
+        return True
+    return cfg.app_env in {"local", "staging"}
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
@@ -249,36 +314,45 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
                     "Recovered %d stale optimization run(s) on startup", recovered
                 )
         except Exception:
-            logger.debug("Stale optimization run recovery skipped", exc_info=True)
+            logger.warning(
+                "Stale optimization run recovery failed; some runs may remain in "
+                "'running' state",
+                exc_info=True,
+            )
         yield
         await shutdown_server_state(state)
+
+    docs_enabled = _docs_enabled(cfg)
 
     app = FastAPI(
         title="fleet-rlm",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
     _annotate_validation_error_schemas(app)
 
     add_middlewares(app, cfg)
     _register_api_routes(app)
 
-    try:
-        scalar_fastapi = cast(Any, import_module("scalar_fastapi"))
-        get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
+    if docs_enabled:
+        try:
+            scalar_fastapi = cast(Any, import_module("scalar_fastapi"))
+            get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
 
-        @app.get("/scalar", include_in_schema=False)
-        def scalar_docs():
-            return get_scalar_api_reference(
-                openapi_url=app.openapi_url,
-                title=app.title,
+            @app.get("/scalar", include_in_schema=False)
+            def scalar_docs():
+                return get_scalar_api_reference(
+                    openapi_url=app.openapi_url,
+                    title=app.title,
+                )
+        except ImportError as exc:
+            logger.warning(
+                "scalar_fastapi not installed; /scalar docs endpoint disabled: %s",
+                exc,
             )
-    except ImportError:
-        # Scalar docs are optional and only enabled when scalar_fastapi is installed.
-        pass
 
     if cfg.serve_ui:
         ui_dir = _resolve_ui_dist_dir()

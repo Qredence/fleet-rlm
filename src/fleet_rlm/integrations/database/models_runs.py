@@ -331,7 +331,6 @@ class RunStep(Base):
         UniqueConstraint(
             "run_id", "step_index", name="uq_execution_steps_run_step_index"
         ),
-        Index("ix_execution_steps_run_step", "run_id", "step_index"),
         Index(
             "ix_execution_steps_workspace_type_created_at",
             "workspace_id",
@@ -412,7 +411,6 @@ class ExecutionEvent(Base):
             name="uq_execution_events_tenant_workspace_id",
         ),
         UniqueConstraint("run_id", "sequence", name="uq_execution_events_run_sequence"),
-        Index("ix_execution_events_run_sequence", "run_id", "sequence"),
         Index("ix_execution_events_workspace_created_at", "workspace_id", "created_at"),
     )
 
@@ -788,7 +786,3 @@ class TraceFeedback(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-
-
-# Compatibility alias retained for existing imports.
-RLMTrace = ExternalTrace

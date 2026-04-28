@@ -196,6 +196,26 @@ class _MemoryBrowseRepository:
             )
         )
 
+    async def list_memory_items_paginated(
+        self,
+        *,
+        tenant_id,
+        workspace_id=None,
+        user_id=None,
+        scope=None,
+        scope_id=None,
+        limit=100,
+        offset=0,
+    ):
+        items = self._matching_items(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            scope=scope,
+            scope_id=scope_id,
+        )
+        return items[offset : offset + limit], len(items)
+
     def _matching_items(
         self,
         *,
