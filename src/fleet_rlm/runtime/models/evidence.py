@@ -27,9 +27,11 @@ class EvidenceSink(Protocol):
         kind: str = "context",
         scope: str = "run",
         tags: list[str] | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        pass
 
-    def list_items(self, *, scope: str = "run", limit: int = 50) -> dict[str, Any]: ...
+    def list_items(self, *, scope: str = "run", limit: int = 50) -> dict[str, Any]:
+        pass
 
 
 __all__ = ["EvidenceSink"]

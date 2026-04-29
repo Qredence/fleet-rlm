@@ -610,7 +610,12 @@ class RecursiveWorkspaceModule(dspy.Module):
     Runs a bounded loop: assemble context → plan decomposition → execute
     subqueries → verify → reflect (finalize / recurse / repair). Each
     sub-module is a ``dspy.RLM`` so the LLM writes code at every step.
-    Evidence is persisted across passes via the host-mediated NeonDB bridge.
+
+    Evidence is persisted across passes via an injected :class:`EvidenceSink`.
+    Pass ``evidence_sink=None`` (the default) to skip persistence — this
+    matches the behaviour of runs without a host repository attached.  The
+    production adapter is
+    ``fleet_rlm.integrations.daytona.evidence_bridge.DaytonaEvidenceSink``.
     """
 
     def __init__(
