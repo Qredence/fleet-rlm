@@ -15,7 +15,13 @@ from urllib.parse import urlparse
 import dspy
 from dspy.streaming.messages import StatusMessageProvider
 
+from fleet_rlm.runtime.execution.preview import head_tail_preview
 from fleet_rlm.runtime.models.streaming import StreamEvent
+
+# Cap oversized trajectory outputs before they cross the websocket boundary.
+# Individual steps can carry multi-KB observations (grep hits, long file reads)
+# that bloat chat payloads without improving UX. See DSPy 3.2.0 PR #9282.
+_TRAJECTORY_OUTPUT_MAX_CHARS = 4_000
 
 # ═══════════════════════════════════════════════════════════════════════
 # Terminal event helpers
@@ -195,8 +201,20 @@ def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, An
 
     final_output = output if output is not None else observation
     if final_output is not None:
-        step["output"] = final_output
-        step["observation"] = final_output
+        if (
+            isinstance(final_output, str)
+            and len(final_output) > _TRAJECTORY_OUTPUT_MAX_CHARS
+        ):
+            preview, full_len = head_tail_preview(
+                final_output, max_chars=_TRAJECTORY_OUTPUT_MAX_CHARS
+            )
+            step["output"] = preview
+            step["observation"] = preview
+            step["output_truncated"] = True
+            step["output_length"] = full_len
+        else:
+            step["output"] = final_output
+            step["observation"] = final_output
 
     return step
 

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
 
+from fleet_rlm.runtime.execution.preview import head_tail_preview
 from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
 
@@ -757,8 +758,11 @@ def _persist_child_trace(
 
     trajectory = getattr(prediction, "trajectory", None)
     payload: dict[str, Any] = {"query": query}
+    answer_preview: str | None = None
     if answer:
-        payload["answer_preview"] = answer[:500]
+        answer_preview, answer_length = head_tail_preview(answer, max_chars=500)
+        payload["answer_preview"] = answer_preview
+        payload["answer_length"] = answer_length
     if isinstance(trajectory, dict):
         payload["trajectory"] = trajectory
     elif isinstance(trajectory, list):
@@ -774,7 +778,7 @@ def _persist_child_trace(
                 run_id=run_id,
                 trace_id=trace_id,
                 workspace_id=identity.workspace_id,
-                summary_text=answer[:500] if answer else None,
+                summary_text=answer_preview,
                 payload_json=payload,
                 latency_ms=latency_ms,
             )

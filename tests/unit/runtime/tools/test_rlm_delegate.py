@@ -838,3 +838,53 @@ def test_set_delegate_interpreter_sets_value() -> None:
         assert rlm_delegate_mod._delegate_interpreter.get() is sentinel
     finally:
         rlm_delegate_mod._delegate_interpreter.reset(token)
+
+
+class _CapturingRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def store_rlm_trace(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+
+class _Identity:
+    tenant_id = "tenant-x"
+    workspace_id = "workspace-y"
+
+
+def test_persist_child_trace_uses_head_tail_preview_for_long_answers() -> None:
+    """Long child-RLM answers round-trip through head+tail truncation."""
+    answer = "HEAD_MARKER" + ("A" * 3_000) + "TAIL_MARKER"
+
+    repository = _CapturingRepository()
+    interpreter = type(
+        "Interp",
+        (),
+        {
+            "_host_repository": repository,
+            "_host_identity": _Identity(),
+            "_host_run_id": "run-1",
+        },
+    )()
+
+    rlm_delegate_mod._persist_child_trace(
+        interpreter=interpreter,
+        query="what?",
+        answer=answer,
+        prediction=type("P", (), {"trajectory": None})(),
+        started_at=0.0,
+    )
+
+    assert len(repository.calls) == 1
+    call = repository.calls[0]
+
+    payload = call["payload_json"]
+    preview = payload["answer_preview"]
+    assert preview.startswith("HEAD_MARKER")
+    assert preview.endswith("TAIL_MARKER")
+    assert "characters omitted" in preview
+    assert payload["answer_length"] == len(answer)
+
+    # summary_text is the same preview string, not a head-only slice.
+    assert call["summary_text"] == preview
