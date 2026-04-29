@@ -286,10 +286,14 @@ class ServerRuntimeConfig(BaseSettings):
             values["serve_ui"] = app_env == "local"
 
         if "expose_docs" not in values and "FLEET_RLM_EXPOSE_DOCS" not in values:
-            values["expose_docs"] = app_env in {"local", "staging"}
+            values["expose_docs"] = app_env == "local" or (
+                app_env == "staging" and auth_mode != "entra"
+            )
 
         if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
-            values["expose_root"] = app_env in {"local", "staging"}
+            values["expose_root"] = app_env == "local" or (
+                app_env == "staging" and auth_mode != "entra"
+            )
 
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:

@@ -101,6 +101,25 @@ def test_serve_ui_defaults_false_in_production(
     assert cfg.expose_root is False
 
 
+def test_staging_entra_defaults_hide_docs_and_root() -> None:
+    cfg = ServerRuntimeConfig(
+        app_env="staging",
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_url="https://login.microsoftonline.com/static/v2.0",
+        entra_allowed_user_ids=["user-123"],
+        cors_allowed_origins=["https://app.example.com"],
+    )
+
+    assert cfg.expose_docs is False
+    assert cfg.expose_root is False
+    cfg.validate_startup_or_raise()
+
+
 def test_serve_ui_respects_explicit_env_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
