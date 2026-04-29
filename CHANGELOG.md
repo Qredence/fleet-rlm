@@ -8,6 +8,19 @@ All notable changes to this project are documented in this file.
 
 ## [0.5.2] - 2026-04-29
 
+### Highlights (User Impact)
+
+- Added first-class Microsoft Entra configuration for managed deployments,
+  including configurable JWKS, issuer, audience, and user/group allow-lists.
+- Restored FastAPI Cloud deployment compatibility for the src-layout package by
+  wiring a stable root `asgi.py` entrypoint and tightening packaging/runtime
+  assumptions.
+- Made `/ready` more operationally honest by reporting degraded database
+  readiness when Neon is sleeping or unreachable instead of claiming a healthy
+  startup.
+- Bounded several list-style API surfaces with pagination so large histories,
+  traces, memory listings, and optimization runs are safer to retrieve.
+
 ### Added
 
 - **Change:** Added FastAPI Cloud Entra auth settings with new environment-configurable
