@@ -137,10 +137,8 @@ def reasoning_quality_scorer(model: str) -> Any:
 
     @scorer(name="reasoning_quality")
     def judge(trace: Any) -> Feedback:
-        import litellm
+        import dspy
 
-        # Extract the thoughts/events from the trace
-        # We look for spans that contain reasoning or tool calls
         spans = trace.search_spans()
 
         reasoning_chunks: list[str] = []
@@ -158,7 +156,6 @@ def reasoning_quality_scorer(model: str) -> Any:
         else:
             reasoning_text = "\n".join(reasoning_chunks)
 
-        # Cap the total reasoning text length to avoid sending excessively large payloads.
         max_reasoning_len = 4000
         if len(reasoning_text) > max_reasoning_len:
             reasoning_text = (
@@ -183,31 +180,18 @@ def reasoning_quality_scorer(model: str) -> Any:
             }}
         """
 
-        # Resolve credentials from the project's standard env vars so this scorer
-        # works with any LiteLLM-routed provider (not just OPENAI_API_KEY).
-        api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get(
-            "DSPY_LM_API_KEY"
-        )
-        api_base = os.environ.get("DSPY_LM_API_BASE") or None
-
         try:
-            # Strip the DSPy-style "provider:/" prefix (e.g. "openai:/") so the
-            # remaining string is a plain LiteLLM model identifier like
-            # "gemini/gemini-3.1-pro-preview" or "gpt-4o".
-            lm_model = model.split(":/")[-1] if ":/" in model else model
+            lm = dspy.settings.lm
+            if lm is None:
+                raise RuntimeError("No DSPy LM configured (dspy.settings.lm is None)")
 
-            response = litellm.completion(
-                model=lm_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                api_key=api_key,
-                api_base=api_base,
+            responses = lm(messages=[{"role": "user", "content": prompt}])
+            content = (
+                responses[0]
+                if isinstance(responses[0], str)
+                else responses[0].get("content", "")
             )
 
-            # Use raw access instead of message.content to handle potential errors
-            content = response.choices[0].message.content
-
-            # Basic JSON extraction in case there's markdown formatting
             if content.startswith("```json"):
                 content = content[7:]
             if content.startswith("```"):
