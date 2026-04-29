@@ -152,7 +152,43 @@ def list_evidence(
 
 _EVIDENCE_TOOL_NAMES = frozenset({"store_evidence", "fetch_evidence", "list_evidence"})
 
+
+class DaytonaEvidenceSink:
+    """Adapts module-level evidence functions to the EvidenceSink protocol.
+
+    Used by runtime modules that accept an ``EvidenceSink`` without knowing
+    Daytona exists. The module-level functions stay the public API for sandbox
+    code registered via ``bridge_callbacks``; this class is the shape the
+    runtime business logic sees.
+    """
+
+    def __init__(self, interpreter: Any) -> None:
+        self._interpreter = interpreter
+
+    def store(
+        self,
+        *,
+        key: str,
+        content: str,
+        kind: str = "context",
+        scope: str = "run",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return store_evidence(
+            self._interpreter,
+            key=key,
+            content=content,
+            kind=kind,
+            scope=scope,
+            tags=tags,
+        )
+
+    def list_items(self, *, scope: str = "run", limit: int = 50) -> dict[str, Any]:
+        return list_evidence(self._interpreter, scope=scope, limit=limit)
+
+
 __all__ = [
+    "DaytonaEvidenceSink",
     "fetch_evidence",
     "list_evidence",
     "store_evidence",

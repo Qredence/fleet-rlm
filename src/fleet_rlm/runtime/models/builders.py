@@ -28,6 +28,7 @@ from fleet_rlm.runtime.content.chunking import (
     chunk_by_size,
     chunk_by_timestamps,
 )
+from fleet_rlm.runtime.models.evidence import EvidenceSink
 
 
 def create_runtime_rlm(
@@ -609,7 +610,12 @@ class RecursiveWorkspaceModule(dspy.Module):
     Runs a bounded loop: assemble context → plan decomposition → execute
     subqueries → verify → reflect (finalize / recurse / repair). Each
     sub-module is a ``dspy.RLM`` so the LLM writes code at every step.
-    Evidence is persisted across passes via the host-mediated NeonDB bridge.
+
+    Evidence is persisted across passes via an injected :class:`EvidenceSink`.
+    Pass ``evidence_sink=None`` (the default) to skip persistence — this
+    matches the behaviour of runs without a host repository attached.  The
+    production adapter is
+    ``fleet_rlm.integrations.daytona.evidence_bridge.DaytonaEvidenceSink``.
     """
 
     def __init__(
@@ -624,6 +630,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         context_budget_chars: int = 32_000,
         verbose: bool = False,
         sub_lm: dspy.LM | None = None,
+        evidence_sink: EvidenceSink | None = None,
     ) -> None:
         super().__init__()
         self.interpreter = interpreter
@@ -631,6 +638,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         self.max_repair_attempts = max_repair_attempts
         self.subquery_budget = subquery_budget
         self.context_budget_chars = context_budget_chars
+        self._evidence = evidence_sink
 
         rlm_kwargs: dict[str, Any] = {
             "interpreter": interpreter,
@@ -810,19 +818,18 @@ class RecursiveWorkspaceModule(dspy.Module):
         return outputs
 
     def _fetch_memory_catalog(self) -> list[str]:
-        from fleet_rlm.integrations.daytona.evidence_bridge import list_evidence
-
-        result = list_evidence(self.interpreter, scope="run", limit=50)
+        if self._evidence is None:
+            return []
+        result = self._evidence.list_items(scope="run", limit=50)
         return [
             f"{item['scope_id']}:{item['kind']}" for item in result.get("items", [])
         ]
 
     def _store_pass_evidence(self, pass_idx: int, outputs: list[str]) -> None:
-        from fleet_rlm.integrations.daytona.evidence_bridge import store_evidence
-
+        if self._evidence is None:
+            return
         for i, output in enumerate(outputs):
-            store_evidence(
-                self.interpreter,
+            self._evidence.store(
                 key=f"pass_{pass_idx}_output_{i}",
                 content=output[:10_000],
                 kind="context",
