@@ -181,16 +181,29 @@ def reasoning_quality_scorer(model: str) -> Any:
         """
 
         try:
-            lm = dspy.settings.lm
-            if lm is None:
-                raise RuntimeError("No DSPy LM configured (dspy.settings.lm is None)")
+            # Strip the DSPy-style "provider:/" prefix so the remaining string is
+            # a plain LiteLLM model identifier (e.g. "gemini/gemini-3.1-pro-preview").
+            lm_model = model.split(":/")[-1] if ":/" in model else model
+            lm = dspy.LM(lm_model, temperature=0.0)
 
             responses = lm(messages=[{"role": "user", "content": prompt}])
-            content = (
-                responses[0]
-                if isinstance(responses[0], str)
-                else responses[0].get("content", "")
-            )
+            # dspy.LM returns list[str | dict]; normalize to plain text.
+            if not responses:
+                raise ValueError("DSPy LM returned an empty response list")
+            raw = responses[0]
+            if isinstance(raw, str):
+                content = raw
+            elif isinstance(raw, dict):
+                content = (
+                    raw.get("content")
+                    or raw.get("text")
+                    or (raw.get("message") or {}).get("content")
+                    or ""
+                )
+            else:
+                raise ValueError(
+                    f"Unexpected DSPy LM response type: {type(raw).__name__}"
+                )
 
             if content.startswith("```json"):
                 content = content[7:]
@@ -206,7 +219,7 @@ def reasoning_quality_scorer(model: str) -> Any:
                 rationale=payload.get("reason", "Failed to parse reasoning"),
                 source=AssessmentSource(
                     source_type="LLM_JUDGE",
-                    source_id=model,
+                    source_id=lm_model,
                 ),
             )
         except Exception as e:
