@@ -112,6 +112,9 @@ override-dependencies = [
     # patched floors until upstream relaxes its metadata.
     "aiohttp>=3.13.4",
     "python-dotenv>=1.2.2",
+    # GitPython <3.1.47 has two command-injection CVEs (Dependabot alerts).
+    # mlflow-skinny is the only dependent; 3.1.47 is a drop-in upgrade.
+    "gitpython>=3.1.47",
 ]
 
 [tool.setuptools]

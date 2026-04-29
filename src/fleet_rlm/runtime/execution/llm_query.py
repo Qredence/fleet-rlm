@@ -23,6 +23,8 @@ from unittest.mock import Mock
 
 import dspy
 
+from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+
 logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
@@ -334,9 +336,6 @@ class LLMQueryMixin:
         llm_budget_lease: int | None = None,
     ) -> str:
         """Spawn a child dspy.RLM interpreter and return its answer."""
-        # Late imports to avoid circular dependencies
-        from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
-
         remaining = self._remaining_llm_budget()
         if remaining <= 0:
             raise RuntimeError(
