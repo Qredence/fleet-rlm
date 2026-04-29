@@ -112,7 +112,7 @@ def test_sub_rlm_batched_siblings_receive_bounded_budget_leases() -> None:
 
     with (
         patch(
-            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm",
             side_effect=_fake_build,
         ),
         pytest.raises(RuntimeError, match="sub_rlm_batched failed"),
@@ -132,7 +132,7 @@ def test_sub_rlm_calls_child_module_and_returns_answer() -> None:
     fake_pred = _make_fake_prediction("child answer")
 
     with patch(
-        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm"
+        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
     ) as mock_build:
         mock_module = MagicMock(return_value=fake_pred)
         mock_build.return_value = mock_module
@@ -148,7 +148,7 @@ def test_sub_rlm_passes_context() -> None:
     fake_pred = _make_fake_prediction("ok")
 
     with patch(
-        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm"
+        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
     ) as mock_build:
         mock_module = MagicMock(return_value=fake_pred)
         mock_build.return_value = mock_module
@@ -163,7 +163,7 @@ def test_sub_rlm_null_answer_raises_runtime_error() -> None:
 
     with (
         patch(
-            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm",
             return_value=MagicMock(return_value=_make_fake_prediction(None)),
         ),
         pytest.raises(RuntimeError, match="without SUBMIT"),
@@ -180,7 +180,7 @@ def test_sub_rlm_detects_broker_error_in_child_prediction() -> None:
 
     with (
         patch(
-            "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+            "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm",
             return_value=MagicMock(return_value=prediction),
         ),
         pytest.raises(RuntimeError, match="broker unavailable"),
@@ -200,7 +200,7 @@ def test_sub_rlm_batched_returns_ordered_results() -> None:
         return MagicMock(return_value=pred)
 
     with patch(
-        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm",
+        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm",
         side_effect=_fake_build,
     ):
         results = interp.sub_rlm_batched(["a", "b", "c"])
@@ -237,7 +237,7 @@ def test_child_depth_incremented() -> None:
     interp.build_delegate_child = _capture_child
 
     with patch(
-        "fleet_rlm.runtime.models.builders.build_recursive_subquery_rlm"
+        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
     ) as mock_build:
         mock_build.return_value = MagicMock(return_value=_make_fake_prediction("ok"))
         interp.sub_rlm("test")
