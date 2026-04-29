@@ -96,8 +96,8 @@ def test_ready_stays_public_when_auth_is_required() -> None:
             cors_allowed_origins=["https://example.com"],
         )
     )
-    with TestClient(app) as client:
-        response = client.get("/ready")
+    client = TestClient(app)
+    response = client.get("/ready")
 
     assert response.status_code == 200
 
