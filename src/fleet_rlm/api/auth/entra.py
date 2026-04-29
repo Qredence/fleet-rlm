@@ -183,16 +183,29 @@ class EntraAuthProvider:
         user_claim = (
             str(claims.get("oid", "")).strip() or str(claims.get("sub", "")).strip()
         )
+        user_allowed = user_claim in self.allowed_user_ids if user_claim else False
+        if user_allowed:
+            return
+
         groups_claim = claims.get("groups")
+        claim_names = claims.get("_claim_names")
+        has_group_overage = bool(claims.get("hasgroups")) or (
+            isinstance(claim_names, Mapping) and "groups" in claim_names
+        )
+        if has_group_overage and self.allowed_group_ids:
+            raise AuthError(
+                "Entra token omitted groups due to overage; "
+                "allowed_group_ids cannot be evaluated from this token.",
+                status_code=403,
+            )
         groups = (
             {str(group).strip() for group in groups_claim if str(group).strip()}
             if isinstance(groups_claim, (list, tuple, set))
             else set()
         )
 
-        user_allowed = user_claim in self.allowed_user_ids if user_claim else False
         group_allowed = bool(groups & self.allowed_group_ids)
-        if user_allowed or group_allowed:
+        if group_allowed:
             return
 
         raise AuthError(

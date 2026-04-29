@@ -18,6 +18,8 @@ from fleet_rlm.api.schemas import (
 )
 from fleet_rlm.integrations.config.env import AppConfig
 
+pytestmark = pytest.mark.ui
+
 
 @pytest.fixture(autouse=True)
 def _clear_server_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -277,7 +279,13 @@ def test_custom_config():
     assert cfg.ws_execution_drop_policy == "drop_newest"
     assert cfg.db_validate_on_startup is True
     assert cfg.entra_issuer_url == "https://login.microsoftonline.com/tenant/v2.0"
+    assert cfg.entra_issuer_template is None
     assert cfg.entra_allowed_user_ids_list == ["user-456"]
+
+
+def test_string_list_validator_reports_field_name() -> None:
+    with pytest.raises(ValidationError, match="CORS_ALLOWED_ORIGINS"):
+        ServerRuntimeConfig(cors_allowed_origins=123)
 
 
 def test_validate_startup_rejects_insecure_production():
@@ -380,6 +388,7 @@ def test_validate_startup_promotes_fixed_template_value_to_issuer_url() -> None:
         cors_allowed_origins=[],
     )
     assert cfg.entra_issuer_url == "https://login.microsoftonline.com/static/v2.0"
+    assert cfg.entra_issuer_template is None
     cfg.validate_startup_or_raise()
 
 

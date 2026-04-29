@@ -414,6 +414,50 @@ async def test_entra_auth_accepts_allowlisted_group(
 
 
 @pytest.mark.asyncio
+async def test_entra_auth_rejects_group_allowlist_when_groups_are_omitted_by_overage(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
+        audience="api://fleet-rlm",
+        allowed_group_ids={"beta-group"},
+    )
+
+    class _FakeSigningKey:
+        key = "rsa-public-key"
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        lambda token: _FakeSigningKey(),
+    )
+
+    decode_calls = {"count": 0}
+
+    def _fake_decode(*args, **kwargs):
+        decode_calls["count"] += 1
+        if decode_calls["count"] == 1:
+            return {"tid": "tenant-123"}
+        return {
+            "tid": "tenant-123",
+            "oid": "blocked-user",
+            "_claim_names": {"groups": "src1"},
+            "preferred_username": "alice@example.com",
+        }
+
+    monkeypatch.setattr(jwt, "decode", _fake_decode)
+
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_http(
+            _FakeRequest({"authorization": "Bearer entra-token"})
+        )
+
+    assert exc.value.status_code == 403
+    assert "omitted groups due to overage" in exc.value.message
+
+
+@pytest.mark.asyncio
 async def test_entra_auth_logs_unexpected_validation_errors(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

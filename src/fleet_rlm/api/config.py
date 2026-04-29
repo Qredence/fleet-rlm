@@ -6,7 +6,13 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import (
+    Field,
+    ValidationInfo,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
@@ -121,6 +127,12 @@ class ServerRuntimeConfig(BaseSettings):
     dev_jwt_secret: str = "change-me"
     entra_jwks_url: str | None = None
     entra_issuer_url: str | None = Field(default=None, alias="ENTRA_ISSUER_URL")
+    entra_issuer_legacy: str | None = Field(
+        default=None,
+        alias="ENTRA_ISSUER",
+        exclude=True,
+        repr=False,
+    )
     entra_issuer_template: str | None = (
         "https://login.microsoftonline.com/{tenantid}/v2.0"
     )
@@ -211,14 +223,21 @@ class ServerRuntimeConfig(BaseSettings):
         mode="before",
     )
     @classmethod
-    def _normalize_string_list(cls, value: object) -> list[str]:
+    def _normalize_string_list(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         if isinstance(value, (list, tuple, set)):
             return [str(item).strip() for item in value if str(item).strip()]
-        raise TypeError("value must be provided as a string or list")
+        field_name = (info.field_name or "value").upper()
+        raise ValueError(
+            f"{field_name} must be provided as a comma-separated string or list"
+        )
 
     @field_validator("entra_issuer_url", "entra_issuer_template", mode="before")
     @classmethod
@@ -305,12 +324,15 @@ class ServerRuntimeConfig(BaseSettings):
         explicit_issuer_url = values.get("entra_issuer_url") or values.get(
             "ENTRA_ISSUER_URL"
         )
+        if explicit_issuer_url:
+            values["entra_issuer_template"] = None
         if (
             explicit_issuer_template
             and not explicit_issuer_url
             and "{tenantid}" not in str(explicit_issuer_template)
         ):
             values["entra_issuer_url"] = str(explicit_issuer_template).strip()
+            values["entra_issuer_template"] = None
 
         # Backward-compatible fallback from ENTRA_ISSUER.
         if (
@@ -319,7 +341,9 @@ class ServerRuntimeConfig(BaseSettings):
             and "entra_issuer_template" not in values
             and "ENTRA_ISSUER_TEMPLATE" not in values
         ):
-            entra_issuer = values.get("ENTRA_ISSUER") or os.getenv("ENTRA_ISSUER")
+            entra_issuer = values.get("entra_issuer_legacy") or values.get(
+                "ENTRA_ISSUER"
+            )
             if entra_issuer:
                 normalized_issuer = str(entra_issuer).strip()
                 if "{tenantid}" in normalized_issuer:
