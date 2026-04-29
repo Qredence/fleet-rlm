@@ -54,3 +54,33 @@ def test_max_chars_smaller_than_default() -> None:
     assert preview.startswith(text[:10])
     assert preview.endswith(text[-10:])
     assert "(80 characters omitted)" in preview
+
+
+def test_odd_max_chars_both_halves_present() -> None:
+    # odd max_chars=5 → half=2, head=text[:2], tail=text[-2:], omitted=total-4
+    text = "ABCDE" * 20  # 100 chars
+    preview, length = head_tail_preview(text, max_chars=5)
+
+    assert length == 100
+    assert preview.startswith(text[:2])
+    assert preview.endswith(text[-2:])
+    assert "(96 characters omitted)" in preview
+
+
+def test_max_chars_zero_or_one_clamped_to_one_char_each_side() -> None:
+    # max_chars=1 → half=max(1, 0)=1, so head=text[:1], tail=text[-1:]
+    text = "FIRST" + "X" * 100 + "LAST"
+    for tiny in (0, 1):
+        preview, length = head_tail_preview(text, max_chars=tiny)
+        assert length == len(text)
+        # preview must start with "F" and end with "T" (first/last char)
+        assert preview[0] == "F"
+        assert preview.split("...")[-1].strip().endswith("T")
+
+
+def test_preview_slightly_exceeds_max_chars_due_to_marker() -> None:
+    # Documents the soft-cap: total preview > max_chars because marker is extra.
+    text = "X" * 10_000
+    preview, _ = head_tail_preview(text, max_chars=4_000)
+    assert len(preview) > 4_000  # marker overhead makes it slightly larger
+    assert "characters omitted" in preview
