@@ -249,6 +249,7 @@ def _bound_runtime_tool_factories(
         max_passes: int = 3,
     ) -> dict[str, Any]:
         """Run a multi-pass recursive analysis with decomposition and verification."""
+        from fleet_rlm.integrations.daytona.evidence_bridge import DaytonaEvidenceSink
         from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
 
         module = RecursiveWorkspaceModule(
@@ -256,6 +257,7 @@ def _bound_runtime_tool_factories(
             max_passes=max_passes,
             verbose=False,
             sub_lm=getattr(interpreter, "sub_lm", None),
+            evidence_sink=DaytonaEvidenceSink(interpreter),
         )
         prediction = module(user_request=query, context=context)
         return {

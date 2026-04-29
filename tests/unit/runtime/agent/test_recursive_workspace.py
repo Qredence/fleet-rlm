@@ -422,20 +422,47 @@ class TestHelpers:
         catalog = module._fetch_memory_catalog()
         assert isinstance(catalog, list)
 
-    def test_store_pass_evidence_calls_bridge(self) -> None:
+    def test_store_pass_evidence_calls_injected_sink(self) -> None:
+        sink_calls: list[dict[str, Any]] = []
+
+        class _FakeSink:
+            def store(self, **kwargs: Any) -> dict[str, Any]:
+                sink_calls.append(kwargs)
+                return {"status": "ok", "id": "x"}
+
+            def list_items(self, **kwargs: Any) -> dict[str, Any]:
+                return {"items": []}
+
+        module = _build_module(evidence_sink=_FakeSink())
+        module._store_pass_evidence(0, ["output1", "output2"])
+
+        assert len(sink_calls) == 2
+        assert sink_calls[0]["key"] == "pass_0_output_0"
+        assert sink_calls[0]["kind"] == "context"
+        assert "orchestrator" in sink_calls[0]["tags"]
+
+    def test_store_pass_evidence_noops_when_no_sink(self) -> None:
+        # Regression: the None-sink branch preserves the pre-refactor silent-skip
+        # behavior when no host repository is attached to the interpreter.
         module = _build_module()
+        module._store_pass_evidence(0, ["output1", "output2"])  # must not raise
 
-        with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.store_evidence"
-        ) as mock_store:
-            mock_store.return_value = {"status": "skipped"}
-            module._store_pass_evidence(0, ["output1", "output2"])
+    def test_fetch_memory_catalog_uses_injected_sink(self) -> None:
+        class _FakeSink:
+            def store(self, **kwargs: Any) -> dict[str, Any]:
+                return {"status": "ok"}
 
-        assert mock_store.call_count == 2
-        first_call = mock_store.call_args_list[0]
-        assert first_call[1]["key"] == "pass_0_output_0"
-        assert first_call[1]["kind"] == "context"
-        assert "orchestrator" in first_call[1]["tags"]
+            def list_items(self, **kwargs: Any) -> dict[str, Any]:
+                return {
+                    "items": [
+                        {"scope_id": "s1", "kind": "context"},
+                        {"scope_id": "s2", "kind": "observation"},
+                    ]
+                }
+
+        module = _build_module(evidence_sink=_FakeSink())
+        catalog = module._fetch_memory_catalog()
+        assert catalog == ["s1:context", "s2:observation"]
 
 
 # ---------------------------------------------------------------------------
