@@ -1,6 +1,17 @@
-# DSPy 3.x API Reference (v3.1.3)
+# DSPy 3.x API Reference (v3.2.0)
 
-> Pinned version in fleet-rlm: `dspy==3.1.3` (pyproject.toml line 30)
+> Pinned version in fleet-rlm: `dspy[optuna]==3.2.0` (pyproject.toml line 34)
+>
+> Upgrade notes from 3.1.3 → 3.2.0 (2026-04-29):
+> - RLM/PythonInterpreter hardened (PR #9341, #9351): kwargs-only tool dispatch,
+>   structured JSONRPC errors, subprocess replay of tool/mount registration.
+> - `litellm` pinned to `>=1.64.0,<=1.82.6` by DSPy (PR #9498). Our direct
+>   `litellm.completion()` in runtime/quality/scorers.py uses stable APIs.
+> - `optuna` moved to optional extra (PR #9397); required for MIPROv2.
+> - New `dspy.ContextWindowExceededError` replaces litellm errors in DSPy internals.
+> - Input field type-mismatch warnings via `typeguard` (PR #9313); disable with
+>   `dspy.configure(warn_on_type_mismatch=False)`.
+> - `dspy.configure_cache(restrict_pickle=True)` available for safer disk cache.
 
 ---
 
