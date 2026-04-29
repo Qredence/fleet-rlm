@@ -6,7 +6,13 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field, computed_field, field_validator, model_validator
+from pydantic import (
+    Field,
+    ValidationInfo,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
@@ -32,6 +38,23 @@ def resolve_server_volume_name(config: AppConfig) -> str | None:
     """Resolve the server-side volume name from shared app config."""
     volume_name = config.interpreter.volume_name
     return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
+
+
+def _looks_like_managed_runtime(
+    *,
+    port: str | None = None,
+    cwd: Path | None = None,
+) -> bool:
+    """Return whether the current process appears to run on a managed host.
+
+    FastAPI Cloud runs the app from ``/app`` and injects ``PORT``. Detecting
+    that combination lets us fail fast if the deploy accidentally boots with
+    local defaults instead of the required cloud configuration.
+    """
+
+    resolved_port = (port if port is not None else os.getenv("PORT") or "").strip()
+    resolved_cwd = cwd if cwd is not None else Path.cwd()
+    return bool(resolved_port) and resolved_cwd == Path("/app")
 
 
 class ServerRuntimeConfig(BaseSettings):
@@ -103,9 +126,26 @@ class ServerRuntimeConfig(BaseSettings):
     auth_required: bool = False
     dev_jwt_secret: str = "change-me"
     entra_jwks_url: str | None = None
-    entra_issuer_template: str = "https://login.microsoftonline.com/{tenantid}/v2.0"
+    entra_issuer_url: str | None = Field(default=None, alias="ENTRA_ISSUER_URL")
+    entra_issuer_legacy: str | None = Field(
+        default=None,
+        alias="ENTRA_ISSUER",
+        exclude=True,
+        repr=False,
+    )
+    entra_issuer_template: str | None = (
+        "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
     entra_audience: str | None = None
+    entra_allowed_user_ids: list[str] | str = Field(
+        default_factory=list, alias="ENTRA_ALLOWED_USER_IDS"
+    )
+    entra_allowed_group_ids: list[str] | str = Field(
+        default_factory=list, alias="ENTRA_ALLOWED_GROUP_IDS"
+    )
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
+    expose_docs: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_DOCS")
+    expose_root: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_ROOT")
 
     @field_validator(
         "agent_model",
@@ -164,16 +204,48 @@ class ServerRuntimeConfig(BaseSettings):
         """Return CORS origins as a normalized list."""
         return list(self.cors_allowed_origins)
 
-    @field_validator("cors_allowed_origins", mode="before")
+    @computed_field
+    @property
+    def entra_allowed_user_ids_list(self) -> list[str]:
+        """Return the configured Entra beta user allowlist."""
+        return list(self.entra_allowed_user_ids)
+
+    @computed_field
+    @property
+    def entra_allowed_group_ids_list(self) -> list[str]:
+        """Return the configured Entra beta group allowlist."""
+        return list(self.entra_allowed_group_ids)
+
+    @field_validator(
+        "cors_allowed_origins",
+        "entra_allowed_user_ids",
+        "entra_allowed_group_ids",
+        mode="before",
+    )
     @classmethod
-    def _normalize_cors_allowed_origins(cls, value: object) -> list[str]:
+    def _normalize_string_list(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         if isinstance(value, (list, tuple, set)):
             return [str(item).strip() for item in value if str(item).strip()]
-        raise TypeError("cors_allowed_origins must be provided as a string or list")
+        field_name = (info.field_name or "value").upper()
+        raise ValueError(
+            f"{field_name} must be provided as a comma-separated string or list"
+        )
+
+    @field_validator("entra_issuer_url", "entra_issuer_template", mode="before")
+    @classmethod
+    def _normalize_optional_string(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
     @model_validator(mode="before")
     @classmethod
@@ -232,18 +304,52 @@ class ServerRuntimeConfig(BaseSettings):
         if "serve_ui" not in values and "FLEET_RLM_SERVE_UI" not in values:
             values["serve_ui"] = app_env == "local"
 
+        if "expose_docs" not in values and "FLEET_RLM_EXPOSE_DOCS" not in values:
+            values["expose_docs"] = app_env == "local" or (
+                app_env == "staging" and auth_mode != "entra"
+            )
+
+        if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
+            values["expose_root"] = app_env == "local" or (
+                app_env == "staging" and auth_mode != "entra"
+            )
+
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:
             values["auth_required"] = auth_mode == "entra"
 
-        # entra_issuer_template fallback to ENTRA_ISSUER
+        explicit_issuer_template = values.get("entra_issuer_template") or values.get(
+            "ENTRA_ISSUER_TEMPLATE"
+        )
+        explicit_issuer_url = values.get("entra_issuer_url") or values.get(
+            "ENTRA_ISSUER_URL"
+        )
+        if explicit_issuer_url:
+            values["entra_issuer_template"] = None
         if (
-            "entra_issuer_template" not in values
+            explicit_issuer_template
+            and not explicit_issuer_url
+            and "{tenantid}" not in str(explicit_issuer_template)
+        ):
+            values["entra_issuer_url"] = str(explicit_issuer_template).strip()
+            values["entra_issuer_template"] = None
+
+        # Backward-compatible fallback from ENTRA_ISSUER.
+        if (
+            "entra_issuer_url" not in values
+            and "ENTRA_ISSUER_URL" not in values
+            and "entra_issuer_template" not in values
             and "ENTRA_ISSUER_TEMPLATE" not in values
         ):
-            entra_issuer = values.get("ENTRA_ISSUER") or os.getenv("ENTRA_ISSUER")
+            entra_issuer = values.get("entra_issuer_legacy") or values.get(
+                "ENTRA_ISSUER"
+            )
             if entra_issuer:
-                values["entra_issuer_template"] = entra_issuer
+                normalized_issuer = str(entra_issuer).strip()
+                if "{tenantid}" in normalized_issuer:
+                    values["entra_issuer_template"] = normalized_issuer
+                else:
+                    values["entra_issuer_url"] = normalized_issuer
 
         return values
 
@@ -251,6 +357,14 @@ class ServerRuntimeConfig(BaseSettings):
         """Validate environment guardrails before server startup."""
         if self.ws_execution_max_queue <= 0:
             raise ValueError("WS execution queue size must be > 0")
+
+        if self.app_env == "local" and _looks_like_managed_runtime():
+            raise ValueError(
+                "Managed deployment detected with APP_ENV=local. Set APP_ENV to "
+                "'staging' or 'production' and configure managed-host settings "
+                "(for example: FLEET_RLM_SERVE_UI=false, DATABASE_REQUIRED/DATABASE_URL, "
+                "AUTH_REQUIRED, and MLFLOW_ENABLED=false)."
+            )
 
         if self.database_required and not self.database_url:
             raise ValueError("DATABASE_URL is required when database_required=true")
@@ -286,7 +400,37 @@ class ServerRuntimeConfig(BaseSettings):
                 raise ValueError("ENTRA_JWKS_URL is required when AUTH_MODE=entra")
             if not self.entra_audience:
                 raise ValueError("ENTRA_AUDIENCE is required when AUTH_MODE=entra")
-            if "{tenantid}" not in self.entra_issuer_template:
+            if self.entra_issuer_url:
+                if "{tenantid}" in self.entra_issuer_url:
+                    raise ValueError(
+                        "ENTRA_ISSUER_URL must be a fixed issuer URL, not a template"
+                    )
+            elif not self.entra_issuer_template:
                 raise ValueError(
-                    "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder when AUTH_MODE=entra"
+                    "Set ENTRA_ISSUER_URL or ENTRA_ISSUER_TEMPLATE when AUTH_MODE=entra"
                 )
+            elif "{tenantid}" not in self.entra_issuer_template:
+                raise ValueError(
+                    "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder "
+                    "when AUTH_MODE=entra; use ENTRA_ISSUER_URL for a single-tenant issuer"
+                )
+            if self.app_env in {"staging", "production"} and self.auth_mode == "entra":
+                if self.expose_docs:
+                    raise ValueError(
+                        "FLEET_RLM_EXPOSE_DOCS must be false when AUTH_MODE=entra "
+                        "in staging/production"
+                    )
+                if self.expose_root:
+                    raise ValueError(
+                        "FLEET_RLM_EXPOSE_ROOT must be false when AUTH_MODE=entra "
+                        "in staging/production"
+                    )
+                if (
+                    self.entra_issuer_url
+                    and not self.entra_allowed_user_ids_list
+                    and not self.entra_allowed_group_ids_list
+                ):
+                    raise ValueError(
+                        "Single-tenant Entra deployments in staging/production "
+                        "must configure ENTRA_ALLOWED_USER_IDS or ENTRA_ALLOWED_GROUP_IDS"
+                    )

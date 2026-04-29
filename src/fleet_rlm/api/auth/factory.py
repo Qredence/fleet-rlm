@@ -14,8 +14,11 @@ def build_auth_provider(
     allow_debug_auth: bool = True,
     allow_query_auth_tokens: bool = True,
     entra_jwks_url: str | None = None,
+    entra_issuer_url: str | None = None,
     entra_issuer_template: str | None = None,
     entra_audience: str | None = None,
+    entra_allowed_user_ids: set[str] | None = None,
+    entra_allowed_group_ids: set[str] | None = None,
 ) -> AuthProvider:
     mode = auth_mode.strip().lower()
     if mode == "dev":
@@ -27,8 +30,11 @@ def build_auth_provider(
     if mode == "entra":
         return EntraAuthProvider(
             jwks_url=entra_jwks_url,
+            issuer_url=entra_issuer_url,
             issuer_template=entra_issuer_template,
             audience=entra_audience,
+            allowed_user_ids=entra_allowed_user_ids,
+            allowed_group_ids=entra_allowed_group_ids,
             allow_query_auth_tokens=allow_query_auth_tokens,
         )
     raise ValueError(f"Unsupported auth mode: {auth_mode}")

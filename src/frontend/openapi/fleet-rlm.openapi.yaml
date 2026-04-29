@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.1
+  version: 0.5.2
 paths:
   /health:
     get:
@@ -24,7 +24,12 @@ paths:
       tags:
         - health
       summary: Ready
-      description: Report whether critical startup dependencies are ready for requests.
+      description: "Report whether critical startup dependencies are ready for requests.
+
+
+        Verifies DB connectivity with a short-timeout ping so a sleeping Neon
+
+        compute reports ``degraded`` instead of ``ready``."
       operationId: ready_ready_get
       responses:
         "200":
@@ -2053,7 +2058,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.1
+          default: 0.5.2
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.

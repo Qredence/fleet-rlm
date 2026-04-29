@@ -15,6 +15,9 @@ export interface paths {
     /**
      * Ready
      * @description Report whether critical startup dependencies are ready for requests.
+     *
+     * Verifies DB connectivity with a short-timeout ping so a sleeping Neon
+     * compute reports ``degraded`` instead of ``ready``.
      */
     get: operations["ready_ready_get"];
   };
@@ -688,7 +691,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.5.1
+       * @default 0.5.2
        */
       version?: string;
     };
@@ -2152,6 +2155,9 @@ export interface operations {
   /**
    * Ready
    * @description Report whether critical startup dependencies are ready for requests.
+   *
+   * Verifies DB connectivity with a short-timeout ping so a sleeping Neon
+   * compute reports ``degraded`` instead of ``ready``.
    */
   ready_ready_get: {
     responses: {

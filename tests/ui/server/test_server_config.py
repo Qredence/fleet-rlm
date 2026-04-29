@@ -18,6 +18,33 @@ from fleet_rlm.api.schemas import (
 )
 from fleet_rlm.integrations.config.env import AppConfig
 
+pytestmark = pytest.mark.ui
+
+
+@pytest.fixture(autouse=True)
+def _clear_server_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "APP_ENV",
+        "AUTH_MODE",
+        "AUTH_REQUIRED",
+        "DATABASE_REQUIRED",
+        "DATABASE_URL",
+        "ALLOW_DEBUG_AUTH",
+        "ALLOW_QUERY_AUTH_TOKENS",
+        "CORS_ALLOWED_ORIGINS",
+        "FLEET_RLM_SERVE_UI",
+        "FLEET_RLM_EXPOSE_DOCS",
+        "FLEET_RLM_EXPOSE_ROOT",
+        "ENTRA_JWKS_URL",
+        "ENTRA_ISSUER_URL",
+        "ENTRA_ISSUER_TEMPLATE",
+        "ENTRA_ISSUER",
+        "ENTRA_AUDIENCE",
+        "ENTRA_ALLOWED_USER_IDS",
+        "ENTRA_ALLOWED_GROUP_IDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
 
 def test_default_config(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("VOLUME_NAME", raising=False)
@@ -52,6 +79,9 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert (
         cfg.entra_issuer_template == "https://login.microsoftonline.com/{tenantid}/v2.0"
     )
+    assert cfg.entra_issuer_url is None
+    assert cfg.expose_docs is True
+    assert cfg.expose_root is True
     assert cfg.serve_ui is True
 
 
@@ -69,6 +99,27 @@ def test_serve_ui_defaults_false_in_production(
         cors_allowed_origins=["https://app.example.com"],
     )
     assert cfg.serve_ui is False
+    assert cfg.expose_docs is False
+    assert cfg.expose_root is False
+
+
+def test_staging_entra_defaults_hide_docs_and_root() -> None:
+    cfg = ServerRuntimeConfig(
+        app_env="staging",
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_url="https://login.microsoftonline.com/static/v2.0",
+        entra_allowed_user_ids=["user-123"],
+        cors_allowed_origins=["https://app.example.com"],
+    )
+
+    assert cfg.expose_docs is False
+    assert cfg.expose_root is False
+    cfg.validate_startup_or_raise()
 
 
 def test_serve_ui_respects_explicit_env_override(
@@ -205,8 +256,9 @@ def test_custom_config():
         ws_execution_drop_policy="drop_newest",
         db_validate_on_startup=True,
         entra_jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
-        entra_issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
+        entra_issuer_url="https://login.microsoftonline.com/tenant/v2.0",
         entra_audience="api://fleet-rlm",
+        entra_allowed_user_ids=["user-456"],
     )
     assert cfg.app_env == "production"
     assert cfg.secret_name == "CUSTOM"
@@ -226,6 +278,14 @@ def test_custom_config():
     assert cfg.ws_execution_max_queue == 512
     assert cfg.ws_execution_drop_policy == "drop_newest"
     assert cfg.db_validate_on_startup is True
+    assert cfg.entra_issuer_url == "https://login.microsoftonline.com/tenant/v2.0"
+    assert cfg.entra_issuer_template is None
+    assert cfg.entra_allowed_user_ids_list == ["user-456"]
+
+
+def test_string_list_validator_reports_field_name() -> None:
+    with pytest.raises(ValidationError, match="CORS_ALLOWED_ORIGINS"):
+        ServerRuntimeConfig(cors_allowed_origins=123)
 
 
 def test_validate_startup_rejects_insecure_production():
@@ -240,6 +300,43 @@ def test_validate_startup_rejects_insecure_production():
     )
     with pytest.raises(ValueError, match="AUTH_REQUIRED"):
         cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_rejects_local_defaults_on_managed_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.api.config._looks_like_managed_runtime",
+        lambda: True,
+    )
+
+    cfg = ServerRuntimeConfig()
+
+    with pytest.raises(
+        ValueError, match="Managed deployment detected with APP_ENV=local"
+    ):
+        cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_allows_production_on_managed_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.api.config._looks_like_managed_runtime",
+        lambda: True,
+    )
+
+    cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="dev",
+        auth_required=True,
+        dev_jwt_secret="prod-secret",
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        cors_allowed_origins=[],
+    )
+
+    cfg.validate_startup_or_raise()
 
 
 def test_validate_startup_requires_entra_settings() -> None:
@@ -259,8 +356,27 @@ def test_validate_startup_requires_database_for_entra() -> None:
         cfg.validate_startup_or_raise()
 
 
-def test_validate_startup_rejects_fixed_entra_issuer_template() -> None:
+def test_validate_startup_allows_fixed_entra_issuer_url_for_single_tenant_beta() -> (
+    None
+):
     cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_url="https://login.microsoftonline.com/static/v2.0",
+        entra_allowed_user_ids=["user-123"],
+        cors_allowed_origins=[],
+    )
+    cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_promotes_fixed_template_value_to_issuer_url() -> None:
+    cfg = ServerRuntimeConfig(
+        app_env="production",
         auth_mode="entra",
         auth_required=True,
         database_required=True,
@@ -268,8 +384,57 @@ def test_validate_startup_rejects_fixed_entra_issuer_template() -> None:
         entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
         entra_audience="api://fleet-rlm",
         entra_issuer_template="https://login.microsoftonline.com/static/v2.0",
+        entra_allowed_user_ids=["user-123"],
+        cors_allowed_origins=[],
     )
-    with pytest.raises(ValueError, match="tenantid"):
+    assert cfg.entra_issuer_url == "https://login.microsoftonline.com/static/v2.0"
+    assert cfg.entra_issuer_template is None
+    cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_requires_beta_allowlist_for_single_tenant_entra() -> None:
+    cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_url="https://login.microsoftonline.com/static/v2.0",
+        cors_allowed_origins=[],
+    )
+    with pytest.raises(ValueError, match="ENTRA_ALLOWED_USER_IDS"):
+        cfg.validate_startup_or_raise()
+
+
+@pytest.mark.parametrize(
+    ("override_key", "override_value", "expected_message"),
+    [
+        ("expose_docs", True, "FLEET_RLM_EXPOSE_DOCS"),
+        ("expose_root", True, "FLEET_RLM_EXPOSE_ROOT"),
+    ],
+)
+def test_validate_startup_rejects_public_docs_or_root_for_entra_production(
+    override_key: str,
+    override_value: bool,
+    expected_message: str,
+) -> None:
+    overrides = {override_key: override_value}
+    cfg = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="entra",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://localhost:5432/test",
+        entra_jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        entra_audience="api://fleet-rlm",
+        entra_issuer_url="https://login.microsoftonline.com/static/v2.0",
+        entra_allowed_user_ids=["user-123"],
+        cors_allowed_origins=[],
+        **overrides,
+    )
+    with pytest.raises(ValueError, match=expected_message):
         cfg.validate_startup_or_raise()
 
 

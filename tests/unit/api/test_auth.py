@@ -139,6 +139,58 @@ async def test_entra_auth_requires_configuration():
 
 
 @pytest.mark.asyncio
+async def test_entra_auth_accepts_single_tenant_issuer_url(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
+        audience="api://fleet-rlm",
+    )
+
+    class _FakeSigningKey:
+        key = "rsa-public-key"
+
+    def _fake_decode(
+        token,
+        key=None,
+        algorithms=None,
+        audience=None,
+        issuer=None,
+        options=None,
+    ):
+        assert token == "entra-token"
+        if key is None:
+            return {"tid": "tenant-123"}
+
+        assert key == "rsa-public-key"
+        assert algorithms == ["RS256"]
+        assert audience == "api://fleet-rlm"
+        assert issuer == "https://login.microsoftonline.com/static-tenant/v2.0"
+        assert options == {"require": ["exp", "iat", "tid"]}
+        return {
+            "tid": "tenant-123",
+            "oid": "user-456",
+            "preferred_username": "alice@example.com",
+            "name": "Alice Example",
+        }
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        lambda token: _FakeSigningKey(),
+    )
+    monkeypatch.setattr(jwt, "decode", _fake_decode)
+
+    identity = await provider.authenticate_http(
+        _FakeRequest({"authorization": "Bearer entra-token"})
+    )
+
+    assert identity.tenant_claim == "tenant-123"
+    assert identity.user_claim == "user-456"
+
+
+@pytest.mark.asyncio
 async def test_entra_auth_accepts_bearer_token(monkeypatch: pytest.MonkeyPatch):
     provider = EntraAuthProvider(
         jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
@@ -273,6 +325,136 @@ async def test_entra_auth_rejects_missing_tid_before_issuer_resolution(
 
     assert exc.value.status_code == 401
     assert "tid" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_entra_auth_rejects_non_allowlisted_user(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
+        audience="api://fleet-rlm",
+        allowed_user_ids={"allowed-user"},
+    )
+
+    class _FakeSigningKey:
+        key = "rsa-public-key"
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        lambda token: _FakeSigningKey(),
+    )
+
+    decode_calls = {"count": 0}
+
+    def _fake_decode(*args, **kwargs):
+        decode_calls["count"] += 1
+        if decode_calls["count"] == 1:
+            return {"tid": "tenant-123"}
+        return {
+            "tid": "tenant-123",
+            "oid": "blocked-user",
+            "preferred_username": "alice@example.com",
+        }
+
+    monkeypatch.setattr(jwt, "decode", _fake_decode)
+
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_http(
+            _FakeRequest({"authorization": "Bearer entra-token"})
+        )
+
+    assert exc.value.status_code == 403
+    assert "allowlisted" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_entra_auth_accepts_allowlisted_group(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
+        audience="api://fleet-rlm",
+        allowed_group_ids={"beta-group"},
+    )
+
+    class _FakeSigningKey:
+        key = "rsa-public-key"
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        lambda token: _FakeSigningKey(),
+    )
+
+    decode_calls = {"count": 0}
+
+    def _fake_decode(*args, **kwargs):
+        decode_calls["count"] += 1
+        if decode_calls["count"] == 1:
+            return {"tid": "tenant-123"}
+        return {
+            "tid": "tenant-123",
+            "oid": "blocked-user",
+            "groups": ["beta-group"],
+            "preferred_username": "alice@example.com",
+        }
+
+    monkeypatch.setattr(jwt, "decode", _fake_decode)
+
+    identity = await provider.authenticate_http(
+        _FakeRequest({"authorization": "Bearer entra-token"})
+    )
+
+    assert identity.tenant_claim == "tenant-123"
+    assert identity.user_claim == "blocked-user"
+
+
+@pytest.mark.asyncio
+async def test_entra_auth_rejects_group_allowlist_when_groups_are_omitted_by_overage(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+        issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
+        audience="api://fleet-rlm",
+        allowed_group_ids={"beta-group"},
+    )
+
+    class _FakeSigningKey:
+        key = "rsa-public-key"
+
+    monkeypatch.setattr(
+        provider._jwk_client,
+        "get_signing_key_from_jwt",
+        lambda token: _FakeSigningKey(),
+    )
+
+    decode_calls = {"count": 0}
+
+    def _fake_decode(*args, **kwargs):
+        decode_calls["count"] += 1
+        if decode_calls["count"] == 1:
+            return {"tid": "tenant-123"}
+        return {
+            "tid": "tenant-123",
+            "oid": "blocked-user",
+            "_claim_names": {"groups": "src1"},
+            "preferred_username": "alice@example.com",
+        }
+
+    monkeypatch.setattr(jwt, "decode", _fake_decode)
+
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_http(
+            _FakeRequest({"authorization": "Bearer entra-token"})
+        )
+
+    assert exc.value.status_code == 403
+    assert "omitted groups due to overage" in exc.value.message
 
 
 @pytest.mark.asyncio

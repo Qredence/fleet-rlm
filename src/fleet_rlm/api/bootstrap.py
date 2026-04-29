@@ -95,8 +95,11 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
         allow_debug_auth=cfg.allow_debug_auth,
         allow_query_auth_tokens=cfg.allow_query_auth_tokens,
         entra_jwks_url=cfg.entra_jwks_url,
+        entra_issuer_url=cfg.entra_issuer_url,
         entra_issuer_template=cfg.entra_issuer_template,
         entra_audience=cfg.entra_audience,
+        entra_allowed_user_ids=set(cfg.entra_allowed_user_ids_list),
+        entra_allowed_group_ids=set(cfg.entra_allowed_group_ids_list),
     )
     state.db_manager = None
     state.repository = None
