@@ -22,13 +22,19 @@ class EntraAuthProvider:
         self,
         *,
         jwks_url: str | None = None,
+        issuer_url: str | None = None,
         issuer_template: str | None = None,
         audience: str | None = None,
+        allowed_user_ids: set[str] | None = None,
+        allowed_group_ids: set[str] | None = None,
         allow_query_auth_tokens: bool = True,
     ) -> None:
         self.jwks_url = jwks_url
+        self.issuer_url = issuer_url
         self.issuer_template = issuer_template
         self.audience = audience
+        self.allowed_user_ids = allowed_user_ids or set()
+        self.allowed_group_ids = allowed_group_ids or set()
         self._allow_query_auth_tokens = allow_query_auth_tokens
         self._jwk_client = (
             PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=300)
@@ -92,13 +98,25 @@ class EntraAuthProvider:
                 status_code=503,
             )
         if not self.issuer_template:
+            if not self.issuer_url:
+                raise AuthError(
+                    "AUTH_MODE=entra requires ENTRA_ISSUER_URL or "
+                    "ENTRA_ISSUER_TEMPLATE to be configured.",
+                    status_code=503,
+                )
+        if self.issuer_url and "{tenantid}" in self.issuer_url:
             raise AuthError(
-                "AUTH_MODE=entra requires an issuer template to be configured.",
+                "ENTRA_ISSUER_URL must be a fixed issuer URL, not a template.",
                 status_code=503,
             )
-        if "{tenantid}" not in self.issuer_template:
+        if (
+            self.issuer_url is None
+            and self.issuer_template is not None
+            and "{tenantid}" not in self.issuer_template
+        ):
             raise AuthError(
-                "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder.",
+                "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder; "
+                "use ENTRA_ISSUER_URL for single-tenant mode.",
                 status_code=503,
             )
         if self._jwk_client is None:
@@ -109,7 +127,6 @@ class EntraAuthProvider:
 
     async def _decode_token(self, token: str) -> NormalizedIdentity:
         assert self._jwk_client is not None
-        assert self.issuer_template is not None
         assert self.audience is not None
 
         try:
@@ -126,7 +143,7 @@ class EntraAuthProvider:
             tenant_claim = str(unverified_claims.get("tid", "")).strip()
             if not tenant_claim:
                 raise AuthError("Missing tid claim", status_code=401)
-            expected_issuer = self.issuer_template.replace("{tenantid}", tenant_claim)
+            expected_issuer = self._resolve_expected_issuer(tenant_claim)
             signing_key = await asyncio.to_thread(
                 self._jwk_client.get_signing_key_from_jwt, token
             )
@@ -138,6 +155,7 @@ class EntraAuthProvider:
                 issuer=expected_issuer,
                 options={"require": ["exp", "iat", "tid"]},
             )
+            self._enforce_access_allowlist(claims)
         except AuthError:
             raise
         except InvalidTokenError as exc:
@@ -151,6 +169,36 @@ class EntraAuthProvider:
                 status_code=503,
             ) from exc
         return self._normalize_claims(claims)
+
+    def _resolve_expected_issuer(self, tenant_claim: str) -> str:
+        if self.issuer_url:
+            return self.issuer_url
+        assert self.issuer_template is not None
+        return self.issuer_template.replace("{tenantid}", tenant_claim)
+
+    def _enforce_access_allowlist(self, claims: Mapping[str, object]) -> None:
+        if not self.allowed_user_ids and not self.allowed_group_ids:
+            return
+
+        user_claim = (
+            str(claims.get("oid", "")).strip() or str(claims.get("sub", "")).strip()
+        )
+        groups_claim = claims.get("groups")
+        groups = (
+            {str(group).strip() for group in groups_claim if str(group).strip()}
+            if isinstance(groups_claim, (list, tuple, set))
+            else set()
+        )
+
+        user_allowed = user_claim in self.allowed_user_ids if user_claim else False
+        group_allowed = bool(groups & self.allowed_group_ids)
+        if user_allowed or group_allowed:
+            return
+
+        raise AuthError(
+            "Authenticated Entra identity is not allowlisted for this beta deployment.",
+            status_code=403,
+        )
 
     @staticmethod
     def _normalize_claims(claims: Mapping[str, object]) -> NormalizedIdentity:

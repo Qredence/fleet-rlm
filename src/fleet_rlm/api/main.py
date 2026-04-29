@@ -273,21 +273,6 @@ def _annotate_validation_error_schemas(app: FastAPI) -> None:
     app.openapi = cast(Any, custom_openapi)
 
 
-def _docs_enabled(cfg: ServerRuntimeConfig) -> bool:
-    """Return whether docs/openapi URLs should be mounted.
-
-    Enabled for local/staging environments. Disabled in production to avoid
-    leaking the full API surface to unauthenticated clients. Override by
-    setting ``FLEET_RLM_EXPOSE_DOCS=1`` if operators need them temporarily.
-    """
-    import os
-
-    override = os.getenv("FLEET_RLM_EXPOSE_DOCS", "").strip().lower()
-    if override in {"1", "true", "yes"}:
-        return True
-    return cfg.app_env in {"local", "staging"}
-
-
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     """Create the FastAPI application instance."""
     cfg = resolve_runtime_config(config)
@@ -322,22 +307,20 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
         yield
         await shutdown_server_state(state)
 
-    docs_enabled = _docs_enabled(cfg)
-
     app = FastAPI(
         title="fleet-rlm",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/docs" if docs_enabled else None,
-        redoc_url="/redoc" if docs_enabled else None,
-        openapi_url="/openapi.json" if docs_enabled else None,
+        docs_url="/docs" if cfg.expose_docs else None,
+        redoc_url="/redoc" if cfg.expose_docs else None,
+        openapi_url="/openapi.json" if cfg.expose_docs else None,
     )
     _annotate_validation_error_schemas(app)
 
     add_middlewares(app, cfg)
     _register_api_routes(app)
 
-    if docs_enabled:
+    if cfg.expose_docs:
         try:
             scalar_fastapi = cast(Any, import_module("scalar_fastapi"))
             get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
@@ -360,7 +343,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
             _mount_spa(app, ui_dir)
         else:
             _mount_ui_unavailable_root(app)
-    else:
+    elif cfg.expose_root:
         _mount_api_only_root(app)
 
     return app
