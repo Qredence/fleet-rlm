@@ -17,9 +17,7 @@
 
 [Docs](docs/) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [arXiv paper](https://arxiv.org/abs/2512.24601)
 
-## Project Status
 
-Solo-maintained by [@Zochory](https://github.com/Zochory). External contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). No SLA; issues are reviewed as capacity allows.
 
 ## Architecture at a Glance
 

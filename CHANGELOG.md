@@ -6,6 +6,53 @@ All notable changes to this project are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.5.2] - 2026-04-29
+
+### Added
+
+- **Change:** Added FastAPI Cloud Entra auth settings with new environment-configurable
+  JWKS URL, issuer, audience, and user/group allow-list fields, plus enhanced
+  `EntraAuthProvider` validation and query-token support.
+  **Outcome:** Deployments to FastAPI Cloud can authenticate via Microsoft Entra
+  with richer configuration and clearer failure modes.
+- **Change:** Added root `asgi.py` entrypoint for managed cloud deploys.
+  **Outcome:** FastAPI Cloud and similar platforms can import the app directly
+  from a stable top-level module instead of relying on package-path heuristics.
+- **Change:** Added database migrations `0011_drop_redundant_indexes` and
+  `0012_updated_at_trigger`.
+  **Outcome:** Cleaner indexes and automatic `updated_at` maintenance on supported
+  tables.
+
+### Changed
+
+- **Change:** Refactored `/ready` endpoint to perform an async DB ping with a
+  2-second timeout, reporting `degraded` instead of `ready` when Neon compute is
+  sleeping or unreachable.
+  **Outcome:** Load balancers and orchestrators get a more honest readiness signal
+  that distinguishes cold-start degradation from full unavailability.
+- **Change:** Added paginated retrieval methods to `FleetRepository` and wired
+  pagination into memory, optimization runs, sessions, traces, and run-steps list
+  endpoints.
+  **Outcome:** Large dataset listing surfaces are now bounded and safer against
+  oversized responses.
+- **Change:** Tuned async database engine connection settings and removed redundant
+  non-unique indexes from run, trace, and optimization models.
+  **Outcome:** Reduced index overhead and clearer connection-pool behavior under
+  load.
+- **Change:** Refined release workflow changelog body generation.
+  **Outcome:** Release notes are grouped more consistently during automated
+  GitHub releases.
+
+### Fixed
+
+- **Change:** Restored FastAPI Cloud deploy compatibility for the src layout by
+  capping Python `<3.14` and wiring the root `asgi.py` entrypoint into packaging.
+  **Outcome:** FastAPI Cloud can import, build, and run the application without
+  hitting unsupported CPython or layout assumptions.
+- **Change:** Added blog evaluation assets to `.gitignore`.
+  **Outcome:** Generated evaluation outputs are no longer at risk of accidental
+  commit.
+
 ## [0.5.1] - 2026-04-27
 
 ### Highlights (User Impact)
@@ -868,6 +915,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.2]: https://github.com/Qredence/fleet-rlm/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Qredence/fleet-rlm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Qredence/fleet-rlm/compare/v0.4.99...v0.5.0
 [0.4.3]: https://github.com/Qredence/fleet-rlm/compare/v0.4.2...v0.4.3
