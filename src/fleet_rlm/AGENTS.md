@@ -156,7 +156,7 @@ Runtime ownership:
 - Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
 - Keep shared evaluation infrastructure in `runtime/quality/datasets.py`, `runtime/quality/scoring_helpers.py`, `runtime/quality/artifacts.py`, `runtime/quality/module_registry.py`, and `runtime/quality/optimization_runner.py`
 - Keep per-module optimization entrypoints in `runtime/quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
-- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `_MODULE_ENTRYPOINTS` is currently empty and must be populated for the registry to function.
+- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.runtime.quality.optimize_longcot`; add new `runtime/quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
 - GEPA runs offline only — never in the live request path
 - Keep grouped tool helpers under root `runtime/tools/*`
 
@@ -248,7 +248,7 @@ Daytona workflow:
 These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
 
 - **Import-time side effects in runtime packages** — `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime models and quality packages do not yet.
-- **Empty module registry** — `runtime/quality/module_registry.py` has `_MODULE_ENTRYPOINTS = ()`. No optimizable modules are registered, so `list_module_metadata()` returns an empty list.
+- **Module registry entrypoint drift** — `runtime/quality/module_registry.py` currently seeds `_MODULE_ENTRYPOINTS` with `fleet_rlm.runtime.quality.optimize_longcot`, which registers `longcot-reasoner`. Keep `_MODULE_ENTRYPOINTS` aligned with any additional `runtime/quality/optimize_*.py` modules so CLI/API metadata stays accurate.
 - **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts many legacy arguments but only passes the runtime-critical subset into `AgentRuntime`; `docs_path` is loaded onto the returned runtime. The remaining ignored arguments are a known structural debt item.
 - **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
 - **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.
