@@ -39,7 +39,7 @@ class ModuleOptimizationSpec:
 # -- Module registry --------------------------------------------------------
 
 _REGISTRY: dict[str, ModuleOptimizationSpec] = {}
-_MODULE_ENTRYPOINTS: tuple[str, ...] = ()
+_MODULE_ENTRYPOINTS: tuple[str, ...] = ("fleet_rlm.runtime.quality.optimize_longcot",)
 
 
 def register_module(spec: ModuleOptimizationSpec) -> None:
