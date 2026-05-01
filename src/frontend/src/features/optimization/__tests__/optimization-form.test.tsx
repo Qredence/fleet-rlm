@@ -19,6 +19,14 @@ const reflectAndReviseModule = {
   required_dataset_keys: ["question", "assistant_response"],
 };
 
+const longcotReasonerModule = {
+  slug: "longcot-reasoner",
+  label: "LongCoT QA Reasoner",
+  description: "Long chain-of-thought question answering module.",
+  program_spec: "fleet_rlm.runtime.agent.signatures:LongCoTQASignature",
+  required_dataset_keys: ["question", "answer"],
+};
+
 const mutationState = {
   isPending: false,
   mutate: vi.fn(),
@@ -277,6 +285,44 @@ describe("OptimizationForm", () => {
       },
       expect.any(AbortSignal),
     );
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("renders the longcot-reasoner module in the module picker (VAL-MOD-005)", async () => {
+    modulesQueryState.data = [reflectAndReviseModule, longcotReasonerModule];
+    modulesQueryState.isError = false;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<OptimizationForm />);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const moduleTrigger = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.getAttribute("aria-label") === "Module selection",
+    );
+    expect(moduleTrigger).toBeTruthy();
+
+    // Open the select dropdown
+    await act(async () => {
+      moduleTrigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    // The SelectContent is portaled; query the document body for options
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (element) => element.textContent?.includes("LongCoT QA Reasoner"),
+    );
+    expect(option).toBeTruthy();
 
     act(() => {
       root.unmount();

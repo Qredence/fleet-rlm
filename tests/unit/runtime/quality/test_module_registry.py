@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
+
 from fleet_rlm.runtime.quality.module_registry import (
     ModuleOptimizationSpec,
     _REGISTRY,
@@ -103,3 +106,35 @@ def test_registry_repopulates_after_reset() -> None:
     slugs = list_module_slugs()
 
     assert "repop-module" in slugs
+
+
+def test_registry_lazy_loads_without_import_time_side_effects() -> None:
+    """VAL-MOD-004: Importing module_registry does not load DSPy or entrypoints."""
+    import importlib.util
+
+    registry_name = "fleet_rlm.runtime.quality.module_registry"
+    entrypoint = "fleet_rlm.runtime.quality.optimize_longcot"
+
+    # Save original module and remove entrypoint so we can observe lazy loading
+    original_module = sys.modules.get(registry_name)
+    sys.modules.pop(entrypoint, None)
+
+    # Import the registry module fresh in a clean namespace
+    spec = importlib.util.find_spec(registry_name)
+    assert spec is not None
+    fresh_module = importlib.util.module_from_spec(spec)
+    sys.modules[registry_name] = fresh_module
+    spec.loader.exec_module(fresh_module)
+
+    try:
+        # _REGISTERED should be False after import (no eager loading)
+        assert fresh_module._REGISTERED is False
+
+        # The entrypoint should NOT be in sys.modules yet
+        assert entrypoint not in sys.modules
+    finally:
+        # Restore the original module so subsequent tests use the real registry
+        if original_module is not None:
+            sys.modules[registry_name] = original_module
+        else:
+            sys.modules.pop(registry_name, None)
