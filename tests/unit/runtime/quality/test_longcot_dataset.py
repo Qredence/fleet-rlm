@@ -91,6 +91,16 @@ def test_all_rows_have_non_empty_question(generated_dataset_path: Path) -> None:
     assert not empty, f"Rows with empty question field: {empty}"
 
 
+def test_all_rows_have_trimmed_question_strings(generated_dataset_path: Path) -> None:
+    rows = load_dataset_rows(generated_dataset_path)
+    offenders = []
+    for row in rows:
+        question = row.get("question")
+        if not isinstance(question, str) or question != question.strip():
+            offenders.append((row.get("question_id"), question))
+    assert not offenders, f"Rows with untrimmed question field: {offenders[:10]}"
+
+
 def test_all_rows_have_non_empty_answer(generated_dataset_path: Path) -> None:
     rows = load_dataset_rows(generated_dataset_path)
     empty = [i for i, r in enumerate(rows) if not str(r.get("answer", "")).strip()]

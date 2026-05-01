@@ -29,10 +29,21 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDOR_DATA_DIR = REPO_ROOT / "vendor" / "longcot" / "src" / "data"
-STRATIFIED_SLICE_PATH = REPO_ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json"
+STRATIFIED_SLICE_PATH = (
+    REPO_ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json"
+)
 
 DOMAINS = ["logic", "cs", "chemistry", "chess", "math"]
 DIFFICULTIES = ["easy", "medium", "hard"]
+
+
+def _normalize_question(question: Any) -> str:
+    """Convert a vendor prompt payload to a trimmed question string."""
+    if question is None:
+        return ""
+    if isinstance(question, str):
+        return question.strip()
+    return str(question).strip()
 
 
 def _normalize_answer(answer: Any) -> str:
@@ -69,7 +80,9 @@ def _load_stratified_slice() -> dict[str, list[str]] | None:
     return data.get("domains")
 
 
-def _load_questions_for_domain(domain: str, difficulties: list[str]) -> list[dict[str, Any]]:
+def _load_questions_for_domain(
+    domain: str, difficulties: list[str]
+) -> list[dict[str, Any]]:
     """Load all questions for *domain* across the given *difficulties*."""
     questions: list[dict[str, Any]] = []
     for diff in difficulties:
@@ -131,7 +144,9 @@ def generate_dataset(
 
     for domain in domains:
         stratified_qids = stratified.get(domain) if stratified else None
-        selected = _select_questions(domain, difficulties, per_domain, seed, stratified_qids)
+        selected = _select_questions(
+            domain, difficulties, per_domain, seed, stratified_qids
+        )
 
         if not selected:
             print(
@@ -149,12 +164,20 @@ def generate_dataset(
             )
 
         for q in selected:
+            question = _normalize_question(q.get("prompt"))
+            if not question:
+                print(
+                    f"  Warning: {domain}/{q.get('_difficulty')} {q.get('question_id')} "
+                    "has empty prompt — skipping",
+                    file=sys.stderr,
+                )
+                continue
             rows.append(
                 {
                     "question_id": q["question_id"],
                     "domain": domain,
                     "difficulty": q.get("_difficulty", "unknown"),
-                    "question": q["prompt"],
+                    "question": question,
                     "answer": _normalize_answer(q.get("answer")),
                 }
             )
