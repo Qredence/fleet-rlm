@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 
 from fleet_rlm.runtime.quality.module_registry import (
