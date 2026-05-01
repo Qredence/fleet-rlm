@@ -1,6 +1,36 @@
 # Quality Tooling Quirks
 
-Factual knowledge about the project's validation scripts discovered during api-rewiring milestone work.
+Factual knowledge about the project's quality, evaluation, and dataset-generation tooling discovered during milestone work.
+
+## LongCoT Vendor Data — Logic Domain Has No Answers
+
+The `vendor/longcot/src/data/logic/` domain files contain only `null` answers. The `scripts/generate_longcot_gepa_dataset.py` generation script handles this gracefully by filtering out empty answers and warning, but this means the `logic` domain yields zero rows unless a separate answer source is provided. Workers extending the dataset generator or adding new domains should expect this and validate accordingly.
+
+## Module Registry Test Isolation
+
+`module_registry.py` exposes `_reset_registry()` (prefixed as internal) for test isolation. Tests that touch the module registry should reset state before each test via an `autouse` fixture:
+
+```python
+@pytest.fixture(autouse=True)
+def _clean_registry() -> None:
+    from fleet_rlm.runtime.quality.module_registry import _reset_registry
+    _reset_registry()
+```
+
+Failure to reset the registry can cause cross-test pollution because `_ensure_registered()` imports entrypoint modules once per process and caches results in `_REGISTRY`.
+
+## Canonical Per-Module Optimization Entrypoint Pattern
+
+New optimizable DSPy modules should follow the pattern established by `runtime/quality/optimize_longcot.py`:
+
+1. Create a file named `runtime/quality/optimize_<module_slug>.py`.
+2. Define `_module_factory()`, `_row_converter()`, and `_metric_builder()` with **lazy DSPy imports inside the functions** (not at module top level).
+3. Construct a `ModuleOptimizationSpec` with all required fields (`module_slug`, `label`, `program_spec`, `artifact_filename`, `input_keys`, `required_dataset_keys`, `module_factory`, `row_converter`, `metric_builder`).
+4. Call `register_module(spec)` at module load time.
+5. Add the module's import path to `module_registry._MODULE_ENTRYPOINTS` so lazy registration discovers it.
+6. Add corresponding tests in `tests/unit/runtime/quality/test_optimize_<module_slug>.py` covering: spec structure, registry lookup, row converter output, metric scoring, and module factory return type.
+
+This pattern is consumed by the offline CLI (`fleet-rlm optimize`), the API router (`POST /api/v1/optimization/run`), and the frontend metadata endpoint (`GET /api/v1/optimization/modules`).
 
 ## check_agents_md_freshness.py — Node.js Frontend Path Resolution
 

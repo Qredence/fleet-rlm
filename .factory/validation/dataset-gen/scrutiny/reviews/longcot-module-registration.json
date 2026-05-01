@@ -1,0 +1,28 @@
+{
+  "featureId": "longcot-module-registration",
+  "milestone": "dataset-gen",
+  "status": "pass",
+  "issues": [
+    {
+      "severity": "non_blocking",
+      "description": "Commit bundles an unrelated signature change: `candidate_answer` input field was added to `VerifyRecursiveAggregation` in `signatures.py`, but the call site in `runtime/models/builders.py` was not updated in the same commit. The required fix (`candidate_answer=latest_result`) exists only in the working tree (uncommitted). This scope creep could cause the recursive workspace verifier to receive an incomplete prompt or raise a DSPy/Pydantic validation error.",
+      "location": "src/fleet_rlm/runtime/agent/signatures.py:422-424"
+    },
+    {
+      "severity": "suggestion",
+      "description": "Metric substring scoring is one-directional (`expected.lower() in actual.lower()`), so verbose predictions get credit but concise predictions against verbose gold answers do not. Documented behavior, but may surprise users with open-ended answer keys.",
+      "location": "src/fleet_rlm/runtime/quality/optimize_longcot.py:83-86"
+    },
+    {
+      "severity": "suggestion",
+      "description": "When `expected_answer` is falsy but `actual_answer` is truthy, the metric falls through to `Unexpected answer format` with score 0.0. A more descriptive branch (e.g., `empty gold answer`) would improve clarity, though `required_dataset_keys` makes this edge case unlikely in practice.",
+      "location": "src/fleet_rlm/runtime/quality/optimize_longcot.py:93-96"
+    }
+  ],
+  "sharedStateObservations": [
+    "AGENTS.md documented `_MODULE_ENTRYPOINTS` as an empty pre-existing issue. This commit correctly populates it with `fleet_rlm.runtime.quality.optimize_longcot`, resolving the empty-registry problem. The AGENTS.md 'Known Pre-Existing Issues' section should be updated to remove or rephrase this note.",
+    "The commit demonstrates the canonical pattern for per-module optimization entrypoints: lazy DSPy imports inside factory functions, a module-level `register_module()` call, and comprehensive unit tests. This pattern should be explicitly documented in AGENTS.md or library/quality-tooling.md so future module authors follow it consistently.",
+    "The `candidate_answer` scope-creep indicates that signature changes affecting the recursive workspace module can accidentally slip into unrelated commits. Consider adding a CI check or pre-commit hook that flags changes to `runtime/agent/signatures.py` when `runtime/models/builders.py` is not modified in tandem."
+  ],
+  "summary": "The LongCoT GEPA module registration is well-implemented and fully covers the feature requirements. `_MODULE_ENTRYPOINTS` is correctly populated, `LongCoTQASignature` is properly defined, and the new `optimize_longcot.py` entrypoint follows project conventions with lazy imports and a clean `ModuleOptimizationSpec`. Tests are comprehensive, covering signature structure, registry behavior, row conversion, metric scoring, and CLI integration. The primary concern is scope creep: the commit also adds `candidate_answer` to `VerifyRecursiveAggregation` without updating the recursive workspace call site in `builders.py` (the fix is only in the working tree). This is a non-blocking issue for the LongCoT feature itself but represents a regression risk for the recursive workspace module."
+}
