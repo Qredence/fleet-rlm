@@ -388,6 +388,7 @@ async def _mark_repo_blocking_run_complete(
         validation_score=result.get("validation_score"),
         output_path=result.get("output_path"),
         manifest_path=result.get("manifest_path"),
+        metadata_json=result.get("run_metadata"),
     )
 
 
@@ -406,6 +407,7 @@ async def _mark_local_blocking_run_complete(
         validation_score=result.get("validation_score"),
         output_path=result.get("output_path"),
         manifest_path=result.get("manifest_path"),
+        metadata_json=result.get("run_metadata"),
     )
 
 

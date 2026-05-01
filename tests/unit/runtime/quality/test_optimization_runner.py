@@ -292,6 +292,7 @@ def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
 
     assert result["train_examples"] == 8
     assert result["validation_examples"] == 2
+    assert result["baseline_validation_score"] == 1.0
     # Per-example eval with metric returning score=1.0 → average = 1.0
     assert result["validation_score"] == 1.0
     assert result["optimizer"] == "GEPA"
@@ -302,6 +303,13 @@ def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
     manifest = json.loads(Path(result["manifest_path"]).read_text())
     assert manifest["train_examples"] == 8
     assert manifest["metric"] == "test_metric"
+    assert manifest["review_bundle"]["holdout"]["baseline_score"] == 1.0
+    assert manifest["review_bundle"]["holdout"]["optimized_score"] == 1.0
+    assert manifest["review_bundle"]["artifact"]["loader"] == "dspy.Module.load"
+    assert result["review_bundle"]["holdout"]["comparisons"]
+    assert result["run_metadata"]["review_bundle"]["holdout"]["split_reference"][
+        "validation_dataset_indexes"
+    ] == [8, 9]
 
 
 def test_run_module_optimization_no_validation(tmp_path: Path) -> None:
@@ -354,7 +362,7 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
     with patch(
         "fleet_rlm.runtime.quality.optimization_runner._persist_run_artifacts"
     ) as mock_persist:
-        run_module_optimization(
+        result = run_module_optimization(
             spec,
             dataset_path=dataset_path,
             output_path=tmp_path / "out.json",
@@ -369,6 +377,9 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
         per_example = call_args[0][1]
         assert len(per_example) == 2  # 2 validation examples
         assert all(r["score"] == 1.0 for r in per_example)
+        assert result["review_bundle"]["holdout"]["comparisons"][0]["baseline"][
+            "score"
+        ] == pytest.approx(1.0)
 
 
 def test_run_module_optimization_without_run_id_skips_persist(

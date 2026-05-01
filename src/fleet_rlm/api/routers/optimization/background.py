@@ -17,9 +17,76 @@ from typing import Any, Literal, cast
 from fleet_rlm.integrations.database.types import IdentityUpsertResult
 
 from ...runtime_services.common import run_blocking
-from ._deps import OPTIMIZATION_TIMEOUT_SECONDS, configure_planner_from_env
+from ._deps import OPTIMIZATION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
+
+
+def _planner_execution_context() -> Any:
+    """Build a thread-local DSPy context for offline optimization work."""
+    from fleet_rlm.runtime.config import build_dspy_context, get_planner_lm_from_env
+
+    planner_lm = get_planner_lm_from_env()
+    if planner_lm is None:
+        raise RuntimeError(
+            "DSPy LM is not configured. Set DSPY_LM_MODEL and DSPY_LLM_API_KEY "
+            "in the environment before running offline optimization."
+        )
+    return build_dspy_context(lm=planner_lm)
+
+
+def _run_module_optimization_with_thread_config(
+    *,
+    module_slug: str,
+    dataset_path: Path,
+    output_path: Path | None,
+    default_output_root: Path | None,
+    auto: Literal["light", "medium", "heavy"],
+    train_ratio: float,
+    run_id: int | None,
+) -> dict[str, Any]:
+    """Configure DSPy context inside the worker thread before module optimization."""
+    from fleet_rlm.runtime.quality.module_registry import get_module_spec
+    from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+
+    spec = get_module_spec(module_slug)
+    if spec is None:
+        raise ValueError(f"Unknown module slug: {module_slug!r}")
+    with _planner_execution_context():
+        return cast(
+            dict[str, Any],
+            run_module_optimization(
+                spec,
+                dataset_path=dataset_path,
+                output_path=output_path,
+                default_output_root=default_output_root,
+                train_ratio=train_ratio,
+                auto=auto,
+                run_id=run_id,
+            ),
+        )
+
+
+def _run_program_optimization_with_thread_config(
+    *,
+    dataset_path: Path,
+    program_spec: str,
+    output_path: Path | None,
+    auto: Literal["light", "medium", "heavy"],
+    train_ratio: float,
+) -> dict[str, Any]:
+    """Configure DSPy context inside the worker thread before generic GEPA optimization."""
+    from fleet_rlm.runtime.quality.gepa_optimization import optimize_program_with_gepa
+
+    with _planner_execution_context():
+        return optimize_program_with_gepa(
+            dataset_path=dataset_path,
+            program_spec=program_spec,
+            output_path=output_path,
+            auto=auto,
+            train_ratio=train_ratio,
+            source="api_background",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +140,7 @@ class _RepoPersistence:
             validation_score=result.get("validation_score"),
             output_path=result.get("output_path"),
             manifest_path=result.get("manifest_path"),
+            metadata_json=result.get("run_metadata"),
         )
 
     async def fail(self, run_id: str | int, error: str) -> None:
@@ -93,12 +161,16 @@ class _LocalPersistence:
         from fleet_rlm.integrations.local_store import (
             complete_optimization_run,
             fail_optimization_run,
+            save_evaluation_results,
+            save_prompt_snapshots,
             update_optimization_run_phase,
         )
 
         self._update_phase = update_optimization_run_phase
         self._complete = complete_optimization_run
         self._fail = fail_optimization_run
+        self._save_evaluation_results = save_evaluation_results
+        self._save_prompt_snapshots = save_prompt_snapshots
 
     async def update_phase(self, run_id: str | int, phase: str) -> None:
         try:
@@ -107,8 +179,17 @@ class _LocalPersistence:
             logger.debug("Failed to update phase for run %s", run_id)
 
     async def save_results(self, run_id: str | int, result: dict) -> None:
-        # Local store does not persist per-example evaluation results
-        pass
+        try:
+            self._save_evaluation_results(
+                int(run_id),
+                list(result.get("evaluation_results", [])),
+            )
+            self._save_prompt_snapshots(
+                int(run_id),
+                list(result.get("prompt_snapshots", [])),
+            )
+        except Exception:
+            logger.debug("Failed to persist local review artifacts for run %s", run_id)
 
     async def complete(self, run_id: str | int, result: dict) -> None:
         self._complete(
@@ -118,6 +199,7 @@ class _LocalPersistence:
             validation_score=result.get("validation_score"),
             output_path=result.get("output_path"),
             manifest_path=result.get("manifest_path"),
+            metadata_json=result.get("run_metadata"),
         )
 
     async def fail(self, run_id: str | int, error: str) -> None:
@@ -150,6 +232,7 @@ async def run_optimization_background(
     * ``"local"`` -- Legacy local-store (SQLite).
     """
     from fleet_rlm.runtime.quality.gepa_optimization import (
+        log_gepa_mlflow_result_metadata,
         log_gepa_mlflow_run_metadata,
     )
 
@@ -168,6 +251,8 @@ async def run_optimization_background(
     _mlflow_log_metric: Any = None
     _mlflow_log_params: Any = None
     _mlflow_set_tags: Any = None
+    _mlflow_log_dict: Any = None
+    _mlflow_log_artifact: Any = None
     if module_slug:
         try:
             import mlflow
@@ -193,6 +278,8 @@ async def run_optimization_background(
                     _mlflow_log_metric = getattr(mlflow, "log_metric", None)
                     _mlflow_log_params = getattr(mlflow, "log_params", None)
                     _mlflow_set_tags = getattr(mlflow, "set_tags", None)
+                    _mlflow_log_dict = getattr(mlflow, "log_dict", None)
+                    _mlflow_log_artifact = getattr(mlflow, "log_artifact", None)
                     run_label = f"GEPA::{module_slug}"
                     if start_run is not None:
                         mlflow_ctx = cast(Any, start_run)(run_name=run_label)
@@ -216,85 +303,38 @@ async def run_optimization_background(
                 logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
-        configure_planner_from_env()
         await store.update_phase(run_id, "loading")
 
         if module_slug:
-            from fleet_rlm.runtime.quality.module_registry import get_module_spec
-            from fleet_rlm.runtime.quality.optimization_runner import (
-                run_module_optimization,
-            )
-
-            spec = get_module_spec(module_slug)
-            if spec is None:
-                raise ValueError(f"Unknown module slug: {module_slug!r}")
             await store.update_phase(run_id, "compiling")
 
-            if persistence == "repo":
-                result = dict(
-                    await run_blocking(
-                        partial(
-                            run_module_optimization,
-                            spec,
-                            dataset_path=dataset_path,
-                            output_path=output_path,
-                            default_output_root=default_output_root,
-                            train_ratio=train_ratio,
-                            auto=auto,
-                            run_id=None,
-                        ),
-                        timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-                    )
-                )
-            else:
-                result = dict(
-                    await run_blocking(
-                        partial(
-                            run_module_optimization,
-                            spec,
-                            dataset_path=dataset_path,
-                            output_path=output_path,
-                            default_output_root=default_output_root,
-                            train_ratio=train_ratio,
-                            auto=auto,
-                            run_id=int(run_id),
-                        ),
-                        timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-                    )
-                )
+            result = await run_blocking(
+                partial(
+                    _run_module_optimization_with_thread_config,
+                    module_slug=module_slug,
+                    dataset_path=dataset_path,
+                    output_path=output_path,
+                    default_output_root=default_output_root,
+                    train_ratio=train_ratio,
+                    auto=auto,
+                    run_id=None if persistence == "repo" else int(run_id),
+                ),
+                timeout=OPTIMIZATION_TIMEOUT_SECONDS,
+            )
         else:
-            from fleet_rlm.runtime.quality.gepa_optimization import (
-                optimize_program_with_gepa,
-            )
-
             await store.update_phase(run_id, "compiling")
 
-            if persistence == "repo":
-                result = await run_blocking(
-                    partial(
-                        optimize_program_with_gepa,
-                        dataset_path=dataset_path,
-                        program_spec=program_spec,
-                        output_path=output_path,
-                        auto=auto,
-                        train_ratio=train_ratio,
-                        source="api_background",
-                    ),
-                    timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-                )
-            else:
-                result = await run_blocking(
-                    partial(
-                        optimize_program_with_gepa,
-                        dataset_path=dataset_path,
-                        program_spec=program_spec,
-                        output_path=output_path,
-                        auto=auto,
-                        train_ratio=train_ratio,
-                        source="api_background",
-                    ),
-                    timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-                )
+            result = await run_blocking(
+                partial(
+                    _run_program_optimization_with_thread_config,
+                    dataset_path=dataset_path,
+                    program_spec=program_spec,
+                    output_path=output_path,
+                    auto=auto,
+                    train_ratio=train_ratio,
+                ),
+                timeout=OPTIMIZATION_TIMEOUT_SECONDS,
+            )
 
         # Log validation score to MLflow when available
         try:
@@ -308,6 +348,15 @@ async def run_optimization_background(
                 val_score = result.get("validation_score")
                 if val_score is not None:
                     cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
+            log_gepa_mlflow_result_metadata(
+                result=result,
+                run_id=run_id,
+                log_metric=cast(Any, _mlflow_log_metric),
+                log_params=cast(Any, _mlflow_log_params),
+                set_tags=cast(Any, _mlflow_set_tags),
+                log_dict=cast(Any, _mlflow_log_dict),
+                log_artifact=cast(Any, _mlflow_log_artifact),
+            )
         except Exception:
             logger.debug("Failed to log GEPA metrics to MLflow for run %s", run_id)
 

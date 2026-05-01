@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -321,6 +322,74 @@ class TestGepaManifest:
         assert manifest["auto"] == "light"
         assert manifest["train_examples"] >= 8
         assert manifest["validation_examples"] >= 2
+
+    def test_manifest_records_review_bundle_holdout_and_provenance(
+        self,
+        longcot_spec: Any,
+        ten_example_dataset: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Manifest stores same-split holdout evidence and reflection provenance."""
+        output_path = tmp_path / "out.json"
+        monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "delegate-model")
+        monkeypatch.setenv("DSPY_LM_MODEL", "planner-model")
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+            lambda: SimpleNamespace(model="delegate-model"),
+        )
+
+        result = run_module_optimization(
+            longcot_spec,
+            dataset_path=ten_example_dataset,
+            output_path=output_path,
+            auto="light",
+        )
+
+        manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+        holdout = manifest["review_bundle"]["holdout"]
+        reflection = manifest["review_bundle"]["reflection_model"]
+        assert holdout["baseline_score"] is not None
+        assert holdout["optimized_score"] == result["validation_score"]
+        assert holdout["split_reference"]["validation_dataset_indexes"] == [8, 9]
+        assert len(holdout["comparisons"]) == result["validation_examples"]
+        assert reflection["model"] == "delegate-model"
+        assert reflection["source"] == "delegate"
+
+    @pytest.mark.parametrize(
+        ("resolved_model", "expected_source"),
+        [
+            ("delegate-model", "delegate"),
+            ("planner-model", "planner"),
+        ],
+    )
+    def test_result_review_bundle_records_delegate_preference_or_planner_fallback(
+        self,
+        longcot_spec: Any,
+        ten_example_dataset: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        resolved_model: str,
+        expected_source: str,
+    ) -> None:
+        """The review bundle records whether reflection used delegate or planner."""
+        monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "delegate-model")
+        monkeypatch.setenv("DSPY_LM_MODEL", "planner-model")
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+            lambda: SimpleNamespace(model=resolved_model),
+        )
+
+        result = run_module_optimization(
+            longcot_spec,
+            dataset_path=ten_example_dataset,
+            output_path=tmp_path / f"{expected_source}.json",
+            auto="light",
+        )
+
+        reflection = result["review_bundle"]["reflection_model"]
+        assert reflection["model"] == resolved_model
+        assert reflection["source"] == expected_source
 
 
 # -- VAL-GEPA-008: Per-example results and snapshots persisted ---------------

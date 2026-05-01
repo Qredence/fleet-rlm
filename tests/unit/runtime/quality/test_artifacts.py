@@ -55,6 +55,12 @@ def test_write_manifest_creates_file(tmp_path: Path) -> None:
 
 
 def test_build_manifest_shape() -> None:
+    review_bundle = {
+        "holdout": {
+            "baseline_score": 0.4,
+            "optimized_score": 0.85,
+        }
+    }
     manifest = build_manifest(
         module_spec="mod:Class",
         dataset_path="data.json",
@@ -64,6 +70,7 @@ def test_build_manifest_shape() -> None:
         optimizer="GEPA",
         metric_name="test_metric",
         auto="light",
+        extra_metadata={"review_bundle": review_bundle, "module_slug": "mod"},
     )
     assert manifest["module"] == "mod:Class"
     assert manifest["dataset_path"] == "data.json"
@@ -73,3 +80,5 @@ def test_build_manifest_shape() -> None:
     assert manifest["optimizer"] == "GEPA"
     assert manifest["metric"] == "test_metric"
     assert manifest["auto"] == "light"
+    assert manifest["module_slug"] == "mod"
+    assert manifest["review_bundle"] == review_bundle

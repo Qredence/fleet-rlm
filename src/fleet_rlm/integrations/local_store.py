@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import Column, Integer, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -53,6 +53,7 @@ def _migrate_optimization_runs(engine: Any) -> None:
         ("dataset_path", "TEXT"),
         ("manifest_path", "TEXT"),
         ("phase", "VARCHAR(64)"),
+        ("metadata_json", "TEXT"),
     ]
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
@@ -284,9 +285,28 @@ class OptimizationRun(SQLModel, table=True):
     dataset_path: str | None = None
     manifest_path: str | None = None
     phase: str | None = Field(default=None, max_length=64)
+    metadata_json: str | None = None
     started_at: datetime = Field(default_factory=_utc_now)
     completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utc_now)
+
+
+def _parse_metadata_json(value: str | None) -> dict[str, Any]:
+    """Decode persisted optimization-run metadata JSON into a dictionary."""
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _serialize_metadata_json(value: dict[str, Any] | None) -> str | None:
+    """Encode optimization-run metadata for local SQLite persistence."""
+    if not value:
+        return None
+    return json.dumps(value, sort_keys=True)
 
 
 def create_session(
@@ -382,6 +402,7 @@ def create_optimization_run(
     train_ratio: float = 0.8,
     module_slug: str | None = None,
     dataset_path: str | None = None,
+    metadata_json: dict[str, Any] | None = None,
 ) -> OptimizationRun:
     with get_session() as db:
         row = OptimizationRun(
@@ -392,6 +413,7 @@ def create_optimization_run(
             train_ratio=train_ratio,
             module_slug=module_slug,
             dataset_path=dataset_path,
+            metadata_json=_serialize_metadata_json(metadata_json),
         )
         db.add(row)
         db.commit()
@@ -407,6 +429,7 @@ def complete_optimization_run(
     validation_score: float | None = None,
     output_path: str | None = None,
     manifest_path: str | None = None,
+    metadata_json: dict[str, Any] | None = None,
 ) -> OptimizationRun | None:
     with get_session() as db:
         row = db.get(OptimizationRun, run_id)
@@ -418,6 +441,10 @@ def complete_optimization_run(
         row.validation_score = validation_score
         row.output_path = output_path
         row.manifest_path = manifest_path
+        merged_metadata = _parse_metadata_json(row.metadata_json)
+        if metadata_json:
+            merged_metadata.update(metadata_json)
+        row.metadata_json = _serialize_metadata_json(merged_metadata)
         row.phase = "completed"
         row.completed_at = _utc_now()
         db.add(row)
@@ -694,6 +721,15 @@ def save_evaluation_results(
 ) -> list[EvaluationResult]:
     """Bulk save per-example evaluation results for an optimization run."""
     with get_session() as db:
+        existing_rows = list(
+            db.exec(
+                select(EvaluationResult).where(
+                    cast(Any, EvaluationResult.run_id) == run_id
+                )
+            ).all()
+        )
+        for existing in existing_rows:
+            db.delete(existing)
         rows: list[EvaluationResult] = []
         for r in results:
             row = EvaluationResult(
@@ -742,6 +778,13 @@ def save_prompt_snapshots(
 ) -> list[PromptSnapshot]:
     """Bulk save before/after prompt snapshots for an optimization run."""
     with get_session() as db:
+        existing_rows = list(
+            db.exec(
+                select(PromptSnapshot).where(cast(Any, PromptSnapshot.run_id) == run_id)
+            ).all()
+        )
+        for existing in existing_rows:
+            db.delete(existing)
         rows: list[PromptSnapshot] = []
         for s in snapshots:
             row = PromptSnapshot(

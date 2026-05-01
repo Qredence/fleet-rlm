@@ -51,6 +51,7 @@ def build_manifest(
     optimizer: str = "GEPA",
     metric_name: str | None = None,
     auto: str | None = None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a canonical optimization manifest dict."""
     manifest: dict[str, Any] = {
@@ -65,6 +66,8 @@ def build_manifest(
         manifest["metric"] = metric_name
     if auto:
         manifest["auto"] = auto
+    if extra_metadata:
+        manifest.update(extra_metadata)
     return manifest
 
 

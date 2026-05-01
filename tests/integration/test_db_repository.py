@@ -553,6 +553,14 @@ async def test_repository_optimization_dataset_and_run_flow(
         validation_score=1.0,
         output_path="artifacts/optimized.py",
         manifest_path="artifacts/optimized.json",
+        metadata_json={
+            "review_bundle": {
+                "reflection_model": {
+                    "model": "delegate-model",
+                    "source": "delegate",
+                }
+            }
+        },
     )
 
     listed_runs = await repository.list_optimization_runs(
@@ -600,6 +608,10 @@ async def test_repository_optimization_dataset_and_run_flow(
     assert run_detail.phase == "completed"
     assert run_detail.metadata_json["module_slug"] == "reflect-and-revise"
     assert run_detail.metadata_json["dataset_path"] == "datasets/reflect.jsonl"
+    assert (
+        run_detail.metadata_json["review_bundle"]["reflection_model"]["source"]
+        == "delegate"
+    )
     assert [item.id for item in listed_runs] == [run.id]
     assert evaluation_total == 2
     assert [item.example_index for item in evaluation_results] == [0, 1]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -100,6 +101,14 @@ def _extract_metadata_str(metadata: object, key: str) -> str | None:
     if isinstance(metadata, dict):
         val = cast("dict[str, Any]", metadata).get(key)
         return str(val) if val is not None else None
+    if isinstance(metadata, str):
+        try:
+            parsed = json.loads(metadata)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            val = cast("dict[str, Any]", parsed).get(key)
+            return str(val) if val is not None else None
     return None
 
 
