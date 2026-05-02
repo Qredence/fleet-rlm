@@ -55,7 +55,23 @@ AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     },
 }
 
-OPTIMIZATION_TIMEOUT_SECONDS = 900
+
+def _resolve_optimization_timeout_seconds() -> int:
+    """Return the configured optimization timeout with a safe fallback."""
+    raw_value = (os.environ.get("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS") or "").strip()
+    if not raw_value:
+        return 900
+    try:
+        return max(int(raw_value), 1)
+    except ValueError:
+        logger.warning(
+            "Invalid FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS=%r; falling back to 900s",
+            raw_value,
+        )
+        return 900
+
+
+OPTIMIZATION_TIMEOUT_SECONDS = _resolve_optimization_timeout_seconds()
 
 OPTIMIZATION_DATA_ROOT = Path(
     os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())

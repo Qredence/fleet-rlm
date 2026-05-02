@@ -497,6 +497,22 @@ def test_resolve_dataset_request_accepts_relative_path(
     assert dataset_ref == "nested/examples.jsonl"
 
 
+def test_optimization_timeout_respects_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    from fleet_rlm.api.routers.optimization import _deps
+
+    monkeypatch.setenv("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS", "1234")
+    reloaded = importlib.reload(_deps)
+    try:
+        assert reloaded.OPTIMIZATION_TIMEOUT_SECONDS == 1234
+    finally:
+        monkeypatch.delenv("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS", raising=False)
+        importlib.reload(reloaded)
+
+
 def test_gepa_background_rejects_none_repository(
     tmp_path: Path,
 ) -> None:
