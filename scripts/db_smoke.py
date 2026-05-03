@@ -21,13 +21,17 @@ from fleet_rlm.integrations.database import (
     RunStepType,
     select_database_url,
 )
-from fleet_rlm.integrations.database.types import (
+from fleet_rlm.integrations.database.repository_chat import (
     ArtifactCreateRequest,
-    JobCreateRequest,
-    JobLeaseRequest,
-    MemoryItemCreateRequest,
     RunCreateRequest,
     RunStepCreateRequest,
+)
+from fleet_rlm.integrations.database.repository_jobs import (
+    JobCreateRequest,
+    JobLeaseRequest,
+)
+from fleet_rlm.integrations.database.repository_memory import (
+    MemoryItemCreateRequest,
 )
 
 

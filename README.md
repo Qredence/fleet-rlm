@@ -87,6 +87,16 @@ stack. Full results, including caveats and deferred L4 work, are generated local
 `output/rlm-eval-full/RESULTS.md`; use the docs page above as the stable checked-in
 reference in this repository.
 
+## Offline GEPA Optimization (LongCoT)
+
+The DSPy optimization layer now supports LongCoT reasoning modules:
+
+- `longcot-reasoner` is registered in the optimization module registry and discoverable via `fleet-rlm optimize list`.
+- A continuous answer-dominant 0.6/0.4 GEPA metric was implemented for LongCoT evaluation with tiered feedback.
+- A one-time offline GEPA optimization was run against an 80-row answered-only LongCoT dataset (64 train / 16 validation), producing a reviewable optimized artifact bundle.
+- The pipeline persists baseline-vs-optimized holdout evidence, prompt snapshots, reflection-model provenance, and MLflow metadata.
+- The optimized artifact is saved for manual review and is **not** auto-loaded into the live runtime.
+
 ## Quick Start
 
 Add `fleet-rlm` to a `uv`-managed project and launch the Web UI:
