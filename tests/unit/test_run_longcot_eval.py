@@ -6,6 +6,14 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
+_VENDOR_DIR = Path(__file__).resolve().parents[2] / "vendor" / "longcot"
+_VENDOR_CONFIGS_PRESENT = (_VENDOR_DIR / "src" / "configs").exists()
+_requires_vendor = pytest.mark.skipif(
+    not _VENDOR_CONFIGS_PRESENT, reason="vendor/longcot not present"
+)
+
 
 _BLOCKSWORLD_PROMPT = """
 Example:
@@ -218,6 +226,7 @@ def test_load_slice_manifest_reads_benchmark_file() -> None:
     assert sum(len(ids) for ids in manifest["domains"].values()) == 100
 
 
+@_requires_vendor
 def test_openrouter_deepseek_v4_flash_config_exists() -> None:
     root = Path(__file__).resolve().parents[2]
     config_path = (

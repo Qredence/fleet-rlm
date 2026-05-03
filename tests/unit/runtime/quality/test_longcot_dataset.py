@@ -32,6 +32,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 DATASET_SCRIPT = REPO_ROOT / "scripts" / "generate_longcot_gepa_dataset.py"
 DEFAULT_OUTPUT = REPO_ROOT / "output" / "longcot-eval" / "longcot_gepa_dataset.jsonl"
 
+_VENDOR_DATA_DIR = REPO_ROOT / "vendor" / "longcot" / "src" / "data"
+pytestmark = pytest.mark.skipif(
+    not _VENDOR_DATA_DIR.exists(),
+    reason="vendor/longcot data not present; skip dataset generation tests",
+)
+
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
