@@ -208,6 +208,28 @@ def client_with_patched_deps(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         yield client
 
 
+@pytest.fixture
+def client_with_mlflow_unavailable(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Create a TestClient where GEPA is installed but MLflow is unavailable."""
+    from fleet_rlm.api.routers.optimization import runs as opt_runs
+
+    monkeypatch.setattr(opt_runs, "_check_gepa_available", lambda: True)
+    monkeypatch.setattr(opt_runs, "_get_mlflow_status", lambda: (True, False))
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.optimization.background._planner_execution_context",
+        lambda: contextlib.nullcontext(),
+    )
+
+    app = create_app(
+        config=ServerRuntimeConfig(
+            app_env="local",
+            database_required=False,
+        )
+    )
+    with TestClient(app) as client:
+        yield client
+
+
 class TestBlockingOptimizationApi:
     """VAL-GEPA-006: Blocking API returns success with artifact paths."""
 
@@ -266,7 +288,7 @@ class TestBlockingOptimizationApi:
         _local_store_isolation: None,
         client_with_patched_deps: TestClient,
     ) -> None:
-        from fleet_rlm.api.schemas.core import GEPAOptimizationResponse
+        from fleet_rlm.api.schemas.optimization import GEPAOptimizationResponse
 
         output_path = tmp_path / "artifact.json"
         fake_result = _fake_optimization_result(output_path)
@@ -299,6 +321,77 @@ class TestBlockingOptimizationApi:
         validated = GEPAOptimizationResponse.model_validate(response.json())
         assert validated.ok is True
         assert validated.module_slug == "longcot-reasoner"
+
+    def test_module_run_succeeds_without_mlflow(
+        self,
+        auth_headers: dict[str, str],
+        ten_example_dataset: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _local_store_isolation: None,
+        client_with_mlflow_unavailable: TestClient,
+    ) -> None:
+        output_path = tmp_path / "artifact.json"
+        fake_result = _fake_optimization_result(output_path)
+
+        data_root = tmp_path / "optimization-data"
+        data_root.mkdir(parents=True)
+        dataset_nested = data_root / ten_example_dataset.name
+        dataset_nested.write_text(ten_example_dataset.read_text())
+        monkeypatch.setattr(
+            "fleet_rlm.api.routers.optimization._deps.OPTIMIZATION_DATA_ROOT",
+            data_root.resolve(),
+        )
+
+        with patch(
+            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            return_value=fake_result,
+        ):
+            response = client_with_mlflow_unavailable.post(
+                "/api/v1/optimization/run",
+                headers=auth_headers,
+                json={
+                    "module_slug": "longcot-reasoner",
+                    "dataset_path": str(ten_example_dataset.name),
+                    "auto": "light",
+                    "train_ratio": 0.8,
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+
+    def test_custom_run_still_requires_mlflow(
+        self,
+        auth_headers: dict[str, str],
+        ten_example_dataset: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        _local_store_isolation: None,
+        client_with_mlflow_unavailable: TestClient,
+    ) -> None:
+        data_root = tmp_path / "optimization-data"
+        data_root.mkdir(parents=True)
+        dataset_nested = data_root / ten_example_dataset.name
+        dataset_nested.write_text(ten_example_dataset.read_text())
+        monkeypatch.setattr(
+            "fleet_rlm.api.routers.optimization._deps.OPTIMIZATION_DATA_ROOT",
+            data_root.resolve(),
+        )
+
+        response = client_with_mlflow_unavailable.post(
+            "/api/v1/optimization/run",
+            headers=auth_headers,
+            json={
+                "program_spec": "pkg.module:build_program",
+                "dataset_path": str(ten_example_dataset.name),
+                "auto": "light",
+                "train_ratio": 0.8,
+            },
+        )
+
+        assert response.status_code == 503
+        assert "Custom GEPA optimization requires" in response.json()["detail"]
 
 
 class TestAsyncOptimizationApi:

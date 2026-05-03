@@ -25,7 +25,7 @@ from ..bootstrap import (
 )
 from ..config import ServerRuntimeConfig
 from ..dependencies import ServerState
-from ..schemas.core import (
+from ..schemas.runtime import (
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,

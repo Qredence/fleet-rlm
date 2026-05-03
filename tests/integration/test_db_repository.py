@@ -40,17 +40,21 @@ from fleet_rlm.integrations.database import (
     User,
     Workspace,
 )
-from fleet_rlm.integrations.database.types import (
+from fleet_rlm.integrations.database.repository_chat import (
     ArtifactCreateRequest,
     ChatSessionUpsertRequest,
     ChatTurnCreateRequest,
-    DatasetCreateRequest,
-    JobCreateRequest,
-    JobLeaseRequest,
-    MemoryItemCreateRequest,
-    OptimizationRunCreateRequest,
     RunCreateRequest,
     RunStepCreateRequest,
+)
+from fleet_rlm.integrations.database.repository_jobs import (
+    JobCreateRequest,
+    JobLeaseRequest,
+)
+from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+from fleet_rlm.integrations.database.repository_optimization import (
+    DatasetCreateRequest,
+    OptimizationRunCreateRequest,
 )
 
 pytestmark = pytest.mark.db

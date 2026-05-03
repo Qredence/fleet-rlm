@@ -12,15 +12,15 @@ from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.daytona.filesystem import (
+from fleet_rlm.integrations.daytona.volume_runtime import (
     alist_daytona_volume_tree,
-    alist_daytona_volumes,
     aread_daytona_volume_file_text,
 )
+from fleet_rlm.integrations.daytona.volume_runtime import alist_daytona_volumes
 
 from ..auth import NormalizedIdentity
 from ..dependencies import ServerState
-from ..schemas.core import (
+from ..schemas.volumes import (
     VolumeFileContentResponse,
     VolumeListItem,
     VolumeListResponse,

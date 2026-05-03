@@ -20,15 +20,17 @@ from ..runtime_services import (
     run_daytona_connection_test,
     run_lm_connection_test,
 )
-from ..schemas.core import (
+from ..schemas.runtime import (
     RuntimeConnectivityTestResponse,
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
     RuntimeStatusResponse,
+)
+from ..schemas.volumes import (
+    VolumeFileContentResponse,
     VolumeListResponse,
     VolumeProvider,
-    VolumeFileContentResponse,
     VolumeTreeResponse,
 )
 

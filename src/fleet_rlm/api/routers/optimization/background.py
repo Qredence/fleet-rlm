@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from ...runtime_services.common import run_blocking
 from ._deps import OPTIMIZATION_TIMEOUT_SECONDS

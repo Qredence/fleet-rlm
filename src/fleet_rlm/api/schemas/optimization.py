@@ -109,7 +109,23 @@ class GEPAStatusResponse(BaseModel):
     """Status payload for GEPA optimization availability."""
 
     available: bool = Field(
-        description="Whether GEPA optimization is available in this environment.",
+        description="Whether the legacy MLflow-backed GEPA optimization path is available.",
+    )
+    module_optimization_available: bool = Field(
+        default=False,
+        description="Whether registered module optimization can run in this environment.",
+    )
+    mlflow_dataset_optimization_available: bool = Field(
+        default=False,
+        description="Whether MLflow-backed dataset/program optimization can run.",
+    )
+    mlflow_logging_available: bool = Field(
+        default=False,
+        description="Whether optional MLflow logging is available for optimization runs.",
+    )
+    mlflow_configured: bool = Field(
+        default=False,
+        description="Whether MLflow is enabled/configured in the environment.",
     )
     mlflow_enabled: bool = Field(
         description="Whether MLflow is enabled and reachable.",

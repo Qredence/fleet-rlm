@@ -478,7 +478,7 @@ def test_resolve_dataset_request_accepts_relative_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.api.routers.optimization import _deps
-    from fleet_rlm.api.schemas.core import GEPAOptimizationRequest
+    from fleet_rlm.api.schemas.optimization import GEPAOptimizationRequest
 
     data_root = tmp_path / "optimization-data"
     dataset = data_root / "nested" / "examples.jsonl"
@@ -549,7 +549,7 @@ def test_resolve_dataset_request_rejects_path_escape(
     from fastapi import HTTPException
 
     from fleet_rlm.api.routers.optimization import _deps
-    from fleet_rlm.api.schemas.core import GEPAOptimizationRequest
+    from fleet_rlm.api.schemas.optimization import GEPAOptimizationRequest
 
     data_root = tmp_path / "optimization-data"
     data_root.mkdir(parents=True)

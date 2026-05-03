@@ -21,19 +21,19 @@ from fastapi import (
 )
 
 from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
-from fleet_rlm.integrations.database.types import DatasetCreateRequest
+from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest
 
 from ...dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
 from ...runtime_services.optimization_datasets import (
     build_transcript_dataset_rows,
     persist_jsonl_rows,
 )
-from ...schemas.core import (
+from ...schemas.optimization import (
     DatasetDetailResponse,
     DatasetListResponse,
     DatasetResponse,
-    TranscriptDatasetRequest,
 )
+from ...schemas.sessions import TranscriptDatasetRequest
 from ._deps import (
     AUTH_ERROR_RESPONSES,
     OPTIMIZATION_DATA_ROOT,

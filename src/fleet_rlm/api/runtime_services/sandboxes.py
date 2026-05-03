@@ -16,7 +16,11 @@ from fleet_rlm.utils.sandbox_ownership import (
     sandbox_owner_matches,
 )
 
-from ..schemas.core import SandboxDetailResponse, SandboxListItem, SandboxListResponse
+from ..schemas.sandbox import (
+    SandboxDetailResponse,
+    SandboxListItem,
+    SandboxListResponse,
+)
 
 
 async def load_sandbox_list(

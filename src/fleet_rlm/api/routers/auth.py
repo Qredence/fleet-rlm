@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..auth import AuthError, resolve_admitted_identity
 from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
-from ..schemas.core import AuthMeResponse
+from ..schemas.base import AuthMeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

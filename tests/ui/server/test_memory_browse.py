@@ -14,7 +14,7 @@ from fleet_rlm.integrations.database import (
     MemorySource,
     MemoryStatus,
 )
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 
 class _MemoryBrowseRepository:

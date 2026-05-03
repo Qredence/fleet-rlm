@@ -13,7 +13,7 @@ from typing import Any, TypeAlias, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from ...dependencies import (
     HTTPIdentityDep,
@@ -22,7 +22,7 @@ from ...dependencies import (
     ServerStateDep,
     resolve_persisted_identity,
 )
-from ...schemas.core import (
+from ...schemas.optimization import (
     DatasetResponse,
     OptimizationRunResponse,
 )

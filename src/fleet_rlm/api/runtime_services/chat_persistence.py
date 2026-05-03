@@ -27,12 +27,12 @@ from fleet_rlm.integrations.database import (
     RunStatus,
     RunStepType,
 )
-from fleet_rlm.integrations.database.types import (
-    IdentityUpsertResult,
-    MemoryItemCreateRequest,
+from fleet_rlm.integrations.database.repository_chat import (
     RunCreateRequest,
     RunStepCreateRequest,
 )
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
 
 from ..dependencies import ServerState
 

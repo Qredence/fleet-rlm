@@ -20,11 +20,13 @@ from fastapi import (
 )
 
 from fleet_rlm.integrations.database import OptimizationRunStatus
-from fleet_rlm.integrations.database.types import OptimizationRunCreateRequest
+from fleet_rlm.integrations.database.repository_optimization import (
+    OptimizationRunCreateRequest,
+)
 
 from ...dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
 from ...runtime_services.common import run_blocking
-from ...schemas.core import (
+from ...schemas.optimization import (
     EvaluationResultItem,
     EvaluationResultsResponse,
     GEPAOptimizationRequest,
@@ -112,18 +114,20 @@ def _run_module_optimization(
     )
 
 
-def _ensure_gepa_runtime_available() -> None:
+def _ensure_gepa_runtime_available(*, requires_mlflow: bool) -> None:
     if not _check_gepa_available():
         raise HTTPException(
             status_code=503,
             detail="GEPA teleprompt module is not available.",
         )
+    if not requires_mlflow:
+        return
     mlflow_configured, mlflow_enabled = _get_mlflow_status()
     if not mlflow_enabled:
         detail = (
-            "MLflow is not enabled. GEPA optimization requires MLflow."
+            "MLflow is not enabled. Custom GEPA optimization requires MLflow."
             if not mlflow_configured
-            else "MLflow is unavailable. GEPA optimization requires a reachable MLflow tracking server."
+            else "MLflow is unavailable. Custom GEPA optimization requires a reachable MLflow tracking server."
         )
         raise HTTPException(
             status_code=503,
@@ -514,7 +518,7 @@ async def run_optimization(
         repository=repository,
         identity=identity,
     )
-    _ensure_gepa_runtime_available()
+    _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
     effective_program_spec = _resolve_effective_program_spec(request)
 
     dataset, dataset_ref = await _resolve_dataset_request(
@@ -600,18 +604,7 @@ async def create_optimization_run(
         repository=repository,
         identity=identity,
     )
-    if not _check_gepa_available():
-        raise HTTPException(
-            status_code=503, detail="GEPA teleprompt module is not available."
-        )
-    mlflow_configured, mlflow_enabled = _get_mlflow_status()
-    if not mlflow_enabled:
-        detail = (
-            "MLflow is not enabled. GEPA optimization requires MLflow."
-            if not mlflow_configured
-            else "MLflow is unavailable. GEPA optimization requires a reachable MLflow tracking server."
-        )
-        raise HTTPException(status_code=503, detail=detail)
+    _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
 
     # Resolve program spec
     effective_program_spec = request.program_spec

@@ -17,7 +17,7 @@ from fleet_rlm.integrations.daytona import DaytonaConfigError
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
 from ..dependencies import ServerState
-from ..schemas.core import (
+from ..schemas.runtime import (
     RuntimeActiveModels,
     RuntimeConnectivityTestResponse,
     RuntimeStatusResponse,
@@ -316,12 +316,12 @@ async def run_daytona_connection_test(
         try:
             from fleet_rlm.integrations.daytona import resolve_daytona_config
             from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
-            from fleet_rlm.integrations.daytona.runtime import (
-                _build_daytona_client,
+            from fleet_rlm.integrations.daytona.config import (
+                build_daytona_client,
             )
 
             config = resolve_daytona_config()
-            client = _build_daytona_client(config)
+            client = build_daytona_client(config)
 
             response = await asyncio.wait_for(
                 _await_if_needed(client.list(limit=1)),

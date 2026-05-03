@@ -13,7 +13,7 @@ from starlette.routing import WebSocketRoute
 from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.integrations.database import ChatSessionStatus
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -350,7 +350,10 @@ def test_optimization_modules_endpoint_returns_longcot_reasoner(
     assert "longcot-reasoner" in slugs
     longcot = next(m for m in payload if m["slug"] == "longcot-reasoner")
     assert longcot["label"] == "LongCoT QA Reasoner"
-    assert longcot["program_spec"] == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
+    assert (
+        longcot["program_spec"]
+        == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
+    )
     assert "question" in longcot["required_dataset_keys"]
 
 
@@ -359,7 +362,7 @@ def test_optimization_modules_response_validates_against_schema(
     auth_headers: dict[str, str],
 ) -> None:
     """VAL-MOD-006: API response validates against GEPAModuleInfo schema."""
-    from fleet_rlm.api.schemas.core import GEPAModuleInfo
+    from fleet_rlm.api.schemas.optimization import GEPAModuleInfo
 
     response = default_client.get(
         "/api/v1/optimization/modules",
@@ -396,6 +399,10 @@ def test_optimization_status_reports_unavailable_mlflow(
     assert response.status_code == 200
     payload = response.json()
     assert payload["available"] is False
+    assert payload["module_optimization_available"] is True
+    assert payload["mlflow_dataset_optimization_available"] is False
+    assert payload["mlflow_logging_available"] is False
+    assert payload["mlflow_configured"] is True
     assert payload["mlflow_enabled"] is False
     assert payload["gepa_installed"] is True
     assert any("configured but unavailable" in item for item in payload["guidance"])
