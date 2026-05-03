@@ -131,6 +131,36 @@ def _make_spec(tmp_path: Path) -> ModuleOptimizationSpec:
     )
 
 
+def _make_metadata_spec(tmp_path: Path) -> ModuleOptimizationSpec:
+    """Build a spec whose examples preserve domain metadata for splitting."""
+
+    def _converter(rows: list[dict]) -> list[dspy.Example]:
+        return [
+            dspy.Example(
+                q=str(r.get("q", "")),
+                a=str(r.get("a", "")),
+                domain=str(r.get("domain", "")),
+                difficulty=str(r.get("difficulty", "")),
+            ).with_inputs("q")
+            for r in rows
+            if isinstance(r, dict) and "q" in r and "a" in r
+        ]
+
+    spec = _make_spec(tmp_path)
+    return ModuleOptimizationSpec(
+        module_slug=spec.module_slug,
+        label=spec.label,
+        program_spec=spec.program_spec,
+        artifact_filename=spec.artifact_filename,
+        input_keys=spec.input_keys,
+        required_dataset_keys=spec.required_dataset_keys,
+        module_factory=spec.module_factory,
+        row_converter=_converter,
+        metric_builder=spec.metric_builder,
+        metric_name=spec.metric_name,
+    )
+
+
 def _write_dataset(tmp_path: Path, rows: list[dict]) -> Path:
     p = tmp_path / "dataset.json"
     p.write_text(json.dumps(rows))
@@ -380,6 +410,42 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
         assert result["review_bundle"]["holdout"]["comparisons"][0]["baseline"][
             "score"
         ] == pytest.approx(1.0)
+
+
+def test_run_module_optimization_uses_metadata_stratified_split(tmp_path: Path) -> None:
+    spec = _make_metadata_spec(tmp_path)
+    dataset_path = _write_dataset(
+        tmp_path,
+        [
+            {"q": f"math-{i}", "a": str(i), "domain": "math", "difficulty": "easy"}
+            for i in range(4)
+        ]
+        + [
+            {
+                "q": f"logic-{i}",
+                "a": str(i),
+                "domain": "logic",
+                "difficulty": "easy",
+            }
+            for i in range(4)
+        ],
+    )
+
+    result = run_module_optimization(
+        spec,
+        dataset_path=dataset_path,
+        output_path=tmp_path / "out.json",
+        train_ratio=0.5,
+        auto="light",
+    )
+
+    split_reference = result["review_bundle"]["holdout"]["split_reference"]
+    assert split_reference["strategy"] == "stratified-metadata"
+    assert split_reference["validation_dataset_indexes"] == [2, 3, 6, 7]
+    assert split_reference["validation_range"] == {
+        "start": None,
+        "end_exclusive": None,
+    }
 
 
 def test_run_module_optimization_without_run_id_skips_persist(

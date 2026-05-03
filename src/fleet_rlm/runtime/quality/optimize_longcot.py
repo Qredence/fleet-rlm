@@ -219,6 +219,9 @@ def _row_converter(rows: list[dict[str, Any]]) -> list[Any]:
             question=str(row.get("question", "")),
             answer=str(row.get("answer", "")),
             reasoning=str(row.get("reasoning", "")),
+            question_id=str(row.get("question_id", "")),
+            domain=str(row.get("domain", "")),
+            difficulty=str(row.get("difficulty", "")),
         ).with_inputs("question")
         examples.append(ex)
     return examples

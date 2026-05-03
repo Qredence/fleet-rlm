@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from .artifacts import build_manifest, resolve_artifact_path, write_manifest
-from .datasets import load_dataset_rows, split_examples, validate_required_keys
+from .datasets import (
+    load_dataset_rows,
+    split_examples_with_metadata,
+    validate_required_keys,
+    validation_range_for_indexes,
+)
 from .module_registry import ModuleOptimizationSpec
 
 logger = logging.getLogger(__name__)
@@ -219,14 +224,6 @@ def _mean_score(results: list[dict[str, Any]]) -> float | None:
     return sum(float(item.get("score", 0.0)) for item in results) / len(results)
 
 
-def _holdout_dataset_indexes(
-    total_examples: int,
-    train_count: int,
-) -> list[int]:
-    """Return original dataset row indexes used in the validation split."""
-    return list(range(train_count, total_examples))
-
-
 def _match_prompt_snapshot_pairs(
     before_snapshots: list[dict[str, str]],
     after_snapshots: list[dict[str, str]],
@@ -371,7 +368,8 @@ def run_module_optimization(
     examples = spec.row_converter(valid_rows)
 
     # 4. Split
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
+    split = split_examples_with_metadata(examples, train_ratio=train_ratio)
+    trainset, valset = split.train, split.validation
 
     # 5. Build metric
     metric = spec.metric_builder()
@@ -379,7 +377,7 @@ def run_module_optimization(
     # 6. Compile — GEPA requires reflection_lm for prompt evolution
     program = spec.module_factory()
     before_snapshots = _capture_prompt_snapshots(program, "before")
-    validation_dataset_indexes = _holdout_dataset_indexes(len(examples), len(trainset))
+    validation_dataset_indexes = split.validation_indexes
     baseline_results = (
         _evaluate_per_example(program, valset, metric)
         if len(valset) >= _MIN_VAL_EXAMPLES
@@ -452,19 +450,16 @@ def run_module_optimization(
         "holdout": {
             "split_reference": {
                 "train_ratio": train_ratio,
+                "strategy": split.strategy,
+                "stratify_by": split.stratify_by,
                 "train_examples": len(trainset),
                 "validation_examples": len(valset),
+                "train_dataset_indexes": split.train_indexes,
                 "validation_dataset_indexes": validation_dataset_indexes,
-                "validation_range": {
-                    "start": validation_dataset_indexes[0]
-                    if validation_dataset_indexes
-                    else None,
-                    "end_exclusive": (
-                        validation_dataset_indexes[-1] + 1
-                        if validation_dataset_indexes
-                        else None
-                    ),
-                },
+                "validation_range": validation_range_for_indexes(
+                    validation_dataset_indexes
+                ),
+                "strata": split.strata,
             },
             "baseline_score": baseline_validation_score,
             "optimized_score": validation_score,

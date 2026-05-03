@@ -273,6 +273,7 @@ def search_annotated_trace_rows(
             experiment_ids=experiment_ids,
             max_results=max_results,
             return_type="list",
+            include_spans=False,
         )
     except Exception as exc:  # noqa: BLE001
         runtime.logger.warning(
