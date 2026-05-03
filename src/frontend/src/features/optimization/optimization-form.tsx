@@ -186,7 +186,8 @@ export function OptimizationForm({
     status?.module_optimization_available ?? status?.available ?? false;
   const customOptimizationAvailable =
     status?.mlflow_dataset_optimization_available ?? status?.available ?? false;
-  const mlflowLoggingAvailable = status?.mlflow_logging_available ?? status?.mlflow_enabled ?? false;
+  const mlflowLoggingAvailable =
+    status?.mlflow_logging_available ?? status?.mlflow_enabled ?? false;
   const available = activeModuleInfo ? moduleOptimizationAvailable : customOptimizationAvailable;
   const hasDatasetTarget = selectedDatasetId != null || datasetPath.trim() !== "";
   const canRun = available && hasDatasetTarget && resolvedProgramSpec !== "" && validRatio;

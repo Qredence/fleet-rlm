@@ -323,8 +323,8 @@ describe("OptimizationForm", () => {
     });
 
     // The SelectContent is portaled; query the document body for options
-    const option = Array.from(document.querySelectorAll('[role="option"]')).find(
-      (element) => element.textContent?.includes("LongCoT QA Reasoner"),
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((element) =>
+      element.textContent?.includes("LongCoT QA Reasoner"),
     );
     expect(option).toBeTruthy();
 
