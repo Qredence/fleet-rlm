@@ -76,8 +76,9 @@ blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion-still.png
 blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion.mp4
 
 # Output artifacts
-output/
+output/*
 !output/longcot-eval/
+!output/longcot-eval/**
 src/output/
 results/
 archive/

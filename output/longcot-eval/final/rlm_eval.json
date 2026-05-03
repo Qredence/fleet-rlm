@@ -1,0 +1,678 @@
+{
+  "total": 100,
+  "correct": 33,
+  "incorrect": 67,
+  "failed": 0,
+  "wrong_formatting": 67,
+  "accuracy": 0.33,
+  "overall_accuracy": 0.33,
+  "details": [
+    {
+      "question_id": "Dungeon_easy_13",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "WizardsTotalStrength_easy_13",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "TrapezoidCounting_easy_15",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "BlocksWorld_easy_12",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "PackagingMinWaste_easy_15",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "PackagingMinWaste_easy_5",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "Dungeon_easy_12",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "Dungeon_easy_2",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "PackagingMinWaste_easy_12",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "Sudoku_easy_4",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "TrapezoidCounting_easy_6",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "Dungeon_easy_10",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "RandomHanoi_easy_9",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "TrapezoidCounting_easy_1",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "PackagingMinWaste_easy_11",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "PackagingMinWaste_easy_13",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "BlocksWorld_easy_13",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "Sudoku_easy_6",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "TrapezoidCounting_easy_11",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "Sokoban_easy_9",
+      "domain": "logic",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "MCM_easy_17",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "MCM_easy_9",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "MCM_easy_15",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "HM_easy_26",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "DistMem_easy_4",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "DistMem_easy_8",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_36",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "MCM_easy_1",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "DistMem_easy_20",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "MCM_easy_23",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_1",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "DistMem_easy_5",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_29",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_20",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_21",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_44",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "HM_easy_14",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "HM_easy_28",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy1_2",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy1_49",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_49",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "easy1_5",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_33",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_13",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_39",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_16",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_22",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_25",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_48",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_8",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy1_18",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_42",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_27",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "HM_easy_12",
+      "domain": "cs",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy1_6",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy1_30",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_35",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy2_3",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_6",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_9",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_30",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_35",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_49",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "easy2_45",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_11",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_38",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_13",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_49",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_36",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_47",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_9",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "uci_to_fen_easy_21",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_48",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_46",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_32",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_27",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "easy2_36",
+      "domain": "chemistry",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_36",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_6",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "uci_to_fen_easy_35",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "piece_combinations_easy_40",
+      "domain": "chess",
+      "difficulty": "easy",
+      "status": "correct",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_5",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "dag_first_easy_19",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "conditional_easy_2",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_11",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "dag_easy_12",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "backtracking_easy_10",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "conditional_easy_12",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "conditional_easy_1",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "dag_first_easy_10",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_1",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "conditional_easy_15",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_12",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "correct"
+    },
+    {
+      "question_id": "linear_easy_17",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "conditional_easy_9",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "dag_first_easy_1",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_22",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    },
+    {
+      "question_id": "dag_first_easy_16",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "backtracking_easy_8",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect",
+      "wrong_formatting": true
+    },
+    {
+      "question_id": "linear_easy_23",
+      "domain": "math",
+      "difficulty": "easy",
+      "status": "incorrect"
+    }
+  ]
+}
