@@ -1,0 +1,49 @@
+{
+  "name": "longcot_mini_stratified_100_remaining_v2",
+  "source": "scripts/benchmarks/longcot_mini_stratified_100.json",
+  "domains": {
+    "cs": [
+      "HM_easy_44"
+    ],
+    "chemistry": [
+      "easy1_6"
+    ],
+    "chess": [
+      "piece_combinations_easy_49",
+      "uci_to_fen_easy_49",
+      "uci_to_fen_easy_36",
+      "piece_combinations_easy_9",
+      "piece_combinations_easy_32",
+      "uci_to_fen_easy_47",
+      "uci_to_fen_easy_21",
+      "uci_to_fen_easy_48",
+      "uci_to_fen_easy_46",
+      "uci_to_fen_easy_27",
+      "piece_combinations_easy_36",
+      "uci_to_fen_easy_35",
+      "piece_combinations_easy_40"
+    ],
+    "math": [
+      "linear_easy_11",
+      "linear_easy_6",
+      "backtracking_easy_10",
+      "dag_first_easy_19",
+      "linear_easy_5",
+      "conditional_easy_2",
+      "dag_easy_12",
+      "linear_easy_17",
+      "conditional_easy_12",
+      "conditional_easy_1",
+      "dag_first_easy_10",
+      "linear_easy_1",
+      "conditional_easy_15",
+      "linear_easy_12",
+      "dag_first_easy_16",
+      "conditional_easy_9",
+      "dag_first_easy_1",
+      "linear_easy_22",
+      "linear_easy_23",
+      "backtracking_easy_8"
+    ]
+  }
+}
