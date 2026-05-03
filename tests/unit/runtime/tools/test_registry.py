@@ -11,6 +11,10 @@ from typing import Any
 import pytest
 
 
+def _tool_names(tools: list[Any]) -> set[str]:
+    return {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+
+
 # ---------------------------------------------------------------------------
 # VAL-TOOLS-001: discover_tools() returns a list of callables
 # VAL-TOOLS-010: Stable ordering across calls
@@ -27,6 +31,58 @@ def test_discover_tools_returns_nonempty_list_of_callables() -> None:
     assert len(tools) > 0
     for tool in tools:
         assert callable(tool), f"Tool {tool!r} is not callable"
+
+
+def test_tool_modules_are_explicitly_registered() -> None:
+    """Tool discovery imports a deliberate module list, not every file in the package."""
+    from fleet_rlm.runtime.tools.registry import TOOL_MODULE_NAMES
+
+    assert TOOL_MODULE_NAMES == (
+        "buffer_tools",
+        "chunking_tools",
+        "document_tools",
+        "filesystem",
+        "memory_tools",
+        "rlm_delegate",
+        "sandbox_filesystem",
+        "sandbox_tools",
+    )
+
+
+def test_discover_tools_uses_explicit_module_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry imports only modules listed in TOOL_MODULE_NAMES."""
+    import types
+
+    from fleet_rlm.runtime.tools import registry
+    from fleet_rlm.runtime.tools._marker import tool_fn
+
+    imported: list[str] = []
+
+    def _fake_import_module(module_name: str) -> Any:
+        imported.append(module_name)
+        module = types.ModuleType(module_name)
+        tool_name = f"{module_name.rsplit('.', maxsplit=1)[-1]}_tool"
+
+        def _explicit_tool() -> str:
+            return tool_name
+
+        _explicit_tool.__name__ = tool_name
+        module.__dict__[tool_name] = tool_fn(_explicit_tool)
+        return module
+
+    monkeypatch.setattr(registry.importlib, "import_module", _fake_import_module)
+
+    tools = registry.discover_tools()
+
+    assert imported == [
+        f"fleet_rlm.runtime.tools.{module_name}"
+        for module_name in registry.TOOL_MODULE_NAMES
+    ]
+    assert _tool_names(tools) == {
+        f"{module_name}_tool" for module_name in registry.TOOL_MODULE_NAMES
+    }
 
 
 def test_discover_tools_stable_ordering() -> None:
