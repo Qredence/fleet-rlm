@@ -310,7 +310,11 @@ def _evaluate_rlm_answer(prompt: str, raw_answer: str) -> tuple[str, str, str | 
         return "error", candidate, validation_error
     # Valid answer, but flag if infrastructure failures tainted the output.
     if _contains_infra_failure_text(raw_answer):
-        return "ok_degraded", candidate, "Answer valid but infrastructure failures were reported during generation."
+        return (
+            "ok_degraded",
+            candidate,
+            "Answer valid but infrastructure failures were reported during generation.",
+        )
     return "ok", candidate, None
 
 
@@ -338,7 +342,9 @@ def _ensure_api_key() -> str:
 def _load_vendor_run_inference_module() -> ModuleType:
     """Dynamically load and cache LongCoT's inference runner for config/provider helpers."""
     script = VENDOR_LONGCOT / "run_inference.py"
-    spec = importlib.util.spec_from_file_location("vendor_longcot_run_inference", script)
+    spec = importlib.util.spec_from_file_location(
+        "vendor_longcot_run_inference", script
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to load LongCoT inference module from {script}")
 
@@ -435,7 +441,9 @@ def _load_tips_text(tips_file: Path | None) -> str | None:
     return text or None
 
 
-def _build_rlm_prompt(prompt: str, tips_text: str | None, domain: str | None = None) -> str:
+def _build_rlm_prompt(
+    prompt: str, tips_text: str | None, domain: str | None = None
+) -> str:
     """Append benchmark-specific steering and output requirements."""
     parts = [prompt.rstrip()]
     if tips_text:
@@ -678,14 +686,15 @@ def _configure_rlm_lm(config: str) -> str:
         return f"bedrock/{model}"
 
     if provider == "openrouter":
-        api_key = str(cfg.get("api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
+        api_key = str(
+            cfg.get("api_key") or os.environ.get("OPENROUTER_API_KEY") or ""
+        ).strip()
         if not api_key:
             print("ERROR: OPENROUTER_API_KEY not set in environment or config")
             sys.exit(1)
 
         api_base = (
-            os.environ.get("OPENROUTER_API_BASE")
-            or "https://openrouter.ai/api/v1"
+            os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1"
         ).strip()
         dspy_model = model if model.startswith("openrouter/") else f"openrouter/{model}"
         os.environ["OPENROUTER_API_KEY"] = api_key
@@ -833,7 +842,6 @@ def run_rlm(
         response_text = ""
         error: str | None = None
         runtime_status = "not_started"
-        transport_status = "not_started"
         transport_success = False
         trace_metadata: dict[str, Any] = {}
         mlflow_result_metadata: dict[str, str] = {}
@@ -960,7 +968,9 @@ def run_rlm(
     flush_mlflow_traces()
 
     succeeded = sum(1 for r in results if r["successful"])
-    print(f"\nRLM mode complete: {succeeded}/{len(results)} transport-successful responses")
+    print(
+        f"\nRLM mode complete: {succeeded}/{len(results)} transport-successful responses"
+    )
     print(f"Results: {output_file}")
 
     summary = _build_summary(

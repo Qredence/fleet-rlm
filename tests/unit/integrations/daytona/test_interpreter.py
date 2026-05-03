@@ -347,7 +347,9 @@ def test_daytona_interpreter_raises_on_bad_marker_leak() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
-    with pytest.raises(CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"):
+    with pytest.raises(
+        CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"
+    ):
         interpreter.execute("if True:\n    pass\nelse\n[[ ## completed ## ]]")
 
 

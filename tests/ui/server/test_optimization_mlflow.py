@@ -15,7 +15,7 @@ import pytest
 def _mock_planner_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "fleet_rlm.api.routers.optimization.background._planner_execution_context",
-        lambda: contextlib.nullcontext(),
+        contextlib.nullcontext,
     )
 
 
