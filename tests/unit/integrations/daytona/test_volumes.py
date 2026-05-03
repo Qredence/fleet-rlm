@@ -12,12 +12,10 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     DaytonaDiagnosticError,
     VolumeNotReadyError,
 )
-from fleet_rlm.integrations.daytona.runtime import (
-    _await_volume_ready,
-)
-from fleet_rlm.integrations.daytona.filesystem import (
+from fleet_rlm.integrations.daytona.volume_runtime import (
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
+    await_volume_ready as _await_volume_ready,
 )
 
 
@@ -89,7 +87,7 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.filesystem._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -147,7 +145,7 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.filesystem._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -186,7 +184,7 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.filesystem._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 

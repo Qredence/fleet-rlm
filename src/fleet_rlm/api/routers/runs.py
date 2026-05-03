@@ -13,7 +13,7 @@ from ..dependencies import (
     RepositoryDep,
     ServerStateDep,
 )
-from ..schemas.core import RunStepItem, RunStepListResponse
+from ..schemas.sandbox import RunStepItem, RunStepListResponse
 
 router = APIRouter(
     prefix="/runs",

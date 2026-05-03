@@ -50,13 +50,6 @@ function formatDate(iso: string): string {
   });
 }
 
-const MODULE_SLUGS = [
-  { value: "reflect-and-revise", label: "Reflect & Revise" },
-  { value: "recursive-context-selection", label: "Recursive Context Selection" },
-  { value: "recursive-decomposition", label: "Recursive Decomposition" },
-  { value: "recursive-repair", label: "Recursive Repair" },
-  { value: "recursive-verification", label: "Recursive Verification" },
-] as const;
 const EMPTY_MODULES: GEPAModuleInfo[] = [];
 
 function sortConversations(conversations: Conversation[]) {
@@ -91,11 +84,13 @@ function SessionRow({
   session,
   conversation,
   onPrepareRun,
+  modules,
   moduleProgramSpecsBySlug,
 }: {
   session: SessionListItem;
   conversation?: Conversation;
   onPrepareRun?: (draft: OptimizationRunDraft) => void;
+  modules: GEPAModuleInfo[];
   moduleProgramSpecsBySlug: Map<string, string>;
 }) {
   const queryClient = useQueryClient();
@@ -168,8 +163,8 @@ function SessionRow({
             <SelectValue placeholder="Select module…" />
           </SelectTrigger>
           <SelectContent>
-            {MODULE_SLUGS.map((mod) => (
-              <SelectItem key={mod.value} value={mod.value}>
+            {modules.map((mod) => (
+              <SelectItem key={mod.slug} value={mod.slug}>
                 {mod.label}
               </SelectItem>
             ))}
@@ -180,6 +175,7 @@ function SessionRow({
           size="sm"
           disabled={
             !selectedModule ||
+            modules.length === 0 ||
             optimizeMutation.isPending ||
             (conversation ? transcriptTurns?.length === 0 : false)
           }
@@ -203,9 +199,11 @@ function SessionRow({
 
 function SessionsSection({
   onPrepareRun,
+  modules,
   moduleProgramSpecsBySlug,
 }: {
   onPrepareRun?: (draft: OptimizationRunDraft) => void;
+  modules: GEPAModuleInfo[];
   moduleProgramSpecsBySlug: Map<string, string>;
 }) {
   const localConversations = useWorkspaceLayoutHistory();
@@ -269,6 +267,7 @@ function SessionsSection({
                 session={session}
                 conversation={conversation}
                 onPrepareRun={onPrepareRun}
+                modules={modules}
                 moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
               />
             ))}
@@ -296,6 +295,7 @@ function SessionsSection({
               key={session.id}
               session={session}
               onPrepareRun={onPrepareRun}
+              modules={modules}
               moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
             />
           ))}
@@ -538,6 +538,7 @@ export function DatasetsTab({
       {/* Session export */}
       <SessionsSection
         onPrepareRun={onPrepareRun}
+        modules={modules}
         moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
       />
     </div>

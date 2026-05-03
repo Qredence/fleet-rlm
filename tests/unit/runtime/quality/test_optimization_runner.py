@@ -131,6 +131,36 @@ def _make_spec(tmp_path: Path) -> ModuleOptimizationSpec:
     )
 
 
+def _make_metadata_spec(tmp_path: Path) -> ModuleOptimizationSpec:
+    """Build a spec whose examples preserve domain metadata for splitting."""
+
+    def _converter(rows: list[dict]) -> list[dspy.Example]:
+        return [
+            dspy.Example(
+                q=str(r.get("q", "")),
+                a=str(r.get("a", "")),
+                domain=str(r.get("domain", "")),
+                difficulty=str(r.get("difficulty", "")),
+            ).with_inputs("q")
+            for r in rows
+            if isinstance(r, dict) and "q" in r and "a" in r
+        ]
+
+    spec = _make_spec(tmp_path)
+    return ModuleOptimizationSpec(
+        module_slug=spec.module_slug,
+        label=spec.label,
+        program_spec=spec.program_spec,
+        artifact_filename=spec.artifact_filename,
+        input_keys=spec.input_keys,
+        required_dataset_keys=spec.required_dataset_keys,
+        module_factory=spec.module_factory,
+        row_converter=_converter,
+        metric_builder=spec.metric_builder,
+        metric_name=spec.metric_name,
+    )
+
+
 def _write_dataset(tmp_path: Path, rows: list[dict]) -> Path:
     p = tmp_path / "dataset.json"
     p.write_text(json.dumps(rows))
@@ -292,6 +322,7 @@ def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
 
     assert result["train_examples"] == 8
     assert result["validation_examples"] == 2
+    assert result["baseline_validation_score"] == 1.0
     # Per-example eval with metric returning score=1.0 → average = 1.0
     assert result["validation_score"] == 1.0
     assert result["optimizer"] == "GEPA"
@@ -302,6 +333,13 @@ def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
     manifest = json.loads(Path(result["manifest_path"]).read_text())
     assert manifest["train_examples"] == 8
     assert manifest["metric"] == "test_metric"
+    assert manifest["review_bundle"]["holdout"]["baseline_score"] == 1.0
+    assert manifest["review_bundle"]["holdout"]["optimized_score"] == 1.0
+    assert manifest["review_bundle"]["artifact"]["loader"] == "dspy.Module.load"
+    assert result["review_bundle"]["holdout"]["comparisons"]
+    assert result["run_metadata"]["review_bundle"]["holdout"]["split_reference"][
+        "validation_dataset_indexes"
+    ] == [8, 9]
 
 
 def test_run_module_optimization_no_validation(tmp_path: Path) -> None:
@@ -354,7 +392,7 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
     with patch(
         "fleet_rlm.runtime.quality.optimization_runner._persist_run_artifacts"
     ) as mock_persist:
-        run_module_optimization(
+        result = run_module_optimization(
             spec,
             dataset_path=dataset_path,
             output_path=tmp_path / "out.json",
@@ -369,6 +407,45 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
         per_example = call_args[0][1]
         assert len(per_example) == 2  # 2 validation examples
         assert all(r["score"] == 1.0 for r in per_example)
+        assert result["review_bundle"]["holdout"]["comparisons"][0]["baseline"][
+            "score"
+        ] == pytest.approx(1.0)
+
+
+def test_run_module_optimization_uses_metadata_stratified_split(tmp_path: Path) -> None:
+    spec = _make_metadata_spec(tmp_path)
+    dataset_path = _write_dataset(
+        tmp_path,
+        [
+            {"q": f"math-{i}", "a": str(i), "domain": "math", "difficulty": "easy"}
+            for i in range(4)
+        ]
+        + [
+            {
+                "q": f"logic-{i}",
+                "a": str(i),
+                "domain": "logic",
+                "difficulty": "easy",
+            }
+            for i in range(4)
+        ],
+    )
+
+    result = run_module_optimization(
+        spec,
+        dataset_path=dataset_path,
+        output_path=tmp_path / "out.json",
+        train_ratio=0.5,
+        auto="light",
+    )
+
+    split_reference = result["review_bundle"]["holdout"]["split_reference"]
+    assert split_reference["strategy"] == "stratified-metadata"
+    assert split_reference["validation_dataset_indexes"] == [2, 3, 6, 7]
+    assert split_reference["validation_range"] == {
+        "start": None,
+        "end_exclusive": None,
+    }
 
 
 def test_run_module_optimization_without_run_id_skips_persist(

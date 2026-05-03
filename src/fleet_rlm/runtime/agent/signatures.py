@@ -39,6 +39,21 @@ class MemoryMigrationOperation(TypedDict):
     reason: str
 
 
+class LongCoTQASignature(dspy.Signature):
+    """Long chain-of-thought question answering signature.
+
+    The model should produce detailed step-by-step reasoning before giving
+    the concise final answer.  The *reasoning* field is the primary
+    long-context chain of thought; *answer* is the distilled result.
+    """
+
+    question: str = dspy.InputField(desc="The question to answer")
+    reasoning: str = dspy.OutputField(
+        desc="Detailed step-by-step reasoning and chain of thought"
+    )
+    answer: str = dspy.OutputField(desc="Concise final answer")
+
+
 class RLMReActChatSignature(dspy.Signature):
     """Interactive ReAct chat signature with explicit conversation history."""
 
@@ -407,6 +422,9 @@ class VerifyRecursiveAggregation(dspy.Signature):
     latest_sandbox_evidence: str = dspy.InputField(
         desc="Latest bounded sandbox, tool, or code evidence summary relevant to the aggregate"
     )
+    candidate_answer: str = dspy.InputField(
+        desc="The full candidate answer produced by the recursive subqueries, to be verified"
+    )
     verification_status: Literal[
         "sufficient",
         "needs_repair",
@@ -521,6 +539,7 @@ __all__ = [
     "GroundedCitation",
     "IncidentTriageFromLogs",
     "AssembleRecursiveWorkspaceContext",
+    "LongCoTQASignature",
     "PlanRecursiveRepair",
     "PlanRecursiveSubqueries",
     "MemoryActionIntentSignature",

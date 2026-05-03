@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id as _sanitize_id
 from fleet_rlm.utils.identity import session_key
 
@@ -111,7 +111,9 @@ async def _link_database_session(
     if repository is not None and identity_rows is not None:
         try:
             from fleet_rlm.integrations.database import ChatSessionStatus
-            from fleet_rlm.integrations.database.types import ChatSessionUpsertRequest
+            from fleet_rlm.integrations.database.repository_chat import (
+                ChatSessionUpsertRequest,
+            )
 
             workspace_uuid = (
                 identity_rows.workspace_id

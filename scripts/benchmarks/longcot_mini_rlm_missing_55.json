@@ -1,0 +1,70 @@
+{
+  "name": "longcot-mini-rlm-missing-55",
+  "seed": 42,
+  "description": "Remaining 55 RLM tasks not yet completed",
+  "domains": {
+    "cs": [
+      "HM_easy_12"
+    ],
+    "chemistry": [
+      "easy2_48",
+      "easy2_16",
+      "easy2_25",
+      "easy1_22",
+      "easy1_8",
+      "easy1_18",
+      "easy2_27",
+      "easy1_42",
+      "easy2_36",
+      "easy2_35",
+      "easy1_6",
+      "easy2_3",
+      "easy1_30",
+      "easy2_45"
+    ],
+    "chess": [
+      "uci_to_fen_easy_9",
+      "uci_to_fen_easy_6",
+      "piece_combinations_easy_35",
+      "uci_to_fen_easy_30",
+      "piece_combinations_easy_49",
+      "uci_to_fen_easy_38",
+      "uci_to_fen_easy_11",
+      "uci_to_fen_easy_13",
+      "uci_to_fen_easy_49",
+      "uci_to_fen_easy_36",
+      "piece_combinations_easy_9",
+      "piece_combinations_easy_32",
+      "uci_to_fen_easy_47",
+      "uci_to_fen_easy_21",
+      "uci_to_fen_easy_48",
+      "uci_to_fen_easy_46",
+      "uci_to_fen_easy_27",
+      "piece_combinations_easy_36",
+      "uci_to_fen_easy_35",
+      "piece_combinations_easy_40"
+    ],
+    "math": [
+      "linear_easy_11",
+      "linear_easy_6",
+      "backtracking_easy_10",
+      "dag_first_easy_19",
+      "linear_easy_5",
+      "conditional_easy_2",
+      "dag_easy_12",
+      "linear_easy_17",
+      "conditional_easy_12",
+      "conditional_easy_1",
+      "dag_first_easy_10",
+      "linear_easy_1",
+      "conditional_easy_15",
+      "linear_easy_12",
+      "dag_first_easy_16",
+      "conditional_easy_9",
+      "dag_first_easy_1",
+      "linear_easy_22",
+      "linear_easy_23",
+      "backtracking_easy_8"
+    ]
+  }
+}

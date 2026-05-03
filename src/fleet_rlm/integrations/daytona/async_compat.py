@@ -1,4 +1,9 @@
-"""Async/sync compatibility bridge for the Daytona integration."""
+"""Async/sync compatibility bridge for the Daytona integration.
+
+TODO(sdk-sync): If the Daytona SDK (>=0.171) adds native synchronous wrappers,
+this persistent-background-loop runner (~120 LOC) can be eliminated entirely.
+Monitor the SDK changelog for sync client support.
+"""
 
 from __future__ import annotations
 

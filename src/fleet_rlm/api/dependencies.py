@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request, Security, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity, resolve_admitted_identity

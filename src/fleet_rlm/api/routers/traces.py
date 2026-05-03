@@ -13,7 +13,7 @@ from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..dependencies import HTTPIdentityDep, PersistedIdentityDep, RepositoryDep
 from ..runtime_services.common import RUNTIME_TEST_TIMEOUT_SECONDS, run_blocking
-from ..schemas.core import TraceFeedbackRequest, TraceFeedbackResponse
+from ..schemas.feedback import TraceFeedbackRequest, TraceFeedbackResponse
 
 logger = logging.getLogger(__name__)
 

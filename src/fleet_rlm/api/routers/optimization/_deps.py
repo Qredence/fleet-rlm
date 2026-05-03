@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -12,7 +13,7 @@ from typing import Any, TypeAlias, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from ...dependencies import (
     HTTPIdentityDep,
@@ -21,7 +22,7 @@ from ...dependencies import (
     ServerStateDep,
     resolve_persisted_identity,
 )
-from ...schemas.core import (
+from ...schemas.optimization import (
     DatasetResponse,
     OptimizationRunResponse,
 )
@@ -54,7 +55,23 @@ AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     },
 }
 
-OPTIMIZATION_TIMEOUT_SECONDS = 900
+
+def _resolve_optimization_timeout_seconds() -> int:
+    """Return the configured optimization timeout with a safe fallback."""
+    raw_value = (os.environ.get("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS") or "").strip()
+    if not raw_value:
+        return 900
+    try:
+        return max(int(raw_value), 1)
+    except ValueError:
+        logger.warning(
+            "Invalid FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS=%r; falling back to 900s",
+            raw_value,
+        )
+        return 900
+
+
+OPTIMIZATION_TIMEOUT_SECONDS = _resolve_optimization_timeout_seconds()
 
 OPTIMIZATION_DATA_ROOT = Path(
     os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())
@@ -100,6 +117,14 @@ def _extract_metadata_str(metadata: object, key: str) -> str | None:
     if isinstance(metadata, dict):
         val = cast("dict[str, Any]", metadata).get(key)
         return str(val) if val is not None else None
+    if isinstance(metadata, str):
+        try:
+            parsed = json.loads(metadata)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            val = cast("dict[str, Any]", parsed).get(key)
+            return str(val) if val is not None else None
     return None
 
 

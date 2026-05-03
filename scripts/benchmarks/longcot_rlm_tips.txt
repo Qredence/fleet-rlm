@@ -1,0 +1,7 @@
+- Treat each LongCoT task as a compositional dependency problem: identify subproblems, solve them in a useful order, and carry verified results forward.
+- Do not brute-force large search spaces when a bounded algorithmic check, dynamic program, parser, or simulation can solve the subproblem directly.
+- When you compute or delegate a sub-answer, verify it before trusting it. If a child result is uncertain, re-check it instead of building more work on top of it.
+- Prefer small, deterministic scripts or simulations over open-ended exploration. Keep code bounded and terminate once the answer is established.
+- Preserve exact intermediate values, states, and move sequences. Do not summarize away details that downstream steps need.
+- Before finishing, ensure the final answer matches the benchmark format exactly: `solution = ...`
+- Never truncate long outputs, replace sections with ellipses, or wrap the final answer in prose if the exact solution can be emitted directly.

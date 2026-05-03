@@ -10,6 +10,7 @@ import pytest
 from fleet_rlm.runtime.quality.datasets import (
     load_dataset_rows,
     split_examples,
+    split_examples_with_metadata,
     validate_required_keys,
 )
 
@@ -101,3 +102,50 @@ def test_split_examples_full_train() -> None:
     train, val = split_examples(items, train_ratio=1.0)
     assert len(train) == 2
     assert len(val) == 1
+
+
+def test_split_examples_with_metadata_stratifies_by_domain() -> None:
+    class Example:
+        def __init__(self, value: int, domain: str, difficulty: str) -> None:
+            self.value = value
+            self.domain = domain
+            self.difficulty = difficulty
+
+    items = [
+        Example(0, "math", "easy"),
+        Example(1, "math", "easy"),
+        Example(2, "math", "easy"),
+        Example(3, "math", "easy"),
+        Example(4, "logic", "easy"),
+        Example(5, "logic", "easy"),
+        Example(6, "logic", "easy"),
+        Example(7, "logic", "easy"),
+    ]
+
+    split = split_examples_with_metadata(items, train_ratio=0.5)
+
+    assert split.strategy == "stratified-metadata"
+    assert split.train_indexes == [0, 1, 4, 5]
+    assert split.validation_indexes == [2, 3, 6, 7]
+    assert [item.domain for item in split.validation] == [
+        "math",
+        "math",
+        "logic",
+        "logic",
+    ]
+    assert split.strata["domain=math|difficulty=easy"] == {
+        "total": 4,
+        "train": 2,
+        "validation": 2,
+    }
+
+
+def test_split_examples_with_metadata_falls_back_without_metadata() -> None:
+    items = list(range(10))
+
+    split = split_examples_with_metadata(items, train_ratio=0.8)
+
+    assert split.strategy == "prefix"
+    assert split.train == list(range(8))
+    assert split.validation == [8, 9]
+    assert split.validation_indexes == [8, 9]

@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _mock_planner_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fleet_rlm.api.routers.optimization.background._planner_execution_context",
+        contextlib.nullcontext,
+    )
 
 
 def _make_runner_kwargs(tmp_path: Path) -> dict:
@@ -33,6 +43,98 @@ def _run_local(**kwargs) -> None:
     asyncio.run(run_optimization_background(**kwargs, persistence="local"))
 
 
+def _review_bundle_result(tmp_path: Path) -> dict:
+    output_path = tmp_path / "artifact.json"
+    output_path.write_text('{"predictors": {}}', encoding="utf-8")
+    manifest_path = tmp_path / "artifact.manifest.json"
+    manifest_path.write_text('{"review_bundle": {"version": 1}}', encoding="utf-8")
+    review_bundle = {
+        "version": 1,
+        "artifact": {
+            "path": str(output_path),
+            "manifest_path": str(manifest_path),
+            "filename": output_path.name,
+            "size_bytes": output_path.stat().st_size,
+            "loader": "dspy.Module.load",
+        },
+        "holdout": {
+            "split_reference": {
+                "train_ratio": 0.8,
+                "train_examples": 4,
+                "validation_examples": 1,
+                "validation_dataset_indexes": [4],
+                "validation_range": {"start": 4, "end_exclusive": 5},
+            },
+            "baseline_score": 0.35,
+            "optimized_score": 0.85,
+            "score_delta": 0.5,
+            "comparisons": [
+                {
+                    "validation_example_index": 0,
+                    "dataset_row_index": 4,
+                    "input_data": "{}",
+                    "expected_output": "hello",
+                    "baseline": {"predicted_output": "hi", "score": 0.35},
+                    "optimized": {"predicted_output": "hello", "score": 0.85},
+                }
+            ],
+        },
+        "prompt_snapshots": {
+            "matched_predictors": [
+                {
+                    "predictor_name": "predict",
+                    "before_prompt": "Before.",
+                    "after_prompt": "After.",
+                }
+            ],
+            "total_snapshots": 2,
+        },
+        "reflection_model": {
+            "model": "delegate-model",
+            "source": "delegate",
+        },
+    }
+    manifest_path.write_text(
+        json.dumps({"review_bundle": review_bundle}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return {
+        "train_examples": 4,
+        "validation_examples": 1,
+        "baseline_validation_score": 0.35,
+        "validation_score": 0.85,
+        "output_path": str(output_path),
+        "manifest_path": str(manifest_path),
+        "evaluation_results": [
+            {
+                "example_index": 0,
+                "input_data": "{}",
+                "expected_output": "hello",
+                "predicted_output": "hello",
+                "score": 0.85,
+            }
+        ],
+        "prompt_snapshots": [
+            {
+                "predictor_name": "predict",
+                "prompt_type": "before",
+                "prompt_text": "Before.",
+            },
+            {
+                "predictor_name": "predict",
+                "prompt_type": "after",
+                "prompt_text": "After.",
+            },
+        ],
+        "review_bundle": review_bundle,
+        "run_metadata": {
+            "module_slug": "test-mod",
+            "dataset_path": "data.jsonl",
+            "review_bundle": review_bundle,
+        },
+    }
+
+
 class TestBackgroundRunnerMlflowAvailable:
     """When MLflow is available, initialize + start_run are invoked."""
 
@@ -49,14 +151,10 @@ class TestBackgroundRunnerMlflowAvailable:
         log_metric_mock = MagicMock()
         log_params_mock = MagicMock()
         set_tags_mock = MagicMock()
+        log_dict_mock = MagicMock()
+        log_artifact_mock = MagicMock()
 
-        fake_result = {
-            "train_examples": 4,
-            "validation_examples": 1,
-            "validation_score": 0.85,
-            "output_path": None,
-            "manifest_path": None,
-        }
+        fake_result = _review_bundle_result(tmp_path)
         run_mod_mock = MagicMock(return_value=fake_result)
         spec_mock = MagicMock()
 
@@ -69,6 +167,8 @@ class TestBackgroundRunnerMlflowAvailable:
             patch("mlflow.log_metric", log_metric_mock, create=True),
             patch("mlflow.log_params", log_params_mock, create=True),
             patch("mlflow.set_tags", set_tags_mock, create=True),
+            patch("mlflow.log_dict", log_dict_mock, create=True),
+            patch("mlflow.log_artifact", log_artifact_mock, create=True),
             patch(
                 "fleet_rlm.runtime.quality.module_registry.get_module_spec",
                 return_value=spec_mock,
@@ -95,14 +195,20 @@ class TestBackgroundRunnerMlflowAvailable:
         init_mock.assert_called_once()
         start_run_mock.assert_called_once()
         assert "GEPA::test-mod" in str(start_run_mock.call_args)
-        log_params_mock.assert_called_once_with(
+        log_params_mock.assert_any_call(
             {
                 "gepa.auto": "light",
                 "gepa.train_ratio": 0.8,
                 "gepa.dataset_name": "data.jsonl",
             }
         )
-        set_tags_mock.assert_called_once_with(
+        log_params_mock.assert_any_call(
+            {
+                "gepa.validation_split_range": "4:5",
+                "gepa.validation_split_count": 1,
+            }
+        )
+        set_tags_mock.assert_any_call(
             {
                 "fleet.optimizer": "GEPA",
                 "fleet.optimization_source": "api_background",
@@ -110,9 +216,23 @@ class TestBackgroundRunnerMlflowAvailable:
                 "fleet.module_slug": "test-mod",
             }
         )
+        set_tags_mock.assert_any_call(
+            {
+                "gepa.reflection_model": "delegate-model",
+                "gepa.reflection_model_source": "delegate",
+                "fleet.optimization_run_id": "1",
+            }
+        )
         log_metric_mock.assert_any_call("gepa_train_examples", 4)
         log_metric_mock.assert_any_call("gepa_validation_examples", 1)
         log_metric_mock.assert_any_call("gepa_validation_score", 0.85)
+        log_metric_mock.assert_any_call("gepa_baseline_validation_score", 0.35)
+        log_metric_mock.assert_any_call("gepa_validation_score_delta", 0.5)
+        log_dict_mock.assert_called_once_with(
+            fake_result["review_bundle"],
+            "optimization_review_bundle.json",
+        )
+        assert log_artifact_mock.call_count == 2
         ctx_mock.__exit__.assert_called_once()
 
 
@@ -127,13 +247,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         init_mock = MagicMock(return_value=False)
         complete_mock = MagicMock()
 
-        fake_result = {
-            "train_examples": 4,
-            "validation_examples": 1,
-            "validation_score": 0.9,
-            "output_path": None,
-            "manifest_path": None,
-        }
+        fake_result = _review_bundle_result(tmp_path) | {"validation_score": 0.9}
         run_mod_mock = MagicMock(return_value=fake_result)
         spec_mock = MagicMock()
 
@@ -168,6 +282,10 @@ class TestBackgroundRunnerMlflowUnavailable:
         run_mod_mock.assert_called_once()
         complete_mock.assert_called_once()
         assert complete_mock.call_args.kwargs.get("validation_score") == 0.9
+        assert (
+            complete_mock.call_args.kwargs.get("metadata_json")
+            == fake_result["run_metadata"]
+        )
 
     def test_mlflow_import_error_does_not_block(
         self,
@@ -181,6 +299,7 @@ class TestBackgroundRunnerMlflowUnavailable:
             "validation_examples": 1,
             "output_path": None,
             "manifest_path": None,
+            "run_metadata": {"module_slug": "test-mod"},
         }
         run_mod_mock = MagicMock(return_value=fake_result)
         spec_mock = MagicMock()
@@ -232,8 +351,12 @@ def test_background_runner_marks_planner_bootstrap_failure_as_failed(
 
     with (
         patch(
-            "fleet_rlm.api.routers.optimization.background.configure_planner_from_env",
+            "fleet_rlm.api.routers.optimization.background._planner_execution_context",
             side_effect=RuntimeError("planner bootstrap failed"),
+        ),
+        patch(
+            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            return_value=MagicMock(),
         ),
         patch("fleet_rlm.integrations.local_store.fail_optimization_run", fail_mock),
         patch(
@@ -303,12 +426,59 @@ def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
     complete_mock.assert_called_once()
 
 
+def test_local_background_persists_review_artifacts_from_runner_result(
+    tmp_path: Path,
+) -> None:
+    save_results_mock = MagicMock()
+    save_snapshots_mock = MagicMock()
+    complete_mock = MagicMock()
+    fake_result = _review_bundle_result(tmp_path)
+    run_mod_mock = MagicMock(return_value=fake_result)
+    spec_mock = MagicMock()
+
+    with (
+        patch(
+            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            return_value=spec_mock,
+        ),
+        patch(
+            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            run_mod_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
+            MagicMock(),
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.complete_optimization_run",
+            complete_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.fail_optimization_run",
+            MagicMock(),
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.save_evaluation_results",
+            save_results_mock,
+        ),
+        patch(
+            "fleet_rlm.integrations.local_store.save_prompt_snapshots",
+            save_snapshots_mock,
+        ),
+    ):
+        _run_local(**_make_runner_kwargs(tmp_path))
+
+    save_results_mock.assert_called_once_with(1, fake_result["evaluation_results"])
+    save_snapshots_mock.assert_called_once_with(1, fake_result["prompt_snapshots"])
+    complete_mock.assert_called_once()
+
+
 def test_resolve_dataset_request_accepts_relative_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.api.routers.optimization import _deps
-    from fleet_rlm.api.schemas.core import GEPAOptimizationRequest
+    from fleet_rlm.api.schemas.optimization import GEPAOptimizationRequest
 
     data_root = tmp_path / "optimization-data"
     dataset = data_root / "nested" / "examples.jsonl"
@@ -325,6 +495,22 @@ def test_resolve_dataset_request_accepts_relative_path(
 
     assert resolved == dataset.resolve()
     assert dataset_ref == "nested/examples.jsonl"
+
+
+def test_optimization_timeout_respects_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    from fleet_rlm.api.routers.optimization import _deps
+
+    monkeypatch.setenv("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS", "1234")
+    reloaded = importlib.reload(_deps)
+    try:
+        assert reloaded.OPTIMIZATION_TIMEOUT_SECONDS == 1234
+    finally:
+        monkeypatch.delenv("FLEET_RLM_OPTIMIZATION_TIMEOUT_SECONDS", raising=False)
+        importlib.reload(reloaded)
 
 
 def test_gepa_background_rejects_none_repository(
@@ -363,7 +549,7 @@ def test_resolve_dataset_request_rejects_path_escape(
     from fastapi import HTTPException
 
     from fleet_rlm.api.routers.optimization import _deps
-    from fleet_rlm.api.schemas.core import GEPAOptimizationRequest
+    from fleet_rlm.api.schemas.optimization import GEPAOptimizationRequest
 
     data_root = tmp_path / "optimization-data"
     data_root.mkdir(parents=True)

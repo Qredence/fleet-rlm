@@ -54,6 +54,30 @@ def test_save_and_get_evaluation_results():
     assert items[2].score == pytest.approx(0.4)
 
 
+def test_save_evaluation_results_replaces_existing_rows():
+    from fleet_rlm.integrations.local_store import (
+        get_evaluation_results,
+        save_evaluation_results,
+    )
+
+    run_id = _create_run()
+    save_evaluation_results(
+        run_id,
+        [{"example_index": 0, "input_data": "{}", "score": 0.1}],
+    )
+    save_evaluation_results(
+        run_id,
+        [
+            {"example_index": 0, "input_data": "{}", "score": 0.9},
+            {"example_index": 1, "input_data": "{}", "score": 0.8},
+        ],
+    )
+
+    items, total = get_evaluation_results(run_id)
+    assert total == 2
+    assert [item.score for item in items] == [pytest.approx(0.9), pytest.approx(0.8)]
+
+
 def test_evaluation_results_pagination():
     from fleet_rlm.integrations.local_store import (
         get_evaluation_results,
@@ -131,6 +155,47 @@ def test_save_and_get_prompt_snapshots():
     assert fetched[1].prompt_type == "before"
     assert fetched[2].predictor_name == "refine_answer"
     assert fetched[3].predictor_name == "refine_answer"
+
+
+def test_save_prompt_snapshots_replaces_existing_rows():
+    from fleet_rlm.integrations.local_store import (
+        get_prompt_snapshots,
+        save_prompt_snapshots,
+    )
+
+    run_id = _create_run()
+    save_prompt_snapshots(
+        run_id,
+        [
+            {
+                "predictor_name": "predict",
+                "prompt_type": "before",
+                "prompt_text": "old",
+            }
+        ],
+    )
+    save_prompt_snapshots(
+        run_id,
+        [
+            {
+                "predictor_name": "predict",
+                "prompt_type": "before",
+                "prompt_text": "new-before",
+            },
+            {
+                "predictor_name": "predict",
+                "prompt_type": "after",
+                "prompt_text": "new-after",
+            },
+        ],
+    )
+
+    snapshots = get_prompt_snapshots(run_id)
+    assert len(snapshots) == 2
+    assert {snapshot.prompt_text for snapshot in snapshots} == {
+        "new-before",
+        "new-after",
+    }
 
 
 def test_evaluation_results_empty_run():

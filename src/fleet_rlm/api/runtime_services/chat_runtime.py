@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
 

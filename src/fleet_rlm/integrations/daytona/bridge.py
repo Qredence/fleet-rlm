@@ -2,6 +2,10 @@
 
 Includes embedded broker assets (server code, tool wrapper templates) that
 were previously in bridge_assets.py.
+
+FUTURE: If the Daytona SDK introduces a native callback or event system for
+sandbox-to-host communication, this Flask-based broker (~300 LOC) could be
+replaced. Monitor the SDK roadmap for webhook/callback infrastructure.
 """
 
 from __future__ import annotations

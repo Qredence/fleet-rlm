@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from .artifacts import build_manifest, resolve_artifact_path, write_manifest
-from .datasets import load_dataset_rows, split_examples, validate_required_keys
+from .datasets import (
+    load_dataset_rows,
+    split_examples_with_metadata,
+    validate_required_keys,
+    validation_range_for_indexes,
+)
 from .module_registry import ModuleOptimizationSpec
 
 logger = logging.getLogger(__name__)
@@ -29,6 +35,7 @@ class OptimizationResult(TypedDict):
 
     train_examples: int
     validation_examples: int
+    baseline_validation_score: float | None
     validation_score: float | None
     output_path: str
     manifest_path: str
@@ -37,6 +44,8 @@ class OptimizationResult(TypedDict):
     module_slug: str
     evaluation_results: list[dict[str, Any]]
     prompt_snapshots: list[dict[str, str]]
+    review_bundle: dict[str, Any]
+    run_metadata: dict[str, Any]
 
 
 def _persist_run_artifacts(
@@ -90,6 +99,34 @@ def _resolve_reflection_lm() -> Any:
         "Set DSPY_LM_MODEL (and DSPY_LLM_API_KEY) or DSPY_DELEGATE_LM_MODEL "
         "in the environment or a .env file."
     )
+
+
+def _resolve_model_name(lm: Any) -> str:
+    """Return a stable model identifier for a DSPy LM-like object."""
+    for attr in ("model", "model_name"):
+        value = getattr(lm, attr, None)
+        if value:
+            return str(value)
+    return "unknown"
+
+
+def _reflection_lm_provenance(reflection_lm: Any) -> dict[str, str]:
+    """Describe which reflection LM was selected and why."""
+    delegate_model = (os.environ.get("DSPY_DELEGATE_LM_MODEL") or "").strip()
+    planner_model = (os.environ.get("DSPY_LM_MODEL") or "").strip()
+    resolved_model = _resolve_model_name(reflection_lm)
+    source = (
+        "delegate" if delegate_model and resolved_model == delegate_model else "planner"
+    )
+    provenance = {
+        "model": resolved_model,
+        "source": source,
+    }
+    if delegate_model:
+        provenance["configured_delegate_model"] = delegate_model
+    if planner_model:
+        provenance["configured_planner_model"] = planner_model
+    return provenance
 
 
 def _capture_prompt_snapshots(module: Any, prompt_type: str) -> list[dict[str, str]]:
@@ -180,6 +217,87 @@ def _evaluate_per_example(
     return results
 
 
+def _mean_score(results: list[dict[str, Any]]) -> float | None:
+    """Return the arithmetic mean score for a non-empty result list."""
+    if not results:
+        return None
+    return sum(float(item.get("score", 0.0)) for item in results) / len(results)
+
+
+def _match_prompt_snapshot_pairs(
+    before_snapshots: list[dict[str, str]],
+    after_snapshots: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Return matched before/after prompt snapshots for shared predictors."""
+    before_by_name = {
+        snapshot["predictor_name"]: snapshot["prompt_text"]
+        for snapshot in before_snapshots
+        if snapshot.get("predictor_name") and snapshot.get("prompt_text")
+    }
+    after_by_name = {
+        snapshot["predictor_name"]: snapshot["prompt_text"]
+        for snapshot in after_snapshots
+        if snapshot.get("predictor_name") and snapshot.get("prompt_text")
+    }
+    shared = sorted(set(before_by_name) & set(after_by_name))
+    return [
+        {
+            "predictor_name": predictor_name,
+            "before_prompt": before_by_name[predictor_name],
+            "after_prompt": after_by_name[predictor_name],
+        }
+        for predictor_name in shared
+    ]
+
+
+def _build_holdout_comparisons(
+    *,
+    dataset_indexes: list[int],
+    baseline_results: list[dict[str, Any]],
+    optimized_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build same-split baseline-versus-optimized holdout rows for review."""
+    comparisons: list[dict[str, Any]] = []
+    total_rows = max(
+        len(dataset_indexes), len(baseline_results), len(optimized_results)
+    )
+    for offset in range(total_rows):
+        baseline_row = (
+            baseline_results[offset] if offset < len(baseline_results) else {}
+        )
+        optimized_row = (
+            optimized_results[offset] if offset < len(optimized_results) else {}
+        )
+        shared_row = optimized_row or baseline_row
+        comparisons.append(
+            {
+                "validation_example_index": int(
+                    shared_row.get(
+                        "example_index", baseline_row.get("example_index", offset)
+                    )
+                ),
+                "dataset_row_index": (
+                    dataset_indexes[offset] if offset < len(dataset_indexes) else None
+                ),
+                "input_data": shared_row.get("input_data")
+                or baseline_row.get("input_data")
+                or "{}",
+                "expected_output": shared_row.get("expected_output")
+                or baseline_row.get("expected_output")
+                or "",
+                "baseline": {
+                    "predicted_output": baseline_row.get("predicted_output", ""),
+                    "score": float(baseline_row.get("score", 0.0)),
+                },
+                "optimized": {
+                    "predicted_output": optimized_row.get("predicted_output", ""),
+                    "score": float(optimized_row.get("score", 0.0)),
+                },
+            }
+        )
+    return comparisons
+
+
 def _ensure_dspy_configured() -> None:
     """Ensure DSPy has a global LM configured for module execution.
 
@@ -250,7 +368,8 @@ def run_module_optimization(
     examples = spec.row_converter(valid_rows)
 
     # 4. Split
-    trainset, valset = split_examples(examples, train_ratio=train_ratio)
+    split = split_examples_with_metadata(examples, train_ratio=train_ratio)
+    trainset, valset = split.train, split.validation
 
     # 5. Build metric
     metric = spec.metric_builder()
@@ -258,8 +377,16 @@ def run_module_optimization(
     # 6. Compile — GEPA requires reflection_lm for prompt evolution
     program = spec.module_factory()
     before_snapshots = _capture_prompt_snapshots(program, "before")
+    validation_dataset_indexes = split.validation_indexes
+    baseline_results = (
+        _evaluate_per_example(program, valset, metric)
+        if len(valset) >= _MIN_VAL_EXAMPLES
+        else []
+    )
+    baseline_validation_score = _mean_score(baseline_results)
 
     reflection_lm = _resolve_reflection_lm()
+    reflection_provenance = _reflection_lm_provenance(reflection_lm)
     optimizer = GEPA(metric=metric, auto=auto, reflection_lm=reflection_lm)
     optimized = optimizer.compile(
         program,
@@ -276,9 +403,7 @@ def run_module_optimization(
     if has_val:
         per_example_results = _evaluate_per_example(optimized, valset, metric)
         if per_example_results:
-            validation_score = sum(r["score"] for r in per_example_results) / len(
-                per_example_results
-            )
+            validation_score = _mean_score(per_example_results)
         else:
             # Fallback to aggregate evaluator if per-example returned nothing
             validation_score = float(
@@ -303,6 +428,60 @@ def run_module_optimization(
 
     # 9. Write manifest
     manifest_path = resolved_path.with_suffix(".manifest.json")
+    prompt_snapshot_pairs = _match_prompt_snapshot_pairs(
+        before_snapshots,
+        after_snapshots,
+    )
+    holdout_comparisons = _build_holdout_comparisons(
+        dataset_indexes=validation_dataset_indexes,
+        baseline_results=baseline_results,
+        optimized_results=per_example_results,
+    )
+    artifact_metadata = {
+        "path": str(resolved_path),
+        "manifest_path": str(manifest_path),
+        "filename": resolved_path.name,
+        "size_bytes": resolved_path.stat().st_size,
+        "loader": "dspy.Module.load",
+    }
+    review_bundle = {
+        "version": 1,
+        "artifact": artifact_metadata,
+        "holdout": {
+            "split_reference": {
+                "train_ratio": train_ratio,
+                "strategy": split.strategy,
+                "stratify_by": split.stratify_by,
+                "train_examples": len(trainset),
+                "validation_examples": len(valset),
+                "train_dataset_indexes": split.train_indexes,
+                "validation_dataset_indexes": validation_dataset_indexes,
+                "validation_range": validation_range_for_indexes(
+                    validation_dataset_indexes
+                ),
+                "strata": split.strata,
+            },
+            "baseline_score": baseline_validation_score,
+            "optimized_score": validation_score,
+            "score_delta": (
+                round(validation_score - baseline_validation_score, 4)
+                if validation_score is not None
+                and baseline_validation_score is not None
+                else None
+            ),
+            "comparisons": holdout_comparisons,
+        },
+        "prompt_snapshots": {
+            "matched_predictors": prompt_snapshot_pairs,
+            "total_snapshots": len(before_snapshots) + len(after_snapshots),
+        },
+        "reflection_model": reflection_provenance,
+    }
+    run_metadata = {
+        "module_slug": spec.module_slug,
+        "dataset_path": str(dataset_path),
+        "review_bundle": review_bundle,
+    }
     manifest_data = build_manifest(
         module_spec=spec.program_spec,
         dataset_path=dataset_path,
@@ -312,6 +491,12 @@ def run_module_optimization(
         optimizer="GEPA",
         metric_name=spec.metric_name or None,
         auto=auto,
+        extra_metadata={
+            "module_slug": spec.module_slug,
+            "output_path": str(resolved_path),
+            "artifact": artifact_metadata,
+            "review_bundle": review_bundle,
+        },
     )
     write_manifest(manifest_path, manifest_data)
 
@@ -324,6 +509,7 @@ def run_module_optimization(
     return OptimizationResult(
         train_examples=len(trainset),
         validation_examples=len(valset),
+        baseline_validation_score=baseline_validation_score,
         validation_score=validation_score,
         output_path=str(resolved_path),
         manifest_path=str(manifest_path),
@@ -332,4 +518,6 @@ def run_module_optimization(
         module_slug=spec.module_slug,
         evaluation_results=per_example_results,
         prompt_snapshots=before_snapshots + after_snapshots,
+        review_bundle=review_bundle,
+        run_metadata=run_metadata,
     )

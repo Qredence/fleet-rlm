@@ -1,0 +1,37 @@
+{
+  "featureId": "longcot-dataset-generation",
+  "milestone": "dataset-gen",
+  "status": "pass",
+  "issues": [
+    {
+      "severity": "non_blocking",
+      "description": "`test_stratified_sampling_by_domain` contains a tautological assertion. `collections.Counter` never includes items with a zero count, so `for domain, count in domain_counts.items(): assert count > 0` can never fail. The test does not actually validate that expected domains are represented or that stratified selection produced the intended per-domain distribution.",
+      "location": "tests/unit/runtime/quality/test_longcot_dataset.py:102-108"
+    },
+    {
+      "severity": "non_blocking",
+      "description": "`test_generation_is_deterministic` claims to verify random sampling determinism but does not pass `--no-stratified`. In stratified mode the seed is ignored, so the test only validates that stratified selection is inherently deterministic. It should pass `--no-stratified` to test the seeded shuffle path, or the docstring should be updated.",
+      "location": "tests/unit/runtime/quality/test_longcot_dataset.py:150-169"
+    },
+    {
+      "severity": "non_blocking",
+      "description": "`DEFAULT_OUTPUT` is declared in the test module but never referenced. It should be removed or used in a test that validates the script's default output path behavior.",
+      "location": "tests/unit/runtime/quality/test_longcot_dataset.py:27"
+    },
+    {
+      "severity": "suggestion",
+      "description": "No test coverage for the `--difficulties` CLI flag. The generation script supports filtering by difficulty, but this path is not exercised in the test suite.",
+      "location": "tests/unit/runtime/quality/test_longcot_dataset.py"
+    },
+    {
+      "severity": "suggestion",
+      "description": "No test for the missing-vendor-data fallback. If `vendor/longcot/src/data` is absent, all domains are silently omitted. A test exercising this edge case would guard against silent data-loss failures in CI or fresh checkouts.",
+      "location": "scripts/generate_longcot_gepa_dataset.py:66-75"
+    }
+  ],
+  "sharedStateObservations": [
+    "The `vendor/longcot/src/data/logic/` domain contains only `null` answers. The generation script handles this gracefully (filters out empty answers and warns), but this quirk is not documented in `.factory/library/` or AGENTS.md. A brief note in `library/quality-tooling.md` or a new dataset-generation note would help future workers understand why logic may yield zero rows.",
+    "`_reset_registry()` in `module_registry.py` is required for isolated module-registry tests but is prefixed with an underscore, indicating it is internal. If test authors are expected to use it routinely (as this test suite does via an `autouse` fixture), consider documenting it as a canonical test utility in `library/quality-tooling.md` or making it a public pytest fixture in a shared `conftest.py`."
+  ],
+  "summary": "The LongCoT GEPA dataset generation feature is well-implemented and thoroughly tested. The generation script correctly normalizes vendor answers, supports stratified and random sampling modes, filters empty answers, and provides a clean CLI. All 12 unit tests pass, and the code passes both `ruff` lint and `ty` typecheck. Four non-blocking issues were found: one tautological test assertion, a determinism test that does not exercise the random-sampling path, an unused variable, and missing coverage for difficulty filtering and missing-vendor-data edge cases. None of these block user testing or feature correctness."
+}

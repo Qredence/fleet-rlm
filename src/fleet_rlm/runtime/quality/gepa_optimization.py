@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "build_gepa_feedback_metric",
     "log_gepa_mlflow_run_metadata",
+    "log_gepa_mlflow_result_metadata",
     "optimize_program_with_gepa",
 ]
 
@@ -133,6 +134,86 @@ def log_gepa_mlflow_run_metadata(
 
     if set_tags is not None:
         cast(Any, set_tags)(tags)
+
+
+def log_gepa_mlflow_result_metadata(
+    *,
+    result: dict[str, Any],
+    run_id: str | int | None = None,
+    log_metric: Callable[[str, float], Any] | None = None,
+    log_params: Callable[[dict[str, Any]], Any] | None = None,
+    set_tags: Callable[[dict[str, str]], Any] | None = None,
+    log_dict: Callable[[dict[str, Any], str], Any] | None = None,
+    log_artifact: Callable[..., Any] | None = None,
+) -> None:
+    """Attach review-bundle metrics, provenance, and artifacts to MLflow."""
+    review_bundle = result.get("review_bundle")
+    if not isinstance(review_bundle, dict):
+        return
+
+    holdout = review_bundle.get("holdout")
+    holdout_dict = holdout if isinstance(holdout, dict) else {}
+    split_reference = holdout_dict.get("split_reference")
+    split_reference_dict = split_reference if isinstance(split_reference, dict) else {}
+    validation_range = split_reference_dict.get("validation_range")
+    validation_range_dict = (
+        validation_range if isinstance(validation_range, dict) else {}
+    )
+    reflection_model = review_bundle.get("reflection_model")
+    reflection_model_dict = (
+        reflection_model if isinstance(reflection_model, dict) else {}
+    )
+
+    if log_metric is not None:
+        baseline_score = holdout_dict.get("baseline_score")
+        score_delta = holdout_dict.get("score_delta")
+        if baseline_score is not None:
+            cast(Any, log_metric)(
+                "gepa_baseline_validation_score",
+                float(baseline_score),
+            )
+        if score_delta is not None:
+            cast(Any, log_metric)(
+                "gepa_validation_score_delta",
+                float(score_delta),
+            )
+
+    if log_params is not None:
+        params: dict[str, Any] = {}
+        start = validation_range_dict.get("start")
+        end_exclusive = validation_range_dict.get("end_exclusive")
+        if start is not None and end_exclusive is not None:
+            params["gepa.validation_split_range"] = f"{start}:{end_exclusive}"
+        validation_indexes = split_reference_dict.get("validation_dataset_indexes")
+        if isinstance(validation_indexes, list):
+            params["gepa.validation_split_count"] = len(validation_indexes)
+        if params:
+            cast(Any, log_params)(params)
+
+    if set_tags is not None:
+        tags: dict[str, str] = {}
+        model_name = reflection_model_dict.get("model")
+        model_source = reflection_model_dict.get("source")
+        if model_name:
+            tags["gepa.reflection_model"] = str(model_name)
+        if model_source:
+            tags["gepa.reflection_model_source"] = str(model_source)
+        if run_id is not None:
+            tags["fleet.optimization_run_id"] = str(run_id)
+        if tags:
+            cast(Any, set_tags)(tags)
+
+    if log_dict is not None:
+        cast(Any, log_dict)(review_bundle, "optimization_review_bundle.json")
+
+    if log_artifact is not None:
+        for path_key in ("manifest_path", "output_path"):
+            raw_path = result.get(path_key)
+            if not raw_path:
+                continue
+            path = Path(str(raw_path))
+            if path.exists():
+                cast(Any, log_artifact)(str(path), artifact_path="optimization")
 
 
 def optimize_program_with_gepa(

@@ -7,7 +7,7 @@ import asyncio
 from fastapi import APIRouter
 
 from ...dependencies import HTTPIdentityDep
-from ...schemas.core import GEPAModuleInfo, GEPAStatusResponse
+from ...schemas.optimization import GEPAModuleInfo, GEPAStatusResponse
 from ._deps import AUTH_ERROR_RESPONSES, _check_gepa_available, _get_mlflow_status
 
 router = APIRouter()
@@ -25,7 +25,10 @@ async def get_optimization_status(
     _ = identity
     gepa_installed = await asyncio.to_thread(_check_gepa_available)
     mlflow_configured, mlflow_enabled = await asyncio.to_thread(_get_mlflow_status)
-    available = gepa_installed and mlflow_enabled
+    module_optimization_available = gepa_installed
+    mlflow_dataset_optimization_available = gepa_installed and mlflow_enabled
+    mlflow_logging_available = mlflow_enabled
+    available = mlflow_dataset_optimization_available
 
     guidance: list[str] = []
     if not gepa_installed:
@@ -36,17 +39,23 @@ async def get_optimization_status(
     if not mlflow_enabled:
         if not mlflow_configured:
             guidance.append(
-                "MLflow is not enabled. Set MLFLOW_ENABLED=true and configure "
-                "MLFLOW_TRACKING_URI to enable optimization tracking."
+                "MLflow is not enabled. Registered module optimization can run "
+                "without MLflow, but tracking and MLflow dataset optimization "
+                "require MLFLOW_ENABLED=true and MLFLOW_TRACKING_URI."
             )
         else:
             guidance.append(
                 "MLflow is configured but unavailable. Verify the tracking URI, "
-                "server health, and any required MLflow auth credentials."
+                "server health, and any required MLflow auth credentials. "
+                "Registered module optimization can continue without tracking."
             )
 
     return GEPAStatusResponse(
         available=available,
+        module_optimization_available=module_optimization_available,
+        mlflow_dataset_optimization_available=mlflow_dataset_optimization_available,
+        mlflow_logging_available=mlflow_logging_available,
+        mlflow_configured=mlflow_configured,
         mlflow_enabled=mlflow_enabled,
         gepa_installed=gepa_installed,
         guidance=guidance,
@@ -69,6 +78,7 @@ def list_optimization_modules(
         GEPAModuleInfo(
             slug=m["slug"],
             label=m["label"],
+            description=m.get("description", ""),
             program_spec=m["program_spec"],
             required_dataset_keys=m["required_dataset_keys"],
         )

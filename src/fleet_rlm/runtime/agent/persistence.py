@@ -273,7 +273,7 @@ async def persist_session_metadata(
 
     import uuid as _uuid
 
-    from fleet_rlm.integrations.database.types import ChatSessionUpsertRequest
+    from fleet_rlm.integrations.database.repository_chat import ChatSessionUpsertRequest
 
     def _to_uuid(val: str | None) -> _uuid.UUID | None:
         if val is None:

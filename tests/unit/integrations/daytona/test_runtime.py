@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.daytona.filesystem import _areconcile_repo_checkout
+from fleet_rlm.integrations.daytona.workspace_runtime import _areconcile_repo_checkout
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
@@ -154,6 +154,13 @@ class _FakeClient:
         self.close_calls += 1
 
 
+class _FakeDaytonaApiError(Exception):
+    def __init__(self, message: str, *, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = message
+
+
 class _LoopBoundCodeInterpreter:
     def __init__(self, sandbox: "_LoopBoundSandbox") -> None:
         self._sandbox = sandbox
@@ -267,6 +274,42 @@ def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> Non
 
     assert fake_client.volume.calls == [("tenant-spec", True)]
     assert session.volume_name == "tenant-spec"
+
+
+def test_create_workspace_session_reports_400_quota_errors(monkeypatch) -> None:
+    class _QuotaClient(_FakeClient):
+        def create(
+            self,
+            request=None,
+            *,
+            timeout: float = 60,
+            on_snapshot_create_logs=None,
+        ):
+            _ = request, timeout, on_snapshot_create_logs
+            raise _FakeDaytonaApiError(
+                "Quota limit exceeded for sandbox resources",
+                status=400,
+            )
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        lambda config: _QuotaClient(),
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(
+            api_key="key", api_url="https://api.daytona.test", target=None
+        )
+    )
+
+    with pytest.raises(DaytonaDiagnosticError) as exc_info:
+        runtime.create_workspace_session(repo_url=None, ref=None)
+
+    err = exc_info.value
+    assert err.category == "sandbox_create_clone_error"
+    assert err.phase == "sandbox_create"
+    assert "resource/quota/precondition failure" in str(err)
+    assert "HTTP 400" in str(err)
 
 
 def test_create_workspace_session_aborts_on_invalid_context_path(

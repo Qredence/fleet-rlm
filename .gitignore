@@ -77,6 +77,7 @@ blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion.mp4
 
 # Output artifacts
 output/
+!output/longcot-eval/
 src/output/
 results/
 archive/
@@ -98,6 +99,9 @@ mlartifacts/*
 .neon
 .output.txt
 
+# Vendor (external benchmarks)
+vendor/
+
 # Playground / one-off
 plugins/
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
@@ -117,3 +121,8 @@ typings/
 files/ai_index_report_2026.pdf
 /dogfood-output
 .factory/plan-benchmark/fleet-rlm-benchmark-improvements.md
+
+blogs/
+logs/
+mlflow_verification_report.mdsrc/frontend/test_output.txt
+mlflow_verification_report.md

@@ -25,8 +25,8 @@ from ..runtime_services.session_helpers import (
     session_external_id as _session_external_id,
     string_or_default as _string_or_default,
 )
-from ..schemas.core import (
-    DatasetResponse,
+from ..schemas.optimization import DatasetResponse
+from ..schemas.sessions import (
     SessionDeleteResponse,
     SessionDetailResponse,
     SessionExportRequest,
@@ -785,7 +785,9 @@ async def export_session_endpoint(
             persist_jsonl_rows,
         )
         from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
-        from fleet_rlm.integrations.database.types import DatasetCreateRequest
+        from fleet_rlm.integrations.database.repository_optimization import (
+            DatasetCreateRequest,
+        )
 
         workspace_id = persisted_identity.workspace_id
         if workspace_id is None:

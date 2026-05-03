@@ -363,6 +363,7 @@ class OptimizationRepository(RepositoryContextMixin):
         validation_score: float | None = None,
         output_path: str | None = None,
         manifest_path: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
@@ -371,6 +372,21 @@ class OptimizationRepository(RepositoryContextMixin):
             user_id=created_by_user_id,
             workspace_id=workspace_id,
         ) as (session, resolved_workspace_id):
+            existing = await session.execute(
+                select(OptimizationRun).where(
+                    and_(
+                        OptimizationRun.tenant_id == tenant_id,
+                        OptimizationRun.workspace_id == resolved_workspace_id,
+                        OptimizationRun.id == run_id,
+                    )
+                )
+            )
+            run_row = existing.scalar_one_or_none()
+            if run_row is None:
+                return None
+            merged_metadata = dict(run_row.metadata_json or {})
+            if metadata_json:
+                merged_metadata.update(metadata_json)
             stmt = (
                 update(OptimizationRun)
                 .where(
@@ -387,6 +403,7 @@ class OptimizationRepository(RepositoryContextMixin):
                     validation_score=validation_score,
                     output_path=output_path,
                     manifest_path=manifest_path,
+                    metadata_json=merged_metadata,
                     phase="completed",
                     completed_at=_utc_now(),
                     updated_at=_utc_now(),

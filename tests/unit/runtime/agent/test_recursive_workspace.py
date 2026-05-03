@@ -12,6 +12,7 @@ Verifies:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -152,6 +153,171 @@ class TestForwardLoop:
         assert result.passes == 1
         assert result.status == "sufficient"
         module._reflector.assert_not_called()
+
+    def test_child_failure_prevents_false_sufficient_result(self) -> None:
+        module = _build_module(max_passes=1, max_repair_attempts=0)
+
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary="context with enough detail",
+                selected_memory_handles=[],
+                selected_evidence_ids=[],
+                omission_rationale="",
+            )
+        )
+        module._planner = MagicMock(
+            return_value=_mock_prediction(
+                subqueries=["q1"],
+                decomposition_mode="single_pass",
+                aggregation_plan="concat",
+                batching_strategy="serial",
+                decomposition_rationale="",
+            )
+        )
+        module._verifier = MagicMock(
+            return_value=_mock_prediction(
+                verification_status="sufficient",
+                verified_summary="looks good",
+                missing_evidence=[],
+                contradictions=[],
+                verification_rationale="",
+            )
+        )
+        module._reflector = MagicMock(
+            return_value=_mock_prediction(
+                next_action="finalize",
+                revised_plan="done",
+                rationale="ok",
+                confidence=0.9,
+            )
+        )
+        child_error = json.dumps(
+            {
+                "status": "error",
+                "reason": "child_error",
+                "error": "child failed",
+            }
+        )
+
+        with (
+            patch.object(module, "_execute_subqueries", return_value=[child_error]),
+            patch.object(module, "_store_pass_evidence"),
+        ):
+            result = module(user_request="test question")
+
+        assert result.status == "needs_human_review"
+        module._reflector.assert_called_once()
+
+    def test_needs_human_review_cannot_be_finalized_by_reflection(self) -> None:
+        module = _build_module(max_passes=1, max_repair_attempts=0)
+
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary="context with enough detail",
+                selected_memory_handles=[],
+                selected_evidence_ids=[],
+                omission_rationale="",
+            )
+        )
+        module._planner = MagicMock(
+            return_value=_mock_prediction(
+                subqueries=["q1"],
+                decomposition_mode="single_pass",
+                aggregation_plan="concat",
+                batching_strategy="serial",
+                decomposition_rationale="",
+            )
+        )
+        module._verifier = MagicMock(
+            return_value=_mock_prediction(
+                verification_status="needs_human_review",
+                verified_summary=(
+                    "A candidate exists but verification is blocked by sandbox limitations."
+                ),
+                missing_evidence=["Independent verification is required."],
+                contradictions=[],
+                verification_rationale="Unable to create sandboxes for verification.",
+            )
+        )
+        module._reflector = MagicMock(
+            return_value=_mock_prediction(
+                next_action="finalize",
+                revised_plan="done",
+                rationale="looks plausible",
+                confidence=0.9,
+            )
+        )
+
+        with (
+            patch.object(module, "_execute_subqueries", return_value=["solution = []"]),
+            patch.object(module, "_store_pass_evidence"),
+        ):
+            result = module(user_request="test question")
+
+        assert result.status == "needs_human_review"
+        assert "verification is blocked" in result.answer.lower()
+
+    def test_adapter_failure_forces_repair_before_accepting_verifier(self) -> None:
+        module = _build_module(max_passes=1, max_repair_attempts=1)
+
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary="context with enough detail",
+                selected_memory_handles=[],
+                selected_evidence_ids=[],
+                omission_rationale="",
+            )
+        )
+        module._planner = MagicMock(
+            return_value=_mock_prediction(
+                subqueries=["q1"],
+                decomposition_mode="single_pass",
+                aggregation_plan="concat",
+                batching_strategy="serial",
+                decomposition_rationale="",
+            )
+        )
+        module._verifier = MagicMock(
+            return_value=_mock_prediction(
+                verification_status="sufficient",
+                verified_summary="looks good",
+                missing_evidence=[],
+                contradictions=[],
+                verification_rationale="",
+            )
+        )
+        module._reflector = MagicMock(
+            return_value=_mock_prediction(
+                next_action="finalize",
+                revised_plan="done",
+                rationale="ok",
+                confidence=0.9,
+            )
+        )
+        module._repairer = MagicMock(
+            return_value=_mock_prediction(
+                repair_mode="targeted_repair",
+                repair_target="adapter failure",
+                repair_steps=["retry failed child"],
+                repair_subqueries=["retry q1"],
+                repair_rationale="child failed",
+            )
+        )
+
+        adapter_error = (
+            "AdapterParseError: LM response cannot be serialized to a JSON object. "
+            "Expected to find output fields in the LM response."
+        )
+        with (
+            patch.object(module, "_execute_subqueries", return_value=[adapter_error]),
+            patch.object(module, "_store_pass_evidence"),
+        ):
+            result = module(user_request="test question")
+
+        assert result.status == "budget_exhausted"
+        module._repairer.assert_called_once()
+        repair_kwargs = module._repairer.call_args.kwargs
+        assert "adapterparseerror" in repair_kwargs["latest_failure_signals"]
 
     def test_budget_exhaustion_after_max_passes(self) -> None:
         module = _build_module(max_passes=2)
@@ -417,6 +583,67 @@ class TestHelpers:
 
         assert outputs == ["a1", "a2"]
 
+    def test_execute_subqueries_fan_out_preserves_structured_errors(self) -> None:
+        module = _build_module()
+
+        with patch(
+            "fleet_rlm.runtime.tools.rlm_delegate.delegate_to_rlm_batched",
+            return_value={
+                "status": "error",
+                "results": [{"query": "good", "answer": "ok"}],
+                "errors": [
+                    {
+                        "index": 1,
+                        "query": "bad",
+                        "reason": "child_error",
+                        "error": "child failed",
+                    }
+                ],
+            },
+        ):
+            outputs = module._execute_subqueries(["good", "bad"], "ctx", "fan_out")
+
+        assert len(outputs) == 1
+        payload = json.loads(outputs[0])
+        assert payload == {
+            "status": "error",
+            "results": [{"query": "good", "answer": "ok"}],
+            "errors": [
+                {
+                    "index": 1,
+                    "query": "bad",
+                    "reason": "child_error",
+                    "error": "child failed",
+                }
+            ],
+        }
+        assert module._classify_subquery_failures(outputs) == [
+            "output[0]:child_error",
+            "output[0]:reason=child_error",
+            "output[0]:status=error",
+        ]
+
+    def test_tool_error_output_is_classified_as_failure(self) -> None:
+        module = _build_module()
+
+        outputs = [
+            json.dumps(
+                {
+                    "status": "error",
+                    "reason": "tool_error",
+                    "tool_name": "store_evidence",
+                    "error": "Failed to inject tool 'store_evidence'",
+                }
+            )
+        ]
+
+        assert module._classify_subquery_failures(outputs) == [
+            "output[0]:failed to inject tool",
+            "output[0]:reason=tool_error",
+            "output[0]:status=error",
+            "output[0]:tool_error",
+        ]
+
     def test_fetch_memory_catalog_empty_when_no_repo(self) -> None:
         module = _build_module()
         catalog = module._fetch_memory_catalog()
@@ -463,6 +690,63 @@ class TestHelpers:
         module = _build_module(evidence_sink=_FakeSink())
         catalog = module._fetch_memory_catalog()
         assert catalog == ["s1:context", "s2:observation"]
+
+    def test_assembled_context_fallback_when_assembler_returns_empty(self) -> None:
+        # Regression: when ChatAdapter.parse errors cause the assembler's REPL loop
+        # to fail and it returns a thin context (e.g. "solution = []"), child RLMs
+        # receive no puzzle data and produce "Unable to determine..." answers.
+        # The fix: forward() substitutes user_request verbatim when assembled_context
+        # is shorter than 64 chars and fits within context_budget_chars.
+        module = _build_module(max_passes=1, context_budget_chars=32_000)
+
+        user_request = "Blocks World puzzle: initial=[[1,2],[3]], goal=[[3,2,1],[]]"
+        captured_contexts: list[str] = []
+
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary="solution = []",  # thin/failed assembler output
+                selected_memory_handles=[],
+                selected_evidence_ids=[],
+                omission_rationale="parse error",
+            )
+        )
+        module._planner = MagicMock(
+            return_value=_mock_prediction(
+                subqueries=["q1"],
+                decomposition_mode="single_pass",
+                aggregation_plan="concat",
+                batching_strategy="serial",
+                decomposition_rationale="",
+            )
+        )
+        module._verifier = MagicMock(
+            return_value=_mock_prediction(
+                verification_status="sufficient",
+                verified_summary="done",
+                missing_evidence=[],
+                contradictions=[],
+                verification_rationale="",
+            )
+        )
+
+        def _capture_subqueries(
+            subqueries: list[str], context: str, mode: str
+        ) -> list[str]:
+            captured_contexts.append(context)
+            return ["child answer"]
+
+        with (
+            patch.object(
+                module, "_execute_subqueries", side_effect=_capture_subqueries
+            ),
+            patch.object(module, "_store_pass_evidence"),
+        ):
+            module(user_request=user_request)
+
+        assert captured_contexts[0] == user_request, (
+            "Expected fallback to user_request when assembled_context is too thin, "
+            f"got: {captured_contexts[0]!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

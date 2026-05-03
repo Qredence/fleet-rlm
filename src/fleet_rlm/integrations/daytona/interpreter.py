@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
-import math
 import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any, Callable, Protocol, cast
 
 import dspy
@@ -45,7 +43,7 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
-from .async_compat import _await_if_needed, _run_async_compat
+from .async_compat import _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from .bridge_callbacks import (
     bridge_tools,
@@ -66,37 +64,35 @@ from .interpreter_assets import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _FINAL_OUTPUT_MARKER,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
-    _base_setup_code,
-    _generic_submit_code,
-    _typed_submit_code,
+)
+from .interpreter_execution import (
+    DaytonaExecutionResponse as _DaytonaExecutionResponse,
+    ExecutionCallbacks as _ExecutionCallbacks,
+    aensure_bridge as _aensure_bridge,
+    aensure_setup as _aensure_setup,
+    aexecute_direct as _aexecute_direct,
+    aexecute_in_session as _aexecute_in_session,
+    arun_prepared_execution as _arun_prepared_execution,
+    extract_final_artifact as _extract_final_artifact,
+    finalize_execution_result as _finalize_execution_result,
+    inject_variables as _inject_variables,
+    literal as _literal,
+    prepare_execution_code as _prepare_execution_code,
+    resolve_execution_callbacks as _resolve_execution_callbacks,
+    response_from_execution as _response_from_execution,
+    safe_variables as _safe_variables,
+    sanitize_execution_code as _sanitize_execution_code,
+    structured_execution_error as _structured_execution_error,
+    submit_signature as _submit_signature,
 )
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
-    DaytonaSandboxSession,
 )
-from .types import SandboxSpec, dedupe_paths, normalized_context_sources
-
-
-@dataclass(slots=True)
-class _DaytonaExecutionResponse:
-    stdout: str = ""
-    stderr: str = ""
-    error: str | None = None
-    final_artifact: dict[str, Any] | None = None
-    callback_count: int = 0
-
-
-@dataclass(slots=True)
-class _ExecutionCallbacks:
-    bridge_tools: Callable[[], dict[str, Callable[..., Any]]]
-    reject_recursive_callbacks: Callable[[str], None]
-    requires_bridge: Callable[[str, dict[str, Callable[..., Any]]], bool]
-    ensure_bridge: Callable[..., Any]
-    execute_direct: Callable[..., Any]
-    response_from_execution: Callable[
-        [DaytonaBridgeExecution], _DaytonaExecutionResponse
-    ]
+from .session_runtime import DaytonaSandboxSession
+from fleet_rlm.utils.paths import dedupe_paths
+from .types import normalized_context_sources
+from .types import SandboxSpec
 
 
 class _DaytonaInterpreterLike(
@@ -319,89 +315,24 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         )
 
     def safe_variables(self, variables: dict[str, Any] | None) -> dict[str, Any]:
-        safe_vars: dict[str, Any] = {}
-        for key, value in (variables or {}).items():
-            normalized_key = str(key)
-            try:
-                json.dumps(value)
-                safe_vars[normalized_key] = value
-            except (TypeError, ValueError, RecursionError):
-                safe_vars[normalized_key] = str(value)
-        return safe_vars
+        return _safe_variables(variables)
 
     def submit_signature(self) -> tuple[tuple[str, str], ...] | None:
-        if not self.output_fields:
-            return None
-        normalized: list[tuple[str, str]] = []
-        for field in self.output_fields:
-            name = str(field.get("name") or "").strip()
-            if not name:
-                continue
-            normalized.append((name, str(field.get("type") or "").strip()))
-        return tuple(normalized) or None
+        return _submit_signature(self.output_fields)
 
     async def aensure_setup(
         self,
         session: DaytonaSandboxSession,
         *,
-        base_setup_code: Callable[..., str] = _base_setup_code,
-        generic_submit_code: Callable[[], str] = _generic_submit_code,
-        typed_submit_code: Callable[[list[dict[str, Any]]], str] = _typed_submit_code,
         submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None]
         | None = None,
     ) -> Any:
         submit_signature_fn = submit_signature_fn or self.submit_signature
-        context = await session.aensure_context()
-        if (
-            self._setup_context_id != session.context_id
-            or self._setup_workspace_path != session.workspace_path
-        ):
-            result = await _await_if_needed(
-                session.sandbox.code_interpreter.run_code(
-                    base_setup_code(
-                        workspace_path=session.workspace_path,
-                        volume_mount_path=self.volume_mount_path,
-                    ),
-                    context=context,
-                )
-            )
-            if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to initialize Daytona sandbox helpers: {result.error.value}"
-                )
-            self._setup_context_id = session.context_id
-            self._setup_workspace_path = session.workspace_path
-            self._submit_signature_key = None
-
-        current_submit_signature = submit_signature_fn()
-        if current_submit_signature is None:
-            if self._submit_signature_key is not None:
-                result = await _await_if_needed(
-                    session.sandbox.code_interpreter.run_code(
-                        generic_submit_code(),
-                        context=context,
-                    )
-                )
-                if result.error:
-                    raise CodeInterpreterError(
-                        f"Failed to restore generic SUBMIT: {result.error.value}"
-                    )
-                self._submit_signature_key = None
-            return context
-
-        if current_submit_signature != self._submit_signature_key:
-            result = await _await_if_needed(
-                session.sandbox.code_interpreter.run_code(
-                    typed_submit_code(self.output_fields or []),
-                    context=context,
-                )
-            )
-            if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to register typed SUBMIT: {result.error.value}"
-                )
-            self._submit_signature_key = current_submit_signature
-        return context
+        return await _aensure_setup(
+            self,
+            session,
+            submit_signature_fn=submit_signature_fn,
+        )
 
     async def aensure_bridge(
         self,
@@ -411,28 +342,13 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         tools: dict[str, Callable[..., Any]],
         bridge_cls: type[DaytonaToolBridge] | None = None,
     ) -> DaytonaToolBridge:
-        if bridge_cls is None:
-            bridge_cls = DaytonaToolBridge
-        sandbox_id = session.sandbox_id
-        context_id = session.context_id
-        bridge = self._bridge
-        if (
-            bridge is None
-            or self._bridge_sandbox_id != sandbox_id
-            or self._bridge_context_id != context_id
-        ):
-            await self._aclose_bridge()
-            bridge = bridge_cls(
-                sandbox=session.sandbox,
-                context=context,
-            )
-            self._bridge = bridge
-            self._bridge_sandbox_id = sandbox_id
-            self._bridge_context_id = context_id
-        else:
-            bridge.bind_context(context)
-        await bridge.async_tools(tools)
-        return bridge
+        return await _aensure_bridge(
+            self,
+            session=session,
+            context=context,
+            tools=tools,
+            bridge_cls=bridge_cls or DaytonaToolBridge,
+        )
 
     async def aexecute_in_session(
         self,
@@ -452,7 +368,12 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         ]
         | None = None,
     ) -> _DaytonaExecutionResponse:
-        callbacks = self._resolve_execution_callbacks(
+        return await _aexecute_in_session(
+            self,
+            session=session,
+            code=code,
+            variables=variables,
+            envs=envs,
             bridge_tools_fn=bridge_tools_fn,
             reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
             requires_bridge_fn=requires_bridge_fn,
@@ -460,23 +381,6 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
             aexecute_direct_fn=aexecute_direct_fn,
             response_from_execution_fn=response_from_execution_fn,
         )
-        context = await self.aensure_setup(
-            session,
-            submit_signature_fn=self.submit_signature,
-        )
-        prepared_code = self._prepare_execution_code(
-            code=code,
-            variables=variables,
-            reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
-        )
-        execution = await self._arun_prepared_execution(
-            session=session,
-            context=context,
-            code=prepared_code,
-            callbacks=callbacks,
-            envs=envs,
-        )
-        return callbacks.response_from_execution(execution)
 
     def _resolve_execution_callbacks(
         self,
@@ -492,30 +396,14 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         ]
         | None = None,
     ) -> _ExecutionCallbacks:
-        return _ExecutionCallbacks(
-            bridge_tools=bridge_tools_fn or self._bridge_tools,
-            reject_recursive_callbacks=reject_unsupported_recursive_callbacks_fn
-            or self._reject_unsupported_recursive_callbacks,
-            requires_bridge=requires_bridge_fn or self._requires_bridge,
-            ensure_bridge=aensure_bridge_fn
-            or (
-                lambda *, session, context, tools: self.aensure_bridge(
-                    session=session,
-                    context=context,
-                    tools=tools,
-                )
-            ),
-            execute_direct=aexecute_direct_fn
-            or (
-                lambda *, session, context, code, envs=None: self.aexecute_direct(
-                    session=session,
-                    context=context,
-                    code=code,
-                    envs=envs,
-                )
-            ),
-            response_from_execution=response_from_execution_fn
-            or (lambda execution: self.response_from_execution(execution)),
+        return _resolve_execution_callbacks(
+            self,
+            bridge_tools_fn=bridge_tools_fn,
+            reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+            requires_bridge_fn=requires_bridge_fn,
+            aensure_bridge_fn=aensure_bridge_fn,
+            aexecute_direct_fn=aexecute_direct_fn,
+            response_from_execution_fn=response_from_execution_fn,
         )
 
     def _prepare_execution_code(
@@ -525,9 +413,22 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         variables: dict[str, Any],
         reject_recursive_callbacks: Callable[[str], None],
     ) -> str:
-        prepared_code = self.inject_variables(code, variables)
-        reject_recursive_callbacks(prepared_code)
-        return prepared_code
+        return _prepare_execution_code(
+            self,
+            code=code,
+            variables=variables,
+            reject_recursive_callbacks=reject_recursive_callbacks,
+        )
+
+    @staticmethod
+    def _sanitize_execution_code(code: str) -> str:
+        return _sanitize_execution_code(code)
+
+    @staticmethod
+    def _structured_execution_error(
+        *, reason: str, error: str
+    ) -> _DaytonaExecutionResponse:
+        return _structured_execution_error(reason=reason, error=error)
 
     async def _arun_prepared_execution(
         self,
@@ -538,27 +439,12 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         callbacks: _ExecutionCallbacks,
         envs: dict[str, str] | None = None,
     ) -> DaytonaBridgeExecution:
-        tools = callbacks.bridge_tools()
-        if callbacks.requires_bridge(code, tools):
-            bridge = await callbacks.ensure_bridge(
-                session=session,
-                context=context,
-                tools=tools,
-            )
-            return await bridge.aexecute(
-                code=code,
-                timeout=int(self.execute_timeout or self.timeout),
-                tool_executor=lambda name, args, kwargs: invoke_tool(
-                    self,
-                    name,
-                    args,
-                    kwargs,
-                ),
-            )
-        return await callbacks.execute_direct(
+        return await _arun_prepared_execution(
+            self,
             session=session,
             context=context,
             code=code,
+            callbacks=callbacks,
             envs=envs,
         )
 
@@ -570,36 +456,12 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         code: str,
         envs: dict[str, str] | None = None,
     ) -> DaytonaBridgeExecution:
-        """Run *code* directly via the sandbox code interpreter.
-
-        With Daytona SDK v0.167.0+, ``code_interpreter.run_code`` is a thin
-        client wrapper around a server-side daemon endpoint, so execution
-        happens inside the sandbox without local SDK machinery.
-        """
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-
-        def _on_stdout(message: Any) -> None:
-            stdout_parts.append(str(getattr(message, "output", "") or ""))
-
-        def _on_stderr(message: Any) -> None:
-            stderr_parts.append(str(getattr(message, "output", "") or ""))
-
-        result = await _await_if_needed(
-            session.sandbox.code_interpreter.run_code(
-                code,
-                context=context,
-                on_stdout=_on_stdout,
-                on_stderr=_on_stderr,
-                envs=envs,
-                timeout=int(self.execute_timeout or self.timeout),
-            )
-        )
-        return DaytonaBridgeExecution(
-            result=result,
-            stdout="".join(stdout_parts),
-            stderr="".join(stderr_parts),
-            callback_count=0,
+        return await _aexecute_direct(
+            self,
+            session=session,
+            context=context,
+            code=code,
+            envs=envs,
         )
 
     def response_from_execution(
@@ -608,42 +470,10 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         *,
         extract_final_artifact_fn: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> _DaytonaExecutionResponse:
-        extract_final_artifact_fn = (
-            extract_final_artifact_fn or self.extract_final_artifact
-        )
-        final_artifact = extract_final_artifact_fn(execution.stdout)
-        result = execution.result
-        error = getattr(result, "error", None)
-        if error is None:
-            return _DaytonaExecutionResponse(
-                stdout=execution.stdout,
-                stderr=execution.stderr,
-                final_artifact=final_artifact,
-                callback_count=execution.callback_count,
-            )
-
-        error_name = str(getattr(error, "name", "") or "")
-        error_value = str(getattr(error, "value", "") or "")
-        if error_name == "_FleetFinalOutput" and final_artifact is not None:
-            return _DaytonaExecutionResponse(
-                stdout=execution.stdout,
-                stderr=execution.stderr,
-                final_artifact=final_artifact,
-                callback_count=execution.callback_count,
-            )
-
-        error_text = (
-            ": ".join(part for part in [error_name, error_value] if part)
-            or error_value
-            or error_name
-            or "Execution failed"
-        )
-        return _DaytonaExecutionResponse(
-            stdout=execution.stdout,
-            stderr=execution.stderr,
-            error=error_text,
-            final_artifact=final_artifact,
-            callback_count=execution.callback_count,
+        return _response_from_execution(
+            self,
+            execution,
+            extract_final_artifact_fn=extract_final_artifact_fn,
         )
 
     @staticmethod
@@ -652,23 +482,7 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         *,
         marker: str = _FINAL_OUTPUT_MARKER,
     ) -> dict[str, Any] | None:
-        start = stdout.find(marker)
-        if start == -1:
-            return None
-        start += len(marker)
-        end = stdout.find(marker, start)
-        if end == -1:
-            return None
-        payload = stdout[start:end]
-        try:
-            parsed = json.loads(payload)
-        except json.JSONDecodeError:
-            return None
-        return {
-            "kind": "structured",
-            "value": parsed,
-            "finalization_mode": "SUBMIT",
-        }
+        return _extract_final_artifact(stdout, marker=marker)
 
     def finalize_execution_result(
         self,
@@ -679,113 +493,20 @@ class _DaytonaInterpreterExecutionMixin(_DaytonaInterpreterLike):
         code_hash: str,
         code_preview: str,
     ) -> str | FinalOutput:
-        final_payload = None
-        if isinstance(response.final_artifact, dict):
-            final_payload = response.final_artifact.get("value")
-
-        stdout_preview = str(response.stdout or "")
-        stderr_preview = str(response.stderr or "")
-        if response.error:
-            error_text = str(response.error)
-            emit_execution_event(
-                self,
-                complete_event_data(
-                    started_at=started_at,
-                    execution_profile=execution_profile,
-                    code_hash=code_hash,
-                    code_preview=code_preview,
-                    success=False,
-                    result_kind="stderr",
-                    stdout_preview=stdout_preview or None,
-                    stderr_preview=stderr_preview or None,
-                    error_type="ExecutionError",
-                    error=error_text,
-                ),
-            )
-            combined = stdout_preview.strip()
-            return f"{combined}\n{error_text}" if combined else error_text
-
-        if final_payload is not None:
-            output_keys = (
-                [str(key) for key in list(final_payload.keys())[:50]]
-                if isinstance(final_payload, dict)
-                else None
-            )
-            emit_execution_event(
-                self,
-                complete_event_data(
-                    started_at=started_at,
-                    execution_profile=execution_profile,
-                    code_hash=code_hash,
-                    code_preview=code_preview,
-                    success=True,
-                    result_kind="final_output",
-                    output_keys=output_keys,
-                    stdout_preview=stdout_preview or None,
-                    stderr_preview=stderr_preview or None,
-                ),
-            )
-            return FinalOutput(final_payload)
-
-        emit_execution_event(
+        return _finalize_execution_result(
             self,
-            complete_event_data(
-                started_at=started_at,
-                execution_profile=execution_profile,
-                code_hash=code_hash,
-                code_preview=code_preview,
-                success=not bool(stderr_preview),
-                result_kind="stderr" if stderr_preview else "stdout",
-                stdout_preview=stdout_preview or None,
-                stderr_preview=stderr_preview or None,
-            ),
+            response=response,
+            started_at=started_at,
+            execution_profile=execution_profile,
+            code_hash=code_hash,
+            code_preview=code_preview,
         )
-        if stderr_preview:
-            combined = stdout_preview.strip()
-            return f"{combined}\n{stderr_preview}" if combined else stderr_preview
-        return stdout_preview
 
     def inject_variables(self, code: str, variables: dict[str, Any]) -> str:
-        if not variables:
-            return code
-        assignments = [
-            f"{name} = {self.literal(value)}" for name, value in variables.items()
-        ]
-        return "\n".join(assignments) + "\n" + code
+        return _inject_variables(self, code, variables)
 
     def literal(self, value: Any) -> str:
-        if value is None:
-            return "None"
-        if isinstance(value, bool):
-            return "True" if value else "False"
-        if isinstance(value, int):
-            return repr(value)
-        if isinstance(value, float):
-            if math.isnan(value):
-                return "float('nan')"
-            if math.isinf(value):
-                return "float('inf')" if value > 0 else "float('-inf')"
-            return repr(value)
-        if isinstance(value, str):
-            return repr(value)
-        if isinstance(value, list):
-            return "[" + ", ".join(self.literal(item) for item in value) + "]"
-        if isinstance(value, tuple):
-            inner = ", ".join(self.literal(item) for item in value)
-            if len(value) == 1:
-                inner += ","
-            return "(" + inner + ")"
-        if isinstance(value, set):
-            if not value:
-                return "set()"
-            return "{" + ", ".join(self.literal(item) for item in value) + "}"
-        if isinstance(value, dict):
-            pairs = [
-                f"{self.literal(key)}: {self.literal(item)}"
-                for key, item in value.items()
-            ]
-            return "{" + ", ".join(pairs) + "}"
-        raise CodeInterpreterError(f"Unsupported value type: {type(value).__name__}")
+        return _literal(value)
 
 
 def build_delegate_child(

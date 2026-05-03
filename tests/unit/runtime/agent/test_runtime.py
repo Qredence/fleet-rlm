@@ -16,6 +16,7 @@ import dspy
 import pytest
 
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
+from fleet_rlm.runtime.tools.binding import INTERPRETER_TOOL_NAMES
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,27 @@ class TestAgentInitWithDiscoveredTools:
             "status": "ok",
             "key": "topic",
             "value": "runtime",
+        }
+
+    def test_runtime_binding_declares_all_interpreter_only_tools(self) -> None:
+        assert INTERPRETER_TOOL_NAMES == {
+            "clear_buffer",
+            "delegate_to_rlm",
+            "delegate_to_rlm_batched",
+            "execute_code",
+            "read_buffer",
+            "recursive_workspace",
+            "sandbox_create_directory",
+            "sandbox_delete_file",
+            "sandbox_find_in_files",
+            "sandbox_get_file_info",
+            "sandbox_list_files",
+            "sandbox_move_file",
+            "sandbox_read_file",
+            "sandbox_replace_in_files",
+            "sandbox_search_files",
+            "sandbox_write_file",
+            "write_buffer",
         }
 
     def test_interpreter_tools_are_bound_to_runtime_backends(

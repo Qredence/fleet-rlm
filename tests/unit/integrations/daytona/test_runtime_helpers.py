@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
+from fleet_rlm.integrations.daytona.config import (
+    classify_daytona_sdk_error,
+    format_daytona_sdk_error,
+)
 
 
 @pytest.mark.asyncio
@@ -20,3 +24,43 @@ async def test_run_async_compat_reraises_exception_inside_running_loop() -> None
 
     with pytest.raises(ValueError, match="boom"):
         _run_async_compat(_raises_error)
+
+
+class _FakeDaytonaApiError(Exception):
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = message
+
+
+def test_classify_daytona_sdk_error_treats_400_quota_as_resource_error() -> None:
+    error = _FakeDaytonaApiError(
+        "Quota limit exceeded for sandbox resources", status=400
+    )
+
+    classification = classify_daytona_sdk_error(error)
+
+    assert classification.status_code == 400
+    assert classification.kind == "resource_or_quota"
+    assert classification.is_resource_or_quota_error is True
+
+
+def test_classify_daytona_sdk_error_treats_429_as_resource_error() -> None:
+    error = _FakeDaytonaApiError("Too many sandbox create requests", status=429)
+
+    classification = classify_daytona_sdk_error(error)
+
+    assert classification.status_code == 429
+    assert classification.kind == "resource_or_quota"
+
+
+def test_format_daytona_sdk_error_includes_status_and_provider_message() -> None:
+    error = _FakeDaytonaApiError(
+        "precondition failed: resource unavailable", status=400
+    )
+
+    message = format_daytona_sdk_error(error)
+
+    assert "resource/quota/precondition failure" in message
+    assert "HTTP 400" in message
+    assert "resource unavailable" in message

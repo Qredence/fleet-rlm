@@ -22,7 +22,7 @@ from ..runtime_services.sandboxes import (
     load_sandbox_detail,
     load_sandbox_list,
 )
-from ..schemas.core import (
+from ..schemas.sandbox import (
     SandboxArchiveResponse,
     SandboxDetailResponse,
     SandboxListResponse,

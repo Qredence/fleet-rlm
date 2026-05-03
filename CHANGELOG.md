@@ -323,7 +323,7 @@ All notable changes to this project are documented in this file.
   **Outcome:** The frontend tree is smaller and clearer, with less dead code competing with the supported product surface.
 - **Change:** Removed the now-unused frontend dependency set tied to those dead files and legacy UI paths.
   **Outcome:** Install/build surface area is reduced and dependency intent is clearer.
-- **Change:** Removed thin Python compatibility wrappers in favor of direct imports from `fleet_rlm.cli.runtime_factory` and concrete terminal helper modules.
+- **Change:** Removed thin Python compatibility wrappers in favor of direct imports from `fleet_rlm.runtime.factory` and concrete terminal helper modules.
   **Outcome:** Backend CLI/runtime ownership is clearer and less dependent on legacy alias modules.
 - **Change:** Removed the duplicate scaffold/skill assets from the old `.claude` and `features/scaffold` locations in favor of the canonical packaged scaffold tree.
   **Outcome:** There is now one supported bundled scaffold surface for distributed skills, hooks, agents, and teams instead of multiple competing copies.

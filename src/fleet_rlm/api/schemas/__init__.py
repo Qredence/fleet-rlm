@@ -1,18 +1,9 @@
 """Schema package exports for FastAPI server routers."""
 
-from .core import (
-    AuthMeResponse,
-    HealthResponse,
-    ReadyResponse,
-    RuntimeActiveModels,
-    RuntimeStatusResponse,
-    RuntimeTestCache,
-    SessionStateResponse,
-    SessionStateSummary,
-    WSCommandMessage,
-    WSCommandResult,
-    WSMessage,
-)
+from .base import AuthMeResponse, HealthResponse, ReadyResponse
+from .runtime import RuntimeActiveModels, RuntimeStatusResponse, RuntimeTestCache
+from .sessions import SessionStateResponse, SessionStateSummary
+from .websocket import WSCommandMessage, WSCommandResult, WSMessage
 
 __all__ = [
     "AuthMeResponse",

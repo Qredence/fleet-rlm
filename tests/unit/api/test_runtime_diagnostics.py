@@ -85,7 +85,7 @@ async def test_run_daytona_connection_test_caches_success(
         ),
     )
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.config.build_daytona_client",
         lambda _cfg: _FakeAsyncDaytona(_cfg),
     )
 
@@ -124,7 +124,7 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
         ),
     )
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.config.build_daytona_client",
         lambda _cfg: (_ for _ in ()).throw(
             RuntimeError("Daytona SDK is not available.")
         ),

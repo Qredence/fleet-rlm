@@ -324,6 +324,35 @@ def test_daytona_interpreter_execute_direct_reuses_context_and_returns_final_out
     assert len(runtime.session.sandbox.code_interpreter.contexts) == 1
 
 
+def test_daytona_interpreter_strips_trailing_dspy_completed_marker() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    result = interpreter.execute("SUBMIT(answer='ok')\n]] [[ ## completed ## ]]")
+
+    assert isinstance(result, FinalOutput)
+    assert getattr(result, "output") == {"answer": "ok"}
+    executed = runtime.session.sandbox.code_interpreter.run_calls[-1]
+    assert "[[ ## completed ## ]]" not in executed
+    assert "]]" not in executed
+
+
+def test_daytona_interpreter_raises_on_bad_marker_leak() -> None:
+    """CodeSanitizationError from prepare_execution_code must surface as CodeInterpreterError.
+
+    Previously the error was serialised to a string and returned; that was
+    incorrect because coerce_sandbox_result would then normalise it back to
+    {"status": "ok", …}, silently masking the failure.
+    """
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    with pytest.raises(
+        CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"
+    ):
+        interpreter.execute("if True:\n    pass\nelse\n[[ ## completed ## ]]")
+
+
 def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
@@ -376,6 +405,91 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
     assert isinstance(result, FinalOutput)
     assert getattr(result, "output") == {"answer": "HOST:hello"}
     assert "llm_query" in captured["tools"]
+
+
+def test_daytona_interpreter_bridge_detection_uses_cleaned_code(monkeypatch) -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    interpreter.llm_query = lambda prompt: f"HOST:{prompt}"  # type: ignore[method-assign]
+
+    captured: dict[str, Any] = {}
+
+    class _FakeBridge:
+        def __init__(self, *, sandbox: Any, context: Any) -> None:
+            captured["sandbox"] = sandbox
+            captured["context"] = context
+
+        def bind_context(self, context: Any) -> None:
+            captured["bound_context"] = context
+
+        async def async_tools(self, tools: dict[str, Any]) -> None:
+            captured["tools"] = dict(tools)
+
+        async def aexecute(
+            self,
+            *,
+            code: str,
+            timeout: int,
+            tool_executor,
+            on_stdout=None,
+            on_stderr=None,
+        ):
+            del timeout, on_stdout, on_stderr
+            captured["code"] = code
+            answer = tool_executor("llm_query", ["hello"], {})
+            payload = f"{_FINAL_OUTPUT_MARKER}{json.dumps({'answer': answer})}{_FINAL_OUTPUT_MARKER}"
+            return DaytonaBridgeExecution(
+                result=_FakeExecutionResult(),
+                stdout=payload,
+                stderr="",
+                callback_count=1,
+            )
+
+        async def aclose(self) -> None:
+            captured["closed"] = True
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.interpreter.DaytonaToolBridge",
+        _FakeBridge,
+    )
+
+    result = interpreter.execute(
+        "Code:\n```python\nanswer = llm_query('hello')\nSUBMIT(answer=answer)\n```\n[[ ## completed ## ]]"
+    )
+
+    assert isinstance(result, FinalOutput)
+    assert getattr(result, "output") == {"answer": "HOST:hello"}
+    assert "[[ ## completed ## ]]" not in captured["code"]
+    assert "```" not in captured["code"]
+
+
+def test_daytona_interpreter_bridge_injection_error_propagates(monkeypatch) -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+
+    class _FakeBridge:
+        def __init__(self, *, sandbox: Any, context: Any) -> None:
+            del sandbox, context
+
+        def bind_context(self, context: Any) -> None:
+            del context
+
+        async def async_tools(self, tools: dict[str, Any]) -> None:
+            del tools
+            raise CodeInterpreterError(
+                "Failed to inject tool 'store_evidence': invalid syntax"
+            )
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.interpreter.DaytonaToolBridge",
+        _FakeBridge,
+    )
+
+    with pytest.raises(CodeInterpreterError, match="store_evidence"):
+        interpreter.execute("answer = llm_query('hello')\nSUBMIT(answer=answer)")
 
 
 def test_daytona_interpreter_exports_context_id_for_resume() -> None:

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fleet_rlm.integrations.database import MemoryScope
 
 from ..dependencies import PersistedIdentityDep, RepositoryDep
-from ..schemas.core import MemoryItemResponse, MemoryListResponse
+from ..schemas.memory import MemoryItemResponse, MemoryListResponse
 
 router = APIRouter(
     prefix="/memory",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -136,6 +137,33 @@ def test_complete_optimization_run_with_manifest():
     assert fetched.status.value == "completed"
     assert fetched.manifest_path == "/tmp/manifest.json"
     assert fetched.phase == "completed"
+
+
+def test_complete_optimization_run_merges_review_metadata():
+    from fleet_rlm.integrations.local_store import (
+        complete_optimization_run,
+        create_optimization_run,
+        get_optimization_run,
+    )
+
+    run = create_optimization_run(
+        program_spec="mod:test",
+        metadata_json={"dataset_path": "datasets/longcot.jsonl"},
+    )
+    complete_optimization_run(
+        run.id,
+        train_examples=8,
+        validation_examples=2,
+        validation_score=0.85,
+        metadata_json={
+            "review_bundle": {"reflection_model": {"source": "delegate"}},
+        },
+    )
+    fetched = get_optimization_run(run.id)
+    assert fetched is not None
+    metadata = json.loads(fetched.metadata_json or "{}")
+    assert metadata["dataset_path"] == "datasets/longcot.jsonl"
+    assert metadata["review_bundle"]["reflection_model"]["source"] == "delegate"
 
 
 def test_recover_stale_optimization_runs():

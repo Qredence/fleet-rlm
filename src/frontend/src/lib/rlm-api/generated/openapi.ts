@@ -650,9 +650,33 @@ export interface components {
     GEPAStatusResponse: {
       /**
        * Available
-       * @description Whether GEPA optimization is available in this environment.
+       * @description Whether the legacy MLflow-backed GEPA optimization path is available.
        */
       available: boolean;
+      /**
+       * Module Optimization Available
+       * @description Whether registered module optimization can run in this environment.
+       * @default false
+       */
+      module_optimization_available?: boolean;
+      /**
+       * Mlflow Dataset Optimization Available
+       * @description Whether MLflow-backed dataset/program optimization can run.
+       * @default false
+       */
+      mlflow_dataset_optimization_available?: boolean;
+      /**
+       * Mlflow Logging Available
+       * @description Whether optional MLflow logging is available for optimization runs.
+       * @default false
+       */
+      mlflow_logging_available?: boolean;
+      /**
+       * Mlflow Configured
+       * @description Whether MLflow is enabled/configured in the environment.
+       * @default false
+       */
+      mlflow_configured?: boolean;
       /**
        * Mlflow Enabled
        * @description Whether MLflow is enabled and reachable.

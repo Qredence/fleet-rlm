@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter
 
 from ..dependencies import ServerStateDep
-from ..schemas.core import HealthResponse, ReadyResponse
+from ..schemas.base import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
 logger = logging.getLogger(__name__)

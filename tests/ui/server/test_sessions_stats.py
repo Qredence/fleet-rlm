@@ -9,7 +9,7 @@ import uuid
 import pytest
 
 from fleet_rlm.integrations.database import ChatSessionStatus
-from fleet_rlm.integrations.database.types import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 
 class _StatsSessionRepository:
