@@ -13,6 +13,10 @@ export type PromptSnapshotItem = components["schemas"]["PromptSnapshotItem"];
 
 export interface GEPAStatusResponse {
   available: boolean;
+  module_optimization_available?: boolean;
+  mlflow_dataset_optimization_available?: boolean;
+  mlflow_logging_available?: boolean;
+  mlflow_configured?: boolean;
   mlflow_enabled: boolean;
   gepa_installed: boolean;
   guidance: string[];

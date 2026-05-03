@@ -28,6 +28,14 @@ const modulesState = {
   }>,
 };
 
+const reflectAndReviseModule = {
+  slug: "reflect-and-revise",
+  label: "Reflect & Revise",
+  description: "Reflect answers",
+  program_spec: "pkg.reflect:build_program",
+  required_dataset_keys: [],
+};
+
 const mutationState = {
   isPending: false,
   mutate: vi.fn(),
@@ -122,7 +130,7 @@ vi.mock("@/lib/rlm-api/sessions", async () => {
 describe("DatasetsTab sessions fallback", () => {
   beforeEach(() => {
     workspaceHistoryState.conversations = [];
-    modulesState.items = [];
+    modulesState.items = [reflectAndReviseModule];
     mutationState.isPending = false;
     mutationState.mutate.mockReset();
     mutationState.config = null;
@@ -249,6 +257,7 @@ describe("DatasetsTab sessions fallback", () => {
       auto: "light",
       trainRatio: 0.8,
       moduleSlug: "reflect-and-revise",
+      programSpec: "pkg.reflect:build_program",
     });
     expect(optimizationEndpoints.createRun).not.toHaveBeenCalled();
 

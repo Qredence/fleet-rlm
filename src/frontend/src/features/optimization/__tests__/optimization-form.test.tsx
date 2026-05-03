@@ -55,6 +55,10 @@ vi.mock("@tanstack/react-query", () => ({
       return {
         data: {
           available: true,
+          module_optimization_available: true,
+          mlflow_dataset_optimization_available: true,
+          mlflow_logging_available: true,
+          mlflow_configured: true,
           mlflow_enabled: true,
           gepa_installed: true,
           guidance: [],

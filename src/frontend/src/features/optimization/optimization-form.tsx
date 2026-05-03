@@ -182,7 +182,12 @@ export function OptimizationForm({
     : customProgramSpec.trim();
 
   const status = statusQuery.data;
-  const available = status?.available ?? false;
+  const moduleOptimizationAvailable =
+    status?.module_optimization_available ?? status?.available ?? false;
+  const customOptimizationAvailable =
+    status?.mlflow_dataset_optimization_available ?? status?.available ?? false;
+  const mlflowLoggingAvailable = status?.mlflow_logging_available ?? status?.mlflow_enabled ?? false;
+  const available = activeModuleInfo ? moduleOptimizationAvailable : customOptimizationAvailable;
   const hasDatasetTarget = selectedDatasetId != null || datasetPath.trim() !== "";
   const canRun = available && hasDatasetTarget && resolvedProgramSpec !== "" && validRatio;
 
@@ -296,7 +301,7 @@ export function OptimizationForm({
             <div className="flex flex-col items-end gap-2 self-start">
               {statusQuery.isLoading ? (
                 <Badge variant="secondary">Checking…</Badge>
-              ) : available ? (
+              ) : moduleOptimizationAvailable ? (
                 <Badge variant="secondary" className="bg-success/15 text-success">
                   Available
                 </Badge>
@@ -306,8 +311,8 @@ export function OptimizationForm({
               {status && !status.gepa_installed ? (
                 <span className="text-xs text-muted-foreground">GEPA module not installed</span>
               ) : null}
-              {status && !status.mlflow_enabled ? (
-                <span className="text-xs text-muted-foreground">MLflow unavailable</span>
+              {status && !mlflowLoggingAvailable ? (
+                <span className="text-xs text-muted-foreground">MLflow logging unavailable</span>
               ) : null}
             </div>
           </Field>
