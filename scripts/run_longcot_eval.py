@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import importlib.util
 import json
 import os
@@ -49,14 +50,23 @@ load_dotenv(ROOT / ".env")
 
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
-# Format constraint injected into every RLM prompt so the model knows what SUBMIT expects.
-# The move schema is [[block, from_stack, to_stack], ...] to match BlocksWorld semantics.
-_LONGCOT_FORMAT_REMINDER = (
+# Domain-specific format reminders injected into RLM prompts so the model knows
+# what SUBMIT expects for each benchmark domain.  The BlocksWorld move schema
+# applies only to the 'logic' domain; other domains receive a generic reminder.
+_LONGCOT_FORMAT_REMINDER_BLOCKSWORLD = (
     "\n\nIMPORTANT: Your final answer MUST be submitted using SUBMIT() "
     "with the answer formatted EXACTLY as:\n  solution = [[block, from_stack, to_stack], ...]\n"
     "Each move is a list of three integers: [block_id, source_stack, destination_stack].\n"
     "Do not add any explanation around it. The solution field must be a Python list literal."
 )
+_LONGCOT_FORMAT_REMINDER_GENERIC = (
+    "\n\nIMPORTANT: Submit your final answer using SUBMIT() with the answer "
+    "in the solution field. Do not include extra explanation outside the submitted value."
+)
+# Per-domain mapping; unmapped domains fall back to the generic reminder.
+_LONGCOT_DOMAIN_FORMAT_REMINDERS: dict[str, str] = {
+    "logic": _LONGCOT_FORMAT_REMINDER_BLOCKSWORLD,
+}
 
 _RLM_FAILURE_MARKERS = (
     "adapterparseerror",
@@ -87,7 +97,6 @@ _INFRA_FAILURE_MARKERS = (
 )
 
 _SLICE_DOMAIN_ORDER = ("logic", "cs", "chemistry", "chess", "math")
-_VENDOR_RUN_INFERENCE_MODULE: ModuleType | None = None
 
 
 def _extract_solution(text: str) -> str:
@@ -325,13 +334,9 @@ def _ensure_api_key() -> str:
     return key
 
 
+@functools.lru_cache(maxsize=1)
 def _load_vendor_run_inference_module() -> ModuleType:
-    """Dynamically load LongCoT's inference runner for config/provider helpers."""
-    global _VENDOR_RUN_INFERENCE_MODULE
-
-    if _VENDOR_RUN_INFERENCE_MODULE is not None:
-        return _VENDOR_RUN_INFERENCE_MODULE
-
+    """Dynamically load and cache LongCoT's inference runner for config/provider helpers."""
     script = VENDOR_LONGCOT / "run_inference.py"
     spec = importlib.util.spec_from_file_location("vendor_longcot_run_inference", script)
     if spec is None or spec.loader is None:
@@ -339,7 +344,6 @@ def _load_vendor_run_inference_module() -> ModuleType:
 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    _VENDOR_RUN_INFERENCE_MODULE = module
     return module
 
 
@@ -431,12 +435,15 @@ def _load_tips_text(tips_file: Path | None) -> str | None:
     return text or None
 
 
-def _build_rlm_prompt(prompt: str, tips_text: str | None) -> str:
+def _build_rlm_prompt(prompt: str, tips_text: str | None, domain: str | None = None) -> str:
     """Append benchmark-specific steering and output requirements."""
     parts = [prompt.rstrip()]
     if tips_text:
         parts.append(f"\n\nRLM EXECUTION TIPS:\n{tips_text}")
-    parts.append(_LONGCOT_FORMAT_REMINDER)
+    format_reminder = _LONGCOT_DOMAIN_FORMAT_REMINDERS.get(
+        domain or "", _LONGCOT_FORMAT_REMINDER_GENERIC
+    )
+    parts.append(format_reminder)
     return "".join(parts)
 
 
@@ -759,8 +766,6 @@ def run_rlm(
     else:
         print("MLflow not configured — traces will not be recorded")
 
-    import dspy as _dspy
-
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
     from fleet_rlm.integrations.daytona.types import SandboxSpec
     from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
@@ -822,7 +827,7 @@ def run_rlm(
         nonlocal completed_count
         i, q = idx_q
         qid = q.get("question_id", f"q{i}")
-        prompt = _build_rlm_prompt(q["prompt"], tips_text)
+        prompt = _build_rlm_prompt(q["prompt"], tips_text, domain=q.get("domain"))
         domain_name = q.get("domain", "unknown")
         started = time.time()
         response_text = ""
@@ -897,6 +902,15 @@ def run_rlm(
                 "response_bytes": len(response_text),
                 "prompt_bytes": len(prompt),
             }
+            update_current_mlflow_trace(
+                response_preview=response_text,
+                trace_metadata=trace_metadata,
+            )
+            mlflow_result_metadata = merge_trace_result_metadata(
+                {},
+                response_preview=response_text,
+                trace_metadata=trace_metadata,
+            )
         finally:
             flush_mlflow_traces()
         elapsed_ms = int((time.time() - started) * 1000)

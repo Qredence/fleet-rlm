@@ -24,9 +24,15 @@ logger = logging.getLogger(__name__)
 
 def _planner_execution_context() -> Any:
     """Build a thread-local DSPy context for offline optimization work."""
+    import dspy
+
     from fleet_rlm.runtime.config import build_dspy_context, get_planner_lm_from_env
 
     planner_lm = get_planner_lm_from_env()
+    if planner_lm is None:
+        # Fall back to the already-configured in-process DSPy LM (e.g. configured at
+        # server start via fleet-rlm bootstrap) rather than hard-failing.
+        planner_lm = dspy.settings.lm
     if planner_lm is None:
         raise RuntimeError(
             "DSPy LM is not configured. Set DSPY_LM_MODEL and DSPY_LLM_API_KEY "

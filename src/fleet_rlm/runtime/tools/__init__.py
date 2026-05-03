@@ -6,7 +6,6 @@ from ._marker import tool_fn
 from .registry import (
     TOOL_MODULE_NAMES,
     _collect_tools_from_modules,
-    _sync_compatible_tool_callable,
     discover_tools,
     list_react_tool_names,
 )
@@ -15,7 +14,6 @@ from .registry import (
 __all__ = [
     "TOOL_MODULE_NAMES",
     "_collect_tools_from_modules",
-    "_sync_compatible_tool_callable",
     "discover_tools",
     "list_react_tool_names",
     "tool_fn",

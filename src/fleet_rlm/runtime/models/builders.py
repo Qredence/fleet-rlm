@@ -754,6 +754,9 @@ class RecursiveWorkspaceModule(dspy.Module):
                 subqueries = [user_request]
             outputs = self._execute_subqueries(subqueries, assembled_context, mode)
             latest_result = "\n---\n".join(outputs)
+            # Refresh compact_latest so the verifier and reflector operate on the
+            # evidence produced in *this* pass, not the stale pre-execution snapshot.
+            compact_latest = self._compact_for_signature(latest_result)
             failure_signals = self._classify_subquery_failures(outputs)
 
             self._store_pass_evidence(pass_idx, outputs)
@@ -806,11 +809,6 @@ class RecursiveWorkspaceModule(dspy.Module):
                     verified_summary = self._append_failure_signals(
                         verified_summary,
                         self._classify_subquery_failures([latest_result]),
-                    )
-                    status = (
-                        "needs_repair"
-                        if repair_count < self.max_repair_attempts
-                        else "needs_more_recursion"
                     )
                 else:
                     best_answer = (

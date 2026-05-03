@@ -195,7 +195,7 @@ def client_with_patched_deps(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(opt_runs, "_get_mlflow_status", lambda: (True, True))
     monkeypatch.setattr(
         "fleet_rlm.api.routers.optimization.background._planner_execution_context",
-        lambda: contextlib.nullcontext(),
+        contextlib.nullcontext,
     )
 
     app = create_app(
@@ -217,7 +217,7 @@ def client_with_mlflow_unavailable(monkeypatch: pytest.MonkeyPatch) -> TestClien
     monkeypatch.setattr(opt_runs, "_get_mlflow_status", lambda: (True, False))
     monkeypatch.setattr(
         "fleet_rlm.api.routers.optimization.background._planner_execution_context",
-        lambda: contextlib.nullcontext(),
+        contextlib.nullcontext,
     )
 
     app = create_app(

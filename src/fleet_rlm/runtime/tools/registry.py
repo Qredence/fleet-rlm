@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
-import inspect
-from functools import wraps
-from typing import Any, Callable, Iterable
+from typing import Any, Iterable
 
 from ._marker import tool_fn
 
@@ -21,22 +18,6 @@ TOOL_MODULE_NAMES: tuple[str, ...] = (
     "sandbox_filesystem",
     "sandbox_tools",
 )
-
-
-def _sync_compatible_tool_callable(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Return *fn* with sync-call compatibility for async callables."""
-    if not inspect.iscoroutinefunction(fn):
-        return fn
-
-    @wraps(fn)
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(fn(*args, **kwargs))
-        return fn(*args, **kwargs)
-
-    return _wrapper
 
 
 def list_react_tool_names(tools: Iterable[Any]) -> list[str]:
@@ -98,7 +79,6 @@ __all__ = [
     "TOOL_MODULE_NAMES",
     "_collect_tools_from_modules",
     "_import_tool_modules",
-    "_sync_compatible_tool_callable",
     "discover_tools",
     "list_react_tool_names",
     "tool_fn",

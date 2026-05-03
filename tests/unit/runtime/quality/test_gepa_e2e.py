@@ -143,7 +143,7 @@ def _mock_dspy_infra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dspy.Evaluate", _FakeEvaluate, raising=False)
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
-        lambda: MagicMock(),
+        MagicMock,
     )
     monkeypatch.setattr(
         "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",

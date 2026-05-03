@@ -337,17 +337,18 @@ def test_daytona_interpreter_strips_trailing_dspy_completed_marker() -> None:
     assert "]]" not in executed
 
 
-def test_daytona_interpreter_returns_structured_prepare_error_for_bad_marker_leak() -> (
-    None
-):
+def test_daytona_interpreter_raises_on_bad_marker_leak() -> None:
+    """CodeSanitizationError from prepare_execution_code must surface as CodeInterpreterError.
+
+    Previously the error was serialised to a string and returned; that was
+    incorrect because coerce_sandbox_result would then normalise it back to
+    {"status": "ok", …}, silently masking the failure.
+    """
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
-    result = interpreter.execute("if True:\n    pass\nelse\n[[ ## completed ## ]]")
-
-    payload = json.loads(str(result))
-    assert payload["status"] == "error"
-    assert payload["reason"] == "code_prepare_error"
+    with pytest.raises(CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"):
+        interpreter.execute("if True:\n    pass\nelse\n[[ ## completed ## ]]")
 
 
 def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
@@ -460,7 +461,7 @@ def test_daytona_interpreter_bridge_detection_uses_cleaned_code(monkeypatch) -> 
     assert "```" not in captured["code"]
 
 
-def test_daytona_interpreter_bridge_injection_error_is_structured(monkeypatch) -> None:
+def test_daytona_interpreter_bridge_injection_error_propagates(monkeypatch) -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
@@ -485,12 +486,8 @@ def test_daytona_interpreter_bridge_injection_error_is_structured(monkeypatch) -
         _FakeBridge,
     )
 
-    result = interpreter.execute("answer = llm_query('hello')\nSUBMIT(answer=answer)")
-
-    payload = json.loads(str(result))
-    assert payload["status"] == "error"
-    assert payload["reason"] == "tool_error"
-    assert "store_evidence" in payload["error"]
+    with pytest.raises(CodeInterpreterError, match="store_evidence"):
+        interpreter.execute("answer = llm_query('hello')\nSUBMIT(answer=answer)")
 
 
 def test_daytona_interpreter_exports_context_id_for_resume() -> None:

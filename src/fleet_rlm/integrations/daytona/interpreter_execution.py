@@ -76,7 +76,9 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     _reject_unsupported_recursive_callbacks: Callable[..., None]
     _requires_bridge: Callable[..., bool]
 
-    async def _aclose_bridge(self) -> None: ...
+    async def _aclose_bridge(self) -> None:
+        pass
+
     async def aensure_bridge(
         self,
         *,
@@ -84,7 +86,9 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
         context: Any,
         tools: dict[str, Callable[..., Any]],
         bridge_cls: type[DaytonaToolBridge] | None = None,
-    ) -> DaytonaToolBridge: ...
+    ) -> DaytonaToolBridge:
+        pass
+
     async def aexecute_direct(
         self,
         *,
@@ -92,13 +96,16 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
         context: Any,
         code: str,
         envs: dict[str, str] | None = None,
-    ) -> DaytonaBridgeExecution: ...
+    ) -> DaytonaBridgeExecution:
+        pass
+
     def response_from_execution(
         self,
         execution: DaytonaBridgeExecution,
         *,
         extract_final_artifact_fn: Callable[[str], dict[str, Any] | None] | None = None,
-    ) -> DaytonaExecutionResponse: ...
+    ) -> DaytonaExecutionResponse:
+        pass
 
 
 def python_parses(code: str) -> bool:
@@ -282,32 +289,20 @@ async def aexecute_in_session(
         session,
         submit_signature_fn=lambda: submit_signature(owner.output_fields),
     )
-    try:
-        prepared_code = prepare_execution_code(
-            owner,
-            code=code,
-            variables=variables,
-            reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
-        )
-    except CodeSanitizationError as exc:
-        return structured_execution_error(
-            reason="code_prepare_error",
-            error=str(exc),
-        )
-    try:
-        execution = await arun_prepared_execution(
-            owner,
-            session=session,
-            context=context,
-            code=prepared_code,
-            callbacks=callbacks,
-            envs=envs,
-        )
-    except CodeInterpreterError as exc:
-        return structured_execution_error(
-            reason="tool_error",
-            error=str(exc),
-        )
+    prepared_code = prepare_execution_code(
+        owner,
+        code=code,
+        variables=variables,
+        reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
+    )
+    execution = await arun_prepared_execution(
+        owner,
+        session=session,
+        context=context,
+        code=prepared_code,
+        callbacks=callbacks,
+        envs=envs,
+    )
     return callbacks.response_from_execution(execution)
 
 

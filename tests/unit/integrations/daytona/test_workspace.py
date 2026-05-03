@@ -7,9 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.integrations.daytona.context_staging import _astage_context_paths
-from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 import fleet_rlm.integrations.daytona.context_staging as context_staging_module
+from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +44,7 @@ def test_stage_context_paths_raises_for_nonexistent_path(tmp_path) -> None:
 
     with pytest.raises(DaytonaDiagnosticError, match="Context path does not exist"):
         asyncio.run(
-            _astage_context_paths(
+            context_staging_module._astage_context_paths(
                 sandbox=sandbox,
                 workspace_path="/workspace/ws",
                 context_paths=[str(missing_path)],
@@ -58,7 +57,7 @@ def test_stage_context_paths_skips_url_paths() -> None:
     """URL-form context paths (http/https) are silently filtered before staging."""
     sandbox = _make_sandbox()
     result = asyncio.run(
-        _astage_context_paths(
+        context_staging_module._astage_context_paths(
             sandbox=sandbox,
             workspace_path="/workspace/ws",
             context_paths=["http://localhost:3000/health", "https://example.com/doc"],
@@ -83,7 +82,7 @@ def test_stage_context_paths_wraps_unexpected_resolution_errors(
         match="Failed to stage context path 'bad-path': boom",
     ) as exc_info:
         asyncio.run(
-            _astage_context_paths(
+            context_staging_module._astage_context_paths(
                 sandbox=sandbox,
                 workspace_path="/workspace/ws",
                 context_paths=["bad-path"],
@@ -98,7 +97,7 @@ def test_stage_context_paths_wraps_unexpected_resolution_errors(
 def test_stage_context_paths_empty_returns_empty() -> None:
     sandbox = _make_sandbox()
     result = asyncio.run(
-        _astage_context_paths(
+        context_staging_module._astage_context_paths(
             sandbox=sandbox,
             workspace_path="/workspace/ws",
             context_paths=[],
@@ -114,7 +113,7 @@ def test_stage_context_paths_stages_valid_file(tmp_path) -> None:
 
     sandbox = _make_sandbox()
     result = asyncio.run(
-        _astage_context_paths(
+        context_staging_module._astage_context_paths(
             sandbox=sandbox,
             workspace_path="/workspace/ws",
             context_paths=[str(test_file)],

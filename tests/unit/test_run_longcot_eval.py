@@ -175,7 +175,19 @@ def test_build_rlm_prompt_appends_tips_and_format_reminder() -> None:
     assert prompt.startswith("Solve this.")
     assert "RLM EXECUTION TIPS" in prompt
     assert "Avoid brute force." in prompt
+    # No domain → generic reminder (not the BlocksWorld-specific one)
+    assert "SUBMIT()" in prompt
+    assert "solution" in prompt
+
+
+def test_build_rlm_prompt_uses_domain_specific_reminder() -> None:
+    mod = _load_longcot_script()
+
+    prompt = mod._build_rlm_prompt("Solve this.", None, domain="logic")
+
+    # logic domain → BlocksWorld reminder
     assert "IMPORTANT: Your final answer MUST be submitted using SUBMIT()" in prompt
+    assert "solution = [[block, from_stack, to_stack]" in prompt
 
 
 def test_configure_rlm_lm_openrouter_sets_dspy_env(monkeypatch) -> None:
