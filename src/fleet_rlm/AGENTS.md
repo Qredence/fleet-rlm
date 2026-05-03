@@ -195,12 +195,20 @@ Daytona-specific boundaries:
 - Keep Daytona-specific behavior under `integrations/daytona/*`
 - Keep recursive child sandbox policy in `integrations/daytona/child_isolation.py`; `interpreter.py` should delegate to it instead of growing new child-creation branches inline.
 - Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge_callbacks.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
-- Keep low-level Daytona client, volume-state normalization, and durable volume layout helpers in `integrations/daytona/runtime_support.py`; `runtime.py` should stay focused on sandbox/session lifecycle.
+- Keep Daytona client construction, config resolution, and SDK error classification in `integrations/daytona/config.py`
+- Keep sandbox spec building, payload models, and state normalization helpers in `integrations/daytona/types.py`
+- Keep volume readiness, mount context managers, inventory, and browsing in `integrations/daytona/volume_runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
+- Keep workspace path helpers, git ref resolution, repo checkout, and workspace session orchestration in `integrations/daytona/workspace_runtime.py`
+- Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`
+- Keep sandbox lifecycle (stop, delete, archive, resume) in `integrations/daytona/sandbox_lifecycle.py`
+- Keep snapshot management in `integrations/daytona/snapshot_runtime.py`
+- Keep structured diagnostic errors and phase-to-category mapping in `integrations/daytona/diagnostics.py`
+- Keep the async/sync bridge (persistent background event loop runner) in `integrations/daytona/async_compat.py`
+- Keep local file staging and document extraction in `integrations/daytona/context_staging.py`
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
-- Keep Daytona filesystem operations (repo staging, workspace creation, volume browsing) in `integrations/daytona/filesystem.py`
-- Keep Daytona sandbox lifecycle, client building, snapshot creation, and volume readiness in `integrations/daytona/runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
+- Keep Daytona sandbox lifecycle in `integrations/daytona/sandbox_lifecycle.py` and runtime factory in `integrations/daytona/runtime.py`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Keep recursive RLM child creation centralized in `integrations/daytona/interpreter.py::build_delegate_child`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.

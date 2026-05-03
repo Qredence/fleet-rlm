@@ -1,4 +1,4 @@
-"""Tests for workspace.py context-path staging helpers."""
+"""Tests for Daytona context-path staging helpers."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from fleet_rlm.integrations.daytona.context_staging import _astage_context_paths
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-import fleet_rlm.integrations.daytona.filesystem as filesystem_module
-from fleet_rlm.integrations.daytona.filesystem import _astage_context_paths
+import fleet_rlm.integrations.daytona.context_staging as context_staging_module
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ def test_stage_context_paths_wraps_unexpected_resolution_errors(
     def _boom(_path: str):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(filesystem_module, "_resolve_local_context_path", _boom)
+    monkeypatch.setattr(context_staging_module, "_resolve_local_context_path", _boom)
     sandbox = _make_sandbox()
 
     with pytest.raises(

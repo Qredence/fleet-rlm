@@ -131,7 +131,12 @@ def invoke_tool(
             raise RuntimeError(f"Unknown host callback: {name}")
         return _json_safe_value(value)
     except Exception as exc:
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": "error",
+            "reason": "tool_error",
+            "tool_name": name,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _mentions_callback_call(code: str, names: AbstractSet[str]) -> bool:
