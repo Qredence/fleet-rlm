@@ -109,6 +109,38 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
     ),
 }
 
+# Command targets that are provided by AgentRuntime methods rather than ReAct tools.
+COMMAND_METHOD_TARGETS = frozenset({"reset"})
+
+# Compatibility command targets kept in the dispatch table so older websocket
+# command clients get a clear "not available" response instead of "unknown
+# command". These are not currently registered by runtime.tools.discover_tools().
+COMPATIBILITY_COMMAND_TARGETS = frozenset(
+    {
+        "chunk_host",
+        "chunk_sandbox",
+        "clarification_questions",
+        "edit_core_memory",
+        "extract_from_logs",
+        "fetch_web_document",
+        "grounded_answer",
+        "load_text_from_volume",
+        "memory_action_intent",
+        "memory_structure_audit",
+        "memory_structure_migration_plan",
+        "memory_tree",
+        "parallel_semantic_map",
+        "plan_code_change",
+        "process_document",
+        "propose_core_memory_update",
+        "rlm_query",
+        "save_buffer_to_volume",
+        "summarize_long_document",
+        "triage_incident_logs",
+        "write_to_file",
+    }
+)
+
 # Commands whose tools may block the event loop and should be offloaded.
 _BLOCKING_COMMANDS = frozenset(
     {
@@ -138,6 +170,21 @@ _BLOCKING_COMMANDS = frozenset(
         "recursive_workspace",
     }
 )
+
+
+def command_target_names() -> set[str]:
+    """Return every callable target referenced by ``COMMAND_DISPATCH``."""
+    return {target for target, _required, _optional in COMMAND_DISPATCH.values()}
+
+
+def missing_required_command_targets(available_tool_names: set[str]) -> set[str]:
+    """Return command targets that should exist but are absent from tools/methods.
+
+    Compatibility-only targets are excluded because they intentionally remain in
+    the command table for clearer errors to older clients.
+    """
+    ignored = set(COMMAND_METHOD_TARGETS) | set(COMPATIBILITY_COMMAND_TARGETS)
+    return command_target_names() - available_tool_names - ignored
 
 
 # ---------------------------------------------------------------------------

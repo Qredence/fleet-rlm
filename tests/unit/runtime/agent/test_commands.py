@@ -4,7 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.runtime.agent.commands import _resolve_tool, execute_command
+from fleet_rlm.runtime.agent.commands import (
+    COMPATIBILITY_COMMAND_TARGETS,
+    COMMAND_METHOD_TARGETS,
+    command_target_names,
+    execute_command,
+    missing_required_command_targets,
+    _resolve_tool,
+)
+from fleet_rlm.runtime.tools import discover_tools
 
 
 class _FakeAgent:
@@ -73,6 +81,23 @@ class _FakeAgent:
             memory_structure_migration_plan,
             clarification_questions,
         ]
+
+
+def test_command_dispatch_targets_are_classified() -> None:
+    target_names = command_target_names()
+
+    assert "reset" in COMMAND_METHOD_TARGETS
+    assert COMMAND_METHOD_TARGETS <= target_names
+    assert COMPATIBILITY_COMMAND_TARGETS <= target_names
+
+
+def test_command_dispatch_has_no_unclassified_missing_tool_targets() -> None:
+    tool_names = {
+        getattr(tool, "name", None) or getattr(tool, "__name__", "")
+        for tool in discover_tools()
+    }
+
+    assert missing_required_command_targets(tool_names) == set()
 
 
 @pytest.mark.asyncio

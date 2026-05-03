@@ -534,7 +534,7 @@ async def test_persist_session_metadata_passes_correct_ids(
     """VAL-PERSIST-002: UpsertRequest is constructed with correct UUIDs."""
     import uuid as _uuid
 
-    from fleet_rlm.integrations.database.types import ChatSessionUpsertRequest
+    from fleet_rlm.integrations.database.repository_chat import ChatSessionUpsertRequest
 
     await persist_session_metadata(
         mock_repository,

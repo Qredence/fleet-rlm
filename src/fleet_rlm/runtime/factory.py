@@ -33,7 +33,7 @@ def build_chat_agent(
     secret_name: str = "LITELLM",
     volume_name: str | None = None,
     runtime: Any | None = None,
-    verbose: bool = False,
+    verbose: bool = True,
     history_max_turns: int | None = None,
     extra_tools: list[Callable[..., Any]] | None = None,
     env_file: Path | None = None,
