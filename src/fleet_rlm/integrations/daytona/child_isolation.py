@@ -10,8 +10,8 @@ from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_s
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 from .runtime import DaytonaSandboxRuntime
+from .sandbox_spec import SandboxSpec
 from .session_runtime import DaytonaSandboxSession
-from .types import SandboxSpec
 
 ChildIsolationMode = Literal["auto", "context"]
 ChildForkFallback = Literal["clean", "fail"]

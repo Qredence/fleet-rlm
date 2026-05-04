@@ -7,7 +7,7 @@ from typing import Any, Callable, Final, TypeVar
 
 from dspy.primitives import FinalOutput
 
-from .types import DaytonaSmokeResult
+from .diagnostic_models import DaytonaSmokeResult
 
 _T = TypeVar("_T")
 
@@ -96,7 +96,7 @@ def as_diagnostic_error(exc: BaseException, *, phase: str) -> DaytonaDiagnosticE
 
 
 # ---------------------------------------------------------------------------
-# Smoke validation (formerly smoke.py)
+# Smoke validation
 # ---------------------------------------------------------------------------
 
 

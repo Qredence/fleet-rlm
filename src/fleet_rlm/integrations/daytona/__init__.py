@@ -10,23 +10,23 @@ if TYPE_CHECKING:
         ResolvedDaytonaConfig,
         resolve_daytona_config,
     )
+    from .diagnostic_models import DaytonaRunCancelled
     from .diagnostics import (
         DaytonaDiagnosticError,
         VolumeNotReadyError,
         run_daytona_smoke,
     )
     from .interpreter import DaytonaInterpreter
+    from .payload_models import (
+        ContextSource,
+        SandboxLmRuntimeConfig,
+    )
     from .runtime import (
         DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
         DaytonaSandboxRuntime,
         DaytonaSandboxSession,
     )
-    from .types import (
-        ContextSource,
-        DaytonaRunCancelled,
-        SandboxLmRuntimeConfig,
-        SandboxSpec,
-    )
+    from .sandbox_spec import SandboxSpec
 
 __all__ = [
     "ContextSource",
@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 _IMPORT_MAP: dict[str, tuple[str, str]] = {
-    "ContextSource": ("fleet_rlm.integrations.daytona.types", "ContextSource"),
+    "ContextSource": ("fleet_rlm.integrations.daytona.payload_models", "ContextSource"),
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH": (
         "fleet_rlm.integrations.daytona.runtime",
         "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
@@ -64,7 +64,7 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
         "DaytonaInterpreter",
     ),
     "DaytonaRunCancelled": (
-        "fleet_rlm.integrations.daytona.types",
+        "fleet_rlm.integrations.daytona.diagnostic_models",
         "DaytonaRunCancelled",
     ),
     "DaytonaSandboxRuntime": (
@@ -80,10 +80,10 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
         "ResolvedDaytonaConfig",
     ),
     "SandboxLmRuntimeConfig": (
-        "fleet_rlm.integrations.daytona.types",
+        "fleet_rlm.integrations.daytona.payload_models",
         "SandboxLmRuntimeConfig",
     ),
-    "SandboxSpec": ("fleet_rlm.integrations.daytona.types", "SandboxSpec"),
+    "SandboxSpec": ("fleet_rlm.integrations.daytona.sandbox_spec", "SandboxSpec"),
     "VolumeNotReadyError": (
         "fleet_rlm.integrations.daytona.diagnostics",
         "VolumeNotReadyError",

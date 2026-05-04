@@ -6,6 +6,8 @@ import ast
 import json
 import math
 import re
+import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
@@ -15,9 +17,12 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     SupportsExecutionEventCallback,
     complete_event_data,
     emit_execution_event,
+    start_event_data,
+    summarize_code,
 )
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
-from .async_compat import _await_if_needed
+from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from .bridge_callbacks import invoke_tool
 from .interpreter_assets import (
@@ -76,11 +81,11 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     _reject_unsupported_recursive_callbacks: Callable[..., None]
     _requires_bridge: Callable[..., bool]
 
-    async def _aclose_bridge(self) -> None:
+    async def _aclose_bridge(self: Any) -> None:
         pass
 
     async def aensure_bridge(
-        self,
+        self: Any,
         *,
         session: DaytonaSandboxSession,
         context: Any,
@@ -90,7 +95,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
         pass
 
     async def aexecute_direct(
-        self,
+        self: Any,
         *,
         session: DaytonaSandboxSession,
         context: Any,
@@ -100,7 +105,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
         pass
 
     def response_from_execution(
-        self,
+        self: Any,
         execution: DaytonaBridgeExecution,
         *,
         extract_final_artifact_fn: Callable[[str], dict[str, Any] | None] | None = None,
@@ -657,3 +662,289 @@ def literal(value: Any) -> str:
         pairs = [f"{literal(key)}: {literal(item)}" for key, item in value.items()]
         return "{" + ", ".join(pairs) + "}"
     raise CodeInterpreterError(f"Unsupported value type: {type(value).__name__}")
+
+
+_DaytonaExecutionResponse = DaytonaExecutionResponse
+_ExecutionCallbacks = ExecutionCallbacks
+_aensure_bridge = aensure_bridge
+_aensure_setup = aensure_setup
+_aexecute_direct = aexecute_direct
+_aexecute_in_session = aexecute_in_session
+_arun_prepared_execution = arun_prepared_execution
+_extract_final_artifact = extract_final_artifact
+_finalize_execution_result = finalize_execution_result
+_inject_variables = inject_variables
+_literal = literal
+_prepare_execution_code = prepare_execution_code
+_resolve_execution_callbacks = resolve_execution_callbacks
+_response_from_execution = response_from_execution
+_safe_variables = safe_variables
+_sanitize_execution_code = sanitize_execution_code
+_structured_execution_error = structured_execution_error
+_submit_signature = submit_signature
+
+
+class DaytonaInterpreterExecutionMixin:
+    def execute(
+        self: Any,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+    ) -> str | FinalOutput:
+        return _run_async_compat(
+            self.aexecute,
+            code,
+            variables,
+            execution_profile=execution_profile,
+        )
+
+    async def aexecute(
+        self: Any,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> str | FinalOutput:
+        session = await self._aensure_session_impl()
+        await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
+        safe_vars = self.safe_variables(variables)
+        profile = execution_profile or self.default_execution_profile
+        profile_value = profile.value if hasattr(profile, "value") else str(profile)
+        code_hash, code_preview = summarize_code(code)
+        started_at = time.time()
+        emit_execution_event(
+            self,
+            start_event_data(
+                execution_profile=str(profile_value),
+                code_hash=code_hash,
+                code_preview=code_preview,
+            ),
+        )
+        try:
+            response = await self.aexecute_in_session(
+                session=session,
+                code=code,
+                variables=safe_vars,
+                envs=envs,
+            )
+        except Exception as exc:
+            emit_execution_event(
+                self,
+                complete_event_data(
+                    started_at=started_at,
+                    execution_profile=str(profile_value),
+                    code_hash=code_hash,
+                    code_preview=code_preview,
+                    success=False,
+                    result_kind="exception",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                ),
+            )
+            raise CodeInterpreterError(str(exc)) from exc
+        return self.finalize_execution_result(
+            response=response,
+            started_at=started_at,
+            execution_profile=str(profile_value),
+            code_hash=code_hash,
+            code_preview=code_preview,
+        )
+
+    def safe_variables(self: Any, variables: dict[str, Any] | None) -> dict[str, Any]:
+        return _safe_variables(variables)
+
+    def submit_signature(self: Any) -> tuple[tuple[str, str], ...] | None:
+        return _submit_signature(self.output_fields)
+
+    async def aensure_setup(
+        self: Any,
+        session: DaytonaSandboxSession,
+        *,
+        submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None]
+        | None = None,
+    ) -> Any:
+        submit_signature_fn = submit_signature_fn or self.submit_signature
+        return await _aensure_setup(
+            self,
+            session,
+            submit_signature_fn=submit_signature_fn,
+        )
+
+    async def aensure_bridge(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        tools: dict[str, Callable[..., Any]],
+        bridge_cls: type[DaytonaToolBridge] | None = None,
+    ) -> DaytonaToolBridge:
+        if bridge_cls is None:
+            owner_module = sys.modules.get(type(self).__module__)
+            bridge_cls = getattr(owner_module, "DaytonaToolBridge", DaytonaToolBridge)
+        return await _aensure_bridge(
+            self,
+            session=session,
+            context=context,
+            tools=tools,
+            bridge_cls=bridge_cls,
+        )
+
+    async def aexecute_in_session(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        code: str,
+        variables: dict[str, Any],
+        envs: dict[str, str] | None = None,
+        bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
+        reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
+        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
+        | None = None,
+        aensure_bridge_fn: Callable[..., Any] | None = None,
+        aexecute_direct_fn: Callable[..., Any] | None = None,
+        response_from_execution_fn: Callable[
+            [DaytonaBridgeExecution], _DaytonaExecutionResponse
+        ]
+        | None = None,
+    ) -> _DaytonaExecutionResponse:
+        return await _aexecute_in_session(
+            self,
+            session=session,
+            code=code,
+            variables=variables,
+            envs=envs,
+            bridge_tools_fn=bridge_tools_fn,
+            reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+            requires_bridge_fn=requires_bridge_fn,
+            aensure_bridge_fn=aensure_bridge_fn,
+            aexecute_direct_fn=aexecute_direct_fn,
+            response_from_execution_fn=response_from_execution_fn,
+        )
+
+    def _resolve_execution_callbacks(
+        self: Any,
+        *,
+        bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
+        reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
+        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
+        | None = None,
+        aensure_bridge_fn: Callable[..., Any] | None = None,
+        aexecute_direct_fn: Callable[..., Any] | None = None,
+        response_from_execution_fn: Callable[
+            [DaytonaBridgeExecution], _DaytonaExecutionResponse
+        ]
+        | None = None,
+    ) -> _ExecutionCallbacks:
+        return _resolve_execution_callbacks(
+            self,
+            bridge_tools_fn=bridge_tools_fn,
+            reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+            requires_bridge_fn=requires_bridge_fn,
+            aensure_bridge_fn=aensure_bridge_fn,
+            aexecute_direct_fn=aexecute_direct_fn,
+            response_from_execution_fn=response_from_execution_fn,
+        )
+
+    def _prepare_execution_code(
+        self: Any,
+        *,
+        code: str,
+        variables: dict[str, Any],
+        reject_recursive_callbacks: Callable[[str], None],
+    ) -> str:
+        return _prepare_execution_code(
+            self,
+            code=code,
+            variables=variables,
+            reject_recursive_callbacks=reject_recursive_callbacks,
+        )
+
+    @staticmethod
+    def _sanitize_execution_code(code: str) -> str:
+        return _sanitize_execution_code(code)
+
+    @staticmethod
+    def _structured_execution_error(
+        *, reason: str, error: str
+    ) -> _DaytonaExecutionResponse:
+        return _structured_execution_error(reason=reason, error=error)
+
+    async def _arun_prepared_execution(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        code: str,
+        callbacks: _ExecutionCallbacks,
+        envs: dict[str, str] | None = None,
+    ) -> DaytonaBridgeExecution:
+        return await _arun_prepared_execution(
+            self,
+            session=session,
+            context=context,
+            code=code,
+            callbacks=callbacks,
+            envs=envs,
+        )
+
+    async def aexecute_direct(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        code: str,
+        envs: dict[str, str] | None = None,
+    ) -> DaytonaBridgeExecution:
+        return await _aexecute_direct(
+            self,
+            session=session,
+            context=context,
+            code=code,
+            envs=envs,
+        )
+
+    def response_from_execution(
+        self: Any,
+        execution: DaytonaBridgeExecution,
+        *,
+        extract_final_artifact_fn: Callable[[str], dict[str, Any] | None] | None = None,
+    ) -> _DaytonaExecutionResponse:
+        return _response_from_execution(
+            self,
+            execution,
+            extract_final_artifact_fn=extract_final_artifact_fn,
+        )
+
+    @staticmethod
+    def extract_final_artifact(
+        stdout: str,
+        *,
+        marker: str = _FINAL_OUTPUT_MARKER,
+    ) -> dict[str, Any] | None:
+        return _extract_final_artifact(stdout, marker=marker)
+
+    def finalize_execution_result(
+        self: Any,
+        *,
+        response: _DaytonaExecutionResponse,
+        started_at: float,
+        execution_profile: str,
+        code_hash: str,
+        code_preview: str,
+    ) -> str | FinalOutput:
+        return _finalize_execution_result(
+            self,
+            response=response,
+            started_at=started_at,
+            execution_profile=execution_profile,
+            code_hash=code_hash,
+            code_preview=code_preview,
+        )
+
+    def inject_variables(self: Any, code: str, variables: dict[str, Any]) -> str:
+        return _inject_variables(self, code, variables)
+
+    def literal(self: Any, value: Any) -> str:
+        return _literal(value)

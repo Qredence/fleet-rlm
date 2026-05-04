@@ -22,8 +22,8 @@ from .config import (
     format_daytona_sdk_error as _format_daytona_sdk_error,
 )
 from .diagnostics import DaytonaDiagnosticError
+from .sandbox_spec import SandboxSpec
 from .snapshot_runtime import aresolve_snapshot, fallback_to_declarative_image
-from .types import SandboxSpec
 from .volume_runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
 )
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Workspace path helpers (formerly workspace_paths.py)
+# Workspace path helpers
 # ---------------------------------------------------------------------------
 
 
@@ -90,7 +90,7 @@ async def _aensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Git ref resolution helpers (formerly repo_refs.py)
+# Git ref resolution helpers
 # ---------------------------------------------------------------------------
 
 _REMOTE_REF_RESOLUTION_TIMEOUT_S = 5
@@ -151,7 +151,7 @@ async def _aresolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Repo clone and checkout reconciliation (formerly repo_checkout.py)
+# Repo clone and checkout reconciliation
 # ---------------------------------------------------------------------------
 
 

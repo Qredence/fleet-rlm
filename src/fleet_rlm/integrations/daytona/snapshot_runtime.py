@@ -19,7 +19,7 @@ from .config import (
     daytona_import_error as _daytona_import_error,
 )
 from .sandbox_lifecycle import _experimental_call
-from .types import SandboxSpec
+from .sandbox_spec import SandboxSpec
 
 logger = logging.getLogger(__name__)
 

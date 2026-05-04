@@ -195,7 +195,7 @@ async def aensure_daytona_volume_layout(
 
 
 # ---------------------------------------------------------------------------
-# Volume mount context managers (formerly volume_mounts.py)
+# Volume mount context managers
 # ---------------------------------------------------------------------------
 
 
@@ -245,7 +245,7 @@ def _mounted_daytona_volume(volume_name: str) -> Iterator[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Volume inventory (formerly volume_inventory.py)
+# Volume inventory
 # ---------------------------------------------------------------------------
 
 
@@ -294,7 +294,7 @@ def list_daytona_volumes() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Volume browsing / file preview (formerly volume_browser.py)
+# Volume browsing / file preview
 # ---------------------------------------------------------------------------
 
 

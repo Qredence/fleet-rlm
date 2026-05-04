@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 from .diagnostics import DaytonaDiagnosticError
-from .types import SandboxLmRuntimeConfig
+from .payload_models import SandboxLmRuntimeConfig
 
 
 class DaytonaConfigError(DaytonaDiagnosticError):
@@ -125,7 +125,7 @@ def resolve_daytona_lm_runtime_config(
 
 
 # ---------------------------------------------------------------------------
-# SDK client construction and error helpers (formerly client.py)
+# SDK client construction and error helpers
 # ---------------------------------------------------------------------------
 
 _RESOURCE_ERROR_STATUS_CODES = frozenset({400, 409, 429})
