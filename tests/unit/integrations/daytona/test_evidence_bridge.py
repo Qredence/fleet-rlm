@@ -15,13 +15,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 from fleet_rlm.integrations.daytona.evidence_bridge import (
     fetch_evidence,
     list_evidence,
     store_evidence,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

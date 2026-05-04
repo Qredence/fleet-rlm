@@ -10,7 +10,6 @@ import asyncio
 import inspect
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Dispatch table: command_name -> (tool_function_name, required_args, optional_args)
 # ---------------------------------------------------------------------------

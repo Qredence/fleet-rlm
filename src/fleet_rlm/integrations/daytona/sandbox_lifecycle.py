@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from contextlib import suppress
 from typing import Any
 
 from .async_compat import _await_if_needed, _run_async_compat
@@ -11,6 +10,8 @@ from .config import format_daytona_sdk_error as _format_daytona_sdk_error
 from .diagnostics import DaytonaDiagnosticError
 from .volume_runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+)
+from .volume_runtime import (
     aensure_daytona_volume_layout as _aensure_daytona_volume_layout,
 )
 
@@ -33,90 +34,6 @@ async def _experimental_call(
             category=category,
             phase=phase,
         ) from exc
-
-
-async def adelete_sandbox_session(session: Any) -> None:
-    await session.adelete_context()
-    # Graceful stop before delete to let processes flush/clean up.
-    with suppress(Exception):
-        await _await_if_needed(session.sandbox.stop(timeout=10))
-    with suppress(Exception):
-        await _await_if_needed(session.sandbox.delete())
-    session._driver_started = False
-
-
-def delete_sandbox_session(session: Any) -> None:
-    _run_async_compat(adelete_sandbox_session, session)
-
-
-async def aarchive_sandbox_session(session: Any) -> None:
-    """Archive the sandbox for later recovery (cheaper than keeping it running)."""
-    await _await_if_needed(session.sandbox.archive())
-
-
-def archive_sandbox_session(session: Any) -> None:
-    _run_async_compat(aarchive_sandbox_session, session)
-
-
-async def arecover_sandbox_session(session: Any, *, timeout: float = 60.0) -> None:
-    """Recover an archived sandbox, restoring it to a running state."""
-    await _await_if_needed(session.sandbox.recover(timeout=timeout))
-
-
-def recover_sandbox_session(session: Any, *, timeout: float = 60.0) -> None:
-    _run_async_compat(arecover_sandbox_session, session, timeout=timeout)
-
-
-async def arefresh_sandbox_session_activity(session: Any) -> None:
-    """Reset the sandbox auto-stop timer without changing state."""
-    with suppress(Exception):
-        await _await_if_needed(session.sandbox.refresh_activity())
-
-
-def refresh_sandbox_session_activity(session: Any) -> None:
-    _run_async_compat(arefresh_sandbox_session_activity, session)
-
-
-async def aresize_sandbox_session(
-    session: Any,
-    *,
-    cpu: int,
-    memory: int,
-    disk: int,
-) -> None:
-    """Hot-resize sandbox resources (CPU cores, memory GiB, disk GiB)."""
-    from daytona import Resources
-
-    await _await_if_needed(
-        session.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
-    )
-
-
-def resize_sandbox_session(
-    session: Any,
-    *,
-    cpu: int,
-    memory: int,
-    disk: int,
-) -> None:
-    _run_async_compat(
-        aresize_sandbox_session,
-        session,
-        cpu=cpu,
-        memory=memory,
-        disk=disk,
-    )
-
-
-def create_lsp_server(
-    session: Any,
-    *,
-    language: str = "python",
-    project_path: str | None = None,
-) -> Any:
-    """Create a Daytona LSP server for code intelligence in the sandbox."""
-    path = project_path or session.workspace_path
-    return session.sandbox.create_lsp_server(language, path)
 
 
 async def aget_sandbox(
@@ -245,19 +162,9 @@ def fork_sandbox(
 
 
 __all__ = [
-    "aarchive_sandbox_session",
-    "adelete_sandbox_session",
     "afork_sandbox",
     "aget_sandbox",
-    "arecover_sandbox_session",
-    "arefresh_sandbox_session_activity",
-    "aresize_sandbox_session",
     "aresume_workspace_session",
-    "archive_sandbox_session",
-    "create_lsp_server",
-    "delete_sandbox_session",
     "fork_sandbox",
-    "recover_sandbox_session",
-    "refresh_sandbox_session_activity",
-    "resize_sandbox_session",
+    "resume_workspace_session",
 ]

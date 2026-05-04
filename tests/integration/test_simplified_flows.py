@@ -29,7 +29,6 @@ from fleet_rlm.runtime.agent.persistence import (
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers and fixtures
 # ---------------------------------------------------------------------------

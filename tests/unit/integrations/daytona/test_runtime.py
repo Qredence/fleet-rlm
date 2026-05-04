@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,13 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.daytona.workspace_runtime import _areconcile_repo_checkout
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
 from fleet_rlm.integrations.daytona.types import ContextSource, SandboxSpec
+from fleet_rlm.integrations.daytona.workspace_runtime import _areconcile_repo_checkout
 
 
 class _FakeProcessExecResult:
@@ -532,7 +533,11 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     assert session.context_sources[0].host_path == str(second_context.resolve())
     assert "workspace_reconcile" in session.phase_timings_ms
     assert "context_stage" in session.phase_timings_ms
-    assert len(fake_client.sandbox.process.code_run_calls) == 2
+    assert len(fake_client.sandbox.process.code_run_calls) == 1
+    assert any(
+        command.startswith("rm -rf -- /workspace/workspace/other")
+        for command in fake_client.sandbox.process.exec_calls
+    )
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes-b.md") for path in upload_paths)
 
@@ -632,9 +637,27 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
         text=True,
     )
 
-    def _code_run(code: str, params=None, timeout=None):
+    class _LocalFs:
+        def create_folder(self, path: str, mode: str) -> None:
+            _ = mode
+            Path(path).mkdir(parents=True, exist_ok=True)
+
+    class _LocalGit:
+        def clone(self, **kwargs: str) -> None:
+            command = ["git", "clone"]
+            if branch := kwargs.get("branch"):
+                command.extend(["--branch", branch])
+            command.extend([kwargs["url"], kwargs["path"]])
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+    def _exec(command: str):
         completed = subprocess.run(
-            ["python3", "-c", code],
+            shlex.split(command),
             check=False,
             capture_output=True,
             text=True,
@@ -645,7 +668,11 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
             exit_code=completed.returncode,
         )
 
-    sandbox = SimpleNamespace(process=SimpleNamespace(code_run=_code_run))
+    sandbox = SimpleNamespace(
+        fs=_LocalFs(),
+        git=_LocalGit(),
+        process=SimpleNamespace(exec=_exec),
+    )
     asyncio.run(
         _areconcile_repo_checkout(
             sandbox=sandbox,

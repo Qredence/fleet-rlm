@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from importlib.metadata import PackageNotFoundError, version as package_version
-from pathlib import Path
 import re
+from importlib import import_module
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
 
 _PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 

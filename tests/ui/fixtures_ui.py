@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-import uuid
 
 try:
     from dspy.primitives.code_interpreter import FinalOutput
 except ImportError:
     from dspy import FinalOutput
 
-from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
+from fleet_rlm.runtime.models import StreamEvent
 
 
 def ts(epoch: float = 1_234_567_890.0) -> datetime:

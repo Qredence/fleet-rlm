@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import io
 import os
+import socket
 from http.client import HTTPMessage
 from pathlib import Path
-import socket
 from typing import Any
 
 import pytest

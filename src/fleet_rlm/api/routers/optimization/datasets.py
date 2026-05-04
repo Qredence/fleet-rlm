@@ -15,9 +15,11 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    Path as ApiPath,
     Query,
     UploadFile,
+)
+from fastapi import (
+    Path as ApiPath,
 )
 
 from fleet_rlm.integrations.database import DatasetFormat, DatasetSource

@@ -13,7 +13,6 @@ from fleet_rlm.runtime.quality.artifacts import (
     write_manifest,
 )
 
-
 # -- resolve_artifact_path ----------------------------------------------------
 
 

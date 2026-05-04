@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 

@@ -10,8 +10,9 @@ import dspy
 from dspy.teleprompt import MIPROv2
 
 from fleet_rlm.integrations.observability.config import MlflowConfig
-from .mlflow_evaluation import load_trace_rows, rows_with_expected_responses
 from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
+
+from .mlflow_evaluation import load_trace_rows, rows_with_expected_responses
 
 
 def load_symbol(spec: str) -> Any:

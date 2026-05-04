@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from fleet_rlm.integrations.database import RunStatus, RunStepType
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...dependencies import ServerState
 from ...events import (
@@ -26,7 +27,7 @@ from ...events import (
     ExecutionStep,
 )
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from .helpers import _error_envelope, _sanitize_for_log, _try_send_json
+from .helpers import _error_envelope, _try_send_json
 from .turn_setup import PreparedStreamingTurn
 from .types import (
     ChatAgentProtocol,

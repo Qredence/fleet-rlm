@@ -23,8 +23,8 @@ def _register_test_module_spec():
     import dspy
 
     from fleet_rlm.runtime.quality.module_registry import (
-        ModuleOptimizationSpec,
         _REGISTRY,
+        ModuleOptimizationSpec,
         register_module,
     )
 

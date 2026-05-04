@@ -11,8 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id as _sanitize_id
-from fleet_rlm.utils.identity import session_key
+from fleet_rlm.utils.identity import owner_fingerprint, session_key
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ...dependencies import ServerState
 from .types import ChatAgentProtocol, LocalPersistFn, SessionContext

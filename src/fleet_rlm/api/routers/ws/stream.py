@@ -22,6 +22,13 @@ from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_even
 
 from ...dependencies import ServerState
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
+from ...runtime_services.chat_runtime import (
+    ChatSessionState as _ChatSessionState,
+)
+from ...runtime_services.chat_runtime import (
+    PreparedChatRuntime as _PreparedChatRuntime,
+)
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
 from .errors import handle_stream_error
@@ -49,11 +56,6 @@ from .types import (
     StreamEventLike,
     WorkspaceEvent,
     WorkspaceTaskRequest,
-)
-from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from ...runtime_services.chat_runtime import (
-    ChatSessionState as _ChatSessionState,
-    PreparedChatRuntime as _PreparedChatRuntime,
 )
 
 logger = logging.getLogger(__name__)

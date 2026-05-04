@@ -352,6 +352,33 @@ class SandboxSpec:
             params["image"] = self.image
         return params
 
+    def to_daytona_create_params(
+        self,
+        *,
+        volume_id: str | None = None,
+        create_image_params_cls: Any,
+        create_snapshot_params_cls: Any,
+        volume_mount_cls: Any,
+        resources_cls: Any,
+    ) -> Any:
+        """Build the concrete Daytona SDK create-params object for this spec."""
+        params = self._common_params(volume_id=None)
+        if volume_id and self.volume_mount_path:
+            mount_kwargs: dict[str, Any] = {
+                "volume_id": volume_id,
+                "mount_path": self.volume_mount_path,
+            }
+            if self.volume_subpath:
+                mount_kwargs["subpath"] = self.volume_subpath
+            params["volumes"] = [volume_mount_cls(**mount_kwargs)]
+        resources = params.pop("resources", None)
+        if resources and self.uses_declarative_image:
+            params["resources"] = resources_cls(**resources)
+        if self.uses_declarative_image:
+            params["image"] = self.image
+            return create_image_params_cls(**params)
+        return create_snapshot_params_cls(**params)
+
 
 @dataclass(slots=True)
 class DaytonaSmokeResult:

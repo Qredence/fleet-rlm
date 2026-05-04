@@ -14,7 +14,6 @@ import pytest
 
 from fleet_rlm.runtime.agent.agent import FleetAgent, FleetAgentSignature
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -260,11 +259,11 @@ def test_rlm_react_agent_forward_omits_max_iters(monkeypatch: pytest.MonkeyPatch
 
 def test_build_chat_agent_returns_agent_runtime(monkeypatch: pytest.MonkeyPatch):
     """build_chat_agent should return an AgentRuntime instance (VAL-FACTORY-002)."""
-    from fleet_rlm.runtime import factory as _factory
-    from fleet_rlm.runtime.agent.runtime import AgentRuntime
-
     # Ensure factory has no RLMReActChatAgent reference
     import inspect
+
+    from fleet_rlm.runtime import factory as _factory
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
     factory_src = inspect.getsource(_factory)
     assert "RLMReActChatAgent" not in factory_src

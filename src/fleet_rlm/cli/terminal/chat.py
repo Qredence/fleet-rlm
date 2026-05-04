@@ -16,6 +16,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
+from fleet_rlm.integrations.config.env import AppConfig
 from fleet_rlm.runtime.agent.commands import COMMAND_DISPATCH
 from fleet_rlm.runtime.config import (
     build_dspy_context,
@@ -24,27 +25,54 @@ from fleet_rlm.runtime.config import (
 )
 from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.runtime.models import TraceMode
-from fleet_rlm.integrations.config.env import AppConfig
 
 from .commands import _normalize_trace_mode, handle_slash_command
 from .session_actions import (
     authorize_command as _authorize_command_impl,
+)
+from .session_actions import (
     print_command_palette_action as _print_command_palette_impl,
+)
+from .session_actions import (
     print_permissions as _print_permissions_impl,
+)
+from .session_actions import (
     print_status as _print_status_impl,
+)
+from .session_actions import (
     print_unknown_command_action as _print_unknown_command_impl,
+)
+from .session_actions import (
     run_long_context_action as _run_long_context_impl,
+)
+from .session_actions import (
     run_settings_action as _run_settings_impl,
+)
+from .session_actions import (
     settings_llm_action as _settings_llm_impl,
+)
+from .session_actions import (
     show_shortcuts as _show_shortcuts_impl,
 )
 from .session_view import (
     append_transcript as _append_transcript_impl,
+)
+from .session_view import (
     bottom_toolbar as _bottom_toolbar_impl,
+)
+from .session_view import (
     print_banner as _print_banner_impl,
+)
+from .session_view import (
     print_error as _print_error_impl,
+)
+from .session_view import (
     print_result as _print_result_impl,
+)
+from .session_view import (
     print_warning as _print_warning_impl,
+)
+from .session_view import (
     render_shell as _render_shell_impl,
 )
 from .ui import _FleetCompleter, _history_path, _prompt_label

@@ -1,13 +1,12 @@
+from importlib.metadata import version
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from importlib.metadata import version
-from types import SimpleNamespace
-
 from fleet_rlm.api.config import ServerRuntimeConfig, resolve_server_volume_name
 from fleet_rlm.api.dependencies import ServerState, get_server_state, session_key
-from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.api.schemas import (
     AuthMeResponse,
     HealthResponse,
@@ -17,6 +16,7 @@ from fleet_rlm.api.schemas import (
     WSMessage,
 )
 from fleet_rlm.integrations.config.env import AppConfig
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 
 pytestmark = pytest.mark.ui
 

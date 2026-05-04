@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from .config import MlflowConfig
 from . import mlflow_runtime as runtime
+from .config import MlflowConfig
 
 if TYPE_CHECKING:
     from mlflow.entities.trace import Trace

@@ -24,7 +24,6 @@ from fleet_rlm.runtime.quality.module_registry import (
 )
 from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
 
-
 # -- Fixtures ----------------------------------------------------------------
 
 

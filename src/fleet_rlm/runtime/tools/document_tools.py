@@ -12,8 +12,8 @@ caching, URL fetching with size limits) use the builder in
 from __future__ import annotations
 
 import io
-import os
 import ipaddress
+import os
 import socket
 import tempfile
 import urllib.parse

@@ -17,8 +17,6 @@ from fleet_rlm.api.runtime_services.common import (
     parse_model_identity,
     resolve_sandbox_provider,
 )
-from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
-from fleet_rlm.utils.time import now_iso
 from fleet_rlm.integrations.database import (
     FleetRepository,
     MemoryKind,
@@ -33,6 +31,8 @@ from fleet_rlm.integrations.database.repository_chat import (
 )
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
+from fleet_rlm.utils.time import now_iso
 
 from ..dependencies import ServerState
 

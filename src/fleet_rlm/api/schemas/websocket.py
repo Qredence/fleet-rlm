@@ -7,7 +7,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
-
 from .runtime import ExecutionMode
 
 

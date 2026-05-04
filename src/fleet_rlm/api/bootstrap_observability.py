@@ -16,9 +16,9 @@ from urllib.parse import urlsplit
 
 from fleet_rlm import __version__
 from fleet_rlm.integrations.observability.config import (
+    PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI,
     MlflowConfig,
     PostHogConfig,
-    PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI,
 )
 
 from .dependencies import ServerState

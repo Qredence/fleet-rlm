@@ -5,8 +5,8 @@ import pytest
 from fleet_rlm.integrations.daytona.types import (
     ContextSource,
     SandboxLmRuntimeConfig,
+    normalized_context_sources,
 )
-from fleet_rlm.integrations.daytona.types import normalized_context_sources
 
 
 def test_sandbox_lm_runtime_config_from_raw_normalizes_values() -> None:

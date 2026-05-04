@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 __all__ = [
     "workspace_feedback_metric",
     "workspace_score_metric",

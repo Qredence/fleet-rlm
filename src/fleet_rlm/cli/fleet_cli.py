@@ -15,9 +15,9 @@ Usage:
 
 from __future__ import annotations
 
-from functools import wraps
 import json
 import sys
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, cast
 

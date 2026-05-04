@@ -14,15 +14,15 @@ from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
-from .config import ServerRuntimeConfig
-from .dependencies import ServerState
-from .events import ExecutionEventEmitter
 from .bootstrap_observability import (
     initialize_mlflow_runtime_service,
     initialize_posthog_runtime_service,
     set_optional_service_status,
     terminate_process,
 )
+from .config import ServerRuntimeConfig
+from .dependencies import ServerState
+from .events import ExecutionEventEmitter
 
 logger = logging.getLogger(__name__)
 

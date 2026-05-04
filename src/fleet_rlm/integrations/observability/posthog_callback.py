@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 import time
-import contextvars
 from typing import Any
 
 from dspy.utils.callback import BaseCallback

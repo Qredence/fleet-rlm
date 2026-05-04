@@ -9,6 +9,13 @@ from __future__ import annotations
 import argparse
 import re
 
+try:
+    from defaults import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNKS_DIR, DEFAULT_STATE_PATH
+except ImportError:
+    DEFAULT_CHUNK_SIZE = 200_000
+    DEFAULT_STATE_PATH = ".claude/rlm_state/state.pkl"
+    DEFAULT_CHUNKS_DIR = ".claude/rlm_state/chunks"
+
 
 def load_context(state_path: str) -> str:
     """Load context from RLM state file (pickle format)."""
@@ -102,6 +109,8 @@ def rank_chunks_by_query(
     for i in range(0, len(content), chunk_size):
         end = min(i + chunk_size, len(content))
         chunk = content[i:end]
+        if not chunk:
+            continue
 
         # Simple scoring: keyword frequency
         matches = len(pattern.findall(chunk))
@@ -183,7 +192,7 @@ def main():
 
     # Write output file if requested
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             for cf in chunk_files:
                 f.write(f"{cf}\n")
         print(f"\nWrote {len(chunk_files)} chunk paths to {args.output}")

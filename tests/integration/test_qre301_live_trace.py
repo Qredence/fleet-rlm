@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import and_, func, select, text
 
+from fleet_rlm.api.main import create_app
 from fleet_rlm.integrations.database import (
     Artifact,
     DatabaseManager,
@@ -22,7 +23,6 @@ from fleet_rlm.integrations.database import (
     RunStatus,
     RunStep,
 )
-from fleet_rlm.api.main import create_app
 
 pytestmark = [pytest.mark.live_llm, pytest.mark.db]
 

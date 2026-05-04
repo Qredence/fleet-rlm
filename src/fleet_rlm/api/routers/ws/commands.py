@@ -1,15 +1,15 @@
 """WebSocket command dispatch helpers."""
 
-from collections.abc import Awaitable, Callable
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from fastapi import WebSocket
 
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from .artifacts import track_command_artifact_if_needed

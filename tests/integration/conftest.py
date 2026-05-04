@@ -6,13 +6,13 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.integrations.daytona.config import resolve_daytona_config
 from fleet_rlm.integrations.database import (
     DatabaseManager,
     FleetRepository,
     select_database_url,
 )
+from fleet_rlm.integrations.daytona.config import resolve_daytona_config
+from fleet_rlm.runtime.config import configure_planner_from_env
 
 
 def _lm_configured() -> bool:

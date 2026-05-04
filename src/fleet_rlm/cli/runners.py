@@ -19,24 +19,24 @@ All runners automatically:
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Literal
 
 import dspy
 
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
-from fleet_rlm.runtime.agent.signatures import (
-    SummarizeLongDocument,
-)
-from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.integrations.observability.mlflow_runtime import (
     MlflowTraceRequestContext,
     merge_trace_result_metadata,
     mlflow_request_context,
     new_client_request_id,
 )
+from fleet_rlm.runtime.agent.signatures import (
+    SummarizeLongDocument,
+)
+from fleet_rlm.runtime.config import build_dspy_context
 from fleet_rlm.runtime.factory import (
     _require_planner_ready,
     build_chat_agent,

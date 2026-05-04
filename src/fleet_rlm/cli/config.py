@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from omegaconf import OmegaConf
 import typer
+from omegaconf import OmegaConf
 
 from fleet_rlm.integrations.config.env import AppConfig
-
 
 _CURRENT_APP_CONFIG: AppConfig | None = None
 

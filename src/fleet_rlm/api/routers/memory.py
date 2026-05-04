@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -10,13 +10,13 @@ from fleet_rlm.integrations.database import MemoryScope
 
 from ..dependencies import PersistedIdentityDep, RepositoryDep
 from ..schemas.memory import MemoryItemResponse, MemoryListResponse
+from ._types import OpenAPIResponses
 
 router = APIRouter(
     prefix="/memory",
     tags=["memory"],
 )
 
-OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     401: {

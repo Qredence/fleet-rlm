@@ -305,6 +305,7 @@ def _ensure_dspy_configured() -> None:
     a no-op.  Otherwise it falls back to ``configure_planner_from_env()``.
     """
     import dspy
+
     from fleet_rlm.runtime.config import configure_planner_from_env
 
     if getattr(dspy.settings, "lm", None) is not None:

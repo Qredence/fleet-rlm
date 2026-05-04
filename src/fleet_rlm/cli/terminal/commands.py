@@ -17,7 +17,6 @@ from prompt_toolkit.shortcuts import input_dialog, radiolist_dialog, yes_no_dial
 
 from .ui import _dialog_style, _prompt_choice
 
-
 # Valid trace modes
 _TRACE_MODES: set[str] = {"compact", "verbose", "off"}
 

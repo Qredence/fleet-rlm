@@ -15,23 +15,10 @@ if TYPE_CHECKING:
     from .datasets import (
         DatasetRow,
         load_dataset_rows,
-        split_examples as split_dataset_examples,
         validate_required_keys,
     )
-    from .module_registry import (
-        ModuleOptimizationSpec,
-        get_module_spec,
-        list_module_metadata,
-        list_module_slugs,
-        register_module,
-    )
-    from .optimization_runner import OptimizationResult, run_module_optimization
-    from .scoring_helpers import (
-        ScoreFeedbackBuilder,
-        action_match_score,
-        boundedness_score,
-        set_overlap_score,
-        text_presence_score,
+    from .datasets import (
+        split_examples as split_dataset_examples,
     )
     from .dspy_evaluation import evaluate_program, evaluate_program_from_dataset
     from .gepa_optimization import (
@@ -55,10 +42,25 @@ if TYPE_CHECKING:
         rows_to_examples,
         split_examples,
     )
+    from .module_registry import (
+        ModuleOptimizationSpec,
+        get_module_spec,
+        list_module_metadata,
+        list_module_slugs,
+        register_module,
+    )
+    from .optimization_runner import OptimizationResult, run_module_optimization
     from .scorers import (
         build_rlm_scorers,
         get_default_judge_model,
         reasoning_quality_scorer,
+    )
+    from .scoring_helpers import (
+        ScoreFeedbackBuilder,
+        action_match_score,
+        boundedness_score,
+        set_overlap_score,
+        text_presence_score,
     )
     from .workspace_metrics import (
         completeness_feedback_metric,

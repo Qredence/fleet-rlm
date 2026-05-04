@@ -9,7 +9,6 @@ from fleet_rlm.runtime.execution.streaming_events import (
 )
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
-
 # ---------------------------------------------------------------------------
 # clarification_questions tool
 # ---------------------------------------------------------------------------

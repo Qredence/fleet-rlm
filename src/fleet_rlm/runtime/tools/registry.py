@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 from ._marker import tool_fn
 
-
 TOOL_MODULE_NAMES: tuple[str, ...] = (
     "buffer_tools",
     "chunking_tools",

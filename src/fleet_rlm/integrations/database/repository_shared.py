@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, and_, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from fleet_rlm.utils.time import utc_now as _utc_now
 
 from .engine import DatabaseManager
 from .models_enums import MembershipRole, WorkspaceRole
@@ -24,10 +25,6 @@ from .models_identity import (
 
 _DEFAULT_WORKSPACE_SLUG = "default"
 _DEFAULT_WORKSPACE_NAME = "Default Workspace"
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _coerce_enum(value: Any, enum_cls: type) -> Any:

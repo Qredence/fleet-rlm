@@ -11,12 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fleet_rlm.runtime.tools._marker import tool_fn
 from fleet_rlm.integrations.daytona.async_compat import (
     _await_if_needed,
     _run_async_compat,
 )
-
+from fleet_rlm.runtime.tools._marker import tool_fn
 
 # ---------------------------------------------------------------------------
 # Tool context

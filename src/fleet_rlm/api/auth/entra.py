@@ -8,8 +8,7 @@ from collections.abc import Mapping
 
 import jwt
 from fastapi import Request, WebSocket
-from jwt import InvalidTokenError
-from jwt import PyJWKClient
+from jwt import InvalidTokenError, PyJWKClient
 
 from .base import AuthError
 from .types import NormalizedIdentity

@@ -15,8 +15,10 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     HTTPException,
-    Path as ApiPath,
     Query,
+)
+from fastapi import (
+    Path as ApiPath,
 )
 
 from fleet_rlm.integrations.database import OptimizationRunStatus

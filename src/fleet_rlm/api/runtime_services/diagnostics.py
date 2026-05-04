@@ -12,8 +12,8 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from fleet_rlm.integrations.observability.config import MlflowConfig
 from fleet_rlm.integrations.daytona import DaytonaConfigError
+from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
 from ..dependencies import ServerState

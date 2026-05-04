@@ -13,13 +13,15 @@ import json
 import os
 import tempfile
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 from sqlalchemy import Column, Integer, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+from fleet_rlm.utils.time import utc_now as _utc_now
 
 _DEFAULT_DB_DIR = Path(".data")
 _engines: dict[str, Any] = {}
@@ -166,10 +168,6 @@ def get_engine(db_path: str | None = None):
 def get_session(db_path: str | None = None) -> Session:
     """Return a new SQLModel session bound to the local SQLite engine."""
     return Session(get_engine(db_path))
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class SessionStatus(str, enum.Enum):

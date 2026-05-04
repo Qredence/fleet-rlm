@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol

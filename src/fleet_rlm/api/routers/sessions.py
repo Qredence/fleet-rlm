@@ -1,16 +1,18 @@
 """Router for session state management."""
 
 import asyncio
+import os
+import uuid
 from collections.abc import Mapping
 from datetime import datetime
-import os
 from pathlib import Path as FsPath
-from typing import Annotated, Any, TypeAlias, cast
-import uuid
+from typing import Annotated, cast
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
 from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+
 from ..dependencies import (
     HTTPIdentityDep,
     PersistedIdentityDep,
@@ -19,10 +21,20 @@ from ..dependencies import (
 )
 from ..runtime_services.session_helpers import (
     optional_string as _optional_string,
+)
+from ..runtime_services.session_helpers import (
     parse_legacy_session_id as _parse_legacy_session_id,
+)
+from ..runtime_services.session_helpers import (
     parse_legacy_session_key_owner as _parse_legacy_session_key_owner,
+)
+from ..runtime_services.session_helpers import (
     parse_session_uuid as _parse_session_uuid,
+)
+from ..runtime_services.session_helpers import (
     session_external_id as _session_external_id,
+)
+from ..runtime_services.session_helpers import (
     string_or_default as _string_or_default,
 )
 from ..schemas.optimization import DatasetResponse
@@ -40,13 +52,12 @@ from ..schemas.sessions import (
     TurnItem,
     TurnListResponse,
 )
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+from ._types import OpenAPIResponses
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 _TURN_COUNT_QUERY_LIMIT = 1
 _TRANSCRIPT_EXPORT_MAX_TURNS = 10_000
 
-OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 SESSIONS_ERROR_RESPONSES: OpenAPIResponses = {
     401: {

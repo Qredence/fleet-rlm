@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 

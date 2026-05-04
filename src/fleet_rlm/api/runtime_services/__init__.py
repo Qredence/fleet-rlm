@@ -5,14 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .chat_runtime import (
-        ChatSessionState,
-        PreparedChatRuntime,
-        build_chat_agent_context,
-        new_chat_session_state,
-        prepare_chat_runtime,
-        set_interpreter_default_profile,
-    )
     from .chat_persistence import (
         ExecutionLifecycleManager,
         build_local_persist_fn,
@@ -22,6 +14,14 @@ if TYPE_CHECKING:
         persist_session_state,
         sync_session_record_state,
         update_manifest_from_exported_state,
+    )
+    from .chat_runtime import (
+        ChatSessionState,
+        PreparedChatRuntime,
+        build_chat_agent_context,
+        new_chat_session_state,
+        prepare_chat_runtime,
+        set_interpreter_default_profile,
     )
     from .diagnostics import (
         build_runtime_status_response,

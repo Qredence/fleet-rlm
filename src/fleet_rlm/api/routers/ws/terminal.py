@@ -11,9 +11,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fleet_rlm.integrations.database import RunStatus
 
 from ...events import ExecutionStep
+from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .completion import build_execution_completion_summary, final_event_failed
 from .helpers import _try_send_json
-from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from .types import LocalPersistFn, SessionContext, StreamEventLike
 
 logger = logging.getLogger(__name__)

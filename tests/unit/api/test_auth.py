@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import jwt
 import pytest
 
-from fleet_rlm.integrations.database import TenantStatus
 from fleet_rlm.api.auth import (
     DevAuthProvider,
     EntraAuthProvider,
@@ -14,6 +13,7 @@ from fleet_rlm.api.auth import (
 )
 from fleet_rlm.api.auth.base import AuthError
 from fleet_rlm.api.auth.types import NormalizedIdentity
+from fleet_rlm.integrations.database import TenantStatus
 
 TEST_SECRET = "0123456789abcdef0123456789abcdef"
 

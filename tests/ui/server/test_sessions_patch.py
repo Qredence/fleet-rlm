@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 import pytest
 

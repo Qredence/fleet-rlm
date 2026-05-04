@@ -12,6 +12,17 @@ import json
 import os
 import pickle
 
+try:
+    from defaults import (
+        DEFAULT_CACHE_DIR,
+        DEFAULT_CHUNK_SIZE,
+        DEFAULT_CHUNKS_DIR,
+        DEFAULT_CONFIDENCE_THRESHOLD,
+        DEFAULT_STATE_PATH,
+    )
+except ImportError:
+    pass
+
 
 def _load_helpers():
     """Load helper modules for both package and direct-script execution."""
@@ -45,13 +56,13 @@ class RLMConfig:
 
     def __init__(
         self,
-        state_path: str = ".claude/rlm_state/state.pkl",
-        chunks_dir: str = ".claude/rlm_state/chunks",
-        cache_dir: str = ".claude/rlm_state/cache",
-        chunk_size: int = 200000,
+        state_path: str = DEFAULT_STATE_PATH,
+        chunks_dir: str = DEFAULT_CHUNKS_DIR,
+        cache_dir: str = DEFAULT_CACHE_DIR,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
         overlap: int = 0,
         top_k: int | None = None,
-        confidence_threshold: float = 0.95,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         enable_cache: bool = True,
         enable_early_exit: bool = True,
     ):
@@ -224,23 +235,23 @@ def main():
     )
     parser.add_argument(
         "--state",
-        default=".claude/rlm_state/state.pkl",
+        default=DEFAULT_STATE_PATH,
         help="Path to RLM state file",
     )
     parser.add_argument(
         "--chunks-dir",
-        default=".claude/rlm_state/chunks",
+        default=DEFAULT_CHUNKS_DIR,
         help="Directory containing chunks",
     )
     parser.add_argument(
         "--cache-dir",
-        default=".claude/rlm_state/cache",
+        default=DEFAULT_CACHE_DIR,
         help="Cache directory",
     )
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=200000,
+        default=DEFAULT_CHUNK_SIZE,
         help="Chunk size",
     )
     parser.add_argument(
@@ -251,7 +262,7 @@ def main():
     parser.add_argument(
         "--confidence",
         type=float,
-        default=0.95,
+        default=DEFAULT_CONFIDENCE_THRESHOLD,
         help="Confidence threshold for early exit",
     )
     parser.add_argument(
@@ -287,7 +298,7 @@ def main():
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2)
         print(f"\n📝 Results written to {args.output}")
     else:

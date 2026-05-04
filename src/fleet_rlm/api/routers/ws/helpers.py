@@ -19,11 +19,6 @@ _WEBSOCKET_CLOSED_ERROR_FRAGMENTS = (
 )
 
 
-def _sanitize_for_log(value: object) -> str:
-    """Normalize untrusted values to a single log line."""
-    return str(value).replace("\r", "\\r").replace("\n", "\\n")
-
-
 def _is_closed_websocket_runtime_error(exc: RuntimeError) -> bool:
     """Return True when a runtime error indicates the websocket is already closed."""
     message = str(exc)

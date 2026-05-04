@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from asyncio import Lock as AsyncLock
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import WebSocket
@@ -207,7 +207,6 @@ class ExecutionEventEmitter:
 # Late import avoids a circular dependency during module initialization while
 # still providing a concrete symbol for static analyzers and re-export users.
 from .step_builder import ExecutionStepBuilder  # noqa: E402
-
 
 __all__ = [
     "ExecutionEvent",

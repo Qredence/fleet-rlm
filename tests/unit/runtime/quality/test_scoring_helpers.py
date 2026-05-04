@@ -12,7 +12,6 @@ from fleet_rlm.runtime.quality.scoring_helpers import (
     text_presence_score,
 )
 
-
 # -- set_overlap_score --------------------------------------------------------
 
 

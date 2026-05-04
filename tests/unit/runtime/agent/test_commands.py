@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.runtime.agent.commands import (
-    COMPATIBILITY_COMMAND_TARGETS,
     COMMAND_METHOD_TARGETS,
+    COMPATIBILITY_COMMAND_TARGETS,
+    _resolve_tool,
     command_target_names,
     execute_command,
     missing_required_command_targets,
-    _resolve_tool,
 )
 from fleet_rlm.runtime.tools import discover_tools
 

@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 
-
 # ── Signature shape ──────────────────────────────────────────────────
 
 

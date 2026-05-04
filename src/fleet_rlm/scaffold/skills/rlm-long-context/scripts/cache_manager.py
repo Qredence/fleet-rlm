@@ -40,7 +40,7 @@ def get_cached_result(cache_dir: str, chunk_path: str, query: str) -> dict | Non
     cache_path = get_cache_path(cache_dir, cache_key)
 
     if os.path.exists(cache_path):
-        with open(cache_path) as f:
+        with open(cache_path, encoding="utf-8") as f:
             return json.load(f)
     return None
 
@@ -77,7 +77,7 @@ def cache_result(
         "result": result,
     }
 
-    with open(cache_path, "w") as f:
+    with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(cache_entry, f, indent=2)
 
     return cache_path

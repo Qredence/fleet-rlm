@@ -9,8 +9,8 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+
 from .types import ChatAgentProtocol
 
 logger = logging.getLogger(__name__)

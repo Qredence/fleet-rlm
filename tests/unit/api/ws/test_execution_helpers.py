@@ -9,21 +9,21 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.api.routers.ws.types import SessionContext
-from fleet_rlm.runtime.models import StreamEvent
-from fleet_rlm.api.routers.ws.stream import (
-    ReplHookBridge,
-    _emit_stream_event,
-)
+from fleet_rlm.api.routers.ws.endpoint import _build_local_persist_fn
 from fleet_rlm.api.routers.ws.helpers import (
     _close_websocket_safely,
     _try_send_json,
 )
-from fleet_rlm.api.routers.ws.endpoint import _build_local_persist_fn
 from fleet_rlm.api.routers.ws.session import (
     switch_session_if_needed,
 )
+from fleet_rlm.api.routers.ws.stream import (
+    ReplHookBridge,
+    _emit_stream_event,
+)
+from fleet_rlm.api.routers.ws.types import SessionContext
 from fleet_rlm.api.schemas import WSMessage
+from fleet_rlm.runtime.models import StreamEvent
 from tests.ui.fixtures_ui import FakeChatAgent, ts
 
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 import pytest
 from fastapi.routing import APIRoute
@@ -11,17 +11,17 @@ from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.integrations.database import ChatSessionStatus
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _register_reflect_and_revise_stub():
     """Register a stub 'reflect-and-revise' module for contract tests."""
     from fleet_rlm.runtime.quality.module_registry import (
-        ModuleOptimizationSpec,
         _REGISTRY,
+        ModuleOptimizationSpec,
         register_module,
     )
 

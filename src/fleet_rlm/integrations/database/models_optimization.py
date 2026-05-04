@@ -8,9 +8,9 @@ from datetime import datetime
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
-    Float,
     Index,
     Integer,
     String,

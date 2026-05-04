@@ -18,7 +18,6 @@ import pytest
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.tools.binding import INTERPRETER_TOOL_NAMES
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

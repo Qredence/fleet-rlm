@@ -7,16 +7,21 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from ...runtime_services.chat_persistence import initialize_turn_lifecycle
+from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
+
+from ...events import ExecutionEventEmitter, ExecutionStepBuilder
+from ...runtime_services.chat_persistence import (
+    ExecutionLifecycleManager,
+    initialize_turn_lifecycle,
+)
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
+)
+from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
-from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...schemas import WSMessage
 from .helpers import _try_send_json
-from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 from .types import (
     ChatAgentProtocol,
     DaytonaChatRequestOptions,

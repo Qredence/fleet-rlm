@@ -5,15 +5,14 @@ from __future__ import annotations
 import sys
 
 from fleet_rlm.runtime.quality.module_registry import (
-    ModuleOptimizationSpec,
     _REGISTRY,
+    ModuleOptimizationSpec,
     _reset_registry,
     get_module_spec,
     list_module_metadata,
     list_module_slugs,
     register_module,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

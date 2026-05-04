@@ -31,7 +31,6 @@ from fleet_rlm.runtime.content.chunking import (
 )
 from fleet_rlm.runtime.models.evidence import EvidenceSink
 
-
 _SUBQUERY_FAILURE_MARKERS = (
     "adapterparseerror",
     "broker server failed",

@@ -23,7 +23,6 @@ from unittest.mock import MagicMock, patch
 import dspy
 import pytest
 
-
 EXPECTED_MODULE_NAMES = frozenset(
     {
         "summarize_long_document",

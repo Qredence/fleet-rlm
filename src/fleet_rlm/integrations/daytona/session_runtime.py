@@ -12,14 +12,6 @@ from typing import Any
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .diagnostics import DaytonaDiagnosticError
-from .sandbox_lifecycle import (
-    aarchive_sandbox_session as _aarchive_sandbox_session,
-    adelete_sandbox_session as _adelete_sandbox_session,
-    arecover_sandbox_session as _arecover_sandbox_session,
-    arefresh_sandbox_session_activity as _arefresh_sandbox_session_activity,
-    aresize_sandbox_session as _aresize_sandbox_session,
-    create_lsp_server as _create_lsp_server,
-)
 from .types import ContextSource
 from .volume_runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 
@@ -268,31 +260,42 @@ class DaytonaSandboxSession:
         return _run_async_compat(self.alist_files, path)
 
     async def adelete(self) -> None:
-        await _adelete_sandbox_session(self)
+        await self.adelete_context()
+        # Graceful stop before delete lets sandbox processes flush if possible.
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.stop(timeout=10))
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.delete())
+        self._driver_started = False
 
     def delete(self) -> None:
         _run_async_compat(self.adelete)
 
     async def aarchive(self) -> None:
-        await _aarchive_sandbox_session(self)
+        await _await_if_needed(self.sandbox.archive())
 
     def archive(self) -> None:
         _run_async_compat(self.aarchive)
 
     async def arecover(self, *, timeout: float = 60.0) -> None:
-        await _arecover_sandbox_session(self, timeout=timeout)
+        await _await_if_needed(self.sandbox.recover(timeout=timeout))
 
     def recover(self, *, timeout: float = 60.0) -> None:
         _run_async_compat(self.arecover, timeout=timeout)
 
     async def arefresh_activity(self) -> None:
-        await _arefresh_sandbox_session_activity(self)
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.refresh_activity())
 
     def refresh_activity(self) -> None:
         _run_async_compat(self.arefresh_activity)
 
     async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:
-        await _aresize_sandbox_session(self, cpu=cpu, memory=memory, disk=disk)
+        from daytona import Resources
+
+        await _await_if_needed(
+            self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
+        )
 
     def resize(self, *, cpu: int, memory: int, disk: int) -> None:
         _run_async_compat(self.aresize, cpu=cpu, memory=memory, disk=disk)
@@ -303,10 +306,9 @@ class DaytonaSandboxSession:
         language: str = "python",
         project_path: str | None = None,
     ) -> Any:
-        return _create_lsp_server(
-            self,
-            language=language,
-            project_path=project_path,
+        return self.sandbox.create_lsp_server(
+            language,
+            project_path or self.workspace_path,
         )
 
 

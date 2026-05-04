@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import fleet_rlm.runtime.config as config
 import pytest
 import yaml
+
+import fleet_rlm.runtime.config as config
 from tests.unit.fixtures_env import clear_env, write_env_file
 
 

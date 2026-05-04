@@ -5,19 +5,17 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Callable
-from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from fleet_rlm.integrations.database import SandboxProvider
+from fleet_rlm.utils.time import (
+    now_iso as utc_now_iso,  # noqa: F401  re-export for consumers
+)
 
 RUNTIME_TEST_TIMEOUT_SECONDS = 20
 VOLUME_OPERATION_TIMEOUT_SECONDS = 30
 
 _BlockingResultT = TypeVar("_BlockingResultT")
-
-
-def utc_now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
 
 
 def sanitize_error(exc: Exception) -> str:

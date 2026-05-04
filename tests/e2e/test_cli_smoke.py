@@ -10,7 +10,6 @@ from fleet_rlm.cli import app
 from fleet_rlm.cli.config import set_current_app_config
 from fleet_rlm.integrations.config.env import AppConfig
 
-
 runner = CliRunner()
 
 

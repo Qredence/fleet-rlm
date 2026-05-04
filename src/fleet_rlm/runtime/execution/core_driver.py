@@ -86,12 +86,6 @@ def sandbox_driver() -> None:
     from typing import Any, Callable, cast
 
     try:
-        from fleet_rlm.runtime.execution.session_history import (
-            get_last_execution,
-            get_session_history,
-            log_execution,
-            reset_session_history,
-        )
         from fleet_rlm.runtime.execution.driver_factories import (
             FinalOutput,
             inject_sandbox_helpers,
@@ -120,6 +114,12 @@ def sandbox_driver() -> None:
             workspace_list,
             workspace_read,
             workspace_write,
+        )
+        from fleet_rlm.runtime.execution.session_history import (
+            get_last_execution,
+            get_session_history,
+            log_execution,
+            reset_session_history,
         )
     except ModuleNotFoundError:
         # The interpreter may execute a bundled script that already

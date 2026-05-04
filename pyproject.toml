@@ -180,6 +180,9 @@ markers = [
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]
 
+[tool.ruff.lint]
+extend-select = ["I001"]
+
 [tool.ty.src]
 exclude = [
     "tests/",

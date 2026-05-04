@@ -16,6 +16,8 @@ from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
 from fleet_rlm.runtime.config import build_dspy_context
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import NormalizedIdentity
 from ...dependencies import ServerState, get_server_state_from_websocket
@@ -25,24 +27,34 @@ from ...runtime_services.chat_persistence import (
 )
 from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
+)
+from ...runtime_services.chat_runtime import (
     build_chat_agent_context as _build_chat_agent_context,
+)
+from ...runtime_services.chat_runtime import (
     new_chat_session_state as _new_chat_session_state,
+)
+from ...runtime_services.chat_runtime import (
     prepare_chat_runtime as _prepare_chat_runtime_service,
+)
+from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from .helpers import (
     _authenticate_websocket,
     _close_websocket_safely,
     _error_envelope,
-    _sanitize_for_log,
     _try_send_json,
 )
 from .lifecycle import (
     cancel_startup_status_task as _cancel_startup_status_task,
+)
+from .lifecycle import (
     chat_startup_error_payload,
-    emit_delayed_startup_status as _emit_delayed_startup_status,
     get_execution_emitter,
+)
+from .lifecycle import (
+    emit_delayed_startup_status as _emit_delayed_startup_status,
 )
 from .messages import parse_ws_message_or_send_error
 from .stream import _chat_message_loop

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
-import uuid
 
+from fleet_rlm.api.routers.ws.lifecycle import build_workspace_task_request
+from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
 from fleet_rlm.api.runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
 )
-from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
-from fleet_rlm.api.routers.ws.lifecycle import build_workspace_task_request
 from fleet_rlm.api.schemas import WSMessage
 from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 from tests.ui.fixtures_ui import FakeChatAgent

@@ -6,9 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-
 from daytona import DaytonaConnectionError, DaytonaNotFoundError
+from fastapi.testclient import TestClient
 
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 

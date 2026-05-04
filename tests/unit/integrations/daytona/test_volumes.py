@@ -13,9 +13,11 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     VolumeNotReadyError,
 )
 from fleet_rlm.integrations.daytona.volume_runtime import (
+    await_volume_ready as _await_volume_ready,
+)
+from fleet_rlm.integrations.daytona.volume_runtime import (
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
-    await_volume_ready as _await_volume_ready,
 )
 
 

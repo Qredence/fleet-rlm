@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import builtins
-import io
 import inspect
+import io
 import json
 import sys
 

@@ -7,9 +7,8 @@ from typing import Any
 
 import jwt
 import pytest
-from fastapi.testclient import TestClient
-
 from daytona import DaytonaConnectionError, DaytonaNotFoundError
+from fastapi.testclient import TestClient
 
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 from tests.ui.conftest import STAGING_TEST_JWT_SECRET

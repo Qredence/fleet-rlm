@@ -9,9 +9,9 @@ The module uses :class:`~fleet_rlm.runtime.agent.signatures.LongCoTQASignature`
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from difflib import SequenceMatcher
-import re
 from typing import Any
 
 from fleet_rlm.runtime.quality.module_registry import (
@@ -19,7 +19,6 @@ from fleet_rlm.runtime.quality.module_registry import (
     register_module,
 )
 from fleet_rlm.runtime.quality.scoring_helpers import set_overlap_score
-
 
 _ANSWER_WEIGHT = 0.6
 _REASONING_WEIGHT = 0.4

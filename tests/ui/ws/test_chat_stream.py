@@ -10,7 +10,6 @@ from starlette.websockets import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
 from fleet_rlm.runtime.models import StreamEvent
-
 from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
 
 
@@ -1301,10 +1300,10 @@ def test_ws_endpoint_has_no_orchestration_session_context_import():
 
 def test_factory_produces_callable_agent():
     """VAL-FACTORY-002: build_chat_agent returns an object callable as a chat agent."""
-    from fleet_rlm.runtime import factory as _factory
-
     # factory must not import from agent_host or worker
     import inspect
+
+    from fleet_rlm.runtime import factory as _factory
 
     factory_src = inspect.getsource(_factory)
     assert "agent_host" not in factory_src
@@ -1317,9 +1316,10 @@ def test_factory_produces_callable_agent():
 def test_ws_endpoint_streams_without_agent_host_imports():
     """VAL-WS-001: ws endpoint has no imports from agent_host or worker."""
     import inspect
+
     import fleet_rlm.api.routers.ws.endpoint as endpoint_mod
-    import fleet_rlm.api.routers.ws.stream as stream_mod
     import fleet_rlm.api.routers.ws.session as session_mod
+    import fleet_rlm.api.routers.ws.stream as stream_mod
 
     for mod, name in [
         (endpoint_mod, "endpoint"),

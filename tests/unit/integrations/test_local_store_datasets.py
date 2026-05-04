@@ -126,8 +126,9 @@ def test_get_dataset_root_creates_dir(tmp_path, monkeypatch):
     ds_root = str(tmp_path / "custom_root" / "datasets")
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", ds_root)
 
-    from fleet_rlm.integrations.local_store import get_dataset_root
     from pathlib import Path
+
+    from fleet_rlm.integrations.local_store import get_dataset_root
 
     root = get_dataset_root()
     assert root == Path(ds_root).resolve()

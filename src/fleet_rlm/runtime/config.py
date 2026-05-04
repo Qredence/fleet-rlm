@@ -7,9 +7,9 @@ import time.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 import logging
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 

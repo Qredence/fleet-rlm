@@ -6,17 +6,11 @@ import pytest
 from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 
-from fleet_rlm.runtime.quality.module_registry import (
-    ModuleOptimizationSpec,
-    _REGISTRY,
-    register_module,
-)
-
 from fleet_rlm.integrations.database import (
     ArtifactKind,
     BillingSource,
-    ChatSessionStatus,
     ChatSession,
+    ChatSessionStatus,
     DatasetFormat,
     DatasetSource,
     FleetRepository,
@@ -55,6 +49,11 @@ from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRe
 from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
     OptimizationRunCreateRequest,
+)
+from fleet_rlm.runtime.quality.module_registry import (
+    _REGISTRY,
+    ModuleOptimizationSpec,
+    register_module,
 )
 
 pytestmark = pytest.mark.db

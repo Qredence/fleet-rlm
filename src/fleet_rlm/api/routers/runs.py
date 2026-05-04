@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypeAlias
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
@@ -14,13 +14,13 @@ from ..dependencies import (
     ServerStateDep,
 )
 from ..schemas.sandbox import RunStepItem, RunStepListResponse
+from ._types import OpenAPIResponses
 
 router = APIRouter(
     prefix="/runs",
     tags=["runs"],
 )
 
-OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     401: {

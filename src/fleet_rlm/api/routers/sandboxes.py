@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypeAlias
-
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from typing import Annotated
 
 from daytona import (
     DaytonaAuthenticationError,
@@ -13,6 +11,8 @@ from daytona import (
     DaytonaNotFoundError,
     DaytonaTimeoutError,
 )
+from fastapi import APIRouter, HTTPException, Path, Query, status
+
 from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 
 from ..dependencies import HTTPIdentityDep, ServerStateDep
@@ -27,6 +27,7 @@ from ..schemas.sandbox import (
     SandboxDetailResponse,
     SandboxListResponse,
 )
+from ._types import OpenAPIResponses
 
 _DAYTONA_NOT_FOUND_ERRORS: tuple[type[BaseException], ...] = (DaytonaNotFoundError,)
 _DAYTONA_UNAVAILABLE_ERRORS: tuple[type[BaseException], ...] = (
@@ -41,7 +42,6 @@ router = APIRouter(
     tags=["sandboxes"],
 )
 
-OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
     401: {

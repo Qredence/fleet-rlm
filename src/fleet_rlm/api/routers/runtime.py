@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated
 
 from fastapi import APIRouter, Query
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
-
 from ..dependencies import HTTPIdentityDep, ServerStateDep
 from ..runtime_services import (
     apply_runtime_settings_patch,
@@ -33,13 +32,12 @@ from ..schemas.volumes import (
     VolumeProvider,
     VolumeTreeResponse,
 )
+from ._types import OpenAPIResponses
 
 router = APIRouter(
     prefix="/runtime",
     tags=["runtime"],
 )
-
-OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {

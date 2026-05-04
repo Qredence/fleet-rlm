@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from threading import Lock
 from typing import Any
-import logging
 
 from posthog import Posthog
 
