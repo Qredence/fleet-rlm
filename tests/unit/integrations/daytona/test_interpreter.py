@@ -21,7 +21,7 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.types import SandboxSpec
+from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"

@@ -71,7 +71,7 @@ Other backend areas:
 
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
-- `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
+- `src/fleet_rlm/utils/` — shared helpers
 - `src/fleet_rlm/ui/dist` — **generated** bundled frontend assets for Python package distributions
 
 Evaluation and benchmarks (maintained alongside the backend):
@@ -375,6 +375,5 @@ Backend reading order for understanding the runtime story:
 3. `src/fleet_rlm/runtime/factory.py`
 4. `src/fleet_rlm/runtime/agent/agent.py`
 5. `src/fleet_rlm/runtime/agent/runtime.py`
-6. `src/fleet_rlm/runtime/agent/chat_session_state.py`
-7. `src/fleet_rlm/integrations/daytona/interpreter.py`
-8. `src/fleet_rlm/integrations/daytona/runtime.py`
+6. `src/fleet_rlm/integrations/daytona/interpreter.py`
+7. `src/fleet_rlm/integrations/daytona/runtime.py`

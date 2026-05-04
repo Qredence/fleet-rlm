@@ -24,7 +24,6 @@ Backend source-of-truth files:
 - `src/fleet_rlm/api/bootstrap.py` for runtime bootstrap, optional startup, LM loading, analytics startup, and persistence initialization
 - `src/fleet_rlm/cli/fleet_cli.py` and `src/fleet_rlm/cli/main.py` for CLI behavior
 - `src/fleet_rlm/runtime/factory.py` for canonical runtime construction
-- `src/fleet_rlm/cli/runtime_factory.py` as a compatibility re-export only; new internal code should import `src/fleet_rlm/runtime/factory.py` directly
 - `src/fleet_rlm/cli/runners.py` for top-level runner helpers
 
 Artifacts and areas to treat carefully:
@@ -148,8 +147,8 @@ Layering rules:
 Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
-- Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
-- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent), `runtime/agent/runtime.py` (AgentRuntime), and `runtime/agent/chat_session_state.py`
+- Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports
+- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent) and `runtime/agent/runtime.py` (AgentRuntime)
 - Keep the public Daytona interpreter facade in `integrations/daytona/interpreter.py`; durable workspace/session behavior lives in the focused `interpreter_state.py`, `interpreter_session.py`, `interpreter_child.py`, and `interpreter_execution.py` collaborators.
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
@@ -197,7 +196,7 @@ Daytona-specific boundaries:
 - Keep recursive child sandbox policy in `integrations/daytona/child_isolation.py`; `interpreter_child.py` should provide only the concrete interpreter hooks that delegate into that policy.
 - Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge_callbacks.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
 - Keep Daytona client construction, config resolution, and SDK error classification in `integrations/daytona/config.py`
-- Keep sandbox spec building in `integrations/daytona/sandbox_spec.py`, payload and manifest normalization in `integrations/daytona/payload_models.py`, diagnostic result models in `integrations/daytona/diagnostic_models.py`, and leave `integrations/daytona/types.py` as compatibility re-exports only.
+- Keep sandbox spec building in `integrations/daytona/sandbox_spec.py`, payload and manifest normalization in `integrations/daytona/payload_models.py`, and diagnostic result models in `integrations/daytona/diagnostic_models.py`.
 - Keep volume readiness, mount context managers, inventory, and browsing in `integrations/daytona/volume_runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
 - Keep workspace path helpers, git ref resolution, repo checkout, and workspace session orchestration in `integrations/daytona/workspace_runtime.py`; use SDK `git.clone`, `git.status`, `git.pull`, `git.branches`, and `git.checkout_branch` where they preserve behavior, and allow named `sandbox.process.exec` fallbacks only for remote URL mismatch, non-git workspace replacement, exact forced remote reset, and detached commit checkout semantics not exposed by the SDK.
 - Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`; session lifecycle methods should call the underlying `AsyncSandbox` methods directly while preserving Fleet context cleanup and async-owner rebinding.
@@ -228,7 +227,7 @@ Daytona-specific boundaries:
 Tooling boundaries:
 
 - The shared backend/frontend product contract is Daytona-only; do not reintroduce Modal provider surfaces.
-- Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating local variants
+- Reuse helpers in `src/fleet_rlm/utils/` for regex helpers instead of creating local variants
 
 Common mistakes to avoid:
 

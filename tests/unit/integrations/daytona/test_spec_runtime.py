@@ -7,7 +7,7 @@ from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
 )
-from fleet_rlm.integrations.daytona.types import (
+from fleet_rlm.integrations.daytona.sandbox_spec import (
     DEFAULT_SANDBOX_LABELS,
     build_sandbox_spec,
     default_sandbox_name,

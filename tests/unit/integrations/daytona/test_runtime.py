@@ -9,12 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
+from fleet_rlm.integrations.daytona.payload_models import ContextSource
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.types import ContextSource, SandboxSpec
+from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
 from fleet_rlm.integrations.daytona.workspace_runtime import _areconcile_repo_checkout
 
 
