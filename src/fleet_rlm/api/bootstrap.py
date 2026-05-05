@@ -138,7 +138,25 @@ async def initialize_persistence(
     if cfg.database_url:
         db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
         if cfg.db_validate_on_startup or cfg.database_required:
-            await db_manager.ping()
+            try:
+                await db_manager.ping()
+            except (TimeoutError, OSError, Exception) as exc:
+                if cfg.database_required:
+                    raise RuntimeError(
+                        f"DATABASE_URL is set and database_required=true, but the "
+                        f"database is unreachable: {exc}"
+                    ) from exc
+                # Graceful fallback for local development
+                logger.warning(
+                    "Database ping failed (%s: %s); falling back to local-only "
+                    "persistence. Unset DATABASE_URL or fix connectivity to silence "
+                    "this warning.",
+                    type(exc).__name__,
+                    exc,
+                )
+                await db_manager.dispose()
+                persistence_deps.local_store = LocalStore()
+                return
         persistence_deps.db_manager = db_manager
         persistence_deps.repository = FleetRepository(db_manager)
         persistence_deps.local_store = LocalStore()
