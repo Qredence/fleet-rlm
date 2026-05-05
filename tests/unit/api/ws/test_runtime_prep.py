@@ -66,14 +66,18 @@ def _runtime_cfg() -> SimpleNamespace:
 
 
 def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
-    async def fake_ensure_runtime_models(state: object) -> tuple[str, str]:
-        assert state is fake_state
+    async def fake_ensure_runtime_models(
+        lm_deps: object, config_deps: object, diagnostics_deps: object
+    ) -> tuple[str, str]:
         return ("planner-lm", "delegate-lm")
 
     fake_cfg = _runtime_cfg()
     identity_rows = SimpleNamespace(tenant_id="tenant-row")
     fake_repo = _FakeRepository(identity_rows)
-    fake_state = SimpleNamespace(config=fake_cfg, repository=fake_repo)
+    config_deps = SimpleNamespace(config=fake_cfg)
+    lm_deps = SimpleNamespace()
+    persistence_deps = SimpleNamespace(repository=fake_repo)
+    diagnostics_deps = SimpleNamespace()
     fake_identity = SimpleNamespace(
         tenant_claim="tenant-123",
         user_claim="user-456",
@@ -90,7 +94,10 @@ def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
     runtime = asyncio.run(
         _prepare_chat_runtime(
             websocket=websocket,
-            state=fake_state,
+            config_deps=config_deps,
+            lm_deps=lm_deps,
+            persistence_deps=persistence_deps,
+            diagnostics_deps=diagnostics_deps,
             identity=fake_identity,
         )
     )
@@ -117,11 +124,16 @@ def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
 def test_prepare_chat_runtime_reports_planner_initialization_failure(
     monkeypatch,
 ) -> None:
-    async def failing_ensure_runtime_models(state: object) -> tuple[object, object]:
-        _ = state
+    async def failing_ensure_runtime_models(
+        lm_deps: object, config_deps: object, diagnostics_deps: object
+    ) -> tuple[object, object]:
         raise RuntimeError("planner boom")
 
-    fake_state = SimpleNamespace(config=_runtime_cfg(), repository=None)
+    fake_cfg = _runtime_cfg()
+    config_deps = SimpleNamespace(config=fake_cfg)
+    lm_deps = SimpleNamespace()
+    persistence_deps = SimpleNamespace(repository=None)
+    diagnostics_deps = SimpleNamespace()
     fake_identity = SimpleNamespace(
         tenant_claim="tenant-123",
         user_claim="user-456",
@@ -138,7 +150,10 @@ def test_prepare_chat_runtime_reports_planner_initialization_failure(
     runtime = asyncio.run(
         _prepare_chat_runtime(
             websocket=websocket,
-            state=fake_state,
+            config_deps=config_deps,
+            lm_deps=lm_deps,
+            persistence_deps=persistence_deps,
+            diagnostics_deps=diagnostics_deps,
             identity=fake_identity,
         )
     )

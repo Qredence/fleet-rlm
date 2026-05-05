@@ -21,7 +21,15 @@ from .bootstrap_observability import (
     terminate_process,
 )
 from .config import ServerRuntimeConfig
-from .dependencies import ServerState
+from .dependencies import (
+    AuthDeps,
+    ConfigDeps,
+    DiagnosticsDeps,
+    LmDeps,
+    PersistenceDeps,
+    ServerState,
+    SessionCacheDeps,
+)
 from .events import ExecutionEventEmitter
 
 logger = logging.getLogger(__name__)
@@ -80,40 +88,57 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
 
 
 def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
-    """Build initialized in-memory server state container."""
-    state = ServerState(
-        config=cfg,
-        execution_event_emitter=ExecutionEventEmitter(
+    """Build initialized in-memory server state container.
+
+    Constructs focused dependency slices individually and composes them into
+    the backward-compatible ServerState wrapper.
+    """
+    config_deps = ConfigDeps(config=cfg)
+    lm_deps = LmDeps()
+    auth_deps = AuthDeps(
+        auth_provider=build_auth_provider(
+            auth_mode=cfg.auth_mode,
+            dev_jwt_secret=cfg.dev_jwt_secret,
+            allow_debug_auth=cfg.allow_debug_auth,
+            allow_query_auth_tokens=cfg.allow_query_auth_tokens,
+            entra_jwks_url=cfg.entra_jwks_url,
+            entra_issuer_url=cfg.entra_issuer_url,
+            entra_issuer_template=cfg.entra_issuer_template,
+            entra_audience=cfg.entra_audience,
+            entra_allowed_user_ids=set(cfg.entra_allowed_user_ids_list),
+            entra_allowed_group_ids=set(cfg.entra_allowed_group_ids_list),
+        ),
+    )
+    session_cache_deps = SessionCacheDeps()
+    persistence_deps = PersistenceDeps()
+    diagnostics_deps = DiagnosticsDeps(
+        events_event_emitter=ExecutionEventEmitter(
             max_queue=cfg.ws_execution_max_queue,
             drop_policy=cfg.ws_execution_drop_policy,
         ),
     )
-    state.runtime_test_results = {}
-    state.auth_provider = build_auth_provider(
-        auth_mode=cfg.auth_mode,
-        dev_jwt_secret=cfg.dev_jwt_secret,
-        allow_debug_auth=cfg.allow_debug_auth,
-        allow_query_auth_tokens=cfg.allow_query_auth_tokens,
-        entra_jwks_url=cfg.entra_jwks_url,
-        entra_issuer_url=cfg.entra_issuer_url,
-        entra_issuer_template=cfg.entra_issuer_template,
-        entra_audience=cfg.entra_audience,
-        entra_allowed_user_ids=set(cfg.entra_allowed_user_ids_list),
-        entra_allowed_group_ids=set(cfg.entra_allowed_group_ids_list),
-    )
-    state.db_manager = None
-    state.repository = None
+
+    # Compose into the backward-compatible ServerState wrapper.
+    state = ServerState.__new__(ServerState)
+    state.config_deps = config_deps
+    state.lm_deps = lm_deps
+    state.auth_deps = auth_deps
+    state.session_cache_deps = session_cache_deps
+    state.persistence_deps = persistence_deps
+    state.diagnostics_deps = diagnostics_deps
     return state
 
 
-async def initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -> None:
+async def initialize_persistence(
+    persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig
+) -> None:
     """Initialize persistence paths based on runtime config."""
     if cfg.database_url:
         db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
         if cfg.db_validate_on_startup or cfg.database_required:
             await db_manager.ping()
-        state.db_manager = db_manager
-        state.repository = FleetRepository(db_manager)
+        persistence_deps.db_manager = db_manager
+        persistence_deps.repository = FleetRepository(db_manager)
         return
 
     if cfg.database_required:
@@ -128,20 +153,20 @@ async def initialize_persistence(state: ServerState, cfg: ServerRuntimeConfig) -
     )
 
 
-def initialize_lms(state: ServerState) -> None:
+def initialize_lms(lm_deps: LmDeps, config_deps: ConfigDeps) -> None:
     """Load planner/delegate LMs into process state."""
-    cfg = state.config
+    cfg = config_deps.config
     configure_posthog, _, _ = _runtime_config_helpers()
     configure_posthog()
     model_name = cfg.agent_model
     if model_name is None:
-        state.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
+        lm_deps.planner_lm = get_planner_lm_from_env(env_file=cfg.env_path)
     else:
-        state.planner_lm = get_planner_lm_from_env(
+        lm_deps.planner_lm = get_planner_lm_from_env(
             env_file=cfg.env_path,
             model_name=model_name,
         )
-    state.delegate_lm = get_delegate_lm_from_env(
+    lm_deps.delegate_lm = get_delegate_lm_from_env(
         env_file=cfg.env_path,
         model_name=cfg.agent_delegate_model,
         default_max_tokens=cfg.agent_delegate_max_tokens,
@@ -149,27 +174,29 @@ def initialize_lms(state: ServerState) -> None:
 
 
 async def ensure_runtime_models(
-    state: ServerState,
+    lm_deps: LmDeps,
+    config_deps: ConfigDeps,
+    diagnostics_deps: DiagnosticsDeps,
 ) -> tuple[object | None, object | None]:
     """Initialize planner/delegate LMs on demand without blocking server startup."""
-    if state.planner_lm is not None:
-        return state.planner_lm, state.delegate_lm
+    if lm_deps.planner_lm is not None:
+        return lm_deps.planner_lm, lm_deps.delegate_lm
 
-    async with state.runtime_model_lock:
-        if state.planner_lm is not None:
-            return state.planner_lm, state.delegate_lm
+    async with lm_deps.runtime_model_lock:
+        if lm_deps.planner_lm is not None:
+            return lm_deps.planner_lm, lm_deps.delegate_lm
 
         try:
-            await asyncio.to_thread(initialize_lms, state)
+            await asyncio.to_thread(initialize_lms, lm_deps, config_deps)
         except Exception as exc:
             set_optional_service_status(
-                state,
+                diagnostics_deps,
                 "planner_lm",
                 "degraded",
                 error=str(exc),
             )
             set_optional_service_status(
-                state,
+                diagnostics_deps,
                 "delegate_lm",
                 "degraded",
                 error=str(exc),
@@ -177,24 +204,24 @@ async def ensure_runtime_models(
             raise
 
         set_optional_service_status(
-            state,
+            diagnostics_deps,
             "planner_lm",
-            "ready" if state.planner_lm is not None else "missing",
+            "ready" if lm_deps.planner_lm is not None else "missing",
         )
         set_optional_service_status(
-            state,
+            diagnostics_deps,
             "delegate_lm",
-            "ready" if state.delegate_lm is not None else "missing",
+            "ready" if lm_deps.delegate_lm is not None else "missing",
         )
-        return state.planner_lm, state.delegate_lm
+        return lm_deps.planner_lm, lm_deps.delegate_lm
 
 
 async def _initialize_mlflow_runtime(
     state: ServerState,
 ) -> None:
     await initialize_mlflow_runtime_service(
-        state,
-        app_env=state.config.app_env,
+        state.diagnostics_deps,
+        app_env=state.config_deps.config.app_env,
     )
 
 
@@ -202,10 +229,10 @@ async def _initialize_posthog_runtime(
     state: ServerState,
 ) -> None:
     await initialize_posthog_runtime_service(
-        state,
-        app_env=state.config.app_env,
-        auth_mode=state.config.auth_mode,
-        database_required=state.config.database_required,
+        state.diagnostics_deps,
+        app_env=state.config_deps.config.app_env,
+        auth_mode=state.config_deps.config.auth_mode,
+        database_required=state.config_deps.config.database_required,
     )
 
 
@@ -222,10 +249,16 @@ async def _warm_optional_runtime_services(
             raise
         except Exception as exc:
             logger.warning("%s optional startup failed", service_name, exc_info=True)
-            set_optional_service_status(state, service_name, "degraded", error=str(exc))
+            set_optional_service_status(
+                state.diagnostics_deps, service_name, "degraded", error=str(exc)
+            )
 
     try:
-        await ensure_runtime_models(state)
+        await ensure_runtime_models(
+            state.lm_deps,
+            state.config_deps,
+            state.diagnostics_deps,
+        )
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -240,14 +273,14 @@ def schedule_optional_runtime_startup(
         _warm_optional_runtime_services(state),
         name="fleet-optional-startup",
     )
-    state.optional_startup_task = task
+    state.diagnostics_deps.optional_startup_task = task
     return task
 
 
 async def cancel_optional_runtime_startup(state: ServerState) -> None:
     """Cancel the current optional startup task, if it is still running."""
-    optional_task = state.optional_startup_task
-    state.optional_startup_task = None
+    optional_task = state.diagnostics_deps.optional_startup_task
+    state.diagnostics_deps.optional_startup_task = None
     if optional_task is None or optional_task.done():
         return
     optional_task.cancel()
@@ -257,11 +290,11 @@ async def cancel_optional_runtime_startup(state: ServerState) -> None:
 
 async def startup_server_state(state: ServerState) -> None:
     """Run startup initialization for server state and runtime services."""
-    cfg = state.config
+    cfg = state.config_deps.config
 
     prime_runtime_env(cfg)
 
-    await initialize_persistence(state, cfg)
+    await initialize_persistence(state.persistence_deps, cfg)
     schedule_optional_runtime_startup(state)
 
 
@@ -270,25 +303,25 @@ async def shutdown_server_state(state: ServerState) -> None:
 
     await cancel_optional_runtime_startup(state)
 
-    state.planner_lm = None
-    state.delegate_lm = None
+    state.lm_deps.planner_lm = None
+    state.lm_deps.delegate_lm = None
     from fleet_rlm.integrations.observability.client import shutdown_posthog_client
     from fleet_rlm.integrations.observability.mlflow_runtime import shutdown_mlflow
 
     shutdown_mlflow()
     shutdown_posthog_client()
 
-    mlflow_proc = getattr(state, "mlflow_server_process", None)
+    mlflow_proc = state.diagnostics_deps.mlflow_server_process
     if mlflow_proc is not None:
         # Clear the reference on state before attempting shutdown.
-        setattr(state, "mlflow_server_process", None)
+        state.diagnostics_deps.mlflow_server_process = None
         logger.info(
             "Stopping MLflow tracking server (pid=%d)...",
             mlflow_proc.pid,
         )
         terminate_process(mlflow_proc)
 
-    if state.db_manager is not None:
-        await state.db_manager.dispose()
-    state.db_manager = None
-    state.repository = None
+    if state.persistence_deps.db_manager is not None:
+        await state.persistence_deps.db_manager.dispose()
+    state.persistence_deps.db_manager = None
+    state.persistence_deps.repository = None

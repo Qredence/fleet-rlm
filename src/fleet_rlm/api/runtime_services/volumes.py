@@ -20,7 +20,7 @@ from fleet_rlm.integrations.daytona.volume_runtime import (
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import NormalizedIdentity
-from ..dependencies import ServerState
+from ..dependencies import ConfigDeps
 from ..schemas.volumes import (
     VolumeFileContentResponse,
     VolumeListItem,
@@ -42,19 +42,19 @@ class _ResolvedVolumeBackend:
 
 
 def resolve_daytona_volume_name(
-    *, identity: NormalizedIdentity, state: ServerState
+    *, identity: NormalizedIdentity, config_deps: ConfigDeps
 ) -> str:
     """Return the workspace-scoped Daytona persistent volume name."""
-    return _sanitize_id(identity.tenant_claim, state.config.ws_default_workspace_id)
+    return _sanitize_id(
+        identity.tenant_claim, config_deps.config.ws_default_workspace_id
+    )
 
 
 def resolve_volume_provider(
     *,
-    state: ServerState,
     provider: VolumeProvider | None,
 ) -> VolumeProvider:
     """Select the effective volume backend, honoring request overrides first."""
-    _ = state
     return provider or "daytona"
 
 
@@ -108,12 +108,14 @@ def raise_volume_file_error(exc: Exception) -> NoReturn:
 
 def _resolve_volume_backend(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
 ) -> _ResolvedVolumeBackend:
-    effective_provider = resolve_volume_provider(state=state, provider=provider)
-    effective_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
+    effective_provider = resolve_volume_provider(provider=provider)
+    effective_volume_name = resolve_daytona_volume_name(
+        identity=identity, config_deps=config_deps
+    )
     return _ResolvedVolumeBackend(
         provider=effective_provider,
         volume_name=effective_volume_name,
@@ -156,7 +158,7 @@ async def _run_volume_operation(
 
 async def load_volume_tree(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
     root_path: str,
@@ -164,7 +166,9 @@ async def load_volume_tree(
 ) -> VolumeTreeResponse:
     """Load a normalized runtime volume tree for the selected provider."""
     normalized_root_path = normalize_volume_tree_path(root_path)
-    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
+    backend = _resolve_volume_backend(
+        config_deps=config_deps, identity=identity, provider=provider
+    )
     result = await _run_volume_operation(
         operation=backend.list_tree,
         volume_name=backend.volume_name,
@@ -178,7 +182,7 @@ async def load_volume_tree(
 
 async def load_volume_file_content(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
     path: str,
@@ -186,7 +190,9 @@ async def load_volume_file_content(
 ) -> VolumeFileContentResponse:
     """Load a text preview for a normalized runtime volume file path."""
     normalized_path = normalize_volume_file_path(path)
-    backend = _resolve_volume_backend(state=state, identity=identity, provider=provider)
+    backend = _resolve_volume_backend(
+        config_deps=config_deps, identity=identity, provider=provider
+    )
     result = await _run_volume_operation(
         operation=backend.read_file_text,
         volume_name=backend.volume_name,
@@ -201,12 +207,12 @@ async def load_volume_file_content(
 
 async def load_volume_list(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
     identity: NormalizedIdentity,
     provider: VolumeProvider | None,
 ) -> VolumeListResponse:
     """Return only the caller's active workspace volume for the selected provider."""
-    effective_provider = resolve_volume_provider(state=state, provider=provider)
+    effective_provider = resolve_volume_provider(provider=provider)
     if effective_provider != "daytona":
         raise HTTPException(status_code=400, detail="Unsupported volume provider.")
 
@@ -222,7 +228,9 @@ async def load_volume_list(
             status_code=502, detail=f"Volume list failed: {exc}"
         ) from exc
 
-    workspace_volume_name = resolve_daytona_volume_name(identity=identity, state=state)
+    workspace_volume_name = resolve_daytona_volume_name(
+        identity=identity, config_deps=config_deps
+    )
     workspace_volume = next(
         (volume for volume in volumes if volume.get("name") == workspace_volume_name),
         None,

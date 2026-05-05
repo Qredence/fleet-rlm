@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 
 from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..dependencies import ConfigDepsDep, HTTPIdentityDep, RepositoryDep
 from ..schemas.base import AuthMeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,12 +26,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 )
 async def get_me(
     identity: HTTPIdentityDep,
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     repository: RepositoryDep,
 ) -> AuthMeResponse:
     """Return the authenticated identity and any admitted control-plane IDs."""
     persisted_identity = None
-    if state.config.auth_mode == "entra":
+    if config_deps.config.auth_mode == "entra":
         if repository is None:
             raise HTTPException(
                 status_code=503,

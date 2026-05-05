@@ -98,7 +98,7 @@ def test_persist_session_state_updates_cache_and_saves_manifest(monkeypatch) -> 
 
     asyncio.run(
         ws_persistence.persist_session_state(
-            state=state,
+            session_cache=state,
             agent=agent,
             session_record=session_record,
             active_manifest_path="workspaces/test/session.json",

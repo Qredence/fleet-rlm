@@ -16,7 +16,7 @@ from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
-from ..dependencies import ServerState
+from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 
 if TYPE_CHECKING:
     from ..routers.ws.types import SessionContext
@@ -67,10 +67,12 @@ def set_interpreter_default_profile(
         )
 
 
-async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | None]:
+async def _ensure_runtime_models(
+    lm_deps: LmDeps, config_deps: ConfigDeps, diagnostics_deps: Any
+) -> tuple[Any | None, Any | None]:
     from ..bootstrap import ensure_runtime_models
 
-    return await ensure_runtime_models(state)
+    return await ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
 
 
 async def _resolve_persisted_identity(
@@ -92,14 +94,19 @@ async def _resolve_persisted_identity(
 async def prepare_chat_runtime(
     *,
     websocket: WebSocket,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    persistence_deps: PersistenceDeps,
+    diagnostics_deps: DiagnosticsDeps,
     identity: NormalizedIdentity,
     send_error,
     close_websocket,
 ) -> PreparedChatRuntime | None:
-    cfg = state.config
+    cfg = config_deps.config
     try:
-        planner_lm, delegate_lm = await _ensure_runtime_models(state)
+        planner_lm, delegate_lm = await _ensure_runtime_models(
+            lm_deps, config_deps, diagnostics_deps
+        )
     except Exception as exc:
         if await send_error(
             websocket,
@@ -109,7 +116,7 @@ async def prepare_chat_runtime(
             await close_websocket(websocket, code=1011)
         return None
 
-    repository = state.repository
+    repository = persistence_deps.repository
     persistence_required = cfg.database_required
     identity_rows = None
 

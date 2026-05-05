@@ -11,7 +11,6 @@ from ..dependencies import (
     HTTPIdentityDep,
     PersistedIdentityDep,
     RepositoryDep,
-    ServerStateDep,
 )
 from ..schemas.sandbox import RunStepItem, RunStepListResponse
 from ._types import OpenAPIResponses
@@ -52,7 +51,6 @@ def _parse_run_uuid(run_id: str) -> uuid.UUID:
     description="Paginated execution trace steps for a run with step_type, tool_name, tokens, and latency.",
 )
 async def get_run_steps(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,

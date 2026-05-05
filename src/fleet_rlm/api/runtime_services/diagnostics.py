@@ -16,7 +16,15 @@ from fleet_rlm.integrations.daytona import DaytonaConfigError
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
-from ..dependencies import ServerState
+from ..dependencies import (
+    AuthDeps,
+    ConfigDeps,
+    DiagnosticsDeps,
+    LmDeps,
+    PersistenceDeps,
+    ServerState,
+    SessionCacheDeps,
+)
 from ..schemas.runtime import (
     RuntimeActiveModels,
     RuntimeConnectivityTestResponse,
@@ -41,15 +49,15 @@ def resolve_active_model(value: str | None, env_key: str) -> str:
 
 
 def cache_runtime_test(
-    *, state: ServerState, result: RuntimeConnectivityTestResponse
+    *, diagnostics: DiagnosticsDeps, result: RuntimeConnectivityTestResponse
 ) -> None:
-    state.runtime_test_results[result.kind] = result.model_dump(mode="json")
+    diagnostics.runtime_test_results[result.kind] = result.model_dump(mode="json")
 
 
 def connectivity_result_from_cache(
-    *, state: ServerState, kind: str
+    *, diagnostics: DiagnosticsDeps, kind: str
 ) -> RuntimeConnectivityTestResponse | None:
-    cached = state.runtime_test_results.get(kind)
+    cached = diagnostics.runtime_test_results.get(kind)
     if isinstance(cached, RuntimeConnectivityTestResponse):
         return cached
     if not isinstance(cached, dict):
@@ -166,15 +174,17 @@ def preflight_failure_result(
     )
 
 
-async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | None]:
+async def _ensure_runtime_models(
+    lm_deps: LmDeps, config_deps: ConfigDeps, diagnostics_deps: DiagnosticsDeps
+) -> tuple[Any | None, Any | None]:
     from ..bootstrap import ensure_runtime_models
 
-    return await ensure_runtime_models(state)
+    return await ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
 
 
 async def run_connectivity_test(
     *,
-    state: ServerState,
+    diagnostics: DiagnosticsDeps,
     kind: Literal["lm", "daytona"],
     preflight_ok: bool,
     checks: dict[str, Any],
@@ -193,7 +203,7 @@ async def run_connectivity_test(
             guidance=guidance,
             error=preflight_error,
         )
-        cache_runtime_test(state=state, result=result)
+        cache_runtime_test(diagnostics=diagnostics, result=result)
         return result
 
     latency_ms: int | None = None
@@ -225,13 +235,15 @@ async def run_connectivity_test(
         output_preview=output_preview,
         error=error,
     )
-    cache_runtime_test(state=state, result=result)
+    cache_runtime_test(diagnostics=diagnostics, result=result)
     return result
 
 
 async def run_lm_connection_test(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    diagnostics_deps: DiagnosticsDeps,
     planner_loader=None,
     delegate_loader=None,
 ) -> RuntimeConnectivityTestResponse:
@@ -239,7 +251,9 @@ async def run_lm_connection_test(
 
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
         if planner_loader is None and delegate_loader is None:
-            planner_lm, delegate_lm = await _ensure_runtime_models(state)
+            planner_lm, delegate_lm = await _ensure_runtime_models(
+                lm_deps, config_deps, diagnostics_deps
+            )
             if planner_lm is None:
                 raise RuntimeError(
                     "Failed to construct planner LM from environment settings."
@@ -253,8 +267,8 @@ async def run_lm_connection_test(
             planner_lm = await run_blocking(
                 partial(
                     planner_loader,
-                    env_file=state.config.env_path,
-                    model_name=state.config.agent_model,
+                    env_file=config_deps.config.env_path,
+                    model_name=config_deps.config.agent_model,
                 ),
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
@@ -267,9 +281,9 @@ async def run_lm_connection_test(
                 delegate_lm = await run_blocking(
                     partial(
                         delegate_loader,
-                        env_file=state.config.env_path,
-                        model_name=state.config.agent_delegate_model,
-                        default_max_tokens=state.config.agent_delegate_max_tokens,
+                        env_file=config_deps.config.env_path,
+                        model_name=config_deps.config.agent_delegate_model,
+                        default_max_tokens=config_deps.config.agent_delegate_max_tokens,
                     ),
                     timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
                 )
@@ -283,12 +297,12 @@ async def run_lm_connection_test(
             timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
         )
 
-        state.planner_lm = planner_lm
-        state.delegate_lm = delegate_lm
+        lm_deps.planner_lm = planner_lm
+        lm_deps.delegate_lm = delegate_lm
         return bool(output_preview), output_preview, None
 
     return await run_connectivity_test(
-        state=state,
+        diagnostics=diagnostics_deps,
         kind="lm",
         preflight_ok=checks["model_set"] and checks["api_key_set"],
         checks=checks,
@@ -305,10 +319,11 @@ async def run_lm_connection_test(
 
 async def run_daytona_connection_test(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    diagnostics_deps: DiagnosticsDeps,
 ) -> RuntimeConnectivityTestResponse:
     checks, guidance = daytona_preflight(
-        sandbox_provider=state.config.sandbox_provider,
+        sandbox_provider=config_deps.config.sandbox_provider,
     )
 
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
@@ -340,7 +355,7 @@ async def run_daytona_connection_test(
                         await _await_if_needed(close())
 
     return await run_connectivity_test(
-        state=state,
+        diagnostics=diagnostics_deps,
         kind="daytona",
         preflight_ok=checks["configured"],
         checks=checks,
@@ -357,16 +372,28 @@ async def run_daytona_connection_test(
 
 def build_runtime_status_response(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    diagnostics_deps: DiagnosticsDeps,
 ) -> RuntimeStatusResponse:
     mlflow_cfg = MlflowConfig.from_env()
     llm_checks, llm_guidance = lm_preflight()
     daytona_checks, daytona_guidance = daytona_preflight(
-        sandbox_provider=state.config.sandbox_provider,
+        sandbox_provider=config_deps.config.sandbox_provider,
     )
 
-    lm_test = connectivity_result_from_cache(state=state, kind="lm")
-    daytona_test = connectivity_result_from_cache(state=state, kind="daytona")
+    lm_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="lm")
+    daytona_test = connectivity_result_from_cache(
+        diagnostics=diagnostics_deps, kind="daytona"
+    )
+
+    state = ServerState.__new__(ServerState)
+    state.config_deps = config_deps
+    state.lm_deps = lm_deps
+    state.auth_deps = AuthDeps()
+    state.session_cache_deps = SessionCacheDeps()
+    state.persistence_deps = PersistenceDeps()
+    state.diagnostics_deps = diagnostics_deps
 
     ready = state.is_ready and bool(
         daytona_test is not None
@@ -374,8 +401,10 @@ def build_runtime_status_response(
         and lm_test is not None
         and lm_test.ok
     )
-    mlflow_startup_status = state.optional_service_status.get("mlflow", "pending")
-    mlflow_startup_error = state.optional_service_errors.get("mlflow")
+    mlflow_startup_status = diagnostics_deps.optional_service_status.get(
+        "mlflow", "pending"
+    )
+    mlflow_startup_error = diagnostics_deps.optional_service_errors.get("mlflow")
 
     guidance: list[str] = []
     guidance.extend(llm_guidance)
@@ -404,34 +433,36 @@ def build_runtime_status_response(
             deduped_guidance.append(normalized)
 
     mlflow_auto_start_enabled = resolve_mlflow_auto_start_enabled(
-        app_env=state.config.app_env,
+        app_env=config_deps.config.app_env,
         mlflow_enabled=mlflow_cfg.enabled,
         tracking_uri=mlflow_cfg.tracking_uri,
     )
 
     return RuntimeStatusResponse(
-        app_env=state.config.app_env,
-        write_enabled=state.config.app_env == "local",
+        app_env=config_deps.config.app_env,
+        write_enabled=config_deps.config.app_env == "local",
         ready=ready,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(
-            planner=resolve_active_model(state.config.agent_model, "DSPY_LM_MODEL"),
+            planner=resolve_active_model(
+                config_deps.config.agent_model, "DSPY_LM_MODEL"
+            ),
             delegate=resolve_active_model(
-                state.config.agent_delegate_model,
+                config_deps.config.agent_delegate_model,
                 "DSPY_DELEGATE_LM_MODEL",
             ),
             delegate_small=resolve_active_model(
-                state.config.agent_delegate_small_model,
+                config_deps.config.agent_delegate_small_model,
                 "DSPY_DELEGATE_LM_SMALL_MODEL",
             ),
         ),
         llm={
             **llm_checks,
-            "planner_configured": state.planner_lm is not None,
-            "startup_status": state.optional_service_status.get(
+            "planner_configured": lm_deps.planner_lm is not None,
+            "startup_status": diagnostics_deps.optional_service_status.get(
                 "planner_lm", "pending"
             ),
-            "startup_error": state.optional_service_errors.get("planner_lm"),
+            "startup_error": diagnostics_deps.optional_service_errors.get("planner_lm"),
         },
         mlflow={
             "enabled": mlflow_cfg.enabled,

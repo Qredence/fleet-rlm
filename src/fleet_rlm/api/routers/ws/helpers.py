@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from ...auth import AuthError
-from ...dependencies import ServerState, build_unauthenticated_identity
+from ...dependencies import AuthDeps, ConfigDeps, build_unauthenticated_identity
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,11 @@ def _error_envelope(
 
 async def _authenticate_websocket(
     websocket: WebSocket,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    auth_deps: AuthDeps,
 ):
-    cfg = state.config
-    provider = state.auth_provider
+    cfg = config_deps.config
+    provider = auth_deps.auth_provider
     if provider is None:
         if cfg.auth_required:
             await websocket.accept()

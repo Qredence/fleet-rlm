@@ -68,7 +68,7 @@ async def test_initialize_mlflow_runtime_service_infers_local_auto_start(
         lambda config: True,
     )
 
-    await initialize_mlflow_runtime_service(state, app_env="local")
+    await initialize_mlflow_runtime_service(state.diagnostics_deps, app_env="local")
 
     assert started == [
         (
@@ -123,7 +123,7 @@ async def test_initialize_mlflow_runtime_service_skips_auto_start_when_disabled_
         lambda config: True,
     )
 
-    await initialize_mlflow_runtime_service(state, app_env=app_env)
+    await initialize_mlflow_runtime_service(state.diagnostics_deps, app_env=app_env)
 
     assert started == []
     assert state.mlflow_server_process is None

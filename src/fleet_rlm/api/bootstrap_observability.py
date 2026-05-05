@@ -21,7 +21,7 @@ from fleet_rlm.integrations.observability.config import (
     PostHogConfig,
 )
 
-from .dependencies import ServerState
+from .dependencies import DiagnosticsDeps
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +32,18 @@ _MLFLOW_STARTUP_POLL_INTERVAL_SECONDS = 1
 
 
 def set_optional_service_status(
-    state: ServerState,
+    diagnostics: DiagnosticsDeps,
     service: str,
     status: str,
     *,
     error: str | None = None,
 ) -> None:
     """Update optional-service readiness/error state."""
-    state.optional_service_status[service] = status
+    diagnostics.optional_service_status[service] = status
     if error:
-        state.optional_service_errors[service] = error
+        diagnostics.optional_service_errors[service] = error
     else:
-        state.optional_service_errors.pop(service, None)
+        diagnostics.optional_service_errors.pop(service, None)
 
 
 def terminate_process(proc: subprocess.Popen) -> None:
@@ -283,14 +283,14 @@ def emit_posthog_startup_event(
 
 
 async def initialize_mlflow_runtime_service(
-    state: ServerState,
+    diagnostics: DiagnosticsDeps,
     *,
     app_env: str,
 ) -> None:
     """Initialize MLflow runtime and optional local tracking server."""
     mlflow_cfg = MlflowConfig.from_env()
     if not mlflow_cfg.enabled:
-        set_optional_service_status(state, "mlflow", "disabled")
+        set_optional_service_status(diagnostics, "mlflow", "disabled")
         return
 
     auto_start_enabled = resolve_mlflow_auto_start_enabled(
@@ -299,7 +299,7 @@ async def initialize_mlflow_runtime_service(
         tracking_uri=mlflow_cfg.tracking_uri,
     )
     tracking_port = resolve_mlflow_tracking_port(mlflow_cfg.tracking_uri)
-    state.mlflow_server_process = (
+    diagnostics.mlflow_server_process = (
         await start_mlflow_server(
             app_env=app_env,
             tracking_uri=mlflow_cfg.tracking_uri,
@@ -321,7 +321,7 @@ async def initialize_mlflow_runtime_service(
                 backend_store_uri=mlflow_cfg.local_backend_store_uri,
             )
     set_optional_service_status(
-        state,
+        diagnostics,
         "mlflow",
         "ready" if initialized else "degraded",
         error=startup_error,
@@ -329,7 +329,7 @@ async def initialize_mlflow_runtime_service(
 
 
 async def initialize_posthog_runtime_service(
-    state: ServerState,
+    diagnostics: DiagnosticsDeps,
     *,
     app_env: str,
     auth_mode: str,
@@ -338,7 +338,7 @@ async def initialize_posthog_runtime_service(
     """Initialize PostHog runtime analytics startup state."""
     posthog_cfg = PostHogConfig.from_env()
     if not posthog_cfg.enabled or not posthog_cfg.api_key:
-        set_optional_service_status(state, "posthog", "disabled")
+        set_optional_service_status(diagnostics, "posthog", "disabled")
         return
 
     emitted = await asyncio.to_thread(
@@ -348,7 +348,7 @@ async def initialize_posthog_runtime_service(
         database_required=database_required,
     )
     set_optional_service_status(
-        state,
+        diagnostics,
         "posthog",
         "ready" if emitted else "degraded",
         error=None if emitted else "PostHog startup event unavailable",

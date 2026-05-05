@@ -24,7 +24,15 @@ from ..bootstrap import (
     schedule_optional_runtime_startup,
 )
 from ..config import ServerRuntimeConfig
-from ..dependencies import ServerState
+from ..dependencies import (
+    AuthDeps,
+    ConfigDeps,
+    DiagnosticsDeps,
+    LmDeps,
+    PersistenceDeps,
+    SessionCacheDeps,
+    compose_server_state,
+)
 from ..schemas.runtime import (
     RuntimeSettingsSnapshot,
     RuntimeSettingsUpdateRequest,
@@ -77,30 +85,31 @@ def apply_runtime_settings_to_config(
         )
 
 
-def _capture_runtime_config_snapshot(*, state: ServerState) -> RuntimeConfigSnapshot:
-    config = state.config
+def _capture_runtime_config_snapshot(
+    *, config: ServerRuntimeConfig, lm_deps: LmDeps
+) -> RuntimeConfigSnapshot:
     return {
         "agent_model": config.agent_model,
         "agent_delegate_model": config.agent_delegate_model,
         "agent_delegate_small_model": config.agent_delegate_small_model,
         "agent_delegate_max_tokens": config.agent_delegate_max_tokens,
-        "planner_lm": state.planner_lm,
-        "delegate_lm": state.delegate_lm,
+        "planner_lm": lm_deps.planner_lm,
+        "delegate_lm": lm_deps.delegate_lm,
     }
 
 
 def _restore_runtime_config_snapshot(
     *,
-    state: ServerState,
+    config: ServerRuntimeConfig,
+    lm_deps: LmDeps,
     snapshot: RuntimeConfigSnapshot,
 ) -> None:
-    config = state.config
     config.agent_model = snapshot["agent_model"]
     config.agent_delegate_model = snapshot["agent_delegate_model"]
     config.agent_delegate_small_model = snapshot["agent_delegate_small_model"]
     config.agent_delegate_max_tokens = snapshot["agent_delegate_max_tokens"]
-    state.planner_lm = snapshot["planner_lm"]
-    state.delegate_lm = snapshot["delegate_lm"]
+    lm_deps.planner_lm = snapshot["planner_lm"]
+    lm_deps.delegate_lm = snapshot["delegate_lm"]
 
 
 def _restore_runtime_settings_env(
@@ -122,22 +131,26 @@ def _restore_runtime_settings_env(
             os.environ[key] = value
 
 
-def build_runtime_settings_snapshot(*, state: ServerState) -> RuntimeSettingsSnapshot:
+def build_runtime_settings_snapshot(
+    *, config_deps: ConfigDeps
+) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
-        env_path=state.config.env_path,
+        env_path=config_deps.config.env_path,
     )
     return RuntimeSettingsSnapshot(**snapshot)
 
 
 async def apply_runtime_settings_patch(
     *,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    diagnostics_deps: DiagnosticsDeps,
     request: RuntimeSettingsUpdateRequest,
     planner_loader=None,
     delegate_loader=None,
 ) -> RuntimeSettingsUpdateResponse:
-    config = state.config
+    config = config_deps.config
     if config.app_env != "local":
         raise HTTPException(
             status_code=403,
@@ -152,7 +165,7 @@ async def apply_runtime_settings_patch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    runtime_snapshot = _capture_runtime_config_snapshot(state=state)
+    runtime_snapshot = _capture_runtime_config_snapshot(config=config, lm_deps=lm_deps)
     env_text = (
         config.env_path.read_text(encoding="utf-8")
         if config.env_path.exists()
@@ -173,6 +186,14 @@ async def apply_runtime_settings_patch(
     trial_config = config.model_copy(deep=True)
     apply_runtime_settings_to_config(config=trial_config, normalized=applied_updates)
 
+    state = compose_server_state(
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        auth_deps=AuthDeps(),
+        session_cache_deps=SessionCacheDeps(),
+        persistence_deps=PersistenceDeps(),
+        diagnostics_deps=diagnostics_deps,
+    )
     await cancel_optional_runtime_startup(state)
     try:
         planner_model_name = trial_config.agent_model
@@ -196,12 +217,14 @@ async def apply_runtime_settings_patch(
             env_text=env_text,
             env_snapshot=env_snapshot,
         )
-        _restore_runtime_config_snapshot(state=state, snapshot=runtime_snapshot)
+        _restore_runtime_config_snapshot(
+            config=config, lm_deps=lm_deps, snapshot=runtime_snapshot
+        )
         schedule_optional_runtime_startup(state)
         raise
 
     apply_runtime_settings_to_config(config=config, normalized=applied_updates)
-    state.planner_lm = next_planner_lm
-    state.delegate_lm = next_delegate_lm
+    lm_deps.planner_lm = next_planner_lm
+    lm_deps.delegate_lm = next_delegate_lm
     schedule_optional_runtime_startup(state)
     return RuntimeSettingsUpdateResponse(**result)

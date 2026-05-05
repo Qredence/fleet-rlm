@@ -25,7 +25,7 @@ from fastapi import (
 from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
 from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest
 
-from ...dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ...dependencies import ConfigDepsDep, HTTPIdentityDep, RepositoryDep
 from ...runtime_services.optimization_datasets import (
     build_transcript_dataset_rows,
     persist_jsonl_rows,
@@ -124,13 +124,13 @@ def _require_object_rows(rows: list[Any]) -> list[dict[str, Any]]:
 )
 async def create_dataset_from_transcript(
     request: TranscriptDatasetRequest,
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
 ) -> DatasetResponse:
     """Convert transcript turns into a GEPA dataset."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -202,7 +202,7 @@ async def create_dataset_from_transcript(
     ),
 )
 async def upload_dataset(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     file: Annotated[
@@ -217,7 +217,7 @@ async def upload_dataset(
 ) -> DatasetResponse:
     """Upload and register a dataset file (.json or .jsonl)."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -325,7 +325,7 @@ async def upload_dataset(
     responses=AUTH_ERROR_RESPONSES,
 )
 async def list_datasets_endpoint(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     module_slug: Annotated[
@@ -340,7 +340,7 @@ async def list_datasets_endpoint(
 ) -> DatasetListResponse:
     """List registered datasets with optional module filter."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -397,7 +397,7 @@ async def list_datasets_endpoint(
     ),
 )
 async def get_dataset_detail(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     dataset_id: Annotated[
@@ -406,7 +406,7 @@ async def get_dataset_detail(
 ) -> DatasetDetailResponse:
     """Return dataset metadata with the first 10 rows as preview."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )

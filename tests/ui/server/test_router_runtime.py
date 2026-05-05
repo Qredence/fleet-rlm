@@ -299,8 +299,8 @@ def test_runtime_daytona_smoke_success(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def _fake_run_daytona_connection_test(*, state):
-        _ = state
+    async def _fake_run_daytona_connection_test(*, config_deps, diagnostics_deps):
+        _ = config_deps, diagnostics_deps
         return {
             "kind": "daytona",
             "preflight_ok": True,
@@ -330,8 +330,8 @@ def test_runtime_daytona_smoke_preflight_failure(
     local_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    async def _fake_run_daytona_connection_test(*, state):
-        _ = state
+    async def _fake_run_daytona_connection_test(*, config_deps, diagnostics_deps):
+        _ = config_deps, diagnostics_deps
         return {
             "kind": "daytona",
             "preflight_ok": False,
@@ -641,7 +641,10 @@ def test_runtime_daytona_volume_name_uses_workspace_claim(
 
     identity = SimpleNamespace(tenant_claim="tenant/a", user_claim="user-a")
 
-    assert resolve_daytona_volume_name(identity=identity, state=state) == "tenant-a"
+    assert (
+        resolve_daytona_volume_name(identity=identity, config_deps=state.config_deps)
+        == "tenant-a"
+    )
 
 
 def test_runtime_volume_tree_maps_backend_errors_to_502(

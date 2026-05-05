@@ -20,7 +20,7 @@ from fleet_rlm.integrations.observability.trace_context import (
 )
 from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
-from ...dependencies import ServerState
+from ...dependencies import DiagnosticsDeps, SessionCacheDeps
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from ...runtime_services.chat_runtime import (
@@ -543,7 +543,7 @@ async def _handle_idle_non_turn_message(
 
 async def _resolve_session_target(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     agent: ChatAgentProtocol,
     runtime: _PreparedChatRuntime,
     interpreter: object | None,
@@ -563,7 +563,7 @@ async def _resolve_session_target(
         session.last_loaded_docs_path,
         session.orchestration_session,
     ) = await switch_session_if_needed(
-        state=state,
+        session_cache=session_cache,
         agent=agent,
         interpreter=interpreter,
         workspace_id=workspace_id,
@@ -598,7 +598,8 @@ class _ExecutionConnectionLoop:
         self,
         *,
         websocket: WebSocket,
-        state: ServerState,
+        session_cache: SessionCacheDeps,
+        diagnostics_deps: DiagnosticsDeps,
         runtime: _PreparedChatRuntime,
         agent: ChatAgentProtocol,
         interpreter: object | None,
@@ -607,13 +608,14 @@ class _ExecutionConnectionLoop:
         initial_message: WSMessage | None = None,
     ) -> None:
         self.websocket = websocket
-        self.state = state
+        self.session_cache = session_cache
+        self.diagnostics_deps = diagnostics_deps
         self.runtime = runtime
         self.agent = agent
         self.interpreter = interpreter
         self.session = session
         self.local_persist = local_persist
-        self.execution_emitter = get_execution_emitter(state)
+        self.execution_emitter = get_execution_emitter(diagnostics_deps)
         self.stream_task: asyncio.Task[str | None] | None = None
         self.pending_receive_task: asyncio.Task[object] | None = None
         self.pending_message = initial_message
@@ -663,7 +665,7 @@ class _ExecutionConnectionLoop:
                     continue
 
                 target = await _resolve_session_target(
-                    state=self.state,
+                    session_cache=self.session_cache,
                     agent=self.agent,
                     runtime=self.runtime,
                     interpreter=self.interpreter,
@@ -719,7 +721,8 @@ class _ExecutionConnectionLoop:
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
+    diagnostics_deps: DiagnosticsDeps,
     runtime: _PreparedChatRuntime,
     agent: ChatAgentProtocol,
     interpreter: object | None,
@@ -729,7 +732,8 @@ async def _chat_message_loop(
 ) -> None:
     loop = _ExecutionConnectionLoop(
         websocket=websocket,
-        state=state,
+        session_cache=session_cache,
+        diagnostics_deps=diagnostics_deps,
         runtime=runtime,
         agent=agent,
         interpreter=interpreter,

@@ -19,7 +19,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fleet_rlm.integrations.database import RunStatus, RunStepType
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
-from ...dependencies import ServerState
+from ...dependencies import ConfigDeps, DiagnosticsDeps
 from ...events import (
     ExecutionEvent,
     ExecutionEventEmitter,
@@ -114,17 +114,26 @@ def build_execution_event(
     )
 
 
-def get_execution_emitter(state: ServerState) -> ExecutionEventEmitter:
-    emitter = state.events_event_emitter
+def get_execution_emitter(diagnostics: DiagnosticsDeps) -> ExecutionEventEmitter:
+    emitter = diagnostics.events_event_emitter
+    if emitter is not None:
+        return emitter
+    return emitter
+
+
+def get_execution_emitter_with_config(
+    diagnostics: DiagnosticsDeps, config_deps: ConfigDeps
+) -> ExecutionEventEmitter:
+    emitter = diagnostics.events_event_emitter
     if emitter is not None:
         return emitter
 
-    cfg = state.config
+    cfg = config_deps.config
     emitter = ExecutionEventEmitter(
         max_queue=cfg.ws_execution_max_queue,
         drop_policy=cfg.ws_execution_drop_policy,
     )
-    state.events_event_emitter = emitter
+    diagnostics.events_event_emitter = emitter
     return emitter
 
 

@@ -34,7 +34,7 @@ from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRe
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 
-from ..dependencies import ServerState
+from ..dependencies import SessionCacheDeps
 
 logger = logging.getLogger(__name__)
 
@@ -487,7 +487,7 @@ def update_manifest_from_exported_state(
 
 def sync_session_record_state(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     session_record: dict[str, Any],
     exported_state: dict[str, Any],
 ) -> None:
@@ -501,7 +501,7 @@ def sync_session_record_state(
 
     record_key = session_record.get("key")
     if isinstance(record_key, str):
-        state.sessions[record_key] = session_record
+        session_cache.sessions[record_key] = session_record
 
 
 async def persist_memory_item_if_needed(
@@ -543,7 +543,7 @@ async def persist_memory_item_if_needed(
 
 async def persist_session_state(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     agent: Any,
     session_record: dict[str, Any] | None,
     active_manifest_path: str | None,
@@ -571,7 +571,7 @@ async def persist_session_state(
         latest_user_message=latest_user_message,
     )
     sync_session_record_state(
-        state=state,
+        session_cache=session_cache,
         session_record=session_record,
         exported_state=exported_state,
     )
@@ -621,7 +621,7 @@ async def persist_session_state(
 
 def build_local_persist_fn(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     runtime: Any,
     agent: Any,
     interpreter: Any,
@@ -633,7 +633,7 @@ def build_local_persist_fn(
         latest_user_message: str = "",
     ) -> None:
         await persist_session_state(
-            state=state,
+            session_cache=session_cache,
             agent=agent,
             session_record=session.session_record,
             active_manifest_path=session.active_manifest_path,

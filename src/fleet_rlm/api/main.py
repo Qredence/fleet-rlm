@@ -283,11 +283,17 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         state = build_server_state(cfg)
         app.state.server_state = state
+        app.state.config_deps = state.config_deps
+        app.state.lm_deps = state.lm_deps
+        app.state.auth_deps = state.auth_deps
+        app.state.session_cache_deps = state.session_cache_deps
+        app.state.persistence_deps = state.persistence_deps
+        app.state.diagnostics_deps = state.diagnostics_deps
         await startup_server_state(state)
         # Recover optimization runs orphaned by prior server restart
         try:
-            if state.repository is not None:
-                recovered = await state.repository.recover_stale_optimization_runs()
+            if state.persistence_deps.repository is not None:
+                recovered = await state.persistence_deps.repository.recover_stale_optimization_runs()
             else:
                 from fleet_rlm.integrations.local_store import (
                     recover_stale_optimization_runs,

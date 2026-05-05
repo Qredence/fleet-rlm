@@ -318,7 +318,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
         _fake_persist_session_state,
     )
 
-    state = SimpleNamespace()
+    session_cache = SimpleNamespace()
     runtime = SimpleNamespace(
         repository="repo",
         identity_rows="identity",
@@ -331,7 +331,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
     )
 
     local_persist = _build_local_persist_fn(
-        state=state,
+        session_cache=session_cache,
         runtime=runtime,
         agent="agent",
         interpreter="interpreter",
@@ -346,7 +346,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
     )
 
     assert captured == {
-        "state": state,
+        "session_cache": session_cache,
         "agent": "agent",
         "session_record": {"id": "session"},
         "active_manifest_path": "/tmp/manifest.json",
@@ -382,7 +382,7 @@ def test_ws_message_accepts_daytona_request_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_switch_session_uses_async_reset_for_new_session() -> None:
-    state = SimpleNamespace(sessions={})
+    session_cache = SimpleNamespace(sessions={})
     agent = FakeChatAgent()
 
     (
@@ -392,7 +392,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
         docs_path,
         orchestration_session,
     ) = await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=None,
         workspace_id="tenant-a",
@@ -418,7 +418,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
 
 @pytest.mark.asyncio
 async def test_switch_session_uses_async_import_for_restored_state() -> None:
-    state = SimpleNamespace(
+    session_cache = SimpleNamespace(
         sessions={
             session_key("tenant-a", "user-a", "session-a"): {
                 "session_id": "session-a",
@@ -436,7 +436,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
         docs_path,
         orchestration_session,
     ) = await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=None,
         workspace_id="tenant-a",
@@ -483,11 +483,11 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
         _load_manifest,
     )
 
-    state = SimpleNamespace(sessions={})
+    session_cache = SimpleNamespace(sessions={})
     agent = FakeChatAgent()
 
     await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=agent.interpreter,
         workspace_id="tenant-a",
@@ -503,7 +503,7 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
 
     assert agent.aimport_session_state_calls == 1
     assert agent._session_state == manifest_state
-    cached = state.sessions[session_key("tenant-a", "user-a", "session-a")]
+    cached = session_cache.sessions[session_key("tenant-a", "user-a", "session-a")]
     assert cached["manifest"]["state"] == manifest_state
 
 

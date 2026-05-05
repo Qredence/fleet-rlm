@@ -14,7 +14,7 @@ from fleet_rlm.integrations.database.repository_identity import IdentityUpsertRe
 from fleet_rlm.utils.identity import owner_fingerprint, session_key
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
-from ...dependencies import ServerState
+from ...dependencies import SessionCacheDeps
 from .types import ChatAgentProtocol, LocalPersistFn, SessionContext
 
 logger = logging.getLogger(__name__)
@@ -191,7 +191,7 @@ def _build_orchestration_context(
 
 async def switch_session_if_needed(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     agent: ChatAgentProtocol,
     interpreter: object | None,
     workspace_id: str,
@@ -232,7 +232,7 @@ async def switch_session_if_needed(
     if session_record is not None:
         await local_persist(include_volume_save=True)
 
-    cached: dict[str, Any] | None = state.sessions.get(key)
+    cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
         from ..ws.manifest import load_manifest_from_volume
 
@@ -277,7 +277,7 @@ async def switch_session_if_needed(
         db_session_id = str(cached.get("db_session_id") or "").strip()
         if db_session_id:
             metadata["db_session_id"] = db_session_id
-    state.sessions[key] = cached
+    session_cache.sessions[key] = cached
 
     await _restore_agent_state(
         agent=agent,

@@ -16,10 +16,10 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from ...dependencies import (
+    ConfigDepsDep,
     HTTPIdentityDep,
     PersistedIdentityDep,
     RepositoryDep,
-    ServerStateDep,
     resolve_persisted_identity,
 )
 from ...schemas.optimization import (
@@ -32,6 +32,7 @@ _resolve_persisted_identity = resolve_persisted_identity
 
 __all__ = [
     "AUTH_ERROR_RESPONSES",
+    "ConfigDepsDep",
     "DatasetResponse",
     "HTTPIdentityDep",
     "OptimizationContext",
@@ -41,7 +42,6 @@ __all__ = [
     "OpenAPIResponses",
     "PersistedIdentityDep",
     "RepositoryDep",
-    "ServerStateDep",
     "_resolve_persisted_identity",
 ]
 

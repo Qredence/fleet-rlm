@@ -17,7 +17,7 @@ from ..dependencies import (
     HTTPIdentityDep,
     PersistedIdentityDep,
     RepositoryDep,
-    ServerStateDep,
+    SessionCacheDepsDep,
 )
 from ..runtime_services.session_helpers import (
     optional_string as _optional_string,
@@ -133,14 +133,14 @@ def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
     },
 )
 def list_session_state(
-    state: ServerStateDep,
+    session_cache: SessionCacheDepsDep,
     identity: HTTPIdentityDep,
 ) -> SessionStateResponse:
     """Return lightweight summaries of active/restored in-memory session state."""
     summaries: list[SessionStateSummary] = []
     expected_workspace_id = _sanitize_id(identity.tenant_claim, "default")
     expected_user_id = _sanitize_id(identity.user_claim, "anonymous")
-    for key, payload in state.sessions.items():
+    for key, payload in session_cache.sessions.items():
         if not isinstance(payload, Mapping):
             continue
         payload_dict = payload
@@ -219,7 +219,6 @@ def list_session_state(
     description="Paginated list of durable session transcripts with search and status filters.",
 )
 async def list_sessions_endpoint(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -341,7 +340,6 @@ async def list_sessions_endpoint(
     description="Return session metadata and turn count for a specific session.",
 )
 async def get_session_detail(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -422,7 +420,6 @@ async def get_session_detail(
 )
 async def patch_session_endpoint(
     body: SessionPatchRequest,
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -509,7 +506,6 @@ async def patch_session_endpoint(
     description="Paginated turn-by-turn transcript for a session.",
 )
 async def get_session_turns(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -588,7 +584,6 @@ async def get_session_turns(
     description="Aggregated token counts, latency, and model breakdown for all turns in a session.",
 )
 async def get_session_stats(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -653,7 +648,6 @@ async def get_session_stats(
     description="Soft-delete (archive) a session. Returns success when archived, 404 if not found or not owned.",
 )
 async def delete_session_endpoint(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -702,7 +696,6 @@ SESSION_RESTORE_RESPONSES: OpenAPIResponses = {
     description="Unarchive (restore) a soft-deleted session. Returns success when restored, 404 if not found, 409 if already active.",
 )
 async def restore_session_endpoint(
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,
@@ -781,7 +774,6 @@ async def restore_session_endpoint(
 )
 async def export_session_endpoint(
     body: SessionExportRequest,
-    state: ServerStateDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     persisted_identity: PersistedIdentityDep,

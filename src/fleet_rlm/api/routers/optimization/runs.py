@@ -26,7 +26,7 @@ from fleet_rlm.integrations.database.repository_optimization import (
     OptimizationRunCreateRequest,
 )
 
-from ...dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ...dependencies import ConfigDepsDep, HTTPIdentityDep, RepositoryDep
 from ...runtime_services.common import run_blocking
 from ...schemas.optimization import (
     EvaluationResultItem,
@@ -510,13 +510,13 @@ def _failed_blocking_optimization_response(
 )
 async def run_optimization(
     request: GEPAOptimizationRequest,
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
 ) -> GEPAOptimizationResponse:
     """Trigger a GEPA prompt optimization run."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -592,7 +592,7 @@ async def run_optimization(
 async def create_optimization_run(
     request: GEPAOptimizationRequest,
     background_tasks: BackgroundTasks,
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
 ) -> OptimizationRunCreatedResponse:
@@ -602,7 +602,7 @@ async def create_optimization_run(
     background task.  Poll ``GET /runs/{run_id}`` for progress and results.
     """
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -740,7 +740,7 @@ async def create_optimization_run(
     ),
 )
 async def list_runs(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     status: Annotated[
@@ -755,7 +755,7 @@ async def list_runs(
 ) -> list[OptimizationRunResponse]:
     """List optimization runs, most recent first."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -810,7 +810,7 @@ async def list_runs(
     ),
 )
 async def compare_runs(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     run_ids: Annotated[
@@ -819,7 +819,7 @@ async def compare_runs(
 ) -> RunComparisonResponse:
     """Compare prompt diffs and scores across optimization runs."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -923,7 +923,7 @@ async def compare_runs(
     ),
 )
 async def get_run(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     run_id: Annotated[
@@ -932,7 +932,7 @@ async def get_run(
 ) -> OptimizationRunResponse:
     """Get a single optimization run by ID."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )
@@ -983,7 +983,7 @@ async def get_run(
     ),
 )
 async def get_run_results(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     repository: RepositoryDep,
     run_id: Annotated[
@@ -1002,7 +1002,7 @@ async def get_run_results(
 ) -> EvaluationResultsResponse:
     """Return per-example evaluation results for an optimization run."""
     persisted_identity = await _resolve_persisted_identity(
-        state=state,
+        config_deps=config_deps,
         repository=repository,
         identity=identity,
     )

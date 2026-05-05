@@ -8,7 +8,12 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
-from ..dependencies import HTTPIdentityDep, ServerStateDep
+from ..dependencies import (
+    ConfigDepsDep,
+    DiagnosticsDepsDep,
+    HTTPIdentityDep,
+    LmDepsDep,
+)
 from ..runtime_services import (
     apply_runtime_settings_patch,
     build_runtime_settings_snapshot,
@@ -94,12 +99,14 @@ VOLUME_LIST_RESPONSES: OpenAPIResponses = {
     responses=AUTH_ERROR_RESPONSES,
 )
 async def get_runtime_settings(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
     _ = identity
-    return await asyncio.to_thread(build_runtime_settings_snapshot, state=state)
+    return await asyncio.to_thread(
+        build_runtime_settings_snapshot, config_deps=config_deps
+    )
 
 
 @router.patch(
@@ -108,14 +115,18 @@ async def get_runtime_settings(
     responses=SETTINGS_WRITE_RESPONSES,
 )
 async def patch_runtime_settings(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
+    lm_deps: LmDepsDep,
+    diagnostics_deps: DiagnosticsDepsDep,
     identity: HTTPIdentityDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
     _ = identity
     return await apply_runtime_settings_patch(
-        state=state,
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        diagnostics_deps=diagnostics_deps,
         request=request,
         planner_loader=get_planner_lm_from_env,
         delegate_loader=get_delegate_lm_from_env,
@@ -128,13 +139,17 @@ async def patch_runtime_settings(
     responses=AUTH_ERROR_RESPONSES,
 )
 async def test_lm_connection(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
+    lm_deps: LmDepsDep,
+    diagnostics_deps: DiagnosticsDepsDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     """Verify that the planner and delegate language-model configuration can load."""
     _ = identity
     return await run_lm_connection_test(
-        state=state,
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        diagnostics_deps=diagnostics_deps,
         planner_loader=get_planner_lm_from_env,
         delegate_loader=get_delegate_lm_from_env,
     )
@@ -146,12 +161,16 @@ async def test_lm_connection(
     responses=AUTH_ERROR_RESPONSES,
 )
 async def test_daytona_connection(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
+    diagnostics_deps: DiagnosticsDepsDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     """Run the Daytona preflight and connectivity check exposed in runtime diagnostics."""
     _ = identity
-    return await run_daytona_connection_test(state=state)
+    return await run_daytona_connection_test(
+        config_deps=config_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
 
 @router.get(
@@ -160,12 +179,19 @@ async def test_daytona_connection(
     responses=AUTH_ERROR_RESPONSES,
 )
 async def get_runtime_status(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
+    lm_deps: LmDepsDep,
+    diagnostics_deps: DiagnosticsDepsDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
     _ = identity
-    return await asyncio.to_thread(build_runtime_status_response, state=state)
+    return await asyncio.to_thread(
+        build_runtime_status_response,
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
 
 @router.get(
@@ -174,7 +200,7 @@ async def get_runtime_status(
     responses=VOLUME_TREE_RESPONSES,
 )
 async def get_volume_tree(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     root_path: Annotated[
         str,
@@ -197,7 +223,7 @@ async def get_volume_tree(
 ) -> VolumeTreeResponse:
     """List the runtime volume tree for the active workspace and provider."""
     return await load_volume_tree(
-        state=state,
+        config_deps=config_deps,
         identity=identity,
         provider=provider,
         root_path=root_path,
@@ -211,7 +237,7 @@ async def get_volume_tree(
     responses=VOLUME_FILE_RESPONSES,
 )
 async def get_volume_file_content(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     path: Annotated[
         str,
@@ -237,7 +263,7 @@ async def get_volume_file_content(
 ) -> VolumeFileContentResponse:
     """Read a text preview for a single file from the runtime volume."""
     return await load_volume_file_content(
-        state=state,
+        config_deps=config_deps,
         identity=identity,
         provider=provider,
         path=path,
@@ -251,7 +277,7 @@ async def get_volume_file_content(
     responses=VOLUME_LIST_RESPONSES,
 )
 async def get_volumes(
-    state: ServerStateDep,
+    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     provider: Annotated[
         VolumeProvider | None,
@@ -262,7 +288,7 @@ async def get_volumes(
 ) -> VolumeListResponse:
     """List the active workspace volume for the selected provider."""
     return await load_volume_list(
-        state=state,
+        config_deps=config_deps,
         identity=identity,
         provider=provider,
     )
