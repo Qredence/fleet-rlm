@@ -237,10 +237,11 @@ def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook
     asyncio.run(scenario())
 
 
-def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run() -> (
-    None
-):
+def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """done events call persist_session_state then send after complete_run."""
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
     async def scenario() -> None:
         websocket = _RecordingWebSocket()

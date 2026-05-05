@@ -494,18 +494,13 @@ def test_execution_websocket_rejects_query_session_id(
 def test_execution_websocket_emits_startup_status_before_slow_startup_failure(
     ws_client, websocket_auth_headers, monkeypatch: pytest.MonkeyPatch
 ):
-    class _SlowFailingAgent:
-        async def __aenter__(self):
-            await asyncio.sleep(0.01)
-            raise RuntimeError("Daytona sandbox unavailable during startup")
-
-        async def __aexit__(self, exc_type, exc_val, exc_tb):
-            _ = (exc_type, exc_val, exc_tb)
-            return False
+    async def _slow_failing_aenter(self):
+        await asyncio.sleep(0.01)
+        raise RuntimeError("Daytona sandbox unavailable during startup")
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
-        lambda **kwargs: _SlowFailingAgent(),
+        "fleet_rlm.api.runtime_services.chat_runtime._ManagedAgentContext.__aenter__",
+        _slow_failing_aenter,
     )
     monkeypatch.setattr(
         "fleet_rlm.api.routers.ws.endpoint._EXECUTION_STARTUP_STATUS_DELAY_SECONDS",
@@ -1145,17 +1140,12 @@ def test_websocket_error_event(
 def test_websocket_reports_agent_startup_daytona_error(
     ws_client, websocket_auth_headers, monkeypatch
 ):
-    class _FailingAgent:
-        async def __aenter__(self):
-            raise RuntimeError("daytona.AuthError: API key is malformed")
-
-        async def __aexit__(self, exc_type, exc_val, exc_tb):
-            _ = (exc_type, exc_val, exc_tb)
-            return False
+    async def _failing_aenter(self):
+        raise RuntimeError("daytona.AuthError: API key is malformed")
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
-        lambda **kwargs: _FailingAgent(),
+        "fleet_rlm.api.runtime_services.chat_runtime._ManagedAgentContext.__aenter__",
+        _failing_aenter,
     )
 
     with ws_client.websocket_connect(

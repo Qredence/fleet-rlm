@@ -59,6 +59,17 @@ def set_delegate_interpreter(interpreter: Any) -> Token:
 
 The tool reads `_delegate_interpreter.get()` at call time and raises `RuntimeError` if not set. The caller (e.g., `AgentRuntime.chat_turn()`) is expected to call `set_delegate_interpreter(self.interpreter)` before invoking the agent. **As of milestone persistence-rlm, `AgentRuntime.chat_turn()` does not call `set_delegate_interpreter()`**, so the `delegate_to_rlm` tool will raise `RuntimeError` if selected by the LLM at runtime. This gap is consistent with the `memory_tools.py` stub pattern — both require explicit wiring by a future worker.
 
+## InterpreterPool Lifecycle Delegation
+
+As of the interpreter-pool milestone, `chat_runtime.py` delegates interpreter lifecycle to `InterpreterPool` instead of constructing and shutting down interpreters inline.
+
+- `InterpreterPool.acquire()` builds the interpreter with local Daytona imports and defensive error handling (`ImportError`, `DaytonaConfigError`, broad `Exception` fallback)
+- `InterpreterPool.release()` shuts down the interpreter via `ashutdown`/`shutdown` and swallows all exceptions
+- `_ManagedAgentContext` (in `chat_runtime.py`) wraps the agent and ensures release on both normal exit and builder failure
+- On `__aexit__`, `_ManagedAgentContext` nulls `agent.interpreter` before calling `pool.release()` to prevent double-shutdown by `AgentRuntime`
+
+Tests that mock interpreter startup errors must patch `_ManagedAgentContext.__aenter__` (not `build_chat_agent`) because the websocket endpoint (`endpoint.py`) now acquires the agent through the managed context.
+
 ## WebSocket Test Fixtures Available in tests/ui/
 
 `tests/ui/ws/test_chat_stream.py` and related files use well-established fixtures (`ws_client`, `FakeChatAgent`, `DelayedRepository`) that can test the WebSocket transport layer without live services. When writing integration tests that need to exercise the WS → agent → streaming path, look for `conftest.py` or fixture imports in `tests/ui/` rather than building custom fixtures from scratch.
