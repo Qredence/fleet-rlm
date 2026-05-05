@@ -347,10 +347,7 @@ def _sandbox_get_file_info_impl(
     mod_time = getattr(info, "mod_time", None)
     mod_time_str = ""
     if mod_time is not None:
-        if hasattr(mod_time, "isoformat"):
-            mod_time_str = mod_time.isoformat()
-        else:
-            mod_time_str = str(mod_time)
+        mod_time_str = mod_time.isoformat() if hasattr(mod_time, "isoformat") else str(mod_time)
     return {
         "status": "ok",
         "path": resolved,
@@ -377,8 +374,8 @@ def sandbox_list_files(path: str = ".") -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, ``directories``, ``files``, and ``total``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_list_files_impl(_ctx, path=path)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_list_files_impl(ctx, path=path)
 
 
 @tool_fn
@@ -391,8 +388,8 @@ def sandbox_read_file(path: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, ``content``, and ``size``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_read_file_impl(_ctx, path=path)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_read_file_impl(ctx, path=path)
 
 
 @tool_fn
@@ -406,8 +403,8 @@ def sandbox_write_file(path: str, content: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, and ``bytes_written``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_write_file_impl(_ctx, path=path, content=content)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_write_file_impl(ctx, path=path, content=content)
 
 
 @tool_fn
@@ -420,8 +417,8 @@ def sandbox_create_directory(path: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status`` and ``path``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_create_directory_impl(_ctx, path=path)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_create_directory_impl(ctx, path=path)
 
 
 @tool_fn
@@ -434,8 +431,8 @@ def sandbox_delete_file(path: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, and ``deleted``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_delete_file_impl(_ctx, path=path)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_delete_file_impl(ctx, path=path)
 
 
 @tool_fn
@@ -449,8 +446,8 @@ def sandbox_move_file(source: str, destination: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``source``, and ``destination``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_move_file_impl(_ctx, source=source, destination=destination)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_move_file_impl(ctx, source=source, destination=destination)
 
 
 @tool_fn
@@ -464,8 +461,8 @@ def sandbox_search_files(path: str, pattern: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, ``pattern``, ``count``, and ``files``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_search_files_impl(_ctx, path=path, pattern=pattern)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_search_files_impl(ctx, path=path, pattern=pattern)
 
 
 @tool_fn
@@ -479,8 +476,8 @@ def sandbox_find_in_files(path: str, pattern: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, ``pattern``, ``count``, and ``hits``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_find_in_files_impl(_ctx, path=path, pattern=pattern)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_find_in_files_impl(ctx, path=path, pattern=pattern)
 
 
 @tool_fn
@@ -497,9 +494,9 @@ def sandbox_replace_in_files(
     Returns:
         Dictionary with ``status``, ``files``, ``pattern``, and ``result``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_replace_in_files_impl(
-        _ctx, files=files, pattern=pattern, replacement=replacement
+        ctx, files=files, pattern=pattern, replacement=replacement
     )
 
 
@@ -513,8 +510,8 @@ def sandbox_get_file_info(path: str) -> dict[str, Any]:
     Returns:
         Dictionary with ``status``, ``path``, ``name``, ``size``, ``mode``, ``is_dir``, and ``mod_time``.
     """
-    _ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_get_file_info_impl(_ctx, path=path)
+    ctx = _SandboxFilesystemToolContext(interpreter=None)
+    return _sandbox_get_file_info_impl(ctx, path=path)
 
 
 __all__ = [
