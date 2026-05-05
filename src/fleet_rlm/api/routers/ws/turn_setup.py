@@ -21,7 +21,7 @@ from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
 from ...schemas import WSMessage
-from .helpers import _try_send_json
+from .transport import _try_send_json
 from .types import (
     ChatAgentProtocol,
     DaytonaChatRequestOptions,

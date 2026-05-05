@@ -52,12 +52,6 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from .helpers import (
-    _authenticate_websocket,
-    _close_websocket_safely,
-    _error_envelope,
-    _try_send_json,
-)
 from .lifecycle import (
     cancel_startup_status_task as _cancel_startup_status_task,
 )
@@ -68,9 +62,15 @@ from .lifecycle import (
 from .lifecycle import (
     emit_delayed_startup_status as _emit_delayed_startup_status,
 )
-from .messages import parse_ws_message_or_send_error
 from .stream import _chat_message_loop
 from .terminal import build_stream_event_dict
+from .transport import (
+    _authenticate_websocket,
+    _close_websocket_safely,
+    _error_envelope,
+    _try_send_json,
+    parse_ws_message_or_send_error,
+)
 from .types import WorkspaceEvent
 
 router = APIRouter(tags=["websocket"])

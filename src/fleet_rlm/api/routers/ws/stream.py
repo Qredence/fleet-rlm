@@ -31,8 +31,6 @@ from ...runtime_services.chat_runtime import (
 )
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
-from .errors import handle_stream_error
-from .helpers import _try_send_json
 from .lifecycle import (
     build_workspace_task_request,
     cancelled_event_payload,
@@ -42,12 +40,17 @@ from .lifecycle import (
     handle_chat_loop_exception,
     should_reload_docs_path,
 )
-from .messages import parse_ws_message_or_send_error, resolve_session_identity
 from .repl_bridge import ReplHookBridge
 from .session import (
     switch_session_if_needed,
 )
 from .terminal import build_stream_event_dict, handle_terminal_stream_event
+from .transport import (
+    _try_send_json,
+    handle_stream_error,
+    parse_ws_message_or_send_error,
+    resolve_session_identity,
+)
 from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
 from .types import (
     ChatAgentProtocol,

@@ -27,7 +27,7 @@ from ...events import (
     ExecutionStep,
 )
 from ...runtime_services.chat_persistence import ExecutionLifecycleManager
-from .helpers import _error_envelope, _try_send_json
+from .transport import _error_envelope, _try_send_json
 from .turn_setup import PreparedStreamingTurn
 from .types import (
     ChatAgentProtocol,
