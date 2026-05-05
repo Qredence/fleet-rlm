@@ -181,9 +181,13 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
         _fake_builder,
     )
+
+    async def _fake_acquire(_self: object, _cfg: object) -> None:
+        return None
+
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_runtime._try_build_daytona_interpreter",
-        lambda _volume_name: None,
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fake_acquire,
     )
 
     runtime = _PreparedChatRuntime(
@@ -196,7 +200,8 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         identity_rows=None,
     )
 
-    assert _build_chat_agent_context(runtime) is daytona_agent
+    result = asyncio.run(_build_chat_agent_context(runtime))
+    assert result is daytona_agent
     assert calls == [
         {
             "react_max_iters": 5,
@@ -257,20 +262,16 @@ def test_new_chat_session_state_uses_identity_or_defaults() -> None:
 
 
 def test_daytona_builder_returns_none_on_import_error(monkeypatch) -> None:
-    """When DaytonaConfigError import fails, _try_build_daytona_interpreter returns None without UnboundLocalError."""
-    from fleet_rlm.api.runtime_services.chat_runtime import (
-        _try_build_daytona_interpreter,
+    """When Daytona import fails, InterpreterPool.acquire returns None without UnboundLocalError."""
+    from fleet_rlm.api.runtime_services.interpreter_pool import InterpreterPool
+
+    async def _fail_acquire(_self: object, _cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fail_acquire,
     )
 
-    original_import = (
-        __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-    )
-
-    def _fail_daytona_config(name: str, *args: object, **kwargs: object) -> object:
-        if "daytona.config" in name or name == "fleet_rlm.integrations.daytona.config":
-            raise ImportError("no daytona config")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", _fail_daytona_config)
-    result = _try_build_daytona_interpreter("vol-1")
+    result = asyncio.run(InterpreterPool().acquire(_runtime_cfg()))
     assert result is None

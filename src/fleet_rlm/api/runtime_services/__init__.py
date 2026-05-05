@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         run_daytona_connection_test,
         run_lm_connection_test,
     )
+    from .interpreter_pool import InterpreterPool
     from .settings import (
         apply_runtime_settings_patch,
         build_runtime_settings_snapshot,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ChatSessionState",
+    "InterpreterPool",
     "PreparedChatRuntime",
     "apply_runtime_settings_patch",
     "build_chat_agent_context",
@@ -69,6 +71,10 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "ChatSessionState": (
         "fleet_rlm.api.runtime_services.chat_runtime",
         "ChatSessionState",
+    ),
+    "InterpreterPool": (
+        "fleet_rlm.api.runtime_services.interpreter_pool",
+        "InterpreterPool",
     ),
     "PreparedChatRuntime": (
         "fleet_rlm.api.runtime_services.chat_runtime",
