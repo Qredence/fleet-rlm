@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws import manifest as ws_manifest
+from fleet_rlm.api.runtime_services import chat_persistence as _chat_persistence
 from tests.unit.fixtures_daytona import FakeDaytonaStorageSession
 
 
@@ -31,7 +31,7 @@ class _RecordingInterpreter:
 
 def test_manifest_path_uses_default_session_id_when_missing() -> None:
     assert (
-        ws_manifest._manifest_path("workspace-123", "user-456", "")
+        _chat_persistence._manifest_path("workspace-123", "user-456", "")
         == "meta/workspaces/workspace-123/users/user-456/react-session-default-session.json"
     )
 
@@ -40,7 +40,9 @@ def test_load_manifest_from_volume_returns_empty_without_interpreter() -> None:
     agent = cast(Any, SimpleNamespace(interpreter=None))
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(agent, "workspaces/test/session.json")
+        _chat_persistence.load_manifest_from_volume(
+            agent, "workspaces/test/session.json"
+        )
     )
 
     assert manifest == {}
@@ -52,10 +54,12 @@ def test_load_manifest_from_volume_returns_empty_on_invalid_json(
     interpreter = _RecordingInterpreter(SimpleNamespace(output={"text": "{oops"}))
     agent = cast(Any, SimpleNamespace(interpreter=interpreter))
 
-    monkeypatch.setattr(ws_manifest, "_is_final_output", lambda result: True)
+    monkeypatch.setattr(_chat_persistence, "_is_final_output", lambda result: True)
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(agent, "workspaces/test/session.json")
+        _chat_persistence.load_manifest_from_volume(
+            agent, "workspaces/test/session.json"
+        )
     )
 
     assert manifest == {}
@@ -65,10 +69,12 @@ def test_load_manifest_from_volume_parses_json_payload(monkeypatch) -> None:
     interpreter = _RecordingInterpreter(SimpleNamespace(output={"text": '{"rev": 2}'}))
     agent = cast(Any, SimpleNamespace(interpreter=interpreter))
 
-    monkeypatch.setattr(ws_manifest, "_is_final_output", lambda result: True)
+    monkeypatch.setattr(_chat_persistence, "_is_final_output", lambda result: True)
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(agent, "workspaces/test/session.json")
+        _chat_persistence.load_manifest_from_volume(
+            agent, "workspaces/test/session.json"
+        )
     )
 
     assert manifest == {"rev": 2}
@@ -90,10 +96,12 @@ def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
     async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
-    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+    monkeypatch.setattr(
+        _chat_persistence, "_aget_daytona_session", _fake_get_daytona_session
+    )
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(
+        _chat_persistence.load_manifest_from_volume(
             agent, "meta/workspaces/test/session.json"
         )
     )
@@ -119,10 +127,12 @@ def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> Non
     async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
-    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+    monkeypatch.setattr(
+        _chat_persistence, "_aget_daytona_session", _fake_get_daytona_session
+    )
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(
+        _chat_persistence.load_manifest_from_volume(
             agent, "meta/workspaces/test/session.json"
         )
     )
@@ -152,10 +162,12 @@ def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
     async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
-    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+    monkeypatch.setattr(
+        _chat_persistence, "_aget_daytona_session", _fake_get_daytona_session
+    )
 
     manifest = asyncio.run(
-        ws_manifest.load_manifest_from_volume(
+        _chat_persistence.load_manifest_from_volume(
             agent,
             "meta/workspaces/workspace-1/users/user-1/react-session-session-a.json",
         )
@@ -174,7 +186,7 @@ def test_save_manifest_to_volume_returns_none_without_interpreter() -> None:
     agent = cast(Any, SimpleNamespace(interpreter=None))
 
     saved_path = asyncio.run(
-        ws_manifest.save_manifest_to_volume(
+        _chat_persistence.save_manifest_to_volume(
             agent,
             "workspaces/test/session.json",
             {"rev": 1},
@@ -190,10 +202,10 @@ def test_save_manifest_to_volume_returns_saved_path(monkeypatch) -> None:
     )
     agent = cast(Any, SimpleNamespace(interpreter=interpreter))
 
-    monkeypatch.setattr(ws_manifest, "_is_final_output", lambda result: True)
+    monkeypatch.setattr(_chat_persistence, "_is_final_output", lambda result: True)
 
     saved_path = asyncio.run(
-        ws_manifest.save_manifest_to_volume(
+        _chat_persistence.save_manifest_to_volume(
             agent,
             "workspaces/test/session.json",
             {"rev": 1},
@@ -219,10 +231,12 @@ def test_save_manifest_to_volume_uses_daytona_session(monkeypatch) -> None:
     async def _fake_get_daytona_session(_agent) -> FakeDaytonaStorageSession:
         return session
 
-    monkeypatch.setattr(ws_manifest, "_aget_daytona_session", _fake_get_daytona_session)
+    monkeypatch.setattr(
+        _chat_persistence, "_aget_daytona_session", _fake_get_daytona_session
+    )
 
     saved_path = asyncio.run(
-        ws_manifest.save_manifest_to_volume(
+        _chat_persistence.save_manifest_to_volume(
             agent,
             "meta/workspaces/test/session.json",
             {"rev": 4},

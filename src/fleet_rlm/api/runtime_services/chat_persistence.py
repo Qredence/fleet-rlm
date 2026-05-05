@@ -1,14 +1,28 @@
-"""WebSocket chat run/session persistence orchestration for runtime services."""
+"""WebSocket chat run/session persistence orchestration for runtime services.
+
+Consolidates lifecycle helpers, execution-event support, manifest I/O,
+and session persistence into a single module.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import posixpath
 import uuid
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from datetime import datetime, timezone
+from pathlib import PurePosixPath
+from types import SimpleNamespace
 from typing import Any
+
+from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.events import (
     ExecutionEvent,
+    ExecutionEventEmitter,
     ExecutionEventType,
     ExecutionStep,
     ExecutionStepBuilder,
@@ -31,14 +45,51 @@ from fleet_rlm.integrations.database.repository_chat import (
 )
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 
-from ..dependencies import SessionCacheDeps
+from ..dependencies import ConfigDeps, DiagnosticsDeps, SessionCacheDeps
 
 logger = logging.getLogger(__name__)
 
-_EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
+# ---------------------------------------------------------------------------
+# Failure classification
+# ---------------------------------------------------------------------------
+
+
+class PersistenceRequiredError(RuntimeError):
+    """Raised when durable writes fail in strict-persistence mode."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def classify_stream_failure(exc: Exception) -> str:
+    """Map runtime failures to stable websocket-facing error codes."""
+    if isinstance(exc, PersistenceRequiredError):
+        return exc.code
+
+    lowered = str(exc).lower()
+    if "planner lm not configured" in lowered:
+        return "planner_missing"
+    if "llm call timed out" in lowered or "timed out" in lowered and "llm" in lowered:
+        return "llm_timeout"
+    if "rate limit" in lowered or "429" in lowered:
+        return "llm_rate_limited"
+    if "sandbox" in lowered or "daytona" in lowered:
+        return "sandbox_unavailable"
+    return "internal_error"
+
+
+# ---------------------------------------------------------------------------
+# Execution-event support
+# ---------------------------------------------------------------------------
+
+EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
     "llm": RunStepType.LLM_CALL,
     "tool": RunStepType.TOOL_CALL,
     "repl": RunStepType.REPL_EXEC,
@@ -47,29 +98,7 @@ _EXECUTION_TO_RUN_STEP_TYPE: dict[str, RunStepType] = {
 }
 
 
-def _new_persistence_required_error(code: str, message: str) -> RuntimeError:
-    from ..routers.ws.lifecycle import PersistenceRequiredError
-
-    return PersistenceRequiredError(code, message)
-
-
-async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
-    from ..routers.ws.manifest import load_manifest_from_volume as _load_manifest
-
-    return await _load_manifest(agent, path)
-
-
-async def save_manifest_to_volume(
-    agent: Any,
-    path: str,
-    manifest: dict[str, Any],
-) -> str | None:
-    from ..routers.ws.manifest import save_manifest_to_volume as _save_manifest
-
-    return await _save_manifest(agent, path, manifest)
-
-
-def _build_execution_event(
+def build_execution_event(
     *,
     event_type: ExecutionEventType,
     run_id: str,
@@ -90,8 +119,373 @@ def _build_execution_event(
     )
 
 
-def _map_execution_step_type(step_type: str) -> RunStepType:
-    return _EXECUTION_TO_RUN_STEP_TYPE.get(step_type, RunStepType.STATUS)
+def get_execution_emitter(diagnostics: DiagnosticsDeps) -> ExecutionEventEmitter:
+    emitter = diagnostics.events_event_emitter
+    if emitter is not None:
+        return emitter
+    return emitter
+
+
+def get_execution_emitter_with_config(
+    diagnostics: DiagnosticsDeps, config_deps: ConfigDeps
+) -> ExecutionEventEmitter:
+    emitter = diagnostics.events_event_emitter
+    if emitter is not None:
+        return emitter
+
+    cfg = config_deps.config
+    emitter = ExecutionEventEmitter(
+        max_queue=cfg.ws_execution_max_queue,
+        drop_policy=cfg.ws_execution_drop_policy,
+    )
+    diagnostics.events_event_emitter = emitter
+    return emitter
+
+
+def map_execution_step_type(step_type: str) -> RunStepType:
+    return EXECUTION_TO_RUN_STEP_TYPE.get(step_type, RunStepType.STATUS)
+
+
+# ---------------------------------------------------------------------------
+# Startup status
+# ---------------------------------------------------------------------------
+
+EmitStartupEvent = Callable[[Any], Awaitable[None]]
+
+
+def build_startup_status_event() -> Any:
+    """Return the canonical delayed startup status event."""
+    return SimpleNamespace(
+        kind="status",
+        text="Preparing Daytona workspace...",
+        payload={
+            "phase": "startup",
+            "runtime": {"runtime_mode": "daytona_pilot"},
+        },
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+async def emit_delayed_startup_status(
+    *,
+    delay_seconds: float,
+    emit_event: EmitStartupEvent,
+) -> None:
+    """Emit the startup-status event after the configured first-frame delay."""
+    await asyncio.sleep(delay_seconds)
+    await emit_event(build_startup_status_event())
+
+
+async def cancel_startup_status_task(task: asyncio.Task[None] | None) -> None:
+    """Cancel the delayed startup task when startup completes first."""
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        _ = await task
+
+
+# ---------------------------------------------------------------------------
+# Task control
+# ---------------------------------------------------------------------------
+
+
+def should_reload_docs_path(last_docs_path: str | None, docs_path: str | None) -> bool:
+    """Return True when a docs path is provided and differs from the last loaded path."""
+    candidate = (docs_path or "").strip()
+    if not candidate:
+        return False
+    return candidate != (last_docs_path or "")
+
+
+def enqueue_latest_nonblocking(
+    queue: asyncio.Queue[Any],
+    item: Any,
+) -> bool:
+    """Enqueue without blocking, dropping the oldest item when the queue is full."""
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        pass
+
+    try:
+        _ = queue.get_nowait()
+    except asyncio.QueueEmpty:
+        return False
+
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        return False
+
+
+def cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, Any]:
+    """Build the websocket event payload for cancellation notifications."""
+    return {
+        "type": "event",
+        "data": {
+            "kind": "done",
+            "text": message,
+            "payload": {"cancelled": True},
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "version": 2,
+            "event_id": str(uuid.uuid4()),
+        },
+    }
+
+
+async def cancel_task(task: asyncio.Task[object] | None) -> None:
+    """Cancel an in-flight task and swallow expected shutdown exceptions."""
+    if task is None or task.done():
+        return
+
+    task.cancel()
+    outcomes = await asyncio.gather(task, return_exceptions=True)
+    if not outcomes:
+        return
+
+    outcome = outcomes[0]
+    if isinstance(outcome, (asyncio.CancelledError, WebSocketDisconnect)):
+        return
+    if isinstance(outcome, BaseException):
+        raise outcome
+
+
+# ---------------------------------------------------------------------------
+# Loop exit
+# ---------------------------------------------------------------------------
+
+
+async def handle_chat_disconnect(
+    *,
+    pending_receive_task: asyncio.Task[object] | None,
+    stream_task: asyncio.Task[str | None] | None,
+    cancel_flag: dict[str, bool],
+    local_persist: Callable[..., Awaitable[None]],
+    lifecycle: ExecutionLifecycleManager | None,
+) -> None:
+    """Cleanly stop the active websocket loop after a client disconnect."""
+    cancel_flag["cancelled"] = True
+    await cancel_task(pending_receive_task)
+    await cancel_task(stream_task)
+    try:
+        await local_persist(include_volume_save=True)
+    except PersistenceRequiredError as exc:
+        logger.warning(
+            "Session persistence failed during disconnect: %s",
+            _sanitize_for_log(exc),
+        )
+        if lifecycle is not None and not lifecycle.run_completed:
+            await lifecycle.complete_run(
+                RunStatus.FAILED,
+                error_json={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "code": exc.code,
+                },
+            )
+        return
+
+    if lifecycle is not None:
+        await lifecycle.complete_run(RunStatus.CANCELLED)
+
+
+# ---------------------------------------------------------------------------
+# Worker request
+# ---------------------------------------------------------------------------
+
+
+def build_workspace_task_request(
+    *,
+    agent: Any,
+    prepared_turn: Any,
+    cancel_check: Callable[[], bool],
+) -> Any:
+    """Build the worker request for one websocket message turn."""
+    return SimpleNamespace(
+        agent=agent,
+        message=prepared_turn.message,
+        execution_mode=prepared_turn.execution_mode,
+        trace=prepared_turn.trace,
+        docs_path=prepared_turn.docs_path,
+        repo_url=prepared_turn.repo_url,
+        repo_ref=prepared_turn.repo_ref,
+        context_paths=(
+            list(prepared_turn.context_paths)
+            if prepared_turn.context_paths is not None
+            else None
+        ),
+        batch_concurrency=prepared_turn.batch_concurrency,
+        workspace_id=prepared_turn.workspace_id,
+        cancel_check=cancel_check,
+        prepare=prepared_turn.prepare_worker,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Manifest I/O
+# ---------------------------------------------------------------------------
+
+
+def _is_final_output(result: Any) -> bool:
+    from dspy.primitives import FinalOutput
+
+    return isinstance(result, FinalOutput)
+
+
+def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
+    safe_session_id = _sanitize_id(session_id, "default-session")
+    return (
+        f"meta/workspaces/{workspace_id}/users/{user_id}/"
+        f"react-session-{safe_session_id}.json"
+    )
+
+
+def _legacy_manifest_path(path: str) -> str | None:
+    normalized = str(path or "").strip()
+    if not normalized.startswith("meta/"):
+        return None
+    stripped = normalized.removeprefix("meta/")
+    parts = PurePosixPath(stripped).parts
+    if len(parts) < 5 or parts[0] != "workspaces" or parts[2] != "users":
+        return stripped
+
+    user_prefix = PurePosixPath(*parts[:4])
+    remainder = parts[4:]
+    if not remainder:
+        return stripped
+    if remainder[0] == "memory":
+        return stripped
+    if remainder[0].startswith("react-session-"):
+        return str(user_prefix / "memory" / PurePosixPath(*remainder))
+    return stripped
+
+
+async def _aget_daytona_session(agent: Any) -> Any | None:
+    try:
+        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+    except ImportError:
+        return None
+
+    interpreter = getattr(agent, "interpreter", None)
+    if not isinstance(interpreter, DaytonaInterpreter):
+        return None
+    aget_session = getattr(interpreter, "aget_session", None)
+    if aget_session is None or not callable(aget_session):
+        return None
+    return await aget_session()
+
+
+def _persistent_storage_path(interpreter: Any, path: str) -> str:
+    raw_root = str(getattr(interpreter, "volume_mount_path", "/data") or "/data")
+    mount_root = posixpath.normpath(raw_root)
+    candidate = PurePosixPath(path)
+    if candidate.is_absolute():
+        resolved = posixpath.normpath(str(candidate))
+    else:
+        resolved = posixpath.normpath(str(PurePosixPath(mount_root) / candidate))
+    if not resolved.startswith(mount_root + "/") and resolved != mount_root:
+        raise ValueError(f"Path {path!r} resolves outside volume mount path.")
+    return resolved
+
+
+async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
+    """Best-effort manifest load from interpreter volume storage."""
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return {}
+    candidate_paths = [path]
+    legacy_path = _legacy_manifest_path(path)
+    if legacy_path is not None:
+        candidate_paths.append(legacy_path)
+    daytona_session = await _aget_daytona_session(agent)
+    if daytona_session is not None:
+        for candidate_path in candidate_paths:
+            storage_path = _persistent_storage_path(interpreter, candidate_path)
+            try:
+                text = await daytona_session.aread_file(storage_path)
+            except Exception:
+                logger.debug(
+                    "manifest_load_daytona_read_error",
+                    extra={"path": storage_path},
+                    exc_info=True,
+                )
+                continue
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    for candidate_path in candidate_paths:
+        result = await interpreter.aexecute(
+            "text = load_from_volume(path)\nSUBMIT(text=text)",
+            variables={"path": candidate_path},
+            execution_profile=ExecutionProfile.MAINTENANCE,
+        )
+        if not _is_final_output(result):
+            continue
+        output = getattr(result, "output", None)
+        output = output if isinstance(output, dict) else {}
+        text = str(output.get("text", ""))
+        if (
+            not text
+            or text.startswith("[file not found:")
+            or text.startswith("[error:")
+        ):
+            continue
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+async def save_manifest_to_volume(
+    agent: Any,
+    path: str,
+    manifest: dict[str, Any],
+) -> str | None:
+    """Best-effort manifest save to interpreter volume storage."""
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return None
+    payload = json.dumps(manifest, ensure_ascii=False, default=str)
+    daytona_session = await _aget_daytona_session(agent)
+    if daytona_session is not None:
+        storage_path = _persistent_storage_path(interpreter, path)
+        try:
+            return await daytona_session.awrite_file(storage_path, payload)
+        except Exception:
+            logger.warning(
+                "manifest_save_daytona_write_error",
+                extra={"path": storage_path},
+                exc_info=True,
+            )
+            return None
+    result = await interpreter.aexecute(
+        "saved_path = save_to_volume(path, payload)\nSUBMIT(saved_path=saved_path)",
+        variables={"path": path, "payload": payload},
+        execution_profile=ExecutionProfile.MAINTENANCE,
+    )
+    if not _is_final_output(result):
+        return None
+    output = getattr(result, "output", None)
+    output = output if isinstance(output, dict) else {}
+    saved_path = str(output.get("saved_path", ""))
+    if saved_path.startswith("["):
+        return None
+    return saved_path or None
+
+
+# ---------------------------------------------------------------------------
+# Execution lifecycle manager
+# ---------------------------------------------------------------------------
 
 
 class ExecutionLifecycleManager:
@@ -136,7 +530,7 @@ class ExecutionLifecycleManager:
         step: ExecutionStep | None = None,
         summary: dict[str, Any] | None = None,
     ) -> Any:
-        return _build_execution_event(
+        return build_execution_event(
             event_type=event_type,
             run_id=self.run_id,
             workspace_id=self.workspace_id,
@@ -156,7 +550,7 @@ class ExecutionLifecycleManager:
 
     def raise_if_persistence_error(self) -> None:
         if self.strict_persistence and self._persistence_error is not None:
-            raise _new_persistence_required_error(
+            raise PersistenceRequiredError(
                 "durable_state_write_failed",
                 f"Durable state write failed: {self._persistence_error}",
             )
@@ -199,7 +593,7 @@ class ExecutionLifecycleManager:
                             tenant_id=self.identity_rows.tenant_id,
                             run_id=self.active_run_db_id,
                             step_index=self._step_index,
-                            step_type=_map_execution_step_type(batch_step.type),
+                            step_type=map_execution_step_type(batch_step.type),
                             input_json=batch_step.input
                             if isinstance(batch_step.input, dict)
                             else {"value": batch_step.input}
@@ -263,7 +657,7 @@ class ExecutionLifecycleManager:
             self._persist_queue.put_nowait(step)
         except asyncio.QueueFull:
             if self.strict_persistence:
-                raise _new_persistence_required_error(
+                raise PersistenceRequiredError(
                     "durable_state_backpressure",
                     "Execution step persistence queue is full",
                 )
@@ -313,7 +707,7 @@ class ExecutionLifecycleManager:
                 )
             except Exception as exc:
                 if self.strict_persistence:
-                    raise _new_persistence_required_error(
+                    raise PersistenceRequiredError(
                         "run_status_persist_failed",
                         f"Failed to persist run status: {exc}",
                     ) from exc
@@ -385,7 +779,7 @@ async def initialize_turn_lifecycle(
                 session_record["last_run_db_id"] = str(run_row.id)
         except Exception as exc:
             if persistence_required:
-                raise _new_persistence_required_error(
+                raise PersistenceRequiredError(
                     "run_start_persist_failed",
                     f"Failed to persist run start: {exc}",
                 ) from exc
@@ -534,7 +928,7 @@ async def persist_memory_item_if_needed(
         )
     except Exception as exc:
         if persistence_required:
-            raise _new_persistence_required_error(
+            raise PersistenceRequiredError(
                 "memory_item_persist_failed",
                 f"Failed to persist memory item: {exc}",
             ) from exc
@@ -593,7 +987,7 @@ async def persist_session_state(
                 f"(remote_rev={remote_rev}, local_rev={previous_rev})"
             )
             if persistence_required:
-                raise _new_persistence_required_error("manifest_conflict", message)
+                raise PersistenceRequiredError("manifest_conflict", message)
             logger.warning(message)
         else:
             saved_path = await save_manifest_to_volume(
@@ -605,9 +999,7 @@ async def persist_session_state(
                     f"(path={active_manifest_path})"
                 )
                 if persistence_required:
-                    raise _new_persistence_required_error(
-                        "manifest_write_failed", message
-                    )
+                    raise PersistenceRequiredError("manifest_write_failed", message)
                 logger.warning(message)
 
     await persist_memory_item_if_needed(
@@ -650,6 +1042,29 @@ def build_local_persist_fn(
 
 
 __all__ = [
+    "PersistenceRequiredError",
+    "classify_stream_failure",
+    "EXECUTION_TO_RUN_STEP_TYPE",
+    "build_execution_event",
+    "get_execution_emitter",
+    "get_execution_emitter_with_config",
+    "map_execution_step_type",
+    "build_startup_status_event",
+    "emit_delayed_startup_status",
+    "cancel_startup_status_task",
+    "should_reload_docs_path",
+    "enqueue_latest_nonblocking",
+    "cancelled_event_payload",
+    "cancel_task",
+    "handle_chat_disconnect",
+    "build_workspace_task_request",
+    "load_manifest_from_volume",
+    "save_manifest_to_volume",
+    "_manifest_path",
+    "_legacy_manifest_path",
+    "_aget_daytona_session",
+    "_persistent_storage_path",
+    "_is_final_output",
     "ExecutionLifecycleManager",
     "build_local_persist_fn",
     "ensure_manifest_shape",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -17,9 +17,6 @@ from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
-
-if TYPE_CHECKING:
-    from ..routers.ws.types import SessionContext
 
 
 @dataclass(slots=True)
@@ -46,7 +43,7 @@ class ChatSessionState:
     active_run_db_id: uuid.UUID | None = None
     lifecycle: Any | None = None
     last_loaded_docs_path: str | None = None
-    orchestration_session: SessionContext | None = None
+    orchestration_session: Any | None = None
 
 
 def set_interpreter_default_profile(
