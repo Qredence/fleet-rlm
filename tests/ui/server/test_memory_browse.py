@@ -420,11 +420,13 @@ def test_list_memory_without_auth_returns_401(staging_client, memory_repo):
     assert response.status_code == 401
 
 
-def test_list_memory_no_repository_returns_503(default_client, auth_headers):
+def test_list_memory_no_repository_uses_local_store(default_client, auth_headers):
     default_client.app.state.server_state.repository = None
     response = default_client.get(
         "/api/v1/memory",
         headers=auth_headers,
     )
-    assert response.status_code == 503
-    assert "Database persistence is unavailable" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"] == []
+    assert payload["total"] == 0

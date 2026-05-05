@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -26,7 +25,7 @@ from fleet_rlm.integrations.database.repository_optimization import (
     OptimizationRunCreateRequest,
 )
 
-from ...dependencies import ConfigDepsDep, HTTPIdentityDep, RepositoryDep
+from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ...runtime_services.common import run_blocking
 from ...schemas.optimization import (
     EvaluationResultItem,
@@ -175,14 +174,26 @@ def _resolve_blocking_output_path(output_path: str | None) -> Path | None:
     return Path(resolved_output)
 
 
-async def _create_repo_blocking_run(
+def _resolve_run_uuid(run_id: str) -> uuid.UUID:
+    """Parse a run UUID or legacy integer id."""
+    try:
+        return uuid.UUID(run_id)
+    except ValueError:
+        pass
+    try:
+        return uuid.UUID(int=int(run_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Run not found.") from exc
+
+
+async def _create_blocking_run_record(
     *,
     request: GEPAOptimizationRequest,
-    repository: Any,
+    persistence: Any,
     persisted_identity: Any,
     program_spec: str,
     dataset_ref: str,
-) -> str:
+) -> str | None:
     workspace_id = _require_workspace_id(persisted_identity)
     dataset_uuid = (
         _parse_uuid_id(
@@ -192,78 +203,24 @@ async def _create_repo_blocking_run(
         if request.dataset_id is not None
         else None
     )
-    created_run = await repository.create_optimization_run(
-        OptimizationRunCreateRequest(
-            tenant_id=persisted_identity.tenant_id,
-            workspace_id=workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-            optimizer="GEPA",
-            program_spec=program_spec,
-            module_slug=request.module_slug,
-            dataset_id=dataset_uuid,
-            auto=request.auto,
-            train_ratio=request.train_ratio,
-            metadata_json={"dataset_path": dataset_ref},
-        )
-    )
-    return str(created_run.id)
-
-
-async def _create_local_blocking_run(
-    *,
-    request: GEPAOptimizationRequest,
-    program_spec: str,
-    dataset_ref: str,
-) -> int | None:
-    from fleet_rlm.integrations.local_store import (
-        create_optimization_run as _db_create_run,
-    )
-
-    created_run = await asyncio.to_thread(
-        _db_create_run,
-        program_spec=program_spec,
-        auto=request.auto,
-        train_ratio=request.train_ratio,
-        module_slug=request.module_slug,
-        dataset_id=int(request.dataset_id) if request.dataset_id is not None else None,
-        dataset_path=dataset_ref,
-    )
-    return created_run.id
-
-
-async def _create_blocking_run_record(
-    *,
-    request: GEPAOptimizationRequest,
-    repository: Any | None,
-    persisted_identity: Any | None,
-    program_spec: str,
-    dataset_ref: str,
-) -> str | int | None:
-    if repository is not None and persisted_identity is not None:
-        try:
-            return await _create_repo_blocking_run(
-                request=request,
-                repository=repository,
-                persisted_identity=persisted_identity,
-                program_spec=program_spec,
-                dataset_ref=dataset_ref,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Failed to create optimization run in Postgres", exc_info=exc
-            )
-            return None
-
     try:
-        return await _create_local_blocking_run(
-            request=request,
-            program_spec=program_spec,
-            dataset_ref=dataset_ref,
+        created_run = await persistence.create_optimization_run(
+            OptimizationRunCreateRequest(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=workspace_id,
+                created_by_user_id=persisted_identity.user_id,
+                optimizer="GEPA",
+                program_spec=program_spec,
+                module_slug=request.module_slug,
+                dataset_id=dataset_uuid,
+                auto=request.auto,
+                train_ratio=request.train_ratio,
+                metadata_json={"dataset_path": dataset_ref},
+            )
         )
+        return str(created_run.id)
     except Exception as exc:
-        logger.exception(
-            "Failed to create optimization run in local database", exc_info=exc
-        )
+        logger.exception("Failed to create optimization run record", exc_info=exc)
         return None
 
 
@@ -273,8 +230,15 @@ async def _execute_blocking_optimization(
     dataset: Path,
     output_path: Path | None,
     program_spec: str,
-    db_run_id: str | int | None,
+    db_run_id: str | None,
 ) -> dict:
+    run_id_int = None
+    if db_run_id is not None:
+        try:
+            run_id_int = int(db_run_id)
+        except ValueError:
+            pass
+
     if request.module_slug:
         return await run_blocking(
             partial(
@@ -285,7 +249,7 @@ async def _execute_blocking_optimization(
                 default_output_root=OPTIMIZATION_DATA_ROOT,
                 auto=request.auto,
                 train_ratio=request.train_ratio,
-                run_id=db_run_id if isinstance(db_run_id, int) else None,
+                run_id=run_id_int,
             ),
             timeout=OPTIMIZATION_TIMEOUT_SECONDS,
         )
@@ -302,152 +266,65 @@ async def _execute_blocking_optimization(
     )
 
 
-async def _mark_repo_blocking_run_failed(
-    *,
-    repository: Any,
-    persisted_identity: Any,
-    db_run_id: str,
-    error: str,
-) -> None:
-    await repository.fail_optimization_run(
-        tenant_id=persisted_identity.tenant_id,
-        run_id=uuid.UUID(db_run_id),
-        workspace_id=persisted_identity.workspace_id,
-        created_by_user_id=persisted_identity.user_id,
-        error=error,
-    )
-
-
-async def _mark_local_blocking_run_failed(*, db_run_id: int, error: str) -> None:
-    from fleet_rlm.integrations.local_store import fail_optimization_run
-
-    await asyncio.to_thread(fail_optimization_run, db_run_id, error=error)
-
-
 async def _mark_blocking_run_failed(
     *,
-    db_run_id: str | int | None,
-    repository: Any | None,
-    persisted_identity: Any | None,
+    db_run_id: str | None,
+    persistence: Any,
+    persisted_identity: Any,
     error: str,
 ) -> None:
     if db_run_id is None:
         return
-    if (
-        repository is not None
-        and persisted_identity is not None
-        and isinstance(db_run_id, str)
-    ):
-        try:
-            await _mark_repo_blocking_run_failed(
-                repository=repository,
-                persisted_identity=persisted_identity,
-                db_run_id=db_run_id,
-                error=error,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to mark GEPA optimization run %s as failed in Postgres",
-                db_run_id,
-            )
-        return
-
     try:
-        assert isinstance(db_run_id, int)
-        await _mark_local_blocking_run_failed(db_run_id=db_run_id, error=error)
-    except Exception:
-        logger.exception(
-            "Failed to mark GEPA optimization run %s as failed in database",
-            db_run_id,
+        run_uuid = _resolve_run_uuid(db_run_id)
+        await persistence.fail_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            error=error,
         )
-
-
-async def _mark_repo_blocking_run_complete(
-    *,
-    repository: Any,
-    persisted_identity: Any,
-    db_run_id: str,
-    result: dict,
-) -> None:
-    run_uuid = uuid.UUID(db_run_id)
-    await repository.save_evaluation_results(
-        tenant_id=persisted_identity.tenant_id,
-        run_id=run_uuid,
-        workspace_id=persisted_identity.workspace_id,
-        created_by_user_id=persisted_identity.user_id,
-        results=result.get("evaluation_results", []),
-    )
-    await repository.save_prompt_snapshots(
-        tenant_id=persisted_identity.tenant_id,
-        run_id=run_uuid,
-        workspace_id=persisted_identity.workspace_id,
-        created_by_user_id=persisted_identity.user_id,
-        snapshots=result.get("prompt_snapshots", []),
-    )
-    await repository.complete_optimization_run(
-        tenant_id=persisted_identity.tenant_id,
-        run_id=run_uuid,
-        workspace_id=persisted_identity.workspace_id,
-        created_by_user_id=persisted_identity.user_id,
-        train_examples=result.get("train_examples", 0),
-        validation_examples=result.get("validation_examples", 0),
-        validation_score=result.get("validation_score"),
-        output_path=result.get("output_path"),
-        manifest_path=result.get("manifest_path"),
-        metadata_json=result.get("run_metadata"),
-    )
-
-
-async def _mark_local_blocking_run_complete(
-    *,
-    db_run_id: int,
-    result: dict,
-) -> None:
-    from fleet_rlm.integrations.local_store import complete_optimization_run
-
-    await asyncio.to_thread(
-        complete_optimization_run,
-        db_run_id,
-        train_examples=result.get("train_examples", 0),
-        validation_examples=result.get("validation_examples", 0),
-        validation_score=result.get("validation_score"),
-        output_path=result.get("output_path"),
-        manifest_path=result.get("manifest_path"),
-        metadata_json=result.get("run_metadata"),
-    )
+    except Exception:
+        logger.exception("Failed to mark GEPA optimization run %s as failed", db_run_id)
 
 
 async def _mark_blocking_run_complete(
     *,
-    db_run_id: str | int | None,
-    repository: Any | None,
-    persisted_identity: Any | None,
+    db_run_id: str | None,
+    persistence: Any,
+    persisted_identity: Any,
     result: dict,
 ) -> None:
     if db_run_id is None:
         return
-    if (
-        repository is not None
-        and persisted_identity is not None
-        and isinstance(db_run_id, str)
-    ):
-        try:
-            await _mark_repo_blocking_run_complete(
-                repository=repository,
-                persisted_identity=persisted_identity,
-                db_run_id=db_run_id,
-                result=result,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to mark GEPA optimization run %s as complete in Postgres",
-                db_run_id,
-            )
-        return
-
     try:
-        assert isinstance(db_run_id, int)
-        await _mark_local_blocking_run_complete(db_run_id=db_run_id, result=result)
+        run_uuid = _resolve_run_uuid(db_run_id)
+        await persistence.save_evaluation_results(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            results=result.get("evaluation_results", []),
+        )
+        await persistence.save_prompt_snapshots(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            snapshots=result.get("prompt_snapshots", []),
+        )
+        await persistence.complete_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            train_examples=result.get("train_examples", 0),
+            validation_examples=result.get("validation_examples", 0),
+            validation_score=result.get("validation_score"),
+            output_path=result.get("output_path"),
+            manifest_path=result.get("manifest_path"),
+            metadata_json=result.get("run_metadata"),
+        )
     except Exception:
         logger.exception(
             "Failed to mark GEPA optimization run %s as complete", db_run_id
@@ -512,12 +389,12 @@ async def run_optimization(
     request: GEPAOptimizationRequest,
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
 ) -> GEPAOptimizationResponse:
     """Trigger a GEPA prompt optimization run."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
     _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
@@ -525,13 +402,13 @@ async def run_optimization(
 
     dataset, dataset_ref = await _resolve_dataset_request(
         request,
-        repository=repository,
+        persistence=persistence,
         persisted_identity=persisted_identity,
     )
     output_path = _resolve_blocking_output_path(request.output_path)
     db_run_id = await _create_blocking_run_record(
         request=request,
-        repository=repository,
+        persistence=persistence,
         persisted_identity=persisted_identity,
         program_spec=effective_program_spec,
         dataset_ref=dataset_ref,
@@ -549,7 +426,7 @@ async def run_optimization(
         logger.exception("GEPA optimization failed")
         await _mark_blocking_run_failed(
             db_run_id=db_run_id,
-            repository=repository,
+            persistence=persistence,
             persisted_identity=persisted_identity,
             error=str(exc),
         )
@@ -561,7 +438,7 @@ async def run_optimization(
 
     await _mark_blocking_run_complete(
         db_run_id=db_run_id,
-        repository=repository,
+        persistence=persistence,
         persisted_identity=persisted_identity,
         result=result,
     )
@@ -594,7 +471,7 @@ async def create_optimization_run(
     background_tasks: BackgroundTasks,
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
 ) -> OptimizationRunCreatedResponse:
     """Create a non-blocking GEPA optimization run.
 
@@ -603,7 +480,7 @@ async def create_optimization_run(
     """
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
     _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
@@ -629,7 +506,7 @@ async def create_optimization_run(
     # Path validation
     dataset, dataset_ref = await _resolve_dataset_request(
         request,
-        repository=repository,
+        persistence=persistence,
         persisted_identity=persisted_identity,
     )
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
@@ -656,66 +533,33 @@ async def create_optimization_run(
         output_path = Path(resolved_output)
 
     # Create DB record
-    if repository is not None and persisted_identity is not None:
-        workspace_id = _require_workspace_id(persisted_identity)
-        dataset_uuid = (
-            _parse_uuid_id(
-                request.dataset_id,
-                detail=f"Dataset {request.dataset_id} not found.",
-            )
-            if request.dataset_id is not None
-            else None
-        )
-        db_row = await repository.create_optimization_run(
-            OptimizationRunCreateRequest(
-                tenant_id=persisted_identity.tenant_id,
-                workspace_id=workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-                optimizer="GEPA",
-                program_spec=effective_program_spec,
-                module_slug=request.module_slug,
-                dataset_id=dataset_uuid,
-                auto=request.auto,
-                train_ratio=request.train_ratio,
-                metadata_json={"dataset_path": dataset_ref},
-            )
-        )
-        run_id = str(db_row.id)
-        background_tasks.add_task(
-            run_optimization_background,
-            run_id=run_id,
-            persistence="repo",
-            repository=repository,
-            identity=persisted_identity,
-            module_slug=request.module_slug,
-            dataset_path=dataset,
+    db_row = await persistence.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=persisted_identity.tenant_id,
+            workspace_id=_require_workspace_id(persisted_identity),
+            created_by_user_id=persisted_identity.user_id,
+            optimizer="GEPA",
             program_spec=effective_program_spec,
-            output_path=output_path,
-            default_output_root=OPTIMIZATION_DATA_ROOT,
+            module_slug=request.module_slug,
+            dataset_id=(
+                _parse_uuid_id(
+                    request.dataset_id,
+                    detail=f"Dataset {request.dataset_id} not found.",
+                )
+                if request.dataset_id is not None
+                else None
+            ),
             auto=request.auto,
             train_ratio=request.train_ratio,
+            metadata_json={"dataset_path": dataset_ref},
         )
-        return OptimizationRunCreatedResponse(run_id=run_id, status="running")
-
-    from fleet_rlm.integrations.local_store import (
-        create_optimization_run as _db_create_run,
     )
-
-    db_row = await asyncio.to_thread(
-        _db_create_run,
-        program_spec=effective_program_spec,
-        auto=request.auto,
-        train_ratio=request.train_ratio,
-        module_slug=request.module_slug,
-        dataset_id=int(request.dataset_id) if request.dataset_id is not None else None,
-        dataset_path=dataset_ref,
-    )
-
-    run_id = str(db_row.id or 0)
+    run_id = str(db_row.id)
     background_tasks.add_task(
         run_optimization_background,
-        run_id=db_row.id or 0,
-        persistence="local",
+        run_id=run_id,
+        persistence=persistence,
+        persisted_identity=persisted_identity,
         module_slug=request.module_slug,
         dataset_path=dataset,
         program_spec=effective_program_spec,
@@ -724,7 +568,6 @@ async def create_optimization_run(
         auto=request.auto,
         train_ratio=request.train_ratio,
     )
-
     return OptimizationRunCreatedResponse(run_id=run_id, status="running")
 
 
@@ -742,7 +585,7 @@ async def create_optimization_run(
 async def list_runs(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     status: Annotated[
         str | None, Query(description="Filter by status: running, completed, failed")
     ] = None,
@@ -756,44 +599,24 @@ async def list_runs(
     """List optimization runs, most recent first."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
-    if repository is not None and persisted_identity is not None:
-        status_filter = None
-        if status:
-            try:
-                status_filter = OptimizationRunStatus(status)
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid status filter: {status!r}"
-                ) from exc
-        runs = await repository.list_optimization_runs(
-            tenant_id=persisted_identity.tenant_id,
-            workspace_id=persisted_identity.workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-            status=status_filter,
-            limit=limit,
-            offset=offset,
-        )
-        return [_db_run_to_response(r) for r in runs]
-
-    from fleet_rlm.integrations.local_store import (
-        RunStatus,
-        list_optimization_runs,
-    )
-
     status_filter = None
     if status:
         try:
-            status_filter = RunStatus(status)
-        except ValueError:
+            status_filter = OptimizationRunStatus(status)
+        except ValueError as exc:
             raise HTTPException(
                 status_code=400, detail=f"Invalid status filter: {status!r}"
-            )
-
-    runs = await asyncio.to_thread(
-        list_optimization_runs, status=status_filter, limit=limit, offset=offset
+            ) from exc
+    runs = await persistence.list_optimization_runs(
+        tenant_id=persisted_identity.tenant_id,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
     )
     return [_db_run_to_response(r) for r in runs]
 
@@ -812,7 +635,7 @@ async def list_runs(
 async def compare_runs(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     run_ids: Annotated[
         str, Query(description="Comma-separated run IDs to compare (max 5).")
     ],
@@ -820,7 +643,7 @@ async def compare_runs(
     """Compare prompt diffs and scores across optimization runs."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
 
@@ -832,82 +655,40 @@ async def compare_runs(
             status_code=400, detail="Maximum 5 runs can be compared at once."
         )
 
-    if repository is not None and persisted_identity is not None:
-        comparison_items: list[RunComparisonItem] = []
-        for raw_id in raw_ids:
-            run_uuid = _parse_uuid_id(raw_id, detail=f"Run {raw_id} not found.")
-            run_row = await repository.get_optimization_run(
-                tenant_id=persisted_identity.tenant_id,
-                run_id=run_uuid,
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-            )
-            if run_row is None:
-                raise HTTPException(status_code=400, detail=f"Run {raw_id} not found.")
-            snapshots = await repository.get_prompt_snapshots(
-                tenant_id=persisted_identity.tenant_id,
-                run_id=run_uuid,
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-            )
-            comparison_items.append(
-                RunComparisonItem(
-                    run_id=str(run_row.id),
-                    program_spec=run_row.program_spec,
-                    validation_score=run_row.validation_score,
-                    prompt_snapshots=[
-                        PromptSnapshotItem(
-                            predictor_name=s.predictor_name,
-                            prompt_type=s.prompt_type.value
-                            if hasattr(s.prompt_type, "value")
-                            else str(s.prompt_type),
-                            prompt_text=s.prompt_text,
-                        )
-                        for s in snapshots
-                    ],
-                )
-            )
-        return RunComparisonResponse(runs=comparison_items)
-
-    try:
-        id_list = [int(x) for x in raw_ids]
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail="run_ids must be comma-separated run identifiers."
+    comparison_items: list[RunComparisonItem] = []
+    for raw_id in raw_ids:
+        run_uuid = _resolve_run_uuid(raw_id)
+        run_row = await persistence.get_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
         )
-
-    from fleet_rlm.integrations.local_store import (
-        get_optimization_run,
-        get_prompt_snapshots,
-    )
-
-    def _build_comparison_items(
-        run_ids: list[int],
-    ) -> list[RunComparisonItem]:
-        items: list[RunComparisonItem] = []
-        for rid in run_ids:
-            run_row = get_optimization_run(rid)
-            if run_row is None:
-                raise HTTPException(status_code=400, detail=f"Run {rid} not found.")
-            snapshots = get_prompt_snapshots(rid)
-            items.append(
-                RunComparisonItem(
-                    run_id=str(run_row.id or 0),
-                    program_spec=run_row.program_spec,
-                    validation_score=run_row.validation_score,
-                    prompt_snapshots=[
-                        PromptSnapshotItem(
-                            predictor_name=s.predictor_name,
-                            prompt_type=s.prompt_type,
-                            prompt_text=s.prompt_text,
-                        )
-                        for s in snapshots
-                    ],
-                )
+        if run_row is None:
+            raise HTTPException(status_code=400, detail=f"Run {raw_id} not found.")
+        snapshots = await persistence.get_prompt_snapshots(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+        comparison_items.append(
+            RunComparisonItem(
+                run_id=str(run_row.id),
+                program_spec=run_row.program_spec,
+                validation_score=run_row.validation_score,
+                prompt_snapshots=[
+                    PromptSnapshotItem(
+                        predictor_name=s.predictor_name,
+                        prompt_type=s.prompt_type.value
+                        if hasattr(s.prompt_type, "value")
+                        else str(s.prompt_type),
+                        prompt_text=s.prompt_text,
+                    )
+                    for s in snapshots
+                ],
             )
-        return items
-
-    comparison_items = await asyncio.to_thread(_build_comparison_items, id_list)
+        )
     return RunComparisonResponse(runs=comparison_items)
 
 
@@ -925,7 +706,7 @@ async def compare_runs(
 async def get_run(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     run_id: Annotated[
         str, ApiPath(description="Identifier of the optimization run to fetch.")
     ],
@@ -933,34 +714,16 @@ async def get_run(
     """Get a single optimization run by ID."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
-    if repository is not None and persisted_identity is not None:
-        row = await repository.get_optimization_run(
-            tenant_id=persisted_identity.tenant_id,
-            run_id=_parse_uuid_id(
-                run_id,
-                detail=f"Optimization run {run_id} not found.",
-            ),
-            workspace_id=persisted_identity.workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-        )
-        if row is None:
-            raise HTTPException(
-                status_code=404, detail=f"Optimization run {run_id} not found."
-            )
-        return _db_run_to_response(row)
-
-    from fleet_rlm.integrations.local_store import get_optimization_run
-
-    try:
-        legacy_run_id = int(run_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Optimization run {run_id} not found."
-        ) from exc
-    row = await asyncio.to_thread(get_optimization_run, legacy_run_id)
+    run_uuid = _resolve_run_uuid(run_id)
+    row = await persistence.get_optimization_run(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+    )
     if row is None:
         raise HTTPException(
             status_code=404, detail=f"Optimization run {run_id} not found."
@@ -985,7 +748,7 @@ async def get_run(
 async def get_run_results(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     run_id: Annotated[
         str,
         ApiPath(
@@ -1003,77 +766,36 @@ async def get_run_results(
     """Return per-example evaluation results for an optimization run."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
-        repository=repository,
+        persistence=persistence,
         identity=identity,
     )
-    if repository is not None and persisted_identity is not None:
-        run_uuid = _parse_uuid_id(
-            run_id, detail=f"Optimization run {run_id} not found."
-        )
-        if (
-            await repository.get_optimization_run(
-                tenant_id=persisted_identity.tenant_id,
-                run_id=run_uuid,
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-            )
-            is None
-        ):
-            raise HTTPException(
-                status_code=404, detail=f"Optimization run {run_id} not found."
-            )
-        items, total = await repository.get_evaluation_results(
+    run_uuid = _resolve_run_uuid(run_id)
+    if (
+        await persistence.get_optimization_run(
             tenant_id=persisted_identity.tenant_id,
             run_id=run_uuid,
             workspace_id=persisted_identity.workspace_id,
             created_by_user_id=persisted_identity.user_id,
-            limit=limit,
-            offset=offset,
         )
-        return EvaluationResultsResponse(
-            items=[
-                EvaluationResultItem(
-                    id=str(r.id),
-                    example_index=r.example_index,
-                    input_data=json.dumps(r.input_data),
-                    expected_output=r.expected_output,
-                    predicted_output=r.predicted_output,
-                    score=r.score,
-                )
-                for r in items
-            ],
-            total=total,
-            offset=offset,
-            limit=limit,
-            has_more=(offset + limit) < total,
-        )
-
-    from fleet_rlm.integrations.local_store import (
-        get_evaluation_results,
-        get_optimization_run,
-    )
-
-    try:
-        legacy_run_id = int(run_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Optimization run {run_id} not found."
-        ) from exc
-
-    if await asyncio.to_thread(get_optimization_run, legacy_run_id) is None:
+        is None
+    ):
         raise HTTPException(
             status_code=404, detail=f"Optimization run {run_id} not found."
         )
-
-    items, total = await asyncio.to_thread(
-        get_evaluation_results, legacy_run_id, limit=limit, offset=offset
+    items, total = await persistence.get_evaluation_results(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+        limit=limit,
+        offset=offset,
     )
     return EvaluationResultsResponse(
         items=[
             EvaluationResultItem(
-                id=str(r.id or 0),
+                id=str(r.id),
                 example_index=r.example_index,
-                input_data=r.input_data,
+                input_data=json.dumps(r.input_data),
                 expected_output=r.expected_output,
                 predicted_output=r.predicted_output,
                 score=r.score,

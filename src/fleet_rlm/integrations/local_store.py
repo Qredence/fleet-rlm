@@ -1055,12 +1055,18 @@ class LocalStore(PersistenceProtocol):
         email: str | None = None,
         full_name: str | None = None,
     ) -> IdentityUpsertResult:
+        # Derive deterministic UUIDs from claims so ownership lookups work
+        # consistently across the local-store backend.
+        _LOCAL_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+        tenant_id = uuid.uuid5(_LOCAL_NS, f"tenant:{entra_tenant_id}")
+        user_id = uuid.uuid5(_LOCAL_NS, f"user:{entra_user_id}@{entra_tenant_id}")
+        workspace_id = uuid.uuid5(_LOCAL_NS, f"workspace:{entra_tenant_id}")
         return IdentityUpsertResult(
-            tenant_id=uuid.UUID(int=0),
-            user_id=uuid.UUID(int=0),
+            tenant_id=tenant_id,
+            user_id=user_id,
             tenant_status=DbTenantStatus.ACTIVE,
             membership_role=DbMembershipRole.MEMBER,
-            workspace_id=uuid.UUID(int=0),
+            workspace_id=workspace_id,
         )
 
     async def resolve_workspace_id(

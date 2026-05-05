@@ -191,6 +191,7 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         planner_lm="planner-lm",
         delegate_lm="delegate-lm",
         repository=None,
+        persistence=None,
         persistence_required=False,
         identity_rows=None,
     )
@@ -228,6 +229,7 @@ def test_new_chat_session_state_uses_identity_or_defaults() -> None:
         planner_lm="planner-lm",
         delegate_lm=None,
         repository=None,
+        persistence=None,
         persistence_required=False,
         identity_rows=None,
     )

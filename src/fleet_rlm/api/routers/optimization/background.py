@@ -1,9 +1,8 @@
 """Background task execution for GEPA optimization runs.
 
-This module merges the former ``_run_optimization_background`` (Postgres
-persistence) and ``_run_optimization_background_local`` (legacy local-store
-persistence) into a single function parameterised by a ``persistence``
-argument.
+This module delegates run state tracking to the unified ``PersistenceProtocol``
+so that the same background logic works for both Postgres and local-store
+backends.
 """
 
 from __future__ import annotations
@@ -95,121 +94,30 @@ def _run_program_optimization_with_thread_config(
         )
 
 
-# ---------------------------------------------------------------------------
-# Persistence helpers — thin wrappers that abstract DB vs local-store
-# ---------------------------------------------------------------------------
+def _resolve_run_uuid(run_id: str | int) -> uuid.UUID:
+    """Convert a run identifier to a UUID for the persistence protocol."""
+    if isinstance(run_id, uuid.UUID):
+        return run_id
+    if isinstance(run_id, int):
+        return uuid.UUID(int=run_id)
+    try:
+        return uuid.UUID(run_id)
+    except ValueError:
+        pass
+    try:
+        return uuid.UUID(int=int(run_id))
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid run_id: {run_id}") from exc
 
 
-class _RepoPersistence:
-    """Postgres persistence via the FleetRepository."""
-
-    def __init__(self, repository: Any, identity: IdentityUpsertResult) -> None:
-        self.repository = repository
-        self.identity = identity
-
-    async def update_phase(self, run_id: str | int, phase: str) -> None:
-        run_uuid = uuid.UUID(str(run_id))
-        await self.repository.update_optimization_run_phase(
-            tenant_id=self.identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=self.identity.workspace_id,
-            created_by_user_id=self.identity.user_id,
-            phase=phase,
-        )
-
-    async def save_results(self, run_id: str | int, result: dict) -> None:
-        run_uuid = uuid.UUID(str(run_id))
-        await self.repository.save_evaluation_results(
-            tenant_id=self.identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=self.identity.workspace_id,
-            created_by_user_id=self.identity.user_id,
-            results=result.get("evaluation_results", []),
-        )
-        await self.repository.save_prompt_snapshots(
-            tenant_id=self.identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=self.identity.workspace_id,
-            created_by_user_id=self.identity.user_id,
-            snapshots=result.get("prompt_snapshots", []),
-        )
-
-    async def complete(self, run_id: str | int, result: dict) -> None:
-        run_uuid = uuid.UUID(str(run_id))
-        await self.repository.complete_optimization_run(
-            tenant_id=self.identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=self.identity.workspace_id,
-            created_by_user_id=self.identity.user_id,
-            train_examples=result.get("train_examples", 0),
-            validation_examples=result.get("validation_examples", 0),
-            validation_score=result.get("validation_score"),
-            output_path=result.get("output_path"),
-            manifest_path=result.get("manifest_path"),
-            metadata_json=result.get("run_metadata"),
-        )
-
-    async def fail(self, run_id: str | int, error: str) -> None:
-        run_uuid = uuid.UUID(str(run_id))
-        await self.repository.fail_optimization_run(
-            tenant_id=self.identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=self.identity.workspace_id,
-            created_by_user_id=self.identity.user_id,
-            error=error,
-        )
-
-
-class _LocalPersistence:
-    """Legacy local-store persistence (synchronous, thread-based)."""
-
-    def __init__(self) -> None:
-        from fleet_rlm.integrations.local_store import (
-            complete_optimization_run,
-            fail_optimization_run,
-            save_evaluation_results,
-            save_prompt_snapshots,
-            update_optimization_run_phase,
-        )
-
-        self._update_phase = update_optimization_run_phase
-        self._complete = complete_optimization_run
-        self._fail = fail_optimization_run
-        self._save_evaluation_results = save_evaluation_results
-        self._save_prompt_snapshots = save_prompt_snapshots
-
-    async def update_phase(self, run_id: str | int, phase: str) -> None:
-        try:
-            self._update_phase(int(run_id), phase=phase)
-        except Exception:
-            logger.debug("Failed to update phase for run %s", run_id)
-
-    async def save_results(self, run_id: str | int, result: dict) -> None:
-        try:
-            self._save_evaluation_results(
-                int(run_id),
-                list(result.get("evaluation_results", [])),
-            )
-            self._save_prompt_snapshots(
-                int(run_id),
-                list(result.get("prompt_snapshots", [])),
-            )
-        except Exception:
-            logger.debug("Failed to persist local review artifacts for run %s", run_id)
-
-    async def complete(self, run_id: str | int, result: dict) -> None:
-        self._complete(
-            int(run_id),
-            train_examples=result.get("train_examples", 0),
-            validation_examples=result.get("validation_examples", 0),
-            validation_score=result.get("validation_score"),
-            output_path=result.get("output_path"),
-            manifest_path=result.get("manifest_path"),
-            metadata_json=result.get("run_metadata"),
-        )
-
-    async def fail(self, run_id: str | int, error: str) -> None:
-        self._fail(int(run_id), error=error)
+def _try_int_run_id(run_id: str | int) -> int | None:
+    """Try to extract an integer run id for MLflow / module optimization tracking."""
+    if isinstance(run_id, int):
+        return run_id
+    try:
+        return int(run_id)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +128,8 @@ class _LocalPersistence:
 async def run_optimization_background(
     *,
     run_id: str | int,
-    persistence: Literal["repo", "local"],
-    repository: Any | None = None,
-    identity: IdentityUpsertResult | None = None,
+    persistence: Any,
+    persisted_identity: IdentityUpsertResult,
     module_slug: str | None,
     dataset_path: Path,
     program_spec: str,
@@ -233,24 +140,15 @@ async def run_optimization_background(
 ) -> None:
     """Execute GEPA optimization in a background task.
 
-    ``persistence`` controls how run state is tracked:
-    * ``"repo"`` -- Postgres via *repository* + *identity* (requires both).
-    * ``"local"`` -- Legacy local-store (SQLite).
+    Run state is tracked through the unified *persistence* backend.
     """
     from fleet_rlm.runtime.quality.gepa_optimization import (
         log_gepa_mlflow_result_metadata,
         log_gepa_mlflow_run_metadata,
     )
 
-    store: _RepoPersistence | _LocalPersistence
-    if persistence == "repo":
-        if repository is None or identity is None:
-            raise ValueError(
-                "repository and identity are required for repo persistence"
-            )
-        store = _RepoPersistence(repository, identity)
-    else:
-        store = _LocalPersistence()
+    run_uuid = _resolve_run_uuid(run_id)
+    int_run_id = _try_int_run_id(run_id)
 
     # -- MLflow autologging (best-effort, never blocks the run) -----------
     mlflow_ctx: Any = None
@@ -309,10 +207,22 @@ async def run_optimization_background(
                 logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
-        await store.update_phase(run_id, "loading")
+        await persistence.update_optimization_run_phase(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            phase="loading",
+        )
 
         if module_slug:
-            await store.update_phase(run_id, "compiling")
+            await persistence.update_optimization_run_phase(
+                tenant_id=persisted_identity.tenant_id,
+                run_id=run_uuid,
+                workspace_id=persisted_identity.workspace_id,
+                created_by_user_id=persisted_identity.user_id,
+                phase="compiling",
+            )
 
             result = await run_blocking(
                 partial(
@@ -323,12 +233,18 @@ async def run_optimization_background(
                     default_output_root=default_output_root,
                     train_ratio=train_ratio,
                     auto=auto,
-                    run_id=None if persistence == "repo" else int(run_id),
+                    run_id=int_run_id,
                 ),
                 timeout=OPTIMIZATION_TIMEOUT_SECONDS,
             )
         else:
-            await store.update_phase(run_id, "compiling")
+            await persistence.update_optimization_run_phase(
+                tenant_id=persisted_identity.tenant_id,
+                run_id=run_uuid,
+                workspace_id=persisted_identity.workspace_id,
+                created_by_user_id=persisted_identity.user_id,
+                phase="compiling",
+            )
 
             result = await run_blocking(
                 partial(
@@ -354,25 +270,61 @@ async def run_optimization_background(
                 val_score = result.get("validation_score")
                 if val_score is not None:
                     cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
-            log_gepa_mlflow_result_metadata(
-                result=result,
-                run_id=run_id,
-                log_metric=cast(Any, _mlflow_log_metric),
-                log_params=cast(Any, _mlflow_log_params),
-                set_tags=cast(Any, _mlflow_set_tags),
-                log_dict=cast(Any, _mlflow_log_dict),
-                log_artifact=cast(Any, _mlflow_log_artifact),
-            )
+                log_gepa_mlflow_result_metadata(
+                    result=result,
+                    run_id=run_id,
+                    log_metric=cast(Any, _mlflow_log_metric),
+                    log_params=cast(Any, _mlflow_log_params),
+                    set_tags=cast(Any, _mlflow_set_tags),
+                    log_dict=cast(Any, _mlflow_log_dict),
+                    log_artifact=cast(Any, _mlflow_log_artifact),
+                )
         except Exception:
             logger.debug("Failed to log GEPA metrics to MLflow for run %s", run_id)
 
-        await store.update_phase(run_id, "saving")
-        await store.save_results(run_id, result)
-        await store.complete(run_id, result)
+        await persistence.update_optimization_run_phase(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            phase="saving",
+        )
+        await persistence.save_evaluation_results(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            results=result.get("evaluation_results", []),
+        )
+        await persistence.save_prompt_snapshots(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            snapshots=result.get("prompt_snapshots", []),
+        )
+        await persistence.complete_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+            train_examples=result.get("train_examples", 0),
+            validation_examples=result.get("validation_examples", 0),
+            validation_score=result.get("validation_score"),
+            output_path=result.get("output_path"),
+            manifest_path=result.get("manifest_path"),
+            metadata_json=result.get("run_metadata"),
+        )
     except Exception as exc:
         logger.exception("Background GEPA optimization failed for run %s", run_id)
         try:
-            await store.fail(run_id, str(exc))
+            await persistence.fail_optimization_run(
+                tenant_id=persisted_identity.tenant_id,
+                run_id=run_uuid,
+                workspace_id=persisted_identity.workspace_id,
+                created_by_user_id=persisted_identity.user_id,
+                error=str(exc),
+            )
         except Exception:
             logger.exception("Failed to mark run %s as failed", run_id)
     finally:

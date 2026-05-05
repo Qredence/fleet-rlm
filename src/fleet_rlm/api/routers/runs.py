@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from ..dependencies import (
     HTTPIdentityDep,
     PersistedIdentityDep,
-    RepositoryDep,
+    PersistenceDep,
 )
 from ..schemas.sandbox import RunStepItem, RunStepListResponse
 from ._types import OpenAPIResponses
@@ -52,7 +52,7 @@ def _parse_run_uuid(run_id: str) -> uuid.UUID:
 )
 async def get_run_steps(
     identity: HTTPIdentityDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
     run_id: Annotated[
         str, Path(description="Identifier of the run whose steps to list.")
@@ -63,13 +63,7 @@ async def get_run_steps(
     """Return paginated execution steps for a run."""
     run_uuid = _parse_run_uuid(run_id)
 
-    if repository is None or persisted_identity is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Database persistence is unavailable.",
-        )
-
-    run = await repository.get_run(
+    run = await persistence.get_run(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
         workspace_id=persisted_identity.workspace_id,
@@ -78,7 +72,7 @@ async def get_run_steps(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
 
-    steps, total = await repository.get_run_steps_paginated(
+    steps, total = await persistence.get_run_steps_paginated(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,
         workspace_id=persisted_identity.workspace_id,

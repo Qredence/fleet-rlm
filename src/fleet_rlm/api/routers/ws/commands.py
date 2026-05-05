@@ -7,7 +7,6 @@ from typing import Any, cast
 
 from fastapi import WebSocket
 
-from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
@@ -76,7 +75,7 @@ async def _handle_command(
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
     *,
-    repository: FleetRepository | None = None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None = None,
     persistence_required: bool = False,
 ) -> None:
@@ -106,7 +105,7 @@ async def _handle_command(
             command=command,
             args=args,
             result=cast(Any, result),
-            repository=repository,
+            persistence=persistence,
             identity_rows=identity_rows,
             persistence_required=persistence_required,
         )
@@ -154,7 +153,7 @@ async def handle_command_with_persist(
     agent: ChatAgentProtocol,
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
-    repository: FleetRepository | None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None,
     persistence_required: bool,
     local_persist: Callable[..., Awaitable[None]],
@@ -165,7 +164,7 @@ async def handle_command_with_persist(
         agent,
         payload,
         session_record,
-        repository=repository,
+        persistence=persistence,
         identity_rows=identity_rows,
         persistence_required=persistence_required,
     )

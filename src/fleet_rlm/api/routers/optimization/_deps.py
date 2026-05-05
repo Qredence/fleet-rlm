@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -19,7 +18,7 @@ from ...dependencies import (
     ConfigDepsDep,
     HTTPIdentityDep,
     PersistedIdentityDep,
-    RepositoryDep,
+    PersistenceDep,
     resolve_persisted_identity,
 )
 from ...schemas.optimization import (
@@ -32,16 +31,16 @@ _resolve_persisted_identity = resolve_persisted_identity
 
 __all__ = [
     "AUTH_ERROR_RESPONSES",
+    "OPTIMIZATION_DATA_ROOT",
+    "OPTIMIZATION_TIMEOUT_SECONDS",
     "ConfigDepsDep",
     "DatasetResponse",
     "HTTPIdentityDep",
+    "OpenAPIResponses",
     "OptimizationContext",
     "OptimizationRunResponse",
-    "OPTIMIZATION_DATA_ROOT",
-    "OPTIMIZATION_TIMEOUT_SECONDS",
-    "OpenAPIResponses",
     "PersistedIdentityDep",
-    "RepositoryDep",
+    "PersistenceDep",
     "_resolve_persisted_identity",
 ]
 
@@ -104,6 +103,10 @@ class OptimizationContext:
 def _parse_uuid_id(value: str, *, detail: str) -> uuid.UUID:
     try:
         return uuid.UUID(value)
+    except ValueError:
+        pass
+    try:
+        return uuid.UUID(int=int(value))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=detail) from exc
 
@@ -216,53 +219,29 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
 async def _resolve_dataset_request(
     request: Any,
     *,
-    repository: RepositoryDep = None,
-    persisted_identity: IdentityUpsertResult | None = None,
+    persistence: PersistenceDep,
+    persisted_identity: IdentityUpsertResult,
 ) -> tuple[Path, str]:
     """Resolve a dataset request into an executable path and stored reference."""
     if request.dataset_id is not None:
-        if repository is not None and persisted_identity is not None:
-            dataset_row = await repository.get_dataset(
-                tenant_id=persisted_identity.tenant_id,
-                dataset_id=_parse_uuid_id(
-                    request.dataset_id,
-                    detail=f"Dataset {request.dataset_id} not found.",
-                ),
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-            )
-            if dataset_row is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset {request.dataset_id} not found.",
-                )
-            if not dataset_row.uri:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset file not found for dataset {request.dataset_id}.",
-                )
-            dataset = Path(dataset_row.uri).resolve()
-            if not dataset.exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset file not found for dataset {request.dataset_id}.",
-                )
-            return dataset, dataset_row.uri
-
-        from fleet_rlm.integrations.local_store import get_dataset
-
-        try:
-            legacy_dataset_id = int(request.dataset_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
+        dataset_row = await persistence.get_dataset(
+            tenant_id=persisted_identity.tenant_id,
+            dataset_id=_parse_uuid_id(
+                request.dataset_id,
                 detail=f"Dataset {request.dataset_id} not found.",
-            ) from exc
-        dataset_row = await asyncio.to_thread(get_dataset, legacy_dataset_id)
+            ),
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
         if dataset_row is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"Dataset {request.dataset_id} not found.",
+            )
+        if not dataset_row.uri:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset file not found for dataset {request.dataset_id}.",
             )
         dataset = Path(dataset_row.uri).resolve()
         if not dataset.exists():
@@ -270,7 +249,7 @@ async def _resolve_dataset_request(
                 status_code=400,
                 detail=f"Dataset file not found for dataset {request.dataset_id}.",
             )
-        return dataset, str(dataset)
+        return dataset, dataset_row.uri
 
     dataset_path = (request.dataset_path or "").strip()
     dataset_lookup = _resolve_relative_dataset_lookup(dataset_path)

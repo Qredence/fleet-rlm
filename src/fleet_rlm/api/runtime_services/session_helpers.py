@@ -19,9 +19,18 @@ def optional_string(value: object) -> str | None:
 
 
 def parse_session_uuid(session_id: str) -> uuid.UUID:
-    """Parse a repository-backed session UUID or raise route-compatible 404."""
+    """Parse a repository-backed session UUID or legacy integer id.
+
+    Integer ids are wrapped as ``uuid.UUID(int=...)`` so they can be
+    passed through the unified ``PersistenceProtocol`` and recovered
+    by the local-store backend via ``_uuid_to_int``.
+    """
     try:
         return uuid.UUID(session_id)
+    except ValueError:
+        pass
+    try:
+        return uuid.UUID(int=int(session_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 

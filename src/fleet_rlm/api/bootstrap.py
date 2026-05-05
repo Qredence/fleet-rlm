@@ -133,19 +133,23 @@ async def initialize_persistence(
     persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig
 ) -> None:
     """Initialize persistence paths based on runtime config."""
+    from fleet_rlm.integrations.local_store import LocalStore
+
     if cfg.database_url:
         db_manager = DatabaseManager(cfg.database_url, echo=cfg.db_echo)
         if cfg.db_validate_on_startup or cfg.database_required:
             await db_manager.ping()
         persistence_deps.db_manager = db_manager
         persistence_deps.repository = FleetRepository(db_manager)
+        persistence_deps.local_store = LocalStore()
         return
 
     if cfg.database_required:
         raise RuntimeError("DATABASE_URL is required when database_required=true")
 
-    logger.warning(
-        "runtime_persistence_disabled",
+    persistence_deps.local_store = LocalStore()
+    logger.info(
+        "runtime_persistence_local",
         extra={
             "database_required": cfg.database_required,
             "app_env": cfg.app_env,

@@ -157,18 +157,30 @@ def test_patch_session_local_store_preserves_metadata(
     tmp_path: Path,
 ):
     """PATCH with metadata_json passes the parameter to local-store update_chat_session."""
+    import asyncio
+
     from fleet_rlm.integrations import local_store
+    from fleet_rlm.integrations.local_store import LocalStore
 
     db_path = tmp_path / "local.db"
     monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
     local_store._engines.clear()
     default_client.app.state.server_state.repository = None
 
-    # Create a local session matching the auth headers tenant/user
+    # Resolve the deterministic identity UUIDs that LocalStore returns for these claims
+    store = LocalStore()
+    identity = asyncio.run(
+        store.upsert_identity(
+            entra_tenant_id="tenant-a",
+            entra_user_id="user-a",
+        )
+    )
+
+    # Create a local session matching the resolved identity UUIDs
     session = local_store.create_session(
         title="Local Session",
-        owner_tenant="tenant-a",
-        owner_user="user-a",
+        owner_tenant=str(identity.tenant_id),
+        owner_user=str(identity.user_id),
     )
 
     call_kwargs: dict[str, object] = {}

@@ -2,8 +2,10 @@
 
 from fastapi import APIRouter, HTTPException
 
+from fleet_rlm.integrations.database import FleetRepository
+
 from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import ConfigDepsDep, HTTPIdentityDep, RepositoryDep
+from ..dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ..schemas.base import AuthMeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -27,18 +29,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def get_me(
     identity: HTTPIdentityDep,
     config_deps: ConfigDepsDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
 ) -> AuthMeResponse:
     """Return the authenticated identity and any admitted control-plane IDs."""
     persisted_identity = None
     if config_deps.config.auth_mode == "entra":
-        if repository is None:
+        if not isinstance(persistence, FleetRepository):
             raise HTTPException(
                 status_code=503,
                 detail="Database repository unavailable for Entra tenant admission.",
             )
         try:
-            persisted_identity = await resolve_admitted_identity(repository, identity)
+            persisted_identity = await resolve_admitted_identity(persistence, identity)
         except AuthError as exc:
             raise HTTPException(
                 status_code=exc.status_code, detail=exc.message

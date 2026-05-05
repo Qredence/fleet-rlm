@@ -868,13 +868,12 @@ def test_optimization_transcript_dataset_endpoint_creates_dataset(
     assert payload["name"].startswith("Recovered chat")
 
 
-def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mode(
+def test_optimization_transcript_dataset_endpoint_persists_in_local_mode(
     default_client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers.optimization import datasets as opt_datasets
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -882,11 +881,6 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
     local_store._engines.clear()
     default_client.app.state.server_state.repository = None
-
-    def _unexpected_persist(**_: object) -> Path:
-        raise AssertionError("persist_jsonl_rows should not run in local mode")
-
-    monkeypatch.setattr(opt_datasets, "persist_jsonl_rows", _unexpected_persist)
 
     response = default_client.post(
         "/api/v1/optimization/transcript-datasets",

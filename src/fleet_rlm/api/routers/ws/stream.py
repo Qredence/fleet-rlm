@@ -459,7 +459,7 @@ async def _handle_message_while_streaming(
             agent=agent,
             payload=msg.model_dump(),
             session_record=session.session_record,
-            repository=runtime.repository,
+            persistence=runtime.persistence,
             identity_rows=runtime.identity_rows,
             persistence_required=runtime.persistence_required,
             local_persist=local_persist,
@@ -524,7 +524,7 @@ async def _handle_idle_non_turn_message(
             agent=agent,
             payload=msg.model_dump(),
             session_record=session.session_record,
-            repository=runtime.repository,
+            persistence=runtime.persistence,
             identity_rows=runtime.identity_rows,
             persistence_required=runtime.persistence_required,
             local_persist=local_persist,
@@ -575,13 +575,13 @@ async def _resolve_session_target(
         session_record=session.session_record,
         last_loaded_docs_path=session.last_loaded_docs_path,
         local_persist=local_persist,
-        repository=runtime.repository,
+        persistence=runtime.persistence,
         identity_rows=runtime.identity_rows,
     )
     agent._db_session_id = (session.session_record or {}).get("db_session_id")
     agent._identity_rows = runtime.identity_rows
     if agent.interpreter is not None:
-        agent.interpreter._host_repository = runtime.repository
+        agent.interpreter._host_repository = runtime.persistence
         agent.interpreter._host_identity = runtime.identity_rows
         agent.interpreter._host_run_id = None
     return _ResolvedSessionTarget(

@@ -66,11 +66,11 @@ def test_append_session_artifact_prefers_saved_path_over_args_path() -> None:
 
 
 def test_persist_artifact_metadata_skips_without_run_id() -> None:
-    repository = _FakeRepository()
+    persistence = _FakeRepository()
 
     asyncio.run(
         persist_artifact_metadata(
-            repository=repository,
+            persistence=persistence,
             identity_rows=SimpleNamespace(tenant_id="tenant-123"),
             session_record={},
             command="save_buffer",
@@ -79,17 +79,17 @@ def test_persist_artifact_metadata_skips_without_run_id() -> None:
         )
     )
 
-    assert repository.requests == []
+    assert persistence.requests == []
 
 
 def test_persist_artifact_metadata_stores_database_request() -> None:
-    repository = _FakeRepository()
+    persistence = _FakeRepository()
     run_id = uuid.uuid4()
     step_id = uuid.uuid4()
 
     asyncio.run(
         persist_artifact_metadata(
-            repository=repository,
+            persistence=persistence,
             identity_rows=SimpleNamespace(tenant_id="tenant-123"),
             session_record={
                 "last_run_db_id": str(run_id),
@@ -101,8 +101,8 @@ def test_persist_artifact_metadata_stores_database_request() -> None:
         )
     )
 
-    assert len(repository.requests) == 1
-    request = repository.requests[0]
+    assert len(persistence.requests) == 1
+    request = persistence.requests[0]
     assert request.tenant_id == "tenant-123"
     assert request.run_id == run_id
     assert request.step_id == step_id
@@ -114,7 +114,7 @@ def test_persist_artifact_metadata_stores_database_request() -> None:
 
 
 def test_track_command_artifact_if_needed_updates_manifest_and_persists() -> None:
-    repository = _FakeRepository()
+    persistence = _FakeRepository()
     run_id = uuid.uuid4()
     step_id = uuid.uuid4()
     session_record: dict[str, Any] = {
@@ -128,14 +128,14 @@ def test_track_command_artifact_if_needed_updates_manifest_and_persists() -> Non
             command="save_buffer",
             args={"path": "/tmp/output.txt"},
             result={"saved_path": "/tmp/output.txt"},
-            repository=repository,  # type: ignore[arg-type]
+            persistence=persistence,  # type: ignore[arg-type]
             identity_rows=SimpleNamespace(tenant_id="tenant-123"),
             persistence_required=False,
         )
     )
 
     assert session_record["manifest"]["artifacts"][0]["path"] == "/tmp/output.txt"
-    assert len(repository.requests) == 1
+    assert len(persistence.requests) == 1
 
 
 def test_track_command_artifact_if_needed_raises_when_persistence_required() -> None:
@@ -148,7 +148,7 @@ def test_track_command_artifact_if_needed_raises_when_persistence_required() -> 
                 command="save_buffer",
                 args={"path": "/tmp/output.txt"},
                 result={"saved_path": "/tmp/output.txt"},
-                repository=_FailingRepository(),  # type: ignore[arg-type]
+                persistence=_FailingRepository(),  # type: ignore[arg-type]
                 identity_rows=SimpleNamespace(tenant_id="tenant-123"),
                 persistence_required=True,
             )

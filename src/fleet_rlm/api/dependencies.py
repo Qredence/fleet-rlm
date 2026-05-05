@@ -77,6 +77,7 @@ class PersistenceDeps:
 
     db_manager: DatabaseManager | None = None
     repository: FleetRepository | None = None
+    local_store: Any | None = None
 
 
 @dataclass
@@ -409,6 +410,21 @@ def get_repository(request: Request) -> FleetRepository | None:
 RepositoryDep = Annotated[FleetRepository | None, Depends(get_repository)]
 
 
+def get_persistence(request: Request) -> Any:
+    """Return the unified persistence backend (repository or local_store)."""
+    persistence_deps = get_persistence_deps(request)
+    if persistence_deps.repository is not None:
+        return persistence_deps.repository
+    if persistence_deps.local_store is not None:
+        return persistence_deps.local_store
+    from fleet_rlm.integrations.local_store import LocalStore
+
+    return LocalStore()
+
+
+PersistenceDep = Annotated[Any, Depends(get_persistence)]
+
+
 def build_unauthenticated_identity(
     config: ServerRuntimeConfig | None = None,
 ) -> NormalizedIdentity:
@@ -458,20 +474,25 @@ HTTPIdentityDep = Annotated[NormalizedIdentity, Depends(require_http_identity)]
 
 async def resolve_persisted_identity(
     config_deps: ConfigDepsDep,
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     identity: HTTPIdentityDep,
-) -> IdentityUpsertResult | None:
-    """Resolve the caller's persisted identity, or None if DB is unavailable."""
-    if repository is None:
-        return None
-    if config_deps.config.auth_mode == "entra":
-        try:
-            return await resolve_admitted_identity(repository, identity)
-        except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.message
-            ) from exc
-    return await repository.upsert_identity(
+) -> IdentityUpsertResult:
+    """Resolve the caller's persisted identity via the unified persistence backend."""
+    if isinstance(persistence, FleetRepository):
+        if config_deps.config.auth_mode == "entra":
+            try:
+                return await resolve_admitted_identity(persistence, identity)
+            except AuthError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code, detail=exc.message
+                ) from exc
+        return await persistence.upsert_identity(
+            entra_tenant_id=identity.tenant_claim,
+            entra_user_id=identity.user_claim,
+            email=identity.email,
+            full_name=identity.name,
+        )
+    return await persistence.upsert_identity(
         entra_tenant_id=identity.tenant_claim,
         entra_user_id=identity.user_claim,
         email=identity.email,
@@ -480,7 +501,7 @@ async def resolve_persisted_identity(
 
 
 PersistedIdentityDep = Annotated[
-    IdentityUpsertResult | None, Depends(resolve_persisted_identity)
+    IdentityUpsertResult, Depends(resolve_persisted_identity)
 ]
 
 

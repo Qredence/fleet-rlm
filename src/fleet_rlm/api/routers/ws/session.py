@@ -97,7 +97,7 @@ async def _link_database_session(
     owner_tenant_claim: str,
     owner_user_claim: str,
     workspace_id: str,
-    repository: FleetRepository | None,
+    persistence: Any,
     identity_rows: IdentityUpsertResult | None,
 ) -> str | None:
     manifest = cached.get("manifest")
@@ -108,7 +108,7 @@ async def _link_database_session(
     ).strip()
     existing_session_uuid = _parse_uuid(existing_db_session_id)
 
-    if repository is not None and identity_rows is not None:
+    if isinstance(persistence, FleetRepository) and identity_rows is not None:
         try:
             from fleet_rlm.integrations.database import ChatSessionStatus
             from fleet_rlm.integrations.database.repository_chat import (
@@ -118,12 +118,12 @@ async def _link_database_session(
             workspace_uuid = (
                 identity_rows.workspace_id
                 if identity_rows.workspace_id is not None
-                else await repository.resolve_workspace_id(
+                else await persistence.resolve_workspace_id(
                     tenant_id=identity_rows.tenant_id,
                     user_id=identity_rows.user_id,
                 )
             )
-            session_row = await repository.upsert_chat_session(
+            session_row = await persistence.upsert_chat_session(
                 ChatSessionUpsertRequest(
                     tenant_id=identity_rows.tenant_id,
                     workspace_id=workspace_uuid,
@@ -203,7 +203,7 @@ async def switch_session_if_needed(
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
-    repository: FleetRepository | None = None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None = None,
 ) -> tuple[str, str, dict[str, Any], str | None, SessionContext]:
     """Switch and restore session state when session identity changed."""
@@ -259,7 +259,7 @@ async def switch_session_if_needed(
             owner_tenant_claim=owner_tenant_claim,
             owner_user_claim=owner_user_claim,
             workspace_id=workspace_id,
-            repository=repository,
+            persistence=persistence,
             identity_rows=identity_rows,
         )
         if linked_session_id:

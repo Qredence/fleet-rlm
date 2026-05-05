@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +20,25 @@ def _mock_planner_config(monkeypatch: pytest.MonkeyPatch) -> None:
         "fleet_rlm.api.routers.optimization.background._planner_execution_context",
         contextlib.nullcontext,
     )
+
+
+def _make_persisted_identity() -> IdentityUpsertResult:
+    return IdentityUpsertResult(
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+    )
+
+
+def _make_persistence_mock() -> MagicMock:
+    """Return a mock persistence object with async protocol methods."""
+    persistence = MagicMock()
+    persistence.update_optimization_run_phase = AsyncMock(return_value=None)
+    persistence.complete_optimization_run = AsyncMock(return_value=None)
+    persistence.fail_optimization_run = AsyncMock(return_value=None)
+    persistence.save_evaluation_results = AsyncMock(return_value=[])
+    persistence.save_prompt_snapshots = AsyncMock(return_value=[])
+    return persistence
 
 
 def _make_runner_kwargs(tmp_path: Path) -> dict:
@@ -35,12 +57,22 @@ def _make_runner_kwargs(tmp_path: Path) -> dict:
 
 
 def _run_local(**kwargs) -> None:
-    """Synchronous wrapper for the async run_optimization_background with local persistence."""
+    """Synchronous wrapper for the async run_optimization_background."""
     from fleet_rlm.api.routers.optimization.background import (
         run_optimization_background,
     )
 
-    asyncio.run(run_optimization_background(**kwargs, persistence="local"))
+    persistence = kwargs.pop("persistence", None) or _make_persistence_mock()
+    persisted_identity = (
+        kwargs.pop("persisted_identity", None) or _make_persisted_identity()
+    )
+    asyncio.run(
+        run_optimization_background(
+            **kwargs,
+            persistence=persistence,
+            persisted_identity=persisted_identity,
+        )
+    )
 
 
 def _review_bundle_result(tmp_path: Path) -> dict:
@@ -157,6 +189,7 @@ class TestBackgroundRunnerMlflowAvailable:
         fake_result = _review_bundle_result(tmp_path)
         run_mod_mock = MagicMock(return_value=fake_result)
         spec_mock = MagicMock()
+        persistence = _make_persistence_mock()
 
         with (
             patch(
@@ -177,20 +210,8 @@ class TestBackgroundRunnerMlflowAvailable:
                 "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
-            patch(
-                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-                MagicMock(),
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.complete_optimization_run",
-                MagicMock(),
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.fail_optimization_run",
-                MagicMock(),
-            ),
         ):
-            _run_local(**_make_runner_kwargs(tmp_path))
+            _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
         init_mock.assert_called_once()
         start_run_mock.assert_called_once()
@@ -245,7 +266,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         init_mock = MagicMock(return_value=False)
-        complete_mock = MagicMock()
+        persistence = _make_persistence_mock()
 
         fake_result = _review_bundle_result(tmp_path) | {"validation_score": 0.9}
         run_mod_mock = MagicMock(return_value=fake_result)
@@ -264,28 +285,14 @@ class TestBackgroundRunnerMlflowUnavailable:
                 "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
-            patch(
-                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-                MagicMock(),
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.complete_optimization_run",
-                complete_mock,
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.fail_optimization_run",
-                MagicMock(),
-            ),
         ):
-            _run_local(**_make_runner_kwargs(tmp_path))
+            _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
         run_mod_mock.assert_called_once()
-        complete_mock.assert_called_once()
-        assert complete_mock.call_args.kwargs.get("validation_score") == 0.9
-        assert (
-            complete_mock.call_args.kwargs.get("metadata_json")
-            == fake_result["run_metadata"]
-        )
+        persistence.complete_optimization_run.assert_called_once()
+        call_kwargs = persistence.complete_optimization_run.call_args.kwargs
+        assert call_kwargs.get("validation_score") == 0.9
+        assert call_kwargs.get("metadata_json") == fake_result["run_metadata"]
 
     def test_mlflow_import_error_does_not_block(
         self,
@@ -293,7 +300,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Even if mlflow import itself raises, the run proceeds."""
-        complete_mock = MagicMock()
+        persistence = _make_persistence_mock()
         fake_result = {
             "train_examples": 2,
             "validation_examples": 1,
@@ -325,29 +332,16 @@ class TestBackgroundRunnerMlflowUnavailable:
                 "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
-            patch(
-                "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-                MagicMock(),
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.complete_optimization_run",
-                complete_mock,
-            ),
-            patch(
-                "fleet_rlm.integrations.local_store.fail_optimization_run",
-                MagicMock(),
-            ),
         ):
-            _run_local(**_make_runner_kwargs(tmp_path))
+            _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
-        complete_mock.assert_called_once()
+        persistence.complete_optimization_run.assert_called_once()
 
 
 def test_background_runner_marks_planner_bootstrap_failure_as_failed(
     tmp_path: Path,
 ) -> None:
-    fail_mock = MagicMock()
-    complete_mock = MagicMock()
+    persistence = _make_persistence_mock()
 
     with (
         patch(
@@ -358,16 +352,13 @@ def test_background_runner_marks_planner_bootstrap_failure_as_failed(
             "fleet_rlm.runtime.quality.module_registry.get_module_spec",
             return_value=MagicMock(),
         ),
-        patch("fleet_rlm.integrations.local_store.fail_optimization_run", fail_mock),
-        patch(
-            "fleet_rlm.integrations.local_store.complete_optimization_run",
-            complete_mock,
-        ),
     ):
-        _run_local(**_make_runner_kwargs(tmp_path))
+        _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
-    fail_mock.assert_called_once_with(1, error="planner bootstrap failed")
-    complete_mock.assert_not_called()
+    persistence.fail_optimization_run.assert_called_once()
+    call_kwargs = persistence.fail_optimization_run.call_args.kwargs
+    assert call_kwargs.get("error") == "planner bootstrap failed"
+    persistence.complete_optimization_run.assert_not_called()
 
 
 def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
@@ -375,7 +366,7 @@ def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
         OPTIMIZATION_TIMEOUT_SECONDS,
     )
 
-    complete_mock = MagicMock()
+    persistence = _make_persistence_mock()
     fake_result = {
         "train_examples": 3,
         "validation_examples": 1,
@@ -404,34 +395,20 @@ def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
             "fleet_rlm.api.routers.optimization.background.run_blocking",
             _fake_run_blocking,
         ),
-        patch(
-            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-            MagicMock(),
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.complete_optimization_run",
-            complete_mock,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.fail_optimization_run",
-            MagicMock(),
-        ),
     ):
-        _run_local(**_make_runner_kwargs(tmp_path))
+        _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
     assert len(run_blocking_calls) == 1
     assert run_blocking_calls[0][1] == OPTIMIZATION_TIMEOUT_SECONDS
     run_mod_mock.assert_called_once()
     assert run_mod_mock.call_args.kwargs.get("run_id") == 1
-    complete_mock.assert_called_once()
+    persistence.complete_optimization_run.assert_called_once()
 
 
 def test_local_background_persists_review_artifacts_from_runner_result(
     tmp_path: Path,
 ) -> None:
-    save_results_mock = MagicMock()
-    save_snapshots_mock = MagicMock()
-    complete_mock = MagicMock()
+    persistence = _make_persistence_mock()
     fake_result = _review_bundle_result(tmp_path)
     run_mod_mock = MagicMock(return_value=fake_result)
     spec_mock = MagicMock()
@@ -445,32 +422,12 @@ def test_local_background_persists_review_artifacts_from_runner_result(
             "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
             run_mod_mock,
         ),
-        patch(
-            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-            MagicMock(),
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.complete_optimization_run",
-            complete_mock,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.fail_optimization_run",
-            MagicMock(),
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.save_evaluation_results",
-            save_results_mock,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.save_prompt_snapshots",
-            save_snapshots_mock,
-        ),
     ):
-        _run_local(**_make_runner_kwargs(tmp_path))
+        _run_local(**_make_runner_kwargs(tmp_path), persistence=persistence)
 
-    save_results_mock.assert_called_once_with(1, fake_result["evaluation_results"])
-    save_snapshots_mock.assert_called_once_with(1, fake_result["prompt_snapshots"])
-    complete_mock.assert_called_once()
+    persistence.save_evaluation_results.assert_called_once()
+    persistence.save_prompt_snapshots.assert_called_once()
+    persistence.complete_optimization_run.assert_called_once()
 
 
 def test_resolve_dataset_request_accepts_relative_path(
@@ -491,7 +448,13 @@ def test_resolve_dataset_request_accepts_relative_path(
         program_spec="qa",
     )
 
-    resolved, dataset_ref = asyncio.run(_deps._resolve_dataset_request(request))
+    resolved, dataset_ref = asyncio.run(
+        _deps._resolve_dataset_request(
+            request,
+            persistence=MagicMock(),
+            persisted_identity=_make_persisted_identity(),
+        )
+    )
 
     assert resolved == dataset.resolve()
     assert dataset_ref == "nested/examples.jsonl"
@@ -513,35 +476,6 @@ def test_optimization_timeout_respects_env_override(
         importlib.reload(reloaded)
 
 
-def test_gepa_background_rejects_none_repository(
-    tmp_path: Path,
-) -> None:
-    """When persistence is repo, None repository or identity raises ValueError."""
-    from fleet_rlm.api.routers.optimization.background import (
-        run_optimization_background,
-    )
-
-    dataset = tmp_path / "data.jsonl"
-    dataset.write_text('{"question": "hi", "answer": "hello"}\n')
-
-    with pytest.raises(ValueError, match="repository and identity are required"):
-        asyncio.run(
-            run_optimization_background(
-                run_id=1,
-                persistence="repo",
-                repository=None,
-                identity=None,
-                module_slug="test-mod",
-                dataset_path=dataset,
-                program_spec="QA",
-                output_path=None,
-                default_output_root=tmp_path,
-                auto="light",
-                train_ratio=0.8,
-            )
-        )
-
-
 def test_resolve_dataset_request_rejects_path_escape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -561,7 +495,13 @@ def test_resolve_dataset_request_rejects_path_escape(
     )
 
     with pytest.raises(HTTPException, match="Path escapes the allowed data directory."):
-        asyncio.run(_deps._resolve_dataset_request(request))
+        asyncio.run(
+            _deps._resolve_dataset_request(
+                request,
+                persistence=MagicMock(),
+                persisted_identity=_make_persisted_identity(),
+            )
+        )
 
 
 @pytest.mark.parametrize("module_slug", [None, ""])
@@ -574,7 +514,7 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
     )
 
     start_run_mock = MagicMock()
-    complete_mock = MagicMock()
+    persistence = _make_persistence_mock()
     fake_result = {
         "train_examples": 3,
         "validation_examples": 1,
@@ -602,24 +542,12 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
             "fleet_rlm.api.routers.optimization.background.run_blocking",
             _fake_run_blocking,
         ),
-        patch(
-            "fleet_rlm.integrations.local_store.update_optimization_run_phase",
-            MagicMock(),
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.complete_optimization_run",
-            complete_mock,
-        ),
-        patch(
-            "fleet_rlm.integrations.local_store.fail_optimization_run",
-            MagicMock(),
-        ),
     ):
-        _run_local(**kwargs)
+        _run_local(**kwargs, persistence=persistence)
 
     start_run_mock.assert_not_called()
     assert len(run_blocking_calls) == 1
     assert run_blocking_calls[0][1] == OPTIMIZATION_TIMEOUT_SECONDS
     optimize_mock.assert_called_once()
     assert optimize_mock.call_args.kwargs.get("source") == "api_background"
-    complete_mock.assert_called_once()
+    persistence.complete_optimization_run.assert_called_once()

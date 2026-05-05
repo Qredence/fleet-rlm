@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from fleet_rlm.integrations.database import MemoryScope
 
-from ..dependencies import PersistedIdentityDep, RepositoryDep
+from ..dependencies import PersistedIdentityDep, PersistenceDep
 from ..schemas.memory import MemoryItemResponse, MemoryListResponse
 from ._types import OpenAPIResponses
 
@@ -41,7 +41,7 @@ MEMORY_ERROR_RESPONSES: OpenAPIResponses = {
     description="Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.",
 )
 async def list_memory_items(
-    repository: RepositoryDep,
+    persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
     scope: Annotated[
         str | None,
@@ -67,13 +67,7 @@ async def list_memory_items(
                 detail=f"Invalid scope: {scope}",
             ) from exc
 
-    if repository is None or persisted_identity is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Database persistence is unavailable.",
-        )
-
-    items, total = await repository.list_memory_items_paginated(
+    items, total = await persistence.list_memory_items_paginated(
         tenant_id=persisted_identity.tenant_id,
         workspace_id=persisted_identity.workspace_id,
         user_id=persisted_identity.user_id,

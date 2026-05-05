@@ -28,6 +28,7 @@ class PreparedChatRuntime:
     planner_lm: object
     delegate_lm: object | None
     repository: FleetRepository | None
+    persistence: Any
     persistence_required: bool
     identity_rows: IdentityUpsertResult | None
 
@@ -117,6 +118,13 @@ async def prepare_chat_runtime(
         return None
 
     repository = persistence_deps.repository
+    persistence = repository
+    if persistence is None:
+        persistence = persistence_deps.local_store
+    if persistence is None:
+        from fleet_rlm.integrations.local_store import LocalStore
+
+        persistence = LocalStore()
     persistence_required = cfg.database_required
     identity_rows = None
 
@@ -143,6 +151,14 @@ async def prepare_chat_runtime(
         ):
             await close_websocket(websocket, code=1011)
         return None
+    else:
+        # Local-store mode: derive a synthetic identity from the HTTP claims
+        identity_rows = await persistence.upsert_identity(
+            entra_tenant_id=identity.tenant_claim,
+            entra_user_id=identity.user_claim,
+            email=identity.email,
+            full_name=identity.name,
+        )
 
     if planner_lm is None:
         if await send_error(
@@ -161,6 +177,7 @@ async def prepare_chat_runtime(
         planner_lm=planner_lm,
         delegate_lm=delegate_lm,
         repository=repository,
+        persistence=persistence,
         persistence_required=persistence_required,
         identity_rows=identity_rows,
     )
