@@ -143,13 +143,9 @@ def test_delegate_to_rlm_valid_for_react() -> None:
 
 
 def test_delegate_to_rlm_raises_without_interpreter() -> None:
-    """delegate_to_rlm raises RuntimeError when no interpreter is in context."""
-    token = rlm_delegate_mod._delegate_interpreter.set(None)
-    try:
-        with pytest.raises(RuntimeError, match="bound Daytona interpreter"):
-            rlm_delegate_mod.delegate_to_rlm("test query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    """delegate_to_rlm raises RuntimeError when no interpreter is passed."""
+    with pytest.raises(RuntimeError, match="Daytona interpreter"):
+        rlm_delegate_mod.delegate_to_rlm("test query")
 
 
 def test_delegate_to_rlm_starts_sandbox_when_not_started(
@@ -169,11 +165,9 @@ def test_delegate_to_rlm_starts_sandbox_when_not_started(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("test query", "test context")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "test query", "test context", interpreter=interpreter
+    )
 
     assert interpreter.build_calls == [50]
     assert child.start_calls == 1
@@ -199,11 +193,9 @@ def test_delegate_to_rlm_reuses_started_sandbox(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("query about reuse")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "query about reuse", interpreter=interpreter
+    )
 
     assert child.start_calls == 0
     assert child.shutdown_calls == 1
@@ -229,11 +221,7 @@ def test_delegate_to_rlm_builds_rlm_with_interpreter(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        rlm_delegate_mod.delegate_to_rlm("build test query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    rlm_delegate_mod.delegate_to_rlm("build test query", interpreter=interpreter)
 
     assert len(build_calls) == 1
     assert build_calls[0]["interpreter"] is child
@@ -262,11 +250,9 @@ def test_delegate_to_rlm_returns_ok_dict(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("structured query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "structured query", interpreter=interpreter
+    )
 
     assert isinstance(result, dict)
     assert result["status"] == "ok"
@@ -289,11 +275,7 @@ def test_delegate_to_rlm_returns_error_dict_on_exception(
         lambda **kwargs: _failing_rlm,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("failing query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm("failing query", interpreter=interpreter)
 
     assert isinstance(result, dict)
     assert result["status"] == "error"
@@ -318,11 +300,7 @@ def test_delegate_to_rlm_result_is_string_or_dict(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("agent query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm("agent query", interpreter=interpreter)
 
     assert isinstance(result, (str, dict)), (
         f"Result must be str or dict, got {type(result)}"
@@ -345,14 +323,9 @@ def test_delegate_to_rlm_none_document_url_is_ignored(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "empty answer query",
-            document_url=None,
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "empty answer query", document_url=None, interpreter=interpreter
+    )
 
     assert result["status"] == "ok"
     assert result["answer"] == "ok"
@@ -374,11 +347,9 @@ def test_delegate_to_rlm_null_answer_returns_error(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("empty answer query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "empty answer query", interpreter=interpreter
+    )
 
     assert result["status"] == "error"
     assert result["reason"] == "null_answer"
@@ -402,11 +373,9 @@ def test_delegate_to_rlm_empty_string_answer_is_allowed(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("empty string answer query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "empty string answer query", interpreter=interpreter
+    )
 
     assert result["status"] == "ok"
     assert result["answer"] == ""
@@ -431,11 +400,9 @@ def test_delegate_to_rlm_detects_broker_error_in_prediction_state(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("broker failure query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "broker failure query", interpreter=interpreter
+    )
 
     assert result["status"] == "error"
     assert result["reason"] == "broker_unavailable"
@@ -445,11 +412,9 @@ def test_delegate_to_rlm_rejects_exhausted_budget() -> None:
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child, remaining=0)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm("budget exhausted query")
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "budget exhausted query", interpreter=interpreter
+    )
 
     assert result["status"] == "error"
     assert result["reason"] == "budget_exhausted"
@@ -473,14 +438,9 @@ def test_delegate_to_rlm_batched_preserves_order_and_leases_budget(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm_batched(
-            ["alpha", "beta", "gamma"],
-            context="shared",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm_batched(
+        ["alpha", "beta", "gamma"], context="shared", interpreter=interpreter
+    )
 
     assert result == {
         "status": "ok",
@@ -514,11 +474,9 @@ def test_delegate_to_rlm_batched_reports_partial_failures(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm_batched(["good", "bad", "later"])
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm_batched(
+        ["good", "bad", "later"], interpreter=interpreter
+    )
 
     assert result["status"] == "error"
     assert result["results"] == [
@@ -555,11 +513,9 @@ def test_delegate_to_rlm_batched_overlaps_child_execution(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"])
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm_batched(
+        ["a", "b", "c"], interpreter=interpreter
+    )
 
     assert result["status"] == "ok"
     assert [item["answer"] for item in result["results"]] == [
@@ -573,11 +529,9 @@ def test_delegate_to_rlm_batched_rejects_exhausted_budget() -> None:
     children = [_FakeChildInterpreter(started=True) for _ in range(3)]
     interpreter = _FakeParentInterpreter(children, remaining=2)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"])
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm_batched(
+        ["a", "b", "c"], interpreter=interpreter
+    )
 
     assert result["status"] == "error"
     assert result["reason"] == "budget_exhausted"
@@ -613,14 +567,11 @@ def test_delegate_to_rlm_writes_large_document_to_child_only(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "read the document",
-            document_url="https://example.com/doc.txt",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "read the document",
+        document_url="https://example.com/doc.txt",
+        interpreter=interpreter,
+    )
 
     assert result["status"] == "ok"
     assert child.session.write_calls == [
@@ -663,14 +614,11 @@ def test_delegate_to_rlm_embeds_truncated_large_document_when_child_write_fails(
     )
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "read the document",
-            document_url="https://example.com/doc.txt",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "read the document",
+        document_url="https://example.com/doc.txt",
+        interpreter=interpreter,
+    )
 
     assert result["status"] == "ok"
     assert (
@@ -710,13 +658,10 @@ def test_delegate_to_rlm_stages_local_workspace_snapshot_for_codebase_tasks(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "Inspect the codebase implementation for sandbox budget session restore",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "Inspect the codebase implementation for sandbox budget session restore",
+        interpreter=interpreter,
+    )
 
     assert result["status"] == "ok"
     assert child.session.write_calls
@@ -760,13 +705,10 @@ def test_delegate_to_rlm_skips_local_workspace_snapshot_for_repo_children(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "Inspect the codebase implementation for sandbox budget session restore",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "Inspect the codebase implementation for sandbox budget session restore",
+        interpreter=interpreter,
+    )
 
     assert result["status"] == "ok"
     assert child.session.write_calls == []
@@ -803,41 +745,14 @@ def test_delegate_to_rlm_skips_local_workspace_snapshot_for_volume_children(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    token = rlm_delegate_mod._delegate_interpreter.set(interpreter)
-    try:
-        result = rlm_delegate_mod.delegate_to_rlm(
-            "Inspect the codebase implementation for sandbox budget session restore",
-        )
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "Inspect the codebase implementation for sandbox budget session restore",
+        interpreter=interpreter,
+    )
 
     assert result["status"] == "ok"
     assert child.session.write_calls == []
     assert "local_workspace_snapshot.txt" not in seen_contexts[0]
-
-
-# ---------------------------------------------------------------------------
-# set_delegate_interpreter utility
-# ---------------------------------------------------------------------------
-
-
-def test_set_delegate_interpreter_returns_token() -> None:
-    """set_delegate_interpreter returns a Token that can reset the variable."""
-    from contextvars import Token
-
-    token = rlm_delegate_mod.set_delegate_interpreter(None)
-    assert isinstance(token, Token)
-    rlm_delegate_mod._delegate_interpreter.reset(token)
-
-
-def test_set_delegate_interpreter_sets_value() -> None:
-    """set_delegate_interpreter makes the interpreter visible to delegate_to_rlm."""
-    sentinel = object()
-    token = rlm_delegate_mod.set_delegate_interpreter(sentinel)
-    try:
-        assert rlm_delegate_mod._delegate_interpreter.get() is sentinel
-    finally:
-        rlm_delegate_mod._delegate_interpreter.reset(token)
 
 
 class _CapturingRepository:

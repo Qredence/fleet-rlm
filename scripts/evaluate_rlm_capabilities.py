@@ -99,20 +99,12 @@ def length_quality_signal(answer: str) -> dict[str, Any]:
 
 def run_single_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
     """Execute a task with delegate_to_rlm (single child RLM)."""
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        delegate_to_rlm,
-        set_delegate_interpreter,
-    )
+    from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
 
     query = task["user_request"]
     started_at = time.time()
 
-    token = set_delegate_interpreter(interpreter)
-    try:
-        result = delegate_to_rlm(query=query, context="")
-    finally:
-        _delegate_interpreter.reset(token)
+    result = delegate_to_rlm(query=query, context="", interpreter=interpreter)
 
     elapsed_ms = int((time.time() - started_at) * 1000)
 

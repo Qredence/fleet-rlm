@@ -100,10 +100,6 @@ def _bound_runtime_tool_factories(
         return factories
 
     from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        set_delegate_interpreter,
-    )
-    from fleet_rlm.runtime.tools.rlm_delegate import (
         delegate_to_rlm as _delegate_to_rlm,
     )
     from fleet_rlm.runtime.tools.rlm_delegate import (
@@ -160,24 +156,22 @@ def _bound_runtime_tool_factories(
     def delegate_to_rlm(
         query: str, context: str = "", document_url: str = ""
     ) -> dict[str, Any]:
-        token = set_delegate_interpreter(interpreter)
-        try:
-            return _delegate_to_rlm(
-                query=query, context=context, document_url=document_url
-            )
-        finally:
-            _delegate_interpreter.reset(token)
+        return _delegate_to_rlm(
+            query=query,
+            context=context,
+            document_url=document_url,
+            interpreter=interpreter,
+        )
 
     def delegate_to_rlm_batched(
         queries: list[str], context: str = "", document_url: str = ""
     ) -> dict[str, Any]:
-        token = set_delegate_interpreter(interpreter)
-        try:
-            return _delegate_to_rlm_batched(
-                queries=queries, context=context, document_url=document_url
-            )
-        finally:
-            _delegate_interpreter.reset(token)
+        return _delegate_to_rlm_batched(
+            queries=queries,
+            context=context,
+            document_url=document_url,
+            interpreter=interpreter,
+        )
 
     factories.update(
         {

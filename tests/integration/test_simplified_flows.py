@@ -589,18 +589,11 @@ def test_rlm_delegate_tool_is_in_registry() -> None:
 
 @pytest.mark.integration
 def test_rlm_delegate_tool_raises_without_interpreter() -> None:
-    """VAL-CROSS-003: delegate_to_rlm raises RuntimeError when no interpreter is bound."""
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        delegate_to_rlm,
-    )
+    """VAL-CROSS-003: delegate_to_rlm raises RuntimeError when no interpreter is passed."""
+    from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
 
-    token = _delegate_interpreter.set(None)
-    try:
-        with pytest.raises(RuntimeError, match="bound Daytona interpreter"):
-            delegate_to_rlm("test delegation query")
-    finally:
-        _delegate_interpreter.reset(token)
+    with pytest.raises(RuntimeError, match="Daytona interpreter"):
+        delegate_to_rlm("test delegation query")
 
 
 @pytest.mark.integration
@@ -610,11 +603,7 @@ async def test_rlm_delegation_with_mocked_interpreter_and_rlm(
 ) -> None:
     """VAL-CROSS-003: delegate_to_rlm executes in sandbox and returns structured result."""
     import fleet_rlm.runtime.tools.rlm_delegate as rlm_delegate_mod
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        delegate_to_rlm,
-        set_delegate_interpreter,
-    )
+    from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
 
     child = SimpleNamespace(
         _started=True,
@@ -640,11 +629,9 @@ async def test_rlm_delegation_with_mocked_interpreter_and_rlm(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    token = set_delegate_interpreter(interpreter)
-    try:
-        result = delegate_to_rlm("Integration test delegation query")
-    finally:
-        _delegate_interpreter.reset(token)
+    result = delegate_to_rlm(
+        "Integration test delegation query", interpreter=interpreter
+    )
 
     assert result["status"] == "ok"
     assert result["answer"] == "Mocked RLM answer"

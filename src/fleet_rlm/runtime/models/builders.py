@@ -920,18 +920,14 @@ class RecursiveWorkspaceModule(dspy.Module):
         mode: str,
     ) -> list[str]:
         from fleet_rlm.runtime.tools.rlm_delegate import (
-            _delegate_interpreter,
             delegate_to_rlm,
             delegate_to_rlm_batched,
-            set_delegate_interpreter,
         )
 
         if mode == "fan_out" and len(subqueries) > 1:
-            token = set_delegate_interpreter(self.interpreter)
-            try:
-                result = delegate_to_rlm_batched(queries=subqueries, context=context)
-            finally:
-                _delegate_interpreter.reset(token)
+            result = delegate_to_rlm_batched(
+                queries=subqueries, context=context, interpreter=self.interpreter
+            )
             if result.get("status") == "ok":
                 return [r.get("answer", "") for r in result.get("results", [])]
             return [
@@ -948,11 +944,9 @@ class RecursiveWorkspaceModule(dspy.Module):
 
         outputs: list[str] = []
         for query in subqueries:
-            token = set_delegate_interpreter(self.interpreter)
-            try:
-                result = delegate_to_rlm(query=query, context=context)
-            finally:
-                _delegate_interpreter.reset(token)
+            result = delegate_to_rlm(
+                query=query, context=context, interpreter=self.interpreter
+            )
             if result.get("status") == "ok":
                 outputs.append(str(result.get("answer", "")))
             else:

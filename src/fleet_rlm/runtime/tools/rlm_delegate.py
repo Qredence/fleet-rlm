@@ -3,19 +3,10 @@
 Registers module-level ``delegate_to_rlm`` tools marked with ``@tool_fn`` so
 that ``discover_tools()`` can collect them.
 
-The tool uses a ``contextvars.ContextVar`` to hold the active Daytona
-interpreter for the current agent turn.  Call ``set_delegate_interpreter()``
-before invoking the tool to inject the interpreter.  Calling without a set
-interpreter raises ``RuntimeError``.
-
-Usage within an agent runtime::
-
-    from fleet_rlm.runtime.tools.rlm_delegate import set_delegate_interpreter
-    token = set_delegate_interpreter(interpreter)
-    try:
-        result = delegate_to_rlm("my query", "optional context")
-    finally:
-        _delegate_interpreter.reset(token)
+The ``delegate_to_rlm`` and ``delegate_to_rlm_batched`` functions require a
+Daytona ``interpreter`` to be passed directly.  The caller (e.g. the agent
+runtime or test harness) is responsible for providing the interpreter
+instance.
 """
 
 from __future__ import annotations
@@ -27,7 +18,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextvars import ContextVar, copy_context
+from contextvars import copy_context
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
@@ -40,44 +31,20 @@ logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
 
-# Context variable holding the Daytona interpreter for the active agent turn.
-# Set by the agent runtime before invoking the agent so tool calls can
-# access the interpreter without requiring a closure.
-_delegate_interpreter: ContextVar[Any | None] = ContextVar(
-    "rlm_delegate_interpreter", default=None
-)
-
-
-def set_delegate_interpreter(interpreter: Any | None) -> Any:
-    """Set the active Daytona interpreter for RLM delegation.
-
-    The returned token can be passed to ``_delegate_interpreter.reset(token)``
-    to restore the previous value (useful in tests and nested contexts).
-
-    Args:
-        interpreter: Daytona interpreter instance, or ``None`` to clear.
-
-    Returns:
-        A ``contextvars.Token`` for resetting the variable.
-    """
-    return _delegate_interpreter.set(interpreter)
-
 
 @tool_fn
 def delegate_to_rlm(
     query: str,
     context: str = "",
     document_url: str | None = None,
+    *,
+    interpreter: Any | None = None,
 ) -> dict[str, Any]:
     """Delegate a query to a recursive dspy.RLM running in a Daytona sandbox.
 
     Creates or reuses an existing Daytona sandbox session, constructs a
-    ``dspy.RLM`` with the active interpreter, executes the query, and returns
+    ``dspy.RLM`` with the provided interpreter, executes the query, and returns
     a structured result dict with ``status`` and ``answer``.
-
-    The interpreter must be set via :func:`set_delegate_interpreter` before
-    invoking this tool (or via the surrounding agent runtime context that
-    initialises the Daytona interpreter).
 
     Use this for one child task. For multiple independent child tasks, prefer
     ``delegate_to_rlm_batched`` so siblings can run concurrently. When work is
@@ -97,6 +64,8 @@ def delegate_to_rlm(
         context: Optional additional context string for the query.
         document_url: Optional HTTP(S) URL of a document to fetch and inject
             into the RLM context before execution.
+        interpreter: Daytona interpreter instance.  Must be provided as a
+            keyword argument.
 
     Returns:
         A dict with:
@@ -105,15 +74,12 @@ def delegate_to_rlm(
         - ``error``: Error message string (present when ``status == "error"``).
 
     Raises:
-        RuntimeError: When called without a bound interpreter in the
-            current context (i.e., ``set_delegate_interpreter`` was not called).
+        RuntimeError: When called without a bound interpreter.
     """
-    interpreter = _delegate_interpreter.get()
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm requires a bound Daytona interpreter. "
-            "Set the interpreter via set_delegate_interpreter() or run within "
-            "an agent runtime context that initialises the interpreter."
+            "delegate_to_rlm requires a Daytona interpreter. "
+            "Pass the interpreter as a keyword argument."
         )
 
     llm_budget = _remaining_llm_budget(interpreter)
@@ -138,6 +104,8 @@ def delegate_to_rlm_batched(
     queries: list[str],
     context: str = "",
     document_url: str | None = None,
+    *,
+    interpreter: Any | None = None,
 ) -> dict[str, Any]:
     """Delegate independent child RLM tasks concurrently.
 
@@ -154,18 +122,21 @@ def delegate_to_rlm_batched(
         queries: Ordered list of independent child RLM prompts.
         context: Shared context supplied to every child.
         document_url: Optional HTTP(S) document to stage for each child.
+        interpreter: Daytona interpreter instance.  Must be provided as a
+            keyword argument.
 
     Returns:
         A dict with ``status`` and ordered successful ``results``. When one or
         more children fail, ``status`` is ``"error"`` and ``errors`` contains
         per-query diagnostics while successful siblings remain in ``results``.
+
+    Raises:
+        RuntimeError: When called without a bound interpreter.
     """
-    interpreter = _delegate_interpreter.get()
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm_batched requires a bound Daytona interpreter. "
-            "Set the interpreter via set_delegate_interpreter() or run within "
-            "an agent runtime context that initialises the interpreter."
+            "delegate_to_rlm_batched requires a Daytona interpreter. "
+            "Pass the interpreter as a keyword argument."
         )
 
     normalized_queries = [str(query) for query in queries or []]
@@ -787,4 +758,4 @@ def _persist_child_trace(
         logger.warning("Failed to persist RLM child trace: %s", exc)
 
 
-__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched", "set_delegate_interpreter"]
+__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched"]
