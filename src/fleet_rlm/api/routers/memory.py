@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
-
-from fleet_rlm.integrations.database import MemoryScope
+from fastapi import APIRouter, Query
 
 from ..dependencies import PersistedIdentityDep, PersistenceDep
-from ..schemas.memory import MemoryItemResponse, MemoryListResponse
+from ..runtime_services.memory_service import MemoryService
+from ..schemas.memory import MemoryListResponse
 from ._types import OpenAPIResponses
 
 router = APIRouter(
@@ -57,50 +56,10 @@ async def list_memory_items(
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> MemoryListResponse:
     """Return memory items for the authenticated user, optionally filtered."""
-    scope_filter = None
-    if scope is not None:
-        try:
-            scope_filter = MemoryScope(scope)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid scope: {scope}",
-            ) from exc
-
-    items, total = await persistence.list_memory_items_paginated(
-        tenant_id=persisted_identity.tenant_id,
-        workspace_id=persisted_identity.workspace_id,
-        user_id=persisted_identity.user_id,
-        scope=scope_filter,
+    return await MemoryService(persistence).list_memory_items(
+        persisted_identity=persisted_identity,
+        scope=scope,
         scope_id=scope_id,
         limit=limit,
         offset=offset,
-    )
-
-    return MemoryListResponse(
-        items=[
-            MemoryItemResponse(
-                id=str(item.id),
-                scope=item.scope.value
-                if hasattr(item.scope, "value")
-                else str(item.scope),
-                scope_id=item.scope_id,
-                kind=item.kind.value if hasattr(item.kind, "value") else str(item.kind),
-                source=item.source.value
-                if hasattr(item.source, "value")
-                else str(item.source),
-                status=item.status.value
-                if hasattr(item.status, "value")
-                else str(item.status),
-                content_text=item.content_text,
-                importance=item.importance,
-                tags=list(item.tags) if item.tags is not None else [],
-                created_at=item.created_at.isoformat(),
-            )
-            for item in items
-        ],
-        total=total,
-        offset=offset,
-        limit=limit,
-        has_more=offset + len(items) < total,
     )

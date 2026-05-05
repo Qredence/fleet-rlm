@@ -4,38 +4,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from daytona import (
-    DaytonaAuthenticationError,
-    DaytonaAuthorizationError,
-    DaytonaConnectionError,
-    DaytonaNotFoundError,
-    DaytonaTimeoutError,
-)
-from fastapi import APIRouter, HTTPException, Path, Query, status
-
-from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
+from fastapi import APIRouter, Path, Query, status
 
 from ..dependencies import ConfigDepsDep, HTTPIdentityDep
-from ..runtime_services.sandboxes import (
-    archive_sandbox,
-    delete_sandbox,
-    load_sandbox_detail,
-    load_sandbox_list,
-)
+from ..runtime_services.sandbox_service import SandboxService
 from ..schemas.sandbox import (
     SandboxArchiveResponse,
     SandboxDetailResponse,
     SandboxListResponse,
 )
 from ._types import OpenAPIResponses
-
-_DAYTONA_NOT_FOUND_ERRORS: tuple[type[BaseException], ...] = (DaytonaNotFoundError,)
-_DAYTONA_UNAVAILABLE_ERRORS: tuple[type[BaseException], ...] = (
-    DaytonaConnectionError,
-    DaytonaAuthenticationError,
-    DaytonaAuthorizationError,
-    DaytonaTimeoutError,
-)
 
 router = APIRouter(
     prefix="/sandboxes",
@@ -94,13 +72,11 @@ async def list_sandboxes(
     ] = 100,
 ) -> SandboxListResponse:
     """Return a paginated list of active Daytona sandboxes."""
-    return await load_sandbox_list(
+    return await SandboxService().list_sandboxes(
         page=page,
         limit=limit,
-        owner_labels=sandbox_owner_labels(
-            tenant_claim=identity.tenant_claim,
-            user_claim=identity.user_claim,
-        ),
+        tenant_claim=identity.tenant_claim,
+        user_claim=identity.user_claim,
         allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
     )
 
@@ -118,25 +94,12 @@ async def get_sandbox_detail(
     identity: HTTPIdentityDep,
 ) -> SandboxDetailResponse:
     """Return detailed information for a single Daytona sandbox."""
-    try:
-        return await load_sandbox_detail(
-            sandbox_id=sandbox_id,
-            owner_labels=sandbox_owner_labels(
-                tenant_claim=identity.tenant_claim,
-                user_claim=identity.user_claim,
-            ),
-            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
-        )
-    except _DAYTONA_NOT_FOUND_ERRORS as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Sandbox not found: {exc}",
-        ) from exc
-    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Sandbox service unavailable: {exc}",
-        ) from exc
+    return await SandboxService().get_sandbox_detail(
+        sandbox_id=sandbox_id,
+        tenant_claim=identity.tenant_claim,
+        user_claim=identity.user_claim,
+        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
+    )
 
 
 @router.delete(
@@ -153,25 +116,12 @@ async def delete_sandbox_endpoint(
     identity: HTTPIdentityDep,
 ) -> None:
     """Stop and delete a Daytona sandbox."""
-    try:
-        await delete_sandbox(
-            sandbox_id=sandbox_id,
-            owner_labels=sandbox_owner_labels(
-                tenant_claim=identity.tenant_claim,
-                user_claim=identity.user_claim,
-            ),
-            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
-        )
-    except _DAYTONA_NOT_FOUND_ERRORS as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Sandbox not found: {exc}",
-        ) from exc
-    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Sandbox service unavailable: {exc}",
-        ) from exc
+    await SandboxService().delete_sandbox(
+        sandbox_id=sandbox_id,
+        tenant_claim=identity.tenant_claim,
+        user_claim=identity.user_claim,
+        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
+    )
 
 
 @router.post(
@@ -187,23 +137,9 @@ async def archive_sandbox_endpoint(
     identity: HTTPIdentityDep,
 ) -> SandboxArchiveResponse:
     """Archive a Daytona sandbox to cold storage."""
-    try:
-        await archive_sandbox(
-            sandbox_id=sandbox_id,
-            owner_labels=sandbox_owner_labels(
-                tenant_claim=identity.tenant_claim,
-                user_claim=identity.user_claim,
-            ),
-            allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
-        )
-    except _DAYTONA_NOT_FOUND_ERRORS as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Sandbox not found: {exc}",
-        ) from exc
-    except _DAYTONA_UNAVAILABLE_ERRORS as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Sandbox service unavailable: {exc}",
-        ) from exc
-    return SandboxArchiveResponse()
+    return await SandboxService().archive_sandbox(
+        sandbox_id=sandbox_id,
+        tenant_claim=identity.tenant_claim,
+        user_claim=identity.user_claim,
+        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
+    )
