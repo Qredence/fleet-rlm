@@ -710,13 +710,13 @@ def test_session_export_route_rejects_oversized_sessions(
     tmp_path: Path,
 ) -> None:
     """Sessions larger than the export cap return HTTP 413."""
-    from fleet_rlm.api.routers import sessions as sessions_router
+    from fleet_rlm.api.runtime_services import session_service as session_svc
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
     monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
-    monkeypatch.setattr(sessions_router, "_TRANSCRIPT_EXPORT_MAX_TURNS", 2)
+    monkeypatch.setattr(session_svc, "_TRANSCRIPT_EXPORT_MAX_TURNS", 2)
     local_store._engines.clear()
 
     repository = SessionHistoryRepository()
