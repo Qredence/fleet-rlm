@@ -13,6 +13,7 @@ from typing import Any, Callable, Protocol
 
 from dspy.primitives import CodeInterpreterError, FinalOutput
 
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import (
     SupportsExecutionEventCallback,
     complete_event_data,
@@ -20,7 +21,6 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     start_event_data,
     summarize_code,
 )
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge

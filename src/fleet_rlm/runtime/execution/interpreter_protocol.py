@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from enum import Enum
 from typing import Any, Callable, Protocol
 
 from dspy.primitives import FinalOutput
 
-from .profiles import ExecutionProfile
+
+class ExecutionProfile(str, Enum):
+    """Execution profile controlling sandbox helper/tool exposure."""
+
+    ROOT_INTERLOCUTOR = "ROOT_INTERLOCUTOR"
+    RLM_ROOT = "RLM_ROOT"
+    RLM_DELEGATE = "RLM_DELEGATE"
+    MAINTENANCE = "MAINTENANCE"
 
 
 class RLMInterpreterProtocol(Protocol):

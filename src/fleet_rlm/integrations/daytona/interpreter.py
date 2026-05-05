@@ -7,6 +7,7 @@ from typing import Any, Callable
 import dspy
 
 from fleet_rlm.runtime.execution.interpreter_protocol import (
+    ExecutionProfile,
     StatefulWorkspaceInterpreterProtocol,
 )
 from fleet_rlm.runtime.execution.interpreter_support import (
@@ -30,7 +31,6 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     sync_exit as _sync_exit_impl,
 )
 from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 from fleet_rlm.utils.paths import dedupe_paths
 
 from .bridge import DaytonaToolBridge

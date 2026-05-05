@@ -45,7 +45,7 @@ from fleet_rlm.integrations.database.repository_chat import (
 )
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso

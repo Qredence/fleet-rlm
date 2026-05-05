@@ -23,6 +23,7 @@ from fleet_rlm.runtime.content.ingestion import (
     looks_like_binary,
     read_document_content,
 )
+from fleet_rlm.runtime.content.preview import head_tail_preview
 
 __all__ = [
     "chunk_by_headers",
@@ -42,4 +43,5 @@ __all__ = [
     "extract_text_with_pypdf",
     "looks_like_binary",
     "read_document_content",
+    "head_tail_preview",
 ]

@@ -6,8 +6,8 @@ import logging
 import uuid
 from typing import Any, Literal, cast
 
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 from .runtime import DaytonaSandboxRuntime
 from .sandbox_spec import SandboxSpec

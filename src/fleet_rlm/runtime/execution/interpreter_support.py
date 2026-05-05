@@ -19,7 +19,7 @@ import dspy
 
 from fleet_rlm.runtime.content.execution_limits import execution_max_text_chars
 
-from .profiles import ExecutionProfile
+from .interpreter_protocol import ExecutionProfile
 
 # ---------------------------------------------------------------------------
 # Common interpreter helpers (previously interpreter_common.py)

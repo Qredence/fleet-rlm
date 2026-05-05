@@ -73,6 +73,37 @@ def sandbox_driver() -> None:
     (if the caller stops sending commands after receiving a Final response).
     """
 
+    # Session history helpers (inlined from session_history.py)
+    _session_history: list[dict[str, Any]] = []
+
+    def log_execution(
+        code: str,
+        result: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log code execution to session history for tracking and learning."""
+        entry = {
+            "timestamp": time.time(),
+            "code_preview": code[:200] + "..." if len(code) > 200 else code,
+            "stdout_preview": result.get("stdout", "")[:200],
+            "stderr_preview": result.get("stderr", "")[:200],
+            "had_final": result.get("final") is not None,
+            "metadata": metadata or {},
+        }
+        _session_history.append(entry)
+
+    def get_session_history() -> list[dict[str, Any]]:
+        """Return all logged executions in this session."""
+        return list(_session_history)
+
+    def get_last_execution() -> dict[str, Any] | None:
+        """Return the most recent execution entry, or None if empty."""
+        return _session_history[-1] if _session_history else None
+
+    def reset_session_history() -> None:
+        """Reset session history."""
+        _session_history.clear()
+
     # Inlined factory functions so ``inspect.getsource(sandbox_driver)`` is
     # self-contained when executed in the sandbox process.
     class FinalOutput(BaseException):
@@ -198,6 +229,7 @@ def sandbox_driver() -> None:
     # in the sandbox process.
     import json
     import sys
+    import time
     from contextlib import redirect_stderr, redirect_stdout
     from io import StringIO
     from typing import Any, Callable, cast
@@ -221,12 +253,6 @@ def sandbox_driver() -> None:
             workspace_read,
             workspace_write,
         )
-        from fleet_rlm.runtime.execution.session_history import (
-            get_last_execution,
-            get_session_history,
-            log_execution,
-            reset_session_history,
-        )
     except ModuleNotFoundError:
         # The interpreter may execute a bundled script that already
         # defines these symbols in globals without an installed fleet_rlm package.
@@ -242,10 +268,6 @@ def sandbox_driver() -> None:
         grep = cast(Any, g.get("grep"))
         peek = cast(Any, g.get("peek"))
         reset_buffers = cast(Any, g.get("reset_buffers"))
-        get_last_execution = cast(Any, g.get("get_last_execution"))
-        get_session_history = cast(Any, g.get("get_session_history"))
-        log_execution = cast(Any, g.get("log_execution"))
-        reset_session_history = cast(Any, g.get("reset_session_history"))
         load_from_volume = cast(Any, g.get("load_from_volume"))
         save_to_volume = cast(Any, g.get("save_to_volume"))
         workspace_append = cast(Any, g.get("workspace_append"))

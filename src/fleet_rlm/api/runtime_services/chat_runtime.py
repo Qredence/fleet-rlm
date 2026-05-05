@@ -13,7 +13,7 @@ from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 

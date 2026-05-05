@@ -8,7 +8,7 @@ from typing import Any, cast
 from fastapi import WebSocket
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...runtime_services.chat_runtime import ChatAgentProtocol

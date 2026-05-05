@@ -6,7 +6,7 @@ output-formatting convention.
 
 from __future__ import annotations
 
-from fleet_rlm.runtime.execution.preview import head_tail_preview
+from fleet_rlm.runtime.content.preview import head_tail_preview
 
 
 def test_short_text_returned_unchanged() -> None:

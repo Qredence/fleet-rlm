@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import dspy
 from dspy.streaming.messages import StatusMessageProvider
 
-from fleet_rlm.runtime.execution.preview import head_tail_preview
+from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.models.streaming import StreamEvent
 
 # Soft content cap for trajectory step outputs crossing the websocket boundary.

@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
 
 from .child_isolation import _UNSET
 from .child_isolation import build_delegate_child as _build_delegate_child_policy
