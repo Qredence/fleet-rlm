@@ -27,7 +27,13 @@ from ...dependencies import DiagnosticsDeps, SessionCacheDeps
 from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
+    build_workspace_task_request,
+    cancelled_event_payload,
     classify_stream_failure,
+    enqueue_latest_nonblocking,
+    get_execution_emitter,
+    handle_chat_disconnect,
+    should_reload_docs_path,
 )
 from ...runtime_services.chat_runtime import (
     ChatAgentProtocol,
@@ -43,15 +49,6 @@ from ...runtime_services.chat_runtime import (
 )
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
-from .lifecycle import (
-    build_workspace_task_request,
-    cancelled_event_payload,
-    enqueue_latest_nonblocking,
-    get_execution_emitter,
-    handle_chat_disconnect,
-    handle_chat_loop_exception,
-    should_reload_docs_path,
-)
 from .repl_bridge import ReplHookBridge
 from .session import (
     switch_session_if_needed,
@@ -59,6 +56,7 @@ from .session import (
 from .transport import (
     _error_envelope,
     _try_send_json,
+    handle_chat_loop_exception,
     parse_ws_message_or_send_error,
     resolve_session_identity,
 )

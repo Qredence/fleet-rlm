@@ -19,7 +19,7 @@ from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 @pytest.fixture(scope="module", autouse=True)
 def _register_reflect_and_revise_stub():
     """Register a stub 'reflect-and-revise' module for contract tests."""
-    from fleet_rlm.runtime.quality.module_registry import (
+    from fleet_rlm.quality.module_registry import (
         _REGISTRY,
         ModuleOptimizationSpec,
         register_module,
@@ -274,13 +274,9 @@ def test_ws_router_split_modules_import() -> None:
     import fleet_rlm.api.routers.ws as ws
     import fleet_rlm.api.routers.ws.artifacts as ws_artifacts
     import fleet_rlm.api.routers.ws.commands as ws_commands
-    import fleet_rlm.api.routers.ws.completion as ws_completion
     import fleet_rlm.api.routers.ws.endpoint as ws_endpoint
-    import fleet_rlm.api.routers.ws.lifecycle as ws_lifecycle
-    import fleet_rlm.api.routers.ws.manifest as ws_manifest
     import fleet_rlm.api.routers.ws.session as ws_session
     import fleet_rlm.api.routers.ws.stream as ws_stream
-    import fleet_rlm.api.routers.ws.terminal as ws_terminal
     import fleet_rlm.api.routers.ws.transport as ws_transport
     import fleet_rlm.api.routers.ws.turn_setup as ws_turn_setup
     import fleet_rlm.api.routers.ws.types as ws_types
@@ -293,20 +289,20 @@ def test_ws_router_split_modules_import() -> None:
     assert ws_endpoint._prepare_chat_runtime is not None
     assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
-    assert ws_completion.build_execution_completion_summary is not None
-    assert ws_lifecycle.get_execution_emitter is not None
+    assert ws_stream.build_execution_completion_summary is not None
+    assert chat_persistence.get_execution_emitter is not None
     assert ws_transport.handle_stream_error is not None
-    assert ws_lifecycle.classify_stream_failure is not None
+    assert chat_persistence.classify_stream_failure is not None
     assert chat_persistence.ExecutionLifecycleManager is not None
-    assert ws_lifecycle.handle_chat_disconnect is not None
-    assert ws_manifest._manifest_path is not None
+    assert chat_persistence.handle_chat_disconnect is not None
+    assert chat_persistence._manifest_path is not None
     assert ws_transport.parse_ws_message_or_send_error is not None
     assert chat_persistence.persist_session_state is not None
     assert chat_runtime.PreparedChatRuntime is not None
     assert ws_session.switch_session_if_needed is not None
     assert ws_stream._chat_message_loop is not None
-    assert ws_lifecycle.cancel_task is not None
-    assert ws_terminal.handle_terminal_stream_event is not None
+    assert chat_persistence.cancel_task is not None
+    assert ws_stream.handle_terminal_stream_event is not None
     assert chat_persistence.initialize_turn_lifecycle is not None
     assert ws_turn_setup.prepare_chat_message_turn is not None
     assert ws_types.ChatAgentProtocol is not None

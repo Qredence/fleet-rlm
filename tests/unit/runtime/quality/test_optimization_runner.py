@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import dspy
 import pytest
 
-from fleet_rlm.runtime.quality.module_registry import ModuleOptimizationSpec
-from fleet_rlm.runtime.quality.optimization_runner import (
+from fleet_rlm.quality.module_registry import ModuleOptimizationSpec
+from fleet_rlm.quality.optimization_runner import (
     _capture_prompt_snapshots,
     _evaluate_per_example,
     run_module_optimization,
@@ -173,11 +173,11 @@ def _mock_dspy_infra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dspy.Evaluate", _FakeEvaluate, raising=False)
     # Mock the LM config so tests don't need real API keys
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+        "fleet_rlm.quality.optimization_runner._resolve_reflection_lm",
         lambda: MagicMock(),
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
+        "fleet_rlm.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
 
@@ -389,7 +389,7 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
     )
 
     with patch(
-        "fleet_rlm.runtime.quality.optimization_runner._persist_run_artifacts"
+        "fleet_rlm.quality.optimization_runner._persist_run_artifacts"
     ) as mock_persist:
         result = run_module_optimization(
             spec,
@@ -457,7 +457,7 @@ def test_run_module_optimization_without_run_id_skips_persist(
     )
 
     with patch(
-        "fleet_rlm.runtime.quality.optimization_runner._persist_run_artifacts"
+        "fleet_rlm.quality.optimization_runner._persist_run_artifacts"
     ) as mock_persist:
         run_module_optimization(
             spec,

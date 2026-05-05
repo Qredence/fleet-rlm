@@ -480,7 +480,7 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
         return {"state": manifest_state}
 
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.manifest.load_manifest_from_volume",
+        "fleet_rlm.api.runtime_services.chat_persistence.load_manifest_from_volume",
         _load_manifest,
     )
 

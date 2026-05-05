@@ -51,8 +51,8 @@ def _run_module_optimization_with_thread_config(
     run_id: int | None,
 ) -> dict[str, Any]:
     """Configure DSPy context inside the worker thread before module optimization."""
-    from fleet_rlm.runtime.quality.module_registry import get_module_spec
-    from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+    from fleet_rlm.quality.module_registry import get_module_spec
+    from fleet_rlm.quality.optimization_runner import run_module_optimization
 
     spec = get_module_spec(module_slug)
     if spec is None:
@@ -81,7 +81,7 @@ def _run_program_optimization_with_thread_config(
     train_ratio: float,
 ) -> dict[str, Any]:
     """Configure DSPy context inside the worker thread before generic GEPA optimization."""
-    from fleet_rlm.runtime.quality.gepa_optimization import optimize_program_with_gepa
+    from fleet_rlm.quality.gepa_optimization import optimize_program_with_gepa
 
     with _planner_execution_context():
         return optimize_program_with_gepa(
@@ -142,7 +142,7 @@ async def run_optimization_background(
 
     Run state is tracked through the unified *persistence* backend.
     """
-    from fleet_rlm.runtime.quality.gepa_optimization import (
+    from fleet_rlm.quality.gepa_optimization import (
         log_gepa_mlflow_result_metadata,
         log_gepa_mlflow_run_metadata,
     )

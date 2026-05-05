@@ -37,6 +37,15 @@ from ...events import ExecutionSubscription
 from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
 )
+from ...runtime_services.chat_persistence import (
+    cancel_startup_status_task as _cancel_startup_status_task,
+)
+from ...runtime_services.chat_persistence import (
+    emit_delayed_startup_status as _emit_delayed_startup_status,
+)
+from ...runtime_services.chat_persistence import (
+    get_execution_emitter,
+)
 from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
@@ -52,22 +61,13 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from .lifecycle import (
-    cancel_startup_status_task as _cancel_startup_status_task,
-)
-from .lifecycle import (
-    chat_startup_error_payload,
-    get_execution_emitter,
-)
-from .lifecycle import (
-    emit_delayed_startup_status as _emit_delayed_startup_status,
-)
 from .stream import WorkspaceEvent, _chat_message_loop, build_stream_event_dict
 from .transport import (
     _authenticate_websocket,
     _close_websocket_safely,
     _error_envelope,
     _try_send_json,
+    chat_startup_error_payload,
     parse_ws_message_or_send_error,
 )
 

@@ -232,7 +232,7 @@ async def upload_dataset(
 
     # Validate first row keys against module requirements if module_slug given
     if module_slug:
-        from fleet_rlm.runtime.quality.module_registry import get_module_spec
+        from fleet_rlm.quality.module_registry import get_module_spec
 
         spec = get_module_spec(module_slug)
         if spec is None:

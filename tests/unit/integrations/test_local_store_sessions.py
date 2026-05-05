@@ -22,7 +22,7 @@ def _register_test_module_spec():
     """Register a stub module spec for tests that use 'reflect-and-revise' slug."""
     import dspy
 
-    from fleet_rlm.runtime.quality.module_registry import (
+    from fleet_rlm.quality.module_registry import (
         _REGISTRY,
         ModuleOptimizationSpec,
         register_module,

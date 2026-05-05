@@ -72,7 +72,7 @@ def list_optimization_modules(
 ) -> list[GEPAModuleInfo]:
     """Return the list of registered optimizable DSPy modules."""
     _ = identity
-    from fleet_rlm.runtime.quality.module_registry import list_module_metadata
+    from fleet_rlm.quality.module_registry import list_module_metadata
 
     return [
         GEPAModuleInfo(

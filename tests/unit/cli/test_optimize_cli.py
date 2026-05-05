@@ -64,7 +64,7 @@ class TestOptimizeCliEndToEnd:
         }
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             result = runner.invoke(
@@ -103,7 +103,7 @@ class TestOptimizeCliEndToEnd:
         }
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             result = runner.invoke(

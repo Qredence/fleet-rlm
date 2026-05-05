@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.lifecycle import (
+from fleet_rlm.api.routers.ws.transport import handle_chat_loop_exception
+from fleet_rlm.api.runtime_services.chat_persistence import (
     PersistenceRequiredError,
     handle_chat_disconnect,
-    handle_chat_loop_exception,
 )
 from fleet_rlm.integrations.database import RunStatus
 

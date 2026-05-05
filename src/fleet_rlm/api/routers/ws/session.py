@@ -238,7 +238,7 @@ async def switch_session_if_needed(
 
     cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ..ws.manifest import load_manifest_from_volume
+        from ...runtime_services.chat_persistence import load_manifest_from_volume
 
         manifest = (
             await load_manifest_from_volume(agent, manifest_path)

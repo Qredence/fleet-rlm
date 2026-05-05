@@ -51,7 +51,7 @@ The backend is organized into two layers, innermost first:
    - `src/fleet_rlm/runtime/models/` — runtime model construction and registry
    - `src/fleet_rlm/runtime/content/` — content-oriented helpers
    - `src/fleet_rlm/runtime/tools/` — grouped tool helpers (content, sandbox, filesystem, batch, LLM)
-   - `src/fleet_rlm/runtime/quality/` — offline DSPy evaluation, GEPA optimization, datasets, scoring, module registry
+   - `src/fleet_rlm/quality/` — offline DSPy evaluation, GEPA optimization, datasets, scoring, module registry
 
 2. **Daytona Substrate** — sandbox and durable storage
    - `src/fleet_rlm/integrations/daytona/` — interpreter lifecycle, runtime, volumes, diagnostics

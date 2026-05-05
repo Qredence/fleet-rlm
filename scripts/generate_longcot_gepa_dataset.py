@@ -3,7 +3,7 @@
 
 Reads ``vendor/longcot/src/data/{domain}/{difficulty}.json``, extracts the
 *prompt* (mapped to ``question``) and *answer*, and writes a JSONL file
-suitable for ``fleet_rlm.runtime.quality.datasets.load_dataset_rows`` and
+suitable for ``fleet_rlm.quality.datasets.load_dataset_rows`` and
 the ``longcot-reasoner`` module's row converter.
 
 The script supports two selection modes:

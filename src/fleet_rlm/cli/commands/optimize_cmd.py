@@ -47,7 +47,7 @@ def optimize_command(
         )
         raise typer.Exit(code=1)
 
-    from fleet_rlm.runtime.quality.module_registry import (
+    from fleet_rlm.quality.module_registry import (
         get_module_spec,
         list_module_slugs,
     )
@@ -76,7 +76,7 @@ def optimize_command(
         typer.echo(f"Available modules: {', '.join(slugs)}", err=True)
         raise typer.Exit(code=1)
 
-    from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+    from fleet_rlm.quality.optimization_runner import run_module_optimization
 
     result = dict(
         run_module_optimization(

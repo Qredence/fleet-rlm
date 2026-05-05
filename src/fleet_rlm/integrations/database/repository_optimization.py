@@ -672,7 +672,7 @@ class OptimizationRepository(RepositoryContextMixin):
         metadata_json: dict[str, Any] = {}
 
         try:
-            from fleet_rlm.runtime.quality.module_registry import get_module_spec
+            from fleet_rlm.quality.module_registry import get_module_spec
 
             spec = get_module_spec(module_slug)
         except Exception:

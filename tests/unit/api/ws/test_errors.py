@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.stream import WorkspaceEvent
-from fleet_rlm.api.routers.ws.transport import handle_stream_error
+from fleet_rlm.api.routers.ws.stream import WorkspaceEvent, handle_stream_error
 from fleet_rlm.integrations.database import RunStatus
 
 

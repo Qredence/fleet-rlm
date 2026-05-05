@@ -50,7 +50,7 @@ from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
     OptimizationRunCreateRequest,
 )
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     _REGISTRY,
     ModuleOptimizationSpec,
     register_module,

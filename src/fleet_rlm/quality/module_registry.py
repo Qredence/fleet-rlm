@@ -39,7 +39,7 @@ class ModuleOptimizationSpec:
 # -- Module registry --------------------------------------------------------
 
 _REGISTRY: dict[str, ModuleOptimizationSpec] = {}
-_MODULE_ENTRYPOINTS: tuple[str, ...] = ("fleet_rlm.runtime.quality.optimize_longcot",)
+_MODULE_ENTRYPOINTS: tuple[str, ...] = ("fleet_rlm.quality.optimize_longcot",)
 
 
 def register_module(spec: ModuleOptimizationSpec) -> None:
@@ -95,7 +95,7 @@ def _ensure_registered() -> None:
             __import__(module_name)
         except Exception as exc:
             sys.stderr.write(
-                f"[fleet_rlm.runtime.quality] failed to load {module_name}: {exc}\n"
+                f"[fleet_rlm.quality] failed to load {module_name}: {exc}\n"
             )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.runtime.quality.scoring_helpers import (
+from fleet_rlm.quality.scoring_helpers import (
     ScoreFeedbackBuilder,
     action_match_score,
     boundedness_score,

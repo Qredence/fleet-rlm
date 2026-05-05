@@ -255,7 +255,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_patched_deps.post(
@@ -303,7 +303,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_patched_deps.post(
@@ -344,7 +344,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_mlflow_unavailable.post(
@@ -419,7 +419,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(
@@ -487,7 +487,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(
@@ -563,7 +563,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(

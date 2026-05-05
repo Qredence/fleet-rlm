@@ -72,7 +72,7 @@ def _run_gepa_optimization(
     train_ratio: float,
 ) -> dict:
     """Blocking wrapper around optimize_program_with_gepa."""
-    from fleet_rlm.runtime.quality.gepa_optimization import (
+    from fleet_rlm.quality.gepa_optimization import (
         optimize_program_with_gepa,
     )
 
@@ -96,8 +96,8 @@ def _run_module_optimization(
     run_id: int | None = None,
 ) -> dict:
     """Blocking wrapper for registry-based module optimization."""
-    from fleet_rlm.runtime.quality.module_registry import get_module_spec
-    from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+    from fleet_rlm.quality.module_registry import get_module_spec
+    from fleet_rlm.quality.optimization_runner import run_module_optimization
 
     spec = get_module_spec(module_slug)
     if spec is None:
@@ -138,7 +138,7 @@ def _ensure_gepa_runtime_available(*, requires_mlflow: bool) -> None:
 
 def _resolve_effective_program_spec(request: GEPAOptimizationRequest) -> str:
     if request.module_slug:
-        from fleet_rlm.runtime.quality.module_registry import get_module_spec
+        from fleet_rlm.quality.module_registry import get_module_spec
 
         spec = get_module_spec(request.module_slug)
         if spec is None:
@@ -488,7 +488,7 @@ async def create_optimization_run(
     # Resolve program spec
     effective_program_spec = request.program_spec
     if request.module_slug:
-        from fleet_rlm.runtime.quality.module_registry import get_module_spec
+        from fleet_rlm.quality.module_registry import get_module_spec
 
         spec = get_module_spec(request.module_slug)
         if spec is None:

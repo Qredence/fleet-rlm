@@ -13,7 +13,7 @@ The `vendor/longcot/src/data/logic/` domain files contain only `null` answers. T
 ```python
 @pytest.fixture(autouse=True)
 def _clean_registry() -> None:
-    from fleet_rlm.runtime.quality.module_registry import _reset_registry
+    from fleet_rlm.quality.module_registry import _reset_registry
     _reset_registry()
 ```
 

@@ -955,7 +955,7 @@ def _build_transcript_dataset_rows(
     turns: list[tuple[str | None, str | None]],
 ) -> tuple[list[dict[str, object]], str]:
     """Map transcript turns into module-specific dataset rows."""
-    from fleet_rlm.runtime.quality.transcript_exports import (
+    from fleet_rlm.quality.transcript_exports import (
         build_transcript_dataset_rows,
     )
 

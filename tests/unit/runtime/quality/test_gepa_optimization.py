@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.runtime.quality.gepa_optimization``."""
+"""Tests for ``fleet_rlm.quality.gepa_optimization``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 
-from fleet_rlm.runtime.quality.gepa_optimization import (
+from fleet_rlm.quality.gepa_optimization import (
     build_gepa_feedback_metric,
     optimize_program_with_gepa,
 )
@@ -133,34 +133,34 @@ def test_optimize_program_with_gepa_logs_mlflow_metadata(
     output_path = tmp_path / "optimized.json"
 
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.initialize_mlflow",
+        "fleet_rlm.quality.gepa_optimization.initialize_mlflow",
         lambda config: True,
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.load_trace_rows",
+        "fleet_rlm.quality.gepa_optimization.load_trace_rows",
         lambda path: [{"question": "hi", "assistant_response": "hello"}],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.rows_to_examples",
+        "fleet_rlm.quality.gepa_optimization.rows_to_examples",
         lambda rows, input_keys=None, output_key="assistant_response": [
             "example-a",
             "example-b",
         ],
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.split_examples",
+        "fleet_rlm.quality.gepa_optimization.split_examples",
         lambda examples, train_ratio=0.8: (["train-example"], ["val-example"]),
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.build_program",
+        "fleet_rlm.quality.gepa_optimization.build_program",
         lambda program_spec: MagicMock(name="program"),
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.build_gepa_feedback_metric",
+        "fleet_rlm.quality.gepa_optimization.build_gepa_feedback_metric",
         lambda output_key="assistant_response", score_fn=None: MagicMock(name="metric"),
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.gepa_optimization.GEPA",
+        "fleet_rlm.quality.gepa_optimization.GEPA",
         _FakeGEPA,
     )
     monkeypatch.setattr(dspy, "Evaluate", _FakeEvaluate)

@@ -203,11 +203,11 @@ class TestBackgroundRunnerMlflowAvailable:
             patch("mlflow.log_dict", log_dict_mock, create=True),
             patch("mlflow.log_artifact", log_artifact_mock, create=True),
             patch(
-                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                "fleet_rlm.quality.module_registry.get_module_spec",
                 return_value=spec_mock,
             ),
             patch(
-                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                "fleet_rlm.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
         ):
@@ -278,11 +278,11 @@ class TestBackgroundRunnerMlflowUnavailable:
                 init_mock,
             ),
             patch(
-                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                "fleet_rlm.quality.module_registry.get_module_spec",
                 return_value=spec_mock,
             ),
             patch(
-                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                "fleet_rlm.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
         ):
@@ -325,11 +325,11 @@ class TestBackgroundRunnerMlflowUnavailable:
         with (
             patch("builtins.__import__", side_effect=_fail_mlflow),
             patch(
-                "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+                "fleet_rlm.quality.module_registry.get_module_spec",
                 return_value=spec_mock,
             ),
             patch(
-                "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+                "fleet_rlm.quality.optimization_runner.run_module_optimization",
                 run_mod_mock,
             ),
         ):
@@ -349,7 +349,7 @@ def test_background_runner_marks_planner_bootstrap_failure_as_failed(
             side_effect=RuntimeError("planner bootstrap failed"),
         ),
         patch(
-            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            "fleet_rlm.quality.module_registry.get_module_spec",
             return_value=MagicMock(),
         ),
     ):
@@ -384,11 +384,11 @@ def test_local_module_optimization_uses_run_blocking(tmp_path: Path) -> None:
 
     with (
         patch(
-            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            "fleet_rlm.quality.module_registry.get_module_spec",
             return_value=spec_mock,
         ),
         patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             run_mod_mock,
         ),
         patch(
@@ -415,11 +415,11 @@ def test_local_background_persists_review_artifacts_from_runner_result(
 
     with (
         patch(
-            "fleet_rlm.runtime.quality.module_registry.get_module_spec",
+            "fleet_rlm.quality.module_registry.get_module_spec",
             return_value=spec_mock,
         ),
         patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             run_mod_mock,
         ),
     ):
@@ -535,7 +535,7 @@ def test_custom_program_path_does_not_open_outer_mlflow_run(
     with (
         patch("mlflow.start_run", start_run_mock, create=True),
         patch(
-            "fleet_rlm.runtime.quality.gepa_optimization.optimize_program_with_gepa",
+            "fleet_rlm.quality.gepa_optimization.optimize_program_with_gepa",
             optimize_mock,
         ),
         patch(

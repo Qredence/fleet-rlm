@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fleet_rlm.runtime.agent.signatures import LongCoTQASignature
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     _reset_registry,
     get_module_spec,
     list_module_slugs,
 )
+from fleet_rlm.runtime.agent.signatures import LongCoTQASignature
 
 # ── Signature tests ──────────────────────────────────────────────────
 

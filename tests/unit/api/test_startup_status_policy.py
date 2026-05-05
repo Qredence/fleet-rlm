@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fleet_rlm.api.routers.ws.lifecycle import (
+from fleet_rlm.api.runtime_services.chat_persistence import (
     build_startup_status_event,
     cancel_startup_status_task,
     emit_delayed_startup_status,

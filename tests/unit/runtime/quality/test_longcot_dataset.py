@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.runtime.quality.datasets import (
+from fleet_rlm.quality.datasets import (
     load_dataset_rows,
     split_examples,
     validate_required_keys,
 )
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     _reset_registry,
     get_module_spec,
 )

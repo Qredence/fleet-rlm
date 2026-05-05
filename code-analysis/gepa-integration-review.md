@@ -86,7 +86,7 @@ This flow is the right product shape.
 Evidence:
 
 - `ModuleOptimizationSpec` in `src/fleet_rlm/runtime/quality/module_registry.py`
-- `_MODULE_ENTRYPOINTS = ("fleet_rlm.runtime.quality.optimize_longcot",)`
+- `_MODULE_ENTRYPOINTS = ("fleet_rlm.quality.optimize_longcot",)`
 - `get_module_spec()` and `list_module_specs()`
 
 The module registry is a good abstraction. It prevents API routes from needing to know how to construct every optimizable module.

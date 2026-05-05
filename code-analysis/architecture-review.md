@@ -202,7 +202,7 @@ Evidence:
 - `src/frontend/src/features/optimization/components/datasets-tab.tsx`
 - `src/fleet_rlm/runtime/quality/module_registry.py`
 
-Docs still describe registered modules such as `reflect-and-revise`, `context-selection`, `decomposition`, `repair`, and `verification`. The current registry imports `fleet_rlm.runtime.quality.optimize_longcot` and exposes `longcot-reasoner`.
+Docs still describe registered modules such as `reflect-and-revise`, `context-selection`, `decomposition`, `repair`, and `verification`. The current registry imports `fleet_rlm.quality.optimize_longcot` and exposes `longcot-reasoner`.
 
 Either the older modules were intentionally removed and docs/frontend need updating, or the registry is incomplete.
 

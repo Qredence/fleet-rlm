@@ -1,6 +1,6 @@
 """GEPA optimization entrypoint for the LongCoT QA reasoner module.
 
-Registers a :class:`~fleet_rlm.runtime.quality.module_registry.ModuleOptimizationSpec`
+Registers a :class:`~fleet_rlm.quality.module_registry.ModuleOptimizationSpec`
 for ``longcot-reasoner`` so that the offline CLI and API can compile it with GEPA.
 
 The module uses :class:`~fleet_rlm.runtime.agent.signatures.LongCoTQASignature`
@@ -14,11 +14,11 @@ from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any
 
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     ModuleOptimizationSpec,
     register_module,
 )
-from fleet_rlm.runtime.quality.scoring_helpers import set_overlap_score
+from fleet_rlm.quality.scoring_helpers import set_overlap_score
 
 _ANSWER_WEIGHT = 0.6
 _REASONING_WEIGHT = 0.4
