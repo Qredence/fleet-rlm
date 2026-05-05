@@ -1,7 +1,7 @@
 """Unit tests for StreamEvent and TurnState models.
 
-Covers fleet_rlm.runtime.models.streaming — all event kinds and
-TurnState.apply state transitions introduced in the new implementation.
+Covers fleet_rlm.runtime.schemas — StreamEvent and TurnState models,
+all event kinds, and TurnState.apply state transitions.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from fleet_rlm.runtime.models.streaming import (
+from fleet_rlm.runtime.schemas import (
     StreamEvent,
     TurnState,
 )
