@@ -4,7 +4,7 @@ import asyncio
 from contextlib import suppress
 from typing import Any, cast
 
-import fleet_rlm.api.routers.ws.terminal as ws_terminal
+import fleet_rlm.api.routers.ws.stream as ws_stream
 from fleet_rlm.api.routers.ws.types import SessionContext, WorkspaceEvent
 from tests.ui.fixtures_ui import ts
 
@@ -61,7 +61,7 @@ def test_build_stream_event_dict_serializes_core_fields() -> None:
         kind="status", text="hello", payload={"ok": True}, timestamp=ts()
     )
 
-    event_dict = ws_terminal.build_stream_event_dict(event=event, payload=event.payload)
+    event_dict = ws_stream.build_stream_event_dict(event=event, payload=event.payload)
 
     assert event_dict["kind"] == "status"
     assert event_dict["text"] == "hello"
@@ -80,11 +80,11 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             persist_calls.append(include_volume_save)
 
-        await ws_terminal.handle_terminal_stream_event(
+        await ws_stream.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_terminal.build_stream_event_dict(
+            event_dict=ws_stream.build_stream_event_dict(
                 event=event, payload=event.payload
             ),
             step=None,
@@ -111,11 +111,11 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
             _ = include_volume_save
             raise RuntimeError("volume unavailable")
 
-        await ws_terminal.handle_terminal_stream_event(
+        await ws_stream.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_terminal.build_stream_event_dict(
+            event_dict=ws_stream.build_stream_event_dict(
                 event=event, payload=event.payload
             ),
             step=None,
@@ -141,11 +141,11 @@ def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
             _ = include_volume_save
 
         task = asyncio.create_task(
-            ws_terminal.handle_terminal_stream_event(
+            ws_stream.handle_terminal_stream_event(
                 websocket=cast(Any, websocket),
                 lifecycle=cast(Any, lifecycle),
                 event=event,
-                event_dict=ws_terminal.build_stream_event_dict(
+                event_dict=ws_stream.build_stream_event_dict(
                     event=event, payload=event.payload
                 ),
                 step=None,
@@ -186,11 +186,11 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
 
-        await ws_terminal.handle_terminal_stream_event(
+        await ws_stream.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_terminal.build_stream_event_dict(
+            event_dict=ws_stream.build_stream_event_dict(
                 event=event, payload=event.payload
             ),
             step=None,
@@ -222,11 +222,11 @@ def test_handle_terminal_stream_event_accepts_session_context() -> None:
         async def persist_session_state(*, include_volume_save: bool = True) -> None:
             _ = include_volume_save
 
-        await ws_terminal.handle_terminal_stream_event(
+        await ws_stream.handle_terminal_stream_event(
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_terminal.build_stream_event_dict(
+            event_dict=ws_stream.build_stream_event_dict(
                 event=event, payload=event.payload
             ),
             step=None,
