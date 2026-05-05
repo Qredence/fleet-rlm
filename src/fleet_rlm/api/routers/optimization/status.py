@@ -6,6 +6,8 @@ import asyncio
 
 from fastapi import APIRouter
 
+from fleet_rlm.quality import module_registry
+
 from ...dependencies import HTTPIdentityDep
 from ...schemas.optimization import GEPAModuleInfo, GEPAStatusResponse
 from ._deps import AUTH_ERROR_RESPONSES, _check_gepa_available, _get_mlflow_status
@@ -72,8 +74,6 @@ def list_optimization_modules(
 ) -> list[GEPAModuleInfo]:
     """Return the list of registered optimizable DSPy modules."""
     _ = identity
-    from fleet_rlm.quality.module_registry import list_module_metadata
-
     return [
         GEPAModuleInfo(
             slug=m["slug"],
@@ -82,5 +82,5 @@ def list_optimization_modules(
             program_spec=m["program_spec"],
             required_dataset_keys=m["required_dataset_keys"],
         )
-        for m in list_module_metadata()
+        for m in module_registry.list_module_metadata()
     ]

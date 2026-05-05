@@ -24,6 +24,7 @@ from fastapi import (
 
 from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
 from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest
+from fleet_rlm.quality import module_registry
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ...runtime_services.optimization_datasets import (
@@ -232,9 +233,7 @@ async def upload_dataset(
 
     # Validate first row keys against module requirements if module_slug given
     if module_slug:
-        from fleet_rlm.quality.module_registry import get_module_spec
-
-        spec = get_module_spec(module_slug)
+        spec = module_registry.get_module_spec(module_slug)
         if spec is None:
             raise HTTPException(
                 status_code=400, detail=f"Unknown module slug: {module_slug!r}"

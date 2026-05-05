@@ -24,6 +24,7 @@ from fleet_rlm.integrations.database import OptimizationRunStatus
 from fleet_rlm.integrations.database.repository_optimization import (
     OptimizationRunCreateRequest,
 )
+from fleet_rlm.quality import gepa_optimization, module_registry, optimization_runner
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ...runtime_services.common import run_blocking
@@ -72,11 +73,7 @@ def _run_gepa_optimization(
     train_ratio: float,
 ) -> dict:
     """Blocking wrapper around optimize_program_with_gepa."""
-    from fleet_rlm.quality.gepa_optimization import (
-        optimize_program_with_gepa,
-    )
-
-    return optimize_program_with_gepa(
+    return gepa_optimization.optimize_program_with_gepa(
         dataset_path=dataset_path,
         program_spec=program_spec,
         output_path=output_path,
@@ -96,14 +93,11 @@ def _run_module_optimization(
     run_id: int | None = None,
 ) -> dict:
     """Blocking wrapper for registry-based module optimization."""
-    from fleet_rlm.quality.module_registry import get_module_spec
-    from fleet_rlm.quality.optimization_runner import run_module_optimization
-
-    spec = get_module_spec(module_slug)
+    spec = module_registry.get_module_spec(module_slug)
     if spec is None:
         raise ValueError(f"Unknown module slug: {module_slug!r}")
     return dict(
-        run_module_optimization(
+        optimization_runner.run_module_optimization(
             spec,
             dataset_path=dataset_path,
             output_path=output_path,
@@ -138,9 +132,7 @@ def _ensure_gepa_runtime_available(*, requires_mlflow: bool) -> None:
 
 def _resolve_effective_program_spec(request: GEPAOptimizationRequest) -> str:
     if request.module_slug:
-        from fleet_rlm.quality.module_registry import get_module_spec
-
-        spec = get_module_spec(request.module_slug)
+        spec = module_registry.get_module_spec(request.module_slug)
         if spec is None:
             raise HTTPException(
                 status_code=400,
@@ -488,9 +480,7 @@ async def create_optimization_run(
     # Resolve program spec
     effective_program_spec = request.program_spec
     if request.module_slug:
-        from fleet_rlm.quality.module_registry import get_module_spec
-
-        spec = get_module_spec(request.module_slug)
+        spec = module_registry.get_module_spec(request.module_slug)
         if spec is None:
             raise HTTPException(
                 status_code=400,

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.quality import gepa_optimization, module_registry, optimization_runner
 
 from ...runtime_services.common import run_blocking
 from ._deps import OPTIMIZATION_TIMEOUT_SECONDS
@@ -51,16 +52,13 @@ def _run_module_optimization_with_thread_config(
     run_id: int | None,
 ) -> dict[str, Any]:
     """Configure DSPy context inside the worker thread before module optimization."""
-    from fleet_rlm.quality.module_registry import get_module_spec
-    from fleet_rlm.quality.optimization_runner import run_module_optimization
-
-    spec = get_module_spec(module_slug)
+    spec = module_registry.get_module_spec(module_slug)
     if spec is None:
         raise ValueError(f"Unknown module slug: {module_slug!r}")
     with _planner_execution_context():
         return cast(
             dict[str, Any],
-            run_module_optimization(
+            optimization_runner.run_module_optimization(
                 spec,
                 dataset_path=dataset_path,
                 output_path=output_path,
@@ -81,10 +79,8 @@ def _run_program_optimization_with_thread_config(
     train_ratio: float,
 ) -> dict[str, Any]:
     """Configure DSPy context inside the worker thread before generic GEPA optimization."""
-    from fleet_rlm.quality.gepa_optimization import optimize_program_with_gepa
-
     with _planner_execution_context():
-        return optimize_program_with_gepa(
+        return gepa_optimization.optimize_program_with_gepa(
             dataset_path=dataset_path,
             program_spec=program_spec,
             output_path=output_path,
@@ -142,11 +138,6 @@ async def run_optimization_background(
 
     Run state is tracked through the unified *persistence* backend.
     """
-    from fleet_rlm.quality.gepa_optimization import (
-        log_gepa_mlflow_result_metadata,
-        log_gepa_mlflow_run_metadata,
-    )
-
     run_uuid = _resolve_run_uuid(run_id)
     int_run_id = _try_int_run_id(run_id)
 
@@ -188,7 +179,7 @@ async def run_optimization_background(
                     if start_run is not None:
                         mlflow_ctx = cast(Any, start_run)(run_name=run_label)
                         mlflow_ctx.__enter__()
-                        log_gepa_mlflow_run_metadata(
+                        gepa_optimization.log_gepa_mlflow_run_metadata(
                             dataset_path=dataset_path,
                             program_spec=program_spec,
                             auto=auto,
@@ -270,7 +261,7 @@ async def run_optimization_background(
                 val_score = result.get("validation_score")
                 if val_score is not None:
                     cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)
-                log_gepa_mlflow_result_metadata(
+                gepa_optimization.log_gepa_mlflow_result_metadata(
                     result=result,
                     run_id=run_id,
                     log_metric=cast(Any, _mlflow_log_metric),
