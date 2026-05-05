@@ -1,240 +1,39 @@
-"""Typed contracts and Daytona request normalization for websocket execution."""
+"""Compatibility re-exports for websocket types.
+
+Primary definitions now live in:
+
+- ``fleet_rlm.api.runtime_services.chat_runtime`` — agent protocols and session types
+- ``fleet_rlm.api.routers.ws.stream`` — streaming event types
+- ``fleet_rlm.api.routers.ws.turn_setup`` — Daytona request types
+"""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Protocol
+from fleet_rlm.api.routers.ws.stream import WorkspaceEvent, WorkspaceTaskRequest
+from fleet_rlm.api.routers.ws.turn_setup import (
+    DaytonaChatRequestOptions,
+    normalize_daytona_chat_request,
+    prepare_daytona_workspace_for_turn,
+)
+from fleet_rlm.api.runtime_services.chat_runtime import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    MaintenanceInterpreterProtocol,
+    PreStreamSetupFn,
+    SessionContext,
+    StreamEventLike,
+)
 
-from ...schemas import WSMessage
-
-LocalPersistFn = Callable[..., Awaitable[None]]
-PreStreamSetupFn = Callable[[], Awaitable[None]]
-
-
-@dataclass(slots=True)
-class WorkspaceEvent:
-    """Normalized event shape for websocket streaming."""
-
-    kind: str
-    text: str = ""
-    payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    terminal: bool = False
-
-
-@dataclass(slots=True)
-class WorkspaceTaskRequest:
-    """Input needed to execute one workspace task end-to-end."""
-
-    agent: Any
-    message: str
-    execution_mode: str | None = None
-    trace: bool = True
-    docs_path: str | None = None
-    repo_url: str | None = None
-    repo_ref: str | None = None
-    context_paths: list[str] | None = None
-    batch_concurrency: int | None = None
-    workspace_id: str | None = None
-    cancel_check: Callable[[], bool] | None = None
-    prepare: Callable[[], Awaitable[None]] | None = None
-
-
-@dataclass(slots=True)
-class SessionContext:
-    """Simplified session context for websocket streaming."""
-
-    workspace_id: str | None = None
-    user_id: str | None = None
-    session_id: str | None = None
-    session_record: dict[str, Any] | None = None
-
-
-class StreamEventLike(Protocol):
-    """Minimal worker-event surface required by WS terminal/completion helpers.
-
-    ``WorkspaceEvent`` satisfies this protocol directly, and transport-created
-    compatibility events can do the same without depending on runtime models.
-    """
-
-    @property
-    def kind(self) -> str:
-        raise NotImplementedError
-
-    @property
-    def text(self) -> str: ...
-
-    @property
-    def payload(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    @property
-    def timestamp(self) -> datetime:
-        raise NotImplementedError
-
-
-class MaintenanceInterpreterProtocol(Protocol):
-    """Interpreter capability needed for session manifest volume I/O."""
-
-    # Host-mediated evidence bridge references — populated by the WS stream
-    # layer once identity is resolved; read by evidence_bridge.py.
-    _host_repository: Any | None
-    _host_identity: Any | None
-    _host_run_id: Any | None
-
-    async def aexecute(
-        self,
-        code: str,
-        variables: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> object: ...
-
-    def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
-
-
-class ChatAgentProtocol(Protocol):
-    """Subset of chat-agent behavior used by websocket runtime helpers."""
-
-    interpreter: MaintenanceInterpreterProtocol | None
-    _db_session_id: str | object | None
-    _repository: Any | None
-    _identity_rows: Any | None
-
-    async def __aenter__(self) -> ChatAgentProtocol: ...
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object | None,
-    ) -> bool: ...
-
-    def history_turns(self) -> int: ...
-
-    def set_execution_mode(self, execution_mode: str) -> None: ...
-
-    def aiter_chat_turn_stream(
-        self,
-        message: str,
-        trace: bool = True,
-        cancel_check: Callable[[], bool] | None = None,
-        *,
-        docs_path: str | None = None,
-        repo_url: str | None = None,
-        repo_ref: str | None = None,
-        context_paths: list[str] | None = None,
-        batch_concurrency: int | None = None,
-        volume_name: str | None = None,
-    ) -> AsyncIterator[object]: ...
-
-    def load_document(self, path: str, alias: str = "active") -> None: ...
-
-    def export_session_state(self) -> dict[str, Any]: ...
-
-    def import_session_state(self, state: dict[str, Any]) -> object: ...
-
-    async def aimport_session_state(self, state: dict[str, Any]) -> object: ...
-
-    def reset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
-
-    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
-
-    async def execute_command(
-        self, command: str, args: dict[str, Any]
-    ) -> dict[str, Any] | object: ...
-
-
-@dataclass(slots=True)
-class DaytonaChatRequestOptions:
-    """Normalized Daytona websocket options after schema validation."""
-
-    repo_url: str | None
-    repo_ref: str | None
-    context_paths: list[str]
-    batch_concurrency: int | None
-    workspace_id: str
-    sandbox_labels: dict[str, str]
-
-
-def normalize_daytona_chat_request(
-    msg: WSMessage,
-    workspace_id: str,
-    *,
-    sandbox_labels: dict[str, str] | None = None,
-) -> DaytonaChatRequestOptions:
-    """Return a typed Daytona request payload for the canonical runtime."""
-
-    repo_url = str(msg.repo_url or "").strip() or None
-    repo_ref = str(msg.repo_ref or "").strip() or None
-    context_paths = [
-        str(item).strip() for item in (msg.context_paths or []) if str(item).strip()
-    ]
-    return DaytonaChatRequestOptions(
-        repo_url=repo_url,
-        repo_ref=repo_ref,
-        context_paths=context_paths,
-        batch_concurrency=msg.batch_concurrency,
-        workspace_id=workspace_id,
-        sandbox_labels=dict(sandbox_labels or {}),
-    )
-
-
-def _normalize_context_paths(*groups: list[str]) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        for item in group:
-            value = str(item or "").strip()
-            if not value or value in seen:
-                continue
-            seen.add(value)
-            normalized.append(value)
-    return normalized
-
-
-async def prepare_daytona_workspace_for_turn(
-    *,
-    agent: ChatAgentProtocol,
-    request: DaytonaChatRequestOptions,
-    docs_path: str | None,
-) -> None:
-    """Apply Daytona workspace settings via the interpreter's native session API."""
-
-    interpreter = getattr(agent, "interpreter", None)
-    if interpreter is None:
-        return
-
-    configure_workspace = getattr(interpreter, "aconfigure_workspace", None)
-    if not callable(configure_workspace):
-        return
-
-    raw_loaded_paths = getattr(agent, "loaded_document_paths", ())
-    loaded_document_paths = (
-        [str(item) for item in raw_loaded_paths]
-        if isinstance(raw_loaded_paths, (list, tuple))
-        else []
-    )
-    docs_paths = [str(docs_path)] if docs_path is not None else []
-    context_paths = _normalize_context_paths(
-        loaded_document_paths,
-        list(request.context_paths),
-        docs_paths,
-    )
-
-    normalized_batch_concurrency = (
-        max(1, int(request.batch_concurrency))
-        if isinstance(request.batch_concurrency, int) and request.batch_concurrency > 0
-        else None
-    )
-    setattr(agent, "batch_concurrency", normalized_batch_concurrency)
-
-    await configure_workspace(
-        repo_url=request.repo_url,
-        repo_ref=request.repo_ref,
-        context_paths=context_paths,
-        volume_name=request.workspace_id,
-        sandbox_labels=request.sandbox_labels,
-    )
+__all__ = [
+    "ChatAgentProtocol",
+    "DaytonaChatRequestOptions",
+    "LocalPersistFn",
+    "MaintenanceInterpreterProtocol",
+    "PreStreamSetupFn",
+    "SessionContext",
+    "StreamEventLike",
+    "WorkspaceEvent",
+    "WorkspaceTaskRequest",
+    "normalize_daytona_chat_request",
+    "prepare_daytona_workspace_for_turn",
+]

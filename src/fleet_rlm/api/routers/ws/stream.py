@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +28,12 @@ from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
     classify_stream_failure,
+)
+from ...runtime_services.chat_runtime import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    SessionContext,
+    StreamEventLike,
 )
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
@@ -57,16 +63,37 @@ from .transport import (
     resolve_session_identity,
 )
 from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
-from .types import (
-    ChatAgentProtocol,
-    LocalPersistFn,
-    SessionContext,
-    StreamEventLike,
-    WorkspaceEvent,
-    WorkspaceTaskRequest,
-)
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class WorkspaceEvent:
+    """Normalized event shape for websocket streaming."""
+
+    kind: str
+    text: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    terminal: bool = False
+
+
+@dataclass(slots=True)
+class WorkspaceTaskRequest:
+    """Input needed to execute one workspace task end-to-end."""
+
+    agent: Any
+    message: str
+    execution_mode: str | None = None
+    trace: bool = True
+    docs_path: str | None = None
+    repo_url: str | None = None
+    repo_ref: str | None = None
+    context_paths: list[str] | None = None
+    batch_concurrency: int | None = None
+    workspace_id: str | None = None
+    cancel_check: Callable[[], bool] | None = None
+    prepare: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(slots=True)

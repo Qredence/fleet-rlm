@@ -15,6 +15,11 @@ from ...runtime_services.chat_persistence import (
     initialize_turn_lifecycle,
 )
 from ...runtime_services.chat_runtime import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    PreStreamSetupFn,
+)
+from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
 )
 from ...runtime_services.chat_runtime import (
@@ -22,14 +27,6 @@ from ...runtime_services.chat_runtime import (
 )
 from ...schemas import WSMessage
 from .transport import _try_send_json
-from .types import (
-    ChatAgentProtocol,
-    DaytonaChatRequestOptions,
-    LocalPersistFn,
-    PreStreamSetupFn,
-    normalize_daytona_chat_request,
-    prepare_daytona_workspace_for_turn,
-)
 
 
 @dataclass(slots=True)
@@ -51,6 +48,99 @@ class PreparedStreamingTurn:
     analytics_enabled: bool | None
     mlflow_trace_context: Any | None
     prepare_worker: PreStreamSetupFn
+
+
+@dataclass(slots=True)
+class DaytonaChatRequestOptions:
+    """Normalized Daytona websocket options after schema validation."""
+
+    repo_url: str | None
+    repo_ref: str | None
+    context_paths: list[str]
+    batch_concurrency: int | None
+    workspace_id: str
+    sandbox_labels: dict[str, str]
+
+
+def normalize_daytona_chat_request(
+    msg: WSMessage,
+    workspace_id: str,
+    *,
+    sandbox_labels: dict[str, str] | None = None,
+) -> DaytonaChatRequestOptions:
+    """Return a typed Daytona request payload for the canonical runtime."""
+
+    repo_url = str(msg.repo_url or "").strip() or None
+    repo_ref = str(msg.repo_ref or "").strip() or None
+    context_paths = [
+        str(item).strip() for item in (msg.context_paths or []) if str(item).strip()
+    ]
+    return DaytonaChatRequestOptions(
+        repo_url=repo_url,
+        repo_ref=repo_ref,
+        context_paths=context_paths,
+        batch_concurrency=msg.batch_concurrency,
+        workspace_id=workspace_id,
+        sandbox_labels=dict(sandbox_labels or {}),
+    )
+
+
+def _normalize_context_paths(*groups: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            value = str(item or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+    return normalized
+
+
+async def prepare_daytona_workspace_for_turn(
+    *,
+    agent: ChatAgentProtocol,
+    request: DaytonaChatRequestOptions,
+    docs_path: str | None,
+) -> None:
+    """Apply Daytona workspace settings via the interpreter's native session API."""
+
+    interpreter = getattr(agent, "interpreter", None)
+    if interpreter is None:
+        return
+
+    configure_workspace = getattr(interpreter, "aconfigure_workspace", None)
+    if not callable(configure_workspace):
+        return
+
+    raw_loaded_paths = getattr(agent, "loaded_document_paths", ())
+    loaded_document_paths = (
+        [str(item) for item in raw_loaded_paths]
+        if isinstance(raw_loaded_paths, (list, tuple))
+        else []
+    )
+    docs_paths = [str(docs_path)] if docs_path is not None else []
+    context_paths = _normalize_context_paths(
+        loaded_document_paths,
+        list(request.context_paths),
+        docs_paths,
+    )
+
+    normalized_batch_concurrency = (
+        max(1, int(request.batch_concurrency))
+        if isinstance(request.batch_concurrency, int) and request.batch_concurrency > 0
+        else None
+    )
+    setattr(agent, "batch_concurrency", normalized_batch_concurrency)
+
+    await configure_workspace(
+        repo_url=request.repo_url,
+        repo_ref=request.repo_ref,
+        context_paths=context_paths,
+        volume_name=request.workspace_id,
+        sandbox_labels=request.sandbox_labels,
+    )
 
 
 async def _reject_empty_message(

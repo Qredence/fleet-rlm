@@ -62,7 +62,7 @@ from .lifecycle import (
 from .lifecycle import (
     emit_delayed_startup_status as _emit_delayed_startup_status,
 )
-from .stream import _chat_message_loop, build_stream_event_dict
+from .stream import WorkspaceEvent, _chat_message_loop, build_stream_event_dict
 from .transport import (
     _authenticate_websocket,
     _close_websocket_safely,
@@ -70,7 +70,6 @@ from .transport import (
     _try_send_json,
     parse_ws_message_or_send_error,
 )
-from .types import WorkspaceEvent
 
 router = APIRouter(tags=["websocket"])
 

@@ -5,7 +5,8 @@ from contextlib import suppress
 from typing import Any, cast
 
 import fleet_rlm.api.routers.ws.stream as ws_stream
-from fleet_rlm.api.routers.ws.types import SessionContext, WorkspaceEvent
+from fleet_rlm.api.routers.ws.stream import WorkspaceEvent
+from fleet_rlm.api.runtime_services.chat_runtime import SessionContext
 from tests.ui.fixtures_ui import ts
 
 

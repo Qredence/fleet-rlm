@@ -15,7 +15,11 @@ from fleet_rlm.utils.identity import owner_fingerprint, session_key
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ...dependencies import SessionCacheDeps
-from .types import ChatAgentProtocol, LocalPersistFn, SessionContext
+from ...runtime_services.chat_runtime import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    SessionContext,
+)
 
 logger = logging.getLogger(__name__)
 

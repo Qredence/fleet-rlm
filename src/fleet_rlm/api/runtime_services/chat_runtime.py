@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, Protocol
 
 from fastapi import WebSocket
 
@@ -44,6 +47,114 @@ class ChatSessionState:
     lifecycle: Any | None = None
     last_loaded_docs_path: str | None = None
     orchestration_session: Any | None = None
+
+
+LocalPersistFn = Callable[..., Awaitable[None]]
+PreStreamSetupFn = Callable[[], Awaitable[None]]
+
+
+@dataclass(slots=True)
+class SessionContext:
+    """Simplified session context for websocket streaming."""
+
+    workspace_id: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    session_record: dict[str, Any] | None = None
+
+
+class StreamEventLike(Protocol):
+    """Minimal worker-event surface required by WS terminal/completion helpers.
+
+    ``WorkspaceEvent`` satisfies this protocol directly, and transport-created
+    compatibility events can do the same without depending on runtime models.
+    """
+
+    @property
+    def kind(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @property
+    def timestamp(self) -> datetime:
+        raise NotImplementedError
+
+
+class MaintenanceInterpreterProtocol(Protocol):
+    """Interpreter capability needed for session manifest volume I/O."""
+
+    # Host-mediated evidence bridge references — populated by the WS stream
+    # layer once identity is resolved; read by evidence_bridge.py.
+    _host_repository: Any | None
+    _host_identity: Any | None
+    _host_run_id: Any | None
+
+    async def aexecute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> object: ...
+
+    def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
+
+
+class ChatAgentProtocol(Protocol):
+    """Subset of chat-agent behavior used by websocket runtime helpers."""
+
+    interpreter: MaintenanceInterpreterProtocol | None
+    _db_session_id: str | object | None
+    _repository: Any | None
+    _identity_rows: Any | None
+
+    async def __aenter__(self) -> ChatAgentProtocol: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool: ...
+
+    def history_turns(self) -> int: ...
+
+    def set_execution_mode(self, execution_mode: str) -> None: ...
+
+    def aiter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
+    ) -> AsyncIterator[object]: ...
+
+    def load_document(self, path: str, alias: str = "active") -> None: ...
+
+    def export_session_state(self) -> dict[str, Any]: ...
+
+    def import_session_state(self, state: dict[str, Any]) -> object: ...
+
+    async def aimport_session_state(self, state: dict[str, Any]) -> object: ...
+
+    def reset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+
+    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+
+    async def execute_command(
+        self, command: str, args: dict[str, Any]
+    ) -> dict[str, Any] | object: ...
 
 
 def set_interpreter_default_profile(
@@ -266,8 +377,14 @@ def new_chat_session_state(
 
 
 __all__ = [
+    "ChatAgentProtocol",
     "ChatSessionState",
+    "LocalPersistFn",
+    "MaintenanceInterpreterProtocol",
     "PreparedChatRuntime",
+    "PreStreamSetupFn",
+    "SessionContext",
+    "StreamEventLike",
     "build_chat_agent_context",
     "new_chat_session_state",
     "prepare_chat_runtime",

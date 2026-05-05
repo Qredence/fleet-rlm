@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from fleet_rlm.api.routers.ws.stream import build_execution_completion_summary
-from fleet_rlm.api.routers.ws.types import WorkspaceEvent
+from fleet_rlm.api.routers.ws.stream import (
+    WorkspaceEvent,
+    build_execution_completion_summary,
+)
 from tests.ui.fixtures_ui import ts
 
 
