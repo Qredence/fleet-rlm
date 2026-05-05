@@ -208,7 +208,35 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     }
 
 
-async def build_chat_agent_context(runtime: PreparedChatRuntime):
+class _ManagedAgentContext:
+    """Wraps an agent so interpreter lifecycle is owned by InterpreterPool."""
+
+    def __init__(
+        self,
+        agent: Any,
+        interpreter: Any | None,
+        pool: Any,
+    ) -> None:
+        self._agent = agent
+        self._interpreter = interpreter
+        self._pool = pool
+
+    async def __aenter__(self) -> Any:
+        return self._agent
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> bool:
+        if self._interpreter is not None:
+            self._agent.interpreter = None
+            await self._pool.release(self._interpreter)
+        return False
+
+
+async def build_chat_agent_context(runtime: PreparedChatRuntime) -> Any:
     kwargs = _chat_agent_builder_kwargs(runtime)
     from .interpreter_pool import InterpreterPool
 
@@ -216,7 +244,12 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime):
     interpreter = await pool.acquire(runtime.cfg)
     if interpreter is not None:
         kwargs["interpreter"] = interpreter
-    return build_chat_agent(**kwargs)
+    try:
+        agent = build_chat_agent(**kwargs)
+    except Exception:
+        await pool.release(interpreter)
+        raise
+    return _ManagedAgentContext(agent, interpreter, pool)
 
 
 def new_chat_session_state(
