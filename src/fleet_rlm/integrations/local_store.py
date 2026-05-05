@@ -8,11 +8,13 @@ best-effort persistence.
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import json
 import os
 import tempfile
-from collections.abc import Iterator
+import uuid
+from collections.abc import Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +23,70 @@ from sqlalchemy import Column, Integer, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
+from fleet_rlm.integrations.database.models_enums import (
+    ChatSessionStatus as DbChatSessionStatus,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    ExternalTraceProvider as DbExternalTraceProvider,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    MembershipRole as DbMembershipRole,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    MemoryScope as DbMemoryScope,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    OptimizationRunStatus as DbOptimizationRunStatus,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    RunStatus as DbRunStatus,
+)
+from fleet_rlm.integrations.database.models_enums import (
+    TenantStatus as DbTenantStatus,
+)
+from fleet_rlm.integrations.database.models_memory import MemoryItem as DbMemoryItem
+from fleet_rlm.integrations.database.models_optimization import (
+    Dataset as DbDataset,
+)
+from fleet_rlm.integrations.database.models_optimization import (
+    DatasetExample as DbDatasetExample,
+)
+from fleet_rlm.integrations.database.models_optimization import (
+    EvaluationResult as DbEvaluationResult,
+)
+from fleet_rlm.integrations.database.models_optimization import (
+    OptimizationRun as DbOptimizationRun,
+)
+from fleet_rlm.integrations.database.models_optimization import (
+    PromptSnapshot as DbPromptSnapshot,
+)
+from fleet_rlm.integrations.database.models_runs import (
+    Artifact as DbArtifact,
+)
+from fleet_rlm.integrations.database.models_runs import (
+    ChatSession as DbChatSession,
+)
+from fleet_rlm.integrations.database.models_runs import (
+    ChatTurn as DbChatTurn,
+)
+from fleet_rlm.integrations.database.models_runs import (
+    Run as DbRun,
+)
+from fleet_rlm.integrations.database.models_runs import (
+    RunStep as DbRunStep,
+)
+from fleet_rlm.integrations.database.repository_chat import (
+    ArtifactCreateRequest,
+    RunCreateRequest,
+    RunStepCreateRequest,
+)
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+from fleet_rlm.integrations.database.repository_optimization import (
+    DatasetCreateRequest,
+    OptimizationRunCreateRequest,
+)
+from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
 from fleet_rlm.utils.time import utc_now as _utc_now
 
 _DEFAULT_DB_DIR = Path(".data")
@@ -955,3 +1021,569 @@ def export_session_as_dataset(session_id: int, module_slug: str) -> Dataset:
         turns=[(turn.user_message, turn.assistant_message) for turn in turns],
         title=f"Session {session_id}",
     )
+
+
+def _uuid_to_int(value: uuid.UUID | None) -> int | None:
+    """Convert a UUID to an integer for local-store primary-key lookup.
+
+    Local store uses auto-incrementing integer IDs.  When the protocol
+    passes a UUID that was created from an integer (``uuid.UUID(int=x)``)
+    we can recover the original value via ``value.int``.
+    """
+    if value is None:
+        return None
+    return value.int
+
+
+class LocalStore(PersistenceProtocol):
+    """SQLite-backed local persistence implementing the unified protocol.
+
+    This is a best-effort adapter that delegates to the module-level
+    synchronous local-store functions.  Methods that have no local-store
+    equivalent return sensible defaults or raise ``NotImplementedError``.
+    """
+
+    # ------------------------------------------------------------------
+    # Identity
+    # ------------------------------------------------------------------
+
+    async def upsert_identity(
+        self,
+        *,
+        entra_tenant_id: str,
+        entra_user_id: str,
+        email: str | None = None,
+        full_name: str | None = None,
+    ) -> IdentityUpsertResult:
+        return IdentityUpsertResult(
+            tenant_id=uuid.UUID(int=0),
+            user_id=uuid.UUID(int=0),
+            tenant_status=DbTenantStatus.ACTIVE,
+            membership_role=DbMembershipRole.MEMBER,
+            workspace_id=uuid.UUID(int=0),
+        )
+
+    async def resolve_workspace_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> uuid.UUID:
+        return workspace_id or tenant_id
+
+    # ------------------------------------------------------------------
+    # Session CRUD
+    # ------------------------------------------------------------------
+
+    async def list_chat_sessions(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+        search: str | None = None,
+        status: DbChatSessionStatus | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        model_name: str | None = None,
+        model_provider: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[DbChatSession], int]:
+        status_filter = SessionStatus(status.value) if status is not None else None
+        items, total = await asyncio.to_thread(
+            list_sessions,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+            search=search,
+            status=status_filter,
+            created_after=created_after,
+            created_before=created_before,
+            model_name=model_name,
+            model_provider=model_provider,
+            limit=limit,
+            offset=offset,
+        )
+        return cast(tuple[list[DbChatSession], int], (items, total))
+
+    async def get_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> DbChatSession | None:
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return None
+        result = await asyncio.to_thread(
+            get_chat_session,
+            session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
+        return cast(DbChatSession | None, result)
+
+    async def list_chat_turns(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[DbChatTurn], int]:
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return [], 0
+        items, total = await asyncio.to_thread(
+            get_turns_paginated,
+            session_id_int,
+            limit=limit,
+            offset=offset,
+        )
+        return cast(tuple[list[DbChatTurn], int], (items, total))
+
+    async def update_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+        title: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> DbChatSession | None:
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return None
+        result = await asyncio.to_thread(
+            update_chat_session,
+            session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+            title=title,
+            metadata_json=metadata_json,
+        )
+        return cast(DbChatSession | None, result)
+
+    async def archive_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> bool:
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return False
+        return await asyncio.to_thread(
+            archive_session,
+            session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
+
+    async def restore_chat_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> bool:
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return False
+        return await asyncio.to_thread(
+            restore_session,
+            session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
+
+    async def get_session_stats(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> dict[str, object] | None:
+        return None
+
+    # ------------------------------------------------------------------
+    # Runs / Steps
+    # ------------------------------------------------------------------
+
+    async def create_run(self, request: RunCreateRequest) -> DbRun:
+        raise NotImplementedError("LocalStore does not support run creation")
+
+    async def get_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbRun | None:
+        return None
+
+    async def get_run_steps_paginated(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[DbRunStep], int]:
+        return [], 0
+
+    async def append_step(self, request: RunStepCreateRequest) -> DbRunStep:
+        raise NotImplementedError("LocalStore does not support step append")
+
+    async def update_run_status(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        status: DbRunStatus,
+        error_json: dict | None = None,
+    ) -> DbRun | None:
+        return None
+
+    async def store_artifact(self, request: ArtifactCreateRequest) -> DbArtifact:
+        raise NotImplementedError("LocalStore does not support artifact storage")
+
+    # ------------------------------------------------------------------
+    # Memory
+    # ------------------------------------------------------------------
+
+    async def store_memory_item(self, request: MemoryItemCreateRequest) -> DbMemoryItem:
+        raise NotImplementedError("LocalStore does not support memory items")
+
+    async def list_memory_items_paginated(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        scope: DbMemoryScope | None = None,
+        scope_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[DbMemoryItem], int]:
+        return [], 0
+
+    # ------------------------------------------------------------------
+    # Traces
+    # ------------------------------------------------------------------
+
+    async def store_trace_feedback(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        trace_id: str,
+        is_correct: bool,
+        workspace_id: uuid.UUID | None = None,
+        reviewer_user_id: uuid.UUID | None = None,
+        comment: str | None = None,
+        expected_response: str | None = None,
+        provider: DbExternalTraceProvider = DbExternalTraceProvider.MLFLOW,
+        client_request_id: str | None = None,
+        run_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
+        turn_id: uuid.UUID | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> uuid.UUID:
+        return uuid.UUID(int=0)
+
+    async def store_rlm_trace(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        trace_id: str,
+        workspace_id: uuid.UUID | None = None,
+        run_step_id: uuid.UUID | None = None,
+        summary_text: str | None = None,
+        payload_json: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
+    ) -> uuid.UUID:
+        return uuid.UUID(int=0)
+
+    # ------------------------------------------------------------------
+    # Datasets
+    # ------------------------------------------------------------------
+
+    async def create_dataset(
+        self,
+        request: DatasetCreateRequest,
+        *,
+        examples: Sequence[dict[str, Any]] | None = None,
+    ) -> DbDataset:
+        result = await asyncio.to_thread(
+            create_dataset,
+            name=request.name,
+            row_count=request.row_count,
+            format=str(request.format.value) if request.format is not None else "jsonl",
+            uri=request.uri or "",
+            module_slug=request.module_slug,
+        )
+        return cast(DbDataset, result)
+
+    async def list_datasets(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        module_slug: str | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[DbDataset], int]:
+        items, total = await asyncio.to_thread(
+            list_datasets,
+            module_slug=module_slug,
+            limit=limit,
+            offset=offset,
+        )
+        return cast(tuple[list[DbDataset], int], (items, total))
+
+    async def get_dataset(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbDataset | None:
+        dataset_id_int = _uuid_to_int(dataset_id)
+        if dataset_id_int is None:
+            return None
+        result = await asyncio.to_thread(get_dataset, dataset_id_int)
+        return cast(DbDataset | None, result)
+
+    async def list_dataset_examples(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[list[DbDatasetExample], int]:
+        return [], 0
+
+    # ------------------------------------------------------------------
+    # Optimization runs
+    # ------------------------------------------------------------------
+
+    async def create_optimization_run(
+        self,
+        request: OptimizationRunCreateRequest,
+    ) -> DbOptimizationRun:
+        dataset_id_int = _uuid_to_int(request.dataset_id)
+        optimizer = OptimizerType.GEPA
+        try:
+            optimizer = OptimizerType(request.optimizer)
+        except ValueError:
+            pass
+        result = await asyncio.to_thread(
+            create_optimization_run,
+            program_spec=request.program_spec,
+            optimizer=optimizer,
+            dataset_id=dataset_id_int,
+            auto=request.auto or "light",
+            train_ratio=request.train_ratio,
+            module_slug=request.module_slug,
+            dataset_path=request.output_path,
+            metadata_json=dict(request.metadata_json),
+        )
+        return cast(DbOptimizationRun, result)
+
+    async def list_optimization_runs(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        status: DbOptimizationRunStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[DbOptimizationRun]:
+        local_status = None
+        if status is not None:
+            local_status = RunStatus(status.value)
+        items = await asyncio.to_thread(
+            list_optimization_runs,
+            status=local_status,
+            limit=limit,
+            offset=offset,
+        )
+        return cast(list[DbOptimizationRun], items)
+
+    async def get_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return None
+        result = await asyncio.to_thread(get_optimization_run, run_id_int)
+        return cast(DbOptimizationRun | None, result)
+
+    async def update_optimization_run_phase(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        phase: str,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return None
+        await asyncio.to_thread(
+            update_optimization_run_phase,
+            run_id_int,
+            phase=phase,
+        )
+        result = await asyncio.to_thread(get_optimization_run, run_id_int)
+        return cast(DbOptimizationRun | None, result)
+
+    async def complete_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        train_examples: int,
+        validation_examples: int,
+        validation_score: float | None = None,
+        output_path: str | None = None,
+        manifest_path: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return None
+        result = await asyncio.to_thread(
+            complete_optimization_run,
+            run_id_int,
+            train_examples=train_examples,
+            validation_examples=validation_examples,
+            validation_score=validation_score,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            metadata_json=metadata_json,
+        )
+        return cast(DbOptimizationRun | None, result)
+
+    async def fail_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        error: str,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return None
+        result = await asyncio.to_thread(
+            fail_optimization_run,
+            run_id_int,
+            error=error,
+        )
+        return cast(DbOptimizationRun | None, result)
+
+    async def recover_stale_optimization_runs(self) -> int:
+        return await asyncio.to_thread(recover_stale_optimization_runs)
+
+    async def save_evaluation_results(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        results: Sequence[dict[str, Any]],
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[DbEvaluationResult]:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return []
+        items = await asyncio.to_thread(
+            save_evaluation_results,
+            run_id_int,
+            list(results),
+        )
+        return cast(list[DbEvaluationResult], items)
+
+    async def get_evaluation_results(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[DbEvaluationResult], int]:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return [], 0
+        items, total = await asyncio.to_thread(
+            get_evaluation_results,
+            run_id_int,
+            limit=limit,
+            offset=offset,
+        )
+        return cast(tuple[list[DbEvaluationResult], int], (items, total))
+
+    async def save_prompt_snapshots(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        snapshots: Sequence[dict[str, Any]],
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[DbPromptSnapshot]:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return []
+        items = await asyncio.to_thread(
+            save_prompt_snapshots,
+            run_id_int,
+            list(snapshots),
+        )
+        return cast(list[DbPromptSnapshot], items)
+
+    async def get_prompt_snapshots(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[DbPromptSnapshot]:
+        run_id_int = _uuid_to_int(run_id)
+        if run_id_int is None:
+            return []
+        items = await asyncio.to_thread(get_prompt_snapshots, run_id_int)
+        return cast(list[DbPromptSnapshot], items)

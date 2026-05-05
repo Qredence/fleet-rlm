@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 
 from fleet_rlm.integrations.database.fleet_repository import FleetRepository
+from fleet_rlm.integrations.local_store import LocalStore
 from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
 
 # Expected method names based on router usage and the protocol definition.
@@ -102,3 +103,23 @@ def test_fleet_repository_implements_protocol() -> None:
 def test_fleet_repository_is_instance_of_protocol() -> None:
     """FleetRepository must pass isinstance check against PersistenceProtocol."""
     assert issubclass(FleetRepository, PersistenceProtocol)
+
+
+def test_local_store_implements_protocol() -> None:
+    """LocalStore must structurally implement PersistenceProtocol."""
+    missing: list[str] = []
+    for name in _EXPECTED_METHODS:
+        if not hasattr(LocalStore, name):
+            missing.append(name)
+    assert not missing, f"LocalStore missing protocol methods: {missing}"
+
+    for name in _EXPECTED_METHODS:
+        member = getattr(LocalStore, name)
+        assert inspect.iscoroutinefunction(member), (
+            f"LocalStore.{name} must be async to satisfy the protocol"
+        )
+
+
+def test_local_store_is_instance_of_protocol() -> None:
+    """LocalStore must pass isinstance check against PersistenceProtocol."""
+    assert issubclass(LocalStore, PersistenceProtocol)
