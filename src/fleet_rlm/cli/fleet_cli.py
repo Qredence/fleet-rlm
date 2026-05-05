@@ -95,7 +95,7 @@ def chat(
 ) -> None:
     """Start standalone in-process interactive terminal chat."""
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
-    from fleet_rlm.runtime.models.streaming import TraceMode
+    from fleet_rlm.runtime.schemas import TraceMode
 
     config = _require_config(
         error_message="Error: Config not initialized. Run via python -m fleet_rlm.cli"

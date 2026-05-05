@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from setuptools import setup
 from setuptools.command.build_py import build_py as _build_py
 from setuptools.command.sdist import sdist as _sdist
-
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _FRONTEND_DIR = _REPO_ROOT / "src" / "frontend"

@@ -43,9 +43,9 @@ def _mock_interpreter() -> MagicMock:
 
 def _build_module(interp: Any = None, **kwargs: Any) -> Any:
     """Build a RecursiveWorkspaceModule with mocked inner RLMs."""
-    from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+    from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
-    with patch("fleet_rlm.runtime.models.builders.create_runtime_rlm") as mock_create:
+    with patch("fleet_rlm.runtime.modules.workspace.create_runtime_rlm") as mock_create:
         mock_create.return_value = MagicMock(spec=dspy.Module)
         module = RecursiveWorkspaceModule(
             interpreter=interp or _mock_interpreter(),
@@ -63,7 +63,7 @@ def _build_module(interp: Any = None, **kwargs: Any) -> Any:
 
 class TestConstruction:
     def test_creates_five_sub_modules(self) -> None:
-        from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+        from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
         create_calls: list[dict[str, Any]] = []
 
@@ -72,7 +72,7 @@ class TestConstruction:
             return MagicMock(spec=dspy.Module)
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+            "fleet_rlm.runtime.modules.workspace.create_runtime_rlm",
             side_effect=_track_create,
         ):
             RecursiveWorkspaceModule(
@@ -775,7 +775,7 @@ class TestToolDiscovery:
 
 class TestRegistry:
     def test_recursive_workspace_in_module_registry(self) -> None:
-        from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+        from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
         assert "recursive_workspace" in RUNTIME_MODULE_REGISTRY
         defn = RUNTIME_MODULE_REGISTRY["recursive_workspace"]

@@ -22,7 +22,7 @@ def _build_terminal_chat_options(
     volume_name: str | None = None,
 ) -> TerminalChatOptions:
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions
-    from fleet_rlm.runtime.models.streaming import TraceMode
+    from fleet_rlm.runtime.schemas import TraceMode
 
     return TerminalChatOptions(
         docs_path=docs_path,

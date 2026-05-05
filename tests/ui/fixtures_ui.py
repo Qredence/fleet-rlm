@@ -15,7 +15,7 @@ except ImportError:
 
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 
 
 def ts(epoch: float = 1_234_567_890.0) -> datetime:

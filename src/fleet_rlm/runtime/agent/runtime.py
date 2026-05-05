@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
-from fleet_rlm.runtime.models.streaming import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 

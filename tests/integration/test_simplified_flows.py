@@ -27,7 +27,7 @@ from fleet_rlm.runtime.agent.persistence import (
     restore_history_from_volume,
 )
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
-from fleet_rlm.runtime.models.streaming import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 
 # ---------------------------------------------------------------------------
 # Shared helpers and fixtures

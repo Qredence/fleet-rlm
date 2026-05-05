@@ -125,7 +125,7 @@ def run_single_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
 
 def build_workspace_module(interpreter: Any) -> Any:
     """Create the shared RecursiveWorkspaceModule used for workspace benchmarks."""
-    from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+    from fleet_rlm.runtime.modules import RecursiveWorkspaceModule
 
     return RecursiveWorkspaceModule(
         interpreter=interpreter,
@@ -390,7 +390,7 @@ def _run_rlm_on_interpreter(
 
     This matches the paper's evaluation setup (depth=1, no child sandbox).
     """
-    from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+    from fleet_rlm.runtime.modules import build_recursive_subquery_rlm
 
     rlm = build_recursive_subquery_rlm(
         interpreter=interpreter,

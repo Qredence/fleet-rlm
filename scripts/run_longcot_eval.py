@@ -143,7 +143,7 @@ def _contains_infra_failure_text(text: str) -> bool:
 class _LocalEvidenceSink:
     """In-memory evidence sink for benchmark runs without a host repository.
 
-    Satisfies the :class:`~fleet_rlm.runtime.models.evidence.EvidenceSink`
+    Satisfies the :class:`~fleet_rlm.runtime.modules.evidence.EvidenceSink`
     protocol so ``RecursiveWorkspaceModule`` can persist cross-pass evidence
     even when the websocket session layer (and its Neon-backed bridge) is not
     present.
@@ -775,9 +775,10 @@ def run_rlm(
     else:
         print("MLflow not configured — traces will not be recorded")
 
-    from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
     from fleet_rlm.integrations.daytona.types import SandboxSpec
-    from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+
+    from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+    from fleet_rlm.runtime.modules import RecursiveWorkspaceModule
 
     # Each thread gets its own interpreter + module to avoid shared state issues.
     _thread_local = threading.local()

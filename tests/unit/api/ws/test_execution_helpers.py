@@ -23,7 +23,7 @@ from fleet_rlm.api.routers.ws.transport import (
 )
 from fleet_rlm.api.runtime_services.chat_runtime import SessionContext
 from fleet_rlm.api.schemas import WSMessage
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 from tests.ui.fixtures_ui import FakeChatAgent, ts
 
 

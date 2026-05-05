@@ -9,7 +9,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.runtime.models import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 from tests.ui.fixtures_ui import DelayedRepository, FakeChatAgent, ts
 
 

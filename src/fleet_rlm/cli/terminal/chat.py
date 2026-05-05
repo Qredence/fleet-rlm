@@ -24,7 +24,7 @@ from fleet_rlm.runtime.config import (
     get_planner_lm_from_env,
 )
 from fleet_rlm.runtime.factory import build_chat_agent
-from fleet_rlm.runtime.models import TraceMode
+from fleet_rlm.runtime.schemas import TraceMode
 
 from .commands import _normalize_trace_mode, handle_slash_command
 from .session_actions import (

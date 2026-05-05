@@ -22,18 +22,20 @@ from fleet_rlm.runtime.agent.signatures import (
     SummarizeLongDocument,
     VolumeFileTreeSignature,
 )
-from fleet_rlm.runtime.models.builders import (
-    ClarificationQuestionPlanningModule,
-    GroundedAnswerSynthesisModule,
-    MemoryActionPlanningModule,
-    MemoryMigrationPlanningModule,
-    MemoryStructureAuditPlanningModule,
-    RecursiveWorkspaceModule,
-    RLMVariableExecutionModule,
+from fleet_rlm.runtime.modules.factory import (
     RuntimeModuleBuildConfig,
     _create_configured_runtime_rlm,
     build_runtime_module_config,
 )
+from fleet_rlm.runtime.modules.grounded_answer import GroundedAnswerSynthesisModule
+from fleet_rlm.runtime.modules.memory import (
+    ClarificationQuestionPlanningModule,
+    MemoryActionPlanningModule,
+    MemoryMigrationPlanningModule,
+    MemoryStructureAuditPlanningModule,
+)
+from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
+from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
 
 class _RuntimeSignatureModule(dspy.Module):
@@ -260,3 +262,16 @@ def get_or_build_runtime_module(
     )
     cache[name] = module
     return module
+
+
+__all__ = [
+    "RUNTIME_MODULE_NAMES",
+    "RUNTIME_MODULE_REGISTRY",
+    "RuntimeModuleDefinition",
+    "_RuntimeModuleFactory",
+    "_RuntimeSignatureModule",
+    "_signature_runtime_module_class",
+    "build_runtime_module",
+    "get_or_build_runtime_module",
+    "runtime_module_class",
+]

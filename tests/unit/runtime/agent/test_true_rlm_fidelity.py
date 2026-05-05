@@ -47,14 +47,14 @@ class TestPromptAsVariable:
 
     def test_module_passes_prompt_to_inner_rlm(self):
         """RLMVariableExecutionModule.forward passes prompt to dspy.RLM."""
-        from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+        from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
         interp = _mock_interpreter()
         mock_rlm = MagicMock()
         mock_rlm.return_value = dspy.Prediction(answer="result")
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm",
             return_value=mock_rlm,
         ):
             module = RLMVariableExecutionModule(interpreter=interp)
@@ -65,12 +65,14 @@ class TestPromptAsVariable:
         assert result.answer == "result"
 
     def test_variable_mode_threshold(self):
-        from fleet_rlm.runtime.models.builders import VARIABLE_MODE_THRESHOLD
+        from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
 
         assert VARIABLE_MODE_THRESHOLD == 32_000
 
     def test_variable_mode_output_chars_limited(self):
-        from fleet_rlm.runtime.models.builders import VARIABLE_MODE_MAX_OUTPUT_CHARS
+        from fleet_rlm.runtime.modules.variable_mode import (
+            VARIABLE_MODE_MAX_OUTPUT_CHARS,
+        )
 
         # Should be much smaller than default 100K to force variable usage
         assert VARIABLE_MODE_MAX_OUTPUT_CHARS <= 10_000
@@ -113,12 +115,12 @@ class TestSubRLMRecursion:
 
     def test_sub_rlm_registered_as_tool(self):
         """RLMVariableExecutionModule includes sub_rlm in tools."""
-        from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+        from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
         interp = _mock_interpreter()
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm"
+            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm"
         ) as mock_create:
             mock_create.return_value = MagicMock(spec=dspy.Module)
             RLMVariableExecutionModule(interpreter=interp)
@@ -191,7 +193,7 @@ class TestAutoRouting:
     """Verify long prompts auto-route to variable-mode RLM."""
 
     def test_registry_long_doc_modules_variable_mode(self):
-        from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+        from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
         variable_mode_names = {
             name for name, defn in RUNTIME_MODULE_REGISTRY.items() if defn.variable_mode
@@ -210,14 +212,14 @@ class TestLongContext:
 
     def test_million_char_prompt_accepted(self):
         """1M char prompt is accepted by RLMVariableExecutionModule."""
-        from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+        from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
         interp = _mock_interpreter()
         mock_rlm = MagicMock()
         mock_rlm.return_value = dspy.Prediction(answer="processed 1M chars")
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm",
             return_value=mock_rlm,
         ):
             module = RLMVariableExecutionModule(interpreter=interp)
@@ -231,7 +233,7 @@ class TestLongContext:
 
     def test_variable_mode_with_extra_tools(self):
         """Extra tools are passed through to dspy.RLM."""
-        from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+        from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
         interp = _mock_interpreter()
 
@@ -239,7 +241,7 @@ class TestLongContext:
             return x.upper()
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm"
+            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm"
         ) as mock_create:
             mock_create.return_value = MagicMock(spec=dspy.Module)
             RLMVariableExecutionModule(interpreter=interp, extra_tools=[custom_tool])

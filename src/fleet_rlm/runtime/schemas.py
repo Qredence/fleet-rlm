@@ -1,4 +1,10 @@
-"""Pydantic models used by the interactive coding CLI runtime."""
+"""Pydantic/dataclass DTOs used by the runtime streaming and CLI layers.
+
+This module contains pure data-transfer objects — no DSPy modules, no business
+logic, no side effects. It is the canonical import path for runtime schemas;
+the legacy ``runtime.models.streaming`` re-exports from here for backward
+compatibility.
+"""
 
 from __future__ import annotations
 
@@ -178,3 +184,15 @@ class TurnState:
             self.history_turns = int(
                 event.payload.get("history_turns", self.history_turns)
             )
+
+
+__all__ = [
+    "CommandResult",
+    "ProfileConfig",
+    "SessionConfig",
+    "StreamEvent",
+    "StreamEventKind",
+    "TraceMode",
+    "TranscriptEvent",
+    "TurnState",
+]

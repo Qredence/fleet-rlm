@@ -23,7 +23,7 @@ from unittest.mock import Mock
 
 import dspy
 
-from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 
 logger = logging.getLogger(__name__)
 

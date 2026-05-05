@@ -24,7 +24,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 from fleet_rlm.runtime.content.preview import head_tail_preview
-from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 logger = logging.getLogger(__name__)
