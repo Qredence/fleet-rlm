@@ -69,9 +69,7 @@ class SandboxService:
                 ),
                 allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
-        except _DAYTONA_NOT_FOUND_ERRORS as exc:
-            raise _map_daytona_error(exc) from exc
-        except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
 
     async def get_sandbox_detail(
@@ -92,9 +90,7 @@ class SandboxService:
                 ),
                 allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
-        except _DAYTONA_NOT_FOUND_ERRORS as exc:
-            raise _map_daytona_error(exc) from exc
-        except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
 
     async def delete_sandbox(
@@ -115,9 +111,7 @@ class SandboxService:
                 ),
                 allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
-        except _DAYTONA_NOT_FOUND_ERRORS as exc:
-            raise _map_daytona_error(exc) from exc
-        except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
 
     async def archive_sandbox(
@@ -138,8 +132,6 @@ class SandboxService:
                 ),
                 allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
-        except _DAYTONA_NOT_FOUND_ERRORS as exc:
-            raise _map_daytona_error(exc) from exc
-        except _DAYTONA_UNAVAILABLE_ERRORS as exc:
+        except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
         return SandboxArchiveResponse()
