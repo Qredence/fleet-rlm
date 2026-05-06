@@ -11,6 +11,7 @@ from .config import initialize_app_config, split_hydra_overrides
 
 if TYPE_CHECKING:
     from fleet_rlm.integrations.config.env import AppConfig
+
     from .terminal.chat import TerminalChatOptions
 
 
@@ -21,7 +22,7 @@ def _build_terminal_chat_options(
     volume_name: str | None = None,
 ) -> TerminalChatOptions:
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions
-    from fleet_rlm.runtime.models.streaming import TraceMode
+    from fleet_rlm.runtime.schemas import TraceMode
 
     return TerminalChatOptions(
         docs_path=docs_path,

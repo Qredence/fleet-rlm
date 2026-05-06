@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -71,17 +71,13 @@ class _PatchSessionRepository:
         self.session.updated_at = datetime.now(timezone.utc)
         return self.session
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
@@ -126,9 +122,7 @@ def test_patch_session_metadata(default_client, auth_headers, patch_session_repo
     assert patch_session_repo.session.metadata_json == new_metadata
 
 
-def test_patch_session_title_and_metadata(
-    default_client, auth_headers, patch_session_repo
-):
+def test_patch_session_title_and_metadata(default_client, auth_headers, patch_session_repo):
     new_metadata = {"tags": ["updated"]}
     response = default_client.patch(
         f"/api/v1/sessions/{patch_session_repo.session.id}",
@@ -157,18 +151,30 @@ def test_patch_session_local_store_preserves_metadata(
     tmp_path: Path,
 ):
     """PATCH with metadata_json passes the parameter to local-store update_chat_session."""
+    import asyncio
+
     from fleet_rlm.integrations import local_store
+    from fleet_rlm.integrations.local_store import LocalStore
 
     db_path = tmp_path / "local.db"
     monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
     local_store._engines.clear()
     default_client.app.state.server_state.repository = None
 
-    # Create a local session matching the auth headers tenant/user
+    # Resolve the deterministic identity UUIDs that LocalStore returns for these claims
+    store = LocalStore()
+    identity = asyncio.run(
+        store.upsert_identity(
+            entra_tenant_id="tenant-a",
+            entra_user_id="user-a",
+        )
+    )
+
+    # Create a local session matching the resolved identity UUIDs
     session = local_store.create_session(
         title="Local Session",
-        owner_tenant="tenant-a",
-        owner_user="user-a",
+        owner_tenant=str(identity.tenant_id),
+        owner_user=str(identity.user_id),
     )
 
     call_kwargs: dict[str, object] = {}

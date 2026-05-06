@@ -33,9 +33,7 @@ def run_long_context_action(session: Any, arg_text: str) -> None:
 def print_status(session: Any, agent: Any) -> None:
     """Print the current session and agent status."""
     has_model = bool(os.environ.get("DSPY_LM_MODEL"))
-    has_api_key = bool(
-        os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
-    )
+    has_api_key = bool(os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY"))
     llm_ready = has_model and has_api_key
 
     try:
@@ -75,16 +73,8 @@ def print_status(session: Any, agent: Any) -> None:
         "[green]ok[/]",
         f"loaded={docs_loaded}, active={active_alias or 'none'}",
     )
-    allowed = sorted(
-        command
-        for command, policy in session.command_permissions.items()
-        if policy == "allow"
-    )
-    denied = sorted(
-        command
-        for command, policy in session.command_permissions.items()
-        if policy == "deny"
-    )
+    allowed = sorted(command for command, policy in session.command_permissions.items() if policy == "allow")
+    denied = sorted(command for command, policy in session.command_permissions.items() if policy == "deny")
     table.add_row(
         "Permissions",
         "[green]ok[/]",
@@ -132,9 +122,6 @@ def authorize_command(session: Any, *, command: str) -> bool:
 def show_shortcuts(session: Any) -> None:
     session._append_transcript(
         "status",
-        (
-            "Shortcuts: / opens command palette - @ mentions files - "
-            "Ctrl+C interrupts - /trace compact|verbose|off"
-        ),
+        ("Shortcuts: / opens command palette - @ mentions files - Ctrl+C interrupts - /trace compact|verbose|off"),
     )
     session._render_shell()

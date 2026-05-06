@@ -100,9 +100,7 @@ class GEPAModuleInfo(BaseModel):
         description="Human-readable description of what this module optimizes.",
     )
     program_spec: str = Field(description="DSPy program specification string.")
-    required_dataset_keys: list[str] = Field(
-        description="Dataset keys required for this module's examples."
-    )
+    required_dataset_keys: list[str] = Field(description="Dataset keys required for this module's examples.")
 
 
 class GEPAStatusResponse(BaseModel):
@@ -144,46 +142,24 @@ class OptimizationRunResponse(BaseModel):
 
     id: str = Field(description="Unique run identifier.")
     status: str = Field(description="Run status: running, completed, or failed.")
-    module_slug: str | None = Field(
-        default=None, description="Module slug when server-side dispatch was used."
-    )
-    program_spec: str = Field(
-        description="DSPy program specification that was optimized."
-    )
+    module_slug: str | None = Field(default=None, description="Module slug when server-side dispatch was used.")
+    program_spec: str = Field(description="DSPy program specification that was optimized.")
     optimizer: str = Field(description="Optimizer backend that was used.")
-    auto: str | None = Field(
-        default="light", description="Optimization intensity level."
-    )
+    auto: str | None = Field(default="light", description="Optimization intensity level.")
     train_ratio: float = Field(default=0.8, description="Train/validation split ratio.")
-    dataset_path: str | None = Field(
-        default=None, description="Path to the dataset used."
-    )
-    train_examples: int | None = Field(
-        default=None, description="Number of training examples used."
-    )
-    validation_examples: int | None = Field(
-        default=None, description="Number of validation examples used."
-    )
-    validation_score: float | None = Field(
-        default=None, description="Validation score from the optimized program."
-    )
+    dataset_path: str | None = Field(default=None, description="Path to the dataset used.")
+    train_examples: int | None = Field(default=None, description="Number of training examples used.")
+    validation_examples: int | None = Field(default=None, description="Number of validation examples used.")
+    validation_score: float | None = Field(default=None, description="Validation score from the optimized program.")
     output_path: str | None = Field(
         default=None,
         description="Filesystem path where the optimized program was saved.",
     )
-    manifest_path: str | None = Field(
-        default=None, description="Filesystem path to the optimization manifest."
-    )
-    error: str | None = Field(
-        default=None, description="Error message when the run failed."
-    )
-    phase: str | None = Field(
-        default=None, description="Current phase of the optimization run."
-    )
+    manifest_path: str | None = Field(default=None, description="Filesystem path to the optimization manifest.")
+    error: str | None = Field(default=None, description="Error message when the run failed.")
+    phase: str | None = Field(default=None, description="Current phase of the optimization run.")
     started_at: str = Field(description="ISO timestamp when the run started.")
-    completed_at: str | None = Field(
-        default=None, description="ISO timestamp when the run completed."
-    )
+    completed_at: str | None = Field(default=None, description="ISO timestamp when the run completed.")
 
 
 class OptimizationRunCreatedResponse(BaseModel):
@@ -200,9 +176,7 @@ class DatasetResponse(BaseModel):
     name: str = Field(description="Human-readable dataset name.")
     row_count: int = Field(description="Number of rows/examples in the dataset.")
     format: str = Field(description="File format (json or jsonl).")
-    module_slug: str | None = Field(
-        default=None, description="Associated module slug, when provided."
-    )
+    module_slug: str | None = Field(default=None, description="Associated module slug, when provided.")
     created_at: str = Field(description="ISO-8601 creation timestamp.")
 
 
@@ -219,9 +193,7 @@ class DatasetListResponse(BaseModel):
 class DatasetDetailResponse(DatasetResponse):
     """Dataset metadata with sample rows and URI."""
 
-    sample_rows: list[dict[str, Any]] = Field(
-        description="First rows from the dataset as preview."
-    )
+    sample_rows: list[dict[str, Any]] = Field(description="First rows from the dataset as preview.")
     uri: str = Field(description="Filesystem path to the dataset file.")
 
 
@@ -231,12 +203,8 @@ class EvaluationResultItem(BaseModel):
     id: str = Field(description="Unique evaluation result identifier.")
     example_index: int = Field(description="Zero-based index in the dataset.")
     input_data: str = Field(description="JSON-serialized input fields.")
-    expected_output: str | None = Field(
-        default=None, description="Expected/gold output."
-    )
-    predicted_output: str | None = Field(
-        default=None, description="Model predicted output."
-    )
+    expected_output: str | None = Field(default=None, description="Expected/gold output.")
+    predicted_output: str | None = Field(default=None, description="Model predicted output.")
     score: float = Field(description="Score for this example (0.0-1.0).")
 
 
@@ -263,12 +231,8 @@ class RunComparisonItem(BaseModel):
 
     run_id: str = Field(description="Optimization run identifier.")
     program_spec: str = Field(description="DSPy program specification optimized.")
-    validation_score: float | None = Field(
-        default=None, description="Validation score from the run."
-    )
-    prompt_snapshots: list[PromptSnapshotItem] = Field(
-        description="Before/after prompt snapshots for this run."
-    )
+    validation_score: float | None = Field(default=None, description="Validation score from the run.")
+    prompt_snapshots: list[PromptSnapshotItem] = Field(description="Before/after prompt snapshots for this run.")
 
 
 class RunComparisonResponse(BaseModel):

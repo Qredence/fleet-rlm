@@ -56,25 +56,17 @@ class MemoryItem(Base):
         Index("ix_memory_items_tags", "tags", postgresql_using="gin"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    session_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
-    scope: Mapped[MemoryScope] = mapped_column(
-        _pg_enum(MemoryScope, name="memory_scope"), nullable=False
-    )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    scope: Mapped[MemoryScope] = mapped_column(_pg_enum(MemoryScope, name="memory_scope"), nullable=False)
     scope_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    kind: Mapped[MemoryKind] = mapped_column(
-        _pg_enum(MemoryKind, name="memory_kind"), nullable=False
-    )
+    kind: Mapped[MemoryKind] = mapped_column(_pg_enum(MemoryKind, name="memory_kind"), nullable=False)
     status: Mapped[MemoryStatus] = mapped_column(
         _pg_enum(MemoryStatus, name="memory_status"),
         nullable=False,
@@ -83,21 +75,11 @@ class MemoryItem(Base):
     uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    provenance_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    source: Mapped[MemorySource] = mapped_column(
-        _pg_enum(MemorySource, name="memory_source"), nullable=False
-    )
-    importance: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, server_default=text("0")
-    )
-    tags: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    provenance_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    source: Mapped[MemorySource] = mapped_column(_pg_enum(MemorySource, name="memory_source"), nullable=False)
+    importance: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -137,23 +119,15 @@ class MemoryLink(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    source_memory_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
-    )
+    source_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     target_kind: Mapped[str] = mapped_column(String(64), nullable=False)
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     link_type: Mapped[str] = mapped_column(String(128), nullable=False)
     weight: Mapped[float] = mapped_column(nullable=False, server_default=text("1.0"))
-    metadata_json: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

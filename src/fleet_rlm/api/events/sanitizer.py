@@ -10,6 +10,8 @@ from fleet_rlm.runtime.content.execution_limits import (
     DEFAULT_MAX_TEXT_CHARS,
     execution_max_collection_items,
     execution_max_recursion_depth,
+)
+from fleet_rlm.runtime.content.execution_limits import (
     execution_max_text_chars as _execution_max_text_chars,
 )
 
@@ -90,17 +92,12 @@ def _sanitize_event_payload(value: Any, *, depth: int, limits: _SanitizeLimits) 
             if _looks_sensitive_key(key_str):
                 sanitized[key_str] = "<redacted>"
             else:
-                sanitized[key_str] = _sanitize_event_payload(
-                    raw, depth=depth + 1, limits=limits
-                )
+                sanitized[key_str] = _sanitize_event_payload(raw, depth=depth + 1, limits=limits)
         return sanitized
     if isinstance(value, (list, tuple, set)):
         sequence = list(value)
         max_items = limits.max_collection_items
-        limited = [
-            _sanitize_event_payload(item, depth=depth + 1, limits=limits)
-            for item in sequence[:max_items]
-        ]
+        limited = [_sanitize_event_payload(item, depth=depth + 1, limits=limits) for item in sequence[:max_items]]
         if len(sequence) > max_items:
             limited.append(f"<truncated:{len(sequence) - max_items}>")
         return limited

@@ -8,8 +8,7 @@ from collections.abc import Mapping
 
 import jwt
 from fastapi import Request, WebSocket
-from jwt import InvalidTokenError
-from jwt import PyJWKClient
+from jwt import InvalidTokenError, PyJWKClient
 
 from .base import AuthError
 from .types import NormalizedIdentity
@@ -36,11 +35,7 @@ class EntraAuthProvider:
         self.allowed_user_ids = allowed_user_ids or set()
         self.allowed_group_ids = allowed_group_ids or set()
         self._allow_query_auth_tokens = allow_query_auth_tokens
-        self._jwk_client = (
-            PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=300)
-            if jwks_url
-            else None
-        )
+        self._jwk_client = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=300) if jwks_url else None
 
     async def authenticate_http(self, request: Request) -> NormalizedIdentity:
         return await self._authenticate(dict(request.headers))
@@ -100,8 +95,7 @@ class EntraAuthProvider:
         if not self.issuer_template:
             if not self.issuer_url:
                 raise AuthError(
-                    "AUTH_MODE=entra requires ENTRA_ISSUER_URL or "
-                    "ENTRA_ISSUER_TEMPLATE to be configured.",
+                    "AUTH_MODE=entra requires ENTRA_ISSUER_URL or ENTRA_ISSUER_TEMPLATE to be configured.",
                     status_code=503,
                 )
         if self.issuer_url and "{tenantid}" in self.issuer_url:
@@ -109,11 +103,7 @@ class EntraAuthProvider:
                 "ENTRA_ISSUER_URL must be a fixed issuer URL, not a template.",
                 status_code=503,
             )
-        if (
-            self.issuer_url is None
-            and self.issuer_template is not None
-            and "{tenantid}" not in self.issuer_template
-        ):
+        if self.issuer_url is None and self.issuer_template is not None and "{tenantid}" not in self.issuer_template:
             raise AuthError(
                 "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder; "
                 "use ENTRA_ISSUER_URL for single-tenant mode.",
@@ -144,9 +134,7 @@ class EntraAuthProvider:
             if not tenant_claim:
                 raise AuthError("Missing tid claim", status_code=401)
             expected_issuer = self._resolve_expected_issuer(tenant_claim)
-            signing_key = await asyncio.to_thread(
-                self._jwk_client.get_signing_key_from_jwt, token
-            )
+            signing_key = await asyncio.to_thread(self._jwk_client.get_signing_key_from_jwt, token)
             claims = jwt.decode(
                 token,
                 signing_key.key,
@@ -161,9 +149,7 @@ class EntraAuthProvider:
         except InvalidTokenError as exc:
             raise AuthError(f"Invalid Entra token: {exc}", status_code=401) from exc
         except Exception as exc:  # pragma: no cover - network/JWKS edge cases
-            logging.warning(
-                "Unexpected error during Entra token validation", exc_info=True
-            )
+            logging.warning("Unexpected error during Entra token validation", exc_info=True)
             raise AuthError(
                 f"Failed to validate Entra token: {exc}",
                 status_code=503,
@@ -180,9 +166,7 @@ class EntraAuthProvider:
         if not self.allowed_user_ids and not self.allowed_group_ids:
             return
 
-        user_claim = (
-            str(claims.get("oid", "")).strip() or str(claims.get("sub", "")).strip()
-        )
+        user_claim = str(claims.get("oid", "")).strip() or str(claims.get("sub", "")).strip()
         user_allowed = user_claim in self.allowed_user_ids if user_claim else False
         if user_allowed:
             return
@@ -194,8 +178,7 @@ class EntraAuthProvider:
         )
         if has_group_overage and self.allowed_group_ids:
             raise AuthError(
-                "Entra token omitted groups due to overage; "
-                "allowed_group_ids cannot be evaluated from this token.",
+                "Entra token omitted groups due to overage; allowed_group_ids cannot be evaluated from this token.",
                 status_code=403,
             )
         groups = (

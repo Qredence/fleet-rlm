@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 import dspy
 from dspy.streaming.messages import StatusMessageProvider
 
-from fleet_rlm.runtime.execution.preview import head_tail_preview
-from fleet_rlm.runtime.models.streaming import StreamEvent
+from fleet_rlm.runtime.content.preview import head_tail_preview
+from fleet_rlm.runtime.schemas import StreamEvent
 
 # Soft content cap for trajectory step outputs crossing the websocket boundary.
 # Individual steps can carry multi-KB observations (grep hits, long file reads)
@@ -81,9 +81,7 @@ def parse_tool_result_status(message: str) -> str | None:
     return None
 
 
-def parse_tool_result_payload(
-    message: str, *, tool_name: str | None
-) -> dict[str, Any] | None:
+def parse_tool_result_payload(message: str, *, tool_name: str | None) -> dict[str, Any] | None:
     stripped = message.strip()
     if stripped != "Tool finished." and not stripped.startswith("Tool result:"):
         return None
@@ -204,13 +202,8 @@ def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, An
 
     final_output = output if output is not None else observation
     if final_output is not None:
-        if (
-            isinstance(final_output, str)
-            and len(final_output) > _TRAJECTORY_OUTPUT_CONTENT_CHARS
-        ):
-            preview, full_len = head_tail_preview(
-                final_output, max_chars=_TRAJECTORY_OUTPUT_CONTENT_CHARS
-            )
+        if isinstance(final_output, str) and len(final_output) > _TRAJECTORY_OUTPUT_CONTENT_CHARS:
+            preview, full_len = head_tail_preview(final_output, max_chars=_TRAJECTORY_OUTPUT_CONTENT_CHARS)
             step["output"] = preview
             step["observation"] = preview
             step["output_truncated"] = True
@@ -231,9 +224,7 @@ def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     if "trajectory" in raw and isinstance(raw["trajectory"], list):
         return raw["trajectory"]
 
-    return [
-        _build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)
-    ]
+    return [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
 
 
 def _as_text(value: Any) -> str | None:
@@ -295,9 +286,7 @@ def _normalize_citation_entry(item: Any, *, index: int) -> dict[str, Any] | None
     if not isinstance(item, dict):
         return None
 
-    url = _sanitize_external_url(
-        item.get("url") or item.get("source_url") or item.get("canonical_url")
-    )
+    url = _sanitize_external_url(item.get("url") or item.get("source_url") or item.get("canonical_url"))
     if not url:
         return None
 
@@ -453,16 +442,12 @@ def _collect_attachment_candidates(
             candidates.extend(item for item in raw if isinstance(item, dict))
     raw_from_trajectory = trajectory.get("attachments")
     if isinstance(raw_from_trajectory, list):
-        candidates.extend(
-            item for item in raw_from_trajectory if isinstance(item, dict)
-        )
+        candidates.extend(item for item in raw_from_trajectory if isinstance(item, dict))
     return candidates
 
 
 def _normalize_attachment_entry(item: dict[str, Any], index: int) -> dict[str, Any]:
-    attachment_id = (
-        _as_text(item.get("attachment_id") or item.get("id")) or f"att-{index + 1}"
-    )
+    attachment_id = _as_text(item.get("attachment_id") or item.get("id")) or f"att-{index + 1}"
     return {
         "attachment_id": attachment_id,
         "name": _as_text(item.get("name") or item.get("title")) or "Attachment",
@@ -470,9 +455,7 @@ def _normalize_attachment_entry(item: dict[str, Any], index: int) -> dict[str, A
         "preview_url": _sanitize_external_url(item.get("preview_url")),
         "mime_type": _as_text(item.get("mime_type") or item.get("mimeType")),
         "media_type": _as_text(item.get("media_type") or item.get("mediaType")),
-        "size_bytes": item.get("size_bytes")
-        if isinstance(item.get("size_bytes"), int)
-        else None,
+        "size_bytes": item.get("size_bytes") if isinstance(item.get("size_bytes"), int) else None,
         "kind": _as_text(item.get("kind")),
         "description": _as_text(item.get("description")),
     }
@@ -489,9 +472,7 @@ def _extract_final_attachments(
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
     for idx, item in enumerate(candidates):
-        attachment_id = (
-            _as_text(item.get("attachment_id") or item.get("id")) or f"att-{idx + 1}"
-        )
+        attachment_id = _as_text(item.get("attachment_id") or item.get("id")) or f"att-{idx + 1}"
         if attachment_id in seen:
             continue
         seen.add(attachment_id)
@@ -541,9 +522,7 @@ def _build_human_review_payload(
     if not repair_steps:
         raw_steps = recursive_repair.get("repair_steps")
         if isinstance(raw_steps, list):
-            repair_steps = [
-                item for item in (_as_text(entry) for entry in raw_steps) if item
-            ]
+            repair_steps = [item for item in (_as_text(entry) for entry in raw_steps) if item]
 
     reason = (
         _prediction_text(final_prediction, "final_reasoning")
@@ -572,13 +551,9 @@ def _build_final_payload(
     fallback_error_type: str | None = None,
     effective_max_iters: int | None = None,
 ) -> dict[str, Any]:
-    citations = _extract_final_citations(
-        final_prediction=final_prediction, trajectory=trajectory
-    )
+    citations = _extract_final_citations(final_prediction=final_prediction, trajectory=trajectory)
     sources = _build_sources_from_citations(citations)
-    attachments = _extract_final_attachments(
-        final_prediction=final_prediction, trajectory=trajectory
-    )
+    attachments = _extract_final_attachments(final_prediction=final_prediction, trajectory=trajectory)
     citation_anchors = [
         {
             "anchor_id": citation.get("anchor_id") or f"anchor-{idx + 1}",

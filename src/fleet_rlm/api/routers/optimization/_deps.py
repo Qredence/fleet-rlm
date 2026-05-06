@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -16,10 +15,10 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from ...dependencies import (
+    ConfigDepsDep,
     HTTPIdentityDep,
     PersistedIdentityDep,
-    RepositoryDep,
-    ServerStateDep,
+    PersistenceDep,
     resolve_persisted_identity,
 )
 from ...schemas.optimization import (
@@ -32,16 +31,16 @@ _resolve_persisted_identity = resolve_persisted_identity
 
 __all__ = [
     "AUTH_ERROR_RESPONSES",
-    "DatasetResponse",
-    "HTTPIdentityDep",
-    "OptimizationContext",
-    "OptimizationRunResponse",
     "OPTIMIZATION_DATA_ROOT",
     "OPTIMIZATION_TIMEOUT_SECONDS",
+    "ConfigDepsDep",
+    "DatasetResponse",
+    "HTTPIdentityDep",
     "OpenAPIResponses",
+    "OptimizationContext",
+    "OptimizationRunResponse",
     "PersistedIdentityDep",
-    "RepositoryDep",
-    "ServerStateDep",
+    "PersistenceDep",
     "_resolve_persisted_identity",
 ]
 
@@ -50,9 +49,7 @@ logger = logging.getLogger(__name__)
 OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
 }
 
 
@@ -73,9 +70,7 @@ def _resolve_optimization_timeout_seconds() -> int:
 
 OPTIMIZATION_TIMEOUT_SECONDS = _resolve_optimization_timeout_seconds()
 
-OPTIMIZATION_DATA_ROOT = Path(
-    os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())
-).resolve()
+OPTIMIZATION_DATA_ROOT = Path(os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +99,10 @@ class OptimizationContext:
 def _parse_uuid_id(value: str, *, detail: str) -> uuid.UUID:
     try:
         return uuid.UUID(value)
+    except ValueError:
+        pass
+    try:
+        return uuid.UUID(int=int(value))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=detail) from exc
 
@@ -138,9 +137,7 @@ def _dataset_row_from_example(example: Any, output_key: str | None) -> dict[str,
 def _require_workspace_id(identity: IdentityUpsertResult) -> uuid.UUID:
     workspace_id = identity.workspace_id
     if workspace_id is None:
-        raise HTTPException(
-            status_code=503, detail="Workspace persistence is unavailable."
-        )
+        raise HTTPException(status_code=503, detail="Workspace persistence is unavailable.")
     return workspace_id
 
 
@@ -155,9 +152,7 @@ def _resolve_relative_dataset_lookup(relative_path: str) -> str:
 
     parts = normalized.parts
     if not parts or any(part in {"", ".", ".."} for part in parts):
-        raise HTTPException(
-            status_code=400, detail="Path escapes the allowed data directory."
-        )
+        raise HTTPException(status_code=400, detail="Path escapes the allowed data directory.")
     return normalized.as_posix()
 
 
@@ -216,53 +211,29 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
 async def _resolve_dataset_request(
     request: Any,
     *,
-    repository: RepositoryDep = None,
-    persisted_identity: IdentityUpsertResult | None = None,
+    persistence: PersistenceDep,
+    persisted_identity: IdentityUpsertResult,
 ) -> tuple[Path, str]:
     """Resolve a dataset request into an executable path and stored reference."""
     if request.dataset_id is not None:
-        if repository is not None and persisted_identity is not None:
-            dataset_row = await repository.get_dataset(
-                tenant_id=persisted_identity.tenant_id,
-                dataset_id=_parse_uuid_id(
-                    request.dataset_id,
-                    detail=f"Dataset {request.dataset_id} not found.",
-                ),
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
-            )
-            if dataset_row is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset {request.dataset_id} not found.",
-                )
-            if not dataset_row.uri:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset file not found for dataset {request.dataset_id}.",
-                )
-            dataset = Path(dataset_row.uri).resolve()
-            if not dataset.exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset file not found for dataset {request.dataset_id}.",
-                )
-            return dataset, dataset_row.uri
-
-        from fleet_rlm.integrations.local_store import get_dataset
-
-        try:
-            legacy_dataset_id = int(request.dataset_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
+        dataset_row = await persistence.get_dataset(
+            tenant_id=persisted_identity.tenant_id,
+            dataset_id=_parse_uuid_id(
+                request.dataset_id,
                 detail=f"Dataset {request.dataset_id} not found.",
-            ) from exc
-        dataset_row = await asyncio.to_thread(get_dataset, legacy_dataset_id)
+            ),
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
         if dataset_row is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"Dataset {request.dataset_id} not found.",
+            )
+        if not dataset_row.uri:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset file not found for dataset {request.dataset_id}.",
             )
         dataset = Path(dataset_row.uri).resolve()
         if not dataset.exists():
@@ -270,15 +241,13 @@ async def _resolve_dataset_request(
                 status_code=400,
                 detail=f"Dataset file not found for dataset {request.dataset_id}.",
             )
-        return dataset, str(dataset)
+        return dataset, dataset_row.uri
 
     dataset_path = (request.dataset_path or "").strip()
     dataset_lookup = _resolve_relative_dataset_lookup(dataset_path)
     dataset = _find_dataset_under_root(OPTIMIZATION_DATA_ROOT, dataset_lookup)
     if dataset is None:
-        raise HTTPException(
-            status_code=400, detail=f"Dataset file not found: {dataset_path}"
-        )
+        raise HTTPException(status_code=400, detail=f"Dataset file not found: {dataset_path}")
     return dataset, dataset_lookup
 
 
@@ -293,16 +262,12 @@ def _db_run_to_response(row: Any) -> OptimizationRunResponse:
     return OptimizationRunResponse(
         id=str(row.id),
         status=row.status.value if hasattr(row.status, "value") else str(row.status),
-        module_slug=getattr(row, "module_slug", None)
-        or _extract_metadata_str(metadata, "module_slug"),
+        module_slug=getattr(row, "module_slug", None) or _extract_metadata_str(metadata, "module_slug"),
         program_spec=row.program_spec,
-        optimizer=row.optimizer.value
-        if hasattr(row.optimizer, "value")
-        else str(row.optimizer),
+        optimizer=row.optimizer.value if hasattr(row.optimizer, "value") else str(row.optimizer),
         auto=row.auto,
         train_ratio=row.train_ratio,
-        dataset_path=getattr(row, "dataset_path", None)
-        or _extract_metadata_str(metadata, "dataset_path"),
+        dataset_path=getattr(row, "dataset_path", None) or _extract_metadata_str(metadata, "dataset_path"),
         train_examples=row.train_examples,
         validation_examples=row.validation_examples,
         validation_score=row.validation_score,
@@ -321,10 +286,7 @@ def _dataset_to_response(row: Any) -> DatasetResponse:
         id=str(row.id),
         name=row.name,
         row_count=row.row_count or 0,
-        format=row.format.value
-        if hasattr(row.format, "value")
-        else str(row.format or ""),
-        module_slug=getattr(row, "module_slug", None)
-        or _extract_metadata_str(metadata, "module_slug"),
+        format=row.format.value if hasattr(row.format, "value") else str(row.format or ""),
+        module_slug=getattr(row, "module_slug", None) or _extract_metadata_str(metadata, "module_slug"),
         created_at=row.created_at.isoformat(),
     )

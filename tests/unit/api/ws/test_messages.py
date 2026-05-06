@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from typing import Any
 
-from fleet_rlm.api.routers.ws.messages import (
+from fleet_rlm.api.routers.ws.transport import (
     parse_ws_message_or_send_error,
     resolve_session_identity,
 )
@@ -87,7 +87,7 @@ def test_resolve_session_identity_preserves_or_creates_session_id(monkeypatch) -
 
     generated_id = uuid.uuid4()
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.messages.uuid.uuid4",
+        "fleet_rlm.api.routers.ws.transport.uuid.uuid4",
         lambda: generated_id,
     )
 

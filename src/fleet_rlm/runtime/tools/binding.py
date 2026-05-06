@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
-
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
@@ -30,9 +30,27 @@ INTERPRETER_TOOL_NAMES = frozenset(
 
 
 def _tool_name(tool: Any) -> str | None:
-    return getattr(tool, "name", None) or getattr(
-        getattr(tool, "func", tool), "__name__", None
-    )
+    return getattr(tool, "name", None) or getattr(getattr(tool, "func", tool), "__name__", None)
+
+
+def _context_with_remote_document(query: str, context: str) -> str:
+    match = re.search(r"https?://\S+", f"{query}\n{context}")
+    if match is None:
+        return context
+    url = match.group(0).rstrip(").,;]")
+    from fleet_rlm.runtime.tools.document_tools import fetch_document_text
+
+    fetch_result = fetch_document_text(url)
+    if fetch_result.get("status") != "ok":
+        return (
+            context + f"\n\nNote: Attempted to fetch {url} for recursive workspace "
+            f"context but failed: {fetch_result.get('error', 'unknown error')}"
+        ).strip()
+    text = str(fetch_result.get("text", ""))
+    char_count = int(fetch_result.get("char_count", len(text)))
+    return (
+        context + f"\n\n--- Document fetched from {url} ({char_count} chars) ---\n{text}\n--- End of document ---"
+    ).strip()
 
 
 def coerce_sandbox_result(raw: Any) -> dict[str, Any]:
@@ -48,11 +66,7 @@ def coerce_sandbox_result(raw: Any) -> dict[str, Any]:
 
 
 def _tool_description(tool: Any) -> str:
-    return (
-        getattr(tool, "desc", None)
-        or getattr(getattr(tool, "func", tool), "__doc__", "")
-        or ""
-    )
+    return getattr(tool, "desc", None) or getattr(getattr(tool, "func", tool), "__doc__", "") or ""
 
 
 def _wrap_tool(tool: Any, func: Callable[..., Any]) -> Any:
@@ -101,13 +115,12 @@ def _bound_runtime_tool_factories(
         return factories
 
     from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
         delegate_to_rlm as _delegate_to_rlm,
+    )
+    from fleet_rlm.runtime.tools.rlm_delegate import (
         delegate_to_rlm_batched as _delegate_to_rlm_batched,
-        set_delegate_interpreter,
     )
     from fleet_rlm.runtime.tools.sandbox_filesystem import (
-        _SandboxFilesystemToolContext,
         _sandbox_create_directory_impl,
         _sandbox_delete_file_impl,
         _sandbox_find_in_files_impl,
@@ -118,6 +131,7 @@ def _bound_runtime_tool_factories(
         _sandbox_replace_in_files_impl,
         _sandbox_search_files_impl,
         _sandbox_write_file_impl,
+        _SandboxFilesystemToolContext,
     )
 
     sandbox_ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
@@ -133,8 +147,7 @@ def _bound_runtime_tool_factories(
     def read_buffer(name: str = "default") -> dict[str, Any]:
         return execute_sandbox_tool(
             interpreter,
-            "items = get_buffer(buffer_name)\n"
-            "SUBMIT(status='ok', name=buffer_name, items=items)",
+            "items = get_buffer(buffer_name)\nSUBMIT(status='ok', name=buffer_name, items=items)",
             {"buffer_name": name},
         )
 
@@ -154,27 +167,21 @@ def _bound_runtime_tool_factories(
             {"buffer_name": name},
         )
 
-    def delegate_to_rlm(
-        query: str, context: str = "", document_url: str = ""
-    ) -> dict[str, Any]:
-        token = set_delegate_interpreter(interpreter)
-        try:
-            return _delegate_to_rlm(
-                query=query, context=context, document_url=document_url
-            )
-        finally:
-            _delegate_interpreter.reset(token)
+    def delegate_to_rlm(query: str, context: str = "", document_url: str = "") -> dict[str, Any]:
+        return _delegate_to_rlm(
+            query=query,
+            context=context,
+            document_url=document_url,
+            interpreter=interpreter,
+        )
 
-    def delegate_to_rlm_batched(
-        queries: list[str], context: str = "", document_url: str = ""
-    ) -> dict[str, Any]:
-        token = set_delegate_interpreter(interpreter)
-        try:
-            return _delegate_to_rlm_batched(
-                queries=queries, context=context, document_url=document_url
-            )
-        finally:
-            _delegate_interpreter.reset(token)
+    def delegate_to_rlm_batched(queries: list[str], context: str = "", document_url: str = "") -> dict[str, Any]:
+        return _delegate_to_rlm_batched(
+            queries=queries,
+            context=context,
+            document_url=document_url,
+            interpreter=interpreter,
+        )
 
     factories.update(
         {
@@ -183,21 +190,13 @@ def _bound_runtime_tool_factories(
             "delegate_to_rlm_batched": delegate_to_rlm_batched,
             "execute_code": execute_code,
             "read_buffer": read_buffer,
-            "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(
-                sandbox_ctx, path=path
-            ),
-            "sandbox_read_file": lambda path: _sandbox_read_file_impl(
-                sandbox_ctx, path=path
-            ),
+            "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(sandbox_ctx, path=path),
+            "sandbox_read_file": lambda path: _sandbox_read_file_impl(sandbox_ctx, path=path),
             "sandbox_write_file": lambda path, content: _sandbox_write_file_impl(
                 sandbox_ctx, path=path, content=content
             ),
-            "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(
-                sandbox_ctx, path=path
-            ),
-            "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(
-                sandbox_ctx, path=path
-            ),
+            "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(sandbox_ctx, path=path),
+            "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(sandbox_ctx, path=path),
             "sandbox_move_file": lambda source, destination: _sandbox_move_file_impl(
                 sandbox_ctx, source=source, destination=destination
             ),
@@ -207,17 +206,13 @@ def _bound_runtime_tool_factories(
             "sandbox_find_in_files": lambda path, pattern: _sandbox_find_in_files_impl(
                 sandbox_ctx, path=path, pattern=pattern
             ),
-            "sandbox_replace_in_files": lambda files, pattern, replacement: (
-                _sandbox_replace_in_files_impl(
-                    sandbox_ctx,
-                    files=files,
-                    pattern=pattern,
-                    replacement=replacement,
-                )
+            "sandbox_replace_in_files": lambda files, pattern, replacement: _sandbox_replace_in_files_impl(
+                sandbox_ctx,
+                files=files,
+                pattern=pattern,
+                replacement=replacement,
             ),
-            "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(
-                sandbox_ctx, path=path
-            ),
+            "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(sandbox_ctx, path=path),
             "write_buffer": write_buffer,
         }
     )
@@ -229,7 +224,7 @@ def _bound_runtime_tool_factories(
     ) -> dict[str, Any]:
         """Run a multi-pass recursive analysis with decomposition and verification."""
         from fleet_rlm.integrations.daytona.evidence_bridge import DaytonaEvidenceSink
-        from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+        from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
         module = RecursiveWorkspaceModule(
             interpreter=interpreter,
@@ -238,7 +233,10 @@ def _bound_runtime_tool_factories(
             sub_lm=getattr(interpreter, "sub_lm", None),
             evidence_sink=DaytonaEvidenceSink(interpreter),
         )
-        prediction = module(user_request=query, context=context)
+        prediction = module(
+            user_request=query,
+            context=_context_with_remote_document(query, context),
+        )
         return {
             "status": str(getattr(prediction, "status", "ok")),
             "answer": str(getattr(prediction, "answer", "")),

@@ -99,20 +99,12 @@ def length_quality_signal(answer: str) -> dict[str, Any]:
 
 def run_single_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
     """Execute a task with delegate_to_rlm (single child RLM)."""
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        _delegate_interpreter,
-        delegate_to_rlm,
-        set_delegate_interpreter,
-    )
+    from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm
 
     query = task["user_request"]
     started_at = time.time()
 
-    token = set_delegate_interpreter(interpreter)
-    try:
-        result = delegate_to_rlm(query=query, context="")
-    finally:
-        _delegate_interpreter.reset(token)
+    result = delegate_to_rlm(query=query, context="", interpreter=interpreter)
 
     elapsed_ms = int((time.time() - started_at) * 1000)
 
@@ -133,7 +125,7 @@ def run_single_pass(task: dict[str, Any], interpreter: Any) -> dict[str, Any]:
 
 def build_workspace_module(interpreter: Any) -> Any:
     """Create the shared RecursiveWorkspaceModule used for workspace benchmarks."""
-    from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+    from fleet_rlm.runtime.modules import RecursiveWorkspaceModule
 
     return RecursiveWorkspaceModule(
         interpreter=interpreter,
@@ -398,7 +390,7 @@ def _run_rlm_on_interpreter(
 
     This matches the paper's evaluation setup (depth=1, no child sandbox).
     """
-    from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+    from fleet_rlm.runtime.modules import build_recursive_subquery_rlm
 
     rlm = build_recursive_subquery_rlm(
         interpreter=interpreter,

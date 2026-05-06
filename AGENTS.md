@@ -48,10 +48,10 @@ The backend is organized into two layers, innermost first:
 1. **DSPy ReAct Agent** — single agent with tool registry
    - `src/fleet_rlm/runtime/agent/` — agent module (`agent.py`), runtime (`runtime.py`), chat orchestration (`chat.py`), session state, signatures
    - `src/fleet_rlm/runtime/execution/` — execution drivers and event assembly
-   - `src/fleet_rlm/runtime/models/` — runtime model construction and registry
+  - `src/fleet_rlm/runtime/modules/` — runtime module construction and registry
    - `src/fleet_rlm/runtime/content/` — content-oriented helpers
    - `src/fleet_rlm/runtime/tools/` — grouped tool helpers (content, sandbox, filesystem, batch, LLM)
-   - `src/fleet_rlm/runtime/quality/` — offline DSPy evaluation, GEPA optimization, datasets, scoring, module registry
+   - `src/fleet_rlm/quality/` — offline DSPy evaluation, GEPA optimization, datasets, scoring, module registry
 
 2. **Daytona Substrate** — sandbox and durable storage
    - `src/fleet_rlm/integrations/daytona/` — interpreter lifecycle, runtime, volumes, diagnostics
@@ -71,7 +71,7 @@ Other backend areas:
 
 - `src/fleet_rlm/cli/` — `fleet` and `fleet-rlm` CLI entrypoints, commands, terminal UI
 - `src/fleet_rlm/integrations/observability/` — PostHog and MLflow wiring
-- `src/fleet_rlm/utils/` — shared helpers (e.g., `utils/regex.py`)
+- `src/fleet_rlm/utils/` — shared helpers
 - `src/fleet_rlm/ui/dist` — **generated** bundled frontend assets for Python package distributions
 
 Evaluation and benchmarks (maintained alongside the backend):
@@ -375,6 +375,5 @@ Backend reading order for understanding the runtime story:
 3. `src/fleet_rlm/runtime/factory.py`
 4. `src/fleet_rlm/runtime/agent/agent.py`
 5. `src/fleet_rlm/runtime/agent/runtime.py`
-6. `src/fleet_rlm/runtime/agent/chat_session_state.py`
-7. `src/fleet_rlm/integrations/daytona/interpreter.py`
-8. `src/fleet_rlm/integrations/daytona/runtime.py`
+6. `src/fleet_rlm/integrations/daytona/interpreter.py`
+7. `src/fleet_rlm/integrations/daytona/runtime.py`

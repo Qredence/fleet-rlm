@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-
-from fleet_rlm.integrations.daytona.types import SandboxSpec
+from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
 
 
 class _FakeImage:
@@ -160,9 +159,7 @@ class TestSandboxSpecWithRealImage:
     def test_declarative_image_in_spec(self) -> None:
         from daytona import Image
 
-        img = (
-            Image.debian_slim("3.12").pip_install(["requests"]).workdir("/home/daytona")
-        )
+        img = Image.debian_slim("3.12").pip_install(["requests"]).workdir("/home/daytona")
         spec = SandboxSpec(image=img, labels={"env": "test"})
         assert spec.uses_declarative_image is True
         params = spec.to_create_params()

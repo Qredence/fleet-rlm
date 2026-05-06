@@ -108,9 +108,7 @@ def concatenate_codebase(
 
             rel_path = filepath.relative_to(source_path)
 
-            if not should_include_file(
-                filepath, include_patterns, exclude_patterns, exclude_dirs
-            ):
+            if not should_include_file(filepath, include_patterns, exclude_patterns, exclude_dirs):
                 continue
 
             try:
@@ -155,7 +153,7 @@ def extract_file_from_concat(concat_file, target_path, output_file=None):
     if output_file is None:
         output_file = target_path.replace("/", "_")
 
-    with open(concat_file) as f:
+    with open(concat_file, encoding="utf-8") as f:
         content = f.read()
 
     # Find the file section
@@ -165,7 +163,7 @@ def extract_file_from_concat(concat_file, target_path, output_file=None):
     match = re.search(pattern, content, re.DOTALL)
 
     if match:
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(match.group(1))
         print(f"Extracted: {target_path} -> {output_file}")
         return True
@@ -175,9 +173,7 @@ def extract_file_from_concat(concat_file, target_path, output_file=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Concatenate codebase into single processable file"
-    )
+    parser = argparse.ArgumentParser(description="Concatenate codebase into single processable file")
     parser.add_argument("source_dir", help="Source directory to process")
     parser.add_argument(
         "-o",
@@ -185,9 +181,7 @@ def main():
         default="codebase_concat.txt",
         help="Output file (default: codebase_concat.txt)",
     )
-    parser.add_argument(
-        "-i", "--include", nargs="+", help="Include patterns (e.g., *.py *.js)"
-    )
+    parser.add_argument("-i", "--include", nargs="+", help="Include patterns (e.g., *.py *.js)")
     parser.add_argument("-e", "--exclude", nargs="+", help="Exclude patterns")
     parser.add_argument("--exclude-dirs", nargs="+", help="Exclude directories")
     parser.add_argument(

@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-import uuid
 
 try:
     from dspy.primitives.code_interpreter import FinalOutput
 except ImportError:
     from dspy import FinalOutput
 
-from fleet_rlm.runtime.models import StreamEvent
 from fleet_rlm.api.config import ServerRuntimeConfig
 from fleet_rlm.api.main import create_app
+from fleet_rlm.runtime.schemas import StreamEvent
 
 
 def ts(epoch: float = 1_234_567_890.0) -> datetime:
@@ -43,9 +43,7 @@ class _FakeAgentInterpreter:
         finally:
             self.default_execution_profile = previous
 
-    def execute(
-        self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any
-    ):
+    def execute(self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any):
         _ = kwargs
         variables = variables or {}
         if "load_from_volume" in code:
@@ -59,9 +57,7 @@ class _FakeAgentInterpreter:
             return FinalOutput({"saved_path": path})
         return FinalOutput({})
 
-    async def aexecute(
-        self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any
-    ):
+    async def aexecute(self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any):
         return self.execute(code, variables, **kwargs)
 
     def configure_workspace(
@@ -186,9 +182,7 @@ class FakeChatAgent:
             await asyncio.sleep(0.01)
             yield event
 
-    async def execute_command(
-        self, command: str, args: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", "command": command, "args": args}
 
     def load_document(self, path: str, alias: str = "active") -> None:

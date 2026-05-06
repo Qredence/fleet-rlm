@@ -163,9 +163,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "repository_optimization": ("OptimizationRepository",),
 }
 
-_LOOKUP: dict[str, str] = {
-    name: submodule for submodule, names in _EXPORTS.items() for name in names
-}
+_LOOKUP: dict[str, str] = {name: submodule for submodule, names in _EXPORTS.items() for name in names}
 
 __all__ = sorted(_LOOKUP)
 

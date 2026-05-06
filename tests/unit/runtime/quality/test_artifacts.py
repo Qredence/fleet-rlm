@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.runtime.quality.artifacts import (
+from fleet_rlm.quality.artifacts import (
     build_manifest,
     resolve_artifact_path,
     write_manifest,
 )
-
 
 # -- resolve_artifact_path ----------------------------------------------------
 

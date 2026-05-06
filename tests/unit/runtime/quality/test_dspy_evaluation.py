@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.runtime.quality.dspy_evaluation``."""
+"""Tests for ``fleet_rlm.quality.dspy_evaluation``."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import json
 
 import dspy
 
-from fleet_rlm.runtime.quality.dspy_evaluation import (
+from fleet_rlm.quality.dspy_evaluation import (
     evaluate_program,
     evaluate_program_from_dataset,
 )
-from fleet_rlm.runtime.quality.workspace_metrics import (
+from fleet_rlm.quality.workspace_metrics import (
     workspace_feedback_metric,
 )
 

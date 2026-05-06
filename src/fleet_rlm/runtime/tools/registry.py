@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 from ._marker import tool_fn
 
-
 TOOL_MODULE_NAMES: tuple[str, ...] = (
     "buffer_tools",
     "chunking_tools",
@@ -64,10 +63,7 @@ def _import_tool_modules(
     module_names: tuple[str, ...] = TOOL_MODULE_NAMES,
 ) -> list[Any]:
     """Import explicitly registered runtime tool modules."""
-    return [
-        importlib.import_module(f"fleet_rlm.runtime.tools.{module_name}")
-        for module_name in module_names
-    ]
+    return [importlib.import_module(f"fleet_rlm.runtime.tools.{module_name}") for module_name in module_names]
 
 
 def discover_tools() -> list[Any]:

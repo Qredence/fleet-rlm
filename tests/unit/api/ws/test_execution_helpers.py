@@ -9,21 +9,21 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.api.routers.ws.types import SessionContext
-from fleet_rlm.runtime.models import StreamEvent
-from fleet_rlm.api.routers.ws.stream import (
-    ReplHookBridge,
-    _emit_stream_event,
-)
-from fleet_rlm.api.routers.ws.helpers import (
-    _close_websocket_safely,
-    _try_send_json,
-)
 from fleet_rlm.api.routers.ws.endpoint import _build_local_persist_fn
 from fleet_rlm.api.routers.ws.session import (
     switch_session_if_needed,
 )
+from fleet_rlm.api.routers.ws.stream import (
+    ReplHookBridge,
+    _emit_stream_event,
+)
+from fleet_rlm.api.routers.ws.transport import (
+    _close_websocket_safely,
+    _try_send_json,
+)
+from fleet_rlm.api.runtime_services.chat_runtime import SessionContext
 from fleet_rlm.api.schemas import WSMessage
+from fleet_rlm.runtime.schemas import StreamEvent
 from tests.ui.fixtures_ui import FakeChatAgent, ts
 
 
@@ -31,8 +31,7 @@ class _ClosedSendWebSocket:
     async def send_json(self, payload: Any) -> None:
         _ = payload
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.send', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed."
         )
 
 
@@ -40,8 +39,7 @@ class _ClosedCloseWebSocket:
     async def close(self, code: int = 1000) -> None:
         _ = code
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.close', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.close', after sending 'websocket.close' or response already completed."
         )
 
 
@@ -133,17 +131,11 @@ class _InterpreterHookStepBuilder:
 
 
 def test_try_send_json_returns_false_after_websocket_close() -> None:
-    assert (
-        asyncio.run(_try_send_json(cast(Any, _ClosedSendWebSocket()), {"ok": True}))
-        is False
-    )
+    assert asyncio.run(_try_send_json(cast(Any, _ClosedSendWebSocket()), {"ok": True})) is False
 
 
 def test_try_send_json_returns_false_on_disconnect() -> None:
-    assert (
-        asyncio.run(_try_send_json(cast(Any, _DisconnectingWebSocket()), {"ok": True}))
-        is False
-    )
+    assert asyncio.run(_try_send_json(cast(Any, _DisconnectingWebSocket()), {"ok": True})) is False
 
 
 def test_close_websocket_safely_swallows_duplicate_close_runtime_error() -> None:
@@ -195,9 +187,7 @@ def test_emit_stream_event_sends_terminal_error_before_run_completion() -> None:
     asyncio.run(scenario())
 
 
-def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook() -> (
-    None
-):
+def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook() -> None:
     async def scenario() -> None:
         lifecycle = _RecordingLifecycle()
         previous_calls: list[dict[str, Any]] = []
@@ -237,10 +227,11 @@ def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook
     asyncio.run(scenario())
 
 
-def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run() -> (
-    None
-):
+def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """done events call persist_session_state then send after complete_run."""
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
     async def scenario() -> None:
         websocket = _RecordingWebSocket()
@@ -289,9 +280,7 @@ def test_emit_stream_event_persists_terminal_error_before_run_completion() -> No
         )
 
         deadline = asyncio.get_running_loop().time() + 0.2
-        while (
-            not websocket.sent or not persist_calls
-        ) and asyncio.get_running_loop().time() < deadline:
+        while (not websocket.sent or not persist_calls) and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.01)
 
         assert websocket.sent
@@ -318,7 +307,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
         _fake_persist_session_state,
     )
 
-    state = SimpleNamespace()
+    session_cache = SimpleNamespace()
     runtime = SimpleNamespace(
         repository="repo",
         identity_rows="identity",
@@ -331,7 +320,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
     )
 
     local_persist = _build_local_persist_fn(
-        state=state,
+        session_cache=session_cache,
         runtime=runtime,
         agent="agent",
         interpreter="interpreter",
@@ -346,7 +335,7 @@ def test_chat_stream_local_persist_wrapper_calls_shared_persist_helper(
     )
 
     assert captured == {
-        "state": state,
+        "session_cache": session_cache,
         "agent": "agent",
         "session_record": {"id": "session"},
         "active_manifest_path": "/tmp/manifest.json",
@@ -382,7 +371,7 @@ def test_ws_message_accepts_daytona_request_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_switch_session_uses_async_reset_for_new_session() -> None:
-    state = SimpleNamespace(sessions={})
+    session_cache = SimpleNamespace(sessions={})
     agent = FakeChatAgent()
 
     (
@@ -392,7 +381,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
         docs_path,
         orchestration_session,
     ) = await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=None,
         workspace_id="tenant-a",
@@ -418,7 +407,7 @@ async def test_switch_session_uses_async_reset_for_new_session() -> None:
 
 @pytest.mark.asyncio
 async def test_switch_session_uses_async_import_for_restored_state() -> None:
-    state = SimpleNamespace(
+    session_cache = SimpleNamespace(
         sessions={
             session_key("tenant-a", "user-a", "session-a"): {
                 "session_id": "session-a",
@@ -436,7 +425,7 @@ async def test_switch_session_uses_async_import_for_restored_state() -> None:
         docs_path,
         orchestration_session,
     ) = await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=None,
         workspace_id="tenant-a",
@@ -479,15 +468,15 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
         return {"state": manifest_state}
 
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.ws.manifest.load_manifest_from_volume",
+        "fleet_rlm.api.runtime_services.chat_persistence.load_manifest_from_volume",
         _load_manifest,
     )
 
-    state = SimpleNamespace(sessions={})
+    session_cache = SimpleNamespace(sessions={})
     agent = FakeChatAgent()
 
     await switch_session_if_needed(
-        state=cast(Any, state),
+        session_cache=cast(Any, session_cache),
         agent=cast(Any, agent),
         interpreter=agent.interpreter,
         workspace_id="tenant-a",
@@ -503,7 +492,7 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
 
     assert agent.aimport_session_state_calls == 1
     assert agent._session_state == manifest_state
-    cached = state.sessions[session_key("tenant-a", "user-a", "session-a")]
+    cached = session_cache.sessions[session_key("tenant-a", "user-a", "session-a")]
     assert cached["manifest"]["state"] == manifest_state
 
 

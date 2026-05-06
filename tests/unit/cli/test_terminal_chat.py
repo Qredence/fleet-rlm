@@ -47,9 +47,7 @@ def test_fleet_completer_suggests_slash_commands() -> None:
         command_specs=[("/settings", "Configure settings"), ("/status", "Show status")],
         command_dispatch_names=[],
     )
-    completions = list(
-        completer.get_completions(Document(text="/set", cursor_position=4), None)
-    )
+    completions = list(completer.get_completions(Document(text="/set", cursor_position=4), None))
     texts = {completion.text for completion in completions}
     assert "/settings" in texts
 
@@ -62,9 +60,7 @@ def test_fleet_completer_suggests_mentions(tmp_path: Path, monkeypatch) -> None:
         command_specs=[],
         command_dispatch_names=[],
     )
-    completions = list(
-        completer.get_completions(Document(text="@s", cursor_position=2), None)
-    )
+    completions = list(completer.get_completions(Document(text="@s", cursor_position=2), None))
     texts = {completion.text for completion in completions}
     assert "src/" in texts
 

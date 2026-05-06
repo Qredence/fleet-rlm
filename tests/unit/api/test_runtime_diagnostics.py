@@ -10,7 +10,7 @@ from fleet_rlm.api.runtime_services import diagnostics
 
 @pytest.mark.asyncio
 async def test_run_connectivity_test_returns_preflight_failure_without_smoke() -> None:
-    state = SimpleNamespace(runtime_test_results={})
+    diagnostics_deps = SimpleNamespace(runtime_test_results={})
     smoke_called = False
 
     async def _smoke() -> tuple[bool, str | None, str | None]:
@@ -19,7 +19,7 @@ async def test_run_connectivity_test_returns_preflight_failure_without_smoke() -
         return True, "ok", None
 
     result = await diagnostics.run_connectivity_test(
-        state=state,
+        diagnostics=diagnostics_deps,
         kind="daytona",
         preflight_ok=False,
         checks={"configured": False},
@@ -35,20 +35,17 @@ async def test_run_connectivity_test_returns_preflight_failure_without_smoke() -
     assert result.ok is False
     assert result.preflight_ok is False
     assert result.error == "Daytona preflight checks failed."
-    assert (
-        state.runtime_test_results["daytona"]["error"]
-        == "Daytona preflight checks failed."
-    )
+    assert diagnostics_deps.runtime_test_results["daytona"]["error"] == "Daytona preflight checks failed."
 
 
 @pytest.mark.asyncio
 async def test_run_daytona_connection_test_caches_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = SimpleNamespace(
+    config_deps = SimpleNamespace(
         config=SimpleNamespace(sandbox_provider="daytona"),
-        runtime_test_results={},
     )
+    diagnostics_deps = SimpleNamespace(runtime_test_results={})
 
     monkeypatch.setattr(
         diagnostics,
@@ -89,15 +86,16 @@ async def test_run_daytona_connection_test_caches_success(
         lambda _cfg: _FakeAsyncDaytona(_cfg),
     )
 
-    result = await diagnostics.run_daytona_connection_test(state=state)
+    result = await diagnostics.run_daytona_connection_test(
+        config_deps=config_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
     assert result.kind == "daytona"
     assert result.ok is True
     assert result.preflight_ok is True
-    assert result.output_preview == (
-        "Daytona connectivity verified. Found 2 sandboxes (limited)."
-    )
-    assert state.runtime_test_results["daytona"]["ok"] is True
+    assert result.output_preview == ("Daytona connectivity verified. Found 2 sandboxes (limited).")
+    assert diagnostics_deps.runtime_test_results["daytona"]["ok"] is True
     assert _FakeAsyncDaytona.instances[-1].closed is True
 
 
@@ -105,10 +103,10 @@ async def test_run_daytona_connection_test_caches_success(
 async def test_run_daytona_connection_test_reports_missing_sdk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = SimpleNamespace(
+    config_deps = SimpleNamespace(
         config=SimpleNamespace(sandbox_provider="daytona"),
-        runtime_test_results={},
     )
+    diagnostics_deps = SimpleNamespace(runtime_test_results={})
 
     monkeypatch.setattr(
         diagnostics,
@@ -125,18 +123,17 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
     )
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.config.build_daytona_client",
-        lambda _cfg: (_ for _ in ()).throw(
-            RuntimeError("Daytona SDK is not available.")
-        ),
+        lambda _cfg: (_ for _ in ()).throw(RuntimeError("Daytona SDK is not available.")),
     )
 
-    result = await diagnostics.run_daytona_connection_test(state=state)
+    result = await diagnostics.run_daytona_connection_test(
+        config_deps=config_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
     assert result.ok is False
     assert "Daytona SDK is not available" in result.error
-    assert (
-        "Daytona SDK is not available" in state.runtime_test_results["daytona"]["error"]
-    )
+    assert "Daytona SDK is not available" in diagnostics_deps.runtime_test_results["daytona"]["error"]
 
 
 def test_build_runtime_status_response_includes_cached_test_failures_in_guidance(
@@ -148,16 +145,18 @@ def test_build_runtime_status_response_includes_cached_test_failures_in_guidance
         lambda **_: False,
     )
 
-    state = SimpleNamespace(
-        is_ready=True,
+    config_deps = SimpleNamespace(
         config=SimpleNamespace(
             app_env="local",
             sandbox_provider="daytona",
             agent_model="openai/gpt-4.1-mini",
             agent_delegate_model="openai/gpt-4.1-mini",
             agent_delegate_small_model="openai/gpt-4.1-mini",
+            database_required=False,
         ),
-        planner_lm=object(),
+    )
+    lm_deps = SimpleNamespace(planner_lm=object())
+    diagnostics_deps = SimpleNamespace(
         optional_service_status={},
         optional_service_errors={},
         runtime_test_results={
@@ -193,7 +192,11 @@ def test_build_runtime_status_response_includes_cached_test_failures_in_guidance
         lambda sandbox_provider=None: ({"configured": True}, []),
     )
 
-    status = diagnostics.build_runtime_status_response(state=state)
+    status = diagnostics.build_runtime_status_response(
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
     assert "LM test timed out after 20s." in status.guidance
     assert "Check API connectivity and credentials." in status.guidance

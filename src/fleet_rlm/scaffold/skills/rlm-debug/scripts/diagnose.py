@@ -106,9 +106,7 @@ def main() -> None:
     print("=" * 40)
     print("RLM Quick Diagnostics")
     print("=" * 40)
-    print(
-        f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    )
+    print(f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
     print(f"CWD: {os.getcwd()}")
 
     results = {

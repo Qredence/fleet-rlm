@@ -9,6 +9,8 @@ from typing import Optional
 
 import typer
 
+from fleet_rlm.quality import module_registry, optimization_runner
+
 
 def optimize_command(
     module: str = typer.Argument(
@@ -42,18 +44,11 @@ def optimize_command(
 ) -> None:
     """Run GEPA offline optimization for a registered DSPy module."""
     if auto not in ("light", "medium", "heavy"):
-        typer.echo(
-            f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True
-        )
+        typer.echo(f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True)
         raise typer.Exit(code=1)
 
-    from fleet_rlm.runtime.quality.module_registry import (
-        get_module_spec,
-        list_module_slugs,
-    )
-
     if module == "list":
-        slugs = list_module_slugs()
+        slugs = module_registry.list_module_slugs()
         typer.echo("Available modules:")
         for slug in slugs:
             typer.echo(f"  - {slug}")
@@ -69,17 +64,15 @@ def optimize_command(
         typer.echo(f"Error: Dataset file is not readable: {dataset}", err=True)
         raise typer.Exit(code=1)
 
-    spec = get_module_spec(module)
+    spec = module_registry.get_module_spec(module)
     if spec is None:
-        slugs = list_module_slugs()
+        slugs = module_registry.list_module_slugs()
         typer.echo(f"Error: Unknown module slug {module!r}.", err=True)
         typer.echo(f"Available modules: {', '.join(slugs)}", err=True)
         raise typer.Exit(code=1)
 
-    from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
-
     result = dict(
-        run_module_optimization(
+        optimization_runner.run_module_optimization(
             spec,
             dataset_path=dataset,
             output_path=output_path,

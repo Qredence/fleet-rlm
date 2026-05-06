@@ -7,9 +7,9 @@ import time.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 import logging
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,9 +62,7 @@ def load_posthog_settings_from_env() -> dict[str, object]:
         PROJECT_POSTHOG_DEFAULT_HOST,
     )
 
-    api_key = (
-        os.getenv("POSTHOG_API_KEY") or ""
-    ).strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
+    api_key = (os.getenv("POSTHOG_API_KEY") or "").strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
     host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
     enabled_raw = os.getenv("POSTHOG_ENABLED")
     return {
@@ -73,18 +71,10 @@ def load_posthog_settings_from_env() -> dict[str, object]:
         "host": host,
         "flush_interval": float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
         "flush_at": max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
-        "enable_dspy_optimization": _env_bool(
-            os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False
-        ),
-        "input_truncation_chars": max(
-            1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))
-        ),
-        "output_truncation_chars": max(
-            1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))
-        ),
-        "redact_sensitive": _env_bool(
-            os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True
-        ),
+        "enable_dspy_optimization": _env_bool(os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False),
+        "input_truncation_chars": max(1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))),
+        "output_truncation_chars": max(1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))),
+        "redact_sensitive": _env_bool(os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True),
         "distinct_id": os.getenv("POSTHOG_DISTINCT_ID") or None,
     }
 
@@ -102,15 +92,9 @@ def configure_posthog_analytics_from_env() -> object | None:
 
     try:
         return configure_analytics(
-            api_key=settings["api_key"]
-            if isinstance(settings["api_key"], str)
-            else None,
-            host=settings["host"]
-            if isinstance(settings["host"], str)
-            else "https://eu.i.posthog.com",
-            distinct_id=settings["distinct_id"]
-            if isinstance(settings["distinct_id"], str)
-            else None,
+            api_key=settings["api_key"] if isinstance(settings["api_key"], str) else None,
+            host=settings["host"] if isinstance(settings["host"], str) else "https://eu.i.posthog.com",
+            distinct_id=settings["distinct_id"] if isinstance(settings["distinct_id"], str) else None,
             enabled=True,
         )
     except Exception:
@@ -140,9 +124,7 @@ def _normalize_adapter_name(value: str | None) -> str | None:
         return None
     if normalized in {"json", "chat"}:
         return normalized
-    raise ValueError(
-        "Unsupported DSPy adapter name. Choose one of: chat, json, auto, none, off."
-    )
+    raise ValueError("Unsupported DSPy adapter name. Choose one of: chat, json, auto, none, off.")
 
 
 def _build_adapter(
@@ -217,18 +199,14 @@ def _delegate_lm_kwargs(
         or os.environ.get("DSPY_LM_API_KEY")
     )
     if not api_key:
-        logger.warning(
-            "Delegate LM model is configured but no API key is available; using planner fallback."
-        )
+        logger.warning("Delegate LM model is configured but no API key is available; using planner fallback.")
         return None
 
     return {
         "model": model,
         "api_key": api_key,
         "api_base": (
-            os.environ.get("DSPY_DELEGATE_LM_API_BASE")
-            or default_api_base
-            or os.environ.get("DSPY_LM_API_BASE")
+            os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
         ),
         "max_tokens": _resolve_max_tokens(default_max_tokens),
     }
@@ -263,9 +241,7 @@ def get_runtime_module_adapter(
     return _build_adapter(
         os.environ.get("DSPY_STRUCTURED_OUTPUT_ADAPTER", "json"),
         use_native_function_calling=_env_bool(
-            os.environ.get(
-                "DSPY_STRUCTURED_OUTPUT_ADAPTER_USE_NATIVE_FUNCTION_CALLING"
-            ),
+            os.environ.get("DSPY_STRUCTURED_OUTPUT_ADAPTER_USE_NATIVE_FUNCTION_CALLING"),
             default=False,
         ),
     )
@@ -353,9 +329,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
     return True
 
 
-def get_planner_lm_from_env(
-    *, env_file: Path | None = None, model_name: str | None = None
-) -> dspy.LM | None:
+def get_planner_lm_from_env(*, env_file: Path | None = None, model_name: str | None = None) -> dspy.LM | None:
     """Create and return a DSPy LM from environment.
 
     This is the async-safe version of configure_planner_from_env(). It creates

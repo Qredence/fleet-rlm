@@ -6,13 +6,13 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from fleet_rlm.runtime.config import configure_planner_from_env
-from fleet_rlm.integrations.daytona.config import resolve_daytona_config
 from fleet_rlm.integrations.database import (
     DatabaseManager,
     FleetRepository,
     select_database_url,
 )
+from fleet_rlm.integrations.daytona.config import resolve_daytona_config
+from fleet_rlm.runtime.config import configure_planner_from_env
 
 
 def _lm_configured() -> bool:
@@ -47,9 +47,7 @@ def _migration_database_url() -> str | None:
     )
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Skip tests marked live_llm unless explicitly enabled."""
     for item in items:
         if "live_llm" in item.keywords and not _live_llm_enabled():

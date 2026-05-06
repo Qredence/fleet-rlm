@@ -13,9 +13,11 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     VolumeNotReadyError,
 )
 from fleet_rlm.integrations.daytona.volume_runtime import (
+    await_volume_ready as _await_volume_ready,
+)
+from fleet_rlm.integrations.daytona.volume_runtime import (
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
-    await_volume_ready as _await_volume_ready,
 )
 
 
@@ -119,9 +121,7 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
     assert root["children"][0]["modified_at"] == "2024-01-01T00:00:00+00:00"
     assert root["children"][1]["children"][0]["path"] == "/artifacts/docs"
     assert root["children"][1]["children"][1]["path"] == "/artifacts/hello.txt"
-    assert root["children"][1]["children"][0]["children"][0]["path"] == (
-        "/artifacts/docs/notes.md"
-    )
+    assert root["children"][1]["children"][0]["children"][0]["path"] == ("/artifacts/docs/notes.md")
 
 
 def test_list_daytona_volume_tree_rejects_path_traversal() -> None:

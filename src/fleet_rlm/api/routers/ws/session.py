@@ -11,11 +11,15 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id as _sanitize_id
-from fleet_rlm.utils.identity import session_key
+from fleet_rlm.utils.identity import owner_fingerprint, session_key
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
-from ...dependencies import ServerState
-from .types import ChatAgentProtocol, LocalPersistFn, SessionContext
+from ...dependencies import SessionCacheDeps
+from ...runtime_services.chat_runtime import (
+    ChatAgentProtocol,
+    LocalPersistFn,
+    SessionContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +33,7 @@ def _resolved_manifest_path(
     if not workspace_id or not user_id or not session_id:
         return None
     safe_session_id = _sanitize_id(session_id, "default-session")
-    return (
-        f"meta/workspaces/{workspace_id}/users/{user_id}/"
-        f"react-session-{safe_session_id}.json"
-    )
+    return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
 def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str:
@@ -69,9 +70,7 @@ def _manifest_metadata(manifest: dict[str, Any]) -> dict[str, Any]:
 
 def _restorable_session_state(session_record: dict[str, Any]) -> Any:
     session_data = session_record.get("session")
-    restored_state: Any = (
-        session_data.get("state", {}) if isinstance(session_data, dict) else {}
-    )
+    restored_state: Any = session_data.get("state", {}) if isinstance(session_data, dict) else {}
     manifest_data = session_record.get("manifest")
     if not restored_state and isinstance(manifest_data, dict):
         restored_state = manifest_data.get("state", {})
@@ -97,18 +96,16 @@ async def _link_database_session(
     owner_tenant_claim: str,
     owner_user_claim: str,
     workspace_id: str,
-    repository: FleetRepository | None,
+    persistence: Any,
     identity_rows: IdentityUpsertResult | None,
 ) -> str | None:
     manifest = cached.get("manifest")
     manifest_dict = manifest if isinstance(manifest, dict) else {}
     metadata = _manifest_metadata(manifest_dict)
-    existing_db_session_id = str(
-        cached.get("db_session_id") or metadata.get("db_session_id") or ""
-    ).strip()
+    existing_db_session_id = str(cached.get("db_session_id") or metadata.get("db_session_id") or "").strip()
     existing_session_uuid = _parse_uuid(existing_db_session_id)
 
-    if repository is not None and identity_rows is not None:
+    if isinstance(persistence, FleetRepository) and identity_rows is not None:
         try:
             from fleet_rlm.integrations.database import ChatSessionStatus
             from fleet_rlm.integrations.database.repository_chat import (
@@ -118,12 +115,12 @@ async def _link_database_session(
             workspace_uuid = (
                 identity_rows.workspace_id
                 if identity_rows.workspace_id is not None
-                else await repository.resolve_workspace_id(
+                else await persistence.resolve_workspace_id(
                     tenant_id=identity_rows.tenant_id,
                     user_id=identity_rows.user_id,
                 )
             )
-            session_row = await repository.upsert_chat_session(
+            session_row = await persistence.upsert_chat_session(
                 ChatSessionUpsertRequest(
                     tenant_id=identity_rows.tenant_id,
                     workspace_id=workspace_uuid,
@@ -191,7 +188,7 @@ def _build_orchestration_context(
 
 async def switch_session_if_needed(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     agent: ChatAgentProtocol,
     interpreter: object | None,
     workspace_id: str,
@@ -203,7 +200,7 @@ async def switch_session_if_needed(
     session_record: dict[str, Any] | None,
     last_loaded_docs_path: str | None,
     local_persist: LocalPersistFn,
-    repository: FleetRepository | None = None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None = None,
 ) -> tuple[str, str, dict[str, Any], str | None, SessionContext]:
     """Switch and restore session state when session identity changed."""
@@ -232,15 +229,11 @@ async def switch_session_if_needed(
     if session_record is not None:
         await local_persist(include_volume_save=True)
 
-    cached: dict[str, Any] | None = state.sessions.get(key)
+    cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ..ws.manifest import load_manifest_from_volume
+        from ...runtime_services.chat_persistence import load_manifest_from_volume
 
-        manifest = (
-            await load_manifest_from_volume(agent, manifest_path)
-            if interpreter is not None
-            else {}
-        )
+        manifest = await load_manifest_from_volume(agent, manifest_path) if interpreter is not None else {}
         cached = {
             "key": key,
             "workspace_id": workspace_id,
@@ -259,7 +252,7 @@ async def switch_session_if_needed(
             owner_tenant_claim=owner_tenant_claim,
             owner_user_claim=owner_user_claim,
             workspace_id=workspace_id,
-            repository=repository,
+            persistence=persistence,
             identity_rows=identity_rows,
         )
         if linked_session_id:
@@ -277,7 +270,7 @@ async def switch_session_if_needed(
         db_session_id = str(cached.get("db_session_id") or "").strip()
         if db_session_id:
             metadata["db_session_id"] = db_session_id
-    state.sessions[key] = cached
+    session_cache.sessions[key] = cached
 
     await _restore_agent_state(
         agent=agent,

@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import sys
 
-from fleet_rlm.runtime.quality.module_registry import (
-    ModuleOptimizationSpec,
+from fleet_rlm.quality.module_registry import (
     _REGISTRY,
+    ModuleOptimizationSpec,
     _reset_registry,
     get_module_spec,
     list_module_metadata,
     list_module_slugs,
     register_module,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -111,8 +110,8 @@ def test_registry_lazy_loads_without_import_time_side_effects() -> None:
     """VAL-MOD-004: Importing module_registry does not load DSPy or entrypoints."""
     import importlib.util
 
-    registry_name = "fleet_rlm.runtime.quality.module_registry"
-    entrypoint = "fleet_rlm.runtime.quality.optimize_longcot"
+    registry_name = "fleet_rlm.quality.module_registry"
+    entrypoint = "fleet_rlm.quality.optimize_longcot"
 
     # Save original module and remove entrypoint so we can observe lazy loading
     original_module = sys.modules.get(registry_name)

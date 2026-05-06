@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fleet_rlm.api.routers.ws.lifecycle import (
+from fleet_rlm.api.runtime_services.chat_persistence import (
     build_startup_status_event,
     cancel_startup_status_task,
     emit_delayed_startup_status,
@@ -43,9 +43,7 @@ def test_cancel_startup_status_task_stops_pending_emit() -> None:
         async def emit_event(event) -> None:
             emitted.append(event)
 
-        task = asyncio.create_task(
-            emit_delayed_startup_status(delay_seconds=60.0, emit_event=emit_event)
-        )
+        task = asyncio.create_task(emit_delayed_startup_status(delay_seconds=60.0, emit_event=emit_event))
 
         await asyncio.sleep(0)
         await cancel_startup_status_task(task)

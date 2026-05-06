@@ -1,19 +1,18 @@
 """WebSocket command dispatch helpers."""
 
-from collections.abc import Awaitable, Callable
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from fastapi import WebSocket
 
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
-from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
+from ...runtime_services.chat_runtime import ChatAgentProtocol
 from .artifacts import track_command_artifact_if_needed
-from .types import ChatAgentProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ async def _handle_command(
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
     *,
-    repository: FleetRepository | None = None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None = None,
     persistence_required: bool = False,
 ) -> None:
@@ -84,9 +83,7 @@ async def _handle_command(
     command, args = _extract_command_and_args(payload)
 
     if not command:
-        await websocket.send_json(
-            {"type": "error", "message": "Command name cannot be empty"}
-        )
+        await websocket.send_json({"type": "error", "message": "Command name cannot be empty"})
         return
     if args is None:
         await _send_command_args_error(websocket=websocket, command=command)
@@ -106,14 +103,12 @@ async def _handle_command(
             command=command,
             args=args,
             result=cast(Any, result),
-            repository=repository,
+            persistence=persistence,
             identity_rows=identity_rows,
             persistence_required=persistence_required,
         )
 
-        await websocket.send_json(
-            _command_response(command=command, result=normalized_result)
-        )
+        await websocket.send_json(_command_response(command=command, result=normalized_result))
     except (ValueError, FileNotFoundError, KeyError) as exc:
         await websocket.send_json(
             _command_response(
@@ -154,7 +149,7 @@ async def handle_command_with_persist(
     agent: ChatAgentProtocol,
     payload: dict[str, Any],
     session_record: dict[str, Any] | None,
-    repository: FleetRepository | None,
+    persistence: Any = None,
     identity_rows: IdentityUpsertResult | None,
     persistence_required: bool,
     local_persist: Callable[..., Awaitable[None]],
@@ -165,7 +160,7 @@ async def handle_command_with_persist(
         agent,
         payload,
         session_record,
-        repository=repository,
+        persistence=persistence,
         identity_rows=identity_rows,
         persistence_required=persistence_required,
     )

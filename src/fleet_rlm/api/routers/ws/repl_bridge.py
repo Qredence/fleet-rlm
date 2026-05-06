@@ -32,18 +32,14 @@ class ReplHookBridge:
         self._interpreter = interpreter
         self._enqueue_nonblocking = enqueue_nonblocking
         self._previous_execution_hook: Any = None
-        self._queue: asyncio.Queue[Any | None] = asyncio.Queue(
-            maxsize=_REPL_HOOK_STEP_QUEUE_MAX
-        )
+        self._queue: asyncio.Queue[Any | None] = asyncio.Queue(maxsize=_REPL_HOOK_STEP_QUEUE_MAX)
         self._worker_task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
         self._worker_task = asyncio.create_task(self._repl_step_worker())
         if self._interpreter is None:
             return
-        self._previous_execution_hook = getattr(
-            self._interpreter, "execution_event_callback", None
-        )
+        self._previous_execution_hook = getattr(self._interpreter, "execution_event_callback", None)
         self._interpreter.execution_event_callback = self._dispatch_interpreter_hook
 
     async def stop(self) -> None:
@@ -96,6 +92,4 @@ class ReplHookBridge:
         repl_step = self._step_builder.from_interpreter_hook(payload)
         if repl_step is None:
             return
-        self._ws_loop.call_soon_threadsafe(
-            lambda step_data=repl_step: self._queue_repl_step(step_data)
-        )
+        self._ws_loop.call_soon_threadsafe(lambda step_data=repl_step: self._queue_repl_step(step_data))

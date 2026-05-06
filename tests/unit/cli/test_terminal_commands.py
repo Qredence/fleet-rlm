@@ -91,9 +91,7 @@ def test_handle_slash_command_routes_session_registry_commands(monkeypatch):
     assert commands.handle_slash_command(session, agent, "/model") is False
     assert commands.handle_slash_command(session, agent, "/permissions") is False
     assert commands.handle_slash_command(session, agent, "/permissions-reset") is False
-    assert (
-        commands.handle_slash_command(session, agent, "/run-long-context docs") is False
-    )
+    assert commands.handle_slash_command(session, agent, "/run-long-context docs") is False
     assert len(palette_calls) == 3
     assert ("transcript", "status") in session.events
     assert ("render", None) in session.events

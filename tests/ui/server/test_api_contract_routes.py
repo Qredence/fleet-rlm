@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 import pytest
 from fastapi.routing import APIRoute
@@ -11,17 +11,17 @@ from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
 from fleet_rlm.api.dependencies import session_key
-from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 from fleet_rlm.integrations.database import ChatSessionStatus
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.utils.identity import owner_fingerprint, sanitize_id
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _register_reflect_and_revise_stub():
     """Register a stub 'reflect-and-revise' module for contract tests."""
-    from fleet_rlm.runtime.quality.module_registry import (
-        ModuleOptimizationSpec,
+    from fleet_rlm.quality.module_registry import (
         _REGISTRY,
+        ModuleOptimizationSpec,
         register_module,
     )
 
@@ -140,21 +140,12 @@ class SessionHistoryRepository:
             items = [
                 item
                 for item in items
-                if needle in item.title.lower()
-                or needle in item.metadata_json["external_session_id"].lower()
+                if needle in item.title.lower() or needle in item.metadata_json["external_session_id"].lower()
             ]
         if model_name is not None:
-            items = [
-                item
-                for item in items
-                if getattr(item, "model_name", None) == model_name
-            ]
+            items = [item for item in items if getattr(item, "model_name", None) == model_name]
         if model_provider is not None:
-            items = [
-                item
-                for item in items
-                if getattr(item, "model_provider", None) == model_provider
-            ]
+            items = [item for item in items if getattr(item, "model_provider", None) == model_provider]
         total = len(items)
         return items[offset : offset + limit], total
 
@@ -226,14 +217,8 @@ class SessionHistoryRepository:
 def test_required_http_and_websocket_routes_are_registered(
     local_client: TestClient,
 ) -> None:
-    http_paths = {
-        route.path for route in local_client.app.routes if isinstance(route, APIRoute)
-    }
-    ws_paths = {
-        route.path
-        for route in local_client.app.routes
-        if isinstance(route, WebSocketRoute)
-    }
+    http_paths = {route.path for route in local_client.app.routes if isinstance(route, APIRoute)}
+    ws_paths = {route.path for route in local_client.app.routes if isinstance(route, WebSocketRoute)}
 
     assert _REQUIRED_HTTP_PATHS.issubset(http_paths)
     assert _REQUIRED_WS_PATHS.issubset(ws_paths)
@@ -274,15 +259,10 @@ def test_ws_router_split_modules_import() -> None:
     import fleet_rlm.api.routers.ws as ws
     import fleet_rlm.api.routers.ws.artifacts as ws_artifacts
     import fleet_rlm.api.routers.ws.commands as ws_commands
-    import fleet_rlm.api.routers.ws.completion as ws_completion
     import fleet_rlm.api.routers.ws.endpoint as ws_endpoint
-    import fleet_rlm.api.routers.ws.errors as ws_errors
-    import fleet_rlm.api.routers.ws.lifecycle as ws_lifecycle
-    import fleet_rlm.api.routers.ws.manifest as ws_manifest
-    import fleet_rlm.api.routers.ws.messages as ws_messages
     import fleet_rlm.api.routers.ws.session as ws_session
     import fleet_rlm.api.routers.ws.stream as ws_stream
-    import fleet_rlm.api.routers.ws.terminal as ws_terminal
+    import fleet_rlm.api.routers.ws.transport as ws_transport
     import fleet_rlm.api.routers.ws.turn_setup as ws_turn_setup
     import fleet_rlm.api.routers.ws.types as ws_types
     import fleet_rlm.api.runtime_services.chat_persistence as chat_persistence
@@ -294,20 +274,20 @@ def test_ws_router_split_modules_import() -> None:
     assert ws_endpoint._prepare_chat_runtime is not None
     assert ws_artifacts.is_artifact_tracking_command is not None
     assert ws_commands._handle_command is not None
-    assert ws_completion.build_execution_completion_summary is not None
-    assert ws_lifecycle.get_execution_emitter is not None
-    assert ws_errors.handle_stream_error is not None
-    assert ws_lifecycle.classify_stream_failure is not None
+    assert ws_stream.build_execution_completion_summary is not None
+    assert chat_persistence.get_execution_emitter is not None
+    assert ws_stream.handle_stream_error is not None
+    assert chat_persistence.classify_stream_failure is not None
     assert chat_persistence.ExecutionLifecycleManager is not None
-    assert ws_lifecycle.handle_chat_disconnect is not None
-    assert ws_manifest._manifest_path is not None
-    assert ws_messages.parse_ws_message_or_send_error is not None
+    assert chat_persistence.handle_chat_disconnect is not None
+    assert chat_persistence._manifest_path is not None
+    assert ws_transport.parse_ws_message_or_send_error is not None
     assert chat_persistence.persist_session_state is not None
     assert chat_runtime.PreparedChatRuntime is not None
     assert ws_session.switch_session_if_needed is not None
     assert ws_stream._chat_message_loop is not None
-    assert ws_lifecycle.cancel_task is not None
-    assert ws_terminal.handle_terminal_stream_event is not None
+    assert chat_persistence.cancel_task is not None
+    assert ws_stream.handle_terminal_stream_event is not None
     assert chat_persistence.initialize_turn_lifecycle is not None
     assert ws_turn_setup.prepare_chat_message_turn is not None
     assert ws_types.ChatAgentProtocol is not None
@@ -316,9 +296,7 @@ def test_ws_router_split_modules_import() -> None:
 def test_ws_router_registers_expected_websocket_routes() -> None:
     import fleet_rlm.api.routers.ws as ws
 
-    websocket_paths = {
-        route.path for route in ws.router.routes if getattr(route, "path", None)
-    }
+    websocket_paths = {route.path for route in ws.router.routes if getattr(route, "path", None)}
     assert "/ws/execution" in websocket_paths
     assert "/ws/execution/events" in websocket_paths
 
@@ -350,10 +328,7 @@ def test_optimization_modules_endpoint_returns_longcot_reasoner(
     assert "longcot-reasoner" in slugs
     longcot = next(m for m in payload if m["slug"] == "longcot-reasoner")
     assert longcot["label"] == "LongCoT QA Reasoner"
-    assert (
-        longcot["program_spec"]
-        == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
-    )
+    assert longcot["program_spec"] == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
     assert "question" in longcot["required_dataset_keys"]
 
 
@@ -697,10 +672,7 @@ def test_session_export_route_loads_repository_turns_in_one_call(
     assert payload["row_count"] == 5
     # Export now issues a single bounded list_chat_turns call instead of paging.
     assert repository.turn_list_calls[-1]["offset"] == 0
-    assert (
-        repository.turn_list_calls[-1]["limit"]
-        == sessions_router._TRANSCRIPT_EXPORT_MAX_TURNS
-    )
+    assert repository.turn_list_calls[-1]["limit"] == sessions_router._TRANSCRIPT_EXPORT_MAX_TURNS
 
 
 def test_session_export_route_rejects_oversized_sessions(
@@ -710,13 +682,13 @@ def test_session_export_route_rejects_oversized_sessions(
     tmp_path: Path,
 ) -> None:
     """Sessions larger than the export cap return HTTP 413."""
-    from fleet_rlm.api.routers import sessions as sessions_router
+    from fleet_rlm.api.runtime_services import session_service as session_svc
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
     monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
-    monkeypatch.setattr(sessions_router, "_TRANSCRIPT_EXPORT_MAX_TURNS", 2)
+    monkeypatch.setattr(session_svc, "_TRANSCRIPT_EXPORT_MAX_TURNS", 2)
     local_store._engines.clear()
 
     repository = SessionHistoryRepository()
@@ -748,16 +720,14 @@ def test_sandbox_list_paginates_with_limit(
 ) -> None:
     calls: list[dict[str, int]] = []
 
-    async def fake_load_sandbox_list(
-        *, page: int, limit: int, **kwargs: object
-    ) -> dict[str, object]:
+    async def fake_load_sandbox_list(*, page: int, limit: int, **kwargs: object) -> dict[str, object]:
         _ = kwargs
         calls.append({"page": page, "limit": limit})
         return {"items": [], "total": 0, "page": page, "total_pages": 0}
 
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.sandboxes.load_sandbox_list",
-        fake_load_sandbox_list,
+        "fleet_rlm.api.runtime_services.sandbox_service.SandboxService.list_sandboxes",
+        staticmethod(fake_load_sandbox_list),
     )
 
     response = default_client.get(
@@ -781,8 +751,7 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
     schema = local_client.app.openapi()
     security_schemes = schema.get("components", {}).get("securitySchemes", {})
     assert any(
-        scheme.get("type") == "http" and scheme.get("scheme") == "bearer"
-        for scheme in security_schemes.values()
+        scheme.get("type") == "http" and scheme.get("scheme") == "bearer" for scheme in security_schemes.values()
     )
 
     protected_operations = [
@@ -797,16 +766,11 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
     ]
     for method, path in protected_operations:
         operation = schema["paths"][path][method]
-        assert operation.get("security"), (
-            f"expected OpenAPI security on {method} {path}"
-        )
+        assert operation.get("security"), f"expected OpenAPI security on {method} {path}"
 
 
 def test_openapi_and_health_share_the_same_version(local_client: TestClient) -> None:
-    assert (
-        local_client.app.openapi()["info"]["version"]
-        == local_client.get("/health").json()["version"]
-    )
+    assert local_client.app.openapi()["info"]["version"] == local_client.get("/health").json()["version"]
 
 
 def test_runtime_contract_endpoints_remain_available(
@@ -868,13 +832,12 @@ def test_optimization_transcript_dataset_endpoint_creates_dataset(
     assert payload["name"].startswith("Recovered chat")
 
 
-def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mode(
+def test_optimization_transcript_dataset_endpoint_persists_in_local_mode(
     default_client: TestClient,
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.api.routers.optimization import datasets as opt_datasets
     from fleet_rlm.integrations import local_store
 
     db_path = tmp_path / "local.db"
@@ -882,11 +845,6 @@ def test_optimization_transcript_dataset_endpoint_skips_jsonl_write_in_local_mod
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
     local_store._engines.clear()
     default_client.app.state.server_state.repository = None
-
-    def _unexpected_persist(**_: object) -> Path:
-        raise AssertionError("persist_jsonl_rows should not run in local mode")
-
-    monkeypatch.setattr(opt_datasets, "persist_jsonl_rows", _unexpected_persist)
 
     response = default_client.post(
         "/api/v1/optimization/transcript-datasets",
@@ -1183,15 +1141,12 @@ def test_trace_feedback_logs_feedback_by_trace_id(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         lambda **kwargs: fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.log_trace_feedback",
-        lambda **kwargs: (
-            calls.append(kwargs)
-            or {"feedback_logged": True, "expectation_logged": True}
-        ),
+        "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
+        lambda **kwargs: calls.append(kwargs) or {"feedback_logged": True, "expectation_logged": True},
     )
 
     response = default_client.post(
@@ -1228,11 +1183,11 @@ def test_trace_feedback_resolves_by_client_request_id(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         lambda **kwargs: captured.append(kwargs) or fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.log_trace_feedback",
+        "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
         lambda **kwargs: {"feedback_logged": True, "expectation_logged": False},
     )
 
@@ -1263,14 +1218,12 @@ def test_trace_feedback_returns_403_for_other_users_trace(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         lambda **kwargs: fake_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.log_trace_feedback",
-        lambda **kwargs: pytest.fail(
-            "feedback logging should not run for another user's trace"
-        ),
+        "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
+        lambda **kwargs: pytest.fail("feedback logging should not run for another user's trace"),
     )
 
     response = default_client.post(
@@ -1313,7 +1266,7 @@ def test_trace_feedback_returns_404_when_trace_missing(
 ) -> None:
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         lambda **kwargs: None,
     )
 
@@ -1336,7 +1289,7 @@ def test_trace_feedback_returns_503_when_lookup_raises(
 ) -> None:
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("mlflow down")),
     )
 
@@ -1380,15 +1333,15 @@ def test_trace_feedback_offloads_lookup_and_logging_with_run_blocking(
 
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.resolve_trace",
+        "fleet_rlm.api.runtime_services.trace_service.resolve_trace",
         fake_resolve_trace,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.log_trace_feedback",
+        "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
         fake_log_trace_feedback,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.routers.traces.run_blocking",
+        "fleet_rlm.api.runtime_services.trace_service.run_blocking",
         fake_run_blocking,
     )
 

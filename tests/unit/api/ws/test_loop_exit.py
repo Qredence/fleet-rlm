@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.lifecycle import (
+from fleet_rlm.api.routers.ws.transport import handle_chat_loop_exception
+from fleet_rlm.api.runtime_services.chat_persistence import (
     PersistenceRequiredError,
     handle_chat_disconnect,
-    handle_chat_loop_exception,
 )
 from fleet_rlm.integrations.database import RunStatus
 
@@ -42,12 +42,8 @@ class _LifecycleStub:
 
 def test_handle_chat_disconnect_cancels_tasks_and_completes_cancelled() -> None:
     async def scenario() -> None:
-        pending_receive_task = cast(
-            asyncio.Task[object], asyncio.create_task(asyncio.sleep(10))
-        )
-        stream_task = cast(
-            asyncio.Task[str | None], asyncio.create_task(asyncio.sleep(10))
-        )
+        pending_receive_task = cast(asyncio.Task[object], asyncio.create_task(asyncio.sleep(10)))
+        stream_task = cast(asyncio.Task[str | None], asyncio.create_task(asyncio.sleep(10)))
         await asyncio.sleep(0)
 
         cancel_flag = {"cancelled": False}

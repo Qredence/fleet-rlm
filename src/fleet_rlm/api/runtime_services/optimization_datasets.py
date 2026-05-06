@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from fleet_rlm.runtime.quality.transcript_exports import (
+from fleet_rlm.quality.transcript_exports import (
     build_transcript_dataset_rows as _build_transcript_dataset_rows,
 )
 

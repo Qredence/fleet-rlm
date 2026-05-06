@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -97,11 +97,7 @@ class _RunStepsRepository:
         created_by_user_id=None,
     ):
         self.calls.append(("get_run", run_id, workspace_id, created_by_user_id))
-        if (
-            tenant_id == self.tenant_id
-            and run_id == self.run.id
-            and workspace_id == self.workspace_id
-        ):
+        if tenant_id == self.tenant_id and run_id == self.run.id and workspace_id == self.workspace_id:
             return self.run
         return None
 
@@ -115,14 +111,8 @@ class _RunStepsRepository:
         limit=None,
         offset=0,
     ):
-        self.calls.append(
-            ("get_run_steps", run_id, workspace_id, created_by_user_id, limit, offset)
-        )
-        if (
-            tenant_id == self.tenant_id
-            and run_id == self.run.id
-            and workspace_id == self.workspace_id
-        ):
+        self.calls.append(("get_run_steps", run_id, workspace_id, created_by_user_id, limit, offset))
+        if tenant_id == self.tenant_id and run_id == self.run.id and workspace_id == self.workspace_id:
             return self.steps[offset : offset + limit if limit is not None else None]
         return []
 
@@ -135,11 +125,7 @@ class _RunStepsRepository:
         created_by_user_id=None,
     ):
         self.calls.append(("count_run_steps", run_id, workspace_id, created_by_user_id))
-        if (
-            tenant_id == self.tenant_id
-            and run_id == self.run.id
-            and workspace_id == self.workspace_id
-        ):
+        if tenant_id == self.tenant_id and run_id == self.run.id and workspace_id == self.workspace_id:
             return len(self.steps)
         return 0
 
@@ -163,11 +149,7 @@ class _RunStepsRepository:
                 offset,
             )
         )
-        if (
-            tenant_id == self.tenant_id
-            and run_id == self.run.id
-            and workspace_id == self.workspace_id
-        ):
+        if tenant_id == self.tenant_id and run_id == self.run.id and workspace_id == self.workspace_id:
             return self.steps[offset : offset + limit], len(self.steps)
         return [], 0
 
@@ -264,9 +246,7 @@ def test_get_run_steps_pagination(default_client, auth_headers, run_steps_repo):
     assert payload["items"][0]["step_index"] == 1
 
 
-def test_get_run_steps_nonexistent_run_returns_404(
-    default_client, auth_headers, run_steps_repo
-):
+def test_get_run_steps_nonexistent_run_returns_404(default_client, auth_headers, run_steps_repo):
     _ = run_steps_repo
     response = default_client.get(
         f"/api/v1/runs/{uuid.uuid4()}/steps",
@@ -304,9 +284,7 @@ def test_get_run_steps_invalid_run_id_returns_404(default_client, auth_headers):
     assert response.status_code == 404
 
 
-def test_get_run_steps_invalid_limit_returns_422(
-    default_client, auth_headers, run_steps_repo
-):
+def test_get_run_steps_invalid_limit_returns_422(default_client, auth_headers, run_steps_repo):
     response = default_client.get(
         f"/api/v1/runs/{run_steps_repo.run.id}/steps?limit=0",
         headers=auth_headers,

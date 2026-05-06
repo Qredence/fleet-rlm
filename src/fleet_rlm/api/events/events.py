@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from asyncio import Lock as AsyncLock
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import WebSocket
@@ -95,13 +95,9 @@ class ExecutionEventEmitter:
         self._connections: dict[WebSocket, ExecutionEventEmitter._ConnectionState] = {}
         self._lock = AsyncLock()
 
-    async def connect(
-        self, websocket: WebSocket, subscription: ExecutionSubscription
-    ) -> None:
+    async def connect(self, websocket: WebSocket, subscription: ExecutionSubscription) -> None:
         await websocket.accept()
-        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(
-            maxsize=self._max_queue
-        )
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=self._max_queue)
         sender_task = asyncio.create_task(self._sender_loop(websocket))
         state = self._ConnectionState(
             subscription=subscription,
@@ -191,11 +187,7 @@ class ExecutionEventEmitter:
     async def emit(self, event: ExecutionEvent) -> None:
         payload = event.model_dump(mode="json")
         async with self._lock:
-            targets = [
-                state
-                for state in self._connections.values()
-                if state.subscription.matches(event)
-            ]
+            targets = [state for state in self._connections.values() if state.subscription.matches(event)]
         for state in targets:
             self._enqueue_payload(state, payload)
 
@@ -207,7 +199,6 @@ class ExecutionEventEmitter:
 # Late import avoids a circular dependency during module initialization while
 # still providing a concrete symbol for static analyzers and re-export users.
 from .step_builder import ExecutionStepBuilder  # noqa: E402
-
 
 __all__ = [
     "ExecutionEvent",

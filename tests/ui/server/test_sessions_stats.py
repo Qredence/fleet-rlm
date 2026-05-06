@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
@@ -113,17 +113,13 @@ class _StatsSessionRepository:
             "model_breakdown": model_breakdown,
         }
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
@@ -186,14 +182,10 @@ class _EmptyTurnsRepository:
             "model_breakdown": {},
         }
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         return False
 
     async def create_dataset(self, request, *, examples):

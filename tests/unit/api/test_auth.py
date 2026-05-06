@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import jwt
 import pytest
 
-from fleet_rlm.integrations.database import TenantStatus
 from fleet_rlm.api.auth import (
     DevAuthProvider,
     EntraAuthProvider,
@@ -14,6 +13,7 @@ from fleet_rlm.api.auth import (
 )
 from fleet_rlm.api.auth.base import AuthError
 from fleet_rlm.api.auth.types import NormalizedIdentity
+from fleet_rlm.integrations.database import TenantStatus
 
 TEST_SECRET = "0123456789abcdef0123456789abcdef"
 
@@ -67,9 +67,7 @@ async def test_dev_auth_accepts_hs256_jwt():
         algorithm="HS256",
     )
 
-    identity = await provider.authenticate_http(
-        _FakeRequest({"authorization": f"Bearer {token}"})
-    )
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert identity.tenant_claim == "tenant-xyz"
     assert identity.user_claim == "user-abc"
@@ -119,9 +117,7 @@ async def test_dev_auth_accepts_websocket_query_access_token():
         algorithm="HS256",
     )
 
-    identity = await provider.authenticate_websocket(
-        _FakeWebSocket(query_params={"access_token": token})
-    )
+    identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
 
     assert identity.tenant_claim == "tenant-ws"
     assert identity.user_claim == "user-ws"
@@ -182,9 +178,7 @@ async def test_entra_auth_accepts_single_tenant_issuer_url(
     )
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
-    identity = await provider.authenticate_http(
-        _FakeRequest({"authorization": "Bearer entra-token"})
-    )
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "user-456"
@@ -239,9 +233,7 @@ async def test_entra_auth_accepts_bearer_token(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
-    identity = await provider.authenticate_http(
-        _FakeRequest({"authorization": "Bearer entra-token"})
-    )
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "user-456"
@@ -282,9 +274,7 @@ async def test_entra_auth_accepts_websocket_query_access_token(
 
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
-    identity = await provider.authenticate_websocket(
-        _FakeWebSocket(query_params={"access_token": "entra-token"})
-    )
+    identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": "entra-token"}))
 
     assert identity.tenant_claim == "tenant-ws"
     assert identity.user_claim == "user-ws"
@@ -300,9 +290,7 @@ async def test_entra_auth_blocks_query_access_token_when_disabled():
         allow_query_auth_tokens=False,
     )
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_websocket(
-            _FakeWebSocket(query_params={"access_token": "entra-token"})
-        )
+        await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": "entra-token"}))
     assert exc.value.status_code == 401
 
 
@@ -319,9 +307,7 @@ async def test_entra_auth_rejects_missing_tid_before_issuer_resolution(
     monkeypatch.setattr(jwt, "decode", lambda *args, **kwargs: {})
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(
-            _FakeRequest({"authorization": "Bearer entra-token"})
-        )
+        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert exc.value.status_code == 401
     assert "tid" in exc.value.message
@@ -362,9 +348,7 @@ async def test_entra_auth_rejects_non_allowlisted_user(
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(
-            _FakeRequest({"authorization": "Bearer entra-token"})
-        )
+        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert exc.value.status_code == 403
     assert "allowlisted" in exc.value.message
@@ -405,9 +389,7 @@ async def test_entra_auth_accepts_allowlisted_group(
 
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
-    identity = await provider.authenticate_http(
-        _FakeRequest({"authorization": "Bearer entra-token"})
-    )
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "blocked-user"
@@ -449,9 +431,7 @@ async def test_entra_auth_rejects_group_allowlist_when_groups_are_omitted_by_ove
     monkeypatch.setattr(jwt, "decode", _fake_decode)
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(
-            _FakeRequest({"authorization": "Bearer entra-token"})
-        )
+        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert exc.value.status_code == 403
     assert "omitted groups due to overage" in exc.value.message
@@ -481,9 +461,7 @@ async def test_entra_auth_logs_unexpected_validation_errors(
 
     with caplog.at_level("WARNING"):
         with pytest.raises(AuthError) as exc:
-            await provider.authenticate_http(
-                _FakeRequest({"authorization": "Bearer entra-token"})
-            )
+            await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
 
     assert exc.value.status_code == 503
     assert "Failed to validate Entra token" in exc.value.message
@@ -578,7 +556,5 @@ async def test_dev_auth_blocks_query_access_token_when_disabled():
         algorithm="HS256",
     )
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_websocket(
-            _FakeWebSocket(query_params={"access_token": token})
-        )
+        await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
     assert exc.value.status_code == 401

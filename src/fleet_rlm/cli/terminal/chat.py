@@ -16,6 +16,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
+from fleet_rlm.integrations.config.env import AppConfig
 from fleet_rlm.runtime.agent.commands import COMMAND_DISPATCH
 from fleet_rlm.runtime.config import (
     build_dspy_context,
@@ -23,28 +24,55 @@ from fleet_rlm.runtime.config import (
     get_planner_lm_from_env,
 )
 from fleet_rlm.runtime.factory import build_chat_agent
-from fleet_rlm.runtime.models import TraceMode
-from fleet_rlm.integrations.config.env import AppConfig
+from fleet_rlm.runtime.schemas import TraceMode
 
 from .commands import _normalize_trace_mode, handle_slash_command
 from .session_actions import (
     authorize_command as _authorize_command_impl,
+)
+from .session_actions import (
     print_command_palette_action as _print_command_palette_impl,
+)
+from .session_actions import (
     print_permissions as _print_permissions_impl,
+)
+from .session_actions import (
     print_status as _print_status_impl,
+)
+from .session_actions import (
     print_unknown_command_action as _print_unknown_command_impl,
+)
+from .session_actions import (
     run_long_context_action as _run_long_context_impl,
+)
+from .session_actions import (
     run_settings_action as _run_settings_impl,
+)
+from .session_actions import (
     settings_llm_action as _settings_llm_impl,
+)
+from .session_actions import (
     show_shortcuts as _show_shortcuts_impl,
 )
 from .session_view import (
     append_transcript as _append_transcript_impl,
+)
+from .session_view import (
     bottom_toolbar as _bottom_toolbar_impl,
+)
+from .session_view import (
     print_banner as _print_banner_impl,
+)
+from .session_view import (
     print_error as _print_error_impl,
+)
+from .session_view import (
     print_result as _print_result_impl,
+)
+from .session_view import (
     print_warning as _print_warning_impl,
+)
+from .session_view import (
     render_shell as _render_shell_impl,
 )
 from .ui import _FleetCompleter, _history_path, _prompt_label
@@ -124,16 +152,10 @@ class _TerminalChatSession:
     def __init__(self, *, config: AppConfig, options: TerminalChatOptions) -> None:
         self.config = config
         self.options = options
-        self.trace_mode: TraceMode = cast(
-            TraceMode, _normalize_trace_mode(options.trace_mode)
-        )
+        self.trace_mode: TraceMode = cast(TraceMode, _normalize_trace_mode(options.trace_mode))
         self.session_id = uuid.uuid4().hex[:8]
-        self.secret_name = (
-            config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM"
-        )
-        self.volume_name = (
-            options.volume_name or config.interpreter.volume_name or "rlm-volume-dspy"
-        )
+        self.secret_name = config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM"
+        self.volume_name = options.volume_name or config.interpreter.volume_name or "rlm-volume-dspy"
         self.console = Console()
         self.last_status = "ready"
         self.is_processing = False
@@ -172,24 +194,8 @@ class _TerminalChatSession:
         agent_context = build_chat_agent(
             docs_path=self.options.docs_path,
             react_max_iters=self.config.rlm_settings.max_iters,
-            deep_react_max_iters=self.config.rlm_settings.deep_max_iters,
-            enable_adaptive_iters=self.config.rlm_settings.enable_adaptive_iters,
-            rlm_max_iterations=self.config.agent.rlm_max_iterations,
-            rlm_max_llm_calls=self.config.rlm_settings.max_llm_calls,
-            max_depth=self.config.rlm_settings.max_depth,
-            timeout=self.config.interpreter.timeout,
-            secret_name=self.secret_name,
-            volume_name=self.volume_name,
             planner_lm=planner_lm,
-            interpreter_async_execute=self.config.interpreter.async_execute,
-            guardrail_mode=self.config.agent.guardrail_mode,
-            max_output_chars=self.config.rlm_settings.max_output_chars,
-            min_substantive_chars=self.config.agent.min_substantive_chars,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=self.config.rlm_settings.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=self.config.rlm_settings.delegate_result_truncation_chars,
-            rlm_child_isolation_mode=self.config.rlm_settings.child_isolation_mode,
-            rlm_child_fork_fallback=self.config.rlm_settings.child_fork_fallback,
         )
 
         lm_context = build_dspy_context(lm=planner_lm) if planner_lm else nullcontext()

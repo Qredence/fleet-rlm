@@ -1,4 +1,4 @@
-"""Tests for ``fleet_rlm.runtime.quality.workspace_metrics``."""
+"""Tests for ``fleet_rlm.quality.workspace_metrics``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import dspy
 import pytest
 
-from fleet_rlm.runtime.quality.workspace_metrics import (
+from fleet_rlm.quality.workspace_metrics import (
     completeness_feedback_metric,
     exact_match_feedback_metric,
     workspace_feedback_metric,
@@ -35,9 +35,7 @@ class TestExactMatchFeedback:
         assert "casing" in feedback.lower()
 
     def test_substring_match(self) -> None:
-        score, feedback = exact_match_feedback_metric(
-            _gold("hello"), _pred("hello world")
-        )
+        score, feedback = exact_match_feedback_metric(_gold("hello"), _pred("hello world"))
         assert score == 0.6
         assert "substring" in feedback.lower()
 
@@ -83,9 +81,7 @@ class TestWorkspaceFeedbackMetric:
         assert "exact_match=1.00" in feedback
 
     def test_blended_score(self) -> None:
-        score, feedback = workspace_feedback_metric(
-            _gold("hello world"), _pred("goodbye world")
-        )
+        score, feedback = workspace_feedback_metric(_gold("hello world"), _pred("goodbye world"))
         assert 0.0 < score < 1.0
         assert "exact_match=" in feedback
         assert "completeness=" in feedback

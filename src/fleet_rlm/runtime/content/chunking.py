@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import re
 
-
 # ═══════════════════════════════════════════════════════════════════════
 # Fixed-size chunking
 # ═══════════════════════════════════════════════════════════════════════
@@ -128,9 +127,7 @@ def chunk_by_headers(
             header = section[:newline_pos].strip()
             content = section[newline_pos + 1 :].strip()
 
-        chunks.append(
-            {"header": header, "content": content, "start_pos": match.start()}
-        )
+        chunks.append({"header": header, "content": content, "start_pos": match.start()})
 
     return chunks
 
@@ -188,9 +185,7 @@ def chunk_by_timestamps(
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         content = text[match.start() : end].strip()
         timestamp = match.group(0).strip()
-        chunks.append(
-            {"timestamp": timestamp, "content": content, "start_pos": match.start()}
-        )
+        chunks.append({"timestamp": timestamp, "content": content, "start_pos": match.start()})
 
     return chunks
 

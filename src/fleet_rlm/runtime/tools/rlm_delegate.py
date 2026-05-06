@@ -3,19 +3,10 @@
 Registers module-level ``delegate_to_rlm`` tools marked with ``@tool_fn`` so
 that ``discover_tools()`` can collect them.
 
-The tool uses a ``contextvars.ContextVar`` to hold the active Daytona
-interpreter for the current agent turn.  Call ``set_delegate_interpreter()``
-before invoking the tool to inject the interpreter.  Calling without a set
-interpreter raises ``RuntimeError``.
-
-Usage within an agent runtime::
-
-    from fleet_rlm.runtime.tools.rlm_delegate import set_delegate_interpreter
-    token = set_delegate_interpreter(interpreter)
-    try:
-        result = delegate_to_rlm("my query", "optional context")
-    finally:
-        _delegate_interpreter.reset(token)
+The ``delegate_to_rlm`` and ``delegate_to_rlm_batched`` functions require a
+Daytona ``interpreter`` to be passed directly.  The caller (e.g. the agent
+runtime or test harness) is responsible for providing the interpreter
+instance.
 """
 
 from __future__ import annotations
@@ -27,40 +18,18 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextvars import ContextVar, copy_context
+from contextvars import copy_context
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
 
-from fleet_rlm.runtime.execution.preview import head_tail_preview
-from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+from fleet_rlm.runtime.content.preview import head_tail_preview
+from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
-
-# Context variable holding the Daytona interpreter for the active agent turn.
-# Set by the agent runtime before invoking the agent so tool calls can
-# access the interpreter without requiring a closure.
-_delegate_interpreter: ContextVar[Any | None] = ContextVar(
-    "rlm_delegate_interpreter", default=None
-)
-
-
-def set_delegate_interpreter(interpreter: Any | None) -> Any:
-    """Set the active Daytona interpreter for RLM delegation.
-
-    The returned token can be passed to ``_delegate_interpreter.reset(token)``
-    to restore the previous value (useful in tests and nested contexts).
-
-    Args:
-        interpreter: Daytona interpreter instance, or ``None`` to clear.
-
-    Returns:
-        A ``contextvars.Token`` for resetting the variable.
-    """
-    return _delegate_interpreter.set(interpreter)
 
 
 @tool_fn
@@ -68,16 +37,14 @@ def delegate_to_rlm(
     query: str,
     context: str = "",
     document_url: str | None = None,
+    *,
+    interpreter: Any | None = None,
 ) -> dict[str, Any]:
     """Delegate a query to a recursive dspy.RLM running in a Daytona sandbox.
 
     Creates or reuses an existing Daytona sandbox session, constructs a
-    ``dspy.RLM`` with the active interpreter, executes the query, and returns
+    ``dspy.RLM`` with the provided interpreter, executes the query, and returns
     a structured result dict with ``status`` and ``answer``.
-
-    The interpreter must be set via :func:`set_delegate_interpreter` before
-    invoking this tool (or via the surrounding agent runtime context that
-    initialises the Daytona interpreter).
 
     Use this for one child task. For multiple independent child tasks, prefer
     ``delegate_to_rlm_batched`` so siblings can run concurrently. When work is
@@ -97,6 +64,8 @@ def delegate_to_rlm(
         context: Optional additional context string for the query.
         document_url: Optional HTTP(S) URL of a document to fetch and inject
             into the RLM context before execution.
+        interpreter: Daytona interpreter instance.  Must be provided as a
+            keyword argument.
 
     Returns:
         A dict with:
@@ -105,15 +74,11 @@ def delegate_to_rlm(
         - ``error``: Error message string (present when ``status == "error"``).
 
     Raises:
-        RuntimeError: When called without a bound interpreter in the
-            current context (i.e., ``set_delegate_interpreter`` was not called).
+        RuntimeError: When called without a bound interpreter.
     """
-    interpreter = _delegate_interpreter.get()
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm requires a bound Daytona interpreter. "
-            "Set the interpreter via set_delegate_interpreter() or run within "
-            "an agent runtime context that initialises the interpreter."
+            "delegate_to_rlm requires a Daytona interpreter. Pass the interpreter as a keyword argument."
         )
 
     llm_budget = _remaining_llm_budget(interpreter)
@@ -138,6 +103,8 @@ def delegate_to_rlm_batched(
     queries: list[str],
     context: str = "",
     document_url: str | None = None,
+    *,
+    interpreter: Any | None = None,
 ) -> dict[str, Any]:
     """Delegate independent child RLM tasks concurrently.
 
@@ -154,26 +121,26 @@ def delegate_to_rlm_batched(
         queries: Ordered list of independent child RLM prompts.
         context: Shared context supplied to every child.
         document_url: Optional HTTP(S) document to stage for each child.
+        interpreter: Daytona interpreter instance.  Must be provided as a
+            keyword argument.
 
     Returns:
         A dict with ``status`` and ordered successful ``results``. When one or
         more children fail, ``status`` is ``"error"`` and ``errors`` contains
         per-query diagnostics while successful siblings remain in ``results``.
+
+    Raises:
+        RuntimeError: When called without a bound interpreter.
     """
-    interpreter = _delegate_interpreter.get()
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm_batched requires a bound Daytona interpreter. "
-            "Set the interpreter via set_delegate_interpreter() or run within "
-            "an agent runtime context that initialises the interpreter."
+            "delegate_to_rlm_batched requires a Daytona interpreter. Pass the interpreter as a keyword argument."
         )
 
     normalized_queries = [str(query) for query in queries or []]
     if not normalized_queries:
         return {"status": "ok", "results": []}
-    blank_indexes = [
-        index for index, query in enumerate(normalized_queries) if not query.strip()
-    ]
+    blank_indexes = [index for index, query in enumerate(normalized_queries) if not query.strip()]
     if blank_indexes:
         return {
             "status": "error",
@@ -241,10 +208,15 @@ def delegate_to_rlm_batched(
             child_result = cast(dict[str, Any], child_result)
 
             if child_result.get("status") == "ok":
-                result_by_index[index] = {
+                success: dict[str, Any] = {
                     "query": query,
                     "answer": str(child_result.get("answer", "")),
                 }
+                if child_result.get("degraded"):
+                    success["degraded"] = True
+                    success["degradation_reason"] = str(child_result.get("degradation_reason", ""))
+                    success["degradation_error"] = str(child_result.get("degradation_error", ""))
+                result_by_index[index] = success
                 continue
 
             error_by_index[index] = {
@@ -254,16 +226,8 @@ def delegate_to_rlm_batched(
                 "error": str(child_result.get("error", "unknown child error")),
             }
 
-    results = [
-        result_by_index[index]
-        for index in range(len(normalized_queries))
-        if index in result_by_index
-    ]
-    errors = [
-        error_by_index[index]
-        for index in range(len(normalized_queries))
-        if index in error_by_index
-    ]
+    results = [result_by_index[index] for index in range(len(normalized_queries)) if index in result_by_index]
+    errors = [error_by_index[index] for index in range(len(normalized_queries)) if index in error_by_index]
     if errors:
         return {"status": "error", "results": results, "errors": errors}
     return {"status": "ok", "results": results}
@@ -304,9 +268,7 @@ def _run_delegate_child(
             interpreter=child,
             max_iterations=max_iterations,
             max_llm_calls=llm_budget,
-            verbose=bool(
-                getattr(child, "verbose", getattr(interpreter, "verbose", False))
-            ),
+            verbose=bool(getattr(child, "verbose", getattr(interpreter, "verbose", False))),
             sub_lm=getattr(child, "sub_lm", None),
         )
 
@@ -349,6 +311,14 @@ def _run_delegate_child(
         if isinstance(metadata, dict):
             metadata["error_reason"] = failure["reason"]
         logger.warning("delegate_to_rlm: child failure detected: %s", failure)
+        if failure["reason"] == "broker_unavailable" and answer.strip():
+            return {
+                "status": "ok",
+                "answer": answer,
+                "degraded": True,
+                "degradation_reason": failure["reason"],
+                "degradation_error": failure["error"],
+            }
         return {"status": "error", **failure}
 
     return {"status": "ok", "answer": answer}
@@ -420,10 +390,7 @@ def _resolve_delegate_context(
             stripped_url,
             err,
         )
-        return (
-            base_context
-            + f"\n\nNote: Attempted to pre-fetch {stripped_url} but failed: {err}"
-        ).strip()
+        return (base_context + f"\n\nNote: Attempted to pre-fetch {stripped_url} but failed: {err}").strip()
 
     doc_text = fetch_result["text"]
     char_count = int(fetch_result["char_count"])
@@ -500,11 +467,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
     if value is None or isinstance(value, (bool, int, float)):
         return False
     if isinstance(value, Mapping):
-        return any(
-            _contains_marker(item, marker, _depth=_depth + 1)
-            for pair in value.items()
-            for item in pair
-        )
+        return any(_contains_marker(item, marker, _depth=_depth + 1) for pair in value.items() for item in pair)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
     value_dict = getattr(value, "__dict__", None)
@@ -512,8 +475,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
         filtered = {
             key: item
             for key, item in value_dict.items()
-            if key
-            in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
+            if key in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
         }
         if _contains_marker(filtered, marker, _depth=_depth + 1):
             return True
@@ -787,4 +749,4 @@ def _persist_child_trace(
         logger.warning("Failed to persist RLM child trace: %s", exc)
 
 
-__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched", "set_delegate_interpreter"]
+__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched"]

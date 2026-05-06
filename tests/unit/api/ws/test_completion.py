@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from fleet_rlm.api.routers.ws.completion import build_execution_completion_summary
-from fleet_rlm.api.routers.ws.types import WorkspaceEvent
+from fleet_rlm.api.routers.ws.stream import (
+    WorkspaceEvent,
+    build_execution_completion_summary,
+)
 from tests.ui.fixtures_ui import ts
 
 
-def test_build_execution_completion_summary_preserves_run_result_and_guarantees_minimum_fields() -> (
-    None
-):
+def test_build_execution_completion_summary_preserves_run_result_and_guarantees_minimum_fields() -> None:
     event = WorkspaceEvent(
         kind="done",
         text="done",
@@ -58,9 +58,7 @@ def test_build_execution_completion_summary_builds_fallback_final_artifact() -> 
     assert summary["summary"]["error"] is None
 
 
-def test_build_execution_completion_summary_prefers_top_level_final_artifact_when_present() -> (
-    None
-):
+def test_build_execution_completion_summary_prefers_top_level_final_artifact_when_present() -> None:
     event = WorkspaceEvent(
         kind="done",
         text="raw fallback text",
@@ -132,9 +130,7 @@ def test_build_execution_completion_summary_marks_tool_error_final_as_error() ->
     assert summary["final_artifact"]["value"]["summary"] == "claimed success"
 
 
-def test_build_execution_completion_summary_surfaces_human_review_terminal_state() -> (
-    None
-):
+def test_build_execution_completion_summary_surfaces_human_review_terminal_state() -> None:
     event = WorkspaceEvent(
         kind="done",
         text="Need a human to review the risky repair.",
@@ -161,14 +157,8 @@ def test_build_execution_completion_summary_surfaces_human_review_terminal_state
     assert summary["termination_reason"] == "needs_human_review"
     assert summary["summary"]["termination_reason"] == "needs_human_review"
     assert summary["human_review"]["required"] is True
-    assert (
-        summary["summary"]["human_review"]["reason"]
-        == "Recursive repair requested a human review checkpoint."
-    )
-    assert (
-        summary["human_review"]["repair_target"]
-        == "Review the risky filesystem mutation."
-    )
+    assert summary["summary"]["human_review"]["reason"] == "Recursive repair requested a human review checkpoint."
+    assert summary["human_review"]["repair_target"] == "Review the risky filesystem mutation."
 
 
 def test_build_execution_completion_summary_normalizes_human_review_payload() -> None:
@@ -193,9 +183,7 @@ def test_build_execution_completion_summary_normalizes_human_review_payload() ->
         run_id="run-human-review-normalized",
     )
 
-    assert summary["human_review"]["reason"] == (
-        "Recursive repair requested human review before continuing."
-    )
+    assert summary["human_review"]["reason"] == ("Recursive repair requested human review before continuing.")
     assert summary["human_review"]["repair_steps"] == ["first"]
 
 
@@ -218,9 +206,7 @@ def test_build_execution_completion_summary_omits_human_review_when_absent() -> 
     assert "human_review" not in summary["summary"]
 
 
-def test_build_execution_completion_summary_normalizes_recursive_repair_human_review() -> (
-    None
-):
+def test_build_execution_completion_summary_normalizes_recursive_repair_human_review() -> None:
     event = WorkspaceEvent(
         kind="done",
         text="Need review",
@@ -240,7 +226,5 @@ def test_build_execution_completion_summary_normalizes_recursive_repair_human_re
         run_id="run-recursive-human-review",
     )
 
-    assert summary["human_review"]["reason"] == (
-        "Recursive repair requested human review before continuing."
-    )
+    assert summary["human_review"]["reason"] == ("Recursive repair requested human review before continuing.")
     assert summary["human_review"]["repair_steps"] == []

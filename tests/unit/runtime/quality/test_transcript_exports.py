@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     ModuleOptimizationSpec,
     _reset_registry,
     register_module,
 )
-from fleet_rlm.runtime.quality.transcript_exports import (
+from fleet_rlm.quality.transcript_exports import (
     build_transcript_dataset_rows,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -92,14 +91,12 @@ def test_build_transcript_dataset_rows_list_and_int_defaults():
     )
 
     with patch.dict(
-        "fleet_rlm.runtime.quality.transcript_exports._ASSISTANT_SINKS",
+        "fleet_rlm.quality.transcript_exports._ASSISTANT_SINKS",
         {"defaulted-module": "assembled_context_summary"},
     ):
         rows, _label = build_transcript_dataset_rows(
             module_slug="defaulted-module",
-            turns=[
-                ("Summarize the repo state", "The latest change touched the router.")
-            ],
+            turns=[("Summarize the repo state", "The latest change touched the router.")],
         )
 
     row = rows[0]

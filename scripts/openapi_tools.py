@@ -4,6 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
+
 import yaml
 
 # Add src to python path to ensure imports work for generation

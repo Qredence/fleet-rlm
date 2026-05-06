@@ -46,9 +46,7 @@ class _FakeResponseLM(dspy.LM):
             "usage": {"prompt_tokens": 2, "completion_tokens": 3},
         }
 
-    def _process_lm_response(
-        self, response: dict[str, Any], *args: Any, **kwargs: Any
-    ) -> dict[str, Any]:
+    def _process_lm_response(self, response: dict[str, Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
         return response
 
 
@@ -103,12 +101,8 @@ def test_mlflow_integration_captures_real_trace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_runtime._INIT_IDENTITY", None
-    )
-    monkeypatch.setattr(
-        "fleet_rlm.integrations.observability.mlflow_runtime._ACTIVE_CONFIG", None
-    )
+    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_runtime._INIT_IDENTITY", None)
+    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_runtime._ACTIVE_CONFIG", None)
 
     experiment_name = f"fleet-rlm-test-{uuid4().hex}"
     config = MlflowConfig(

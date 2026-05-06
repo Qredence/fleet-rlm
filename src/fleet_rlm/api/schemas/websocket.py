@@ -7,7 +7,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
-
 from .runtime import ExecutionMode
 
 
@@ -18,9 +17,7 @@ class WSMessage(BaseModel):
         default="message",
         description="Websocket frame type.",
     )
-    content: str = Field(
-        default="", description="Primary chat content for message frames."
-    )
+    content: str = Field(default="", description="Primary chat content for message frames.")
     docs_path: str | None = Field(
         default=None,
         description="Optional local documentation path to preload before execution.",
@@ -58,9 +55,7 @@ class WSMessage(BaseModel):
         description="Optional session identifier for restoring an existing websocket session.",
     )
     # Command dispatch fields (used when type == "command")
-    command: str = Field(
-        default="", description="Command name when `type` is `command`."
-    )
+    command: str = Field(default="", description="Command name when `type` is `command`.")
     args: dict[str, Any] = Field(
         default_factory=dict,
         description="Command arguments when `type` is `command`.",
@@ -82,8 +77,7 @@ class WSMessage(BaseModel):
         if message_type == "message" and raw.get("max_depth") is not None:
             raise PydanticCustomError(
                 "daytona_max_depth_removed",
-                "Daytona websocket requests no longer accept max_depth; use the "
-                "server-configured recursion depth.",
+                "Daytona websocket requests no longer accept max_depth; use the server-configured recursion depth.",
             )
 
         if (

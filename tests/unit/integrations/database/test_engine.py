@@ -52,8 +52,7 @@ def test_select_database_url_returns_none_when_unset() -> None:
 
 def test_to_async_database_url_disables_prepared_cache_for_pooler_urls() -> None:
     assert to_async_database_url(
-        "postgresql://user:pass@ep-test-pooler.us-east-2.aws.neon.tech/neondb"
-        "?sslmode=require&channel_binding=require"
+        "postgresql://user:pass@ep-test-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
     ) == (
         "postgresql+asyncpg://user:pass@ep-test-pooler.us-east-2.aws.neon.tech/neondb"
         "?ssl=require&prepared_statement_cache_size=0"
@@ -72,8 +71,7 @@ def test_to_async_database_url_preserves_explicit_prepared_cache_override() -> N
 
 def test_to_async_database_url_disables_cache_for_direct_neon_hosts() -> None:
     assert to_async_database_url(
-        "postgresql://user:pass@ep-test.us-east-2.aws.neon.tech/neondb"
-        "?sslmode=require&channel_binding=require"
+        "postgresql://user:pass@ep-test.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
     ) == (
         "postgresql+asyncpg://user:pass@ep-test.us-east-2.aws.neon.tech/neondb"
         "?ssl=require&prepared_statement_cache_size=0"

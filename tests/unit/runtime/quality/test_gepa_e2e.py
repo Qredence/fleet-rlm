@@ -18,12 +18,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fleet_rlm.runtime.quality.module_registry import (
+from fleet_rlm.quality.module_registry import (
     _reset_registry,
     get_module_spec,
 )
-from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
-
+from fleet_rlm.quality.optimization_runner import run_module_optimization
 
 # -- Fixtures ----------------------------------------------------------------
 
@@ -122,9 +121,7 @@ class _FakeGEPA:
         self.auto = auto
         self.reflection_lm = reflection_lm
 
-    def compile(
-        self, program: Any, trainset: Any = None, valset: Any = None
-    ) -> _FakeOptimizedProgram:
+    def compile(self, program: Any, trainset: Any = None, valset: Any = None) -> _FakeOptimizedProgram:
         return _FakeOptimizedProgram()
 
 
@@ -142,11 +139,11 @@ def _mock_dspy_infra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dspy.teleprompt.GEPA", _FakeGEPA, raising=False)
     monkeypatch.setattr("dspy.Evaluate", _FakeEvaluate, raising=False)
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+        "fleet_rlm.quality.optimization_runner._resolve_reflection_lm",
         MagicMock,
     )
     monkeypatch.setattr(
-        "fleet_rlm.runtime.quality.optimization_runner._ensure_dspy_configured",
+        "fleet_rlm.quality.optimization_runner._ensure_dspy_configured",
         lambda: None,
     )
 
@@ -201,7 +198,7 @@ class TestGepaMlflowLogging:
             patch("mlflow.log_params", create=True) as log_params,
             patch("mlflow.set_tags", create=True) as set_tags,
         ):
-            from fleet_rlm.runtime.quality.gepa_optimization import (
+            from fleet_rlm.quality.gepa_optimization import (
                 log_gepa_mlflow_run_metadata,
             )
 
@@ -335,7 +332,7 @@ class TestGepaManifest:
         monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "delegate-model")
         monkeypatch.setenv("DSPY_LM_MODEL", "planner-model")
         monkeypatch.setattr(
-            "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+            "fleet_rlm.quality.optimization_runner._resolve_reflection_lm",
             lambda: SimpleNamespace(model="delegate-model"),
         )
 
@@ -376,7 +373,7 @@ class TestGepaManifest:
         monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "delegate-model")
         monkeypatch.setenv("DSPY_LM_MODEL", "planner-model")
         monkeypatch.setattr(
-            "fleet_rlm.runtime.quality.optimization_runner._resolve_reflection_lm",
+            "fleet_rlm.quality.optimization_runner._resolve_reflection_lm",
             lambda: SimpleNamespace(model=resolved_model),
         )
 
@@ -403,9 +400,7 @@ class TestGepaPersistence:
         tmp_path: Path,
     ) -> None:
         """When run_id is provided, evaluation results are persisted."""
-        with patch(
-            "fleet_rlm.runtime.quality.optimization_runner._persist_run_artifacts"
-        ) as mock_persist:
+        with patch("fleet_rlm.quality.optimization_runner._persist_run_artifacts") as mock_persist:
             run_module_optimization(
                 longcot_spec,
                 dataset_path=ten_example_dataset,
@@ -475,7 +470,7 @@ class TestGepaCrossArea:
         tmp_path: Path,
     ) -> None:
         """Dataset generation + optimization pipeline produces a valid artifact."""
-        from fleet_rlm.runtime.quality.datasets import (
+        from fleet_rlm.quality.datasets import (
             load_dataset_rows,
             validate_required_keys,
         )
@@ -492,9 +487,7 @@ class TestGepaCrossArea:
             }
             for i in range(10)
         ]
-        dataset_path.write_text(
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-        )
+        dataset_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
 
         spec = get_module_spec("longcot-reasoner")
         assert spec is not None

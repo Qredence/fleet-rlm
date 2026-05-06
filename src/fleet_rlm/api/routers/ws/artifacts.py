@@ -6,15 +6,13 @@ import logging
 import uuid
 from typing import Any
 
-from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database import ArtifactKind
 from fleet_rlm.integrations.database.repository_chat import ArtifactCreateRequest
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 
-from .lifecycle import PersistenceRequiredError
+from ...runtime_services.chat_persistence import PersistenceRequiredError
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +40,7 @@ def append_session_artifact(
         artifacts = []
         manifest["artifacts"] = artifacts
 
-    artifact_uri = str(
-        result.get("saved_path") or args.get("path") or result.get("alias") or ""
-    )
+    artifact_uri = str(result.get("saved_path") or args.get("path") or result.get("alias") or "")
     artifacts.append(
         {
             "timestamp": now_iso(),
@@ -57,7 +53,7 @@ def append_session_artifact(
 
 async def persist_artifact_metadata(
     *,
-    repository: FleetRepository,
+    persistence: Any,
     identity_rows: IdentityUpsertResult,
     session_record: dict[str, Any],
     command: str,
@@ -71,7 +67,7 @@ async def persist_artifact_metadata(
     run_id = uuid.UUID(str(run_id_raw))
     step_id = session_record.get("last_step_db_id")
     step_uuid = uuid.UUID(str(step_id)) if step_id else None
-    await repository.store_artifact(
+    await persistence.store_artifact(
         ArtifactCreateRequest(
             tenant_id=identity_rows.tenant_id,
             run_id=run_id,
@@ -92,16 +88,12 @@ async def track_command_artifact_if_needed(
     command: str,
     args: dict[str, Any],
     result: Any,
-    repository: FleetRepository | None,
+    persistence: Any,
     identity_rows: IdentityUpsertResult | None,
     persistence_required: bool,
 ) -> None:
     """Track command-produced artifacts in session metadata and durable storage."""
-    if (
-        session_record is None
-        or not isinstance(result, dict)
-        or not is_artifact_tracking_command(command)
-    ):
+    if session_record is None or not isinstance(result, dict) or not is_artifact_tracking_command(command):
         return
 
     result_dict = result
@@ -111,12 +103,12 @@ async def track_command_artifact_if_needed(
         args=args,
         result=result_dict,
     )
-    if repository is None or identity_rows is None:
+    if identity_rows is None:
         return
 
     try:
         await persist_artifact_metadata(
-            repository=repository,
+            persistence=persistence,
             identity_rows=identity_rows,
             session_record=session_record,
             command=command,

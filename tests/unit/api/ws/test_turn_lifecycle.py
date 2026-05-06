@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from types import SimpleNamespace
 from typing import Any
-import uuid
 
 import pytest
 
-from fleet_rlm.api.routers.ws.lifecycle import PersistenceRequiredError
-from fleet_rlm.api.runtime_services.chat_persistence import initialize_turn_lifecycle
+from fleet_rlm.api.runtime_services.chat_persistence import (
+    PersistenceRequiredError,
+    initialize_turn_lifecycle,
+)
 
 
 class _RepositoryStub:
@@ -67,9 +69,7 @@ def test_initialize_turn_lifecycle_records_run_id_and_session_record() -> None:
 
 def test_initialize_turn_lifecycle_raises_when_run_persist_required() -> None:
     async def scenario() -> None:
-        with pytest.raises(
-            PersistenceRequiredError, match="Failed to persist run start"
-        ):
+        with pytest.raises(PersistenceRequiredError, match="Failed to persist run start"):
             await initialize_turn_lifecycle(
                 planner_lm=SimpleNamespace(model="openai/gpt-4o"),
                 cfg=SimpleNamespace(sandbox_provider="daytona"),

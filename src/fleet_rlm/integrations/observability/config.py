@@ -29,9 +29,7 @@ class PostHogConfig(BaseModel):
     @classmethod
     def from_env(cls) -> PostHogConfig:
         """Load analytics configuration from environment variables."""
-        api_key = (
-            os.getenv("POSTHOG_API_KEY") or ""
-        ).strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
+        api_key = (os.getenv("POSTHOG_API_KEY") or "").strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
         host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
         enabled_raw = os.getenv("POSTHOG_ENABLED")
         return cls(
@@ -40,18 +38,10 @@ class PostHogConfig(BaseModel):
             host=host,
             flush_interval=float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
             flush_at=max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
-            enable_dspy_optimization=_env_bool(
-                os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False
-            ),
-            input_truncation_chars=max(
-                1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))
-            ),
-            output_truncation_chars=max(
-                1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))
-            ),
-            redact_sensitive=_env_bool(
-                os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True
-            ),
+            enable_dspy_optimization=_env_bool(os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False),
+            input_truncation_chars=max(1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))),
+            output_truncation_chars=max(1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))),
+            redact_sensitive=_env_bool(os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True),
         )
 
 
@@ -77,12 +67,9 @@ class MlflowConfig(BaseModel):
     @classmethod
     def from_env(cls) -> MlflowConfig:
         """Load MLflow configuration from environment variables."""
-        tracking_uri = (
-            os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5001"
-        ).strip()
+        tracking_uri = (os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5001").strip()
         local_backend_store_uri = (
-            os.getenv("MLFLOW_LOCAL_BACKEND_STORE_URI")
-            or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+            os.getenv("MLFLOW_LOCAL_BACKEND_STORE_URI") or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
         ).strip()
         experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
         active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
@@ -90,9 +77,7 @@ class MlflowConfig(BaseModel):
         return cls(
             enabled=_env_bool(enabled_raw, default=True),
             tracking_uri=tracking_uri,
-            local_backend_store_uri=(
-                local_backend_store_uri or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
-            ),
+            local_backend_store_uri=(local_backend_store_uri or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI),
             experiment=experiment or "fleet-rlm",
             active_model_id=active_model_id,
             dspy_log_traces_from_compile=_env_bool(

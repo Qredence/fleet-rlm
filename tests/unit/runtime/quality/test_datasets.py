@@ -7,13 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.runtime.quality.datasets import (
+from fleet_rlm.quality.datasets import (
     load_dataset_rows,
     split_examples,
     split_examples_with_metadata,
     validate_required_keys,
 )
-
 
 # -- load_dataset_rows -------------------------------------------------------
 

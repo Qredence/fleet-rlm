@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,44 +21,77 @@ from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
 from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
-from ...dependencies import ServerState
-from ...events import ExecutionEventEmitter, ExecutionStepBuilder
-from ...schemas import WSMessage
-from .commands import handle_command_with_persist
-from .errors import handle_stream_error
-from .helpers import _try_send_json
-from .lifecycle import (
+from ...dependencies import DiagnosticsDeps, SessionCacheDeps
+from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...runtime_services.chat_persistence import (
+    ExecutionLifecycleManager,
     build_workspace_task_request,
     cancelled_event_payload,
+    classify_stream_failure,
     enqueue_latest_nonblocking,
     get_execution_emitter,
     handle_chat_disconnect,
-    handle_chat_loop_exception,
     should_reload_docs_path,
 )
-from .messages import parse_ws_message_or_send_error, resolve_session_identity
-from .repl_bridge import ReplHookBridge
-from .session import (
-    switch_session_if_needed,
-)
-from .terminal import build_stream_event_dict, handle_terminal_stream_event
-from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
-from .types import (
+from ...runtime_services.chat_runtime import (
     ChatAgentProtocol,
     LocalPersistFn,
     SessionContext,
     StreamEventLike,
-    WorkspaceEvent,
-    WorkspaceTaskRequest,
 )
-from ...runtime_services.chat_persistence import ExecutionLifecycleManager
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
+)
+from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
+from ...schemas import WSMessage
+from .commands import handle_command_with_persist
+from .repl_bridge import ReplHookBridge
+from .session import (
+    switch_session_if_needed,
+)
+from .transport import (
+    _error_envelope,
+    _try_send_json,
+    handle_chat_loop_exception,
+    parse_ws_message_or_send_error,
+    resolve_session_identity,
+)
+from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class WorkspaceEvent:
+    """Normalized event shape for websocket streaming."""
+
+    kind: str
+    text: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    terminal: bool = False
+
+
+@dataclass(slots=True)
+class WorkspaceTaskRequest:
+    """Input needed to execute one workspace task end-to-end."""
+
+    agent: Any
+    message: str
+    execution_mode: str | None = None
+    trace: bool = True
+    docs_path: str | None = None
+    repo_url: str | None = None
+    repo_ref: str | None = None
+    context_paths: list[str] | None = None
+    batch_concurrency: int | None = None
+    workspace_id: str | None = None
+    cancel_check: Callable[[], bool] | None = None
+    prepare: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +136,373 @@ def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
             continue
         metadata[key] = value
     return metadata
+
+
+def build_stream_event_dict(
+    *,
+    event: StreamEventLike,
+    payload: Any,
+) -> dict[str, Any]:
+    """Serialize one stream event for websocket delivery."""
+    return {
+        "kind": event.kind,
+        "text": event.text,
+        "payload": payload,
+        "timestamp": event.timestamp.isoformat(),
+        "version": 2,
+        "event_id": uuid.uuid4().hex,
+    }
+
+
+def _terminal_run_status(event: StreamEventLike) -> RunStatus:
+    """Return the authoritative terminal run status for one event."""
+    if event.kind == "done" and (isinstance(event.payload, dict) and event.payload.get("cancelled")):
+        return RunStatus.CANCELLED
+    if event.kind == "done":
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
+    return RunStatus.FAILED
+
+
+async def handle_terminal_stream_event(
+    *,
+    websocket: WebSocket,
+    lifecycle: ExecutionLifecycleManager,
+    event: StreamEventLike,
+    event_dict: dict[str, Any],
+    step: ExecutionStep | None,
+    persist_session_state: LocalPersistFn,
+    request_message: str,
+    orchestration_session: SessionContext | None = None,
+) -> None:
+    """Handle terminal websocket events: persist, complete lifecycle, send.
+
+    ``orchestration_session`` is retained for API compatibility but the
+    simplified architecture has no HITL/checkpoint logic.
+    """
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message=request_message,
+        run_id=lifecycle.run_id,
+    )
+
+    if event.kind == "done":
+        try:
+            await persist_session_state(include_volume_save=True)
+        except Exception:
+            logger.debug(
+                "Failed to persist session state before final event; continuing",
+                exc_info=True,
+            )
+        await lifecycle.complete_run(
+            _terminal_run_status(event),
+            step=step,
+            summary=summary,
+        )
+        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+            raise WebSocketDisconnect(code=1001)
+        return
+
+    if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
+        raise WebSocketDisconnect(code=1001)
+
+    try:
+        await persist_session_state(include_volume_save=True)
+    except Exception:
+        logger.debug(
+            "Failed to persist session state after %s event; completing run anyway",
+            event.kind,
+            exc_info=True,
+        )
+
+    error_json: dict[str, Any] | None = {"error": event.text, "kind": event.kind} if event.kind == "error" else None
+    await lifecycle.complete_run(
+        _terminal_run_status(event),
+        step=step,
+        error_json=error_json,
+        summary=summary,
+    )
+
+
+def _as_record(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return None
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in (_as_text(entry) for entry in value) if item is not None]
+
+
+def final_event_failed(payload: dict[str, Any]) -> bool:
+    runtime = _as_record(payload.get("runtime"))
+    runtime_degraded = bool(payload.get("runtime_degraded", runtime.get("runtime_degraded", False)))
+    category = _as_text(payload.get("runtime_failure_category") or runtime.get("runtime_failure_category"))
+    return runtime_degraded and category == "tool_execution_error"
+
+
+def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    raw = _as_record(payload.get("human_review"))
+    if raw:
+        required = raw.get("required")
+        if required is False:
+            return None
+        return {
+            "required": True,
+            "reason": _as_text(raw.get("reason")) or "Recursive repair requested human review before continuing.",
+            "repair_mode": _as_text(raw.get("repair_mode")),
+            "repair_target": _as_text(raw.get("repair_target")),
+            "repair_steps": _normalize_text_list(raw.get("repair_steps")),
+        }
+
+    recursive_repair = _as_record(payload.get("recursive_repair"))
+    if _as_text(recursive_repair.get("repair_mode")) != "needs_human_review":
+        return None
+
+    normalized_steps = _normalize_text_list(recursive_repair.get("repair_steps"))
+    return {
+        "required": True,
+        "reason": _as_text(payload.get("final_reasoning"))
+        or _as_text(recursive_repair.get("repair_rationale"))
+        or _as_text(recursive_repair.get("repair_target"))
+        or "Recursive repair requested human review before continuing.",
+        "repair_mode": "needs_human_review",
+        "repair_target": _as_text(recursive_repair.get("repair_target")),
+        "repair_steps": normalized_steps,
+    }
+
+
+def _canonical_run_status(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    human_review_required: bool,
+) -> str:
+    if kind == "done":
+        # A "done" event with payload["cancelled"]=True is a cancelled turn.
+        if isinstance(payload, dict) and payload.get("cancelled"):
+            return "cancelled"
+        if human_review_required:
+            return "needs_human_review"
+        return "error" if final_event_failed(payload) else "completed"
+    return "error"
+
+
+def _build_fallback_final_artifact(event: StreamEventLike) -> dict[str, Any] | None:
+    if event.kind != "done":
+        return None
+    return {
+        "kind": "assistant_response",
+        "value": {
+            "text": event.text,
+            "final_markdown": event.text,
+            "summary": event.text,
+        },
+        "finalization_mode": "RETURN",
+    }
+
+
+def _build_minimum_summary(
+    *,
+    event: StreamEventLike,
+    summary_payload: dict[str, Any],
+    warnings: list[Any],
+    human_review: dict[str, Any] | None,
+    termination_reason: str,
+) -> dict[str, Any]:
+    error_text = event.text if event.kind == "error" else None
+    summary = {
+        "termination_reason": termination_reason,
+        "duration_ms": summary_payload.get("duration_ms"),
+        "warnings": warnings,
+        "error": error_text,
+    }
+    if human_review is not None:
+        summary["human_review"] = human_review
+    return summary
+
+
+def _resolve_terminal_status(
+    *,
+    existing_status: Any,
+    terminal_status: str,
+) -> str:
+    normalized = _as_text(existing_status)
+    if terminal_status in {"needs_human_review", "error", "cancelled"}:
+        return terminal_status
+    return normalized or terminal_status
+
+
+def _resolve_termination_reason(
+    *,
+    existing_reason: Any,
+    event_kind: str,
+    human_review_required: bool,
+) -> str:
+    normalized = _as_text(existing_reason)
+    if human_review_required and normalized in {None, "", "done", "completed"}:
+        return "needs_human_review"
+    return normalized or event_kind
+
+
+def build_execution_completion_summary(
+    *,
+    event: StreamEventLike,
+    request_message: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Build the canonical execution summary payload from a terminal event."""
+    payload = _as_record(event.payload)
+    runtime = _as_record(payload.get("runtime"))
+    run_result = _as_record(payload.get("run_result"))
+    summary_payload = _as_record(payload.get("summary"))
+    payload_final_artifact = _as_record(payload.get("final_artifact"))
+    human_review = _extract_human_review_payload(payload)
+    runtime_mode = (
+        _as_text(payload.get("runtime_mode"))
+        or _as_text(runtime.get("runtime_mode"))
+        or _as_text(run_result.get("runtime_mode"))
+        or "daytona_pilot"
+    )
+    terminal_status = _canonical_run_status(
+        event.kind,
+        payload,
+        human_review_required=human_review is not None,
+    )
+    resolved_termination_reason = _resolve_termination_reason(
+        existing_reason=run_result.get("termination_reason") or summary_payload.get("termination_reason"),
+        event_kind=event.kind,
+        human_review_required=human_review is not None,
+    )
+    warnings = list(summary_payload.get("warnings") or payload.get("guardrail_warnings") or [])
+    minimum_summary = _build_minimum_summary(
+        event=event,
+        summary_payload=summary_payload,
+        warnings=warnings,
+        human_review=human_review,
+        termination_reason=resolved_termination_reason,
+    )
+
+    if run_result:
+        normalized = dict(run_result)
+        normalized.setdefault("run_id", run_result.get("run_id") or runtime.get("run_id") or run_id)
+        normalized.setdefault("runtime_mode", runtime_mode)
+        normalized.setdefault("task", run_result.get("task") or request_message)
+        normalized["status"] = _resolve_terminal_status(
+            existing_status=run_result.get("status"),
+            terminal_status=terminal_status,
+        )
+        normalized["termination_reason"] = resolved_termination_reason
+        normalized.setdefault("duration_ms", summary_payload.get("duration_ms"))
+        normalized.setdefault("warnings", warnings)
+        nested_summary = _as_record(normalized.get("summary"))
+        nested_summary = {**minimum_summary, **nested_summary}
+        if summary_payload:
+            nested_summary = {**nested_summary, **summary_payload}
+        nested_summary["termination_reason"] = resolved_termination_reason
+        if warnings and not nested_summary.get("warnings"):
+            nested_summary["warnings"] = warnings
+        if human_review is not None:
+            normalized["human_review"] = human_review
+            nested_summary["human_review"] = human_review
+        normalized["summary"] = nested_summary
+        normalized.setdefault(
+            "final_artifact",
+            payload_final_artifact or _build_fallback_final_artifact(event),
+        )
+        return normalized
+
+    final_artifact = payload_final_artifact or _build_fallback_final_artifact(event)
+
+    return {
+        "run_id": _as_text(runtime.get("run_id")) or run_id,
+        "runtime_mode": runtime_mode,
+        "task": request_message,
+        "status": terminal_status,
+        "termination_reason": resolved_termination_reason,
+        "duration_ms": summary_payload.get("duration_ms"),
+        "iterations": [],
+        "callbacks": [],
+        "prompts": [],
+        "context_sources": [],
+        "sources": list(payload.get("sources") or []),
+        "attachments": list(payload.get("attachments") or []),
+        "final_artifact": final_artifact,
+        "summary": minimum_summary,
+        "warnings": warnings,
+        **({"human_review": human_review} if human_review is not None else {}),
+    }
+
+
+async def handle_stream_error(
+    *,
+    websocket: WebSocket,
+    lifecycle: ExecutionLifecycleManager,
+    step_builder: ExecutionStepBuilder,
+    exc: Exception,
+    request_message: str,
+) -> None:
+    """Log, emit, and persist a failed websocket streaming turn."""
+    error_code = classify_stream_failure(exc)
+    logger.error(
+        "Streaming error: %s",
+        _sanitize_for_log(exc),
+        exc_info=True,
+        extra={
+            "error_type": type(exc).__name__,
+            "error_code": error_code,
+        },
+    )
+    await _try_send_json(
+        websocket,
+        _error_envelope(
+            code=error_code,
+            message=f"Streaming error: {exc}",
+            details={"error_type": type(exc).__name__},
+        ),
+    )
+    if lifecycle.run_completed:
+        return
+
+    error_text = f"Streaming error: {exc}"
+    error_payload = {
+        "error_type": type(exc).__name__,
+        "error_code": error_code,
+    }
+    error_step = step_builder.from_stream_event(
+        kind="error",
+        text=error_text,
+        payload=error_payload,
+        timestamp=time.time(),
+    )
+    if error_step is not None:
+        await lifecycle.emit_step(error_step)
+    await lifecycle.complete_run(
+        RunStatus.FAILED,
+        step=error_step,
+        error_json={
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "code": error_code,
+        },
+        summary=build_execution_completion_summary(
+            event=WorkspaceEvent(
+                kind="error",
+                text=error_text,
+                payload=error_payload,
+                terminal=True,
+            ),
+            request_message=request_message,
+            run_id=lifecycle.run_id,
+        ),
+    )
 
 
 def _is_terminal_transport_event(event: StreamEventLike) -> bool:
@@ -154,9 +556,7 @@ async def stream_agent_turn(
         request.agent.set_execution_mode(request.execution_mode)
     if request.prepare is not None:
         await request.prepare()
-    async for runtime_event in request.agent.aiter_chat_turn_stream(
-        **_build_agent_stream_kwargs(request)
-    ):
+    async for runtime_event in request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request)):
         yield _to_workspace_event(runtime_event)
 
 
@@ -308,9 +708,7 @@ async def _emit_stream_event(
         payload = merge_trace_result_metadata(
             payload if isinstance(payload, dict) else None,
             response_preview=event.text,
-            trace_metadata=_runtime_trace_metadata(
-                payload if isinstance(payload, dict) else None
-            ),
+            trace_metadata=_runtime_trace_metadata(payload if isinstance(payload, dict) else None),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = _is_terminal_transport_event(event)
@@ -414,9 +812,7 @@ async def _await_message_while_streaming(
     stream_task: asyncio.Task[str | None],
     pending_receive_task: asyncio.Task[object] | None,
     session: _ChatSessionState,
-) -> tuple[
-    WSMessage | None, asyncio.Task[str | None] | None, asyncio.Task[object] | None
-]:
+) -> tuple[WSMessage | None, asyncio.Task[str | None] | None, asyncio.Task[object] | None]:
     pending_receive_task = _ensure_pending_receive_task(
         websocket=websocket,
         pending_receive_task=pending_receive_task,
@@ -457,7 +853,7 @@ async def _handle_message_while_streaming(
             agent=agent,
             payload=msg.model_dump(),
             session_record=session.session_record,
-            repository=runtime.repository,
+            persistence=runtime.persistence,
             identity_rows=runtime.identity_rows,
             persistence_required=runtime.persistence_required,
             local_persist=local_persist,
@@ -472,8 +868,7 @@ async def _handle_message_while_streaming(
         {
             "type": "error",
             "message": (
-                "A run is already in progress. Cancel it or wait for "
-                "completion before sending another message."
+                "A run is already in progress. Cancel it or wait for completion before sending another message."
             ),
         },
     )
@@ -522,7 +917,7 @@ async def _handle_idle_non_turn_message(
             agent=agent,
             payload=msg.model_dump(),
             session_record=session.session_record,
-            repository=runtime.repository,
+            persistence=runtime.persistence,
             identity_rows=runtime.identity_rows,
             persistence_required=runtime.persistence_required,
             local_persist=local_persist,
@@ -541,7 +936,7 @@ async def _handle_idle_non_turn_message(
 
 async def _resolve_session_target(
     *,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
     agent: ChatAgentProtocol,
     runtime: _PreparedChatRuntime,
     interpreter: object | None,
@@ -561,7 +956,7 @@ async def _resolve_session_target(
         session.last_loaded_docs_path,
         session.orchestration_session,
     ) = await switch_session_if_needed(
-        state=state,
+        session_cache=session_cache,
         agent=agent,
         interpreter=interpreter,
         workspace_id=workspace_id,
@@ -573,13 +968,13 @@ async def _resolve_session_target(
         session_record=session.session_record,
         last_loaded_docs_path=session.last_loaded_docs_path,
         local_persist=local_persist,
-        repository=runtime.repository,
+        persistence=runtime.persistence,
         identity_rows=runtime.identity_rows,
     )
     agent._db_session_id = (session.session_record or {}).get("db_session_id")
     agent._identity_rows = runtime.identity_rows
     if agent.interpreter is not None:
-        agent.interpreter._host_repository = runtime.repository
+        agent.interpreter._host_repository = runtime.persistence
         agent.interpreter._host_identity = runtime.identity_rows
         agent.interpreter._host_run_id = None
     return _ResolvedSessionTarget(
@@ -596,7 +991,8 @@ class _ExecutionConnectionLoop:
         self,
         *,
         websocket: WebSocket,
-        state: ServerState,
+        session_cache: SessionCacheDeps,
+        diagnostics_deps: DiagnosticsDeps,
         runtime: _PreparedChatRuntime,
         agent: ChatAgentProtocol,
         interpreter: object | None,
@@ -605,13 +1001,14 @@ class _ExecutionConnectionLoop:
         initial_message: WSMessage | None = None,
     ) -> None:
         self.websocket = websocket
-        self.state = state
+        self.session_cache = session_cache
+        self.diagnostics_deps = diagnostics_deps
         self.runtime = runtime
         self.agent = agent
         self.interpreter = interpreter
         self.session = session
         self.local_persist = local_persist
-        self.execution_emitter = get_execution_emitter(state)
+        self.execution_emitter = get_execution_emitter(diagnostics_deps)
         self.stream_task: asyncio.Task[str | None] | None = None
         self.pending_receive_task: asyncio.Task[object] | None = None
         self.pending_message = initial_message
@@ -661,7 +1058,7 @@ class _ExecutionConnectionLoop:
                     continue
 
                 target = await _resolve_session_target(
-                    state=self.state,
+                    session_cache=self.session_cache,
                     agent=self.agent,
                     runtime=self.runtime,
                     interpreter=self.interpreter,
@@ -717,7 +1114,8 @@ class _ExecutionConnectionLoop:
 async def _chat_message_loop(
     *,
     websocket: WebSocket,
-    state: ServerState,
+    session_cache: SessionCacheDeps,
+    diagnostics_deps: DiagnosticsDeps,
     runtime: _PreparedChatRuntime,
     agent: ChatAgentProtocol,
     interpreter: object | None,
@@ -727,7 +1125,8 @@ async def _chat_message_loop(
 ) -> None:
     loop = _ExecutionConnectionLoop(
         websocket=websocket,
-        state=state,
+        session_cache=session_cache,
+        diagnostics_deps=diagnostics_deps,
         runtime=runtime,
         agent=agent,
         interpreter=interpreter,

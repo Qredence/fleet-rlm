@@ -8,8 +8,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from fleet_rlm.integrations.daytona import config as _daytona_config
-from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
+from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
     sandbox_has_owner_label,
@@ -193,9 +193,7 @@ async def _list_sandboxes(
 ) -> Any:
     if labels_filter:
         try:
-            return await _await_if_needed(
-                client.list(labels=labels_filter, page=page, limit=limit)
-            )
+            return await _await_if_needed(client.list(labels=labels_filter, page=page, limit=limit))
         except TypeError:
             pass
     return await _await_if_needed(client.list(page=page, limit=limit))

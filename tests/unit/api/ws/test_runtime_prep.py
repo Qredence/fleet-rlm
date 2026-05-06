@@ -4,10 +4,16 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from fleet_rlm.api.routers.ws.endpoint import _prepare_chat_runtime
 from fleet_rlm.api.runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
+)
+from fleet_rlm.api.runtime_services.chat_runtime import (
     build_chat_agent_context as _build_chat_agent_context,
+)
+from fleet_rlm.api.runtime_services.chat_runtime import (
     new_chat_session_state as _new_chat_session_state,
 )
 
@@ -62,14 +68,18 @@ def _runtime_cfg() -> SimpleNamespace:
 
 
 def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
-    async def fake_ensure_runtime_models(state: object) -> tuple[str, str]:
-        assert state is fake_state
+    async def fake_ensure_runtime_models(
+        lm_deps: object, config_deps: object, diagnostics_deps: object
+    ) -> tuple[str, str]:
         return ("planner-lm", "delegate-lm")
 
     fake_cfg = _runtime_cfg()
     identity_rows = SimpleNamespace(tenant_id="tenant-row")
     fake_repo = _FakeRepository(identity_rows)
-    fake_state = SimpleNamespace(config=fake_cfg, repository=fake_repo)
+    config_deps = SimpleNamespace(config=fake_cfg)
+    lm_deps = SimpleNamespace()
+    persistence_deps = SimpleNamespace(repository=fake_repo)
+    diagnostics_deps = SimpleNamespace()
     fake_identity = SimpleNamespace(
         tenant_claim="tenant-123",
         user_claim="user-456",
@@ -86,7 +96,10 @@ def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
     runtime = asyncio.run(
         _prepare_chat_runtime(
             websocket=websocket,
-            state=fake_state,
+            config_deps=config_deps,
+            lm_deps=lm_deps,
+            persistence_deps=persistence_deps,
+            diagnostics_deps=diagnostics_deps,
             identity=fake_identity,
         )
     )
@@ -113,11 +126,16 @@ def test_prepare_chat_runtime_returns_prepared_runtime(monkeypatch) -> None:
 def test_prepare_chat_runtime_reports_planner_initialization_failure(
     monkeypatch,
 ) -> None:
-    async def failing_ensure_runtime_models(state: object) -> tuple[object, object]:
-        _ = state
+    async def failing_ensure_runtime_models(
+        lm_deps: object, config_deps: object, diagnostics_deps: object
+    ) -> tuple[object, object]:
         raise RuntimeError("planner boom")
 
-    fake_state = SimpleNamespace(config=_runtime_cfg(), repository=None)
+    fake_cfg = _runtime_cfg()
+    config_deps = SimpleNamespace(config=fake_cfg)
+    lm_deps = SimpleNamespace()
+    persistence_deps = SimpleNamespace(repository=None)
+    diagnostics_deps = SimpleNamespace()
     fake_identity = SimpleNamespace(
         tenant_claim="tenant-123",
         user_claim="user-456",
@@ -134,7 +152,10 @@ def test_prepare_chat_runtime_reports_planner_initialization_failure(
     runtime = asyncio.run(
         _prepare_chat_runtime(
             websocket=websocket,
-            state=fake_state,
+            config_deps=config_deps,
+            lm_deps=lm_deps,
+            persistence_deps=persistence_deps,
+            diagnostics_deps=diagnostics_deps,
             identity=fake_identity,
         )
     )
@@ -162,9 +183,13 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
         _fake_builder,
     )
+
+    async def _fake_acquire(_self: object, _cfg: object) -> None:
+        return None
+
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_runtime._try_build_daytona_interpreter",
-        lambda _volume_name: None,
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fake_acquire,
     )
 
     runtime = _PreparedChatRuntime(
@@ -172,35 +197,116 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
         planner_lm="planner-lm",
         delegate_lm="delegate-lm",
         repository=None,
+        persistence=None,
         persistence_required=False,
         identity_rows=None,
     )
 
-    assert _build_chat_agent_context(runtime) is daytona_agent
+    result = asyncio.run(_build_chat_agent_context(runtime))
+    # result is a managed context wrapper; entering it yields the agent.
+    entered_agent = asyncio.run(result.__aenter__())
+    assert entered_agent is daytona_agent
     assert calls == [
         {
             "react_max_iters": 5,
-            "deep_react_max_iters": 9,
-            "enable_adaptive_iters": True,
-            "rlm_max_iterations": 11,
-            "rlm_max_llm_calls": 17,
-            "max_depth": 4,
-            "rlm_child_isolation_mode": "auto",
-            "rlm_child_fork_fallback": "clean",
-            "timeout": 123,
-            "secret_name": "secret",
-            "volume_name": "volume",
-            "interpreter_async_execute": True,
-            "guardrail_mode": "warn",
-            "max_output_chars": 1200,
-            "min_substantive_chars": 40,
             "planner_lm": "planner-lm",
             "delegate_lm": "delegate-lm",
-            "delegate_max_calls_per_turn": 3,
-            "delegate_result_truncation_chars": 500,
             "repository": None,
         }
     ]
+
+
+def test_build_chat_agent_context_releases_interpreter_on_exit(monkeypatch) -> None:
+    fake_interpreter = SimpleNamespace(ashutdown_called=False)
+    release_calls: list[Any] = []
+
+    def _fake_builder(**_kwargs: Any) -> object:
+        return SimpleNamespace(interpreter=fake_interpreter)
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
+        _fake_builder,
+    )
+
+    async def _fake_acquire(_self: object, _cfg: object) -> object:
+        return fake_interpreter
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fake_acquire,
+    )
+
+    async def _fake_release(_self: object, interpreter: Any) -> None:
+        release_calls.append(interpreter)
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.release",
+        _fake_release,
+    )
+
+    runtime = _PreparedChatRuntime(
+        cfg=_runtime_cfg(),
+        planner_lm="planner-lm",
+        delegate_lm="delegate-lm",
+        repository=None,
+        persistence=None,
+        persistence_required=False,
+        identity_rows=None,
+    )
+
+    async def _use_context() -> None:
+        context = await _build_chat_agent_context(runtime)
+        async with context as agent:
+            assert agent.interpreter is fake_interpreter
+
+    asyncio.run(_use_context())
+    assert len(release_calls) == 1
+    assert release_calls[0] is fake_interpreter
+
+
+def test_build_chat_agent_context_releases_on_builder_failure(monkeypatch) -> None:
+    fake_interpreter = object()
+    release_calls: list[Any] = []
+
+    def _fake_builder(**_kwargs: Any) -> object:
+        raise RuntimeError("builder boom")
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_runtime.build_chat_agent",
+        _fake_builder,
+    )
+
+    async def _fake_acquire(_self: object, _cfg: object) -> object:
+        return fake_interpreter
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fake_acquire,
+    )
+
+    async def _fake_release(_self: object, interpreter: Any) -> None:
+        release_calls.append(interpreter)
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.release",
+        _fake_release,
+    )
+
+    runtime = _PreparedChatRuntime(
+        cfg=_runtime_cfg(),
+        planner_lm="planner-lm",
+        delegate_lm="delegate-lm",
+        repository=None,
+        persistence=None,
+        persistence_required=False,
+        identity_rows=None,
+    )
+
+    with pytest.raises(RuntimeError, match="builder boom"):
+        asyncio.run(_build_chat_agent_context(runtime))
+
+    assert len(release_calls) == 1
+    assert release_calls[0] is fake_interpreter
 
 
 def test_new_chat_session_state_uses_identity_or_defaults() -> None:
@@ -209,6 +315,7 @@ def test_new_chat_session_state_uses_identity_or_defaults() -> None:
         planner_lm="planner-lm",
         delegate_lm=None,
         repository=None,
+        persistence=None,
         persistence_required=False,
         identity_rows=None,
     )
@@ -236,20 +343,16 @@ def test_new_chat_session_state_uses_identity_or_defaults() -> None:
 
 
 def test_daytona_builder_returns_none_on_import_error(monkeypatch) -> None:
-    """When DaytonaConfigError import fails, _try_build_daytona_interpreter returns None without UnboundLocalError."""
-    from fleet_rlm.api.runtime_services.chat_runtime import (
-        _try_build_daytona_interpreter,
+    """When Daytona import fails, InterpreterPool.acquire returns None without UnboundLocalError."""
+    from fleet_rlm.api.runtime_services.interpreter_pool import InterpreterPool
+
+    async def _fail_acquire(_self: object, _cfg: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.interpreter_pool.InterpreterPool.acquire",
+        _fail_acquire,
     )
 
-    original_import = (
-        __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-    )
-
-    def _fail_daytona_config(name: str, *args: object, **kwargs: object) -> object:
-        if "daytona.config" in name or name == "fleet_rlm.integrations.daytona.config":
-            raise ImportError("no daytona config")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", _fail_daytona_config)
-    result = _try_build_daytona_interpreter("vol-1")
+    result = asyncio.run(InterpreterPool().acquire(_runtime_cfg()))
     assert result is None

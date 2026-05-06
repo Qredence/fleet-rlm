@@ -6,9 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-
 from daytona import DaytonaConnectionError, DaytonaNotFoundError
+from fastapi.testclient import TestClient
 
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
@@ -19,9 +18,7 @@ def fake_daytona_delete(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     deleted_ids: list[str] = []
 
     class _FakeSandbox:
-        def __init__(
-            self, sandbox_id: str, labels: dict[str, str] | None = None
-        ) -> None:
+        def __init__(self, sandbox_id: str, labels: dict[str, str] | None = None) -> None:
             self.id = sandbox_id
             self.labels = labels or {}
             self._stopped = False
@@ -89,9 +86,7 @@ def test_delete_sandbox_not_found_returns_404(
     auth_headers: dict[str, str],
     fake_daytona_delete: SimpleNamespace,
 ) -> None:
-    response = default_client.delete(
-        "/api/v1/sandboxes/nonexistent", headers=auth_headers
-    )
+    response = default_client.delete("/api/v1/sandboxes/nonexistent", headers=auth_headers)
     assert response.status_code == 404
 
 
@@ -197,9 +192,7 @@ def test_delete_sandbox_then_get_returns_404(
     assert get_before.status_code == 200
 
     # Delete the sandbox
-    delete_response = default_client.delete(
-        "/api/v1/sandboxes/sb-001", headers=auth_headers
-    )
+    delete_response = default_client.delete("/api/v1/sandboxes/sb-001", headers=auth_headers)
     assert delete_response.status_code == 204
 
     # Verify sandbox no longer exists

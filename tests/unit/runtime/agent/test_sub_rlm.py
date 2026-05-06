@@ -131,9 +131,7 @@ def test_sub_rlm_calls_child_module_and_returns_answer() -> None:
 
     fake_pred = _make_fake_prediction("child answer")
 
-    with patch(
-        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
-    ) as mock_build:
+    with patch("fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm") as mock_build:
         mock_module = MagicMock(return_value=fake_pred)
         mock_build.return_value = mock_module
 
@@ -147,9 +145,7 @@ def test_sub_rlm_passes_context() -> None:
     interp = _StubInterpreter(max_llm_calls=50, depth=0, max_depth=2)
     fake_pred = _make_fake_prediction("ok")
 
-    with patch(
-        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
-    ) as mock_build:
+    with patch("fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm") as mock_build:
         mock_module = MagicMock(return_value=fake_pred)
         mock_build.return_value = mock_module
 
@@ -174,9 +170,7 @@ def test_sub_rlm_null_answer_raises_runtime_error() -> None:
 def test_sub_rlm_detects_broker_error_in_child_prediction() -> None:
     interp = _StubInterpreter(max_llm_calls=50, depth=0, max_depth=2)
     prediction = _make_fake_prediction("misleading answer")
-    prediction.trajectory = [
-        {"output": "[Error] Broker server failed to start within timeout"}
-    ]
+    prediction.trajectory = [{"output": "[Error] Broker server failed to start within timeout"}]
 
     with (
         patch(
@@ -236,9 +230,7 @@ def test_child_depth_incremented() -> None:
 
     interp.build_delegate_child = _capture_child
 
-    with patch(
-        "fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm"
-    ) as mock_build:
+    with patch("fleet_rlm.runtime.execution.llm_query.build_recursive_subquery_rlm") as mock_build:
         mock_build.return_value = MagicMock(return_value=_make_fake_prediction("ok"))
         interp.sub_rlm("test")
 

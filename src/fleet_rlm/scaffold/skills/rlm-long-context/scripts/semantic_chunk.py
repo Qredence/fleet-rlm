@@ -272,7 +272,7 @@ def write_chunks(
         filename = f"{prefix}_{i:04d}_{chunk_type}.txt"
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(f"<!-- Chunk {i}: bytes {start}-{end}, type={chunk_type} -->\n")
             f.write(chunk_content)
 

@@ -19,9 +19,7 @@ def test_websocket_command_validation(
     expected_type: str,
     expected_substring: str,
 ):
-    with ws_client.websocket_connect(
-        "/api/v1/ws/execution", headers=websocket_auth_headers
-    ) as websocket:
+    with ws_client.websocket_connect("/api/v1/ws/execution", headers=websocket_auth_headers) as websocket:
         websocket.send_json(
             {
                 "type": "command",
@@ -43,9 +41,7 @@ def test_websocket_command_rejects_legacy_identity_fields(
     ws_client,
     websocket_auth_headers,
 ):
-    with ws_client.websocket_connect(
-        "/api/v1/ws/execution", headers=websocket_auth_headers
-    ) as websocket:
+    with ws_client.websocket_connect("/api/v1/ws/execution", headers=websocket_auth_headers) as websocket:
         websocket.send_json(
             {
                 "type": "command",
@@ -67,9 +63,7 @@ def test_websocket_command_rejects_null_legacy_identity_fields(
     ws_client,
     websocket_auth_headers,
 ):
-    with ws_client.websocket_connect(
-        "/api/v1/ws/execution", headers=websocket_auth_headers
-    ) as websocket:
+    with ws_client.websocket_connect("/api/v1/ws/execution", headers=websocket_auth_headers) as websocket:
         websocket.send_json(
             {
                 "type": "command",

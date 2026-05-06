@@ -60,9 +60,9 @@ class JobsRepository(RepositoryContextMixin):
                 available_at=request.available_at or _utc_now(),
                 idempotency_key=request.idempotency_key,
             )
-            stmt = insert_stmt.on_conflict_do_nothing(
-                index_elements=[Job.workspace_id, Job.idempotency_key]
-            ).returning(Job)
+            stmt = insert_stmt.on_conflict_do_nothing(index_elements=[Job.workspace_id, Job.idempotency_key]).returning(
+                Job
+            )
             result = await session.execute(stmt)
             created = result.scalar_one_or_none()
             if created is not None:
@@ -77,16 +77,12 @@ class JobsRepository(RepositoryContextMixin):
             )
             job = existing.scalar_one_or_none()
             if job is None:
-                raise RuntimeError(
-                    "Job idempotency conflict occurred but existing row could not be resolved."
-                )
+                raise RuntimeError("Job idempotency conflict occurred but existing row could not be resolved.")
             return job
 
     async def lease_jobs(self, request: JobLeaseRequest) -> list[Job]:
         available_before = request.available_before or _utc_now()
-        stale_locked_before = available_before - timedelta(
-            seconds=request.lease_timeout_seconds
-        )
+        stale_locked_before = available_before - timedelta(seconds=request.lease_timeout_seconds)
         async with self._scoped_session(
             tenant_id=request.tenant_id,
             workspace_id=request.workspace_id,

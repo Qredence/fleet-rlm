@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from datetime import datetime
+from typing import Any, Protocol, cast
 
 from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
-from ..dependencies import ServerState
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
-
-if TYPE_CHECKING:
-    from ..routers.ws.types import SessionContext
+from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 
 
 @dataclass(slots=True)
@@ -28,6 +28,7 @@ class PreparedChatRuntime:
     planner_lm: object
     delegate_lm: object | None
     repository: FleetRepository | None
+    persistence: Any
     persistence_required: bool
     identity_rows: IdentityUpsertResult | None
 
@@ -45,32 +46,131 @@ class ChatSessionState:
     active_run_db_id: uuid.UUID | None = None
     lifecycle: Any | None = None
     last_loaded_docs_path: str | None = None
-    orchestration_session: SessionContext | None = None
+    orchestration_session: Any | None = None
 
 
-def set_interpreter_default_profile(
-    interpreter: object | None, cfg: ServerRuntimeConfig
-) -> None:
+LocalPersistFn = Callable[..., Awaitable[None]]
+PreStreamSetupFn = Callable[[], Awaitable[None]]
+
+
+@dataclass(slots=True)
+class SessionContext:
+    """Simplified session context for websocket streaming."""
+
+    workspace_id: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    session_record: dict[str, Any] | None = None
+
+
+class StreamEventLike(Protocol):
+    """Minimal worker-event surface required by WS terminal/completion helpers.
+
+    ``WorkspaceEvent`` satisfies this protocol directly, and transport-created
+    compatibility events can do the same without depending on runtime models.
+    """
+
+    @property
+    def kind(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def text(self) -> str: ...
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @property
+    def timestamp(self) -> datetime:
+        raise NotImplementedError
+
+
+class MaintenanceInterpreterProtocol(Protocol):
+    """Interpreter capability needed for session manifest volume I/O."""
+
+    # Host-mediated evidence bridge references — populated by the WS stream
+    # layer once identity is resolved; read by evidence_bridge.py.
+    _host_repository: Any | None
+    _host_identity: Any | None
+    _host_run_id: Any | None
+
+    async def aexecute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> object: ...
+
+    def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
+
+
+class ChatAgentProtocol(Protocol):
+    """Subset of chat-agent behavior used by websocket runtime helpers."""
+
+    interpreter: MaintenanceInterpreterProtocol | None
+    _db_session_id: str | object | None
+    _repository: Any | None
+    _identity_rows: Any | None
+
+    async def __aenter__(self) -> ChatAgentProtocol: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool: ...
+
+    def history_turns(self) -> int: ...
+
+    def set_execution_mode(self, execution_mode: str) -> None: ...
+
+    def aiter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check: Callable[[], bool] | None = None,
+        *,
+        docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+        volume_name: str | None = None,
+    ) -> AsyncIterator[object]: ...
+
+    def load_document(self, path: str, alias: str = "active") -> None: ...
+
+    def export_session_state(self) -> dict[str, Any]: ...
+
+    def import_session_state(self, state: dict[str, Any]) -> object: ...
+
+    async def aimport_session_state(self, state: dict[str, Any]) -> object: ...
+
+    def reset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+
+    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any] | object: ...
+
+
+def set_interpreter_default_profile(interpreter: object | None, cfg: ServerRuntimeConfig) -> None:
     if interpreter is None:
         return
+    runtime_interpreter = cast(Any, interpreter)
     try:
-        setattr(
-            interpreter,
-            "default_execution_profile",
-            ExecutionProfile(cfg.ws_default_execution_profile),
-        )
+        runtime_interpreter.default_execution_profile = ExecutionProfile(cfg.ws_default_execution_profile)
     except ValueError:
-        setattr(
-            interpreter,
-            "default_execution_profile",
-            ExecutionProfile.ROOT_INTERLOCUTOR,
-        )
+        runtime_interpreter.default_execution_profile = ExecutionProfile.ROOT_INTERLOCUTOR
 
 
-async def _ensure_runtime_models(state: ServerState) -> tuple[Any | None, Any | None]:
+async def _ensure_runtime_models(
+    lm_deps: LmDeps, config_deps: ConfigDeps, diagnostics_deps: Any
+) -> tuple[Any | None, Any | None]:
     from ..bootstrap import ensure_runtime_models
 
-    return await ensure_runtime_models(state)
+    return await ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
 
 
 async def _resolve_persisted_identity(
@@ -92,14 +192,17 @@ async def _resolve_persisted_identity(
 async def prepare_chat_runtime(
     *,
     websocket: WebSocket,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    persistence_deps: PersistenceDeps,
+    diagnostics_deps: DiagnosticsDeps,
     identity: NormalizedIdentity,
     send_error,
     close_websocket,
 ) -> PreparedChatRuntime | None:
-    cfg = state.config
+    cfg = config_deps.config
     try:
-        planner_lm, delegate_lm = await _ensure_runtime_models(state)
+        planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
     except Exception as exc:
         if await send_error(
             websocket,
@@ -109,7 +212,14 @@ async def prepare_chat_runtime(
             await close_websocket(websocket, code=1011)
         return None
 
-    repository = state.repository
+    repository = persistence_deps.repository
+    persistence = repository
+    if persistence is None:
+        persistence = persistence_deps.local_store
+    if persistence is None:
+        from fleet_rlm.integrations.local_store import LocalStore
+
+        persistence = LocalStore()
     persistence_required = cfg.database_required
     identity_rows = None
 
@@ -136,15 +246,20 @@ async def prepare_chat_runtime(
         ):
             await close_websocket(websocket, code=1011)
         return None
+    else:
+        # Local-store mode: derive a synthetic identity from the HTTP claims
+        identity_rows = await persistence.upsert_identity(
+            entra_tenant_id=identity.tenant_claim,
+            entra_user_id=identity.user_claim,
+            email=identity.email,
+            full_name=identity.name,
+        )
 
     if planner_lm is None:
         if await send_error(
             websocket,
             code="planner_missing",
-            message=(
-                "Planner LM not configured. "
-                "Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."
-            ),
+            message=("Planner LM not configured. Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."),
         ):
             await close_websocket(websocket)
         return None
@@ -154,6 +269,7 @@ async def prepare_chat_runtime(
         planner_lm=planner_lm,
         delegate_lm=delegate_lm,
         repository=repository,
+        persistence=persistence,
         persistence_required=persistence_required,
         identity_rows=identity_rows,
     )
@@ -162,74 +278,60 @@ async def prepare_chat_runtime(
 def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     return {
         "react_max_iters": runtime.cfg.react_max_iters,
-        "deep_react_max_iters": runtime.cfg.deep_react_max_iters,
-        "enable_adaptive_iters": runtime.cfg.enable_adaptive_iters,
-        "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
-        "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
-        "max_depth": runtime.cfg.rlm_max_depth,
-        "rlm_child_isolation_mode": runtime.cfg.rlm_child_isolation_mode,
-        "rlm_child_fork_fallback": runtime.cfg.rlm_child_fork_fallback,
-        "timeout": runtime.cfg.timeout,
-        "secret_name": runtime.cfg.secret_name,
-        "volume_name": runtime.cfg.volume_name,
-        "interpreter_async_execute": runtime.cfg.interpreter_async_execute,
-        "guardrail_mode": runtime.cfg.agent_guardrail_mode,
-        "max_output_chars": runtime.cfg.agent_max_output_chars,
-        "min_substantive_chars": runtime.cfg.agent_min_substantive_chars,
         "planner_lm": runtime.planner_lm,
         "delegate_lm": runtime.delegate_lm,
-        "delegate_max_calls_per_turn": runtime.cfg.delegate_max_calls_per_turn,
-        "delegate_result_truncation_chars": runtime.cfg.delegate_result_truncation_chars,
         "repository": runtime.repository,
     }
 
 
-def _try_build_daytona_interpreter(cfg: ServerRuntimeConfig) -> Any | None:
-    """Instantiate a DaytonaInterpreter if Daytona credentials are configured."""
-    try:
-        from fleet_rlm.integrations.daytona.config import DaytonaConfigError
-        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+class _ManagedAgentContext:
+    """Wraps an agent so interpreter lifecycle is owned by InterpreterPool."""
 
-        interpreter = DaytonaInterpreter(
-            volume_name=cfg.volume_name,
-            timeout=cfg.timeout,
-            max_llm_calls=cfg.rlm_max_llm_calls,
-            max_recursion_depth=cfg.rlm_max_depth,
-            rlm_max_iterations=cfg.rlm_max_iterations,
-            child_isolation_mode=cfg.rlm_child_isolation_mode,
-            child_fork_fallback=cfg.rlm_child_fork_fallback,
-            delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
-            async_execute=cfg.interpreter_async_execute,
-        )
-        interpreter._host_repository = None
-        interpreter._host_identity = None
-        interpreter._host_run_id = None
-        return interpreter
-    except ImportError:
-        return None
-    except DaytonaConfigError:
-        return None
+    def __init__(
+        self,
+        agent: Any,
+        interpreter: Any | None,
+        pool: Any,
+    ) -> None:
+        self._agent = agent
+        self._interpreter = interpreter
+        self._pool = pool
+
+    async def __aenter__(self) -> Any:
+        return self._agent
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any | None,
+    ) -> bool:
+        if self._interpreter is not None:
+            self._agent.interpreter = None
+            await self._pool.release(self._interpreter)
+        return False
 
 
-def build_chat_agent_context(runtime: PreparedChatRuntime):
+async def build_chat_agent_context(runtime: PreparedChatRuntime) -> Any:
     kwargs = _chat_agent_builder_kwargs(runtime)
-    interpreter = _try_build_daytona_interpreter(runtime.cfg)
+    from .interpreter_pool import InterpreterPool
+
+    pool = InterpreterPool()
+    interpreter = await pool.acquire(runtime.cfg)
     if interpreter is not None:
         kwargs["interpreter"] = interpreter
-    return build_chat_agent(**kwargs)
+    try:
+        agent = build_chat_agent(**kwargs)
+    except Exception:
+        await pool.release(interpreter)
+        raise
+    return _ManagedAgentContext(agent, interpreter, pool)
 
 
-def new_chat_session_state(
-    runtime: PreparedChatRuntime, identity: NormalizedIdentity
-) -> ChatSessionState:
+def new_chat_session_state(runtime: PreparedChatRuntime, identity: NormalizedIdentity) -> ChatSessionState:
     return ChatSessionState(
-        canonical_workspace_id=_sanitize_id(
-            identity.tenant_claim, runtime.cfg.ws_default_workspace_id
-        ),
-        canonical_user_id=_sanitize_id(
-            identity.user_claim, runtime.cfg.ws_default_user_id
-        ),
+        canonical_workspace_id=_sanitize_id(identity.tenant_claim, runtime.cfg.ws_default_workspace_id),
+        canonical_user_id=_sanitize_id(identity.user_claim, runtime.cfg.ws_default_user_id),
         owner_tenant_claim=identity.tenant_claim,
         owner_user_claim=identity.user_claim,
         cancel_flag={"cancelled": False},
@@ -237,8 +339,14 @@ def new_chat_session_state(
 
 
 __all__ = [
+    "ChatAgentProtocol",
     "ChatSessionState",
+    "LocalPersistFn",
+    "MaintenanceInterpreterProtocol",
+    "PreStreamSetupFn",
     "PreparedChatRuntime",
+    "SessionContext",
+    "StreamEventLike",
     "build_chat_agent_context",
     "new_chat_session_state",
     "prepare_chat_runtime",

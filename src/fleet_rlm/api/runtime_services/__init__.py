@@ -5,14 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .chat_runtime import (
-        ChatSessionState,
-        PreparedChatRuntime,
-        build_chat_agent_context,
-        new_chat_session_state,
-        prepare_chat_runtime,
-        set_interpreter_default_profile,
-    )
     from .chat_persistence import (
         ExecutionLifecycleManager,
         build_local_persist_fn,
@@ -23,11 +15,20 @@ if TYPE_CHECKING:
         sync_session_record_state,
         update_manifest_from_exported_state,
     )
+    from .chat_runtime import (
+        ChatSessionState,
+        PreparedChatRuntime,
+        build_chat_agent_context,
+        new_chat_session_state,
+        prepare_chat_runtime,
+        set_interpreter_default_profile,
+    )
     from .diagnostics import (
         build_runtime_status_response,
         run_daytona_connection_test,
         run_lm_connection_test,
     )
+    from .interpreter_pool import InterpreterPool
     from .settings import (
         apply_runtime_settings_patch,
         build_runtime_settings_snapshot,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ChatSessionState",
+    "InterpreterPool",
     "PreparedChatRuntime",
     "apply_runtime_settings_patch",
     "build_chat_agent_context",
@@ -69,6 +71,10 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "ChatSessionState": (
         "fleet_rlm.api.runtime_services.chat_runtime",
         "ChatSessionState",
+    ),
+    "InterpreterPool": (
+        "fleet_rlm.api.runtime_services.interpreter_pool",
+        "InterpreterPool",
     ),
     "PreparedChatRuntime": (
         "fleet_rlm.api.runtime_services.chat_runtime",

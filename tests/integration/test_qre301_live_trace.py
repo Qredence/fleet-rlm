@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import and_, func, select, text
 
+from fleet_rlm.api.main import create_app
 from fleet_rlm.integrations.database import (
     Artifact,
     DatabaseManager,
@@ -22,14 +23,11 @@ from fleet_rlm.integrations.database import (
     RunStatus,
     RunStep,
 )
-from fleet_rlm.api.main import create_app
 
 pytestmark = [pytest.mark.live_llm, pytest.mark.db]
 
 
-def _wait_for_execution_completed(
-    execution_ws, *, timeout_seconds: float
-) -> list[dict]:
+def _wait_for_execution_completed(execution_ws, *, timeout_seconds: float) -> list[dict]:
     deadline = time.time() + timeout_seconds
     events: list[dict] = []
     while time.time() < deadline:
@@ -64,10 +62,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
     user_id = "alice"
     session_id = f"qre301-live-{uuid.uuid4().hex[:8]}"
     docs_path = str(Path(__file__).resolve().parents[2] / "AGENTS.md")
-    prompt = (
-        "Analyze this repository and provide a concise architecture summary with "
-        "key execution flow checkpoints."
-    )
+    prompt = "Analyze this repository and provide a concise architecture summary with key execution flow checkpoints."
 
     headers = {
         "X-Debug-Tenant-Id": workspace_id,
@@ -92,9 +87,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
             f"/api/v1/ws/execution/events?session_id={session_id}",
             headers=headers,
         ) as execution_ws:
-            with client.websocket_connect(
-                "/api/v1/ws/execution", headers=headers
-            ) as chat_ws:
+            with client.websocket_connect("/api/v1/ws/execution", headers=headers) as chat_ws:
                 chat_ws.send_json(
                     {
                         "type": "message",
@@ -106,16 +99,13 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                 )
 
                 chat_messages = _wait_for_chat_terminal(chat_ws, timeout_seconds=240)
-                execution_events = _wait_for_execution_completed(
-                    execution_ws, timeout_seconds=240
-                )
+                execution_events = _wait_for_execution_completed(execution_ws, timeout_seconds=240)
 
                 chat_terminal = next(
                     (
                         msg
                         for msg in reversed(chat_messages)
-                        if msg.get("type") == "event"
-                        and msg.get("data", {}).get("kind") in {"done", "error"}
+                        if msg.get("type") == "event" and msg.get("data", {}).get("kind") in {"done", "error"}
                     ),
                     None,
                 )
@@ -151,11 +141,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                 assert cancel_ack.get("type") == "cancelled"
 
                 run_started = next(
-                    (
-                        ev
-                        for ev in execution_events
-                        if ev.get("type") == "execution_started"
-                    ),
+                    (ev for ev in execution_events if ev.get("type") == "execution_started"),
                     None,
                 )
                 assert run_started is not None
@@ -163,21 +149,13 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
 
                 assert execution_events[0].get("type") == "execution_started"
                 assert execution_events[-1].get("type") == "execution_completed"
-                assert any(
-                    ev.get("type") == "execution_step" for ev in execution_events
-                )
+                assert any(ev.get("type") == "execution_step" for ev in execution_events)
                 assert all(ev.get("run_id") == run_id for ev in execution_events)
-                assert all(
-                    ev.get("workspace_id") == workspace_id for ev in execution_events
-                )
+                assert all(ev.get("workspace_id") == workspace_id for ev in execution_events)
                 assert all(ev.get("user_id") == user_id for ev in execution_events)
-                assert all(
-                    ev.get("session_id") == session_id for ev in execution_events
-                )
+                assert all(ev.get("session_id") == session_id for ev in execution_events)
 
-                step_events = [
-                    ev for ev in execution_events if ev.get("type") == "execution_step"
-                ]
+                step_events = [ev for ev in execution_events if ev.get("type") == "execution_step"]
                 assert step_events
                 for event in step_events:
                     step = event.get("step")
@@ -235,9 +213,7 @@ async def test_qre301_live_trace_websocket_and_persistence_flow(
                     )
                 ).scalar_one_or_none()
 
-                assert run_row is not None, (
-                    f"Run not found for external_run_id={run_id}"
-                )
+                assert run_row is not None, f"Run not found for external_run_id={run_id}"
                 assert run_row.status == RunStatus.COMPLETED
 
                 step_count = (

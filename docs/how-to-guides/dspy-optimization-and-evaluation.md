@@ -104,7 +104,7 @@ Reusable scoring functions in `runtime/quality/scoring_helpers.py`:
 Optional accumulator for weighted sub-scores:
 
 ```python
-from fleet_rlm.runtime.quality.scoring_helpers import ScoreFeedbackBuilder
+from fleet_rlm.quality.scoring_helpers import ScoreFeedbackBuilder
 
 builder = ScoreFeedbackBuilder()
 builder.add(0.9, 0.4, "overlap looks good")
@@ -141,8 +141,8 @@ fleet-rlm optimize list
 ### Programmatic
 
 ```python
-from fleet_rlm.runtime.quality.module_registry import get_module_spec
-from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+from fleet_rlm.quality.module_registry import get_module_spec
+from fleet_rlm.quality.optimization_runner import run_module_optimization
 
 spec = get_module_spec("reflect-and-revise")
 result = run_module_optimization(
@@ -238,10 +238,10 @@ This prints module info, dataset stats, and validation score.
    `src/fleet_rlm/runtime/quality/optimize_<name>.py`:
 
    ```python
-   from fleet_rlm.runtime.quality.datasets import load_dataset_rows, validate_required_keys
-   from fleet_rlm.runtime.quality.artifacts import resolve_artifact_path
-   from fleet_rlm.runtime.quality.module_registry import ModuleOptimizationSpec, register_module
-   from fleet_rlm.runtime.quality.optimization_runner import run_module_optimization
+   from fleet_rlm.quality.datasets import load_dataset_rows, validate_required_keys
+   from fleet_rlm.quality.artifacts import resolve_artifact_path
+   from fleet_rlm.quality.module_registry import ModuleOptimizationSpec, register_module
+   from fleet_rlm.quality.optimization_runner import run_module_optimization
 
    _MODULE_SLUG = "my-module"
    _REQUIRED_DATASET_KEYS = ["query", "expected_output"]

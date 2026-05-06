@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 from .diagnostics import DaytonaDiagnosticError
-from .types import SandboxLmRuntimeConfig
+from .payload_models import SandboxLmRuntimeConfig
 
 
 class DaytonaConfigError(DaytonaDiagnosticError):
@@ -73,13 +73,9 @@ def resolve_daytona_config(
             "DAYTONA_API_URL. Rename DAYTONA_API_BASE_URL to DAYTONA_API_URL."
         )
     if not api_key:
-        raise DaytonaConfigError(
-            "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
-        )
+        raise DaytonaConfigError("Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.")
     if not api_url:
-        raise DaytonaConfigError(
-            "Missing DAYTONA_API_URL. Set DAYTONA_API_URL before using Daytona commands."
-        )
+        raise DaytonaConfigError("Missing DAYTONA_API_URL. Set DAYTONA_API_URL before using Daytona commands.")
 
     return ResolvedDaytonaConfig(
         api_key=api_key,
@@ -94,10 +90,7 @@ def resolve_daytona_lm_runtime_config(
     """Resolve the LM config that Daytona sandboxes should boot locally."""
 
     values = dict(env) if env is not None else _load_env_sources()
-    api_key = (
-        values.get("DSPY_LLM_API_KEY", "").strip()
-        or values.get("DSPY_LM_API_KEY", "").strip()
-    )
+    api_key = values.get("DSPY_LLM_API_KEY", "").strip() or values.get("DSPY_LM_API_KEY", "").strip()
     model = values.get("DSPY_LM_MODEL", "").strip()
     if not model or not api_key:
         raise DaytonaConfigError(
@@ -125,7 +118,7 @@ def resolve_daytona_lm_runtime_config(
 
 
 # ---------------------------------------------------------------------------
-# SDK client construction and error helpers (formerly client.py)
+# SDK client construction and error helpers
 # ---------------------------------------------------------------------------
 
 _RESOURCE_ERROR_STATUS_CODES = frozenset({400, 409, 429})
@@ -218,13 +211,9 @@ def classify_daytona_sdk_error(exc: BaseException) -> DaytonaSdkErrorClassificat
     status_code = _extract_status_code(exc)
     message = _exception_message(exc)
     lowered = message.lower()
-    has_resource_keyword = any(
-        keyword in lowered for keyword in _RESOURCE_ERROR_KEYWORDS
-    )
+    has_resource_keyword = any(keyword in lowered for keyword in _RESOURCE_ERROR_KEYWORDS)
     kind = "provider_error"
-    if status_code == 429 or (
-        status_code in _RESOURCE_ERROR_STATUS_CODES and has_resource_keyword
-    ):
+    if status_code == 429 or (status_code in _RESOURCE_ERROR_STATUS_CODES and has_resource_keyword):
         kind = "resource_or_quota"
     return DaytonaSdkErrorClassification(
         status_code=status_code,
@@ -236,16 +225,9 @@ def classify_daytona_sdk_error(exc: BaseException) -> DaytonaSdkErrorClassificat
 def format_daytona_sdk_error(exc: BaseException) -> str:
     """Return a stable, operator-friendly Daytona SDK error string."""
     classification = classify_daytona_sdk_error(exc)
-    status = (
-        f"HTTP {classification.status_code}"
-        if classification.status_code is not None
-        else "unknown HTTP status"
-    )
+    status = f"HTTP {classification.status_code}" if classification.status_code is not None else "unknown HTTP status"
     if classification.is_resource_or_quota_error:
-        return (
-            "Daytona resource/quota/precondition failure "
-            f"({status}): {classification.message}"
-        )
+        return f"Daytona resource/quota/precondition failure ({status}): {classification.message}"
     return f"Daytona provider failure ({status}): {classification.message}"
 
 

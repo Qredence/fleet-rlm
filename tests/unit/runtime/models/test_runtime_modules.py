@@ -3,7 +3,7 @@
 NOTE: All imports are intentionally deferred inside each test function to
 avoid triggering the circular import chain:
   fleet_rlm.runtime.agent.chat_agent
-  → fleet_rlm.runtime.models.builders/registry
+  → fleet_rlm.runtime.modules.registry/factory/etc.
   → fleet_rlm.runtime.agent.signatures
   → fleet_rlm.runtime.agent
 
@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 import pytest
-
 
 EXPECTED_MODULE_NAMES = frozenset(
     {
@@ -52,13 +51,13 @@ def fake_interpreter() -> MagicMock:
 
 
 def test_registry_contains_all_expected_names():
-    from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
     assert EXPECTED_MODULE_NAMES <= frozenset(RUNTIME_MODULE_REGISTRY)
 
 
 def test_runtime_module_names_frozenset_matches_registry():
-    from fleet_rlm.runtime.models.registry import (
+    from fleet_rlm.runtime.modules.registry import (
         RUNTIME_MODULE_NAMES,
         RUNTIME_MODULE_REGISTRY,
     )
@@ -67,16 +66,12 @@ def test_runtime_module_names_frozenset_matches_registry():
 
 
 def test_each_registry_entry_has_signature_and_classname():
-    from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
     for name, defn in RUNTIME_MODULE_REGISTRY.items():
         assert defn.signature is not None, f"No signature for {name}"
-        assert isinstance(defn.class_name, str) and defn.class_name, (
-            f"No class_name for {name}"
-        )
-        assert issubclass(defn.signature, dspy.Signature), (
-            f"{name} signature is not a dspy.Signature subclass"
-        )
+        assert isinstance(defn.class_name, str) and defn.class_name, f"No class_name for {name}"
+        assert issubclass(defn.signature, dspy.Signature), f"{name} signature is not a dspy.Signature subclass"
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +82,9 @@ def test_each_registry_entry_has_signature_and_classname():
 @pytest.mark.parametrize("name", sorted(EXPECTED_MODULE_NAMES))
 def test_build_runtime_module_returns_module_instance(name: str, fake_interpreter: Any):
     """Every registered name should produce a dspy.Module instance."""
-    from fleet_rlm.runtime.models.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.registry import build_runtime_module
 
-    with patch("fleet_rlm.runtime.models.builders.dspy.RLM", MagicMock()):
+    with patch("fleet_rlm.runtime.modules.factory.dspy.RLM", MagicMock()):
         module = build_runtime_module(
             name,
             interpreter=fake_interpreter,
@@ -102,7 +97,7 @@ def test_build_runtime_module_returns_module_instance(name: str, fake_interprete
 
 
 def test_build_runtime_module_raises_for_unknown_name(fake_interpreter: Any):
-    from fleet_rlm.runtime.models.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.registry import build_runtime_module
 
     with pytest.raises(ValueError, match="Unknown runtime module: nonexistent"):
         build_runtime_module(
@@ -116,9 +111,9 @@ def test_build_runtime_module_raises_for_unknown_name(fake_interpreter: Any):
 
 def test_build_runtime_module_each_call_is_new_instance(fake_interpreter: Any):
     """build_runtime_module always constructs a new instance (no shared state)."""
-    from fleet_rlm.runtime.models.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.registry import build_runtime_module
 
-    with patch("fleet_rlm.runtime.models.builders.dspy.RLM", MagicMock()):
+    with patch("fleet_rlm.runtime.modules.factory.dspy.RLM", MagicMock()):
         m1 = build_runtime_module(
             "grounded_answer",
             interpreter=fake_interpreter,
@@ -138,8 +133,8 @@ def test_build_runtime_module_each_call_is_new_instance(fake_interpreter: Any):
 
 
 def test_get_or_build_runtime_module_reuses_cached_instance(fake_interpreter: Any):
-    from fleet_rlm.runtime.models.builders import build_runtime_module_config
-    from fleet_rlm.runtime.models.registry import get_or_build_runtime_module
+    from fleet_rlm.runtime.modules.factory import build_runtime_module_config
+    from fleet_rlm.runtime.modules.registry import get_or_build_runtime_module
 
     created: list[str] = []
     fake_module = MagicMock(name="RuntimeModule")
@@ -160,7 +155,7 @@ def test_get_or_build_runtime_module_reuses_cached_instance(fake_interpreter: An
         return fake_module
 
     with patch(
-        "fleet_rlm.runtime.models.registry.build_runtime_module",
+        "fleet_rlm.runtime.modules.registry.build_runtime_module",
         side_effect=_fake_build_runtime_module,
     ):
         cache: dict[str, dspy.Module] = {}
@@ -194,7 +189,7 @@ def test_get_or_build_runtime_module_reuses_cached_instance(fake_interpreter: An
 def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: Any):
     """Verify that recursive subquery RLM uses RecursiveSubQuerySignature."""
     from fleet_rlm.runtime.agent.signatures import RecursiveSubQuerySignature
-    from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+    from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 
     captured: dict[str, Any] = {}
 
@@ -202,7 +197,7 @@ def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: A
         captured.update(kwargs)
         return MagicMock()
 
-    with patch("fleet_rlm.runtime.models.builders.dspy.RLM", _fake_rlm):
+    with patch("fleet_rlm.runtime.modules.factory.dspy.RLM", _fake_rlm):
         build_recursive_subquery_rlm(
             interpreter=fake_interpreter,
             max_iterations=5,
@@ -219,7 +214,7 @@ def test_build_recursive_subquery_rlm_uses_correct_signature(fake_interpreter: A
 def test_grounded_answer_synthesis_module_chunks_document_before_rlm(
     fake_interpreter: Any,
 ):
-    from fleet_rlm.runtime.models.builders import GroundedAnswerSynthesisModule
+    from fleet_rlm.runtime.modules.grounded_answer import GroundedAnswerSynthesisModule
 
     captured: dict[str, Any] = {}
 
@@ -234,7 +229,7 @@ def test_grounded_answer_synthesis_module_chunks_document_before_rlm(
             )
 
     with patch(
-        "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+        "fleet_rlm.runtime.modules.grounded_answer._create_configured_runtime_rlm",
         return_value=_FakeGroundedAnswerRLM(),
     ):
         module = GroundedAnswerSynthesisModule(
@@ -260,7 +255,7 @@ def test_grounded_answer_synthesis_module_chunks_document_before_rlm(
 def test_memory_migration_planning_module_composes_audit_then_migration(
     fake_interpreter: Any,
 ):
-    from fleet_rlm.runtime.models.builders import MemoryMigrationPlanningModule
+    from fleet_rlm.runtime.modules.memory import MemoryMigrationPlanningModule
 
     captured: dict[str, Any] = {}
 
@@ -281,11 +276,11 @@ def test_memory_migration_planning_module_composes_audit_then_migration(
 
     with (
         patch(
-            "fleet_rlm.runtime.models.builders.MemoryStructureAuditPlanningModule",
+            "fleet_rlm.runtime.modules.memory.MemoryStructureAuditPlanningModule",
             return_value=_FakeAuditModule(),
         ),
         patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+            "fleet_rlm.runtime.modules.memory._create_configured_runtime_rlm",
             return_value=_FakeMigrationRLM(),
         ),
     ):

@@ -16,38 +16,60 @@ from fleet_rlm.integrations.observability.trace_context import (
     runtime_distinct_id_context,
 )
 from fleet_rlm.runtime.config import build_dspy_context
+from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import NormalizedIdentity
-from ...dependencies import ServerState, get_server_state_from_websocket
+from ...dependencies import (
+    ConfigDeps,
+    DiagnosticsDeps,
+    LmDeps,
+    PersistenceDeps,
+    SessionCacheDeps,
+    get_auth_deps_from_websocket,
+    get_config_deps_from_websocket,
+    get_diagnostics_deps_from_websocket,
+    get_lm_deps_from_websocket,
+    get_persistence_deps_from_websocket,
+    get_session_cache_deps_from_websocket,
+)
 from ...events import ExecutionSubscription
 from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
 )
+from ...runtime_services.chat_persistence import (
+    cancel_startup_status_task as _cancel_startup_status_task,
+)
+from ...runtime_services.chat_persistence import (
+    emit_delayed_startup_status as _emit_delayed_startup_status,
+)
+from ...runtime_services.chat_persistence import (
+    get_execution_emitter,
+)
 from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
+)
+from ...runtime_services.chat_runtime import (
     build_chat_agent_context as _build_chat_agent_context,
+)
+from ...runtime_services.chat_runtime import (
     new_chat_session_state as _new_chat_session_state,
+)
+from ...runtime_services.chat_runtime import (
     prepare_chat_runtime as _prepare_chat_runtime_service,
+)
+from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
-from .helpers import (
+from .stream import WorkspaceEvent, _chat_message_loop, build_stream_event_dict
+from .transport import (
     _authenticate_websocket,
     _close_websocket_safely,
     _error_envelope,
-    _sanitize_for_log,
     _try_send_json,
-)
-from .lifecycle import (
-    cancel_startup_status_task as _cancel_startup_status_task,
     chat_startup_error_payload,
-    emit_delayed_startup_status as _emit_delayed_startup_status,
-    get_execution_emitter,
+    parse_ws_message_or_send_error,
 )
-from .messages import parse_ws_message_or_send_error
-from .stream import _chat_message_loop
-from .terminal import build_stream_event_dict
-from .types import WorkspaceEvent
 
 router = APIRouter(tags=["websocket"])
 
@@ -57,7 +79,10 @@ logger = logging.getLogger(__name__)
 async def _prepare_chat_runtime(
     *,
     websocket: WebSocket,
-    state: ServerState,
+    config_deps: ConfigDeps,
+    lm_deps: LmDeps,
+    persistence_deps: PersistenceDeps,
+    diagnostics_deps: DiagnosticsDeps,
     identity: NormalizedIdentity,
 ) -> _PreparedChatRuntime | None:
     async def _send_error(
@@ -73,7 +98,10 @@ async def _prepare_chat_runtime(
 
     return await _prepare_chat_runtime_service(
         websocket=websocket,
-        state=state,
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        persistence_deps=persistence_deps,
+        diagnostics_deps=diagnostics_deps,
         identity=identity,
         send_error=_send_error,
         close_websocket=_close_websocket_safely,
@@ -134,9 +162,23 @@ async def _reject_execution_query_session_id(
 class _ExecutionWebSocketConnection:
     """Connection-scoped execution orchestration for one websocket client."""
 
-    def __init__(self, *, websocket: WebSocket, state: Any, identity: Any) -> None:
+    def __init__(
+        self,
+        *,
+        websocket: WebSocket,
+        config_deps: ConfigDeps,
+        lm_deps: LmDeps,
+        persistence_deps: PersistenceDeps,
+        diagnostics_deps: DiagnosticsDeps,
+        session_cache: SessionCacheDeps,
+        identity: Any,
+    ) -> None:
         self.websocket = websocket
-        self.state = state
+        self.config_deps = config_deps
+        self.lm_deps = lm_deps
+        self.persistence_deps = persistence_deps
+        self.diagnostics_deps = diagnostics_deps
+        self.session_cache = session_cache
         self.identity = identity
 
     async def _emit_delayed_startup_status(self) -> None:
@@ -157,9 +199,7 @@ class _ExecutionWebSocketConnection:
             emit_event=_emit_event,
         )
 
-    async def _cancel_startup_status_task(
-        self, task: asyncio.Task[None] | None
-    ) -> None:
+    async def _cancel_startup_status_task(self, task: asyncio.Task[None] | None) -> None:
         await _cancel_startup_status_task(task)
 
     async def _receive_initial_message(self):
@@ -176,7 +216,10 @@ class _ExecutionWebSocketConnection:
         await self.websocket.accept()
         runtime = await _prepare_chat_runtime(
             websocket=self.websocket,
-            state=self.state,
+            config_deps=self.config_deps,
+            lm_deps=self.lm_deps,
+            persistence_deps=self.persistence_deps,
+            diagnostics_deps=self.diagnostics_deps,
             identity=self.identity,
         )
         if runtime is None:
@@ -191,10 +234,8 @@ class _ExecutionWebSocketConnection:
             ):
                 initial_msg = await self._receive_initial_message()
                 if initial_msg.type == "message":
-                    startup_status_task = asyncio.create_task(
-                        self._emit_delayed_startup_status()
-                    )
-                agent_context = _build_chat_agent_context(runtime)
+                    startup_status_task = asyncio.create_task(self._emit_delayed_startup_status())
+                agent_context = await _build_chat_agent_context(runtime)
                 async with agent_context as agent:
                     await self._cancel_startup_status_task(startup_status_task)
                     startup_status_task = None
@@ -202,7 +243,7 @@ class _ExecutionWebSocketConnection:
                     _set_interpreter_default_profile(interpreter, runtime.cfg)
                     session = _new_chat_session_state(runtime, self.identity)
                     local_persist = _build_local_persist_fn(
-                        state=self.state,
+                        session_cache=self.session_cache,
                         runtime=runtime,
                         agent=agent,
                         interpreter=interpreter,
@@ -210,7 +251,8 @@ class _ExecutionWebSocketConnection:
                     )
                     await _chat_message_loop(
                         websocket=self.websocket,
-                        state=self.state,
+                        session_cache=self.session_cache,
+                        diagnostics_deps=self.diagnostics_deps,
                         runtime=runtime,
                         agent=agent,
                         interpreter=interpreter,
@@ -223,9 +265,7 @@ class _ExecutionWebSocketConnection:
             return
         except Exception as exc:
             await self._cancel_startup_status_task(startup_status_task)
-            logger.exception(
-                "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
-            )
+            logger.exception("WebSocket execution startup failed: %s", _sanitize_for_log(exc))
             if await _try_send_json(self.websocket, chat_startup_error_payload(exc)):
                 await _close_websocket_safely(self.websocket, code=1011)
 
@@ -233,7 +273,7 @@ class _ExecutionWebSocketConnection:
 async def _run_execution_subscription_stream(
     *,
     websocket: WebSocket,
-    state,
+    diagnostics_deps: DiagnosticsDeps,
     identity,
     session_id: str,
 ) -> None:
@@ -254,7 +294,7 @@ async def _run_execution_subscription_stream(
             await _close_websocket_safely(websocket, code=1008)
         return
 
-    emitter = get_execution_emitter(state)
+    emitter = get_execution_emitter(diagnostics_deps)
     await emitter.connect(websocket, subscription)
 
     try:
@@ -284,14 +324,23 @@ async def execution_stream(
     if await _reject_execution_query_session_id(websocket, session_id=session_id):
         return
 
-    state = get_server_state_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, state)
+    config_deps = get_config_deps_from_websocket(websocket)
+    auth_deps = get_auth_deps_from_websocket(websocket)
+    lm_deps = get_lm_deps_from_websocket(websocket)
+    persistence_deps = get_persistence_deps_from_websocket(websocket)
+    diagnostics_deps = get_diagnostics_deps_from_websocket(websocket)
+    session_cache = get_session_cache_deps_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, config_deps, auth_deps)
     if identity is None:
         return
 
     connection = _ExecutionWebSocketConnection(
         websocket=websocket,
-        state=state,
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        persistence_deps=persistence_deps,
+        diagnostics_deps=diagnostics_deps,
+        session_cache=session_cache,
         identity=identity,
     )
     await connection.run()
@@ -312,14 +361,16 @@ async def execution_events_stream(
     ):
         return
 
-    state = get_server_state_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, state)
+    config_deps = get_config_deps_from_websocket(websocket)
+    auth_deps = get_auth_deps_from_websocket(websocket)
+    diagnostics_deps = get_diagnostics_deps_from_websocket(websocket)
+    identity = await _authenticate_websocket(websocket, config_deps, auth_deps)
     if identity is None:
         return
 
     await _run_execution_subscription_stream(
         websocket=websocket,
-        state=state,
+        diagnostics_deps=diagnostics_deps,
         identity=identity,
         session_id=str(session_id or "").strip(),
     )

@@ -2,8 +2,10 @@
 
 from fastapi import APIRouter, HTTPException
 
+from fleet_rlm.integrations.database import FleetRepository
+
 from ..auth import AuthError, resolve_admitted_identity
-from ..dependencies import HTTPIdentityDep, RepositoryDep, ServerStateDep
+from ..dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ..schemas.base import AuthMeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -13,48 +15,34 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/me",
     response_model=AuthMeResponse,
     responses={
-        401: {
-            "description": "Authentication is required or the provided token is invalid."
-        },
-        403: {
-            "description": "The authenticated tenant or user is not admitted to Fleet RLM."
-        },
-        503: {
-            "description": "Authentication or repository services are not configured yet."
-        },
+        401: {"description": "Authentication is required or the provided token is invalid."},
+        403: {"description": "The authenticated tenant or user is not admitted to Fleet RLM."},
+        503: {"description": "Authentication or repository services are not configured yet."},
     },
 )
 async def get_me(
     identity: HTTPIdentityDep,
-    state: ServerStateDep,
-    repository: RepositoryDep,
+    config_deps: ConfigDepsDep,
+    persistence: PersistenceDep,
 ) -> AuthMeResponse:
     """Return the authenticated identity and any admitted control-plane IDs."""
     persisted_identity = None
-    if state.config.auth_mode == "entra":
-        if repository is None:
+    if config_deps.config.auth_mode == "entra":
+        if not isinstance(persistence, FleetRepository):
             raise HTTPException(
                 status_code=503,
                 detail="Database repository unavailable for Entra tenant admission.",
             )
         try:
-            persisted_identity = await resolve_admitted_identity(repository, identity)
+            persisted_identity = await resolve_admitted_identity(persistence, identity)
         except AuthError as exc:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.message
-            ) from exc
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     return AuthMeResponse(
         tenant_claim=identity.tenant_claim,
         user_claim=identity.user_claim,
         email=identity.email,
         name=identity.name,
-        tenant_id=(
-            str(persisted_identity.tenant_id)
-            if persisted_identity is not None
-            else None
-        ),
-        user_id=(
-            str(persisted_identity.user_id) if persisted_identity is not None else None
-        ),
+        tenant_id=(str(persisted_identity.tenant_id) if persisted_identity is not None else None),
+        user_id=(str(persisted_identity.user_id) if persisted_identity is not None else None),
     )

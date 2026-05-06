@@ -3,17 +3,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from fleet_rlm.api.routers.ws.errors import handle_stream_error
+from fleet_rlm.api.routers.ws.stream import WorkspaceEvent, handle_stream_error
 from fleet_rlm.integrations.database import RunStatus
-from fleet_rlm.api.routers.ws.types import WorkspaceEvent
 
 
 class _ClosedSendWebSocket:
     async def send_json(self, payload: Any) -> None:
         _ = payload
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.send', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed."
         )
 
 

@@ -231,7 +231,7 @@ def run_rlm_task(
     max_llm_calls: int = 20,
 ) -> dict[str, Any]:
     """Run a single task through fleet-rlm's dspy.RLM on the given interpreter."""
-    from fleet_rlm.runtime.models.builders import build_recursive_subquery_rlm
+    from fleet_rlm.runtime.modules import build_recursive_subquery_rlm
 
     rlm = build_recursive_subquery_rlm(
         interpreter=interpreter,

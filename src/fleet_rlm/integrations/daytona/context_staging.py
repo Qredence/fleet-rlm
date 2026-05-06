@@ -12,10 +12,10 @@ from typing import Any
 from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.utils.paths import is_local_path
 
-from .session_runtime import _arun_admin_code
 from .async_compat import _await_if_needed
 from .diagnostics import DaytonaDiagnosticError
-from .types import ContextSource
+from .payload_models import ContextSource
+from .session_runtime import _arun_admin_code
 from .volume_runtime import aensure_remote_directory as _aensure_remote_directory
 
 
@@ -86,11 +86,7 @@ async def _aread_document_content(path: Path) -> tuple[str, dict[str, Any]]:
 
 
 def _build_staged_filename(*, source_path: Path, source_type: str) -> str:
-    return (
-        source_path.name
-        if source_type == "text"
-        else f"{source_path.name}.extracted.txt"
-    )
+    return source_path.name if source_type == "text" else f"{source_path.name}.extracted.txt"
 
 
 async def _astage_local_file(
@@ -131,9 +127,7 @@ async def _astage_local_directory(
     extraction_methods: set[str] = set()
     source_types: set[str] = set()
 
-    for local_file in sorted(
-        path for path in resolved_path.rglob("*") if path.is_file()
-    ):
+    for local_file in sorted(path for path in resolved_path.rglob("*") if path.is_file()):
         relative_path = local_file.relative_to(resolved_path)
         try:
             text, metadata = await _aread_document_content(local_file)
@@ -163,13 +157,9 @@ async def _astage_local_directory(
         )
 
     extraction_method = (
-        "mixed"
-        if len(extraction_methods) > 1
-        else next(iter(extraction_methods), None) or "directory_walk"
+        "mixed" if len(extraction_methods) > 1 else next(iter(extraction_methods), None) or "directory_walk"
     )
-    source_type = (
-        "mixed" if len(source_types) > 1 else next(iter(source_types), None) or "text"
-    )
+    source_type = "mixed" if len(source_types) > 1 else next(iter(source_types), None) or "text"
     return ContextSource(
         source_id=source_id,
         kind="directory",
@@ -191,9 +181,7 @@ async def _astage_context_paths(
     reset_existing: bool = False,
 ) -> list[ContextSource]:
     raw_paths = [
-        stripped
-        for item in (context_paths or [])
-        if (stripped := str(item).strip()) and is_local_path(stripped)
+        stripped for item in (context_paths or []) if (stripped := str(item).strip()) and is_local_path(stripped)
     ]
     if reset_existing:
         await _aclear_staged_context_paths(
@@ -214,10 +202,7 @@ async def _astage_context_paths(
         try:
             resolved = _resolve_local_context_path(raw_path)
             display_path = str(resolved)
-            staged_root = (
-                context_root
-                / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
-            )
+            staged_root = context_root / f"{index:02d}-{_safe_context_slug(resolved.stem or resolved.name)}"
             if resolved.is_dir():
                 staged_sources.append(
                     await _astage_local_directory(

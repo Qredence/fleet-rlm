@@ -1,7 +1,7 @@
 """Unit tests for StreamEvent and TurnState models.
 
-Covers fleet_rlm.runtime.models.streaming — all event kinds and
-TurnState.apply state transitions introduced in the new implementation.
+Covers fleet_rlm.runtime.schemas — StreamEvent and TurnState models,
+all event kinds, and TurnState.apply state transitions.
 """
 
 from __future__ import annotations
@@ -10,11 +10,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from fleet_rlm.runtime.models.streaming import (
+from fleet_rlm.runtime.schemas import (
     StreamEvent,
     TurnState,
 )
-
 
 # ---------------------------------------------------------------------------
 # StreamEvent dataclass
@@ -182,11 +181,7 @@ def test_turn_state_apply_done_uses_tokens_when_no_text():
 def test_turn_state_apply_cancelled_via_done():
     state = TurnState()
     state.apply(StreamEvent(kind="text", text="partial response"))
-    state.apply(
-        StreamEvent(
-            kind="done", text="", payload={"cancelled": True, "history_turns": 1}
-        )
-    )
+    state.apply(StreamEvent(kind="done", text="", payload={"cancelled": True, "history_turns": 1}))
 
     assert state.cancelled is True
     assert state.done is True
@@ -197,9 +192,7 @@ def test_turn_state_apply_cancelled_via_done():
 
 def test_turn_state_apply_error():
     state = TurnState()
-    state.apply(
-        StreamEvent(kind="error", text="LLM timeout", payload={"history_turns": 2})
-    )
+    state.apply(StreamEvent(kind="error", text="LLM timeout", payload={"history_turns": 2}))
 
     assert state.errored is True
     assert state.done is True

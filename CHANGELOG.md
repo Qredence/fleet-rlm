@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file.
 
 - No unreleased changes yet.
 
+## [0.5.3] - 2026-05-06
+
+### Changed
+
+- **Change:** Refactored backend runtime and transport boundaries across Daytona
+  interpreter collaborators, websocket services, persistence abstractions, and
+  runtime modules.
+  **Outcome:** Backend ownership boundaries are clearer while preserving the
+  public Workbench runtime contract.
+
+### Fixed
+
+- **Change:** Hardened recursive workspace delegation around remote document
+  context, degraded child execution metadata, and chunk-document alias handling.
+  **Outcome:** Recursive runs avoid stale document evidence, surface degraded
+  child results for repair/review, and keep short plain text chunkable.
+
 ## [0.5.2] - 2026-04-29
 
 ### Highlights (User Impact)

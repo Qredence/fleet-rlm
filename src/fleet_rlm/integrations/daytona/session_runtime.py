@@ -12,20 +12,12 @@ from typing import Any
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .diagnostics import DaytonaDiagnosticError
-from .sandbox_lifecycle import (
-    aarchive_sandbox_session as _aarchive_sandbox_session,
-    adelete_sandbox_session as _adelete_sandbox_session,
-    arecover_sandbox_session as _arecover_sandbox_session,
-    arefresh_sandbox_session_activity as _arefresh_sandbox_session_activity,
-    aresize_sandbox_session as _aresize_sandbox_session,
-    create_lsp_server as _create_lsp_server,
-)
-from .types import ContextSource
+from .payload_models import ContextSource
 from .volume_runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 
 
 # ---------------------------------------------------------------------------
-# Admin code-execution helpers (formerly admin_runtime.py)
+# Admin code-execution helpers
 # ---------------------------------------------------------------------------
 async def _arun_admin_code(
     *,
@@ -39,9 +31,7 @@ async def _arun_admin_code(
     try:
         from daytona.common.process import CodeRunParams
 
-        result = await _await_if_needed(
-            sandbox.process.code_run(code, params=CodeRunParams())
-        )
+        result = await _await_if_needed(sandbox.process.code_run(code, params=CodeRunParams()))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"{error_prefix}: {exc}",
@@ -130,17 +120,13 @@ class DaytonaSandboxSession:
         if self.context_id:
             existing_contexts: list[Any] | None = None
             with suppress(Exception):
-                existing_contexts = await _await_if_needed(
-                    self.sandbox.code_interpreter.list_contexts()
-                )
+                existing_contexts = await _await_if_needed(self.sandbox.code_interpreter.list_contexts())
             if existing_contexts is not None:
                 for existing in existing_contexts:
                     if str(getattr(existing, "id", "") or "") == self.context_id:
                         self._context = existing
                         return existing
-        context = await _await_if_needed(
-            self.sandbox.code_interpreter.create_context(cwd=self.workspace_path)
-        )
+        context = await _await_if_needed(self.sandbox.code_interpreter.create_context(cwd=self.workspace_path))
         self._context = context
         self.context_id = str(getattr(context, "id", "") or "") or None
         return context
@@ -167,18 +153,14 @@ class DaytonaSandboxSession:
         self._context = None
         if context is None and self.context_id:
             with suppress(Exception):
-                existing_contexts = await _await_if_needed(
-                    self.sandbox.code_interpreter.list_contexts()
-                )
+                existing_contexts = await _await_if_needed(self.sandbox.code_interpreter.list_contexts())
                 for existing in existing_contexts:
                     if str(getattr(existing, "id", "") or "") == self.context_id:
                         context = existing
                         break
         if context is not None:
             with suppress(Exception):
-                await _await_if_needed(
-                    self.sandbox.code_interpreter.delete_context(context)
-                )
+                await _await_if_needed(self.sandbox.code_interpreter.delete_context(context))
         self.context_id = None
         self._driver_started = False
 
@@ -206,9 +188,7 @@ class DaytonaSandboxSession:
 
     async def aread_file(self, path: str) -> str:
         await self._arebind_sandbox_if_needed()
-        raw = await _await_if_needed(
-            self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
-        )
+        raw = await _await_if_needed(self.sandbox.fs.download_file(self._resolve_sandbox_path(path)))
         if raw is None:
             return ""
         if isinstance(raw, str):
@@ -259,40 +239,47 @@ class DaytonaSandboxSession:
 
     async def alist_files(self, path: str) -> list[Any]:
         await self._arebind_sandbox_if_needed()
-        entries = await _await_if_needed(
-            self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
-        )
+        entries = await _await_if_needed(self.sandbox.fs.list_files(self._resolve_sandbox_path(path)))
         return list(entries)
 
     def list_files(self, path: str) -> list[Any]:
         return _run_async_compat(self.alist_files, path)
 
     async def adelete(self) -> None:
-        await _adelete_sandbox_session(self)
+        await self.adelete_context()
+        # Graceful stop before delete lets sandbox processes flush if possible.
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.stop(timeout=10))
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.delete())
+        self._driver_started = False
 
     def delete(self) -> None:
         _run_async_compat(self.adelete)
 
     async def aarchive(self) -> None:
-        await _aarchive_sandbox_session(self)
+        await _await_if_needed(self.sandbox.archive())
 
     def archive(self) -> None:
         _run_async_compat(self.aarchive)
 
     async def arecover(self, *, timeout: float = 60.0) -> None:
-        await _arecover_sandbox_session(self, timeout=timeout)
+        await _await_if_needed(self.sandbox.recover(timeout=timeout))
 
     def recover(self, *, timeout: float = 60.0) -> None:
         _run_async_compat(self.arecover, timeout=timeout)
 
     async def arefresh_activity(self) -> None:
-        await _arefresh_sandbox_session_activity(self)
+        with suppress(Exception):
+            await _await_if_needed(self.sandbox.refresh_activity())
 
     def refresh_activity(self) -> None:
         _run_async_compat(self.arefresh_activity)
 
     async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:
-        await _aresize_sandbox_session(self, cpu=cpu, memory=memory, disk=disk)
+        from daytona import Resources
+
+        await _await_if_needed(self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk)))
 
     def resize(self, *, cpu: int, memory: int, disk: int) -> None:
         _run_async_compat(self.aresize, cpu=cpu, memory=memory, disk=disk)
@@ -303,10 +290,9 @@ class DaytonaSandboxSession:
         language: str = "python",
         project_path: str | None = None,
     ) -> Any:
-        return _create_lsp_server(
-            self,
-            language=language,
-            project_path=project_path,
+        return self.sandbox.create_lsp_server(
+            language,
+            project_path or self.workspace_path,
         )
 
 

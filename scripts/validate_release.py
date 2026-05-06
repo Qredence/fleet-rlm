@@ -6,11 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
-from pathlib import Path
 import re
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 import yaml
 

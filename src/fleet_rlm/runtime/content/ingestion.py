@@ -30,9 +30,7 @@ def extract_text_with_markitdown(path: Path) -> tuple[str, dict[str, Any]]:
     try:
         from markitdown import MarkItDown
     except ImportError as exc:
-        raise RuntimeError(
-            "MarkItDown is not installed. Run `uv sync` to install runtime dependencies."
-        ) from exc
+        raise RuntimeError("MarkItDown is not installed. Run `uv sync` to install runtime dependencies.") from exc
 
     converter = MarkItDown()
     converted = converter.convert(str(path))
@@ -115,13 +113,9 @@ def read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
         except Exception as exc:
             extraction_errors.append(f"pypdf: {exc}")
             details = "; ".join(extraction_errors)
-            raise ValueError(
-                f"Could not extract text from PDF '{path}'. Details: {details}"
-            ) from exc
+            raise ValueError(f"Could not extract text from PDF '{path}'. Details: {details}") from exc
 
-        raise ValueError(
-            f"PDF '{path}' appears to be image-only or scanned. OCR is required before analysis."
-        )
+        raise ValueError(f"PDF '{path}' appears to be image-only or scanned. OCR is required before analysis.")
 
     if suffix in MARKITDOWN_SUFFIXES:
         try:
@@ -149,9 +143,7 @@ def read_document_content(path: Path) -> tuple[str, dict[str, Any]]:
         # File is text-like but not UTF-8 (e.g. Latin-1 / Windows-1252).
         # latin-1 decodes every byte 0x00–0xFF losslessly, so use it as a
         # last-resort fallback rather than surfacing a confusing codec error.
-        logger.warning(
-            "File '%s' is not valid UTF-8; re-reading with latin-1 fallback.", path
-        )
+        logger.warning("File '%s' is not valid UTF-8; re-reading with latin-1 fallback.", path)
         return path.read_text(encoding="latin-1"), {
             "source_type": "text",
             "extraction_method": "read_text_latin1",

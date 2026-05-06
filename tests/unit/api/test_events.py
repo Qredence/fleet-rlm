@@ -88,15 +88,11 @@ async def test_execution_event_emitter_filters_by_subscription():
 
     await emitter.connect(
         ws_match,  # type: ignore[arg-type]
-        ExecutionSubscription(
-            workspace_id="default", user_id="alice", session_id="session-1"
-        ),
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-1"),
     )
     await emitter.connect(
         ws_other,  # type: ignore[arg-type]
-        ExecutionSubscription(
-            workspace_id="default", user_id="bob", session_id="session-2"
-        ),
+        ExecutionSubscription(workspace_id="default", user_id="bob", session_id="session-2"),
     )
 
     event = ExecutionEvent(
@@ -125,9 +121,7 @@ async def test_execution_event_emitter_removes_stale_connections():
 
     await emitter.connect(
         ws_stale,  # type: ignore[arg-type]
-        ExecutionSubscription(
-            workspace_id="default", user_id="alice", session_id="session-1"
-        ),
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-1"),
     )
     await emitter.emit(
         ExecutionEvent(

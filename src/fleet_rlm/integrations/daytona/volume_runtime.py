@@ -99,10 +99,7 @@ def raise_if_volume_error(
     if normalized_state in _VOLUME_ERROR_STATES:
         message = f"Volume '{volume_name}' is in error state '{normalized_state}'"
         if raw_state and raw_state != normalized_state:
-            message = (
-                f"Volume '{volume_name}' is in error state "
-                f"'{normalized_state}' (raw='{raw_state}')"
-            )
+            message = f"Volume '{volume_name}' is in error state '{normalized_state}' (raw='{raw_state}')"
         raise DaytonaDiagnosticError(
             message,
             category="sandbox_create_clone_error",
@@ -195,7 +192,7 @@ async def aensure_daytona_volume_layout(
 
 
 # ---------------------------------------------------------------------------
-# Volume mount context managers (formerly volume_mounts.py)
+# Volume mount context managers
 # ---------------------------------------------------------------------------
 
 
@@ -245,7 +242,7 @@ def _mounted_daytona_volume(volume_name: str) -> Iterator[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Volume inventory (formerly volume_inventory.py)
+# Volume inventory
 # ---------------------------------------------------------------------------
 
 
@@ -294,7 +291,7 @@ def list_daytona_volumes() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Volume browsing / file preview (formerly volume_browser.py)
+# Volume browsing / file preview
 # ---------------------------------------------------------------------------
 
 
@@ -359,9 +356,7 @@ async def alist_daytona_volume_tree(
     ) -> list[dict[str, Any]]:
         nonlocal truncated
         nodes: list[dict[str, Any]] = []
-        entries = await _await_if_needed(
-            sandbox.fs.list_files(str(location.mounted_path))
-        )
+        entries = await _await_if_needed(sandbox.fs.list_files(str(location.mounted_path)))
 
         for entry in entries:
             name = entry_name(getattr(entry, "name", "") or getattr(entry, "path", ""))
@@ -450,17 +445,9 @@ async def aread_daytona_volume_file_text(
     resolved_path = _resolve_daytona_path(path)
 
     async with _amounted_daytona_volume(volume_name) as sandbox:
-        raw = await _await_if_needed(
-            sandbox.fs.download_file(str(resolved_path.mounted_path))
-        )
+        raw = await _await_if_needed(sandbox.fs.download_file(str(resolved_path.mounted_path)))
 
-    raw_bytes = (
-        b""
-        if raw is None
-        else raw.encode("utf-8")
-        if isinstance(raw, str)
-        else bytes(raw)
-    )
+    raw_bytes = b"" if raw is None else raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
     size = len(raw_bytes)
     truncated = size > max_bytes
     preview_bytes = raw_bytes[:max_bytes] if truncated else raw_bytes

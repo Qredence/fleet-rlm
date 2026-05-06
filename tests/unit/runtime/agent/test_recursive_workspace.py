@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 import dspy
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -44,9 +43,9 @@ def _mock_interpreter() -> MagicMock:
 
 def _build_module(interp: Any = None, **kwargs: Any) -> Any:
     """Build a RecursiveWorkspaceModule with mocked inner RLMs."""
-    from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+    from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
-    with patch("fleet_rlm.runtime.models.builders.create_runtime_rlm") as mock_create:
+    with patch("fleet_rlm.runtime.modules.workspace.create_runtime_rlm") as mock_create:
         mock_create.return_value = MagicMock(spec=dspy.Module)
         module = RecursiveWorkspaceModule(
             interpreter=interp or _mock_interpreter(),
@@ -64,7 +63,7 @@ def _build_module(interp: Any = None, **kwargs: Any) -> Any:
 
 class TestConstruction:
     def test_creates_five_sub_modules(self) -> None:
-        from fleet_rlm.runtime.models.builders import RecursiveWorkspaceModule
+        from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
         create_calls: list[dict[str, Any]] = []
 
@@ -73,7 +72,7 @@ class TestConstruction:
             return MagicMock(spec=dspy.Module)
 
         with patch(
-            "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+            "fleet_rlm.runtime.modules.workspace.create_runtime_rlm",
             side_effect=_track_create,
         ):
             RecursiveWorkspaceModule(
@@ -231,9 +230,7 @@ class TestForwardLoop:
         module._verifier = MagicMock(
             return_value=_mock_prediction(
                 verification_status="needs_human_review",
-                verified_summary=(
-                    "A candidate exists but verification is blocked by sandbox limitations."
-                ),
+                verified_summary=("A candidate exists but verification is blocked by sandbox limitations."),
                 missing_evidence=["Independent verification is required."],
                 contradictions=[],
                 verification_rationale="Unable to create sandboxes for verification.",
@@ -358,9 +355,7 @@ class TestForwardLoop:
         )
 
         with (
-            patch.object(
-                module, "_execute_subqueries", return_value=["partial answer"]
-            ),
+            patch.object(module, "_execute_subqueries", return_value=["partial answer"]),
             patch.object(module, "_store_pass_evidence"),
         ):
             result = module(user_request="hard question")
@@ -540,6 +535,29 @@ class TestForwardLoop:
         assert result.status == "needs_human_review"
         assert result.missing == ["critical gap"]
 
+    def test_loaded_document_request_without_source_rejects_stale_evidence(
+        self,
+    ) -> None:
+        module = _build_module(max_passes=1)
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary=("Autoresearch Framework: accept-if-better, discard-if-worse"),
+                selected_memory_handles=["old-session"],
+                selected_evidence_ids=["react-session-old.json"],
+                omission_rationale="old durable evidence",
+            )
+        )
+        module._planner = MagicMock()
+
+        result = module(
+            user_request="Analyze the loaded document 'codex_config'.",
+            context="The document is located in the agent cache under alias codex_config.",
+        )
+
+        assert result.status == "needs_human_review"
+        assert result.missing == ["current_document_source"]
+        module._planner.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Helper methods
@@ -566,6 +584,35 @@ class TestHelpers:
         assert len(outputs) == 2
         assert all(o == "result" for o in outputs)
 
+    def test_execute_subqueries_serial_preserves_degraded_success(self) -> None:
+        module = _build_module()
+
+        with patch(
+            "fleet_rlm.runtime.tools.rlm_delegate.delegate_to_rlm",
+            return_value={
+                "status": "ok",
+                "answer": "usable answer",
+                "degraded": True,
+                "degradation_reason": "broker_unavailable",
+                "degradation_error": "Daytona broker unavailable during child RLM execution.",
+            },
+        ):
+            outputs = module._execute_subqueries(["q1"], "ctx", "single_pass")
+
+        assert len(outputs) == 1
+        payload = json.loads(outputs[0])
+        assert payload == {
+            "status": "ok",
+            "answer": "usable answer",
+            "degraded": True,
+            "reason": "broker_unavailable",
+            "error": "Daytona broker unavailable during child RLM execution.",
+        }
+        assert module._classify_subquery_failures(outputs) == [
+            "output[0]:broker_unavailable",
+            "output[0]:reason=broker_unavailable",
+        ]
+
     def test_execute_subqueries_fan_out(self) -> None:
         module = _build_module()
 
@@ -582,6 +629,33 @@ class TestHelpers:
             outputs = module._execute_subqueries(["q1", "q2"], "ctx", "fan_out")
 
         assert outputs == ["a1", "a2"]
+
+    def test_execute_subqueries_fan_out_preserves_degraded_success(self) -> None:
+        module = _build_module()
+
+        with patch(
+            "fleet_rlm.runtime.tools.rlm_delegate.delegate_to_rlm_batched",
+            return_value={
+                "status": "ok",
+                "results": [
+                    {
+                        "answer": "usable answer",
+                        "degraded": True,
+                        "degradation_reason": "broker_unavailable",
+                        "degradation_error": "Daytona broker unavailable during child RLM execution.",
+                    },
+                    {"answer": "clean answer"},
+                ],
+            },
+        ):
+            outputs = module._execute_subqueries(["q1", "q2"], "ctx", "fan_out")
+
+        assert json.loads(outputs[0])["reason"] == "broker_unavailable"
+        assert outputs[1] == "clean answer"
+        assert module._classify_subquery_failures(outputs) == [
+            "output[0]:broker_unavailable",
+            "output[0]:reason=broker_unavailable",
+        ]
 
     def test_execute_subqueries_fan_out_preserves_structured_errors(self) -> None:
         module = _build_module()
@@ -643,6 +717,26 @@ class TestHelpers:
             "output[0]:status=error",
             "output[0]:tool_error",
         ]
+
+    def test_current_source_requirement_ignores_unrelated_alias_and_cache_terms(
+        self,
+    ) -> None:
+        module = _build_module()
+
+        assert not module._requires_current_source_context(
+            user_request="Explain cache invalidation tradeoffs.",
+            context="",
+        )
+        assert not module._requires_current_source_context(
+            user_request="What does the SQL alias do here?",
+            context="",
+        )
+
+    def test_current_source_context_accepts_sandbox_paths(self) -> None:
+        module = _build_module()
+
+        assert module._has_current_source_context("artifacts/rlm-inputs/doc_123.txt")
+        assert module._has_current_source_context("/home/daytona/memory/meta/doc.txt")
 
     def test_fetch_memory_catalog_empty_when_no_repo(self) -> None:
         module = _build_module()
@@ -729,23 +823,18 @@ class TestHelpers:
             )
         )
 
-        def _capture_subqueries(
-            subqueries: list[str], context: str, mode: str
-        ) -> list[str]:
+        def _capture_subqueries(subqueries: list[str], context: str, mode: str) -> list[str]:
             captured_contexts.append(context)
             return ["child answer"]
 
         with (
-            patch.object(
-                module, "_execute_subqueries", side_effect=_capture_subqueries
-            ),
+            patch.object(module, "_execute_subqueries", side_effect=_capture_subqueries),
             patch.object(module, "_store_pass_evidence"),
         ):
             module(user_request=user_request)
 
         assert captured_contexts[0] == user_request, (
-            "Expected fallback to user_request when assembled_context is too thin, "
-            f"got: {captured_contexts[0]!r}"
+            f"Expected fallback to user_request when assembled_context is too thin, got: {captured_contexts[0]!r}"
         )
 
 
@@ -776,7 +865,7 @@ class TestToolDiscovery:
 
 class TestRegistry:
     def test_recursive_workspace_in_module_registry(self) -> None:
-        from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+        from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
         assert "recursive_workspace" in RUNTIME_MODULE_REGISTRY
         defn = RUNTIME_MODULE_REGISTRY["recursive_workspace"]

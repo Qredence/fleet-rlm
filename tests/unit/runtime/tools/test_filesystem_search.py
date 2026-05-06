@@ -31,8 +31,8 @@ def test_find_files_rg_cli_fallback_finds_matches(tmp_path) -> None:
 
 def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
     from fleet_rlm.runtime.tools.sandbox_filesystem import (
-        _SandboxFilesystemToolContext,
         _sandbox_find_in_files_impl,
+        _SandboxFilesystemToolContext,
     )
 
     class _Fs:

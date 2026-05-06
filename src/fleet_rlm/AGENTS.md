@@ -24,7 +24,6 @@ Backend source-of-truth files:
 - `src/fleet_rlm/api/bootstrap.py` for runtime bootstrap, optional startup, LM loading, analytics startup, and persistence initialization
 - `src/fleet_rlm/cli/fleet_cli.py` and `src/fleet_rlm/cli/main.py` for CLI behavior
 - `src/fleet_rlm/runtime/factory.py` for canonical runtime construction
-- `src/fleet_rlm/cli/runtime_factory.py` as a compatibility re-export only; new internal code should import `src/fleet_rlm/runtime/factory.py` directly
 - `src/fleet_rlm/cli/runners.py` for top-level runner helpers
 
 Artifacts and areas to treat carefully:
@@ -48,8 +47,8 @@ Active top-level areas under `src/fleet_rlm/`:
 
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
-- `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
-  - `runtime/models/builders.py` hosts the runtime RLM factories including `build_recursive_subquery_rlm`, `build_variable_mode_rlm`, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
+- `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime modules
+  - `runtime/modules/` hosts runtime RLM factories, module registry definitions, variable-mode modules, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
   - `runtime/tools/rlm_delegate.py` owns `delegate_to_rlm` / `delegate_to_rlm_batched` plus host-side trajectory persistence into `external_traces`
 - `integrations/`: config, database, observability, and external-system integrations
   - `integrations/daytona/evidence_bridge.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` to sandbox code via `bridge_callbacks.py`; `DATABASE_URL` is never exposed to the sandbox
@@ -148,15 +147,16 @@ Layering rules:
 Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
-- Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports; do not reference the removed `runtime/models/rlm_runtime_modules.py`
-- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent), `runtime/agent/runtime.py` (AgentRuntime), and `runtime/agent/chat_session_state.py`
-- Keep Daytona execution and durable workspace/session semantics in `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py`
+- Keep runtime module construction/registration in `runtime/modules/factory.py`, `runtime/modules/registry.py`, or the `fleet_rlm.runtime.modules` package exports
+- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent) and `runtime/agent/runtime.py` (AgentRuntime)
+- Keep the public Daytona interpreter facade in `integrations/daytona/interpreter.py`; durable workspace/session behavior lives in `workspace_manager.py`, code execution and bridge state live in `sandbox_executor.py`, and recursive child construction lives in `child_delegation.py`.
+- Keep Daytona collaborator boundaries typed with small internal Protocols. Use Pydantic v2 for validated configuration/state boundary models such as `WorkspaceConfig`, but keep hot execution-path payloads and bridge result carriers as dataclasses/functions.
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
-- Keep DSPy evaluation and optimization helpers under `runtime/quality/*`
-- Keep shared evaluation infrastructure in `runtime/quality/datasets.py`, `runtime/quality/scoring_helpers.py`, `runtime/quality/artifacts.py`, `runtime/quality/module_registry.py`, and `runtime/quality/optimization_runner.py`
-- Keep per-module optimization entrypoints in `runtime/quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
-- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.runtime.quality.optimize_longcot`; add new `runtime/quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
+- Keep DSPy evaluation and optimization helpers under `quality/*`
+- Keep shared evaluation infrastructure in `quality/datasets.py`, `quality/scoring_helpers.py`, `quality/artifacts.py`, `quality/module_registry.py`, and `quality/optimization_runner.py`
+- Keep per-module optimization entrypoints in `quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
+- The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.quality.optimize_longcot`; add new `quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
 - GEPA runs offline only — never in the live request path
 - Keep grouped tool helpers under root `runtime/tools/*`
 
@@ -193,14 +193,15 @@ Websocket/runtime contract rules:
 Daytona-specific boundaries:
 
 - Keep Daytona-specific behavior under `integrations/daytona/*`
-- Keep recursive child sandbox policy in `integrations/daytona/child_isolation.py`; `interpreter.py` should delegate to it instead of growing new child-creation branches inline.
+- Prefer Daytona SDK services directly for sandbox lifecycle, git, filesystem, preview/LSP, and code-interpreter operations; Fleet wrappers should exist only for product policy, diagnostics, session state, ownership labels, volume layout, context staging, manifests, and the RLM host-callback bridge.
+- Keep recursive child sandbox policy in `integrations/daytona/child_isolation.py`; `child_delegation.py` should provide only the concrete interpreter hooks that delegate into that policy.
 - Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge_callbacks.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
 - Keep Daytona client construction, config resolution, and SDK error classification in `integrations/daytona/config.py`
-- Keep sandbox spec building, payload models, and state normalization helpers in `integrations/daytona/types.py`
+- Keep sandbox spec building in `integrations/daytona/sandbox_spec.py`, payload and manifest normalization in `integrations/daytona/payload_models.py`, and diagnostic result models in `integrations/daytona/diagnostic_models.py`.
 - Keep volume readiness, mount context managers, inventory, and browsing in `integrations/daytona/volume_runtime.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
-- Keep workspace path helpers, git ref resolution, repo checkout, and workspace session orchestration in `integrations/daytona/workspace_runtime.py`
-- Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`
-- Keep sandbox lifecycle (stop, delete, archive, resume) in `integrations/daytona/sandbox_lifecycle.py`
+- Keep workspace path helpers, git ref resolution, repo checkout, and workspace session orchestration in `integrations/daytona/workspace_runtime.py`; use SDK `git.clone`, `git.status`, `git.pull`, `git.branches`, and `git.checkout_branch` where they preserve behavior, and allow named `sandbox.process.exec` fallbacks only for remote URL mismatch, non-git workspace replacement, exact forced remote reset, and detached commit checkout semantics not exposed by the SDK.
+- Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`; session lifecycle methods should call the underlying `AsyncSandbox` methods directly while preserving Fleet context cleanup and async-owner rebinding.
+- Keep resume/fork diagnostics in `integrations/daytona/sandbox_lifecycle.py`; do not add new thin lifecycle wrappers for SDK methods that can be called directly from `DaytonaSandboxSession` or `DaytonaSandboxRuntime`.
 - Keep snapshot management in `integrations/daytona/snapshot_runtime.py`
 - Keep structured diagnostic errors and phase-to-category mapping in `integrations/daytona/diagnostics.py`
 - Keep the async/sync bridge (persistent background event loop runner) in `integrations/daytona/async_compat.py`
@@ -211,7 +212,7 @@ Daytona-specific boundaries:
 - Keep Daytona sandbox lifecycle in `integrations/daytona/sandbox_lifecycle.py` and runtime factory in `integrations/daytona/runtime.py`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
-- Keep recursive RLM child creation centralized in `integrations/daytona/interpreter.py::build_delegate_child`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.
+- Keep recursive RLM child creation centralized through `integrations/daytona/child_delegation.py::build_delegate_child`, re-exported by `integrations/daytona/interpreter.py`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.
 - Default recursive isolation is `RLM_CHILD_ISOLATION_MODE=auto`: fork no-volume parents, use clean child sandboxes with `meta/rlm-children/...` volume subpaths for volume-mounted parents, and delete child sandboxes after every recursive task. `context` mode is a local/debug opt-out only.
 - Dispatch bridged `llm_query*` and `sub_rlm*` callbacks through Daytona interpreter methods so recursion depth and `rlm_max_llm_calls` remain shared across recursive children.
 - For local host-checkout codebase questions without `repo_url`, keep `delegate_to_rlm()` snapshot staging bounded and explicit: write relevant local evidence to the isolated child sandbox under `artifacts/rlm-inputs/local_workspace_snapshot.txt`; do not silently share the parent filesystem.
@@ -227,7 +228,7 @@ Daytona-specific boundaries:
 Tooling boundaries:
 
 - The shared backend/frontend product contract is Daytona-only; do not reintroduce Modal provider surfaces.
-- Reuse `src/fleet_rlm/utils/regex.py` for regex helpers instead of creating local variants
+- Reuse helpers in `src/fleet_rlm/utils/` for regex helpers instead of creating local variants
 
 Common mistakes to avoid:
 
@@ -255,9 +256,8 @@ Daytona workflow:
 
 These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
 
-- **Import-time side effects in runtime packages** — `runtime/models/__init__.py`, `runtime/quality/__init__.py`, and `runtime/quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime models and quality packages do not yet.
-- **Module registry entrypoint drift** — `runtime/quality/module_registry.py` currently seeds `_MODULE_ENTRYPOINTS` with `fleet_rlm.runtime.quality.optimize_longcot`, which registers `longcot-reasoner`. Keep `_MODULE_ENTRYPOINTS` aligned with any additional `runtime/quality/optimize_*.py` modules so CLI/API metadata stays accurate.
-- **`runtime/factory.py` `build_chat_agent()` ignores most parameters** — The function accepts many legacy arguments but only passes the runtime-critical subset into `AgentRuntime`; `docs_path` is loaded onto the returned runtime. The remaining ignored arguments are a known structural debt item.
+- **Import-time side effects in runtime packages** — `quality/__init__.py` and `quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; quality packages do not yet.
+- **Module registry entrypoint drift** — `quality/module_registry.py` currently seeds `_MODULE_ENTRYPOINTS` with `fleet_rlm.quality.optimize_longcot`, which registers `longcot-reasoner`. Keep `_MODULE_ENTRYPOINTS` aligned with any additional `quality/optimize_*.py` modules so CLI/API metadata stays accurate.
 - **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
 - **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.
 

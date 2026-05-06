@@ -9,6 +9,8 @@ __pycache__/
 dist/
 build/
 .coverage
+.coverage.*
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -24,12 +26,15 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
-mlartifacts/*
+mlartifacts/
 
 # OS/editor
 .DS_Store
+**/.DS_Store
 .vscode/
 .idea/
+*.code-workspace
+inspector.json
 
 # Temporary local scratch artifacts
 *.tmp
@@ -68,6 +73,9 @@ src/frontend/.tmp-*.mjs
 .letta/
 .opencode/
 .junie/
+.pi/
+.hermes/
+.factory/
 blogs/rlm-capability-evaluation-0-5-1/hero.png
 blogs/rlm-capability-evaluation-0-5-1/remotion
 blogs/rlm-capability-evaluation-0-5-1/hyperframes/
@@ -79,6 +87,7 @@ blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion.mp4
 output/*
 !output/longcot-eval/
 !output/longcot-eval/**
+output/**/.DS_Store
 src/output/
 results/
 archive/
@@ -90,9 +99,10 @@ artifacts/
 .data/
 *.sqlite
 *.db
+*.pid
+*.log
 fleet_rlm.db
 server.log
-mlartifacts/*
 .remember/
 .air/
 .air
@@ -100,8 +110,18 @@ mlartifacts/*
 .neon
 .output.txt
 
+# Type checker cache
+.ty/
+
+# MLflow local tracking
+mlruns/
+
 # Vendor (external benchmarks)
 vendor/
+
+# AI-generated analysis (ephemeral)
+code-analysis/
+research/
 
 # Playground / one-off
 plugins/
@@ -121,9 +141,8 @@ databricks.yml
 typings/
 files/ai_index_report_2026.pdf
 /dogfood-output
-.factory/plan-benchmark/fleet-rlm-benchmark-improvements.md
 
 blogs/
 logs/
-mlflow_verification_report.mdsrc/frontend/test_output.txt
 mlflow_verification_report.md
+src/frontend/test_output.txt

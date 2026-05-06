@@ -69,17 +69,11 @@ def to_async_database_url(database_url: str) -> str:
     if database_url.startswith("postgresql+asyncpg://"):
         return _normalize_async_query(database_url)
     if database_url.startswith("postgresql+psycopg://"):
-        return _normalize_async_query(
-            database_url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
-        )
+        return _normalize_async_query(database_url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1))
     if database_url.startswith("postgresql://"):
-        return _normalize_async_query(
-            database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        )
+        return _normalize_async_query(database_url.replace("postgresql://", "postgresql+asyncpg://", 1))
     if database_url.startswith("postgres://"):
-        return _normalize_async_query(
-            database_url.replace("postgres://", "postgresql+asyncpg://", 1)
-        )
+        return _normalize_async_query(database_url.replace("postgres://", "postgresql+asyncpg://", 1))
     return _normalize_async_query(database_url)
 
 
@@ -99,9 +93,16 @@ def to_sync_database_url(database_url: str) -> str:
 class DatabaseManager:
     """Manage async SQLAlchemy engine and sessions."""
 
-    def __init__(self, database_url: str, *, echo: bool = False) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        echo: bool = False,
+        connect_timeout: int = 10,
+    ) -> None:
         self._database_url = to_async_database_url(database_url)
         self._echo = echo
+        self._connect_timeout = connect_timeout
         self._engine: AsyncEngine | None = None
         self._session_maker: async_sessionmaker[AsyncSession] | None = None
 
@@ -118,9 +119,12 @@ class DatabaseManager:
                 pool_pre_ping=True,
                 pool_size=3,
                 max_overflow=5,
-                pool_timeout=30,
+                pool_timeout=self._connect_timeout,
                 pool_recycle=180,
-                connect_args={"server_settings": {"jit": "off"}},
+                connect_args={
+                    "timeout": self._connect_timeout,
+                    "server_settings": {"jit": "off"},
+                },
                 future=True,
             )
         return self._engine

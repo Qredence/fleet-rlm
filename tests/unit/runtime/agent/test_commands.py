@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.runtime.agent.commands import (
-    COMPATIBILITY_COMMAND_TARGETS,
     COMMAND_METHOD_TARGETS,
+    COMPATIBILITY_COMMAND_TARGETS,
+    _resolve_tool,
     command_target_names,
     execute_command,
     missing_required_command_targets,
-    _resolve_tool,
 )
 from fleet_rlm.runtime.tools import discover_tools
 
@@ -92,10 +92,7 @@ def test_command_dispatch_targets_are_classified() -> None:
 
 
 def test_command_dispatch_has_no_unclassified_missing_tool_targets() -> None:
-    tool_names = {
-        getattr(tool, "name", None) or getattr(tool, "__name__", "")
-        for tool in discover_tools()
-    }
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", "") for tool in discover_tools()}
 
     assert missing_required_command_targets(tool_names) == set()
 
@@ -276,9 +273,7 @@ def test_resolve_tool_supports_wrapped_tools():
     def wrapped_fn(**kwargs):
         return {"status": "ok", "kwargs": kwargs}
 
-    agent.react_tools = [
-        SimpleNamespace(name="summarize_long_document", func=wrapped_fn)
-    ]
+    agent.react_tools = [SimpleNamespace(name="summarize_long_document", func=wrapped_fn)]
     resolved = _resolve_tool(agent, "summarize_long_document")
     assert resolved is wrapped_fn
 

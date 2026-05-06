@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
-from fleet_rlm.runtime.models.streaming import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -107,10 +107,7 @@ class AgentRuntime:
         response = str(getattr(result, "response", ""))
         messages = list(getattr(self.history, "messages", []) or [])
         messages.append({"user_message": user_message, "response": response})
-        if (
-            self.history_max_turns is not None
-            and len(messages) > self.history_max_turns
-        ):
+        if self.history_max_turns is not None and len(messages) > self.history_max_turns:
             messages = messages[-self.history_max_turns :]
         self.history = dspy.History(messages=messages)
         return result
@@ -266,9 +263,7 @@ class AgentRuntime:
             return
         self._import_interpreter_session_state(state)
 
-    async def execute_command(
-        self, command: str, args: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any]:
         from .commands import execute_command as _execute_command
 
         return await _execute_command(self, command, args)
@@ -370,27 +365,17 @@ class AgentRuntime:
                     },
                 )
                 # Emit a structured clarification event when a tool signals it.
-                if (
-                    isinstance(observation, dict)
-                    and observation.get("status") == "clarification_needed"
-                ):
+                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
                     import uuid as _uuid
 
                     clar_payload = observation
                     yield StreamEvent(
                         kind="clarification",
-                        text=str(
-                            clar_payload.get("question", "Please clarify your intent.")
-                        ),
+                        text=str(clar_payload.get("question", "Please clarify your intent.")),
                         payload={
-                            "message_id": str(
-                                clar_payload.get("message_id")
-                                or f"clar-{_uuid.uuid4().hex[:8]}"
-                            ),
+                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
                             "question": clar_payload.get("question"),
-                            "step_label": clar_payload.get(
-                                "step_label", "Clarification needed"
-                            ),
+                            "step_label": clar_payload.get("step_label", "Clarification needed"),
                             "options": clar_payload.get("options", []),
                         },
                     )
@@ -401,10 +386,7 @@ class AgentRuntime:
         # Accumulate history (mirrors chat_turn)
         messages = list(getattr(self.history, "messages", []) or [])
         messages.append({"user_message": message, "response": response})
-        if (
-            self.history_max_turns is not None
-            and len(messages) > self.history_max_turns
-        ):
+        if self.history_max_turns is not None and len(messages) > self.history_max_turns:
             messages = messages[-self.history_max_turns :]
         self.history = dspy.History(messages=messages)
 

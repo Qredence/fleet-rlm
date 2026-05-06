@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import io
 import os
+import socket
 from http.client import HTTPMessage
 from pathlib import Path
-import socket
 from typing import Any
 
 import pytest
@@ -55,10 +55,7 @@ def test_download_url_removes_partial_temp_file_on_size_limit(
     created: list[Path] = []
 
     def fake_build_opener(*handlers: Any) -> _FakeOpener:
-        assert any(
-            isinstance(handler, document_tools._ValidatingRedirectHandler)
-            for handler in handlers
-        )
+        assert any(isinstance(handler, document_tools._ValidatingRedirectHandler) for handler in handlers)
         return _FakeOpener(_FakeResponse([b"abcd", b"efgh"]))
 
     def fake_getaddrinfo(*args: Any, **kwargs: Any) -> list[Any]:
@@ -72,9 +69,7 @@ def test_download_url_removes_partial_temp_file_on_size_limit(
         return fd, str(path)
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fake_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fake_build_opener)
     monkeypatch.setattr(document_tools.tempfile, "mkstemp", fake_mkstemp)
     monkeypatch.setattr(document_tools, "_MAX_DOWNLOAD_BYTES", 4)
 
@@ -102,9 +97,7 @@ def test_download_url_rejects_private_network_targets(
         _ = (args, kwargs)
         raise AssertionError("build_opener should not be called for blocked URLs")
 
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fail_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fail_build_opener)
 
     with pytest.raises(ValueError, match="private network"):
         document_tools._download_url(url)
@@ -122,9 +115,7 @@ def test_download_url_rejects_hosts_resolving_to_private_addresses(
         raise AssertionError("build_opener should not be called for blocked URLs")
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fail_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fail_build_opener)
 
     with pytest.raises(ValueError, match="private network"):
         document_tools._download_url("https://docs.example.test/file.txt")
@@ -139,9 +130,7 @@ def test_download_url_rejects_private_redirect_targets(
 
     def fake_build_opener(*handlers: Any) -> Any:
         redirect_handler = next(
-            handler
-            for handler in handlers
-            if isinstance(handler, document_tools._ValidatingRedirectHandler)
+            handler for handler in handlers if isinstance(handler, document_tools._ValidatingRedirectHandler)
         )
 
         class _RedirectingOpener:
@@ -160,9 +149,7 @@ def test_download_url_rejects_private_redirect_targets(
         return _RedirectingOpener()
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fake_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fake_build_opener)
 
     with pytest.raises(ValueError, match="private network"):
         document_tools._download_url("https://docs.example.test/file.txt")
@@ -179,10 +166,7 @@ def test_download_url_falls_back_to_original_url_without_geturl(
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
     def fake_build_opener(*handlers: Any) -> _FakeOpener:
-        assert any(
-            isinstance(handler, document_tools._ValidatingRedirectHandler)
-            for handler in handlers
-        )
+        assert any(isinstance(handler, document_tools._ValidatingRedirectHandler) for handler in handlers)
         return _FakeOpener(_FakeResponse([b"hello world"]))
 
     def fake_mkstemp(suffix: str) -> tuple[int, str]:
@@ -192,9 +176,7 @@ def test_download_url_falls_back_to_original_url_without_geturl(
         return fd, str(path)
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fake_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fake_build_opener)
     monkeypatch.setattr(document_tools.tempfile, "mkstemp", fake_mkstemp)
 
     downloaded_path = document_tools._download_url("https://example.test/doc.md")
@@ -215,15 +197,8 @@ def test_download_url_uses_redirect_final_url_for_suffix(
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
 
     def fake_build_opener(*handlers: Any) -> _FakeOpener:
-        assert any(
-            isinstance(handler, document_tools._ValidatingRedirectHandler)
-            for handler in handlers
-        )
-        return _FakeOpener(
-            _FakeResponseWithUrl(
-                [b"hello world"], "https://example.test/downloads/final.pdf"
-            )
-        )
+        assert any(isinstance(handler, document_tools._ValidatingRedirectHandler) for handler in handlers)
+        return _FakeOpener(_FakeResponseWithUrl([b"hello world"], "https://example.test/downloads/final.pdf"))
 
     def fake_mkstemp(suffix: str) -> tuple[int, str]:
         path = tmp_path / f"download{suffix}"
@@ -232,9 +207,7 @@ def test_download_url_uses_redirect_final_url_for_suffix(
         return fd, str(path)
 
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
-    monkeypatch.setattr(
-        document_tools.urllib.request, "build_opener", fake_build_opener
-    )
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", fake_build_opener)
     monkeypatch.setattr(document_tools.tempfile, "mkstemp", fake_mkstemp)
 
     downloaded_path = document_tools._download_url("https://example.test/redirect")

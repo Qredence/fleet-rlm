@@ -50,9 +50,7 @@ def test_resolve_daytona_config_prefers_project_env_file_in_local_mode(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname='tmp'\n", encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\n", encoding="utf-8")
     (tmp_path / ".env").write_text(
         "DAYTONA_API_KEY=file-key\nDAYTONA_API_URL=https://file.daytona.example\n",
         encoding="utf-8",
@@ -72,9 +70,7 @@ def test_resolve_daytona_config_prefers_process_env_outside_local_mode(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\nname='tmp'\n", encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='tmp'\n", encoding="utf-8")
     (tmp_path / ".env").write_text(
         "DAYTONA_API_KEY=file-key\nDAYTONA_API_URL=https://file.daytona.example\n",
         encoding="utf-8",

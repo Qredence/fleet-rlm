@@ -53,10 +53,6 @@ Final Variable Convention:
 
 from __future__ import annotations
 
-from fleet_rlm.runtime.execution.driver_factories import (
-    FinalOutput,  # noqa: F401 — public re-export
-)
-
 
 def sandbox_driver() -> None:
     """Run the long-lived JSON protocol driver for sandbox execution.
@@ -76,33 +72,165 @@ def sandbox_driver() -> None:
     The loop terminates on EOFError (stdin closed) or when ``Final`` is set
     (if the caller stops sending commands after receiving a Final response).
     """
-    # Keep these imports inside the function so the source extracted by
+
+    # Session history helpers (inlined from session_history.py)
+    _session_history: list[dict[str, Any]] = []
+
+    def log_execution(
+        code: str,
+        result: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log code execution to session history for tracking and learning."""
+        entry = {
+            "timestamp": time.time(),
+            "code_preview": code[:200] + "..." if len(code) > 200 else code,
+            "stdout_preview": result.get("stdout", "")[:200],
+            "stderr_preview": result.get("stderr", "")[:200],
+            "had_final": result.get("final") is not None,
+            "metadata": metadata or {},
+        }
+        _session_history.append(entry)
+
+    def get_session_history() -> list[dict[str, Any]]:
+        """Return all logged executions in this session."""
+        return list(_session_history)
+
+    def get_last_execution() -> dict[str, Any] | None:
+        """Return the most recent execution entry, or None if empty."""
+        return _session_history[-1] if _session_history else None
+
+    def reset_session_history() -> None:
+        """Reset session history."""
+        _session_history.clear()
+
+    # Inlined factory functions so ``inspect.getsource(sandbox_driver)`` is
+    # self-contained when executed in the sandbox process.
+    class FinalOutput(BaseException):
+        """Exception to signal final output from SUBMIT call."""
+
+        pass
+
+    RESERVED_TOOL_NAMES = frozenset({"llm_query", "llm_query_batched", "SUBMIT", "print"})
+
+    def make_send(proto_out: Any) -> Callable[[dict], None]:
+        def _send(obj: dict) -> None:
+            if proto_out is None:
+                return
+            proto_out.write(json.dumps(obj) + "\n")
+            proto_out.flush()
+
+        return _send
+
+    def make_tool_call(send: Callable[[dict], None]) -> Callable[..., Any]:
+        def _tool_call(name: str, *args, **kwargs) -> Any:
+            send({"tool_call": {"name": name, "args": list(args), "kwargs": kwargs}})
+            reply = json.loads(input())
+            if reply.get("tool_error"):
+                raise RuntimeError(reply["tool_error"])
+            return reply.get("tool_result")
+
+        return _tool_call
+
+    def wrap_helper(fn: Callable[..., Any], current_profile: list[str]) -> Callable[..., Any]:
+        fn_name = getattr(fn, "__name__", "unknown")
+
+        def _wrapped(*args, **kwargs):
+            if current_profile[0] == "ROOT_INTERLOCUTOR":
+                raise RuntimeError(
+                    f"Helper '{fn_name}' is not available in ROOT_INTERLOCUTOR profile. "
+                    "Delegate tool-heavy work via llm_query/llm_query_batched."
+                )
+            return fn(*args, **kwargs)
+
+        _wrapped.__name__ = fn_name
+        _wrapped.__doc__ = getattr(fn, "__doc__", None)
+        return _wrapped
+
+    def make_submit(output_names: list[str]) -> Callable[..., None]:
+        def SUBMIT(*args, **kwargs) -> None:
+            if kwargs:
+                raise FinalOutput(kwargs)
+            if not output_names:
+                if len(args) == 1:
+                    raise FinalOutput({"output": args[0]})
+                raise FinalOutput({"output": list(args)})
+            if len(args) != len(output_names):
+                raise FinalOutput(
+                    {
+                        "error": f"SUBMIT expected {len(output_names)} positional values ({output_names}), got {len(args)}"
+                    }
+                )
+            raise FinalOutput(dict(zip(output_names, args)))
+
+        return SUBMIT
+
+    def make_llm_query(tool_call: Callable[..., Any]) -> Callable[[str], str]:
+        def llm_query(prompt: str) -> str:
+            return tool_call("llm_query", prompt)
+
+        return llm_query
+
+    def make_llm_query_batched(
+        tool_call: Callable[..., Any],
+    ) -> Callable[[list[str]], list[str]]:
+        def llm_query_batched(prompts: list[str]) -> list[str]:
+            return tool_call("llm_query_batched", prompts)
+
+        return llm_query_batched
+
+    def register_tools(
+        names: list[str],
+        sandbox_globals: dict[str, Any],
+        dynamic_tool_names: set[str],
+        tool_call: Callable[..., Any],
+        current_profile: list[str],
+    ) -> None:
+        if current_profile[0] == "ROOT_INTERLOCUTOR":
+            for dyn_name in list(dynamic_tool_names):
+                sandbox_globals.pop(dyn_name, None)
+            dynamic_tool_names.clear()
+            return
+        for name in names:
+            if not name.isidentifier() or name in RESERVED_TOOL_NAMES:
+                continue
+            if name in sandbox_globals:
+                continue
+
+            def _make(name_: str):
+                def _fn(*args, **kwargs):
+                    return tool_call(name_, *args, **kwargs)
+
+                return _fn
+
+            sandbox_globals[name] = _make(name)
+            dynamic_tool_names.add(name)
+
+    def inject_sandbox_helpers(
+        sandbox_globals: dict[str, Any],
+        wrap_fn: Callable[[Callable], Callable],
+        sandbox_tools: dict[str, Callable],
+        volume_tools: dict[str, Callable],
+        session_tools: dict[str, Callable],
+    ) -> None:
+        for name, fn in sandbox_tools.items():
+            sandbox_globals[name] = wrap_fn(fn)
+        for name, fn in volume_tools.items():
+            sandbox_globals[name] = wrap_fn(fn)
+        for name, fn in session_tools.items():
+            sandbox_globals[name] = wrap_fn(fn)
+
+    # Keep remaining imports inside the function so the source extracted by
     # ``inspect.getsource(sandbox_driver)`` is self-contained when executed
     # in the sandbox process.
     import json
     import sys
+    import time
     from contextlib import redirect_stderr, redirect_stdout
     from io import StringIO
     from typing import Any, Callable, cast
 
     try:
-        from fleet_rlm.runtime.execution.session_history import (
-            get_last_execution,
-            get_session_history,
-            log_execution,
-            reset_session_history,
-        )
-        from fleet_rlm.runtime.execution.driver_factories import (
-            FinalOutput,
-            inject_sandbox_helpers,
-            make_llm_query,
-            make_llm_query_batched,
-            make_send,
-            make_submit,
-            make_tool_call,
-            register_tools,
-            wrap_helper,
-        )
         from fleet_rlm.runtime.execution.sandbox_assets import (
             add_buffer,
             chunk_by_headers,
@@ -126,15 +254,6 @@ def sandbox_driver() -> None:
         # defines these symbols in globals without an installed fleet_rlm package.
         # Access them from globals() instead.
         g: dict[str, Any] = globals()
-        FinalOutput = cast(Any, g.get("FinalOutput"))
-        inject_sandbox_helpers = cast(Any, g.get("inject_sandbox_helpers"))
-        make_llm_query = cast(Any, g.get("make_llm_query"))
-        make_llm_query_batched = cast(Any, g.get("make_llm_query_batched"))
-        make_send = cast(Any, g.get("make_send"))
-        make_submit = cast(Any, g.get("make_submit"))
-        make_tool_call = cast(Any, g.get("make_tool_call"))
-        register_tools = cast(Any, g.get("register_tools"))
-        wrap_helper = cast(Any, g.get("wrap_helper"))
         add_buffer = cast(Any, g.get("add_buffer"))
         chunk_by_headers = cast(Any, g.get("chunk_by_headers"))
         chunk_by_json_keys = cast(Any, g.get("chunk_by_json_keys"))
@@ -145,10 +264,6 @@ def sandbox_driver() -> None:
         grep = cast(Any, g.get("grep"))
         peek = cast(Any, g.get("peek"))
         reset_buffers = cast(Any, g.get("reset_buffers"))
-        get_last_execution = cast(Any, g.get("get_last_execution"))
-        get_session_history = cast(Any, g.get("get_session_history"))
-        log_execution = cast(Any, g.get("log_execution"))
-        reset_session_history = cast(Any, g.get("reset_session_history"))
         load_from_volume = cast(Any, g.get("load_from_volume"))
         save_to_volume = cast(Any, g.get("save_to_volume"))
         workspace_append = cast(Any, g.get("workspace_append"))
@@ -218,18 +333,14 @@ def sandbox_driver() -> None:
         try:
             command = json.loads(line)
         except json.JSONDecodeError as exc:
-            _send(
-                {"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None}
-            )
+            _send({"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None})
             continue
 
         code = command.get("code")
         variables = command.get("variables", {}) or {}
         tool_names = list(command.get("tool_names", []) or [])
         output_names = list(command.get("output_names", []) or [])
-        execution_profile = str(
-            command.get("execution_profile", "RLM_DELEGATE")
-        ).strip()
+        execution_profile = str(command.get("execution_profile", "RLM_DELEGATE")).strip()
         if execution_profile not in {
             "ROOT_INTERLOCUTOR",
             "RLM_ROOT",

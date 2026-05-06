@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from fleet_rlm.api.events import ExecutionStep
-from fleet_rlm.api.runtime_services import chat_persistence as ws_persistence
 from fleet_rlm.api.runtime_services import chat_persistence as persistence_service
+from fleet_rlm.api.runtime_services import chat_persistence as ws_persistence
 from fleet_rlm.integrations.database import RunStatus
 from tests.ui.fixtures_ui import FakeChatAgent
 
@@ -98,7 +98,7 @@ def test_persist_session_state_updates_cache_and_saves_manifest(monkeypatch) -> 
 
     asyncio.run(
         ws_persistence.persist_session_state(
-            state=state,
+            session_cache=state,
             agent=agent,
             session_record=session_record,
             active_manifest_path="workspaces/test/session.json",
@@ -197,9 +197,7 @@ def test_complete_run_drains_batched_steps_before_shutdown() -> None:
             )
         )
         await lifecycle._persist_queue.put(None)
-        lifecycle._persist_worker_task = asyncio.create_task(
-            lifecycle._persist_worker()
-        )
+        lifecycle._persist_worker_task = asyncio.create_task(lifecycle._persist_worker())
 
         await asyncio.wait_for(lifecycle.complete_run(RunStatus.COMPLETED), timeout=1.0)
 

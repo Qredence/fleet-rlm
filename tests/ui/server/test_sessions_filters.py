@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-from types import SimpleNamespace
 import uuid
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -92,8 +92,7 @@ class _MultiSessionRepository:
             items = [
                 s
                 for s in items
-                if needle in s.title.lower()
-                or needle in s.metadata_json.get("external_session_id", "").lower()
+                if needle in s.title.lower() or needle in s.metadata_json.get("external_session_id", "").lower()
             ]
         if created_after is not None:
             items = [s for s in items if s.created_at >= created_after]
@@ -102,9 +101,7 @@ class _MultiSessionRepository:
         if model_name is not None:
             items = [s for s in items if getattr(s, "model_name", None) == model_name]
         if model_provider is not None:
-            items = [
-                s for s in items if getattr(s, "model_provider", None) == model_provider
-            ]
+            items = [s for s in items if getattr(s, "model_provider", None) == model_provider]
         total = len(items)
         return items[offset : offset + limit], total
 
@@ -117,17 +114,13 @@ class _MultiSessionRepository:
                 return s
         return None
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
@@ -231,9 +224,7 @@ def test_invalid_date_format_returns_422(default_client, auth_headers):
     assert response.status_code == 422
 
 
-def test_no_filters_returns_active_sessions(
-    default_client, auth_headers, multi_session_repo
-):
+def test_no_filters_returns_active_sessions(default_client, auth_headers, multi_session_repo):
     response = default_client.get(
         "/api/v1/sessions",
         headers=auth_headers,

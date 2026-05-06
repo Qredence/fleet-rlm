@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import dspy
 
-
 # ── Signature shape ──────────────────────────────────────────────────
 
 
@@ -39,13 +38,13 @@ def test_variable_signature_output_fields():
 
 def test_variable_execution_module_creates_rlm():
     """RLMVariableExecutionModule should wrap a dspy.RLM internally."""
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock()
     mock_interp.sub_rlm = MagicMock()
     mock_interp.sub_rlm_batched = MagicMock()
 
-    with patch("fleet_rlm.runtime.models.builders.create_runtime_rlm") as mock_create:
+    with patch("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm") as mock_create:
         mock_create.return_value = MagicMock(spec=dspy.Module)
         RLMVariableExecutionModule(
             interpreter=mock_interp,
@@ -69,11 +68,11 @@ def test_variable_execution_module_creates_rlm():
 
 def test_variable_execution_module_no_sub_rlm_on_interpreter():
     """When interpreter lacks sub_rlm, tools list should be None."""
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock(spec=[])  # No sub_rlm attributes
 
-    with patch("fleet_rlm.runtime.models.builders.create_runtime_rlm") as mock_create:
+    with patch("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm") as mock_create:
         mock_create.return_value = MagicMock(spec=dspy.Module)
         RLMVariableExecutionModule(interpreter=mock_interp, verbose=False)
         call_kwargs = mock_create.call_args[1]
@@ -82,14 +81,14 @@ def test_variable_execution_module_no_sub_rlm_on_interpreter():
 
 def test_variable_execution_module_forward_delegates():
     """forward(task, prompt) should call the inner RLM with both fields."""
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock(spec=[])
     mock_rlm = MagicMock()
     mock_rlm.return_value = dspy.Prediction(answer="42")
 
     with patch(
-        "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+        "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm",
         return_value=mock_rlm,
     ):
         module = RLMVariableExecutionModule(interpreter=mock_interp)
@@ -102,7 +101,7 @@ def test_variable_execution_module_forward_delegates():
 def test_variable_execution_module_preserves_custom_signature_kwargs():
     """Variable-mode wrappers should preserve signature-specific fields."""
     from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock(spec=[])
     mock_rlm = MagicMock()
@@ -113,7 +112,7 @@ def test_variable_execution_module_preserves_custom_signature_kwargs():
     )
 
     with patch(
-        "fleet_rlm.runtime.models.builders.create_runtime_rlm",
+        "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm",
         return_value=mock_rlm,
     ):
         module = RLMVariableExecutionModule(
@@ -130,13 +129,13 @@ def test_variable_execution_module_preserves_custom_signature_kwargs():
 
 
 def test_build_variable_mode_rlm_returns_module():
-    from fleet_rlm.runtime.models.builders import (
+    from fleet_rlm.runtime.modules.variable_mode import (
         RLMVariableExecutionModule,
         build_variable_mode_rlm,
     )
 
     mock_interp = MagicMock(spec=[])
-    with patch("fleet_rlm.runtime.models.builders.create_runtime_rlm"):
+    with patch("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm"):
         module = build_variable_mode_rlm(interpreter=mock_interp)
     assert isinstance(module, RLMVariableExecutionModule)
 
@@ -145,7 +144,7 @@ def test_build_variable_mode_rlm_returns_module():
 
 
 def test_registry_long_document_modules_have_variable_mode():
-    from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
     for name in (
         "summarize_long_document",
@@ -156,7 +155,7 @@ def test_registry_long_document_modules_have_variable_mode():
 
 
 def test_registry_short_context_modules_no_variable_mode():
-    from fleet_rlm.runtime.models.registry import RUNTIME_MODULE_REGISTRY
+    from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
     for name in ("grounded_answer", "plan_code_change", "memory_tree"):
         defn = RUNTIME_MODULE_REGISTRY[name]
@@ -166,13 +165,11 @@ def test_registry_short_context_modules_no_variable_mode():
 def test_build_runtime_module_variable_mode_returns_variable_module():
     """build_runtime_module with variable_mode=True entry → RLMVariableExecutionModule."""
     from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
-    from fleet_rlm.runtime.models.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock(spec=[])
-    with patch(
-        "fleet_rlm.runtime.models.registry.RLMVariableExecutionModule"
-    ) as mock_cls:
+    with patch("fleet_rlm.runtime.modules.registry.RLMVariableExecutionModule") as mock_cls:
         mock_cls.return_value = MagicMock(spec=RLMVariableExecutionModule)
         build_runtime_module(
             "summarize_long_document",
@@ -192,11 +189,11 @@ def test_build_runtime_module_variable_mode_returns_variable_module():
 
 def test_build_runtime_module_non_variable_mode_returns_generic():
     """build_runtime_module with variable_mode=False → generic _RuntimeSignatureModule."""
-    from fleet_rlm.runtime.models.registry import build_runtime_module
+    from fleet_rlm.runtime.modules.registry import build_runtime_module
 
     mock_interp = MagicMock()
     # grounded_answer has a custom module_class, NOT variable_mode
-    with patch("fleet_rlm.runtime.models.builders._create_configured_runtime_rlm"):
+    with patch("fleet_rlm.runtime.modules.grounded_answer._create_configured_runtime_rlm"):
         module = build_runtime_module(
             "grounded_answer",
             interpreter=mock_interp,
@@ -205,7 +202,7 @@ def test_build_runtime_module_non_variable_mode_returns_generic():
             verbose=False,
         )
     # Should NOT be RLMVariableExecutionModule
-    from fleet_rlm.runtime.models.builders import RLMVariableExecutionModule
+    from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     assert not isinstance(module, RLMVariableExecutionModule)
 
@@ -214,6 +211,6 @@ def test_build_runtime_module_non_variable_mode_returns_generic():
 
 
 def test_variable_mode_threshold_is_reasonable():
-    from fleet_rlm.runtime.models.builders import VARIABLE_MODE_THRESHOLD
+    from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
 
     assert VARIABLE_MODE_THRESHOLD == 32_000

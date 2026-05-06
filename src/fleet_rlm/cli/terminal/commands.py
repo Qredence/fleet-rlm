@@ -17,7 +17,6 @@ from prompt_toolkit.shortcuts import input_dialog, radiolist_dialog, yes_no_dial
 
 from .ui import _dialog_style, _prompt_choice
 
-
 # Valid trace modes
 _TRACE_MODES: set[str] = {"compact", "verbose", "off"}
 
@@ -54,9 +53,7 @@ def handle_slash_command(
     trace_modes = trace_modes or _TRACE_MODES
     command, arg_text = _split_slash_command(line)
 
-    session_result = _dispatch_session_command(
-        session, agent, command, arg_text, trace_modes
-    )
+    session_result = _dispatch_session_command(session, agent, command, arg_text, trace_modes)
     if session_result is not None:
         return session_result
 
@@ -292,9 +289,7 @@ _ALIAS_COMMAND_SPECS: dict[str, _AliasCommandSpec] = {
     "/list": _AliasCommandSpec("list_documents", lambda session, arg_text: {}),
     "/chunk": _AliasCommandSpec(
         "chunk_host",
-        _make_chunk_payload_builder(
-            usage="usage: /chunk <size|headers|timestamps|json> [chunk_size]"
-        ),
+        _make_chunk_payload_builder(usage="usage: /chunk <size|headers|timestamps|json> [chunk_size]"),
     ),
     "/summarize": _AliasCommandSpec(
         "summarize_long_document",
@@ -379,10 +374,7 @@ def print_command_palette(session: Any, agent: Any) -> bool:
         session._print_warning("No commands match that filter.")
         return False
 
-    values = [
-        (spec.name, f"{spec.name:<20} {spec.summary}  [{spec.category}]")
-        for spec in specs
-    ]
+    values = [(spec.name, f"{spec.name:<20} {spec.summary}  [{spec.category}]") for spec in specs]
     selected = radiolist_dialog(
         title="Slash command palette",
         text="Select a command (up/down, Enter):",
@@ -481,9 +473,7 @@ def _print_unknown_command(session: Any, command: str) -> None:
     options.extend(f"/{name}" for name in sorted(COMMAND_DISPATCH))
     suggestions = [opt for opt in options if opt.startswith(command)][:6]
     if suggestions:
-        session._print_error(
-            f"Unknown command: {command}. Did you mean: {', '.join(suggestions)}"
-        )
+        session._print_error(f"Unknown command: {command}. Did you mean: {', '.join(suggestions)}")
         return
     session._print_error(f"Unknown command: {command}. Type /help for commands.")
 
@@ -496,10 +486,7 @@ def _show_shortcuts(session: Any) -> None:
     """
     session._append_transcript(
         "status",
-        (
-            "Shortcuts: / opens command palette - @ mentions files - "
-            "Ctrl+C interrupts - /trace compact|verbose|off"
-        ),
+        ("Shortcuts: / opens command palette - @ mentions files - Ctrl+C interrupts - /trace compact|verbose|off"),
     )
     session._render_shell()
 
@@ -613,9 +600,7 @@ def _parse_command_payload(arg_text: str) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for token in _safe_split(text):
         if "=" not in token:
-            raise ValueError(
-                "Use key=value pairs or JSON object payload for canonical commands."
-            )
+            raise ValueError("Use key=value pairs or JSON object payload for canonical commands.")
         key, value = token.split("=", 1)
         payload[key] = _coerce_value(value)
     return payload

@@ -12,8 +12,8 @@ caching, URL fetching with size limits) use the builder in
 from __future__ import annotations
 
 import io
-import os
 import ipaddress
+import os
 import socket
 import tempfile
 import urllib.parse
@@ -75,9 +75,7 @@ def _validate_download_url(url: str) -> None:
     try:
         resolved = socket.getaddrinfo(hostname, parsed.port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
-        raise ValueError(
-            f"Unable to resolve document download host: {hostname}"
-        ) from exc
+        raise ValueError(f"Unable to resolve document download host: {hostname}") from exc
 
     for result in resolved:
         sockaddr = result[4]
@@ -157,9 +155,7 @@ def _download_url(url: str) -> Path:
                         break
                     downloaded += len(chunk)
                     if downloaded > _MAX_DOWNLOAD_BYTES:
-                        raise ValueError(
-                            f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit."
-                        )
+                        raise ValueError(f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit.")
                     os.write(fd, chunk)
             except Exception:
                 cleanup_tmp = True
@@ -213,9 +209,7 @@ def load_document(path: str, alias: str = "active") -> dict[str, Any]:
     file_path = Path(path)
 
     if file_path.is_dir():
-        files = sorted(
-            str(p.relative_to(file_path)) for p in file_path.rglob("*") if p.is_file()
-        )
+        files = sorted(str(p.relative_to(file_path)) for p in file_path.rglob("*") if p.is_file())
         return {
             "status": "directory",
             "alias": alias,

@@ -255,7 +255,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_patched_deps.post(
@@ -303,7 +303,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_patched_deps.post(
@@ -344,7 +344,7 @@ class TestBlockingOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             response = client_with_mlflow_unavailable.post(
@@ -419,7 +419,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(
@@ -487,7 +487,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(
@@ -523,9 +523,7 @@ class TestAsyncOptimizationApi:
         results_payload = results_resp.json()
         assert results_payload["total"] >= 2
         assert len(results_payload["items"]) >= 2
-        mean_score = sum(item["score"] for item in results_payload["items"]) / len(
-            results_payload["items"]
-        )
+        mean_score = sum(item["score"] for item in results_payload["items"]) / len(results_payload["items"])
         assert mean_score == pytest.approx(0.87, abs=1e-9)
 
         # Fetch prompt snapshots via compare endpoint
@@ -563,7 +561,7 @@ class TestAsyncOptimizationApi:
         )
 
         with patch(
-            "fleet_rlm.runtime.quality.optimization_runner.run_module_optimization",
+            "fleet_rlm.quality.optimization_runner.run_module_optimization",
             return_value=fake_result,
         ):
             create_resp = client_with_patched_deps.post(
@@ -587,17 +585,10 @@ class TestAsyncOptimizationApi:
         assert run_payload["status"] == "completed"
         assert run_payload["manifest_path"] == fake_result["manifest_path"]
 
-        manifest = json.loads(
-            Path(fake_result["manifest_path"]).read_text(encoding="utf-8")
-        )
+        manifest = json.loads(Path(fake_result["manifest_path"]).read_text(encoding="utf-8"))
         holdout = manifest["review_bundle"]["holdout"]
         assert holdout["baseline_score"] == 0.42
         assert holdout["optimized_score"] == run_payload["validation_score"]
         assert holdout["split_reference"]["validation_dataset_indexes"] == [8, 9]
         assert manifest["review_bundle"]["reflection_model"]["source"] == "delegate"
-        assert (
-            manifest["review_bundle"]["prompt_snapshots"]["matched_predictors"][0][
-                "predictor_name"
-            ]
-            == "predict"
-        )
+        assert manifest["review_bundle"]["prompt_snapshots"]["matched_predictors"][0]["predictor_name"] == "predict"

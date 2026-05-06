@@ -7,7 +7,7 @@ from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
 )
-from fleet_rlm.integrations.daytona.types import (
+from fleet_rlm.integrations.daytona.sandbox_spec import (
     DEFAULT_SANDBOX_LABELS,
     build_sandbox_spec,
     default_sandbox_name,
@@ -16,17 +16,11 @@ from fleet_rlm.integrations.daytona.types import (
 
 
 def _make_runtime() -> DaytonaSandboxRuntime:
-    return DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
-    )
+    return DaytonaSandboxRuntime(config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None))
 
 
 def test_default_sandbox_name_uses_utc_timestamp() -> None:
-    name = default_sandbox_name(
-        now=dt.datetime(2026, 5, 3, 12, 34, 56, tzinfo=dt.timezone.utc)
-    )
+    name = default_sandbox_name(now=dt.datetime(2026, 5, 3, 12, 34, 56, tzinfo=dt.timezone.utc))
 
     assert name == "fleet-rlm-20260503-123456"
 
@@ -48,9 +42,7 @@ def test_merge_sandbox_labels_overlays_defaults() -> None:
 
 
 def test_build_sandbox_spec_applies_defaults() -> None:
-    spec = build_sandbox_spec(
-        default_labels=DEFAULT_SANDBOX_LABELS, volume_name="tenant-a"
-    )
+    spec = build_sandbox_spec(default_labels=DEFAULT_SANDBOX_LABELS, volume_name="tenant-a")
 
     assert spec.name is not None
     assert spec.name.startswith("fleet-rlm-")

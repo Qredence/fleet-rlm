@@ -10,4 +10,9 @@ def now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
-__all__ = ["now_iso"]
+def utc_now() -> datetime:
+    """Return the current UTC datetime."""
+    return datetime.now(tz=timezone.utc)
+
+
+__all__ = ["now_iso", "utc_now"]

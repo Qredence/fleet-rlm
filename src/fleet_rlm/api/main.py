@@ -144,9 +144,7 @@ def _mount_spa(app: FastAPI, ui_dir: Path) -> None:
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
     branding_dir = ui_dir / "branding"
     if branding_dir.exists():
-        app.mount(
-            "/branding", StaticFiles(directory=str(branding_dir)), name="branding"
-        )
+        app.mount("/branding", StaticFiles(directory=str(branding_dir)), name="branding")
 
     ui_root = ui_dir.resolve()
     index_path = ui_root / "index.html"
@@ -208,10 +206,7 @@ def _ui_unavailable_payload() -> dict[str, str]:
 
     return {
         "error": "Packaged UI assets are missing from this installation.",
-        "hint": (
-            "Reinstall a wheel or sdist built with synced frontend assets, or use a "
-            "newer fleet-rlm release."
-        ),
+        "hint": ("Reinstall a wheel or sdist built with synced frontend assets, or use a newer fleet-rlm release."),
     }
 
 
@@ -262,9 +257,7 @@ def _annotate_validation_error_schemas(app: FastAPI) -> None:
                 property_name,
                 description,
             ) in _VALIDATION_ERROR_PROPERTY_DESCRIPTIONS.items():
-                if property_name in properties and not properties[property_name].get(
-                    "description"
-                ):
+                if property_name in properties and not properties[property_name].get("description"):
                     properties[property_name]["description"] = description
 
         app.openapi_schema = schema
@@ -283,11 +276,17 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         state = build_server_state(cfg)
         app.state.server_state = state
+        app.state.config_deps = state.config_deps
+        app.state.lm_deps = state.lm_deps
+        app.state.auth_deps = state.auth_deps
+        app.state.session_cache_deps = state.session_cache_deps
+        app.state.persistence_deps = state.persistence_deps
+        app.state.diagnostics_deps = state.diagnostics_deps
         await startup_server_state(state)
         # Recover optimization runs orphaned by prior server restart
         try:
-            if state.repository is not None:
-                recovered = await state.repository.recover_stale_optimization_runs()
+            if state.persistence_deps.repository is not None:
+                recovered = await state.persistence_deps.repository.recover_stale_optimization_runs()
             else:
                 from fleet_rlm.integrations.local_store import (
                     recover_stale_optimization_runs,
@@ -295,13 +294,10 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
 
                 recovered = recover_stale_optimization_runs()
             if recovered:
-                logger.info(
-                    "Recovered %d stale optimization run(s) on startup", recovered
-                )
+                logger.info("Recovered %d stale optimization run(s) on startup", recovered)
         except Exception:
             logger.warning(
-                "Stale optimization run recovery failed; some runs may remain in "
-                "'running' state",
+                "Stale optimization run recovery failed; some runs may remain in 'running' state",
                 exc_info=True,
             )
         yield

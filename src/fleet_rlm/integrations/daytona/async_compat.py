@@ -39,31 +39,19 @@ class _AsyncCompatRunner:
             for task in pending:
                 task.cancel()
             if pending:
-                loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.close()
 
     def _ensure_started(self) -> asyncio.AbstractEventLoop:
         loop = self._loop
         thread = self._thread
-        if (
-            loop is not None
-            and not loop.is_closed()
-            and thread is not None
-            and thread.is_alive()
-        ):
+        if loop is not None and not loop.is_closed() and thread is not None and thread.is_alive():
             return loop
 
         with self._lock:
             loop = self._loop
             thread = self._thread
-            if (
-                loop is not None
-                and not loop.is_closed()
-                and thread is not None
-                and thread.is_alive()
-            ):
+            if loop is not None and not loop.is_closed() and thread is not None and thread.is_alive():
                 return loop
 
             self._loop = None
@@ -85,9 +73,7 @@ class _AsyncCompatRunner:
     def run(self, awaitable: Awaitable[_T]) -> _T:
         loop = self._ensure_started()
         if self._thread_id == threading.get_ident():
-            raise RuntimeError(
-                "Async compatibility runner cannot be called from its own loop thread."
-            )
+            raise RuntimeError("Async compatibility runner cannot be called from its own loop thread.")
         future = asyncio.run_coroutine_threadsafe(
             cast(Coroutine[Any, Any, _T], awaitable),
             loop,

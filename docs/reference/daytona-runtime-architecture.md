@@ -58,12 +58,21 @@ The current implementation treats these Daytona docs as the normative baseline:
   Daytona workspace/session metadata needed by the workbench runtime.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:
+  - `interpreter.py` is the public `DaytonaInterpreter` facade used by `dspy.RLM`, runtime services, and callers
+  - `workspace_manager.py` owns workspace config, session lifecycle, persisted Daytona state, runtime metadata, and session import/export
+  - `sandbox_executor.py` owns code execution, code sanitization, bridge/setup state, tool callback dispatch, and result finalization
+  - `child_delegation.py` owns the concrete interpreter hooks for recursive child creation and delegates policy decisions to `child_isolation.py`
+  - `workspace_config.py` owns the normalized immutable workspace configuration boundary
   - `runtime.py` owns workspace bootstrap, context staging, and snapshot helpers
-  - `interpreter.py` owns the `dspy.RLM` interpreter backend and result translation
   - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
   - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
   - `types.py` owns provider-local configuration, staged-context, smoke-result, and chat/session normalization contracts
   - `volumes.py` owns provider-specific volume browsing helpers
+- Daytona collaborator boundaries are intentionally typed with small internal
+  Protocols rather than mixin-style dynamic forwarding. Pydantic v2 is used for
+  normalized configuration/state inputs such as `WorkspaceConfig`; hot
+  execution-path carriers such as `DaytonaExecutionResponse` remain lightweight
+  dataclasses/functions.
 - Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The provider is now async-first internally:
   - `AsyncDaytona` drives sandbox/session lifecycle

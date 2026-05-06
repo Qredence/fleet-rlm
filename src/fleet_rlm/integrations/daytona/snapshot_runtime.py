@@ -11,13 +11,15 @@ import logging
 from typing import Any
 
 from .async_compat import _await_if_needed, _run_async_compat
+from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import (
     build_daytona_client as _build_daytona_client,
+)
+from .config import (
     daytona_import_error as _daytona_import_error,
 )
-from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .sandbox_lifecycle import _experimental_call
-from .types import SandboxSpec
+from .sandbox_spec import SandboxSpec
 
 logger = logging.getLogger(__name__)
 
@@ -95,24 +97,18 @@ async def acreate_snapshot(
     except ImportError as exc:  # pragma: no cover - environment specific
         raise _daytona_import_error(exc) from exc
 
-    packages_to_install = (
-        packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
-    )
+    packages_to_install = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
 
     image = DaytonaImage.base(base_image)
     image = image.run_commands("pip install uv")
     if packages_to_install:
-        image = image.run_commands(
-            f"uv pip install --system {' '.join(packages_to_install)}"
-        )
+        image = image.run_commands(f"uv pip install --system {' '.join(packages_to_install)}")
 
     params = CreateSnapshotParams(name=name, image=image)
     cfg = config or resolve_daytona_config()
     client = _build_daytona_client(cfg)
     try:
-        snapshot = await _await_if_needed(
-            client.snapshot.create(params, on_logs=on_logs, timeout=0)
-        )
+        snapshot = await _await_if_needed(client.snapshot.create(params, on_logs=on_logs, timeout=0))
         logger.info("Snapshot '%s' created (id=%s)", snapshot.name, snapshot.id)
         return _snapshot_summary(snapshot)
     finally:
@@ -149,9 +145,7 @@ def fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
     image = DaytonaImage.base("python:3.12-slim")
     image = image.run_commands("pip install uv")
     if DEFAULT_SNAPSHOT_PACKAGES:
-        image = image.run_commands(
-            f"uv pip install --system {' '.join(DEFAULT_SNAPSHOT_PACKAGES)}"
-        )
+        image = image.run_commands(f"uv pip install --system {' '.join(DEFAULT_SNAPSHOT_PACKAGES)}")
     return dataclasses.replace(spec, image=image, snapshot=None)
 
 

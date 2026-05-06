@@ -83,37 +83,21 @@ class TestGrepHelper:
     def test_grep_basic(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "line one\\nline two\\nno match\\nline three"\n'
-                    'hits = grep(text, "line")\n'
-                    "SUBMIT(hits)"
-                )
-            ],
+            [_cmd('text = "line one\\nline two\\nno match\\nline three"\nhits = grep(text, "line")\nSUBMIT(hits)')],
         )
         assert len(msgs[0]["final"]["output"]) == 3
 
     def test_grep_case_insensitive(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "Hello\\nhello\\nHELLO"\nhits = grep(text, "hello")\nSUBMIT(hits)'
-                )
-            ],
+            [_cmd('text = "Hello\\nhello\\nHELLO"\nhits = grep(text, "hello")\nSUBMIT(hits)')],
         )
         assert len(msgs[0]["final"]["output"]) == 3
 
     def test_grep_with_context(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "a\\nb\\nTARGET\\nd\\ne"\n'
-                    'hits = grep(text, "TARGET", context=1)\n'
-                    "SUBMIT(hits)"
-                )
-            ],
+            [_cmd('text = "a\\nb\\nTARGET\\nd\\ne"\nhits = grep(text, "TARGET", context=1)\nSUBMIT(hits)')],
         )
         hit = msgs[0]["final"]["output"][0]
         assert "b" in hit
@@ -138,26 +122,14 @@ class TestChunkBySizeHelper:
     def test_chunk_basic(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "abcdefghij"\n'
-                    "chunks = chunk_by_size(text, 4, 0)\n"
-                    "SUBMIT(chunks)"
-                )
-            ],
+            [_cmd('text = "abcdefghij"\nchunks = chunk_by_size(text, 4, 0)\nSUBMIT(chunks)')],
         )
         assert msgs[0]["final"]["output"] == ["abcd", "efgh", "ij"]
 
     def test_chunk_with_overlap(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "abcdefghij"\n'
-                    "chunks = chunk_by_size(text, 4, 1)\n"
-                    "SUBMIT(len(chunks))"
-                )
-            ],
+            [_cmd('text = "abcdefghij"\nchunks = chunk_by_size(text, 4, 1)\nSUBMIT(len(chunks))')],
         )
         assert msgs[0]["final"]["output"] >= 3
 
@@ -173,26 +145,14 @@ class TestChunkByHeadersHelper:
     def test_markdown_headers(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "# Title\\nContent\\n## Sub\\nMore"\n'
-                    "chunks = chunk_by_headers(text)\n"
-                    "SUBMIT(len(chunks))"
-                )
-            ],
+            [_cmd('text = "# Title\\nContent\\n## Sub\\nMore"\nchunks = chunk_by_headers(text)\nSUBMIT(len(chunks))')],
         )
         assert msgs[0]["final"]["output"] >= 2
 
     def test_no_headers(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'text = "Just plain text"\n'
-                    "chunks = chunk_by_headers(text)\n"
-                    "SUBMIT(len(chunks))"
-                )
-            ],
+            [_cmd('text = "Just plain text"\nchunks = chunk_by_headers(text)\nSUBMIT(len(chunks))')],
         )
         # Should still return one chunk (the whole text)
         assert msgs[0]["final"]["output"] == 1
@@ -222,11 +182,7 @@ class TestChunkByTimestampsHelper:
     def test_timestamp_no_matches(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'chunks = chunk_by_timestamps("plain text")\nSUBMIT(chunks[0]["timestamp"])'
-                )
-            ],
+            [_cmd('chunks = chunk_by_timestamps("plain text")\nSUBMIT(chunks[0]["timestamp"])')],
         )
         assert msgs[0]["final"]["output"] == ""
 
@@ -282,21 +238,12 @@ class TestBufferHelpers:
     def test_buffer_lifecycle(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'add_buffer("test", "a")\n'
-                    'add_buffer("test", "b")\n'
-                    'buf = get_buffer("test")\n'
-                    "SUBMIT(buf)"
-                )
-            ],
+            [_cmd('add_buffer("test", "a")\nadd_buffer("test", "b")\nbuf = get_buffer("test")\nSUBMIT(buf)')],
         )
         assert msgs[0]["final"]["output"] == ["a", "b"]
 
     def test_get_missing_buffer(self, monkeypatch):
-        msgs = _run_driver(
-            monkeypatch, [_cmd('buf = get_buffer("nonexistent")\nSUBMIT(buf)')]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd('buf = get_buffer("nonexistent")\nSUBMIT(buf)')])
         assert msgs[0]["final"]["output"] == []
 
     def test_clear_specific_buffer(self, monkeypatch):
@@ -319,15 +266,7 @@ class TestBufferHelpers:
     def test_clear_all_buffers(self, monkeypatch):
         msgs = _run_driver(
             monkeypatch,
-            [
-                _cmd(
-                    'add_buffer("a", 1)\n'
-                    'add_buffer("b", 2)\n'
-                    "clear_buffer()\n"
-                    'ba = get_buffer("a")\n'
-                    "SUBMIT(ba)"
-                )
-            ],
+            [_cmd('add_buffer("a", 1)\nadd_buffer("b", 2)\nclear_buffer()\nba = get_buffer("a")\nSUBMIT(ba)')],
         )
         assert msgs[0]["final"]["output"] == []
 
@@ -337,9 +276,7 @@ class TestBufferHelpers:
             monkeypatch,
             [
                 _cmd('add_buffer("acc", "first")'),
-                _cmd(
-                    'add_buffer("acc", "second")\nbuf = get_buffer("acc")\nSUBMIT(buf)'
-                ),
+                _cmd('add_buffer("acc", "second")\nbuf = get_buffer("acc")\nSUBMIT(buf)'),
             ],
         )
         # First command has no SUBMIT, second returns the buffer
@@ -355,15 +292,11 @@ class TestVolumeHelpers:
     """Test save_to_volume / load_from_volume without a real volume."""
 
     def test_save_without_volume(self, monkeypatch):
-        msgs = _run_driver(
-            monkeypatch, [_cmd('msg = save_to_volume("test.txt", "data")\nSUBMIT(msg)')]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd('msg = save_to_volume("test.txt", "data")\nSUBMIT(msg)')])
         assert "no volume" in msgs[0]["final"]["output"].lower()
 
     def test_load_without_volume(self, monkeypatch):
-        msgs = _run_driver(
-            monkeypatch, [_cmd('msg = load_from_volume("test.txt")\nSUBMIT(msg)')]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd('msg = load_from_volume("test.txt")\nSUBMIT(msg)')])
         assert "not found" in msgs[0]["final"]["output"].lower()
 
 
@@ -377,16 +310,12 @@ class TestWorkspaceHelpers:
 
     def test_workspace_read_without_volume(self, monkeypatch):
         """Test workspace_read returns error when no volume mounted."""
-        msgs = _run_driver(
-            monkeypatch, [_cmd('msg = workspace_read("test.txt")\nSUBMIT(msg)')]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd('msg = workspace_read("test.txt")\nSUBMIT(msg)')])
         assert "error" in msgs[0]["final"]["output"].lower()
 
     def test_workspace_list_without_volume(self, monkeypatch):
         """Test workspace_list returns empty list when no volume mounted."""
-        msgs = _run_driver(
-            monkeypatch, [_cmd("files = workspace_list()\nSUBMIT(files)")]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd("files = workspace_list()\nSUBMIT(files)")])
         assert msgs[0]["final"]["output"] == []
 
     def test_workspace_helpers_exist(self, monkeypatch):
@@ -405,9 +334,7 @@ class TestWorkspaceHelpers:
 
     def test_workspace_read_rejects_parent_path_escape(self, monkeypatch):
         """Parent traversal should be rejected before filesystem access."""
-        msgs = _run_driver(
-            monkeypatch, [_cmd('msg = workspace_read("../outside.txt")\nSUBMIT(msg)')]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd('msg = workspace_read("../outside.txt")\nSUBMIT(msg)')])
         assert "invalid workspace path" in msgs[0]["final"]["output"].lower()
 
     def test_workspace_append_rejects_absolute_path(self, monkeypatch):
@@ -418,9 +345,7 @@ class TestWorkspaceHelpers:
         )
         assert "invalid workspace path" in msgs[0]["final"]["output"].lower()
 
-    def test_bundled_sandbox_assets_source_has_import_free_path_helper(
-        self, monkeypatch
-    ):
+    def test_bundled_sandbox_assets_source_has_import_free_path_helper(self, monkeypatch):
         """Bundled helper source should still work when ``fleet_rlm`` is absent."""
         from fleet_rlm.runtime.execution import sandbox_assets
 
@@ -466,14 +391,10 @@ class TestSessionHistoryHelpers:
 
     def test_get_session_history_empty(self, monkeypatch):
         """Test get_session_history returns empty list initially."""
-        msgs = _run_driver(
-            monkeypatch, [_cmd("history = get_session_history()\nSUBMIT(history)")]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd("history = get_session_history()\nSUBMIT(history)")])
         assert msgs[0]["final"]["output"] == []
 
     def test_get_last_execution_empty(self, monkeypatch):
         """Test get_last_execution returns None when no history."""
-        msgs = _run_driver(
-            monkeypatch, [_cmd("last = get_last_execution()\nSUBMIT(last)")]
-        )
+        msgs = _run_driver(monkeypatch, [_cmd("last = get_last_execution()\nSUBMIT(last)")])
         assert msgs[0]["final"]["output"] is None

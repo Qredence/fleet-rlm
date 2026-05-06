@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.5.2"
+version = "0.5.3"
 description = "Recursive Language Models with DSPy + Daytona and an integrated Web UI for secure long-context code execution"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -47,16 +47,16 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "typer>=0.21.1,<1",
-    "posthog>=7.10.0",
+    "posthog>=7.14.0",
     "asyncpg>=0.31.0,<1",
-    "sqlalchemy[asyncio]>=2.0.48,<3",
+    "sqlalchemy[asyncio]>=2.0.49,<3",
     "psycopg>=3.3.2,<4",
     "fastapi[standard]==0.136.1",
     "uvicorn>=0.42.0,<1",
     "PyJWT>=2.12.1,<3",
-    "mlflow>=3.11.1",
+    "mlflow[mcp]>=3.12.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.0",
-    "boto3>=1.42.97",
+    "boto3>=1.43.4",
 ]
 
 [project.urls]
@@ -67,23 +67,23 @@ Documentation = "https://fleet-rlm.readthedocs.io/"
 
 [project.optional-dependencies]
 dev = [
-    "pre-commit>=3.7",
+    "pre-commit>=4.6.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
     "pytest-timeout>=2.4.0",
-    "ruff>=0.15.9",
-    "ty>=0.0.29",
+    "ruff>=0.15.12",
+    "ty>=0.0.34",
 ]
 server = [
     "alembic>=1.13,<2",
     "psycopg[binary]>=3.3.2,<4",
-    "scalar-fastapi>=1.5.0,<2",
+    "scalar-fastapi>=1.8.2,<2",
     "uvicorn[standard]>=0.42.0,<1",
 ]
 full = [
     "alembic>=1.13,<2",
     "psycopg[binary]>=3.3.2,<4",
-    "scalar-fastapi>=1.5.0,<2",
+    "scalar-fastapi>=1.8.2,<2",
     "uvicorn[standard]>=0.42.0,<1",
 ]
 evaluation = [
@@ -126,7 +126,7 @@ build-backend = "setuptools.build_meta"
 [dependency-groups]
 dev = [
     "pytest-timeout>=2.4.0",
-    "ty>=0.0.29",
+    "ty>=0.0.34",
 ]
 
 [tool.uv]
@@ -179,6 +179,124 @@ markers = [
     "live_llm: tests that require a live configured LM / LiteLLM backend",
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    ".ruff_cache",
+    "__pycache__",
+    "node_modules",
+    "build",
+    "dist",
+    ".egg-info",
+]
+
+[tool.ruff.lint]
+# Essential rules: F (pyflakes), E/W (pycodestyle), I (isort), N (pep8-naming),
+# B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins),
+# Q (flake8-quotes), T (flake8-print), D (pydocstyle), ARG (unused-arguments),
+# RUF (ruff-specific), SIM (simplify), LOG (flake8-logging-usage).
+# Several families are selected for targeted rules but temporarily ignored
+# below until the existing repo-wide backlog is remediated.
+# Note: COM (trailing commas) handled by formatter, so excluded to avoid conflicts
+select = [
+    "F",     # Pyflakes
+    "E",     # Pycodestyle errors
+    "W",     # Pycodestyle warnings
+    "I001",  # Isort - import sorting
+    "N",     # pep8-naming
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade
+    "A",     # flake8-builtins
+    "Q",     # flake8-quotes
+    "T20",   # flake8-print
+    "D",     # pydocstyle
+    "ARG",   # flake8-unused-arguments
+    "RUF",   # ruff-specific rules
+    "SIM",   # flake8-simplify
+    "LOG",   # flake8-logging-usage
+]
+
+# Ignore specific rules that conflict or are too strict
+ignore = [
+    "D",      # Existing docstring backlog; keep docs quality checks separate.
+    "E501",   # Line too long (handled by formatter)
+    "ANN401", # Dynamically typed expressions (Any) allowed in certain contexts
+    "A002",   # Existing builtin-shadowing backlog in tests.
+    "ARG001", # Unused function arguments (common in callbacks/handlers)
+    "ARG002", # Unused method arguments (common in inheritance)
+    "ARG005", # Existing callback/lambda test fixture backlog.
+    "B008",   # Existing Typer/default-call backlog.
+    "B009",   # Existing dynamic getattr backlog in tests.
+    "B010",   # Existing dynamic setattr backlog.
+    "B904",   # Existing exception chaining backlog.
+    "B905",   # Existing zip(strict=...) backlog.
+    "T201",   # Existing CLI/script print backlog.
+    "TRY003", # Avoid specifying long messages outside exception class (sometimes required)
+    "UP037",  # Existing quoted annotation backlog.
+    "UP041",  # Existing asyncio timeout alias backlog.
+    "UP045",  # Existing Optional[...] annotation backlog.
+    "UP012",  # Existing redundant encode() encoding backlog.
+    "UP017",  # Existing datetime.timezone.utc backlog.
+    "UP028",  # Existing yield-from simplification backlog.
+    "UP033",  # Existing lru_cache(None) backlog.
+    "UP034",  # Existing extraneous-parentheses backlog.
+    "UP035",  # Existing deprecated import backlog.
+    "UP042",  # Existing str + Enum backlog.
+    "N802",   # Existing uppercase runtime callback name backlog.
+    "N806",   # Existing uppercase local test-double backlog.
+    "N818",   # Existing exception-name compatibility backlog.
+    "LOG014", # Existing logging exc_info backlog.
+    "LOG015", # Existing root logger backlog.
+    "RUF001", # Existing intentional unicode CLI glyph backlog.
+    "RUF003", # Existing intentional unicode comment backlog.
+    "RUF010", # Existing explicit f-string conversion backlog.
+    "RUF012", # Existing mutable class attribute test backlog.
+    "RUF021", # Existing mixed boolean precedence backlog.
+    "RUF022", # Existing __all__ ordering backlog.
+    "RUF043", # Existing pytest match-pattern backlog.
+    "RUF059", # Existing unused unpacked variable backlog.
+    "RUF100", # Existing stale noqa backlog.
+    "SIM102", # Existing collapsible-if backlog.
+    "SIM103", # Existing return-condition simplification backlog.
+    "SIM105", # Existing suppressible-exception backlog.
+    "SIM108", # Existing ternary simplification backlog.
+    "SIM110", # Existing any(...) simplification backlog.
+    "SIM114", # Existing duplicate-branch simplification backlog.
+    "SIM117", # Existing nested-with backlog.
+    "SIM118", # Existing dict.keys() membership backlog.
+    "SIM300", # Existing yoda-condition backlog.
+]
+
+# Per-file ignores for specific directories
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]  # Allow star imports and unused imports in __init__
+"tests/**" = ["ARG001", "ARG002", "D100", "D101", "D102", "D103"]  # Less strict for tests
+"scripts/**" = ["D100", "D101", "D102", "D103"]  # Less strict for scripts
+"setup.py" = ["D100"]  # Less strict for setup file
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "double"
+
+[tool.ruff.lint.flake8-builtins]
+builtins-ignorelist = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Use Google-style docstrings
+
+[tool.ruff.lint.isort]
+known-first-party = ["fleet_rlm"]
+known-third-party = ["dspy", "daytona"]
+force-single-line = false
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+skip-magic-trailing-comma = false
 
 [tool.ty.src]
 exclude = [

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from .config import MlflowConfig
 from . import mlflow_runtime as runtime
+from .config import MlflowConfig
 
 if TYPE_CHECKING:
     from mlflow.entities.trace import Trace
@@ -43,10 +43,7 @@ def resolve_trace_by_client_request_id(
     try:
         traces = mlflow.search_traces(
             experiment_ids=experiment_ids,
-            filter_string=(
-                "trace.client_request_id = "
-                f"'{runtime._mlflow_string_literal(client_request_id)}'"
-            ),
+            filter_string=(f"trace.client_request_id = '{runtime._mlflow_string_literal(client_request_id)}'"),
             max_results=max_results,
             return_type="list",
             include_spans=False,
@@ -61,15 +58,12 @@ def resolve_trace_by_client_request_id(
     matches = [
         trace
         for trace in traces
-        if getattr(getattr(trace, "info", None), "client_request_id", None)
-        == client_request_id
+        if getattr(getattr(trace, "info", None), "client_request_id", None) == client_request_id
     ]
     if not matches:
         return None
     matches.sort(
-        key=lambda trace: int(
-            getattr(getattr(trace, "info", None), "timestamp_ms", 0) or 0
-        ),
+        key=lambda trace: int(getattr(getattr(trace, "info", None), "timestamp_ms", 0) or 0),
         reverse=True,
     )
     return matches[0]
@@ -119,9 +113,7 @@ def log_trace_feedback(
     if mlflow is None:
         raise RuntimeError("MLflow is not installed.")
 
-    source = mlflow.entities.AssessmentSource(
-        source_type="HUMAN", source_id=source_id or "anonymous"
-    )
+    source = mlflow.entities.AssessmentSource(source_type="HUMAN", source_id=source_id or "anonymous")
     mlflow.log_feedback(
         trace_id=trace_id,
         name="response_is_correct",
@@ -196,9 +188,7 @@ def _trace_span_types(trace: Trace) -> list[str]:
         raw_spans = []
 
     for span in raw_spans or []:
-        candidate = str(
-            getattr(span, "span_type", None) or getattr(span, "type", None) or ""
-        ).strip()
+        candidate = str(getattr(span, "span_type", None) or getattr(span, "type", None) or "").strip()
         if not candidate or candidate in seen:
             continue
         seen.add(candidate)

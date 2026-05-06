@@ -325,7 +325,7 @@ trajectory compatibility are proven.
 
 ```python
 from fleet_rlm import DaytonaInterpreter
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 
 interpreter = DaytonaInterpreter(
     # Core settings
@@ -371,7 +371,7 @@ Set the profile explicitly:
 
 ```python
 from fleet_rlm import DaytonaInterpreter
-from fleet_rlm.runtime.execution.profiles import ExecutionProfile
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 
 # During interpreter creation
 interpreter = DaytonaInterpreter(
