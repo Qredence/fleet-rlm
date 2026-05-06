@@ -98,18 +98,10 @@ class RecursiveWorkspaceModule(dspy.Module):
             "sub_lm": sub_lm,
         }
 
-        self._assembler = create_runtime_rlm(
-            signature=AssembleRecursiveWorkspaceContext, **rlm_kwargs
-        )
-        self._planner = create_runtime_rlm(
-            signature=PlanRecursiveSubqueries, **rlm_kwargs
-        )
-        self._verifier = create_runtime_rlm(
-            signature=VerifyRecursiveAggregation, **rlm_kwargs
-        )
-        self._reflector = create_runtime_rlm(
-            signature=ReflectAndReviseWorkspaceStep, **rlm_kwargs
-        )
+        self._assembler = create_runtime_rlm(signature=AssembleRecursiveWorkspaceContext, **rlm_kwargs)
+        self._planner = create_runtime_rlm(signature=PlanRecursiveSubqueries, **rlm_kwargs)
+        self._verifier = create_runtime_rlm(signature=VerifyRecursiveAggregation, **rlm_kwargs)
+        self._reflector = create_runtime_rlm(signature=ReflectAndReviseWorkspaceStep, **rlm_kwargs)
         self._repairer = create_runtime_rlm(signature=PlanRecursiveRepair, **rlm_kwargs)
 
     def forward(
@@ -124,11 +116,20 @@ class RecursiveWorkspaceModule(dspy.Module):
         evidence_catalog: list[str] = []
         latest_result = context
         repair_count = 0
+        requires_current_source = self._requires_current_source_context(
+            user_request=user_request,
+            context=context,
+        )
+        has_current_source = self._has_current_source_context(context)
 
         for pass_idx in range(self.max_passes):
             loop_state = self._loop_state_summary(pass_idx, repair_count)
 
-            memory_catalog = working_memory_catalog or self._fetch_memory_catalog()
+            memory_catalog = (
+                working_memory_catalog
+                if working_memory_catalog is not None
+                else ([] if requires_current_source and not has_current_source else self._fetch_memory_catalog())
+            )
             compact_latest = self._compact_for_signature(latest_result)
             assemble = self._assembler(
                 user_request=user_request,
@@ -140,14 +141,26 @@ class RecursiveWorkspaceModule(dspy.Module):
                 context_budget=self.context_budget_chars,
             )
             assembled_context = str(getattr(assemble, "assembled_context_summary", ""))
+            if (
+                requires_current_source
+                and not has_current_source
+                and not self._has_current_source_context(assembled_context)
+            ):
+                return dspy.Prediction(
+                    answer=(
+                        "Current document/source content was not available to the "
+                        "recursive workspace. Use delegate_to_rlm(document_url=...) "
+                        "or pass the actual document text/sandbox path as context."
+                    ),
+                    passes=pass_idx + 1,
+                    status="needs_human_review",
+                    missing=["current_document_source"],
+                )
 
             # If the assembler failed to build useful context (e.g. due to
             # ChatAdapter parse errors inside its REPL loop), fall back to
             # including user_request verbatim so child RLMs are not context-starved.
-            if (
-                len(assembled_context) < 64
-                and len(user_request) <= self.context_budget_chars
-            ):
+            if len(assembled_context) < 64 and len(user_request) <= self.context_budget_chars:
                 assembled_context = user_request
 
             compact_latest = self._compact_for_signature(latest_result)
@@ -173,9 +186,7 @@ class RecursiveWorkspaceModule(dspy.Module):
             failure_signals = self._classify_subquery_failures(outputs)
 
             self._store_pass_evidence(pass_idx, outputs)
-            evidence_catalog = [
-                f"pass_{pass_idx}_output_{i}" for i in range(len(outputs))
-            ]
+            evidence_catalog = [f"pass_{pass_idx}_output_{i}" for i in range(len(outputs))]
 
             compact_outputs = [self._compact_for_signature(o) for o in outputs]
             verification = self._call_with_fallback(
@@ -188,32 +199,20 @@ class RecursiveWorkspaceModule(dspy.Module):
                 candidate_answer=latest_result,
             )
             status = str(getattr(verification, "verification_status", "sufficient"))
-            verified_summary = str(
-                getattr(verification, "verified_summary", latest_result)
-            )
+            verified_summary = str(getattr(verification, "verified_summary", latest_result))
             failure_signals = self._merge_failure_signals(
                 failure_signals,
                 self._classify_verification_failures(
                     status=status,
                     verified_summary=verified_summary,
-                    missing_evidence=list(
-                        getattr(verification, "missing_evidence", []) or []
-                    ),
-                    contradictions=list(
-                        getattr(verification, "contradictions", []) or []
-                    ),
+                    missing_evidence=list(getattr(verification, "missing_evidence", []) or []),
+                    contradictions=list(getattr(verification, "contradictions", []) or []),
                     rationale=str(getattr(verification, "verification_rationale", "")),
                 ),
             )
             if failure_signals and status == "sufficient":
-                status = (
-                    "needs_repair"
-                    if repair_count < self.max_repair_attempts
-                    else "needs_more_recursion"
-                )
-                verified_summary = self._append_failure_signals(
-                    verified_summary, failure_signals
-                )
+                status = "needs_repair" if repair_count < self.max_repair_attempts else "needs_more_recursion"
+                verified_summary = self._append_failure_signals(verified_summary, failure_signals)
 
             if status == "sufficient":
                 # Prefer the raw subquery output when it contains more detail
@@ -224,11 +223,7 @@ class RecursiveWorkspaceModule(dspy.Module):
                         self._classify_subquery_failures([latest_result]),
                     )
                 else:
-                    best_answer = (
-                        latest_result
-                        if len(latest_result) > len(verified_summary)
-                        else verified_summary
-                    )
+                    best_answer = latest_result if len(latest_result) > len(verified_summary) else verified_summary
                     return dspy.Prediction(
                         answer=best_answer,
                         passes=pass_idx + 1,
@@ -241,19 +236,13 @@ class RecursiveWorkspaceModule(dspy.Module):
                 working_memory_summary=assembled_context,
                 current_plan=plan,
                 latest_sandbox_evidence=compact_latest,
-                latest_tool_or_code_result=self._compact_for_signature(
-                    verified_summary
-                ),
+                latest_tool_or_code_result=self._compact_for_signature(verified_summary),
                 loop_state=loop_state,
             )
             action = str(getattr(reflection, "next_action", "finalize"))
             plan = str(getattr(reflection, "revised_plan", plan))
             if failure_signals:
-                action = (
-                    "repair_and_retry"
-                    if repair_count < self.max_repair_attempts
-                    else "request_human_review"
-                )
+                action = "repair_and_retry" if repair_count < self.max_repair_attempts else "request_human_review"
 
             if action == "finalize":
                 return dspy.Prediction(
@@ -282,9 +271,7 @@ class RecursiveWorkspaceModule(dspy.Module):
                 )
                 repair_queries = list(getattr(repair, "repair_subqueries", []) or [])
                 if repair_queries:
-                    repair_outputs = self._execute_subqueries(
-                        repair_queries, assembled_context, "serial"
-                    )
+                    repair_outputs = self._execute_subqueries(repair_queries, assembled_context, "serial")
                     latest_result = "\n---\n".join(repair_outputs)
                 repair_count += 1
                 continue
@@ -308,16 +295,48 @@ class RecursiveWorkspaceModule(dspy.Module):
         omitted = len(text) - len(head) - len(tail)
         return f"{head}\n\n... ({omitted} chars omitted) ...\n\n{tail}"
 
+    def _requires_current_source_context(self, *, user_request: str, context: str) -> bool:
+        """Return whether old durable evidence is unsafe for this request."""
+        text = f"{user_request}\n{context}".lower()
+        source_markers = (
+            "loaded document",
+            "document is located",
+            "document alias",
+            "document cache",
+            "cached document",
+            "document_url",
+            "document url",
+            "http://",
+            "https://",
+        )
+        if any(term in text for term in source_markers):
+            return True
+        document_terms = ("document", "source", "pdf", "paper", "file")
+        return ("alias" in text or "cache" in text) and any(term in text for term in document_terms)
+
+    def _has_current_source_context(self, text: str) -> bool:
+        """Return whether *text* carries real source content or a sandbox path."""
+        stripped = text.strip()
+        if not stripped:
+            return False
+        lowered = stripped.lower()
+        if "--- document fetched from " in lowered:
+            return True
+        if "is available in this child sandbox at:" in lowered:
+            return True
+        path_prefixes = ("/", "./", "../", "artifacts/", "memory/", "buffers/", "meta/")
+        if "\n" not in stripped and stripped.startswith(path_prefixes):
+            return True
+        if len(stripped) >= 1_000 and "\n" in stripped:
+            return True
+        return False
+
     def _call_with_fallback(self, module: dspy.Module, **kwargs) -> dspy.Prediction:
         """Call a sub-module, retrying with ChatAdapter if JSONAdapter fails to parse."""
         try:
             return module(**kwargs)
         except Exception as exc:
-            if (
-                not self._adapter_fallback
-                or "Adapter" not in type(exc).__name__
-                and "Adapter" not in str(exc)
-            ):
+            if not self._adapter_fallback or "Adapter" not in type(exc).__name__ and "Adapter" not in str(exc):
                 raise
             fallback = dspy.ChatAdapter()
             with dspy.context(adapter=fallback):
@@ -335,11 +354,9 @@ class RecursiveWorkspaceModule(dspy.Module):
         )
 
         if mode == "fan_out" and len(subqueries) > 1:
-            result = delegate_to_rlm_batched(
-                queries=subqueries, context=context, interpreter=self.interpreter
-            )
+            result = delegate_to_rlm_batched(queries=subqueries, context=context, interpreter=self.interpreter)
             if result.get("status") == "ok":
-                return [r.get("answer", "") for r in result.get("results", [])]
+                return [self._format_successful_subquery_output(r) for r in result.get("results", [])]
             return [
                 json.dumps(
                     {
@@ -354,11 +371,9 @@ class RecursiveWorkspaceModule(dspy.Module):
 
         outputs: list[str] = []
         for query in subqueries:
-            result = delegate_to_rlm(
-                query=query, context=context, interpreter=self.interpreter
-            )
+            result = delegate_to_rlm(query=query, context=context, interpreter=self.interpreter)
             if result.get("status") == "ok":
-                outputs.append(str(result.get("answer", "")))
+                outputs.append(self._format_successful_subquery_output(result))
             else:
                 outputs.append(
                     json.dumps(
@@ -372,6 +387,24 @@ class RecursiveWorkspaceModule(dspy.Module):
                     )
                 )
         return outputs
+
+    def _format_successful_subquery_output(self, result: Any) -> str:
+        if not isinstance(result, dict):
+            return str(result)
+        answer = str(result.get("answer", ""))
+        if not result.get("degraded"):
+            return answer
+        return json.dumps(
+            {
+                "status": "ok",
+                "answer": answer,
+                "degraded": True,
+                "reason": str(result.get("degradation_reason", "degraded")),
+                "error": str(result.get("degradation_error", "")),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
 
     def _classify_subquery_failures(self, outputs: list[str]) -> list[str]:
         signals: list[str] = []
@@ -406,9 +439,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         except json.JSONDecodeError:
             return None
 
-    def _collect_failure_reasons(
-        self, value: Any, output_index: int, signals: list[str]
-    ) -> None:
+    def _collect_failure_reasons(self, value: Any, output_index: int, signals: list[str]) -> None:
         if isinstance(value, dict):
             reason = str(value.get("reason", "")).lower()
             if reason in _SUBQUERY_FAILURE_REASONS:
@@ -450,14 +481,9 @@ class RecursiveWorkspaceModule(dspy.Module):
 
     def _append_failure_signals(self, summary: str, signals: list[str]) -> str:
         joined = ", ".join(signals)
-        return (
-            f"{summary}\n\nSubquery failure signals detected; verifier success was "
-            f"not accepted: {joined}"
-        )
+        return f"{summary}\n\nSubquery failure signals detected; verifier success was not accepted: {joined}"
 
-    def _format_failure_signals(
-        self, failure_signals: list[str], contradictions: list[str]
-    ) -> str:
+    def _format_failure_signals(self, failure_signals: list[str], contradictions: list[str]) -> str:
         payload = {
             "subquery_failure_signals": failure_signals,
             "verification_contradictions": contradictions,
@@ -468,9 +494,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         if self._evidence is None:
             return []
         result = self._evidence.list_items(scope="run", limit=50)
-        return [
-            f"{item['scope_id']}:{item['kind']}" for item in result.get("items", [])
-        ]
+        return [f"{item['scope_id']}:{item['kind']}" for item in result.get("items", [])]
 
     def _store_pass_evidence(self, pass_idx: int, outputs: list[str]) -> None:
         if self._evidence is None:

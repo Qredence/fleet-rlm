@@ -70,9 +70,7 @@ class _FakeParentInterpreter:
     def _remaining_llm_budget(self) -> int:
         return self.remaining
 
-    def build_delegate_child(
-        self, *, remaining_llm_budget: int
-    ) -> _FakeChildInterpreter:
+    def build_delegate_child(self, *, remaining_llm_budget: int) -> _FakeChildInterpreter:
         self.build_calls.append(remaining_llm_budget)
         index = min(len(self.build_calls) - 1, len(self.children) - 1)
         return self.children[index]
@@ -99,10 +97,7 @@ def test_delegate_to_rlm_has_fleet_tool_marker() -> None:
 
 def test_delegate_to_rlm_batched_has_fleet_tool_marker() -> None:
     """delegate_to_rlm_batched is marked with @tool_fn for registry discovery."""
-    assert (
-        getattr(rlm_delegate_mod.delegate_to_rlm_batched, "__is_fleet_tool__", False)
-        is True
-    )
+    assert getattr(rlm_delegate_mod.delegate_to_rlm_batched, "__is_fleet_tool__", False) is True
 
 
 def test_delegate_to_rlm_in_discover_tools() -> None:
@@ -112,12 +107,8 @@ def test_delegate_to_rlm_in_discover_tools() -> None:
     tools = discover_tools()
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
 
-    assert "delegate_to_rlm" in names, (
-        f"delegate_to_rlm not found in registry. Found: {sorted(names)}"
-    )
-    assert "delegate_to_rlm_batched" in names, (
-        f"delegate_to_rlm_batched not found in registry. Found: {sorted(names)}"
-    )
+    assert "delegate_to_rlm" in names, f"delegate_to_rlm not found in registry. Found: {sorted(names)}"
+    assert "delegate_to_rlm_batched" in names, f"delegate_to_rlm_batched not found in registry. Found: {sorted(names)}"
 
 
 def test_delegate_to_rlm_valid_for_react() -> None:
@@ -165,9 +156,7 @@ def test_delegate_to_rlm_starts_sandbox_when_not_started(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "test query", "test context", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("test query", "test context", interpreter=interpreter)
 
     assert interpreter.build_calls == [50]
     assert child.start_calls == 1
@@ -193,9 +182,7 @@ def test_delegate_to_rlm_reuses_started_sandbox(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "query about reuse", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("query about reuse", interpreter=interpreter)
 
     assert child.start_calls == 0
     assert child.shutdown_calls == 1
@@ -250,9 +237,7 @@ def test_delegate_to_rlm_returns_ok_dict(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "structured query", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("structured query", interpreter=interpreter)
 
     assert isinstance(result, dict)
     assert result["status"] == "ok"
@@ -302,9 +287,7 @@ def test_delegate_to_rlm_result_is_string_or_dict(
 
     result = rlm_delegate_mod.delegate_to_rlm("agent query", interpreter=interpreter)
 
-    assert isinstance(result, (str, dict)), (
-        f"Result must be str or dict, got {type(result)}"
-    )
+    assert isinstance(result, (str, dict)), f"Result must be str or dict, got {type(result)}"
 
 
 def test_delegate_to_rlm_none_document_url_is_ignored(
@@ -323,9 +306,7 @@ def test_delegate_to_rlm_none_document_url_is_ignored(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "empty answer query", document_url=None, interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("empty answer query", document_url=None, interpreter=interpreter)
 
     assert result["status"] == "ok"
     assert result["answer"] == "ok"
@@ -347,9 +328,7 @@ def test_delegate_to_rlm_null_answer_returns_error(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "empty answer query", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("empty answer query", interpreter=interpreter)
 
     assert result["status"] == "error"
     assert result["reason"] == "null_answer"
@@ -373,26 +352,22 @@ def test_delegate_to_rlm_empty_string_answer_is_allowed(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "empty string answer query", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("empty string answer query", interpreter=interpreter)
 
     assert result["status"] == "ok"
     assert result["answer"] == ""
 
 
-def test_delegate_to_rlm_detects_broker_error_in_prediction_state(
+def test_delegate_to_rlm_returns_degraded_ok_with_answer_and_broker_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Hidden child trajectory broker failures are not returned as status:ok."""
+    """Usable child answers survive broker markers as degraded successes."""
     import dspy
 
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child)
-    mock_prediction = dspy.Prediction(answer="misleading answer")
-    mock_prediction.trajectory = [
-        {"output": "[Error] Broker server failed to start within timeout"}
-    ]
+    mock_prediction = dspy.Prediction(answer="usable answer")
+    mock_prediction.trajectory = [{"output": "[Error] Broker server failed to start within timeout"}]
 
     monkeypatch.setattr(
         rlm_delegate_mod,
@@ -400,9 +375,33 @@ def test_delegate_to_rlm_detects_broker_error_in_prediction_state(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "broker failure query", interpreter=interpreter
+    result = rlm_delegate_mod.delegate_to_rlm("broker failure query", interpreter=interpreter)
+
+    assert result["status"] == "ok"
+    assert result["answer"] == "usable answer"
+    assert result["degraded"] is True
+    assert result["degradation_reason"] == "broker_unavailable"
+    assert "Daytona broker unavailable" in result["degradation_error"]
+
+
+def test_delegate_to_rlm_detects_fatal_broker_error_without_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Broker markers remain hard errors when no child answer was produced."""
+    import dspy
+
+    child = _FakeChildInterpreter(started=True, verbose=False)
+    interpreter = _FakeParentInterpreter(child)
+    mock_prediction = dspy.Prediction(answer="")
+    mock_prediction.trajectory = [{"output": "[Error] Broker server failed to start within timeout"}]
+
+    monkeypatch.setattr(
+        rlm_delegate_mod,
+        "build_recursive_subquery_rlm",
+        lambda **kwargs: lambda **kw: mock_prediction,
     )
+
+    result = rlm_delegate_mod.delegate_to_rlm("broker failure query", interpreter=interpreter)
 
     assert result["status"] == "error"
     assert result["reason"] == "broker_unavailable"
@@ -412,9 +411,7 @@ def test_delegate_to_rlm_rejects_exhausted_budget() -> None:
     child = _FakeChildInterpreter(started=True, verbose=False)
     interpreter = _FakeParentInterpreter(child, remaining=0)
 
-    result = rlm_delegate_mod.delegate_to_rlm(
-        "budget exhausted query", interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm("budget exhausted query", interpreter=interpreter)
 
     assert result["status"] == "error"
     assert result["reason"] == "budget_exhausted"
@@ -474,9 +471,7 @@ def test_delegate_to_rlm_batched_reports_partial_failures(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    result = rlm_delegate_mod.delegate_to_rlm_batched(
-        ["good", "bad", "later"], interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm_batched(["good", "bad", "later"], interpreter=interpreter)
 
     assert result["status"] == "error"
     assert result["results"] == [
@@ -513,9 +508,7 @@ def test_delegate_to_rlm_batched_overlaps_child_execution(
 
     monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
 
-    result = rlm_delegate_mod.delegate_to_rlm_batched(
-        ["a", "b", "c"], interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"], interpreter=interpreter)
 
     assert result["status"] == "ok"
     assert [item["answer"] for item in result["results"]] == [
@@ -529,9 +522,7 @@ def test_delegate_to_rlm_batched_rejects_exhausted_budget() -> None:
     children = [_FakeChildInterpreter(started=True) for _ in range(3)]
     interpreter = _FakeParentInterpreter(children, remaining=2)
 
-    result = rlm_delegate_mod.delegate_to_rlm_batched(
-        ["a", "b", "c"], interpreter=interpreter
-    )
+    result = rlm_delegate_mod.delegate_to_rlm_batched(["a", "b", "c"], interpreter=interpreter)
 
     assert result["status"] == "error"
     assert result["reason"] == "budget_exhausted"
@@ -574,9 +565,7 @@ def test_delegate_to_rlm_writes_large_document_to_child_only(
     )
 
     assert result["status"] == "ok"
-    assert child.session.write_calls == [
-        ("artifacts/rlm-inputs/doc_41cb62f6e140.txt", doc_text)
-    ]
+    assert child.session.write_calls == [("artifacts/rlm-inputs/doc_41cb62f6e140.txt", doc_text)]
     assert child.start_calls == 1
     assert child.shutdown_calls == 1
 
@@ -621,10 +610,7 @@ def test_delegate_to_rlm_embeds_truncated_large_document_when_child_write_fails(
     )
 
     assert result["status"] == "ok"
-    assert (
-        "truncated after 100000 chars because sandbox staging failed"
-        in seen_contexts[0]
-    )
+    assert "truncated after 100000 chars because sandbox staging failed" in seen_contexts[0]
     assert child.start_calls == 1
     assert child.shutdown_calls == 1
 
@@ -670,9 +656,7 @@ def test_delegate_to_rlm_stages_local_workspace_snapshot_for_codebase_tasks(
     assert "--- FILE: src/demo/runtime.py ---" in snapshot
     assert "sandbox budget session" in snapshot
     assert "local_workspace_snapshot.txt" in seen_contexts[0]
-    assert child.child_isolation_metadata["local_workspace_snapshot_path"].endswith(
-        "local_workspace_snapshot.txt"
-    )
+    assert child.child_isolation_metadata["local_workspace_snapshot_path"].endswith("local_workspace_snapshot.txt")
 
 
 def test_delegate_to_rlm_skips_local_workspace_snapshot_for_repo_children(

@@ -6,6 +6,7 @@ so that ``discover_tools()`` can collect it.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fleet_rlm.runtime.content.chunking import (
@@ -30,9 +31,7 @@ def _normalize_strategy(strategy: str) -> str:
         "json_keys": "json_keys",
     }
     if normalized not in mapping:
-        raise ValueError(
-            "Unsupported strategy. Choose one of: size, headers, timestamps, json_keys"
-        )
+        raise ValueError("Unsupported strategy. Choose one of: size, headers, timestamps, json_keys")
     return mapping[normalized]
 
 
@@ -53,6 +52,21 @@ def _chunk_text(
     if strategy_norm == "timestamps":
         return chunk_by_timestamps(text, pattern=pattern or r"^\d{4}-\d{2}-\d{2}[T ]")
     return chunk_by_json_keys(text)
+
+
+def _looks_like_document_alias(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or len(stripped) > 128:
+        return False
+    if "\n" in stripped or "\r" in stripped:
+        return False
+    if " " in stripped or "\t" in stripped:
+        return False
+    if stripped.startswith(("http://", "https://", "/", "./", "../")):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:csv|html?|json|md|pdf|txt|xml|ya?ml)", stripped):
+        return True
+    return bool(re.fullmatch(r"[a-z][a-z0-9]*(?:[_-][a-z0-9]+)+", stripped))
 
 
 @tool_fn
@@ -86,6 +100,19 @@ def chunk_document(
         Dictionary with ``status``, ``strategy``, ``chunk_count``, and a
         ``preview`` of the first chunk.
     """
+    if _looks_like_document_alias(text):
+        return {
+            "status": "warning",
+            "reason": "alias_like_input",
+            "strategy": _normalize_strategy(strategy),
+            "chunk_count": 0,
+            "preview": "",
+            "warning": (
+                "chunk_document received an alias/path-like token instead of "
+                "document text. Load or fetch the document content first, then "
+                "pass the actual text to chunk_document."
+            ),
+        }
     chunks = _chunk_text(text, strategy, size=size, overlap=overlap, pattern=pattern)
     preview = chunks[0] if chunks else ""
     return {

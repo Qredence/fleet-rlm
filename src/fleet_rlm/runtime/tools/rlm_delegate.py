@@ -78,8 +78,7 @@ def delegate_to_rlm(
     """
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm requires a Daytona interpreter. "
-            "Pass the interpreter as a keyword argument."
+            "delegate_to_rlm requires a Daytona interpreter. Pass the interpreter as a keyword argument."
         )
 
     llm_budget = _remaining_llm_budget(interpreter)
@@ -135,16 +134,13 @@ def delegate_to_rlm_batched(
     """
     if interpreter is None:
         raise RuntimeError(
-            "delegate_to_rlm_batched requires a Daytona interpreter. "
-            "Pass the interpreter as a keyword argument."
+            "delegate_to_rlm_batched requires a Daytona interpreter. Pass the interpreter as a keyword argument."
         )
 
     normalized_queries = [str(query) for query in queries or []]
     if not normalized_queries:
         return {"status": "ok", "results": []}
-    blank_indexes = [
-        index for index, query in enumerate(normalized_queries) if not query.strip()
-    ]
+    blank_indexes = [index for index, query in enumerate(normalized_queries) if not query.strip()]
     if blank_indexes:
         return {
             "status": "error",
@@ -212,10 +208,15 @@ def delegate_to_rlm_batched(
             child_result = cast(dict[str, Any], child_result)
 
             if child_result.get("status") == "ok":
-                result_by_index[index] = {
+                success: dict[str, Any] = {
                     "query": query,
                     "answer": str(child_result.get("answer", "")),
                 }
+                if child_result.get("degraded"):
+                    success["degraded"] = True
+                    success["degradation_reason"] = str(child_result.get("degradation_reason", ""))
+                    success["degradation_error"] = str(child_result.get("degradation_error", ""))
+                result_by_index[index] = success
                 continue
 
             error_by_index[index] = {
@@ -225,16 +226,8 @@ def delegate_to_rlm_batched(
                 "error": str(child_result.get("error", "unknown child error")),
             }
 
-    results = [
-        result_by_index[index]
-        for index in range(len(normalized_queries))
-        if index in result_by_index
-    ]
-    errors = [
-        error_by_index[index]
-        for index in range(len(normalized_queries))
-        if index in error_by_index
-    ]
+    results = [result_by_index[index] for index in range(len(normalized_queries)) if index in result_by_index]
+    errors = [error_by_index[index] for index in range(len(normalized_queries)) if index in error_by_index]
     if errors:
         return {"status": "error", "results": results, "errors": errors}
     return {"status": "ok", "results": results}
@@ -275,9 +268,7 @@ def _run_delegate_child(
             interpreter=child,
             max_iterations=max_iterations,
             max_llm_calls=llm_budget,
-            verbose=bool(
-                getattr(child, "verbose", getattr(interpreter, "verbose", False))
-            ),
+            verbose=bool(getattr(child, "verbose", getattr(interpreter, "verbose", False))),
             sub_lm=getattr(child, "sub_lm", None),
         )
 
@@ -320,6 +311,14 @@ def _run_delegate_child(
         if isinstance(metadata, dict):
             metadata["error_reason"] = failure["reason"]
         logger.warning("delegate_to_rlm: child failure detected: %s", failure)
+        if failure["reason"] == "broker_unavailable" and answer.strip():
+            return {
+                "status": "ok",
+                "answer": answer,
+                "degraded": True,
+                "degradation_reason": failure["reason"],
+                "degradation_error": failure["error"],
+            }
         return {"status": "error", **failure}
 
     return {"status": "ok", "answer": answer}
@@ -391,10 +390,7 @@ def _resolve_delegate_context(
             stripped_url,
             err,
         )
-        return (
-            base_context
-            + f"\n\nNote: Attempted to pre-fetch {stripped_url} but failed: {err}"
-        ).strip()
+        return (base_context + f"\n\nNote: Attempted to pre-fetch {stripped_url} but failed: {err}").strip()
 
     doc_text = fetch_result["text"]
     char_count = int(fetch_result["char_count"])
@@ -471,11 +467,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
     if value is None or isinstance(value, (bool, int, float)):
         return False
     if isinstance(value, Mapping):
-        return any(
-            _contains_marker(item, marker, _depth=_depth + 1)
-            for pair in value.items()
-            for item in pair
-        )
+        return any(_contains_marker(item, marker, _depth=_depth + 1) for pair in value.items() for item in pair)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
     value_dict = getattr(value, "__dict__", None)
@@ -483,8 +475,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
         filtered = {
             key: item
             for key, item in value_dict.items()
-            if key
-            in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
+            if key in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
         }
         if _contains_marker(filtered, marker, _depth=_depth + 1):
             return True

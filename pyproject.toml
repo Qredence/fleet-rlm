@@ -54,7 +54,7 @@ dependencies = [
     "fastapi[standard]==0.136.1",
     "uvicorn>=0.42.0,<1",
     "PyJWT>=2.12.1,<3",
-    "mlflow>=3.12.0",
+    "mlflow[mcp]>=3.12.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.0",
     "boto3>=1.43.4",
 ]
