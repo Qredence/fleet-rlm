@@ -1,9 +1,6 @@
-"""Unit tests for sandbox-driver injected helpers.
+"""Tests for sandbox_driver protocol and injected helpers.
 
-Uses the same ``_run_driver`` pattern from ``test_driver_protocol.py``
-to feed JSON commands through the driver and inspect results.
-
-Run with: uv run pytest tests/test_driver_helpers.py -v
+Uses ``_run_driver`` to feed JSON commands through the driver and inspect results.
 """
 
 from __future__ import annotations
@@ -40,6 +37,126 @@ def _run_driver(monkeypatch, lines: list[str]) -> list[dict]:
 def _cmd(code: str) -> str:
     """Build a minimal JSON command string."""
     return json.dumps({"code": code})
+
+
+# ---------------------------------------------------------------------------
+# Protocol / round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_submit_positional_mapping(monkeypatch):
+    command = {
+        "code": "SUBMIT(7, 'ok')",
+        "variables": {},
+        "tool_names": [],
+        "output_names": ["count", "status"],
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command)])
+
+    assert len(messages) == 1
+    assert messages[0]["final"] == {"count": 7, "status": "ok"}
+
+
+def test_tool_call_roundtrip(monkeypatch):
+    command = {
+        "code": "total = add(2, 3)\nSUBMIT(total)",
+        "variables": {},
+        "tool_names": ["add"],
+        "output_names": ["sum"],
+    }
+    tool_reply = {"tool_result": 5}
+
+    messages = _run_driver(monkeypatch, [json.dumps(command), json.dumps(tool_reply)])
+
+    assert len(messages) == 2
+    assert messages[0]["tool_call"]["name"] == "add"
+    assert messages[1]["final"] == {"sum": 5}
+
+
+def test_final_variable_does_not_mask_runtime_error(monkeypatch):
+    command = {
+        "code": "Final = {'ok': True}\nraise RuntimeError('boom')",
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command)])
+
+    assert len(messages) == 1
+    assert messages[0]["final"] is None
+    assert "RuntimeError: boom" in messages[0]["stderr"]
+
+
+def test_final_variable_does_not_leak_across_commands(monkeypatch):
+    command_one = {
+        "code": "Final = {'stale': True}\nSUBMIT('ok')",
+        "variables": {},
+        "tool_names": [],
+        "output_names": ["status"],
+    }
+    command_two = {
+        "code": "x = 1",
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command_one), json.dumps(command_two)])
+
+    assert len(messages) == 2
+    assert messages[0]["final"] == {"status": "ok"}
+    assert messages[1]["final"] is None
+
+
+def test_root_profile_blocks_helper_access(monkeypatch):
+    command = {
+        "code": 'text = "hello"\nSUBMIT(peek(text, 0, 2))',
+        "variables": {},
+        "tool_names": [],
+        "output_names": [],
+        "execution_profile": "ROOT_INTERLOCUTOR",
+    }
+    messages = _run_driver(monkeypatch, [json.dumps(command)])
+
+    assert len(messages) == 1
+    assert messages[0]["final"] is None
+    assert "Helper 'peek' is not available in ROOT_INTERLOCUTOR profile" in messages[0]["stderr"]
+
+
+def test_extracted_driver_source_runs_standalone(monkeypatch):
+    """Regression: inspect-extracted sandbox_driver source must be self-contained."""
+    ns: dict[str, object] = {}
+    exec(inspect.getsource(sandbox_driver), ns)
+    extracted = ns["sandbox_driver"]
+
+    iterator = iter(
+        [
+            json.dumps(
+                {
+                    "code": "SUBMIT(status='ok')",
+                    "variables": {},
+                    "tool_names": [],
+                    "output_names": [],
+                }
+            )
+        ]
+    )
+
+    def fake_input() -> str:
+        try:
+            return next(iterator)
+        except StopIteration as exc:
+            raise EOFError from exc
+
+    proto_out = io.StringIO()
+    monkeypatch.setattr(builtins, "input", fake_input)
+    monkeypatch.setattr(sys, "__stdout__", proto_out)
+
+    extracted()
+
+    raw_lines = [line for line in proto_out.getvalue().splitlines() if line.strip()]
+    messages = [json.loads(line) for line in raw_lines]
+    assert len(messages) == 1
+    assert messages[0]["final"] == {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +271,6 @@ class TestChunkByHeadersHelper:
             monkeypatch,
             [_cmd('text = "Just plain text"\nchunks = chunk_by_headers(text)\nSUBMIT(len(chunks))')],
         )
-        # Should still return one chunk (the whole text)
         assert msgs[0]["final"]["output"] == 1
 
 
@@ -279,7 +395,6 @@ class TestBufferHelpers:
                 _cmd('add_buffer("acc", "second")\nbuf = get_buffer("acc")\nSUBMIT(buf)'),
             ],
         )
-        # First command has no SUBMIT, second returns the buffer
         assert msgs[1]["final"]["output"] == ["first", "second"]
 
 

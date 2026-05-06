@@ -15,7 +15,12 @@ from fleet_rlm.api.routers.ws.session import (
 )
 from fleet_rlm.api.routers.ws.stream import (
     ReplHookBridge,
+    WorkspaceEvent,
     _emit_stream_event,
+    build_execution_completion_summary,
+    build_stream_event_dict,
+    handle_stream_error,
+    handle_terminal_stream_event,
 )
 from fleet_rlm.api.routers.ws.transport import (
     _close_websocket_safely,
@@ -23,6 +28,7 @@ from fleet_rlm.api.routers.ws.transport import (
 )
 from fleet_rlm.api.runtime_services.chat_runtime import SessionContext
 from fleet_rlm.api.schemas import WSMessage
+from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.schemas import StreamEvent
 from tests.ui.fixtures_ui import FakeChatAgent, ts
 
@@ -128,6 +134,11 @@ class _RecordingLifecycle(_LifecycleStub):
 class _InterpreterHookStepBuilder:
     def from_interpreter_hook(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {"id": "step-1", "payload": payload}
+
+
+class _CapturingStepBuilder:
+    def from_stream_event(self, **kwargs: Any) -> dict[str, Any]:
+        return kwargs
 
 
 def test_try_send_json_returns_false_after_websocket_close() -> None:
@@ -494,6 +505,454 @@ async def test_switch_session_restores_manifest_state_when_cache_empty(
     assert agent._session_state == manifest_state
     cached = session_cache.sessions[session_key("tenant-a", "user-a", "session-a")]
     assert cached["manifest"]["state"] == manifest_state
+
+
+def test_build_stream_event_dict_serializes_core_fields() -> None:
+    event = WorkspaceEvent(kind="status", text="hello", payload={"ok": True}, timestamp=ts())
+
+    event_dict = build_stream_event_dict(event=event, payload=event.payload)
+
+    assert event_dict["kind"] == "status"
+    assert event_dict["text"] == "hello"
+    assert event_dict["payload"] == {"ok": True}
+    assert event_dict["version"] == 2
+    assert isinstance(event_dict["event_id"], str) and event_dict["event_id"]
+
+
+def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        persist_calls: list[bool] = []
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            persist_calls.append(include_volume_save)
+
+        await handle_terminal_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            event=event,
+            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            step=None,
+            persist_session_state=cast(Any, persist_session_state),
+            request_message="hello",
+        )
+
+        assert persist_calls == [True]
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["summary"]["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            _ = include_volume_save
+            raise RuntimeError("volume unavailable")
+
+        await handle_terminal_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            event=event,
+            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            step=None,
+            persist_session_state=cast(Any, persist_session_state),
+            request_message="hello",
+        )
+
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["summary"]["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _HangingTerminalLifecycle()
+        event = WorkspaceEvent(kind="error", text="boom", timestamp=ts(), terminal=True)
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            _ = include_volume_save
+
+        task = asyncio.create_task(
+            handle_terminal_stream_event(
+                websocket=cast(Any, websocket),
+                lifecycle=cast(Any, lifecycle),
+                event=event,
+                event_dict=build_stream_event_dict(event=event, payload=event.payload),
+                step=None,
+                persist_session_state=cast(Any, persist_session_state),
+                request_message="hello",
+            )
+        )
+
+        deadline = asyncio.get_running_loop().time() + 0.2
+        while not websocket.sent and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+
+        assert websocket.sent
+        assert websocket.sent[0]["data"]["kind"] == "error"
+
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        event = WorkspaceEvent(
+            kind="done",
+            text="claimed success",
+            payload={
+                "runtime_degraded": True,
+                "runtime_failure_category": "tool_execution_error",
+            },
+            timestamp=ts(),
+            terminal=True,
+        )
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            _ = include_volume_save
+
+        await handle_terminal_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            event=event,
+            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            step=None,
+            persist_session_state=cast(Any, persist_session_state),
+            request_message="hello",
+        )
+
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["status"].name == "FAILED"
+        assert lifecycle.completed_with["summary"]["status"] == "error"
+
+    asyncio.run(scenario())
+
+
+def test_handle_terminal_stream_event_accepts_session_context() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _LifecycleStub()
+        event = WorkspaceEvent(kind="done", text="done", timestamp=ts(), terminal=True)
+        session = SessionContext(
+            workspace_id="workspace-1",
+            user_id="user-1",
+            session_id="session-1",
+            session_record={"manifest": {"metadata": {}}},
+        )
+
+        async def persist_session_state(*, include_volume_save: bool = True) -> None:
+            _ = include_volume_save
+
+        await handle_terminal_stream_event(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            event=event,
+            event_dict=build_stream_event_dict(event=event, payload=event.payload),
+            step=None,
+            orchestration_session=session,
+            persist_session_state=cast(Any, persist_session_state),
+            request_message="hello",
+        )
+
+        assert lifecycle.run_completed is True
+        assert websocket.sent[0]["data"]["kind"] == "done"
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["summary"]["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_handle_stream_error_ignores_closed_socket_during_error_send() -> None:
+    lifecycle = _LifecycleStub()
+
+    asyncio.run(
+        handle_stream_error(
+            websocket=cast(Any, _ClosedSendWebSocket()),
+            lifecycle=cast(Any, lifecycle),
+            step_builder=cast(Any, _NoopStepBuilder()),
+            exc=RuntimeError("boom"),
+            request_message="hello",
+        )
+    )
+
+    assert lifecycle.run_completed is True
+    assert lifecycle.completed_with is not None
+
+
+def test_handle_stream_error_completes_run_with_error_summary() -> None:
+    async def scenario() -> None:
+        websocket = _RecordingWebSocket()
+        lifecycle = _RecordingLifecycle()
+
+        await handle_stream_error(
+            websocket=cast(Any, websocket),
+            lifecycle=cast(Any, lifecycle),
+            step_builder=cast(Any, _CapturingStepBuilder()),
+            exc=RuntimeError("boom"),
+            request_message="hello",
+        )
+
+        assert websocket.sent
+        assert websocket.sent[0]["type"] == "error"
+        assert lifecycle.run_completed is True
+        assert lifecycle.emitted_steps
+        assert lifecycle.completed_with is not None
+        assert lifecycle.completed_with["status"] == RunStatus.FAILED
+        assert lifecycle.completed_with["error_json"]["error"] == "boom"
+        assert lifecycle.completed_with["summary"]["status"] == "error"
+        assert lifecycle.completed_with["summary"]["termination_reason"] == "error"
+        terminal_event = WorkspaceEvent(
+            kind="error",
+            text="Streaming error: boom",
+            payload={"error_type": "RuntimeError", "error_code": "internal_error"},
+            terminal=True,
+        )
+        assert terminal_event.terminal is True
+
+    asyncio.run(scenario())
+
+
+def test_build_execution_completion_summary_preserves_run_result_and_guarantees_minimum_fields() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="done",
+        payload={
+            "runtime": {"run_id": "runtime-run", "runtime_mode": "daytona_pilot"},
+            "run_result": {"task": "indexed", "status": "completed"},
+            "summary": {"duration_ms": 12, "warnings": ["slow"]},
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="hello",
+        run_id="fallback-run",
+    )
+
+    assert summary["run_id"] == "runtime-run"
+    assert summary["runtime_mode"] == "daytona_pilot"
+    assert summary["task"] == "indexed"
+    assert summary["status"] == "completed"
+    assert summary["warnings"] == ["slow"]
+    assert summary["summary"]["duration_ms"] == 12
+    assert summary["summary"]["termination_reason"] == "done"
+    assert summary["final_artifact"]["value"]["summary"] == "done"
+
+
+def test_build_execution_completion_summary_builds_fallback_final_artifact() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="answer text",
+        payload={"runtime_mode": "daytona_pilot", "sources": [{"id": "src-1"}]},
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="what happened?",
+        run_id="run-123",
+    )
+
+    assert summary["run_id"] == "run-123"
+    assert summary["status"] == "completed"
+    assert summary["final_artifact"]["value"]["text"] == "answer text"
+    assert summary["sources"] == [{"id": "src-1"}]
+    assert summary["summary"]["error"] is None
+
+
+def test_build_execution_completion_summary_prefers_top_level_final_artifact_when_present() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="raw fallback text",
+        payload={
+            "runtime_mode": "daytona_pilot",
+            "final_artifact": {
+                "kind": "markdown",
+                "value": {"summary": "Structured final summary"},
+                "finalization_mode": "SUBMIT",
+            },
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="summarize",
+        run_id="run-top-level-artifact",
+    )
+
+    assert summary["runtime_mode"] == "daytona_pilot"
+    assert summary["final_artifact"]["finalization_mode"] == "SUBMIT"
+    assert summary["final_artifact"]["value"]["summary"] == "Structured final summary"
+
+
+def test_build_execution_completion_summary_builds_error_summary() -> None:
+    event = WorkspaceEvent(
+        kind="error",
+        text="boom",
+        payload={"summary": {"duration_ms": 55}},
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="please run",
+        run_id="run-err",
+    )
+
+    assert summary["status"] == "error"
+    assert summary["termination_reason"] == "error"
+    assert summary["final_artifact"] is None
+    assert summary["summary"]["duration_ms"] == 55
+    assert summary["summary"]["error"] == "boom"
+
+
+def test_build_execution_completion_summary_marks_tool_error_final_as_error() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="claimed success",
+        payload={
+            "runtime_degraded": True,
+            "runtime_failure_category": "tool_execution_error",
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="please run",
+        run_id="run-tool-error",
+    )
+
+    assert summary["status"] == "error"
+    assert summary["termination_reason"] == "done"
+    assert summary["final_artifact"]["value"]["summary"] == "claimed success"
+
+
+def test_build_execution_completion_summary_surfaces_human_review_terminal_state() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="Need a human to review the risky repair.",
+        payload={
+            "recursive_repair": {
+                "repair_mode": "needs_human_review",
+                "repair_target": "Review the risky filesystem mutation.",
+                "repair_steps": ["Confirm the proposed workspace mutation."],
+                "repair_rationale": "The remaining repair path is too risky.",
+            },
+            "final_reasoning": "Recursive repair requested a human review checkpoint.",
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="repair the workspace",
+        run_id="run-human-review",
+    )
+
+    assert summary["status"] == "needs_human_review"
+    assert summary["termination_reason"] == "needs_human_review"
+    assert summary["summary"]["termination_reason"] == "needs_human_review"
+    assert summary["human_review"]["required"] is True
+    assert summary["summary"]["human_review"]["reason"] == "Recursive repair requested a human review checkpoint."
+    assert summary["human_review"]["repair_target"] == "Review the risky filesystem mutation."
+
+
+def test_build_execution_completion_summary_normalizes_human_review_payload() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="Need review",
+        payload={
+            "human_review": {
+                "required": True,
+                "repair_mode": "needs_human_review",
+                "repair_target": "Review target",
+                "repair_steps": [" first ", "", 42, {"ignored": True}],
+            }
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="review this",
+        run_id="run-human-review-normalized",
+    )
+
+    assert summary["human_review"]["reason"] == ("Recursive repair requested human review before continuing.")
+    assert summary["human_review"]["repair_steps"] == ["first"]
+
+
+def test_build_execution_completion_summary_omits_human_review_when_absent() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="done",
+        payload={"summary": {"duration_ms": 1}},
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="finish",
+        run_id="run-no-human-review",
+    )
+
+    assert "human_review" not in summary
+    assert "human_review" not in summary["summary"]
+
+
+def test_build_execution_completion_summary_normalizes_recursive_repair_human_review() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="Need review",
+        payload={
+            "recursive_repair": {
+                "repair_mode": "needs_human_review",
+                "repair_steps": "not-a-list",
+            }
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="review this",
+        run_id="run-recursive-human-review",
+    )
+
+    assert summary["human_review"]["reason"] == ("Recursive repair requested human review before continuing.")
+    assert summary["human_review"]["repair_steps"] == []
 
 
 async def _noop_persist(*, include_volume_save: bool = True) -> None:
