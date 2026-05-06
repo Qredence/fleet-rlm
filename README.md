@@ -238,7 +238,7 @@ The maintained backend is easiest to read in this order:
 That means:
 
 - `runtime/agent/agent.py` and `runtime/agent/runtime.py` are the main cognition loop.
-- `integrations/daytona/interpreter.py` and `integrations/daytona/runtime.py` are the execution and durable-memory substrate.
+- `integrations/daytona/interpreter.py` is the public Daytona interpreter facade; `workspace_manager.py`, `sandbox_executor.py`, `child_delegation.py`, and `runtime.py` own workspace/session state, execution, recursive child construction, and Daytona SDK runtime helpers behind it.
 - FastAPI/WebSocket modules are transport: auth, request parsing, session extraction, lifecycle, and event-envelope delivery.
 
 The supported app surfaces are `Workbench`, `Volumes`, `Optimization`, and `Settings`. Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are no longer first-class product surfaces and should fall through to `/404`.

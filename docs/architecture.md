@@ -77,15 +77,20 @@ Responsibilities:
 Primary files:
 
 - `src/fleet_rlm/integrations/daytona/interpreter.py`
+- `src/fleet_rlm/integrations/daytona/workspace_manager.py`
+- `src/fleet_rlm/integrations/daytona/sandbox_executor.py`
+- `src/fleet_rlm/integrations/daytona/child_delegation.py`
 - `src/fleet_rlm/integrations/daytona/runtime.py`
 - `src/fleet_rlm/integrations/daytona/filesystem.py`
 - `src/fleet_rlm/integrations/daytona/diagnostics.py`
 
 Responsibilities:
 
+- Public `DaytonaInterpreter` facade over typed workspace, execution, and child-delegation collaborators
 - Sandbox and interpreter lifecycle
 - Repo checkout, workspace path staging, and durable mounted volumes
 - Provider-specific diagnostics and volume normalization
+- Pydantic v2 normalization at workspace config/state boundaries; lightweight dataclasses/functions on execution hot paths
 
 ### Recursive RLM isolation
 

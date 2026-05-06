@@ -22,6 +22,7 @@ from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxSession,
 )
 from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
+from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
@@ -322,6 +323,18 @@ def test_daytona_interpreter_execute_direct_reuses_context_and_returns_final_out
     assert isinstance(second, FinalOutput)
     assert getattr(second, "output") == {"output": 5}
     assert len(runtime.session.sandbox.code_interpreter.contexts) == 1
+
+
+def test_daytona_interpreter_default_execution_profile_updates_executor() -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    events: list[dict[str, Any]] = []
+    interpreter.execution_event_callback = events.append
+
+    interpreter.default_execution_profile = ExecutionProfile.ROOT_INTERLOCUTOR
+    interpreter.execute("counter = 2")
+
+    assert events[0]["execution_profile"] == ExecutionProfile.ROOT_INTERLOCUTOR.value
 
 
 def test_daytona_interpreter_strips_trailing_dspy_completed_marker() -> None:

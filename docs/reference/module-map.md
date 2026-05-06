@@ -49,7 +49,7 @@ graph LR
 | `runtime/agent/agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
 | `runtime/agent/agent.py` | `runtime/execution/*` | Streaming turn execution and interpreter support |
 | `runtime/agent/runtime.py` | `integrations/daytona/*` | Recursive child execution over the Daytona substrate |
-| `runtime/execution/*` | `integrations/daytona/interpreter.py`, `integrations/daytona/runtime.py` | Stateful interpreter/session backend integration |
+| `runtime/execution/*` | `integrations/daytona/interpreter.py`, `integrations/daytona/sandbox_executor.py`, `integrations/daytona/runtime.py` | Stateful interpreter/session backend integration |
 | `runtime/models/*` | `runtime/agent/*` | Builder, registry, and runtime-model exports |
 | `runtime/quality/*` | `runtime/agent/*`, `runtime/models/*` | Offline evaluation and optimization against the live runtime graph |
 
@@ -99,7 +99,7 @@ graph LR
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
-| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `runtime.py`, `filesystem.py`, `config.py`, `diagnostics.py`, `types.py`, `bridge.py` |
+| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `workspace_manager.py`, `sandbox_executor.py`, `child_delegation.py`, `workspace_config.py`, `runtime.py`, `filesystem.py`, `config.py`, `diagnostics.py`, `types.py`, `bridge.py` |
 | `runtime/quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `gepa_optimization.py`, `mlflow_evaluation.py`, `mlflow_optimization.py`, `workspace_metrics.py`, `scorers.py` |
 
 ## Verification

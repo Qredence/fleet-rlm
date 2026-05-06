@@ -209,24 +209,8 @@ def test_build_chat_agent_context_uses_canonical_builder(monkeypatch) -> None:
     assert calls == [
         {
             "react_max_iters": 5,
-            "deep_react_max_iters": 9,
-            "enable_adaptive_iters": True,
-            "rlm_max_iterations": 11,
-            "rlm_max_llm_calls": 17,
-            "max_depth": 4,
-            "rlm_child_isolation_mode": "auto",
-            "rlm_child_fork_fallback": "clean",
-            "timeout": 123,
-            "secret_name": "secret",
-            "volume_name": "volume",
-            "interpreter_async_execute": True,
-            "guardrail_mode": "warn",
-            "max_output_chars": 1200,
-            "min_substantive_chars": 40,
             "planner_lm": "planner-lm",
             "delegate_lm": "delegate-lm",
-            "delegate_max_calls_per_turn": 3,
-            "delegate_result_truncation_chars": 500,
             "repository": None,
         }
     ]

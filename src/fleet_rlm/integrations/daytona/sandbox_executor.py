@@ -24,9 +24,16 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 
 from .async_compat import _await_if_needed, _run_async_compat
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
-from .bridge_callbacks import invoke_tool
+from .bridge_callbacks import (
+    bridge_tools,
+    invoke_tool,
+    reject_unsupported_recursive_callbacks,
+    requires_bridge,
+)
 from .interpreter_assets import (
+    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _FINAL_OUTPUT_MARKER,
+    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
     _base_setup_code,
     _generic_submit_code,
     _typed_submit_code,
@@ -78,6 +85,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     _bridge_sandbox_id: str | None
     _bridge_context_id: str | None
     _bridge_tools: Callable[..., Any]
+    _invoke_tool: Callable[..., Any]
     _reject_unsupported_recursive_callbacks: Callable[..., None]
     _requires_bridge: Callable[..., bool]
 
@@ -110,6 +118,25 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
         *,
         extract_final_artifact_fn: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> DaytonaExecutionResponse:
+        pass
+
+
+class ExecutorWorkspace(Protocol):
+    """Workspace/session surface needed by ``SandboxExecutor``."""
+
+    async def aensure_session(self) -> DaytonaSandboxSession:
+        pass
+
+
+class SandboxCallbackOwner(Protocol):
+    """Interpreter facade surface used by bridge callback dispatch."""
+
+    _tools: dict[str, Callable[..., Any]]
+
+    def llm_query(self, prompt: str) -> Any:
+        pass
+
+    def llm_query_batched(self, prompts: list[str]) -> Any:
         pass
 
 
@@ -426,12 +453,7 @@ async def arun_prepared_execution(
         return await bridge.aexecute(
             code=code,
             timeout=int(owner.execute_timeout or owner.timeout),
-            tool_executor=lambda name, args, kwargs: invoke_tool(
-                owner,
-                name,
-                args,
-                kwargs,
-            ),
+            tool_executor=lambda name, args, kwargs: owner._invoke_tool(name, args, kwargs),
         )
     return await callbacks.execute_direct(
         session=session,
@@ -684,9 +706,94 @@ _structured_execution_error = structured_execution_error
 _submit_signature = submit_signature
 
 
-class DaytonaInterpreterExecutionMixin:
+class SandboxExecutor:
+    """Execute code inside Daytona sessions and manage bridge/setup state."""
+
+    def __init__(
+        self,
+        *,
+        workspace: ExecutorWorkspace,
+        callback_owner: SandboxCallbackOwner,
+        async_execute: bool,
+        timeout: int,
+        execute_timeout: int,
+        output_fields: list[dict[str, Any]] | None,
+        volume_mount_path: str,
+        default_execution_profile: ExecutionProfile,
+        native_tool_names: frozenset[str] = _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+        unsupported_recursive_callbacks: tuple[str, ...] = _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
+    ) -> None:
+        self._workspace = workspace
+        self._callback_owner = callback_owner
+        self.async_execute = async_execute
+        self.timeout = timeout
+        self.execute_timeout = execute_timeout
+        self.output_fields = output_fields
+        self.volume_mount_path = volume_mount_path
+        self.default_execution_profile = default_execution_profile
+        self._native_tool_names = native_tool_names
+        self._unsupported_recursive_callbacks = unsupported_recursive_callbacks
+        self._tools: dict[str, Callable[..., Any]] = {}
+        self.execution_event_callback: Callable[[dict[str, Any]], None] | None = None
+        self._bridge: DaytonaToolBridge | None = None
+        self._bridge_sandbox_id: str | None = None
+        self._bridge_context_id: str | None = None
+        self._setup_context_id: str | None = None
+        self._setup_workspace_path: str | None = None
+        self._submit_signature_key: tuple[tuple[str, str], ...] | None = None
+
+    @property
+    def tools(self) -> dict[str, Callable[..., Any]]:
+        return self._tools
+
+    @tools.setter
+    def tools(self, value: dict[str, Callable[..., Any]]) -> None:
+        self._tools = dict(value)
+        self._callback_owner._tools = self._tools
+
+    def reset(self) -> None:
+        _run_async_compat(self.areset)
+
+    async def areset(self) -> None:
+        await self.aclose_bridge()
+        self._setup_context_id = None
+        self._setup_workspace_path = None
+        self._submit_signature_key = None
+
+    def close_bridge(self) -> None:
+        _run_async_compat(self.aclose_bridge)
+
+    async def aclose_bridge(self) -> None:
+        bridge = self._bridge
+        self._bridge = None
+        self._bridge_sandbox_id = None
+        self._bridge_context_id = None
+        if bridge is not None:
+            await bridge.aclose()
+
+    async def _aclose_bridge(self) -> None:
+        await self.aclose_bridge()
+
+    def _bridge_tools(self) -> dict[str, Callable[..., Any]]:
+        self._callback_owner._tools = self._tools
+        return bridge_tools(self._callback_owner, native_tool_names=self._native_tool_names)
+
+    def _reject_unsupported_recursive_callbacks(self, code: str) -> None:
+        reject_unsupported_recursive_callbacks(
+            self._callback_owner,
+            code,
+            callbacks=self._unsupported_recursive_callbacks,
+        )
+
+    def _requires_bridge(self, code: str, tools: dict[str, Callable[..., Any]]) -> bool:
+        return requires_bridge(self._callback_owner, code, tools)
+
+    def _invoke_tool(self, name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        self._callback_owner._tools = self._tools
+        return invoke_tool(self._callback_owner, name, args, kwargs)
+
     def execute(
-        self: Any,
+        self,
         code: str,
         variables: dict[str, Any] | None = None,
         *,
@@ -700,14 +807,14 @@ class DaytonaInterpreterExecutionMixin:
         )
 
     async def aexecute(
-        self: Any,
+        self,
         code: str,
         variables: dict[str, Any] | None = None,
         *,
         execution_profile: ExecutionProfile | None = None,
         envs: dict[str, str] | None = None,
     ) -> str | FinalOutput:
-        session = await self._aensure_session_impl()
+        session = await self._workspace.aensure_session()
         await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
         safe_vars = self.safe_variables(variables)
         profile = execution_profile or self.default_execution_profile
@@ -781,7 +888,7 @@ class DaytonaInterpreterExecutionMixin:
         bridge_cls: type[DaytonaToolBridge] | None = None,
     ) -> DaytonaToolBridge:
         if bridge_cls is None:
-            owner_module = sys.modules.get(type(self).__module__)
+            owner_module = sys.modules.get(type(self._callback_owner).__module__)
             bridge_cls = getattr(owner_module, "DaytonaToolBridge", DaytonaToolBridge)
         return await _aensure_bridge(
             self,

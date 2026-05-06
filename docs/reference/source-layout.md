@@ -85,7 +85,7 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `local_store.py` | Local session/history/optimization persistence. |
 
 | `observability/` | PostHog and MLflow integrations plus trace/request-context helpers. |
-| `daytona/` | Daytona interpreter backend, bridge/runtime helpers, diagnostics, and volume access. |
+| `daytona/` | Daytona interpreter facade, workspace/session manager, sandbox executor, child delegation, bridge/runtime helpers, diagnostics, and volume access. |
 
 ## Packaged Assets
 

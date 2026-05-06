@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from fastapi import WebSocket
 
@@ -152,28 +152,17 @@ class ChatAgentProtocol(Protocol):
 
     async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
 
-    async def execute_command(
-        self, command: str, args: dict[str, Any]
-    ) -> dict[str, Any] | object: ...
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any] | object: ...
 
 
-def set_interpreter_default_profile(
-    interpreter: object | None, cfg: ServerRuntimeConfig
-) -> None:
+def set_interpreter_default_profile(interpreter: object | None, cfg: ServerRuntimeConfig) -> None:
     if interpreter is None:
         return
+    runtime_interpreter = cast(Any, interpreter)
     try:
-        setattr(
-            interpreter,
-            "default_execution_profile",
-            ExecutionProfile(cfg.ws_default_execution_profile),
-        )
+        runtime_interpreter.default_execution_profile = ExecutionProfile(cfg.ws_default_execution_profile)
     except ValueError:
-        setattr(
-            interpreter,
-            "default_execution_profile",
-            ExecutionProfile.ROOT_INTERLOCUTOR,
-        )
+        runtime_interpreter.default_execution_profile = ExecutionProfile.ROOT_INTERLOCUTOR
 
 
 async def _ensure_runtime_models(
@@ -213,9 +202,7 @@ async def prepare_chat_runtime(
 ) -> PreparedChatRuntime | None:
     cfg = config_deps.config
     try:
-        planner_lm, delegate_lm = await _ensure_runtime_models(
-            lm_deps, config_deps, diagnostics_deps
-        )
+        planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
     except Exception as exc:
         if await send_error(
             websocket,
@@ -272,10 +259,7 @@ async def prepare_chat_runtime(
         if await send_error(
             websocket,
             code="planner_missing",
-            message=(
-                "Planner LM not configured. "
-                "Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."
-            ),
+            message=("Planner LM not configured. Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."),
         ):
             await close_websocket(websocket)
         return None
@@ -294,24 +278,8 @@ async def prepare_chat_runtime(
 def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     return {
         "react_max_iters": runtime.cfg.react_max_iters,
-        "deep_react_max_iters": runtime.cfg.deep_react_max_iters,
-        "enable_adaptive_iters": runtime.cfg.enable_adaptive_iters,
-        "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
-        "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
-        "max_depth": runtime.cfg.rlm_max_depth,
-        "rlm_child_isolation_mode": runtime.cfg.rlm_child_isolation_mode,
-        "rlm_child_fork_fallback": runtime.cfg.rlm_child_fork_fallback,
-        "timeout": runtime.cfg.timeout,
-        "secret_name": runtime.cfg.secret_name,
-        "volume_name": runtime.cfg.volume_name,
-        "interpreter_async_execute": runtime.cfg.interpreter_async_execute,
-        "guardrail_mode": runtime.cfg.agent_guardrail_mode,
-        "max_output_chars": runtime.cfg.agent_max_output_chars,
-        "min_substantive_chars": runtime.cfg.agent_min_substantive_chars,
         "planner_lm": runtime.planner_lm,
         "delegate_lm": runtime.delegate_lm,
-        "delegate_max_calls_per_turn": runtime.cfg.delegate_max_calls_per_turn,
-        "delegate_result_truncation_chars": runtime.cfg.delegate_result_truncation_chars,
         "repository": runtime.repository,
     }
 
@@ -360,16 +328,10 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime) -> Any:
     return _ManagedAgentContext(agent, interpreter, pool)
 
 
-def new_chat_session_state(
-    runtime: PreparedChatRuntime, identity: NormalizedIdentity
-) -> ChatSessionState:
+def new_chat_session_state(runtime: PreparedChatRuntime, identity: NormalizedIdentity) -> ChatSessionState:
     return ChatSessionState(
-        canonical_workspace_id=_sanitize_id(
-            identity.tenant_claim, runtime.cfg.ws_default_workspace_id
-        ),
-        canonical_user_id=_sanitize_id(
-            identity.user_claim, runtime.cfg.ws_default_user_id
-        ),
+        canonical_workspace_id=_sanitize_id(identity.tenant_claim, runtime.cfg.ws_default_workspace_id),
+        canonical_user_id=_sanitize_id(identity.user_claim, runtime.cfg.ws_default_user_id),
         owner_tenant_claim=identity.tenant_claim,
         owner_user_claim=identity.user_claim,
         cancel_flag={"cancelled": False},
@@ -381,8 +343,8 @@ __all__ = [
     "ChatSessionState",
     "LocalPersistFn",
     "MaintenanceInterpreterProtocol",
-    "PreparedChatRuntime",
     "PreStreamSetupFn",
+    "PreparedChatRuntime",
     "SessionContext",
     "StreamEventLike",
     "build_chat_agent_context",

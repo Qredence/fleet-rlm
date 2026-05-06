@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import dspy
 
@@ -43,10 +43,10 @@ from fleet_rlm.runtime.factory import (
 )
 
 __all__ = [
+    "arun_react_chat_once",
     "build_chat_agent",
     "run_long_context",
     "run_react_chat_once",
-    "arun_react_chat_once",
 ]
 
 
@@ -95,46 +95,16 @@ def run_react_chat_once(
     message: str,
     docs_path: Path | str | None = None,
     react_max_iters: int = 15,
-    deep_react_max_iters: int = 35,
-    enable_adaptive_iters: bool = True,
-    rlm_max_iterations: int = 30,
-    rlm_max_llm_calls: int = 50,
-    max_depth: int = 2,
-    timeout: int = 900,
-    secret_name: str = "LITELLM",
-    volume_name: str | None = None,
-    verbose: bool = False,
     include_trajectory: bool = True,
     env_file: Path | None = None,
-    interpreter_async_execute: bool = True,
-    guardrail_mode: Literal["off", "warn", "strict"] = "off",
-    max_output_chars: int = 10000,
-    min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,
-    delegate_max_calls_per_turn: int = 8,
-    delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Run a single prompt through the interactive ReAct chat agent."""
     with (
         build_chat_agent(
             docs_path=docs_path,
             react_max_iters=react_max_iters,
-            deep_react_max_iters=deep_react_max_iters,
-            enable_adaptive_iters=enable_adaptive_iters,
-            rlm_max_iterations=rlm_max_iterations,
-            rlm_max_llm_calls=rlm_max_llm_calls,
-            max_depth=max_depth,
-            timeout=timeout,
-            secret_name=secret_name,
-            volume_name=volume_name,
-            verbose=verbose,
-            interpreter_async_execute=interpreter_async_execute,
-            guardrail_mode=guardrail_mode,
-            max_output_chars=max_output_chars,
-            min_substantive_chars=min_substantive_chars,
             delegate_lm=delegate_lm,
-            delegate_max_calls_per_turn=delegate_max_calls_per_turn,
-            delegate_result_truncation_chars=delegate_result_truncation_chars,
             env_file=env_file,
         ) as agent,
         mlflow_request_context(
@@ -158,65 +128,37 @@ async def arun_react_chat_once(
     message: str,
     docs_path: Path | str | None = None,
     react_max_iters: int = 15,
-    deep_react_max_iters: int = 35,
-    enable_adaptive_iters: bool = True,
-    rlm_max_iterations: int = 30,
-    rlm_max_llm_calls: int = 50,
-    max_depth: int = 2,
-    timeout: int = 900,
-    secret_name: str = "LITELLM",
-    volume_name: str | None = None,
-    verbose: bool = False,
     include_trajectory: bool = True,
     env_file: Path | None = None,
     planner_lm: Any | None = None,
-    interpreter_async_execute: bool = True,
-    guardrail_mode: Literal["off", "warn", "strict"] = "off",
-    max_output_chars: int = 10000,
-    min_substantive_chars: int = 20,
     delegate_lm: Any | None = None,
-    delegate_max_calls_per_turn: int = 8,
-    delegate_result_truncation_chars: int = 8000,
 ) -> dict[str, Any]:
     """Async version of ``run_react_chat_once`` using ``achat_turn``."""
     agent = build_chat_agent(
         docs_path=docs_path,
         react_max_iters=react_max_iters,
-        deep_react_max_iters=deep_react_max_iters,
-        enable_adaptive_iters=enable_adaptive_iters,
-        rlm_max_iterations=rlm_max_iterations,
-        rlm_max_llm_calls=rlm_max_llm_calls,
-        max_depth=max_depth,
-        timeout=timeout,
-        secret_name=secret_name,
-        volume_name=volume_name,
-        verbose=verbose,
-        interpreter_async_execute=interpreter_async_execute,
-        guardrail_mode=guardrail_mode,
-        max_output_chars=max_output_chars,
-        min_substantive_chars=min_substantive_chars,
         delegate_lm=delegate_lm,
-        delegate_max_calls_per_turn=delegate_max_calls_per_turn,
-        delegate_result_truncation_chars=delegate_result_truncation_chars,
         env_file=env_file,
         planner_lm=planner_lm,
     )
     try:
-        with build_dspy_context(lm=planner_lm) if planner_lm else nullcontext():
-            with agent:
-                with mlflow_request_context(
-                    _runner_trace_context(
-                        entrypoint="arun-react-chat-once",
-                        request_preview=message,
-                    )
-                ):
-                    result = await agent.achat_turn(message)
-                    if not include_trajectory:
-                        result.pop("trajectory", None)
-                    return merge_trace_result_metadata(
-                        result,
-                        response_preview=result.get("assistant_response"),
-                    )
+        with (
+            build_dspy_context(lm=planner_lm) if planner_lm else nullcontext(),
+            agent,
+            mlflow_request_context(
+                _runner_trace_context(
+                    entrypoint="arun-react-chat-once",
+                    request_preview=message,
+                )
+            ),
+        ):
+            result = await agent.achat_turn(message)
+            if not include_trajectory:
+                result.pop("trajectory", None)
+            return merge_trace_result_metadata(
+                result,
+                response_preview=result.get("assistant_response"),
+            )
     except Exception:
         agent.shutdown()
         raise
@@ -306,9 +248,7 @@ def run_long_context(
         }
         response_preview = str(getattr(result, "summary", "") or "")
 
-        response.update(
-            _rlm_trajectory_payload(result, include_trajectory=include_trajectory)
-        )
+        response.update(_rlm_trajectory_payload(result, include_trajectory=include_trajectory))
         return merge_trace_result_metadata(
             response,
             response_preview=response_preview,

@@ -44,17 +44,25 @@ Current maintained runner surface:
 - `run_long_context(...)`
 ### `build_chat_agent(...)`
 
-Constructs an `AgentRuntime` wrapping `FleetAgent` with runtime controls such as:
+Constructs an `AgentRuntime` wrapping `FleetAgent`. The maintained surface is intentionally small:
 
-- ReAct/RLM iteration budgets
-- recursion depth
-- Daytona timeout/volume
-- guardrail settings
-- delegate LM settings
+- `docs_path`
+- `react_max_iters`
+- `history_max_turns`
+- `extra_tools`
+- `env_file`
+- `planner_lm`
+- `interpreter`
+- `sub_lm` / `delegate_lm`
+- `repository`
+
+Daytona sandbox controls such as timeout, volume, recursion limits, child isolation, and delegate budgets belong on `DaytonaInterpreter`, server runtime config, or the interpreter pool. They are no longer accepted as no-op legacy kwargs by `build_chat_agent`.
 
 ### `run_react_chat_once(...)` and `arun_react_chat_once(...)`
 
 Single-turn wrappers around the interactive ReAct agent.
+
+Their maintained controls are `message`, `docs_path`, `react_max_iters`, `include_trajectory`, `env_file`, and `delegate_lm`; the async wrapper also accepts `planner_lm`.
 
 Common output shape includes:
 

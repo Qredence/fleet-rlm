@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from fleet_rlm.integrations.daytona.workspace_config import ReconfigureOutcome
 
 from dspy.primitives import FinalOutput
 
@@ -61,9 +65,7 @@ class RLMInterpreterProtocol(Protocol):
     ) -> str | FinalOutput:
         pass
 
-    def execution_profile(
-        self, profile: ExecutionProfile
-    ) -> AbstractContextManager[Any]:
+    def execution_profile(self, profile: ExecutionProfile) -> AbstractContextManager[Any]:
         pass
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
@@ -82,7 +84,7 @@ class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
-    ) -> None:
+    ) -> ReconfigureOutcome | None:
         pass
 
     def export_session_state(self) -> dict[str, Any]:
@@ -103,5 +105,5 @@ class StatefulWorkspaceInterpreterProtocol(RLMInterpreterProtocol, Protocol):
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
-    ) -> None:
+    ) -> ReconfigureOutcome | None:
         pass
