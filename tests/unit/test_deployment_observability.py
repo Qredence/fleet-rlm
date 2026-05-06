@@ -10,12 +10,8 @@ pytestmark = pytest.mark.unit
 
 
 def _load_module():
-    script_path = (
-        Path(__file__).resolve().parents[2] / "scripts" / "deployment_observability.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "deployment_observability", script_path
-    )
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "deployment_observability.py"
+    spec = importlib.util.spec_from_file_location("deployment_observability", script_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -64,20 +60,10 @@ def test_build_summary_includes_release_and_observability_links(
 
     assert "## Deployment observability (pypi)" in summary
     assert "[Package](https://pypi.org/project/fleet-rlm/0.5.0/)" in summary
-    assert (
-        "[GitHub release](https://github.com/Qredence/fleet-rlm/releases/tag/v0.5.0)"
-        in summary
-    )
-    assert (
-        "[Workflow run](https://github.com/Qredence/fleet-rlm/actions/runs/12345)"
-        in summary
-    )
-    assert (
-        "[Metrics dashboard](https://grafana.example.com/d/fleet/overview)" in summary
-    )
-    assert (
-        "[PostHog dashboard](https://eu.posthog.com/project/1/dashboard/42)" in summary
-    )
+    assert "[GitHub release](https://github.com/Qredence/fleet-rlm/releases/tag/v0.5.0)" in summary
+    assert "[Workflow run](https://github.com/Qredence/fleet-rlm/actions/runs/12345)" in summary
+    assert "[Metrics dashboard](https://grafana.example.com/d/fleet/overview)" in summary
+    assert "[PostHog dashboard](https://eu.posthog.com/project/1/dashboard/42)" in summary
     assert "PostHog deploy marker: **sent**" in summary
     assert "- Installed wheel smoke test passed" in summary
 
@@ -141,6 +127,4 @@ def test_emit_posthog_deploy_marker_sends_capture_request(
     assert captured["url"] == "https://eu.i.posthog.com/capture/"
     assert captured["timeout"] == 10
     assert "fleet_rlm_release_deployed" in str(captured["body"])
-    assert "https://github.com/Qredence/fleet-rlm/actions/runs/98765" in str(
-        captured["body"]
-    )
+    assert "https://github.com/Qredence/fleet-rlm/actions/runs/98765" in str(captured["body"])

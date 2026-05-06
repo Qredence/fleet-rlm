@@ -39,9 +39,7 @@ _RUNTIME_SETTING_INDEX: dict[str, RuntimeSettingDefinition] = {
 }
 
 DEFAULT_SETTINGS_KEYS: tuple[str, ...] = tuple(
-    definition.key
-    for definition in _RUNTIME_SETTING_DEFINITIONS
-    if definition.include_in_default_snapshot
+    definition.key for definition in _RUNTIME_SETTING_DEFINITIONS if definition.include_in_default_snapshot
 )
 
 RUNTIME_SETTINGS_KEYS: tuple[str, ...] = tuple(
@@ -51,11 +49,7 @@ RUNTIME_SETTINGS_KEYS: tuple[str, ...] = tuple(
 RUNTIME_SETTINGS_ALLOWLIST: frozenset[str] = frozenset(RUNTIME_SETTINGS_KEYS)
 
 _LEGACY_SECRET_KEYS = frozenset({"DSPY_LM_API_KEY"})
-_NON_SECRET_KEYS = frozenset(
-    definition.key
-    for definition in _RUNTIME_SETTING_DEFINITIONS
-    if not definition.secret
-)
+_NON_SECRET_KEYS = frozenset(definition.key for definition in _RUNTIME_SETTING_DEFINITIONS if not definition.secret)
 
 _SENSITIVE_KEY_MARKERS = (
     "SECRET",
@@ -117,9 +111,7 @@ def _read_env_file_values(path: Path) -> dict[str, str]:
             continue
 
         value = value.strip()
-        if len(value) >= 2 and (
-            (value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")
-        ):
+        if len(value) >= 2 and ((value[0] == value[-1] == '"') or (value[0] == value[-1] == "'")):
             value = value[1:-1]
 
         values[key] = value
@@ -156,9 +148,7 @@ def should_mask_key(key: str) -> bool:
         return definition.secret
     if normalized in _NON_SECRET_KEYS:
         return False
-    return normalized in _LEGACY_SECRET_KEYS or any(
-        marker in normalized for marker in _SENSITIVE_KEY_MARKERS
-    )
+    return normalized in _LEGACY_SECRET_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
 
 
 def _is_masked_secret_round_trip(
@@ -212,10 +202,7 @@ def get_settings_snapshot(
         extra = extras.get(key)
         raw_values[key] = "" if extra is None else str(extra)
 
-    masked_values = {
-        key: mask_secret(value) if should_mask_key(key) else value
-        for key, value in raw_values.items()
-    }
+    masked_values = {key: mask_secret(value) if should_mask_key(key) else value for key, value in raw_values.items()}
     return {
         "env_path": str(resolved_env_path),
         "keys": keys,
@@ -245,16 +232,12 @@ def normalize_updates(
     if invalid_keys:
         allowed = ", ".join(sorted(allowlist or ()))
         invalid = ", ".join(sorted(invalid_keys))
-        raise ValueError(
-            f"Unsupported settings key(s): {invalid}. Allowed keys: {allowed}"
-        )
+        raise ValueError(f"Unsupported settings key(s): {invalid}. Allowed keys: {allowed}")
 
     return normalized
 
 
-def apply_env_updates(
-    *, updates: Mapping[str, Any], env_path: Path | None = None
-) -> dict[str, Any]:
+def apply_env_updates(*, updates: Mapping[str, Any], env_path: Path | None = None) -> dict[str, Any]:
     """Apply updates to .env and current process environment."""
     # Normalize and validate updates against the runtime settings allowlist
     normalized_updates = normalize_updates(

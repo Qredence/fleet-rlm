@@ -61,9 +61,7 @@ class RuntimeConfigSnapshot(TypedDict):
     delegate_lm: object | None
 
 
-def apply_runtime_settings_to_config(
-    *, config: ServerRuntimeConfig, normalized: dict[str, str]
-) -> None:
+def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized: dict[str, str]) -> None:
     if "DSPY_LM_MODEL" in normalized:
         resolved_planner_model = normalized["DSPY_LM_MODEL"].strip()
         config.agent_model = resolved_planner_model or None
@@ -73,9 +71,7 @@ def apply_runtime_settings_to_config(
         config.agent_delegate_model = resolved_delegate_model or None
 
     if "DSPY_DELEGATE_LM_SMALL_MODEL" in normalized:
-        resolved_delegate_small_model = normalized[
-            "DSPY_DELEGATE_LM_SMALL_MODEL"
-        ].strip()
+        resolved_delegate_small_model = normalized["DSPY_DELEGATE_LM_SMALL_MODEL"].strip()
         config.agent_delegate_small_model = resolved_delegate_small_model or None
 
     if "DSPY_DELEGATE_LM_MAX_TOKENS" in normalized:
@@ -85,9 +81,7 @@ def apply_runtime_settings_to_config(
         )
 
 
-def _capture_runtime_config_snapshot(
-    *, config: ServerRuntimeConfig, lm_deps: LmDeps
-) -> RuntimeConfigSnapshot:
+def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: LmDeps) -> RuntimeConfigSnapshot:
     return {
         "agent_model": config.agent_model,
         "agent_delegate_model": config.agent_delegate_model,
@@ -131,9 +125,7 @@ def _restore_runtime_settings_env(
             os.environ[key] = value
 
 
-def build_runtime_settings_snapshot(
-    *, config_deps: ConfigDeps
-) -> RuntimeSettingsSnapshot:
+def build_runtime_settings_snapshot(*, config_deps: ConfigDeps) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
         env_path=config_deps.config.env_path,
@@ -166,16 +158,10 @@ async def apply_runtime_settings_patch(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     runtime_snapshot = _capture_runtime_config_snapshot(config=config, lm_deps=lm_deps)
-    env_text = (
-        config.env_path.read_text(encoding="utf-8")
-        if config.env_path.exists()
-        else None
-    )
+    env_text = config.env_path.read_text(encoding="utf-8") if config.env_path.exists() else None
     env_snapshot = {key: os.environ.get(key) for key in RUNTIME_SETTINGS_KEYS}
     result = apply_env_updates(updates=normalized, env_path=config.env_path)
-    applied_updates = {
-        key: normalized[key] for key in result["updated"] if key in normalized
-    }
+    applied_updates = {key: normalized[key] for key in result["updated"] if key in normalized}
     if not applied_updates:
         return RuntimeSettingsUpdateResponse(**result)
 
@@ -217,9 +203,7 @@ async def apply_runtime_settings_patch(
             env_text=env_text,
             env_snapshot=env_snapshot,
         )
-        _restore_runtime_config_snapshot(
-            config=config, lm_deps=lm_deps, snapshot=runtime_snapshot
-        )
+        _restore_runtime_config_snapshot(config=config, lm_deps=lm_deps, snapshot=runtime_snapshot)
         schedule_optional_runtime_startup(state)
         raise
 

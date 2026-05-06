@@ -318,9 +318,7 @@ async def _mark_blocking_run_complete(
             metadata_json=result.get("run_metadata"),
         )
     except Exception:
-        logger.exception(
-            "Failed to mark GEPA optimization run %s as complete", db_run_id
-        )
+        logger.exception("Failed to mark GEPA optimization run %s as complete", db_run_id)
 
 
 def _blocking_optimization_response(
@@ -371,9 +369,7 @@ def _failed_blocking_optimization_response(
         {
             **AUTH_ERROR_RESPONSES,
             400: {"description": "Invalid optimization parameters."},
-            503: {
-                "description": "GEPA optimization is unavailable in this environment."
-            },
+            503: {"description": "GEPA optimization is unavailable in this environment."},
         },
     ),
 )
@@ -452,9 +448,7 @@ async def run_optimization(
         {
             **AUTH_ERROR_RESPONSES,
             400: {"description": "Invalid optimization parameters."},
-            503: {
-                "description": "GEPA optimization is unavailable in this environment."
-            },
+            503: {"description": "GEPA optimization is unavailable in this environment."},
         },
     ),
 )
@@ -511,15 +505,11 @@ async def create_optimization_run(
             )
         resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
         try:
-            stays_under_data_root = (
-                os.path.commonpath([base_root, resolved_output]) == base_root
-            )
+            stays_under_data_root = os.path.commonpath([base_root, resolved_output]) == base_root
         except ValueError:
             stays_under_data_root = False
         if not stays_under_data_root:
-            raise HTTPException(
-                status_code=400, detail="Path escapes the allowed data directory."
-            )
+            raise HTTPException(status_code=400, detail="Path escapes the allowed data directory.")
         output_path = Path(resolved_output)
 
     # Create DB record
@@ -576,15 +566,9 @@ async def list_runs(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
-    status: Annotated[
-        str | None, Query(description="Filter by status: running, completed, failed")
-    ] = None,
-    limit: Annotated[
-        int, Query(ge=1, le=200, description="Maximum number of runs to return.")
-    ] = 50,
-    offset: Annotated[
-        int, Query(ge=0, description="Pagination offset into the run list.")
-    ] = 0,
+    status: Annotated[str | None, Query(description="Filter by status: running, completed, failed")] = None,
+    limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of runs to return.")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset into the run list.")] = 0,
 ) -> list[OptimizationRunResponse]:
     """List optimization runs, most recent first."""
     persisted_identity = await _resolve_persisted_identity(
@@ -597,9 +581,7 @@ async def list_runs(
         try:
             status_filter = OptimizationRunStatus(status)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid status filter: {status!r}"
-            ) from exc
+            raise HTTPException(status_code=400, detail=f"Invalid status filter: {status!r}") from exc
     runs = await persistence.list_optimization_runs(
         tenant_id=persisted_identity.tenant_id,
         workspace_id=persisted_identity.workspace_id,
@@ -626,9 +608,7 @@ async def compare_runs(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
-    run_ids: Annotated[
-        str, Query(description="Comma-separated run IDs to compare (max 5).")
-    ],
+    run_ids: Annotated[str, Query(description="Comma-separated run IDs to compare (max 5).")],
 ) -> RunComparisonResponse:
     """Compare prompt diffs and scores across optimization runs."""
     persisted_identity = await _resolve_persisted_identity(
@@ -641,9 +621,7 @@ async def compare_runs(
     if not raw_ids:
         raise HTTPException(status_code=400, detail="run_ids is required.")
     if len(raw_ids) > 5:
-        raise HTTPException(
-            status_code=400, detail="Maximum 5 runs can be compared at once."
-        )
+        raise HTTPException(status_code=400, detail="Maximum 5 runs can be compared at once.")
 
     comparison_items: list[RunComparisonItem] = []
     for raw_id in raw_ids:
@@ -670,9 +648,7 @@ async def compare_runs(
                 prompt_snapshots=[
                     PromptSnapshotItem(
                         predictor_name=s.predictor_name,
-                        prompt_type=s.prompt_type.value
-                        if hasattr(s.prompt_type, "value")
-                        else str(s.prompt_type),
+                        prompt_type=s.prompt_type.value if hasattr(s.prompt_type, "value") else str(s.prompt_type),
                         prompt_text=s.prompt_text,
                     )
                     for s in snapshots
@@ -697,9 +673,7 @@ async def get_run(
     config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
-    run_id: Annotated[
-        str, ApiPath(description="Identifier of the optimization run to fetch.")
-    ],
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run to fetch.")],
 ) -> OptimizationRunResponse:
     """Get a single optimization run by ID."""
     persisted_identity = await _resolve_persisted_identity(
@@ -715,9 +689,7 @@ async def get_run(
         created_by_user_id=persisted_identity.user_id,
     )
     if row is None:
-        raise HTTPException(
-            status_code=404, detail=f"Optimization run {run_id} not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Optimization run {run_id} not found.")
     return _db_run_to_response(row)
 
 
@@ -741,17 +713,13 @@ async def get_run_results(
     persistence: PersistenceDep,
     run_id: Annotated[
         str,
-        ApiPath(
-            description="Identifier of the optimization run whose results to list."
-        ),
+        ApiPath(description="Identifier of the optimization run whose results to list."),
     ],
     limit: Annotated[
         int,
         Query(ge=1, le=500, description="Maximum number of evaluation rows to return."),
     ] = 100,
-    offset: Annotated[
-        int, Query(ge=0, description="Pagination offset into the evaluation results.")
-    ] = 0,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset into the evaluation results.")] = 0,
 ) -> EvaluationResultsResponse:
     """Return per-example evaluation results for an optimization run."""
     persisted_identity = await _resolve_persisted_identity(
@@ -769,9 +737,7 @@ async def get_run_results(
         )
         is None
     ):
-        raise HTTPException(
-            status_code=404, detail=f"Optimization run {run_id} not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Optimization run {run_id} not found.")
     items, total = await persistence.get_evaluation_results(
         tenant_id=persisted_identity.tenant_id,
         run_id=run_uuid,

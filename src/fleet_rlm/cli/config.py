@@ -48,9 +48,7 @@ def require_current_app_config(*, error_message: str | None = None) -> AppConfig
 def initialize_app_config(overrides: list[str] | None = None) -> AppConfig:
     from hydra import compose, initialize_config_module
 
-    with initialize_config_module(
-        config_module="fleet_rlm.integrations.config", version_base=None
-    ):
+    with initialize_config_module(config_module="fleet_rlm.integrations.config", version_base=None):
         cfg = compose(config_name="config", overrides=overrides or [])
         cfg_dict = OmegaConf.to_container(cfg, resolve=True)
         if not isinstance(cfg_dict, dict):

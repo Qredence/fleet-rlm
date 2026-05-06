@@ -83,14 +83,8 @@ class ChildDelegation:
         volume_subpath: str | None | object = _UNSET,
     ) -> Any:
         owner = self._owner
-        child_volume_name = (
-            owner.volume_name if volume_name is _UNSET else cast(str | None, volume_name)
-        )
-        child_volume_subpath = (
-            owner.volume_subpath
-            if volume_subpath is _UNSET
-            else cast(str | None, volume_subpath)
-        )
+        child_volume_name = owner.volume_name if volume_name is _UNSET else cast(str | None, volume_name)
+        child_volume_subpath = owner.volume_subpath if volume_subpath is _UNSET else cast(str | None, volume_subpath)
         child_cls = cast(Callable[..., Any], owner.__class__)
         return child_cls(
             runtime=runtime,

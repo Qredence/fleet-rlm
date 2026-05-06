@@ -35,8 +35,7 @@ async def get_optimization_status(
     guidance: list[str] = []
     if not gepa_installed:
         guidance.append(
-            "GEPA teleprompt module is not installed. "
-            "Install dspy with GEPA support to enable optimization."
+            "GEPA teleprompt module is not installed. Install dspy with GEPA support to enable optimization."
         )
     if not mlflow_enabled:
         if not mlflow_configured:

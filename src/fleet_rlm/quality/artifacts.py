@@ -33,11 +33,7 @@ def resolve_artifact_path(
     if default_root is not None:
         return Path(default_root) / module_slug / filename
 
-    root = (
-        DAYTONA_QUALITY_ROOT / module_slug
-        if DAYTONA_QUALITY_ROOT.exists()
-        else LOCAL_QUALITY_ROOT / module_slug
-    )
+    root = DAYTONA_QUALITY_ROOT / module_slug if DAYTONA_QUALITY_ROOT.exists() else LOCAL_QUALITY_ROOT / module_slug
     return root / filename
 
 

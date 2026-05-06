@@ -86,14 +86,10 @@ def build_child_interpreter(
             volume_subpath=volume_subpath,
         )
     child_volume_name = (
-        getattr(interpreter, "volume_name", None)
-        if volume_name is _UNSET
-        else cast(str | None, volume_name)
+        getattr(interpreter, "volume_name", None) if volume_name is _UNSET else cast(str | None, volume_name)
     )
     child_volume_subpath = (
-        getattr(interpreter, "volume_subpath", None)
-        if volume_subpath is _UNSET
-        else cast(str | None, volume_subpath)
+        getattr(interpreter, "volume_subpath", None) if volume_subpath is _UNSET else cast(str | None, volume_subpath)
     )
     return interpreter.__class__(
         runtime=runtime,
@@ -105,9 +101,7 @@ def build_child_interpreter(
         repo_url=interpreter.repo_url,
         repo_ref=interpreter.repo_ref,
         context_paths=list(interpreter.context_paths),
-        sandbox_spec=cast(
-            SandboxSpec | None, getattr(interpreter, "sandbox_spec", None)
-        ),
+        sandbox_spec=cast(SandboxSpec | None, getattr(interpreter, "sandbox_spec", None)),
         sandbox_labels=interpreter.sandbox_labels,
         delete_session_on_shutdown=delete_session_on_shutdown,
         delete_context_on_shutdown=delete_context_on_shutdown,
@@ -117,12 +111,8 @@ def build_child_interpreter(
         rlm_max_iterations=getattr(interpreter, "rlm_max_iterations", 30),
         child_isolation_mode=getattr(interpreter, "child_isolation_mode", "auto"),
         child_fork_fallback=getattr(interpreter, "child_fork_fallback", "clean"),
-        delegate_max_calls_per_turn=getattr(
-            interpreter, "delegate_max_calls_per_turn", 8
-        ),
-        delegate_result_truncation_chars=getattr(
-            interpreter, "delegate_result_truncation_chars", 8000
-        ),
+        delegate_max_calls_per_turn=getattr(interpreter, "delegate_max_calls_per_turn", 8),
+        delegate_result_truncation_chars=getattr(interpreter, "delegate_result_truncation_chars", 8000),
         llm_call_timeout=interpreter.llm_call_timeout,
         default_execution_profile=ExecutionProfile.RLM_DELEGATE,
         async_execute=interpreter.async_execute,
@@ -193,12 +183,8 @@ def build_delegate_child(
     remaining_llm_budget: int,
 ) -> Any:
     """Build a recursive RLM child interpreter using the isolation policy."""
-    mode = normalize_child_isolation_mode(
-        getattr(interpreter, "child_isolation_mode", "auto")
-    )
-    fallback = normalize_child_fork_fallback(
-        getattr(interpreter, "child_fork_fallback", "clean")
-    )
+    mode = normalize_child_isolation_mode(getattr(interpreter, "child_isolation_mode", "auto"))
+    fallback = normalize_child_fork_fallback(getattr(interpreter, "child_fork_fallback", "clean"))
     parent_session = parent_session_for_child(interpreter)
     runtime_obj = getattr(interpreter, "runtime", None)
     if runtime_obj is None:
@@ -208,9 +194,7 @@ def build_delegate_child(
         )
     runtime = cast(DaytonaSandboxRuntime, runtime_obj)
     parent_sandbox_id = getattr(parent_session, "sandbox_id", None)
-    effective_volume_name = getattr(parent_session, "volume_name", None) or getattr(
-        interpreter, "volume_name", None
-    )
+    effective_volume_name = getattr(parent_session, "volume_name", None) or getattr(interpreter, "volume_name", None)
 
     def _clean_child(
         *,
@@ -390,11 +374,7 @@ def _child_sandbox_name(strategy: str) -> str:
 
 def _child_volume_subpath(parent_session: DaytonaSandboxSession | None) -> str:
     parent_id = getattr(parent_session, "sandbox_id", None) if parent_session else None
-    return (
-        f"{_CHILD_VOLUME_SUBPATH_ROOT}/"
-        f"{_safe_child_path_token(parent_id)}/"
-        f"{uuid.uuid4().hex[:12]}"
-    )
+    return f"{_CHILD_VOLUME_SUBPATH_ROOT}/{_safe_child_path_token(parent_id)}/{uuid.uuid4().hex[:12]}"
 
 
 __all__ = [

@@ -38,11 +38,7 @@ def bridge_tools(
     native_tool_names: AbstractSet[str] = _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
 ) -> dict[str, Callable[..., Any]]:
     """Return host callbacks exposed to sandbox bridge wrappers."""
-    tools = {
-        name: tool
-        for name, tool in interpreter._tools.items()
-        if name not in native_tool_names
-    }
+    tools = {name: tool for name, tool in interpreter._tools.items() if name not in native_tool_names}
     if "llm_query" not in tools:
         tools["llm_query"] = interpreter.llm_query
     if "llm_query_batched" not in tools:
@@ -94,18 +90,14 @@ def invoke_tool(
             prompt = _callback_arg(args, kwargs, 0, "prompt", "")
             value = interpreter.llm_query(str(prompt))
         elif name == "llm_query_batched":
-            prompts = _normalize_callback_prompts(
-                _callback_arg(args, kwargs, 0, "prompts", [])
-            )
+            prompts = _normalize_callback_prompts(_callback_arg(args, kwargs, 0, "prompts", []))
             value = interpreter.llm_query_batched(prompts)
         elif name == "sub_rlm":
             prompt = _callback_arg(args, kwargs, 0, "prompt", "")
             context = _callback_arg(args, kwargs, 1, "context", "")
             value = interpreter.sub_rlm(str(prompt), context=str(context or ""))
         elif name == "sub_rlm_batched":
-            prompts = _normalize_callback_prompts(
-                _callback_arg(args, kwargs, 0, "prompts", [])
-            )
+            prompts = _normalize_callback_prompts(_callback_arg(args, kwargs, 0, "prompts", []))
             context = _callback_arg(args, kwargs, 1, "context", "")
             value = interpreter.sub_rlm_batched(prompts, context=str(context or ""))
         elif name in interpreter._tools:
@@ -146,10 +138,7 @@ def _mentions_callback_call(code: str, names: AbstractSet[str]) -> bool:
         tree = ast.parse(code)
     except SyntaxError:
         return any(f"{name}(" in code for name in names)
-    return any(
-        isinstance(node, ast.Call) and _call_name(node.func) in names
-        for node in ast.walk(tree)
-    )
+    return any(isinstance(node, ast.Call) and _call_name(node.func) in names for node in ast.walk(tree))
 
 
 def _call_name(node: ast.AST) -> str | None:
@@ -166,10 +155,7 @@ def _json_safe_value(value: Any, *, _depth: int = 0) -> Any:
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     if isinstance(value, Mapping):
-        return {
-            str(key): _json_safe_value(item, _depth=_depth + 1)
-            for key, item in value.items()
-        }
+        return {str(key): _json_safe_value(item, _depth=_depth + 1) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe_value(item, _depth=_depth + 1) for item in value]
     return str(value)

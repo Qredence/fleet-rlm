@@ -94,9 +94,7 @@ def _ensure_registered() -> None:
         try:
             __import__(module_name)
         except Exception as exc:
-            sys.stderr.write(
-                f"[fleet_rlm.quality] failed to load {module_name}: {exc}\n"
-            )
+            sys.stderr.write(f"[fleet_rlm.quality] failed to load {module_name}: {exc}\n")
 
 
 def _reset_registry() -> None:

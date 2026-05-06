@@ -156,7 +156,4 @@ class TestOptimizeCliEndToEnd:
             ],
         )
         assert result.exit_code == 1
-        assert (
-            "not found" in result.output.lower()
-            or "Dataset file not found" in result.output
-        )
+        assert "not found" in result.output.lower() or "Dataset file not found" in result.output

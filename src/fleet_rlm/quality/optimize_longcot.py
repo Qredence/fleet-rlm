@@ -76,9 +76,7 @@ def _score_answer(expected: str, actual: str) -> tuple[float, str]:
     actual_tokens = set(_tokenize(actual_normalized))
     overlap = set_overlap_score(expected_tokens, actual_tokens)
     similarity = SequenceMatcher(None, expected_lower, actual_lower).ratio()
-    contains_reference = (
-        expected_lower in actual_lower or actual_lower in expected_lower
-    )
+    contains_reference = expected_lower in actual_lower or actual_lower in expected_lower
 
     if contains_reference or overlap >= 0.75:
         return (
@@ -89,13 +87,11 @@ def _score_answer(expected: str, actual: str) -> tuple[float, str]:
     if overlap > 0.0 or similarity >= 0.45:
         return (
             _RELATED_WRONG_ANSWER_SCORE,
-            "Answer is related but still wrong. Replace it with "
-            f"'{_clip_text(expected_normalized)}'.",
+            f"Answer is related but still wrong. Replace it with '{_clip_text(expected_normalized)}'.",
         )
     return (
         0.0,
-        "Answer does not match the reference. Replace it with "
-        f"'{_clip_text(expected_normalized)}'.",
+        f"Answer does not match the reference. Replace it with '{_clip_text(expected_normalized)}'.",
     )
 
 
@@ -149,10 +145,7 @@ def _score_reasoning(reasoning: str) -> tuple[float, str]:
             "with concise steps, a causal connector, and a verification check."
         )
     elif score >= 0.45:
-        feedback = (
-            "Reasoning has some support but is still shallow. Add explicit steps "
-            "and a verification check."
-        )
+        feedback = "Reasoning has some support but is still shallow. Add explicit steps and a verification check."
     else:
         feedback = (
             "Reasoning is too thin to justify the answer. Add stepwise support "
@@ -285,10 +278,7 @@ _LONGCOT_SPEC = ModuleOptimizationSpec(
     row_converter=_row_converter,
     metric_builder=_metric_builder,
     metric_name="longcot_qa_metric",
-    description=(
-        "Long chain-of-thought question answering module with explicit "
-        "reasoning and answer fields."
-    ),
+    description=("Long chain-of-thought question answering module with explicit reasoning and answer fields."),
 )
 
 register_module(_LONGCOT_SPEC)

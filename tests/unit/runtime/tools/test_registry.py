@@ -76,13 +76,8 @@ def test_discover_tools_uses_explicit_module_list(
 
     tools = registry.discover_tools()
 
-    assert imported == [
-        f"fleet_rlm.runtime.tools.{module_name}"
-        for module_name in registry.TOOL_MODULE_NAMES
-    ]
-    assert _tool_names(tools) == {
-        f"{module_name}_tool" for module_name in registry.TOOL_MODULE_NAMES
-    }
+    assert imported == [f"fleet_rlm.runtime.tools.{module_name}" for module_name in registry.TOOL_MODULE_NAMES]
+    assert _tool_names(tools) == {f"{module_name}_tool" for module_name in registry.TOOL_MODULE_NAMES}
 
 
 def test_discover_tools_stable_ordering() -> None:
@@ -93,14 +88,10 @@ def test_discover_tools_stable_ordering() -> None:
     tools_second = discover_tools()
 
     names_first = [getattr(t, "name", getattr(t, "__name__", "")) for t in tools_first]
-    names_second = [
-        getattr(t, "name", getattr(t, "__name__", "")) for t in tools_second
-    ]
+    names_second = [getattr(t, "name", getattr(t, "__name__", "")) for t in tools_second]
 
     assert names_first == names_second
-    assert names_first == sorted(names_first), (
-        "Tools should be returned in alphabetical order"
-    )
+    assert names_first == sorted(names_first), "Tools should be returned in alphabetical order"
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +186,7 @@ def test_sandbox_execution_tool_present() -> None:
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
 
     sandbox_names = {n for n in names if "execute" in n or "code" in n}
-    assert sandbox_names, (
-        f"Expected a sandbox execution tool but found only: {sorted(names)}"
-    )
+    assert sandbox_names, f"Expected a sandbox execution tool but found only: {sorted(names)}"
 
 
 # ---------------------------------------------------------------------------
@@ -357,21 +346,11 @@ def test_all_expected_tool_categories_present() -> None:
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
 
     # Check each category has at least one representative
-    assert any("execute" in n or "code" in n for n in names), (
-        f"Missing sandbox execution tool. Found: {sorted(names)}"
-    )
-    assert any("file" in n.lower() for n in names), (
-        f"Missing filesystem tool. Found: {sorted(names)}"
-    )
-    assert any("document" in n.lower() or "load" in n for n in names), (
-        f"Missing document tool. Found: {sorted(names)}"
-    )
-    assert any("chunk" in n.lower() for n in names), (
-        f"Missing chunking tool. Found: {sorted(names)}"
-    )
+    assert any("execute" in n or "code" in n for n in names), f"Missing sandbox execution tool. Found: {sorted(names)}"
+    assert any("file" in n.lower() for n in names), f"Missing filesystem tool. Found: {sorted(names)}"
+    assert any("document" in n.lower() or "load" in n for n in names), f"Missing document tool. Found: {sorted(names)}"
+    assert any("chunk" in n.lower() for n in names), f"Missing chunking tool. Found: {sorted(names)}"
     assert any("buffer" in n.lower() or "volume" in n.lower() for n in names), (
         f"Missing buffer/volume tool. Found: {sorted(names)}"
     )
-    assert any("memory" in n.lower() for n in names), (
-        f"Missing core memory tool. Found: {sorted(names)}"
-    )
+    assert any("memory" in n.lower() for n in names), f"Missing core memory tool. Found: {sorted(names)}"

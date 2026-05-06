@@ -58,9 +58,7 @@ class _HangingLifecycle(_LifecycleStub):
 
 
 def test_build_stream_event_dict_serializes_core_fields() -> None:
-    event = WorkspaceEvent(
-        kind="status", text="hello", payload={"ok": True}, timestamp=ts()
-    )
+    event = WorkspaceEvent(kind="status", text="hello", payload={"ok": True}, timestamp=ts())
 
     event_dict = ws_stream.build_stream_event_dict(event=event, payload=event.payload)
 
@@ -85,9 +83,7 @@ def test_handle_terminal_stream_event_final_completes_and_sends() -> None:
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_stream.build_stream_event_dict(
-                event=event, payload=event.payload
-            ),
+            event_dict=ws_stream.build_stream_event_dict(event=event, payload=event.payload),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -116,9 +112,7 @@ def test_handle_terminal_stream_event_final_still_sends_when_persist_fails() -> 
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_stream.build_stream_event_dict(
-                event=event, payload=event.payload
-            ),
+            event_dict=ws_stream.build_stream_event_dict(event=event, payload=event.payload),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -146,9 +140,7 @@ def test_handle_terminal_stream_event_error_sends_before_completion() -> None:
                 websocket=cast(Any, websocket),
                 lifecycle=cast(Any, lifecycle),
                 event=event,
-                event_dict=ws_stream.build_stream_event_dict(
-                    event=event, payload=event.payload
-                ),
+                event_dict=ws_stream.build_stream_event_dict(event=event, payload=event.payload),
                 step=None,
                 persist_session_state=cast(Any, persist_session_state),
                 request_message="hello",
@@ -191,9 +183,7 @@ def test_handle_terminal_stream_event_final_tool_error_marks_run_failed() -> Non
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_stream.build_stream_event_dict(
-                event=event, payload=event.payload
-            ),
+            event_dict=ws_stream.build_stream_event_dict(event=event, payload=event.payload),
             step=None,
             persist_session_state=cast(Any, persist_session_state),
             request_message="hello",
@@ -227,9 +217,7 @@ def test_handle_terminal_stream_event_accepts_session_context() -> None:
             websocket=cast(Any, websocket),
             lifecycle=cast(Any, lifecycle),
             event=event,
-            event_dict=ws_stream.build_stream_event_dict(
-                event=event, payload=event.payload
-            ),
+            event_dict=ws_stream.build_stream_event_dict(event=event, payload=event.payload),
             step=None,
             orchestration_session=session,
             persist_session_state=cast(Any, persist_session_state),

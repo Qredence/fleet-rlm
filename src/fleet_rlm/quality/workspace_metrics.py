@@ -70,10 +70,7 @@ def exact_match_feedback_metric(
         )
 
     if not actual:
-        return 0.0, (
-            f"Empty response. Expected: '{expected[:200]}'. "
-            "The model produced no output for this task."
-        )
+        return 0.0, (f"Empty response. Expected: '{expected[:200]}'. The model produced no output for this task.")
 
     return 0.0, (
         f"Mismatch. Expected: '{expected[:120]}'. Got: '{actual[:120]}'. "
@@ -122,9 +119,7 @@ def completeness_feedback_metric(
     if coverage >= 0.9:
         return 1.0, f"Excellent coverage ({coverage:.0%}) of expected concepts."
     if coverage >= 0.6:
-        return coverage, (
-            f"Good coverage ({coverage:.0%}) but missing: {', '.join(missing_sample)}."
-        )
+        return coverage, (f"Good coverage ({coverage:.0%}) but missing: {', '.join(missing_sample)}.")
     return coverage, (
         f"Low coverage ({coverage:.0%}). Missing key terms: {', '.join(missing_sample)}. "
         f"The response should address these concepts from the expected answer."
@@ -146,12 +141,8 @@ def workspace_feedback_metric(
 
     Weighting: 60% exact-match, 40% completeness coverage.
     """
-    em_score, em_feedback = exact_match_feedback_metric(
-        gold, pred, output_key=output_key, trace=trace
-    )
-    comp_score, comp_feedback = completeness_feedback_metric(
-        gold, pred, output_key=output_key, trace=trace
-    )
+    em_score, em_feedback = exact_match_feedback_metric(gold, pred, output_key=output_key, trace=trace)
+    comp_score, comp_feedback = completeness_feedback_metric(gold, pred, output_key=output_key, trace=trace)
 
     score = 0.6 * em_score + 0.4 * comp_score
     feedback = f"[exact_match={em_score:.2f}] {em_feedback} [completeness={comp_score:.2f}] {comp_feedback}"

@@ -67,9 +67,7 @@ def test_normalize_updates_enforces_allowlist() -> None:
         )
 
 
-def test_apply_env_updates_writes_dotenv_and_process_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_apply_env_updates_writes_dotenv_and_process_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_path = tmp_path / ".env"
     clear_env(monkeypatch, "DSPY_LM_MODEL", "DAYTONA_TARGET")
 

@@ -45,8 +45,5 @@ def mounted_storage_roots(mounted_root: str) -> RuntimeStorageRoots:
 
 def runtime_storage_roots(interpreter: RLMInterpreterProtocol) -> RuntimeStorageRoots:
     """Return canonical mounted durable roots for an interpreter."""
-    mounted_root = (
-        str(getattr(interpreter, "volume_mount_path", "/data") or "/data").rstrip("/")
-        or "/data"
-    )
+    mounted_root = str(getattr(interpreter, "volume_mount_path", "/data") or "/data").rstrip("/") or "/data"
     return mounted_storage_roots(mounted_root)

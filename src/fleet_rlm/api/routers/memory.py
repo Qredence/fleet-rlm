@@ -18,12 +18,8 @@ router = APIRouter(
 
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
-    503: {
-        "description": "Memory services are unavailable because server startup is incomplete."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
+    503: {"description": "Memory services are unavailable because server startup is incomplete."},
 }
 
 MEMORY_ERROR_RESPONSES: OpenAPIResponses = {
@@ -44,9 +40,7 @@ async def list_memory_items(
     persisted_identity: PersistedIdentityDep,
     scope: Annotated[
         str | None,
-        Query(
-            description="Filter by memory scope (user, tenant, workspace, run, session)."
-        ),
+        Query(description="Filter by memory scope (user, tenant, workspace, run, session)."),
     ] = None,
     scope_id: Annotated[
         str | None,

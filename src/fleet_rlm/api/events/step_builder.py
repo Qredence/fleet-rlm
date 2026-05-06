@@ -172,8 +172,8 @@ class ExecutionStepBuilder:
         payload_obj: dict[str, Any],
         timestamp: float,
     ) -> ExecutionStep:
-        step_type, label, input_payload, output_payload, _tool_name = (
-            build_tool_call_spec(text=text, payload_obj=payload_obj)
+        step_type, label, input_payload, output_payload, _tool_name = build_tool_call_spec(
+            text=text, payload_obj=payload_obj
         )
         step = self._build_step(
             step_type=step_type,
@@ -194,8 +194,8 @@ class ExecutionStepBuilder:
         payload_obj: dict[str, Any],
         timestamp: float,
     ) -> ExecutionStep:
-        step_type, label, input_payload, output_payload, _tool_name = (
-            build_tool_result_spec(text=text, payload_obj=payload_obj)
+        step_type, label, input_payload, output_payload, _tool_name = build_tool_result_spec(
+            text=text, payload_obj=payload_obj
         )
         parent_id = self._last_tool_step_id or self._resolve_parent(payload_obj)
         return self._build_step(

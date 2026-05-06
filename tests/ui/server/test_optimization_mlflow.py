@@ -63,9 +63,7 @@ def _run_local(**kwargs) -> None:
     )
 
     persistence = kwargs.pop("persistence", None) or _make_persistence_mock()
-    persisted_identity = (
-        kwargs.pop("persisted_identity", None) or _make_persisted_identity()
-    )
+    persisted_identity = kwargs.pop("persisted_identity", None) or _make_persisted_identity()
     asyncio.run(
         run_optimization_background(
             **kwargs,
@@ -311,11 +309,7 @@ class TestBackgroundRunnerMlflowUnavailable:
         run_mod_mock = MagicMock(return_value=fake_result)
         spec_mock = MagicMock()
 
-        original_import = (
-            __builtins__.__import__
-            if hasattr(__builtins__, "__import__")
-            else __import__
-        )
+        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
         def _fail_mlflow(name, *args, **kwargs):
             if name == "mlflow":

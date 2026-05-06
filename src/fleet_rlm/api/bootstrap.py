@@ -129,9 +129,7 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     return state
 
 
-async def initialize_persistence(
-    persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig
-) -> None:
+async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig) -> None:
     """Initialize persistence paths based on runtime config."""
     from fleet_rlm.integrations.local_store import LocalStore
 
@@ -143,8 +141,7 @@ async def initialize_persistence(
             except (TimeoutError, OSError, Exception) as exc:
                 if cfg.database_required:
                     raise RuntimeError(
-                        f"DATABASE_URL is set and database_required=true, but the "
-                        f"database is unreachable: {exc}"
+                        f"DATABASE_URL is set and database_required=true, but the database is unreachable: {exc}"
                     ) from exc
                 # Graceful fallback for local development
                 logger.warning(
@@ -271,9 +268,7 @@ async def _warm_optional_runtime_services(
             raise
         except Exception as exc:
             logger.warning("%s optional startup failed", service_name, exc_info=True)
-            set_optional_service_status(
-                state.diagnostics_deps, service_name, "degraded", error=str(exc)
-            )
+            set_optional_service_status(state.diagnostics_deps, service_name, "degraded", error=str(exc))
 
     try:
         await ensure_runtime_models(

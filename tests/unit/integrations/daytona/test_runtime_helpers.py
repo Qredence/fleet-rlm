@@ -34,9 +34,7 @@ class _FakeDaytonaApiError(Exception):
 
 
 def test_classify_daytona_sdk_error_treats_400_quota_as_resource_error() -> None:
-    error = _FakeDaytonaApiError(
-        "Quota limit exceeded for sandbox resources", status=400
-    )
+    error = _FakeDaytonaApiError("Quota limit exceeded for sandbox resources", status=400)
 
     classification = classify_daytona_sdk_error(error)
 
@@ -55,9 +53,7 @@ def test_classify_daytona_sdk_error_treats_429_as_resource_error() -> None:
 
 
 def test_format_daytona_sdk_error_includes_status_and_provider_message() -> None:
-    error = _FakeDaytonaApiError(
-        "precondition failed: resource unavailable", status=400
-    )
+    error = _FakeDaytonaApiError("precondition failed: resource unavailable", status=400)
 
     message = format_daytona_sdk_error(error)
 

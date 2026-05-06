@@ -36,12 +36,8 @@ class Tenant(Base):
         Index("ix_tenants_status", "status"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
-    entra_tenant_id: Mapped[str] = mapped_column(
-        String(128), nullable=False, unique=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
+    entra_tenant_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -55,9 +51,7 @@ class Tenant(Base):
         nullable=False,
         server_default=TenantStatus.ACTIVE.value,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -69,29 +63,21 @@ class Tenant(Base):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "entra_user_id", name="uq_users_tenant_entra_user"
-        ),
+        UniqueConstraint("tenant_id", "entra_user_id", name="uq_users_tenant_entra_user"),
         UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id_id"),
         Index("ix_users_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_users_tenant_email", "tenant_id", "email"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     entra_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -109,15 +95,11 @@ class Membership(Base):
             ondelete="CASCADE",
             name="fk_tenant_memberships_tenant_user__users_tenant_id_id",
         ),
-        UniqueConstraint(
-            "tenant_id", "user_id", name="uq_tenant_memberships_tenant_user"
-        ),
+        UniqueConstraint("tenant_id", "user_id", name="uq_tenant_memberships_tenant_user"),
         Index("ix_tenant_memberships_tenant_created_at", "tenant_id", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -127,12 +109,8 @@ class Membership(Base):
         nullable=False,
         server_default=MembershipRole.MEMBER.value,
     )
-    is_default: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -156,9 +134,7 @@ class Workspace(Base):
         Index("ix_workspaces_tenant_updated_at", "tenant_id", "updated_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -169,22 +145,14 @@ class Workspace(Base):
         nullable=False,
         server_default=WorkspaceStatus.ACTIVE.value,
     )
-    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
-    runtime_provider: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default=text("'daytona'")
-    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    runtime_provider: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'daytona'"))
     active_volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    metadata_json: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     last_activity_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -221,9 +189,7 @@ class WorkspaceMembership(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -234,12 +200,8 @@ class WorkspaceMembership(Base):
         nullable=False,
         server_default=WorkspaceRole.MEMBER.value,
     )
-    is_default: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -274,22 +236,14 @@ class WorkspaceRuntimeSetting(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
-    settings_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    settings_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

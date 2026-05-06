@@ -96,9 +96,7 @@ def test_build_transcript_dataset_rows_list_and_int_defaults():
     ):
         rows, _label = build_transcript_dataset_rows(
             module_slug="defaulted-module",
-            turns=[
-                ("Summarize the repo state", "The latest change touched the router.")
-            ],
+            turns=[("Summarize the repo state", "The latest change touched the router.")],
         )
 
     row = rows[0]

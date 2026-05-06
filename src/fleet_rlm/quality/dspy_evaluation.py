@@ -36,10 +36,7 @@ def _metric_supports_trace(metric: Callable[..., Any]) -> bool:
         params = inspect.signature(metric).parameters.values()
     except (TypeError, ValueError):
         return False
-    return any(
-        param.kind is inspect.Parameter.VAR_KEYWORD or param.name == "trace"
-        for param in params
-    )
+    return any(param.kind is inspect.Parameter.VAR_KEYWORD or param.name == "trace" for param in params)
 
 
 def _coerce_metric_score(result: Any) -> float:
@@ -125,9 +122,7 @@ def evaluate_program(
         "metric": getattr(source_metric, "__name__", str(source_metric)),
     }
     if return_all_scores:
-        result["all_scores"] = [
-            _coerce_metric_score(score) for _example, _prediction, score in results
-        ]
+        result["all_scores"] = [_coerce_metric_score(score) for _example, _prediction, score in results]
     if return_outputs:
         result["outputs"] = [prediction for _example, prediction, _score in results]
 

@@ -40,9 +40,7 @@ def append_session_artifact(
         artifacts = []
         manifest["artifacts"] = artifacts
 
-    artifact_uri = str(
-        result.get("saved_path") or args.get("path") or result.get("alias") or ""
-    )
+    artifact_uri = str(result.get("saved_path") or args.get("path") or result.get("alias") or "")
     artifacts.append(
         {
             "timestamp": now_iso(),
@@ -95,11 +93,7 @@ async def track_command_artifact_if_needed(
     persistence_required: bool,
 ) -> None:
     """Track command-produced artifacts in session metadata and durable storage."""
-    if (
-        session_record is None
-        or not isinstance(result, dict)
-        or not is_artifact_tracking_command(command)
-    ):
+    if session_record is None or not isinstance(result, dict) or not is_artifact_tracking_command(command):
         return
 
     result_dict = result

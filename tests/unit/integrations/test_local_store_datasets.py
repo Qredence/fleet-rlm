@@ -62,9 +62,7 @@ def test_list_datasets_returns_items():
 
     create_dataset(name="a", row_count=1, format="json", uri="/a.json")
     create_dataset(name="b", row_count=2, format="jsonl", uri="/b.jsonl")
-    create_dataset(
-        name="c", row_count=3, format="json", uri="/c.json", module_slug="qa"
-    )
+    create_dataset(name="c", row_count=3, format="json", uri="/c.json", module_slug="qa")
 
     items, total = list_datasets()
     assert total == 3
@@ -77,9 +75,7 @@ def test_list_datasets_filter_by_module():
     from fleet_rlm.integrations.local_store import create_dataset, list_datasets
 
     create_dataset(name="a", row_count=1, format="json", uri="/a.json")
-    create_dataset(
-        name="b", row_count=2, format="jsonl", uri="/b.jsonl", module_slug="qa"
-    )
+    create_dataset(name="b", row_count=2, format="jsonl", uri="/b.jsonl", module_slug="qa")
 
     items, total = list_datasets(module_slug="qa")
     assert total == 1

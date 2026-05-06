@@ -197,9 +197,7 @@ def test_complete_run_drains_batched_steps_before_shutdown() -> None:
             )
         )
         await lifecycle._persist_queue.put(None)
-        lifecycle._persist_worker_task = asyncio.create_task(
-            lifecycle._persist_worker()
-        )
+        lifecycle._persist_worker_task = asyncio.create_task(lifecycle._persist_worker())
 
         await asyncio.wait_for(lifecycle.complete_run(RunStatus.COMPLETED), timeout=1.0)
 

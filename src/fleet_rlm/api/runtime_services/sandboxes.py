@@ -193,9 +193,7 @@ async def _list_sandboxes(
 ) -> Any:
     if labels_filter:
         try:
-            return await _await_if_needed(
-                client.list(labels=labels_filter, page=page, limit=limit)
-            )
+            return await _await_if_needed(client.list(labels=labels_filter, page=page, limit=limit))
         except TypeError:
             pass
     return await _await_if_needed(client.list(page=page, limit=limit))

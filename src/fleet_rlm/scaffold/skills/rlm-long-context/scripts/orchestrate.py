@@ -46,9 +46,7 @@ def _load_helpers():
     )
 
 
-cache_result, get_cached_result, load_rank_context, rank_chunks_by_query = (
-    _load_helpers()
-)
+cache_result, get_cached_result, load_rank_context, rank_chunks_by_query = _load_helpers()
 
 
 class RLMConfig:
@@ -105,12 +103,7 @@ def estimate_confidence(results: list[dict], query: str) -> float:
 
     # Simple heuristic: more high-confidence findings = higher confidence
     total_findings = sum(len(r.get("relevant", [])) for r in results)
-    high_conf = sum(
-        1
-        for r in results
-        for f in r.get("relevant", [])
-        if f.get("confidence") == "high"
-    )
+    high_conf = sum(1 for r in results for f in r.get("relevant", []) if f.get("confidence") == "high")
 
     # Confidence based on finding density and quality
     if total_findings == 0:
@@ -128,9 +121,7 @@ def print_progress(current: int, total: int, confidence: float):
     bar_len = 30
     filled = int(bar_len * current / total)
     bar = "█" * filled + "░" * (bar_len - filled)
-    print(
-        f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end=""
-    )
+    print(f"\r[{bar}] {pct:.1f}% ({current}/{total}) Confidence: {confidence:.2f}", end="")
 
 
 def orchestrate(
@@ -161,9 +152,7 @@ def orchestrate(
     chunks_to_process = [
         (
             start,
-            os.path.join(
-                config.chunks_dir, f"chunk_{start // config.chunk_size:04d}.txt"
-            ),
+            os.path.join(config.chunks_dir, f"chunk_{start // config.chunk_size:04d}.txt"),
         )
         for start, _end, _score in ranked_chunks
     ]
@@ -176,9 +165,7 @@ def orchestrate(
             cached = get_cached_result(config.cache_dir, chunk_path, query)
             if cached:
                 results.append(cached["result"])
-                print_progress(
-                    i, len(chunks_to_process), estimate_confidence(results, query)
-                )
+                print_progress(i, len(chunks_to_process), estimate_confidence(results, query))
                 print(f"  [cached] chunk_{chunk_idx:04d}")
                 continue
 
@@ -203,9 +190,7 @@ def orchestrate(
         # Early exit check
         if config.enable_early_exit and i >= 3:
             if confidence >= config.confidence_threshold:
-                print(
-                    f"\n✓ Early exit: confidence {confidence:.2f} >= {config.confidence_threshold}"
-                )
+                print(f"\n✓ Early exit: confidence {confidence:.2f} >= {config.confidence_threshold}")
                 break
 
     print()  # End progress line
@@ -224,9 +209,7 @@ def orchestrate(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Orchestrate RLM workflow with optimizations"
-    )
+    parser = argparse.ArgumentParser(description="Orchestrate RLM workflow with optimizations")
     parser.add_argument(
         "--query",
         "-q",

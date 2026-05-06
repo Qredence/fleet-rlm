@@ -76,9 +76,7 @@ def test_default_config(monkeypatch: pytest.MonkeyPatch):
     assert cfg.cors_allowed_origins == ["*"]
     assert cfg.ws_execution_max_queue == 256
     assert cfg.ws_execution_drop_policy == "drop_oldest"
-    assert (
-        cfg.entra_issuer_template == "https://login.microsoftonline.com/{tenantid}/v2.0"
-    )
+    assert cfg.entra_issuer_template == "https://login.microsoftonline.com/{tenantid}/v2.0"
     assert cfg.entra_issuer_url is None
     assert cfg.expose_docs is True
     assert cfg.expose_root is True
@@ -312,9 +310,7 @@ def test_validate_startup_rejects_local_defaults_on_managed_host(
 
     cfg = ServerRuntimeConfig()
 
-    with pytest.raises(
-        ValueError, match="Managed deployment detected with APP_ENV=local"
-    ):
+    with pytest.raises(ValueError, match="Managed deployment detected with APP_ENV=local"):
         cfg.validate_startup_or_raise()
 
 
@@ -356,9 +352,7 @@ def test_validate_startup_requires_database_for_entra() -> None:
         cfg.validate_startup_or_raise()
 
 
-def test_validate_startup_allows_fixed_entra_issuer_url_for_single_tenant_beta() -> (
-    None
-):
+def test_validate_startup_allows_fixed_entra_issuer_url_for_single_tenant_beta() -> None:
     cfg = ServerRuntimeConfig(
         app_env="production",
         auth_mode="entra",
@@ -472,9 +466,7 @@ def test_get_server_state_missing_raises_http_503() -> None:
 def test_session_key() -> None:
     owner_id = owner_fingerprint("workspace", "user")
     assert session_key("workspace", "user") == f"owner:{owner_id}:__default__"
-    assert session_key("workspace", "user", "session-1") == (
-        f"owner:{owner_id}:session-1"
-    )
+    assert session_key("workspace", "user", "session-1") == (f"owner:{owner_id}:session-1")
 
 
 def test_sanitize_id_rejects_dot_only_segments() -> None:

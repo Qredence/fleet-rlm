@@ -33,10 +33,7 @@ def _resolved_manifest_path(
     if not workspace_id or not user_id or not session_id:
         return None
     safe_session_id = _sanitize_id(session_id, "default-session")
-    return (
-        f"meta/workspaces/{workspace_id}/users/{user_id}/"
-        f"react-session-{safe_session_id}.json"
-    )
+    return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
 def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str:
@@ -73,9 +70,7 @@ def _manifest_metadata(manifest: dict[str, Any]) -> dict[str, Any]:
 
 def _restorable_session_state(session_record: dict[str, Any]) -> Any:
     session_data = session_record.get("session")
-    restored_state: Any = (
-        session_data.get("state", {}) if isinstance(session_data, dict) else {}
-    )
+    restored_state: Any = session_data.get("state", {}) if isinstance(session_data, dict) else {}
     manifest_data = session_record.get("manifest")
     if not restored_state and isinstance(manifest_data, dict):
         restored_state = manifest_data.get("state", {})
@@ -107,9 +102,7 @@ async def _link_database_session(
     manifest = cached.get("manifest")
     manifest_dict = manifest if isinstance(manifest, dict) else {}
     metadata = _manifest_metadata(manifest_dict)
-    existing_db_session_id = str(
-        cached.get("db_session_id") or metadata.get("db_session_id") or ""
-    ).strip()
+    existing_db_session_id = str(cached.get("db_session_id") or metadata.get("db_session_id") or "").strip()
     existing_session_uuid = _parse_uuid(existing_db_session_id)
 
     if isinstance(persistence, FleetRepository) and identity_rows is not None:
@@ -240,11 +233,7 @@ async def switch_session_if_needed(
     if cached is None:
         from ...runtime_services.chat_persistence import load_manifest_from_volume
 
-        manifest = (
-            await load_manifest_from_volume(agent, manifest_path)
-            if interpreter is not None
-            else {}
-        )
+        manifest = await load_manifest_from_volume(agent, manifest_path) if interpreter is not None else {}
         cached = {
             "key": key,
             "workspace_id": workspace_id,

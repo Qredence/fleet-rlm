@@ -96,9 +96,7 @@ class LLMQueryMixin:
         """
         target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
         if target_lm is None:
-            raise RuntimeError(
-                "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter."
-            )
+            raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
 
         # Execute LM call with timeout to prevent hangs
         def _execute_lm() -> str:
@@ -114,9 +112,7 @@ class LLMQueryMixin:
         # threads when repeated calls time out, while not serializing all calls.
         with self._sub_lm_executor_lock:
             if self._sub_lm_executor is None:
-                self._sub_lm_executor = ThreadPoolExecutor(
-                    max_workers=min(8, max(1, self.max_llm_calls))
-                )
+                self._sub_lm_executor = ThreadPoolExecutor(max_workers=min(8, max(1, self.max_llm_calls)))
             executor = self._sub_lm_executor
 
         ctx = contextvars.copy_context()
@@ -197,9 +193,7 @@ class LLMQueryMixin:
                 # Copy a fresh context per task. Reusing one Context object
                 # across concurrent threads can raise:
                 # "RuntimeError: cannot enter context ... is already entered".
-                executor.submit(
-                    contextvars.copy_context().run, self._query_sub_lm, p
-                ): i
+                executor.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
                 for i, p in enumerate(prompts)
             }
             for future in as_completed(future_to_idx):
@@ -212,9 +206,7 @@ class LLMQueryMixin:
 
         if errors:
             errors.sort(key=lambda x: x[0])
-            details = "; ".join(
-                f"prompt[{idx}]: {type(exc).__name__}: {exc}" for idx, exc in errors
-            )
+            details = "; ".join(f"prompt[{idx}]: {type(exc).__name__}: {exc}" for idx, exc in errors)
             raise RuntimeError(
                 f"llm_query_batched failed for {len(errors)}/{len(prompts)} prompts: {details}"
             ) from errors[0][1]
@@ -267,8 +259,7 @@ class LLMQueryMixin:
             raise ValueError("sub_rlm prompt cannot be empty")
         if self._sub_rlm_depth >= self._sub_rlm_max_depth:
             raise RuntimeError(
-                f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached. "
-                "Cannot recurse further."
+                f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached. Cannot recurse further."
             )
         return self._execute_sub_rlm(prompt, context)
 
@@ -291,9 +282,7 @@ class LLMQueryMixin:
         if not prompts:
             return []
         if self._sub_rlm_depth >= self._sub_rlm_max_depth:
-            raise RuntimeError(
-                f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached."
-            )
+            raise RuntimeError(f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached.")
 
         leases = self._sub_rlm_budget_leases(len(prompts))
         results: dict[int, str] = {}
@@ -320,12 +309,8 @@ class LLMQueryMixin:
 
         if errors:
             errors.sort(key=lambda x: x[0])
-            details = "; ".join(
-                f"prompt[{i}]: {type(e).__name__}: {e}" for i, e in errors
-            )
-            raise RuntimeError(
-                f"sub_rlm_batched failed for {len(errors)}/{len(prompts)}: {details}"
-            ) from errors[0][1]
+            details = "; ".join(f"prompt[{i}]: {type(e).__name__}: {e}" for i, e in errors)
+            raise RuntimeError(f"sub_rlm_batched failed for {len(errors)}/{len(prompts)}: {details}") from errors[0][1]
 
         return [results[i] for i in range(len(prompts))]
 
@@ -338,23 +323,17 @@ class LLMQueryMixin:
         """Spawn a child dspy.RLM interpreter and return its answer."""
         remaining = self._remaining_llm_budget()
         if remaining <= 0:
-            raise RuntimeError(
-                "LLM call budget exhausted — cannot spawn sub_rlm child."
-            )
+            raise RuntimeError("LLM call budget exhausted — cannot spawn sub_rlm child.")
         child_budget = remaining
         if llm_budget_lease is not None:
             child_budget = max(0, min(remaining, int(llm_budget_lease)))
         if child_budget <= 0:
-            raise RuntimeError(
-                "LLM call budget exhausted — cannot spawn sub_rlm child."
-            )
+            raise RuntimeError("LLM call budget exhausted — cannot spawn sub_rlm child.")
 
         child = self.build_delegate_child(remaining_llm_budget=child_budget)
         if llm_budget_lease is not None:
             self._install_child_budget_lease(child, child_budget)
-        max_iterations = max(
-            1, min(getattr(self, "rlm_max_iterations", 30), child_budget)
-        )
+        max_iterations = max(1, min(getattr(self, "rlm_max_iterations", 30), child_budget))
 
         child_module = build_recursive_subquery_rlm(
             interpreter=child,
@@ -419,9 +398,7 @@ class LLMQueryMixin:
                 raise ValueError("LLM call increment cannot be negative")
             with lock:
                 if consumed + n_int > lease:
-                    raise RuntimeError(
-                        f"LLM budget lease exceeded: {consumed} + {n_int} > {lease}."
-                    )
+                    raise RuntimeError(f"LLM budget lease exceeded: {consumed} + {n_int} > {lease}.")
                 parent_check(n_int)
                 consumed += n_int
 
@@ -455,11 +432,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
     if value is None or isinstance(value, (bool, int, float)):
         return False
     if isinstance(value, Mapping):
-        return any(
-            _contains_marker(item, marker, _depth=_depth + 1)
-            for pair in value.items()
-            for item in pair
-        )
+        return any(_contains_marker(item, marker, _depth=_depth + 1) for pair in value.items() for item in pair)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
     value_dict = getattr(value, "__dict__", None)
@@ -467,8 +440,7 @@ def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
         filtered = {
             key: item
             for key, item in value_dict.items()
-            if key
-            in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
+            if key in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
         }
         if _contains_marker(filtered, marker, _depth=_depth + 1):
             return True

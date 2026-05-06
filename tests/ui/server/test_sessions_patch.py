@@ -71,17 +71,13 @@ class _PatchSessionRepository:
         self.session.updated_at = datetime.now(timezone.utc)
         return self.session
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
@@ -126,9 +122,7 @@ def test_patch_session_metadata(default_client, auth_headers, patch_session_repo
     assert patch_session_repo.session.metadata_json == new_metadata
 
 
-def test_patch_session_title_and_metadata(
-    default_client, auth_headers, patch_session_repo
-):
+def test_patch_session_title_and_metadata(default_client, auth_headers, patch_session_repo):
     new_metadata = {"tags": ["updated"]}
     response = default_client.patch(
         f"/api/v1/sessions/{patch_session_repo.session.id}",

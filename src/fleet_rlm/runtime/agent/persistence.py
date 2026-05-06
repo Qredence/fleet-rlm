@@ -48,12 +48,7 @@ def history_volume_path(
         Absolute path string for the session history JSON file.
     """
     return str(
-        PurePosixPath(meta_root)
-        / "workspaces"
-        / workspace_id
-        / "users"
-        / user_id
-        / f"react-session-{session_id}.json"
+        PurePosixPath(meta_root) / "workspaces" / workspace_id / "users" / user_id / f"react-session-{session_id}.json"
     )
 
 
@@ -175,9 +170,7 @@ async def persist_history_to_volume(
         if callable(write):
             write(path, content)
         else:
-            raise RuntimeError(
-                "Interpreter has no write method (awrite_file or write_file)"
-            )
+            raise RuntimeError("Interpreter has no write method (awrite_file or write_file)")
 
     return path
 

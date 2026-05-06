@@ -197,9 +197,7 @@ class PostHogLLMCallback(BaseCallback):
             raw_choices.extend(choices)
 
         if not raw_choices:
-            completions = (
-                outputs.get("completions") if isinstance(outputs, dict) else None
-            )
+            completions = outputs.get("completions") if isinstance(outputs, dict) else None
             if isinstance(completions, list):
                 raw_choices.extend(completions)
 
@@ -284,15 +282,9 @@ class PostHogLLMCallback(BaseCallback):
             or usage.get("completionTokens")
             or usage.get("outputTokens")
         )
-        total_tokens = _int_or_none(
-            usage.get("total_tokens") or usage.get("total") or usage.get("totalTokens")
-        )
+        total_tokens = _int_or_none(usage.get("total_tokens") or usage.get("total") or usage.get("totalTokens"))
 
-        if (
-            total_tokens is None
-            and input_tokens is not None
-            and output_tokens is not None
-        ):
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
             total_tokens = input_tokens + output_tokens
 
         return input_tokens, output_tokens, total_tokens

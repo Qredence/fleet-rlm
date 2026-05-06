@@ -44,9 +44,7 @@ def optimize_command(
 ) -> None:
     """Run GEPA offline optimization for a registered DSPy module."""
     if auto not in ("light", "medium", "heavy"):
-        typer.echo(
-            f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True
-        )
+        typer.echo(f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True)
         raise typer.Exit(code=1)
 
     if module == "list":

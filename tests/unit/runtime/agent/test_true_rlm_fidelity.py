@@ -40,9 +40,7 @@ class TestPromptAsVariable:
         from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
 
         assert "prompt" in RLMVariableSignature.input_fields
-        desc = RLMVariableSignature.input_fields["prompt"].json_schema_extra.get(
-            "desc", ""
-        )
+        desc = RLMVariableSignature.input_fields["prompt"].json_schema_extra.get("desc", "")
         assert "REPL variable" in desc
 
     def test_module_passes_prompt_to_inner_rlm(self):
@@ -87,9 +85,7 @@ class TestSymbolicOutput:
     def test_signature_mentions_submit(self):
         from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
 
-        desc = RLMVariableSignature.output_fields["answer"].json_schema_extra.get(
-            "desc", ""
-        )
+        desc = RLMVariableSignature.output_fields["answer"].json_schema_extra.get("desc", "")
         assert "SUBMIT" in desc
 
     def test_metadata_summary_truncates_large_output(self):
@@ -119,9 +115,7 @@ class TestSubRLMRecursion:
 
         interp = _mock_interpreter()
 
-        with patch(
-            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm"
-        ) as mock_create:
+        with patch("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm") as mock_create:
             mock_create.return_value = MagicMock(spec=dspy.Module)
             RLMVariableExecutionModule(interpreter=interp)
             call_kwargs = mock_create.call_args[1]
@@ -195,9 +189,7 @@ class TestAutoRouting:
     def test_registry_long_doc_modules_variable_mode(self):
         from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
 
-        variable_mode_names = {
-            name for name, defn in RUNTIME_MODULE_REGISTRY.items() if defn.variable_mode
-        }
+        variable_mode_names = {name for name, defn in RUNTIME_MODULE_REGISTRY.items() if defn.variable_mode}
         assert variable_mode_names == {
             "summarize_long_document",
             "extract_from_logs",
@@ -240,9 +232,7 @@ class TestLongContext:
         def custom_tool(x: str) -> str:
             return x.upper()
 
-        with patch(
-            "fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm"
-        ) as mock_create:
+        with patch("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm") as mock_create:
             mock_create.return_value = MagicMock(spec=dspy.Module)
             RLMVariableExecutionModule(interpreter=interp, extra_tools=[custom_tool])
             call_kwargs = mock_create.call_args[1]

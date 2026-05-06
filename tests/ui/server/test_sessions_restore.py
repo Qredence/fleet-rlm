@@ -67,17 +67,13 @@ class _RestoreSessionRepository:
         self.session.updated_at = datetime.now(timezone.utc)
         return True
 
-    async def list_chat_turns(
-        self, *, tenant_id, session_id, user_id, workspace_id, limit, offset
-    ):
+    async def list_chat_turns(self, *, tenant_id, session_id, user_id, workspace_id, limit, offset):
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
         return [], 0
 
-    async def archive_chat_session(
-        self, *, tenant_id, session_id, user_id, workspace_id
-    ) -> bool:
+    async def archive_chat_session(self, *, tenant_id, session_id, user_id, workspace_id) -> bool:
         assert tenant_id == self.tenant_id
         assert user_id == self.user_id
         assert workspace_id == self.workspace_id
@@ -108,9 +104,7 @@ def test_restore_archived_session(default_client, auth_headers, restore_session_
     assert restore_session_repo.session.status == ChatSessionStatus.ACTIVE
 
 
-def test_restore_active_session_returns_409(
-    default_client, auth_headers, restore_session_repo
-):
+def test_restore_active_session_returns_409(default_client, auth_headers, restore_session_repo):
     restore_session_repo.session.status = ChatSessionStatus.ACTIVE
     response = default_client.post(
         f"/api/v1/sessions/{restore_session_repo.session.id}/restore",

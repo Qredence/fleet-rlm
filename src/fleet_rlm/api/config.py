@@ -82,12 +82,8 @@ class ServerRuntimeConfig(BaseSettings):
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
     rlm_max_depth: int = 2
-    rlm_child_isolation_mode: Literal["auto", "context"] = Field(
-        default="auto", alias="RLM_CHILD_ISOLATION_MODE"
-    )
-    rlm_child_fork_fallback: Literal["clean", "fail"] = Field(
-        default="clean", alias="RLM_CHILD_FORK_FALLBACK"
-    )
+    rlm_child_isolation_mode: Literal["auto", "context"] = Field(default="auto", alias="RLM_CHILD_ISOLATION_MODE")
+    rlm_child_fork_fallback: Literal["clean", "fail"] = Field(default="clean", alias="RLM_CHILD_FORK_FALLBACK")
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
     interpreter_async_execute: bool = True
@@ -102,15 +98,9 @@ class ServerRuntimeConfig(BaseSettings):
 
     # Model fields read from DSPY_* env vars
     agent_model: str | None = Field(default=None, alias="DSPY_LM_MODEL")
-    agent_delegate_model: str | None = Field(
-        default=None, alias="DSPY_DELEGATE_LM_MODEL"
-    )
-    agent_delegate_small_model: str | None = Field(
-        default=None, alias="DSPY_DELEGATE_LM_SMALL_MODEL"
-    )
-    agent_delegate_max_tokens: int = Field(
-        default=64000, alias="DSPY_DELEGATE_LM_MAX_TOKENS"
-    )
+    agent_delegate_model: str | None = Field(default=None, alias="DSPY_DELEGATE_LM_MODEL")
+    agent_delegate_small_model: str | None = Field(default=None, alias="DSPY_DELEGATE_LM_SMALL_MODEL")
+    agent_delegate_max_tokens: int = Field(default=64000, alias="DSPY_DELEGATE_LM_MAX_TOKENS")
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
     database_admin_url: str | None = Field(default=None, alias="DATABASE_ADMIN_URL")
@@ -133,16 +123,10 @@ class ServerRuntimeConfig(BaseSettings):
         exclude=True,
         repr=False,
     )
-    entra_issuer_template: str | None = (
-        "https://login.microsoftonline.com/{tenantid}/v2.0"
-    )
+    entra_issuer_template: str | None = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
-    entra_allowed_user_ids: list[str] | str = Field(
-        default_factory=list, alias="ENTRA_ALLOWED_USER_IDS"
-    )
-    entra_allowed_group_ids: list[str] | str = Field(
-        default_factory=list, alias="ENTRA_ALLOWED_GROUP_IDS"
-    )
+    entra_allowed_user_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_USER_IDS")
+    entra_allowed_group_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_GROUP_IDS")
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
     expose_docs: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_DOCS")
     expose_root: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_ROOT")
@@ -173,9 +157,7 @@ class ServerRuntimeConfig(BaseSettings):
     def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
         """Build server runtime settings from the shared application config."""
         kwargs: dict = {
-            "secret_name": config.interpreter.secrets[0]
-            if config.interpreter.secrets
-            else "LITELLM",
+            "secret_name": config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM",
             "volume_name": resolve_server_volume_name(config),
             "timeout": config.interpreter.timeout,
             "react_max_iters": config.rlm_settings.max_iters,
@@ -236,9 +218,7 @@ class ServerRuntimeConfig(BaseSettings):
         if isinstance(value, (list, tuple, set)):
             return [str(item).strip() for item in value if str(item).strip()]
         field_name = (info.field_name or "value").upper()
-        raise ValueError(
-            f"{field_name} must be provided as a comma-separated string or list"
-        )
+        raise ValueError(f"{field_name} must be provided as a comma-separated string or list")
 
     @field_validator("entra_issuer_url", "entra_issuer_template", mode="before")
     @classmethod
@@ -254,25 +234,9 @@ class ServerRuntimeConfig(BaseSettings):
         """Apply cross-field defaults that depend on app_env and auth_mode."""
         values.pop("sandbox_provider", None)
         values.pop("SANDBOX_PROVIDER", None)
-        app_env = (
-            str(
-                values.get("app_env")
-                or values.get("APP_ENV")
-                or os.getenv("APP_ENV")
-                or "local"
-            )
-            .strip()
-            .lower()
-        )
+        app_env = str(values.get("app_env") or values.get("APP_ENV") or os.getenv("APP_ENV") or "local").strip().lower()
         auth_mode = (
-            str(
-                values.get("auth_mode")
-                or values.get("AUTH_MODE")
-                or os.getenv("AUTH_MODE")
-                or "dev"
-            )
-            .strip()
-            .lower()
+            str(values.get("auth_mode") or values.get("AUTH_MODE") or os.getenv("AUTH_MODE") or "dev").strip().lower()
         )
 
         # database_required defaults to True in staging/production
@@ -284,19 +248,11 @@ class ServerRuntimeConfig(BaseSettings):
             values["allow_debug_auth"] = app_env == "local"
 
         # allow_query_auth_tokens defaults based on env and auth_mode
-        if (
-            "allow_query_auth_tokens" not in values
-            and "ALLOW_QUERY_AUTH_TOKENS" not in values
-        ):
-            values["allow_query_auth_tokens"] = (
-                app_env == "local" or auth_mode == "entra"
-            )
+        if "allow_query_auth_tokens" not in values and "ALLOW_QUERY_AUTH_TOKENS" not in values:
+            values["allow_query_auth_tokens"] = app_env == "local" or auth_mode == "entra"
 
         # cors_allowed_origins defaults to "*" in local
-        if (
-            "cors_allowed_origins" not in values
-            and "CORS_ALLOWED_ORIGINS" not in values
-        ):
+        if "cors_allowed_origins" not in values and "CORS_ALLOWED_ORIGINS" not in values:
             values["cors_allowed_origins"] = ["*"] if app_env == "local" else []
 
         # serve_ui defaults to True in local, False in staging/production.
@@ -306,32 +262,20 @@ class ServerRuntimeConfig(BaseSettings):
             values["serve_ui"] = app_env == "local"
 
         if "expose_docs" not in values and "FLEET_RLM_EXPOSE_DOCS" not in values:
-            values["expose_docs"] = app_env == "local" or (
-                app_env == "staging" and auth_mode != "entra"
-            )
+            values["expose_docs"] = app_env == "local" or (app_env == "staging" and auth_mode != "entra")
 
         if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
-            values["expose_root"] = app_env == "local" or (
-                app_env == "staging" and auth_mode != "entra"
-            )
+            values["expose_root"] = app_env == "local" or (app_env == "staging" and auth_mode != "entra")
 
         # auth_required defaults to True when auth_mode is entra
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:
             values["auth_required"] = auth_mode == "entra"
 
-        explicit_issuer_template = values.get("entra_issuer_template") or values.get(
-            "ENTRA_ISSUER_TEMPLATE"
-        )
-        explicit_issuer_url = values.get("entra_issuer_url") or values.get(
-            "ENTRA_ISSUER_URL"
-        )
+        explicit_issuer_template = values.get("entra_issuer_template") or values.get("ENTRA_ISSUER_TEMPLATE")
+        explicit_issuer_url = values.get("entra_issuer_url") or values.get("ENTRA_ISSUER_URL")
         if explicit_issuer_url:
             values["entra_issuer_template"] = None
-        if (
-            explicit_issuer_template
-            and not explicit_issuer_url
-            and "{tenantid}" not in str(explicit_issuer_template)
-        ):
+        if explicit_issuer_template and not explicit_issuer_url and "{tenantid}" not in str(explicit_issuer_template):
             values["entra_issuer_url"] = str(explicit_issuer_template).strip()
             values["entra_issuer_template"] = None
 
@@ -342,9 +286,7 @@ class ServerRuntimeConfig(BaseSettings):
             and "entra_issuer_template" not in values
             and "ENTRA_ISSUER_TEMPLATE" not in values
         ):
-            entra_issuer = values.get("entra_issuer_legacy") or values.get(
-                "ENTRA_ISSUER"
-            )
+            entra_issuer = values.get("entra_issuer_legacy") or values.get("ENTRA_ISSUER")
             if entra_issuer:
                 normalized_issuer = str(entra_issuer).strip()
                 if "{tenantid}" in normalized_issuer:
@@ -372,25 +314,15 @@ class ServerRuntimeConfig(BaseSettings):
 
         if self.app_env in {"staging", "production"}:
             if not self.auth_required:
-                raise ValueError(
-                    "AUTH_REQUIRED must be true when APP_ENV is staging/production"
-                )
+                raise ValueError("AUTH_REQUIRED must be true when APP_ENV is staging/production")
             if self.allow_debug_auth:
-                raise ValueError(
-                    "ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production"
-                )
+                raise ValueError("ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production")
             if self.allow_query_auth_tokens and self.auth_mode != "entra":
-                raise ValueError(
-                    "ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production"
-                )
+                raise ValueError("ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production")
             if "*" in self.cors_origins_list:
-                raise ValueError(
-                    "CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production"
-                )
+                raise ValueError("CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production")
             if self.auth_mode == "dev" and self.dev_jwt_secret == "change-me":
-                raise ValueError(
-                    "DEV_JWT_SECRET must be customized for staging/production in AUTH_MODE=dev"
-                )
+                raise ValueError("DEV_JWT_SECRET must be customized for staging/production in AUTH_MODE=dev")
 
         if self.auth_mode == "entra":
             if not self.auth_required:
@@ -403,13 +335,9 @@ class ServerRuntimeConfig(BaseSettings):
                 raise ValueError("ENTRA_AUDIENCE is required when AUTH_MODE=entra")
             if self.entra_issuer_url:
                 if "{tenantid}" in self.entra_issuer_url:
-                    raise ValueError(
-                        "ENTRA_ISSUER_URL must be a fixed issuer URL, not a template"
-                    )
+                    raise ValueError("ENTRA_ISSUER_URL must be a fixed issuer URL, not a template")
             elif not self.entra_issuer_template:
-                raise ValueError(
-                    "Set ENTRA_ISSUER_URL or ENTRA_ISSUER_TEMPLATE when AUTH_MODE=entra"
-                )
+                raise ValueError("Set ENTRA_ISSUER_URL or ENTRA_ISSUER_TEMPLATE when AUTH_MODE=entra")
             elif "{tenantid}" not in self.entra_issuer_template:
                 raise ValueError(
                     "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder "
@@ -417,15 +345,9 @@ class ServerRuntimeConfig(BaseSettings):
                 )
             if self.app_env in {"staging", "production"} and self.auth_mode == "entra":
                 if self.expose_docs:
-                    raise ValueError(
-                        "FLEET_RLM_EXPOSE_DOCS must be false when AUTH_MODE=entra "
-                        "in staging/production"
-                    )
+                    raise ValueError("FLEET_RLM_EXPOSE_DOCS must be false when AUTH_MODE=entra in staging/production")
                 if self.expose_root:
-                    raise ValueError(
-                        "FLEET_RLM_EXPOSE_ROOT must be false when AUTH_MODE=entra "
-                        "in staging/production"
-                    )
+                    raise ValueError("FLEET_RLM_EXPOSE_ROOT must be false when AUTH_MODE=entra in staging/production")
                 if (
                     self.entra_issuer_url
                     and not self.entra_allowed_user_ids_list

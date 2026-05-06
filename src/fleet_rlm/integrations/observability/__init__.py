@@ -75,9 +75,7 @@ def configure_analytics(
     from .posthog_callback import PostHogLLMCallback
 
     base = PostHogConfig.from_env()
-    resolved_host = (
-        base.host if host == "https://us.i.posthog.com" and base.host else host
-    )
+    resolved_host = base.host if host == "https://us.i.posthog.com" and base.host else host
     config = PostHogConfig(
         enabled=base.enabled if enabled is None else enabled,
         api_key=api_key if api_key is not None else base.api_key,

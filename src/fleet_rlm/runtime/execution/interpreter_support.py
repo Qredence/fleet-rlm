@@ -171,9 +171,7 @@ class InterpreterExecutionEventData:
             "bytes_total": self.bytes_total,
             "bytes_written": self.bytes_written,
         }
-        payload.update(
-            {key: value for key, value in optional_fields.items() if value is not None}
-        )
+        payload.update({key: value for key, value in optional_fields.items() if value is not None})
         return payload
 
 
@@ -202,9 +200,7 @@ def emit_execution_event(
         return
 
 
-def start_event_data(
-    *, execution_profile: str, code_hash: str, code_preview: str
-) -> InterpreterExecutionEventData:
+def start_event_data(*, execution_profile: str, code_hash: str, code_preview: str) -> InterpreterExecutionEventData:
     """Build the standard execution-start event payload."""
     return InterpreterExecutionEventData(
         phase="start",

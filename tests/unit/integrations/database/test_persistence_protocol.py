@@ -61,26 +61,17 @@ def test_protocol_is_runtime_checkable() -> None:
 
 def test_protocol_has_all_expected_methods() -> None:
     """The protocol must declare every method routers depend on."""
-    protocol_methods = {
-        name
-        for name, member in inspect.getmembers(
-            PersistenceProtocol, predicate=inspect.isfunction
-        )
-    }
+    protocol_methods = {name for name, member in inspect.getmembers(PersistenceProtocol, predicate=inspect.isfunction)}
     missing = _EXPECTED_METHODS - protocol_methods
     assert not missing, f"PersistenceProtocol is missing methods: {missing}"
 
 
 def test_protocol_methods_are_coroutines() -> None:
     """Every method on the protocol must be async (a coroutine)."""
-    for name, member in inspect.getmembers(
-        PersistenceProtocol, predicate=inspect.isfunction
-    ):
+    for name, member in inspect.getmembers(PersistenceProtocol, predicate=inspect.isfunction):
         if name.startswith("_"):
             continue
-        assert inspect.iscoroutinefunction(member), (
-            f"PersistenceProtocol.{name} must be async"
-        )
+        assert inspect.iscoroutinefunction(member), f"PersistenceProtocol.{name} must be async"
 
 
 def test_fleet_repository_implements_protocol() -> None:
@@ -95,9 +86,7 @@ def test_fleet_repository_implements_protocol() -> None:
     # Verify each protocol method is a coroutine on FleetRepository
     for name in _EXPECTED_METHODS:
         member = getattr(FleetRepository, name)
-        assert inspect.iscoroutinefunction(member), (
-            f"FleetRepository.{name} must be async to satisfy the protocol"
-        )
+        assert inspect.iscoroutinefunction(member), f"FleetRepository.{name} must be async to satisfy the protocol"
 
 
 def test_fleet_repository_is_instance_of_protocol() -> None:
@@ -115,9 +104,7 @@ def test_local_store_implements_protocol() -> None:
 
     for name in _EXPECTED_METHODS:
         member = getattr(LocalStore, name)
-        assert inspect.iscoroutinefunction(member), (
-            f"LocalStore.{name} must be async to satisfy the protocol"
-        )
+        assert inspect.iscoroutinefunction(member), f"LocalStore.{name} must be async to satisfy the protocol"
 
 
 def test_local_store_is_instance_of_protocol() -> None:

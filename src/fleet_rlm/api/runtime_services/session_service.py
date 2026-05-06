@@ -77,10 +77,7 @@ async def _load_turns_for_export(
     if total > _TRANSCRIPT_EXPORT_MAX_TURNS:
         raise HTTPException(
             status_code=413,
-            detail=(
-                f"Session has {total} turns; export is limited to "
-                f"{_TRANSCRIPT_EXPORT_MAX_TURNS} turns."
-            ),
+            detail=(f"Session has {total} turns; export is limited to {_TRANSCRIPT_EXPORT_MAX_TURNS} turns."),
         )
     return list(turns)
 
@@ -111,54 +108,30 @@ class SessionService:
             owner_tenant_claim = optional_string(payload_dict.get("owner_tenant_claim"))
             owner_user_claim = optional_string(payload_dict.get("owner_user_claim"))
             if owner_tenant_claim is not None and owner_user_claim is not None:
-                if (
-                    owner_tenant_claim != identity.tenant_claim
-                    or owner_user_claim != identity.user_claim
-                ):
+                if owner_tenant_claim != identity.tenant_claim or owner_user_claim != identity.user_claim:
                     continue
             else:
                 key_workspace_id, key_user_id = parse_legacy_session_key_owner(key)
-                workspace_id_fallback = optional_string(
-                    payload_dict.get("workspace_id")
-                )
+                workspace_id_fallback = optional_string(payload_dict.get("workspace_id"))
                 user_id_fallback = optional_string(payload_dict.get("user_id"))
                 legacy_workspace_id = workspace_id_fallback or key_workspace_id
                 legacy_user_id = user_id_fallback or key_user_id
                 if legacy_workspace_id is None or legacy_user_id is None:
                     continue
-                if (
-                    legacy_workspace_id != expected_workspace_id
-                    or legacy_user_id != expected_user_id
-                ):
+                if legacy_workspace_id != expected_workspace_id or legacy_user_id != expected_user_id:
                     continue
 
-            workspace_id = string_or_default(
-                payload_dict.get("workspace_id"), "default"
-            )
+            workspace_id = string_or_default(payload_dict.get("workspace_id"), "default")
             user_id = string_or_default(payload_dict.get("user_id"), "anonymous")
             manifest = payload_dict.get("manifest", {})
             session = payload_dict.get("session", {})
-            session_state = (
-                session.get("state", {}) if isinstance(session, Mapping) else {}
-            )
-            history = (
-                session_state.get("history", [])
-                if isinstance(session_state, Mapping)
-                else []
-            )
-            documents = (
-                session_state.get("documents", {})
-                if isinstance(session_state, Mapping)
-                else {}
-            )
+            session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
+            history = session_state.get("history", []) if isinstance(session_state, Mapping) else []
+            documents = session_state.get("documents", {}) if isinstance(session_state, Mapping) else {}
             memory = manifest.get("memory", []) if isinstance(manifest, Mapping) else []
             logs = manifest.get("logs", []) if isinstance(manifest, Mapping) else []
-            artifacts = (
-                manifest.get("artifacts", []) if isinstance(manifest, Mapping) else []
-            )
-            metadata = (
-                manifest.get("metadata", {}) if isinstance(manifest, Mapping) else {}
-            )
+            artifacts = manifest.get("artifacts", []) if isinstance(manifest, Mapping) else []
+            metadata = manifest.get("metadata", {}) if isinstance(manifest, Mapping) else {}
             summaries.append(
                 SessionStateSummary(
                     key=str(key),
@@ -170,9 +143,7 @@ class SessionService:
                     memory_count=len(memory) if isinstance(memory, list) else 0,
                     log_count=len(logs) if isinstance(logs, list) else 0,
                     artifact_count=len(artifacts) if isinstance(artifacts, list) else 0,
-                    updated_at=optional_string(metadata.get("updated_at"))
-                    if isinstance(metadata, Mapping)
-                    else None,
+                    updated_at=optional_string(metadata.get("updated_at")) if isinstance(metadata, Mapping) else None,
                 )
             )
         return SessionStateResponse(ok=True, sessions=summaries)
@@ -222,13 +193,9 @@ class SessionService:
                 SessionListItem(
                     id=str(s.id),
                     title=s.title,
-                    status=s.status.value
-                    if hasattr(s.status, "value")
-                    else str(s.status),
+                    status=s.status.value if hasattr(s.status, "value") else str(s.status),
                     model_name=s.model_name,
-                    external_session_id=session_external_id(
-                        getattr(s, "metadata_json", None)
-                    ),
+                    external_session_id=session_external_id(getattr(s, "metadata_json", None)),
                     created_at=s.created_at.isoformat(),
                     updated_at=s.updated_at.isoformat(),
                 )
@@ -268,13 +235,9 @@ class SessionService:
         return SessionDetailResponse(
             id=str(session.id),
             title=session.title,
-            status=session.status.value
-            if hasattr(session.status, "value")
-            else str(session.status),
+            status=session.status.value if hasattr(session.status, "value") else str(session.status),
             model_name=session.model_name,
-            external_session_id=session_external_id(
-                getattr(session, "metadata_json", None)
-            ),
+            external_session_id=session_external_id(getattr(session, "metadata_json", None)),
             workspace_id=str(session.workspace_id),
             turn_count=turn_count,
             created_at=session.created_at.isoformat(),
@@ -312,13 +275,9 @@ class SessionService:
         return SessionDetailResponse(
             id=str(session.id),
             title=session.title,
-            status=session.status.value
-            if hasattr(session.status, "value")
-            else str(session.status),
+            status=session.status.value if hasattr(session.status, "value") else str(session.status),
             model_name=session.model_name,
-            external_session_id=session_external_id(
-                getattr(session, "metadata_json", None)
-            ),
+            external_session_id=session_external_id(getattr(session, "metadata_json", None)),
             workspace_id=str(session.workspace_id),
             turn_count=turn_count,
             created_at=session.created_at.isoformat(),
@@ -380,9 +339,7 @@ class SessionService:
             total_tokens_in=int(cast(int, stats.get("total_tokens_in", 0))),
             total_tokens_out=int(cast(int, stats.get("total_tokens_out", 0))),
             total_latency_ms=int(cast(int, stats.get("total_latency_ms", 0))),
-            model_breakdown=dict(
-                cast(dict[str, int], stats.get("model_breakdown") or {})
-            ),
+            model_breakdown=dict(cast(dict[str, int], stats.get("model_breakdown") or {})),
         )
 
     async def delete_session(
@@ -418,10 +375,9 @@ class SessionService:
         )
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        if (
-            hasattr(session.status, "value")
-            and session.status.value == ChatSessionStatus.ACTIVE.value
-        ) or str(session.status) == ChatSessionStatus.ACTIVE.value:
+        if (hasattr(session.status, "value") and session.status.value == ChatSessionStatus.ACTIVE.value) or str(
+            session.status
+        ) == ChatSessionStatus.ACTIVE.value:
             raise HTTPException(status_code=409, detail="Session is already active")
         restored = await self._persistence.restore_chat_session(
             tenant_id=persisted_identity.tenant_id,
@@ -508,9 +464,7 @@ class SessionService:
             id=str(dataset.id),
             name=dataset.name,
             row_count=dataset.row_count or 0,
-            format=dataset.format.value
-            if hasattr(dataset.format, "value")
-            else str(dataset.format or "jsonl"),
+            format=dataset.format.value if hasattr(dataset.format, "value") else str(dataset.format or "jsonl"),
             module_slug=body.module_slug,
             created_at=dataset.created_at.isoformat(),
         )

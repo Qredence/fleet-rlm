@@ -95,9 +95,7 @@ class ContextSource(BaseModel):
     def _normalize_required_fields(cls, value: Any) -> str:
         text = _normalize_optional_text(value)
         if text is None:
-            raise ValueError(
-                "Context source requires source_id, kind, host_path, and staged_path."
-            )
+            raise ValueError("Context source requires source_id, kind, host_path, and staged_path.")
         return text
 
     @field_validator("source_type", "extraction_method", mode="before")
@@ -156,9 +154,7 @@ class ContextSource(BaseModel):
         try:
             return cls.model_validate(raw)
         except Exception as exc:  # pragma: no cover - pydantic internals
-            raise ValueError(
-                "Context source requires source_id, kind, host_path, and staged_path."
-            ) from exc
+            raise ValueError("Context source requires source_id, kind, host_path, and staged_path.") from exc
 
 
 def render_final_text(value: Any) -> str:

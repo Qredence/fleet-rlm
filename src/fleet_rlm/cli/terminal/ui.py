@@ -41,8 +41,7 @@ class _FleetCompleter(Completer):
         """
         dispatch_names = command_dispatch_names or []
         self._slash_entries: list[tuple[str, str]] = sorted(
-            command_specs
-            + [(f"/{name}", "tool command") for name in sorted(dispatch_names)],
+            command_specs + [(f"/{name}", "tool command") for name in sorted(dispatch_names)],
             key=lambda item: item[0],
         )
 
@@ -61,9 +60,7 @@ class _FleetCompleter(Completer):
                         display_meta=summary,
                     )
             if text.startswith("/settings "):
-                sub = (
-                    text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
-                )
+                sub = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
                 for choice in ("llm", "model"):
                     if choice.startswith(sub):
                         yield Completion(
@@ -143,12 +140,7 @@ def _bottom_toolbar(*, is_processing: bool) -> HTML:
         HTML formatted toolbar text.
     """
     mode = "thinking" if is_processing else "idle"
-    return HTML(
-        "<trace>"
-        " Type @ to mention files, / for commands, or ? for shortcuts "
-        f" · mode={mode}"
-        "</trace>"
-    )
+    return HTML(f"<trace> Type @ to mention files, / for commands, or ? for shortcuts  · mode={mode}</trace>")
 
 
 def _iter_mention_paths(prefix: str, *, limit: int = 40) -> list[str]:
@@ -172,11 +164,7 @@ def _iter_mention_paths(prefix: str, *, limit: int = 40) -> list[str]:
         if as_path.is_absolute():
             parent = as_path.parent if as_path.parent.as_posix() else Path("/")
             root = parent if parent.exists() else Path("/")
-            prefix_dir = (
-                f"{as_path.parent.as_posix().rstrip('/')}/"
-                if as_path.parent.as_posix()
-                else ""
-            )
+            prefix_dir = f"{as_path.parent.as_posix().rstrip('/')}/" if as_path.parent.as_posix() else ""
             name_prefix = as_path.name
         elif "/" in query:
             maybe_dir, name_prefix = query.rsplit("/", 1)
@@ -187,9 +175,7 @@ def _iter_mention_paths(prefix: str, *, limit: int = 40) -> list[str]:
 
     suggestions: list[str] = []
     try:
-        entries = sorted(
-            root.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower())
-        )
+        entries = sorted(root.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower()))
     except Exception:  # directory may not exist or be unreadable
         return suggestions
 
@@ -270,9 +256,7 @@ def _prompt_choice(
             number = int(picked)
             if 1 <= number <= len(choices):
                 return choices[number - 1]
-    except (
-        Exception
-    ):  # prompt_toolkit dialog unavailable; fall back to plain print-based menu
+    except Exception:  # prompt_toolkit dialog unavailable; fall back to plain print-based menu
         pass
 
     print(prompt)
@@ -370,10 +354,7 @@ def _render_shell(
         title="chat",
     )
 
-    hint = (
-        "Enter=send • Shift+Enter=newline • /=command palette • "
-        "Ctrl+C=interrupt • /help=commands"
-    )
+    hint = "Enter=send • Shift+Enter=newline • /=command palette • Ctrl+C=interrupt • /help=commands"
     footer = Panel(Text(hint, style="dim"), border_style="bright_black")
 
     layout = Layout()

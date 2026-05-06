@@ -174,9 +174,7 @@ class MemoryRepository(RepositoryContextMixin):
             )
             if stmt is None:
                 return []
-            stmt = (
-                stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
-            )
+            stmt = stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
@@ -232,9 +230,7 @@ class MemoryRepository(RepositoryContextMixin):
             if stmt is None:
                 return [], 0
             total = await _count_from_stmt(session, stmt)
-            items_stmt = (
-                stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
-            )
+            items_stmt = stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 

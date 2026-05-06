@@ -72,9 +72,7 @@ async def _close_websocket_safely(
         raise
 
 
-def _error_envelope(
-    *, code: str, message: str, details: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def _error_envelope(*, code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"type": "error", "code": code, "message": message}
     if details:
         payload["details"] = details
@@ -93,9 +91,7 @@ async def _authenticate_websocket(
             await websocket.accept()
             if await _try_send_json(
                 websocket,
-                _error_envelope(
-                    code="auth_provider_missing", message="Auth provider missing"
-                ),
+                _error_envelope(code="auth_provider_missing", message="Auth provider missing"),
             ):
                 await _close_websocket_safely(websocket, code=1011)
             return None
@@ -124,11 +120,7 @@ async def parse_ws_message_or_send_error(
     """Parse a websocket payload into WSMessage, sending error envelopes on failure."""
     payload: dict[str, Any]
     if isinstance(raw_payload, dict):
-        payload = {
-            str(key): value
-            for key, value in raw_payload.items()
-            if isinstance(key, str)
-        }
+        payload = {str(key): value for key, value in raw_payload.items() if isinstance(key, str)}
     else:
         payload = {}
     try:
@@ -173,15 +165,12 @@ async def parse_ws_message_or_send_error(
                 _error_envelope(
                     code="unsupported_identity_fields",
                     message=(
-                        "WebSocket identity is derived from auth. Remove "
-                        "workspace_id/user_id and use session_id only."
+                        "WebSocket identity is derived from auth. Remove workspace_id/user_id and use session_id only."
                     ),
                 ),
             )
             return None
-        message = "; ".join(
-            error.get("msg", "Invalid websocket payload") for error in errors
-        )
+        message = "; ".join(error.get("msg", "Invalid websocket payload") for error in errors)
         await _try_send_json(
             websocket,
             {"type": "error", "message": f"Invalid payload: {message}"},

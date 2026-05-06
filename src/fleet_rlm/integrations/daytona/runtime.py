@@ -137,9 +137,7 @@ class DaytonaSandboxRuntime:
     def _resolve_default_snapshot(*, image: Any, snapshot: str | None) -> str | None:
         return _resolve_default_snapshot(image=image, snapshot=snapshot)
 
-    def _merge_sandbox_labels(
-        self, labels: dict[str, str] | None = None
-    ) -> dict[str, str]:
+    def _merge_sandbox_labels(self, labels: dict[str, str] | None = None) -> dict[str, str]:
         return _merge_sandbox_labels_helper(
             default_labels=self.DEFAULT_LABELS,
             labels=labels,

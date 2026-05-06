@@ -111,9 +111,7 @@ def sandbox_driver() -> None:
 
         pass
 
-    RESERVED_TOOL_NAMES = frozenset(
-        {"llm_query", "llm_query_batched", "SUBMIT", "print"}
-    )
+    RESERVED_TOOL_NAMES = frozenset({"llm_query", "llm_query_batched", "SUBMIT", "print"})
 
     def make_send(proto_out: Any) -> Callable[[dict], None]:
         def _send(obj: dict) -> None:
@@ -134,9 +132,7 @@ def sandbox_driver() -> None:
 
         return _tool_call
 
-    def wrap_helper(
-        fn: Callable[..., Any], current_profile: list[str]
-    ) -> Callable[..., Any]:
+    def wrap_helper(fn: Callable[..., Any], current_profile: list[str]) -> Callable[..., Any]:
         fn_name = getattr(fn, "__name__", "unknown")
 
         def _wrapped(*args, **kwargs):
@@ -337,18 +333,14 @@ def sandbox_driver() -> None:
         try:
             command = json.loads(line)
         except json.JSONDecodeError as exc:
-            _send(
-                {"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None}
-            )
+            _send({"stdout": "", "stderr": f"[Error] Invalid JSON: {exc}", "final": None})
             continue
 
         code = command.get("code")
         variables = command.get("variables", {}) or {}
         tool_names = list(command.get("tool_names", []) or [])
         output_names = list(command.get("output_names", []) or [])
-        execution_profile = str(
-            command.get("execution_profile", "RLM_DELEGATE")
-        ).strip()
+        execution_profile = str(command.get("execution_profile", "RLM_DELEGATE")).strip()
         if execution_profile not in {
             "ROOT_INTERLOCUTOR",
             "RLM_ROOT",

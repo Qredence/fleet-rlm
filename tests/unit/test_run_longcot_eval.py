@@ -10,9 +10,7 @@ import pytest
 
 _VENDOR_DIR = Path(__file__).resolve().parents[2] / "vendor" / "longcot"
 _VENDOR_CONFIGS_PRESENT = (_VENDOR_DIR / "src" / "configs").exists()
-_requires_vendor = pytest.mark.skipif(
-    not _VENDOR_CONFIGS_PRESENT, reason="vendor/longcot not present"
-)
+_requires_vendor = pytest.mark.skipif(not _VENDOR_CONFIGS_PRESENT, reason="vendor/longcot not present")
 
 
 _BLOCKSWORLD_PROMPT = """
@@ -46,9 +44,7 @@ def test_extract_solution_candidate_balances_nested_moves() -> None:
     mod = _load_longcot_script()
 
     assert (
-        mod._extract_solution_candidate(
-            "thinking...\nsolution = [[2, 1, 2], [0, 0, 2]]\nextra"
-        )
+        mod._extract_solution_candidate("thinking...\nsolution = [[2, 1, 2], [0, 0, 2]]\nextra")
         == "solution = [[2, 1, 2], [0, 0, 2]]"
     )
 
@@ -68,12 +64,8 @@ def test_extract_solution_candidate_rejects_incomplete_literal() -> None:
 def test_contains_rlm_failure_text_detects_child_and_adapter_failures() -> None:
     mod = _load_longcot_script()
 
-    assert mod._contains_rlm_failure_text(
-        "{'reason': 'child_error', 'error': 'failed'}"
-    )
-    assert mod._contains_rlm_failure_text(
-        "AdapterParseError: Expected to find output fields"
-    )
+    assert mod._contains_rlm_failure_text("{'reason': 'child_error', 'error': 'failed'}")
+    assert mod._contains_rlm_failure_text("AdapterParseError: Expected to find output fields")
     assert mod._contains_rlm_failure_text("verification_status='needs_human_review'")
     assert not mod._contains_rlm_failure_text("solution = [[2, 1, 2]]")
 
@@ -222,12 +214,7 @@ def test_configure_rlm_lm_openrouter_sets_dspy_env(monkeypatch) -> None:
 
 def test_load_slice_manifest_reads_benchmark_file() -> None:
     mod = _load_longcot_script()
-    slice_path = (
-        Path(__file__).resolve().parents[2]
-        / "scripts"
-        / "benchmarks"
-        / "longcot_mini_stratified_100.json"
-    )
+    slice_path = Path(__file__).resolve().parents[2] / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json"
 
     manifest = mod._load_slice_manifest(slice_path)
 
@@ -241,9 +228,7 @@ def test_load_slice_manifest_reads_benchmark_file() -> None:
 @_requires_vendor
 def test_openrouter_deepseek_v4_flash_config_exists() -> None:
     root = Path(__file__).resolve().parents[2]
-    config_path = (
-        root / "vendor" / "longcot" / "src" / "configs" / "or_deepseek_v4_flash.yaml"
-    )
+    config_path = root / "vendor" / "longcot" / "src" / "configs" / "or_deepseek_v4_flash.yaml"
 
     data = config_path.read_text(encoding="utf-8")
 

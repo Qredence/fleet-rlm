@@ -18,9 +18,7 @@ class _FilesystemToolContext:
     agent: Any | None
 
 
-def _list_files_impl(
-    _ctx: _FilesystemToolContext, path: str = ".", pattern: str = "**/*"
-) -> dict[str, Any]:
+def _list_files_impl(_ctx: _FilesystemToolContext, path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
     """List files on the host filesystem matching a glob pattern."""
     base = Path(path).resolve()
     if not base.exists():
@@ -63,12 +61,8 @@ def _list_files_impl(
     is_default_root = path_norm in {"", ".", "./"}
     pattern_parts = Path(pattern_norm).parts
     first_part = pattern_parts[0] if pattern_parts else ""
-    has_explicit_root = bool(first_part) and not any(
-        token in first_part for token in ("*", "?", "[", "]")
-    )
-    source_first_scope = (
-        is_default_root and not has_explicit_root and "**" in pattern_norm
-    )
+    has_explicit_root = bool(first_part) and not any(token in first_part for token in ("*", "?", "[", "]"))
+    source_first_scope = is_default_root and not has_explicit_root and "**" in pattern_norm
 
     scope_roots: list[Path] = []
     matched_files: list[Path] = []
@@ -85,9 +79,7 @@ def _list_files_impl(
                     if _is_included(candidate_path):
                         scoped_matches.append(candidate_path)
             matched_files.extend(
-                candidate
-                for candidate in sorted(set(scoped_matches), key=str)
-                if isinstance(candidate, Path)
+                candidate for candidate in sorted(set(scoped_matches), key=str) if isinstance(candidate, Path)
             )
 
     if not matched_files:
@@ -144,9 +136,7 @@ def _read_file_slice_impl(
     end_idx = min(total_lines, start_idx + num_lines)
 
     slice_lines = lines[start_idx:end_idx]
-    numbered = [
-        {"line": start_idx + i + 1, "text": text} for i, text in enumerate(slice_lines)
-    ]
+    numbered = [{"line": start_idx + i + 1, "text": text} for i, text in enumerate(slice_lines)]
 
     return {
         "status": "ok",
@@ -158,9 +148,7 @@ def _read_file_slice_impl(
     }
 
 
-def _find_files_impl(
-    _ctx: _FilesystemToolContext, pattern: str, path: str = ".", include: str = ""
-) -> dict[str, Any]:
+def _find_files_impl(_ctx: _FilesystemToolContext, pattern: str, path: str = ".", include: str = "") -> dict[str, Any]:
     """Search file contents on the host using regex pattern (ripgrep)."""
     try:
         from ripgrepy import Ripgrepy  # ty: ignore[unresolved-import]
@@ -201,9 +189,7 @@ def _find_files_impl(
     }
 
 
-def _find_files_with_rg_cli(
-    *, pattern: str, path: str = ".", include: str = ""
-) -> dict[str, Any]:
+def _find_files_with_rg_cli(*, pattern: str, path: str = ".", include: str = "") -> dict[str, Any]:
     """Fallback content search using the ripgrep CLI shipped with the package."""
     base = Path(path).resolve()
     if not base.exists():
@@ -290,9 +276,7 @@ def build_filesystem_tools(agent: Any) -> list[Any]:
     def list_files(path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
         return _list_files_impl(ctx, path=path, pattern=pattern)
 
-    def read_file_slice(
-        path: str, start_line: int = 1, num_lines: int = 100
-    ) -> dict[str, Any]:
+    def read_file_slice(path: str, start_line: int = 1, num_lines: int = 100) -> dict[str, Any]:
         return _read_file_slice_impl(
             ctx,
             path=path,
@@ -365,9 +349,7 @@ def read_file_slice(
         and ``total_lines``.
     """
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
-    return _read_file_slice_impl(
-        _ctx, path=path, start_line=start_line, num_lines=num_lines
-    )
+    return _read_file_slice_impl(_ctx, path=path, start_line=start_line, num_lines=num_lines)
 
 
 @tool_fn

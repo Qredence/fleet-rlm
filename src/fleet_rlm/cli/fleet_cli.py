@@ -79,9 +79,7 @@ def chat(
         "--docs-path",
         help="Optional document path to preload as active context",
     ),
-    trace: bool | None = typer.Option(
-        None, "--trace/--no-trace", help="Enable verbose thought/status display"
-    ),
+    trace: bool | None = typer.Option(None, "--trace/--no-trace", help="Enable verbose thought/status display"),
     trace_mode: str | None = typer.Option(
         None,
         "--trace-mode",
@@ -97,9 +95,7 @@ def chat(
     from fleet_rlm.cli.terminal.chat import TerminalChatOptions, run_terminal_chat
     from fleet_rlm.runtime.schemas import TraceMode
 
-    config = _require_config(
-        error_message="Error: Config not initialized. Run via python -m fleet_rlm.cli"
-    )
+    config = _require_config(error_message="Error: Config not initialized. Run via python -m fleet_rlm.cli")
 
     if trace_mode in {"compact", "verbose", "off"}:
         resolved_trace_mode: TraceMode = cast(TraceMode, trace_mode)
@@ -153,10 +149,7 @@ def main() -> None:
     set_current_app_config(None)
 
     # Help and completion output should be available without initializing runtime config.
-    if any(
-        arg in {"--help", "-h", "--show-completion", "--install-completion"}
-        for arg in typer_args
-    ):
+    if any(arg in {"--help", "-h", "--show-completion", "--install-completion"} for arg in typer_args):
         app(typer_args)
         return
 

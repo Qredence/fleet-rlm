@@ -139,9 +139,7 @@ def test_track_command_artifact_if_needed_updates_manifest_and_persists() -> Non
 
 
 def test_track_command_artifact_if_needed_raises_when_persistence_required() -> None:
-    with pytest.raises(
-        PersistenceRequiredError, match="Failed to persist artifact metadata"
-    ):
+    with pytest.raises(PersistenceRequiredError, match="Failed to persist artifact metadata"):
         asyncio.run(
             track_command_artifact_if_needed(
                 session_record={"last_run_db_id": str(uuid.uuid4())},

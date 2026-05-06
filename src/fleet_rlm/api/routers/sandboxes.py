@@ -22,30 +22,20 @@ router = APIRouter(
 
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
-    503: {
-        "description": "Sandbox services are unavailable because server startup is incomplete."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
+    503: {"description": "Sandbox services are unavailable because server startup is incomplete."},
 }
 
 
 SBX_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
     404: {"description": "Sandbox not found or inaccessible."},
-    503: {
-        "description": "Sandbox services are unavailable because server startup is incomplete."
-    },
+    503: {"description": "Sandbox services are unavailable because server startup is incomplete."},
 }
 
 
 def _allow_unlabeled_legacy_sandboxes(config_deps: ConfigDepsDep) -> bool:
-    return (
-        config_deps.config.app_env == "local" and config_deps.config.auth_mode == "dev"
-    )
+    return config_deps.config.app_env == "local" and config_deps.config.auth_mode == "dev"
 
 
 @router.get(

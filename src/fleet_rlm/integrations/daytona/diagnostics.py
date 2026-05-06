@@ -61,14 +61,8 @@ class VolumeNotReadyError(DaytonaDiagnosticError):
         self.raw_volume_state = raw_volume_state or volume_state
         self.timeout_seconds = timeout_seconds
         state_description = f"'{volume_state}'"
-        if (
-            self.raw_volume_state
-            and self.raw_volume_state.strip()
-            and self.raw_volume_state != volume_state
-        ):
-            state_description = (
-                f"normalized='{volume_state}' (raw='{self.raw_volume_state}')"
-            )
+        if self.raw_volume_state and self.raw_volume_state.strip() and self.raw_volume_state != volume_state:
+            state_description = f"normalized='{volume_state}' (raw='{self.raw_volume_state}')"
         super().__init__(
             f"Volume '{volume_name}' is in state {state_description} "
             f"after {timeout_seconds}s. Check Daytona dashboard.",
@@ -191,9 +185,7 @@ def run_daytona_smoke(
             ),
         )
         if isinstance(first, FinalOutput):
-            raise RuntimeError(
-                "Smoke validation finalized too early on the first execution step."
-            )
+            raise RuntimeError("Smoke validation finalized too early on the first execution step.")
 
         termination_phase = "exec_step_2"
         second = _run_timed(
@@ -229,9 +221,7 @@ def run_daytona_smoke(
                     error_message = str(cleanup_error)
                     termination_phase = cleanup_error.phase
                 elif error_message is not None:
-                    error_message = (
-                        f"{error_message} Cleanup also failed: {cleanup_exc}"
-                    )
+                    error_message = f"{error_message} Cleanup also failed: {cleanup_exc}"
         elif owns_runtime and runtime_instance is not None:
             try:
                 _run_timed(
@@ -246,9 +236,7 @@ def run_daytona_smoke(
                     error_message = str(cleanup_error)
                     termination_phase = cleanup_error.phase
                 elif error_message is not None:
-                    error_message = (
-                        f"{error_message} Cleanup also failed: {cleanup_exc}"
-                    )
+                    error_message = f"{error_message} Cleanup also failed: {cleanup_exc}"
 
     return DaytonaSmokeResult(
         repo=repo,

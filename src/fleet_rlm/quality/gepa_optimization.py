@@ -156,13 +156,9 @@ def log_gepa_mlflow_result_metadata(
     split_reference = holdout_dict.get("split_reference")
     split_reference_dict = split_reference if isinstance(split_reference, dict) else {}
     validation_range = split_reference_dict.get("validation_range")
-    validation_range_dict = (
-        validation_range if isinstance(validation_range, dict) else {}
-    )
+    validation_range_dict = validation_range if isinstance(validation_range, dict) else {}
     reflection_model = review_bundle.get("reflection_model")
-    reflection_model_dict = (
-        reflection_model if isinstance(reflection_model, dict) else {}
-    )
+    reflection_model_dict = reflection_model if isinstance(reflection_model, dict) else {}
 
     if log_metric is not None:
         baseline_score = holdout_dict.get("baseline_score")
@@ -250,9 +246,7 @@ def optimize_program_with_gepa(
         }
     )
     if not initialize_mlflow(resolved):
-        raise RuntimeError(
-            "MLflow optimization is unavailable. Check MLFLOW_* settings."
-        )
+        raise RuntimeError("MLflow optimization is unavailable. Check MLFLOW_* settings.")
 
     rows = load_trace_rows(dataset_path)
     examples = rows_to_examples(
@@ -285,9 +279,7 @@ def optimize_program_with_gepa(
     log_params = getattr(mlflow, "log_params", None)
     set_tags = getattr(mlflow, "set_tags", None)
     if start_run is None or log_metric is None:
-        raise RuntimeError(
-            "MLflow tracking helpers are unavailable in this environment."
-        )
+        raise RuntimeError("MLflow tracking helpers are unavailable in this environment.")
 
     with cast(Any, start_run)(run_name=resolved_run_name):
         log_gepa_mlflow_run_metadata(

@@ -50,9 +50,7 @@ def _make_fake_react(response: str = "Test response"):
     return _FakeReAct
 
 
-def _make_fake_react_with_tool_call(
-    tool_name: str, tool_response: str, final_response: str = "Done"
-):
+def _make_fake_react_with_tool_call(tool_name: str, tool_response: str, final_response: str = "Done"):
     """Return a fake dspy.ReAct that records a tool call in trajectory."""
 
     class _FakeReActWithTool:
@@ -299,9 +297,7 @@ def test_multi_turn_history_accumulates(monkeypatch: pytest.MonkeyPatch) -> None
 
         def __call__(self, **kwargs):
             nonlocal call_count
-            history: dspy.History = kwargs.get(
-                "chat_history", dspy.History(messages=[])
-            )
+            history: dspy.History = kwargs.get("chat_history", dspy.History(messages=[]))
             captured_histories.append(list(getattr(history, "messages", [])))
             resp = responses[min(call_count, len(responses) - 1)]
             call_count += 1
@@ -478,9 +474,7 @@ def test_rlm_delegation_turn_has_tool_call_in_trajectory(
     trajectory = dict(getattr(result, "trajectory", {}) or {})
     # At least one tool call in the trajectory
     tool_names = [v for k, v in trajectory.items() if k.startswith("tool_name_")]
-    assert "delegate_to_rlm" in tool_names, (
-        f"Expected delegate_to_rlm in trajectory tool calls. Got: {tool_names}"
-    )
+    assert "delegate_to_rlm" in tool_names, f"Expected delegate_to_rlm in trajectory tool calls. Got: {tool_names}"
 
 
 @pytest.mark.integration
@@ -582,9 +576,7 @@ def test_rlm_delegate_tool_is_in_registry() -> None:
 
     tools = discover_tools()
     tool_names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
-    assert "delegate_to_rlm" in tool_names, (
-        f"delegate_to_rlm not found in tool registry. Found: {sorted(tool_names)}"
-    )
+    assert "delegate_to_rlm" in tool_names, f"delegate_to_rlm not found in tool registry. Found: {sorted(tool_names)}"
 
 
 @pytest.mark.integration
@@ -629,9 +621,7 @@ async def test_rlm_delegation_with_mocked_interpreter_and_rlm(
         lambda **kwargs: lambda **kw: mock_prediction,
     )
 
-    result = delegate_to_rlm(
-        "Integration test delegation query", interpreter=interpreter
-    )
+    result = delegate_to_rlm("Integration test delegation query", interpreter=interpreter)
 
     assert result["status"] == "ok"
     assert result["answer"] == "Mocked RLM answer"

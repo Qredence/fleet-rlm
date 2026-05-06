@@ -29,9 +29,7 @@ _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
 
 
 class _FakeExecutionResult:
-    def __init__(
-        self, *, stdout: str = "", stderr: str = "", error: Any = None
-    ) -> None:
+    def __init__(self, *, stdout: str = "", stderr: str = "", error: Any = None) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.error = error
@@ -110,11 +108,7 @@ class _FakeCodeInterpreter:
                     )
                 )
             payload_dict = _submit_payload(code)
-            payload = (
-                f"{_FINAL_OUTPUT_MARKER}"
-                f"{json.dumps(payload_dict, ensure_ascii=False)}"
-                f"{_FINAL_OUTPUT_MARKER}"
-            )
+            payload = f"{_FINAL_OUTPUT_MARKER}{json.dumps(payload_dict, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}"
             if on_stdout is not None:
                 on_stdout(SimpleNamespace(output=payload))
             return _FakeExecutionResult(
@@ -185,9 +179,7 @@ class _FakeRuntime:
             workspace_path="/workspace/repo",
             context_sources=[],
         )
-        self.create_calls: list[
-            tuple[str | None, str | None, list[str], str | None]
-        ] = []
+        self.create_calls: list[tuple[str | None, str | None, list[str], str | None]] = []
         self.resume_calls: list[tuple[str, str | None]] = []
         self.reconcile_calls: list[tuple[str | None, str | None, list[str]]] = []
         self.fork_calls: list[tuple[str | None, str | None]] = []
@@ -206,18 +198,13 @@ class _FakeRuntime:
         spec: object | None = None,
     ) -> DaytonaSandboxSession:
         self.last_spec = spec
-        self.create_calls.append(
-            (repo_url, ref, list(context_paths or []), volume_name)
-        )
+        self.create_calls.append((repo_url, ref, list(context_paths or []), volume_name))
         self.session.repo_url = repo_url
         self.session.ref = ref
         self.session.volume_name = volume_name
         self.session.owner_thread_id = threading.get_ident()
         self.session.owner_loop_id = id(asyncio.get_running_loop())
-        workspace_name = (
-            str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
-            or "repo"
-        )
+        workspace_name = str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git") or "repo"
         self.session.workspace_path = f"/workspace/{workspace_name}"
         del context_paths
         return self.session
@@ -277,9 +264,7 @@ class _FakeRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
     ) -> DaytonaSandboxSession:
-        raise AssertionError(
-            "internal Daytona flow should use areconcile_workspace_session"
-        )
+        raise AssertionError("internal Daytona flow should use areconcile_workspace_session")
 
     def fork_sandbox(
         self,
@@ -306,9 +291,7 @@ class _FakeRuntime:
         )
 
 
-def test_daytona_interpreter_execute_direct_reuses_context_and_returns_final_output() -> (
-    None
-):
+def test_daytona_interpreter_execute_direct_reuses_context_and_returns_final_output() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(
         runtime=runtime,
@@ -360,9 +343,7 @@ def test_daytona_interpreter_raises_on_bad_marker_leak() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
-    with pytest.raises(
-        CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"
-    ):
+    with pytest.raises(CodeInterpreterError, match="Unable to prepare executable Python|SyntaxError"):
         interpreter.execute("if True:\n    pass\nelse\n[[ ## completed ## ]]")
 
 
@@ -489,9 +470,7 @@ def test_daytona_interpreter_bridge_injection_error_propagates(monkeypatch) -> N
 
         async def async_tools(self, tools: dict[str, Any]) -> None:
             del tools
-            raise CodeInterpreterError(
-                "Failed to inject tool 'store_evidence': invalid syntax"
-            )
+            raise CodeInterpreterError("Failed to inject tool 'store_evidence': invalid syntax")
 
         async def aclose(self) -> None:
             pass
@@ -519,9 +498,7 @@ def test_daytona_interpreter_exports_context_id_for_resume() -> None:
     assert runtime.resume_calls == [("sbx-123", "ctx-1")]
 
 
-def test_daytona_interpreter_resumed_session_recreates_context_when_persisted_one_is_stale() -> (
-    None
-):
+def test_daytona_interpreter_resumed_session_recreates_context_when_persisted_one_is_stale() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
     interpreter.start()
@@ -531,9 +508,7 @@ def test_daytona_interpreter_resumed_session_recreates_context_when_persisted_on
     restored = DaytonaInterpreter(runtime=runtime)
     restored.import_session_state(exported)
     runtime.session._context = None
-    runtime.session.sandbox.code_interpreter.list_contexts_error = RuntimeError(
-        "stale context cache"
-    )
+    runtime.session.sandbox.code_interpreter.list_contexts_error = RuntimeError("stale context cache")
     restored.start()
 
     assert runtime.resume_calls == [("sbx-123", "ctx-1")]
@@ -549,9 +524,7 @@ def test_daytona_interpreter_restores_generic_submit_after_typed_execution() -> 
 
     typed = interpreter.execute("SUBMIT(answer='typed')\n")
     interpreter.output_fields = None
-    generic = interpreter.execute(
-        "SUBMIT(status='ok', result='saved', path='workspace/out.txt')\n"
-    )
+    generic = interpreter.execute("SUBMIT(status='ok', result='saved', path='workspace/out.txt')\n")
 
     assert isinstance(typed, FinalOutput)
     assert getattr(typed, "output") == {"answer": "typed"}
@@ -589,9 +562,7 @@ def test_daytona_interpreter_reconciles_workspace_without_recreating_session() -
     ensured = interpreter._ensure_session_sync()
 
     assert ensured is active_session
-    assert runtime.reconcile_calls == [
-        ("https://github.com/example/other.git", "develop", ["docs/b.md"])
-    ]
+    assert runtime.reconcile_calls == [("https://github.com/example/other.git", "develop", ["docs/b.md"])]
     assert interpreter._last_sandbox_transition == "reused"
     assert interpreter._last_workspace_reconfigured is True
 
@@ -621,10 +592,7 @@ def test_daytona_interpreter_applies_owner_labels_to_created_sandbox_spec() -> N
     assert runtime.last_spec.volume_name == "tenant-a"
     assert runtime.last_spec.labels is not None
     assert runtime.last_spec.labels["env"] == "test"
-    assert (
-        runtime.last_spec.labels[SANDBOX_OWNER_LABEL]
-        == owner_labels[SANDBOX_OWNER_LABEL]
-    )
+    assert runtime.last_spec.labels[SANDBOX_OWNER_LABEL] == owner_labels[SANDBOX_OWNER_LABEL]
 
 
 def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
@@ -670,9 +638,7 @@ def test_daytona_interpreter_marks_reconcile_recreate_fallback_as_degraded() -> 
     )
     interpreter._ensure_session_sync()
 
-    assert runtime.reconcile_calls == [
-        ("https://github.com/example/other.git", "develop", ["docs/b.md"])
-    ]
+    assert runtime.reconcile_calls == [("https://github.com/example/other.git", "develop", ["docs/b.md"])]
     assert len(runtime.create_calls) == 2
     assert interpreter._last_sandbox_transition == "recreated"
     assert interpreter.current_runtime_metadata() == {
@@ -751,16 +717,12 @@ def test_daytona_interpreter_rejects_recursive_rlm_query_in_sandbox_code() -> No
         interpreter.execute("answer = rlm_query('hello')\nSUBMIT(answer=answer)")
 
 
-def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code() -> (
-    None
-):
+def test_daytona_interpreter_rejects_recursive_rlm_query_batched_in_sandbox_code() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(runtime=runtime)
 
     with pytest.raises(CodeInterpreterError, match="agent-level only"):
-        interpreter.execute(
-            "answers = rlm_query_batched([{'query': 'hello'}])\nSUBMIT(answer=answers)"
-        )
+        interpreter.execute("answers = rlm_query_batched([{'query': 'hello'}])\nSUBMIT(answer=answers)")
 
 
 def test_invoke_tool_prefers_fleet_shared_llm_query_budget() -> None:
@@ -917,9 +879,7 @@ def test_invoke_tool_dispatches_bridged_fetch_document_text(
         fake_fetch_document_text,
     )
 
-    result = interpreter._invoke_tool(
-        "fetch_document_text", ["https://example.test"], {}
-    )
+    result = interpreter._invoke_tool("fetch_document_text", ["https://example.test"], {})
 
     assert result == {
         "status": "ok",
@@ -960,9 +920,7 @@ def test_daytona_interpreter_does_not_recreate_open_owned_runtime() -> None:
     assert interpreter._runtime_closed is False
 
 
-def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> (
-    None
-):
+def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_sandbox() -> None:
     runtime = _FakeRuntime()
     interpreter = DaytonaInterpreter(
         runtime=runtime,

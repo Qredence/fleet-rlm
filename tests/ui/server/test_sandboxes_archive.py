@@ -18,9 +18,7 @@ def fake_daytona_archive(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     archived_ids: list[str] = []
 
     class _FakeSandbox:
-        def __init__(
-            self, sandbox_id: str, labels: dict[str, str] | None = None
-        ) -> None:
+        def __init__(self, sandbox_id: str, labels: dict[str, str] | None = None) -> None:
             self.id = sandbox_id
             self.labels = labels or {}
             self._archived = False
@@ -73,9 +71,7 @@ def test_archive_sandbox_returns_success(
     auth_headers: dict[str, str],
     fake_daytona_archive: SimpleNamespace,
 ) -> None:
-    response = default_client.post(
-        "/api/v1/sandboxes/sb-001/archive", headers=auth_headers
-    )
+    response = default_client.post("/api/v1/sandboxes/sb-001/archive", headers=auth_headers)
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
@@ -87,9 +83,7 @@ def test_archive_sandbox_not_found_returns_404(
     auth_headers: dict[str, str],
     fake_daytona_archive: SimpleNamespace,
 ) -> None:
-    response = default_client.post(
-        "/api/v1/sandboxes/nonexistent/archive", headers=auth_headers
-    )
+    response = default_client.post("/api/v1/sandboxes/nonexistent/archive", headers=auth_headers)
     assert response.status_code == 404
 
 
@@ -98,9 +92,7 @@ def test_archive_sandbox_mismatched_owner_returns_404(
     auth_headers: dict[str, str],
     fake_daytona_archive: SimpleNamespace,
 ) -> None:
-    response = default_client.post(
-        "/api/v1/sandboxes/sb-other/archive", headers=auth_headers
-    )
+    response = default_client.post("/api/v1/sandboxes/sb-other/archive", headers=auth_headers)
     assert response.status_code == 404
     assert fake_daytona_archive.archived_ids == []
 
@@ -129,9 +121,7 @@ def test_archive_sandbox_connection_error_returns_503(
         "fleet_rlm.api.runtime_services.sandboxes._daytona_runtime._build_daytona_client",
         lambda _cfg: _FakeAsyncDaytona(),
     )
-    response = default_client.post(
-        "/api/v1/sandboxes/sb-001/archive", headers=auth_headers
-    )
+    response = default_client.post("/api/v1/sandboxes/sb-001/archive", headers=auth_headers)
     assert response.status_code == 503
     assert "unavailable" in response.json()["detail"].lower()
 

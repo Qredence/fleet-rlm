@@ -32,9 +32,7 @@ def export_annotated_trace_rows(
     try:
         from fleet_rlm.integrations.local_store import register_dataset
 
-        register_dataset(
-            name=output_path.stem, uri=str(output_path), row_count=len(rows)
-        )
+        register_dataset(name=output_path.stem, uri=str(output_path), row_count=len(rows))
     except Exception:
         logger.warning(
             "Local dataset registration failed for %s; export succeeded",
@@ -93,9 +91,7 @@ def _row_has_retriever_span(row: dict[str, Any]) -> bool:
     span_types = row.get("span_types")
     if not isinstance(span_types, list):
         return False
-    return any(
-        str(span_type).strip().upper() == "RETRIEVER" for span_type in span_types
-    )
+    return any(str(span_type).strip().upper() == "RETRIEVER" for span_type in span_types)
 
 
 def _dataset_supports_retrieval_groundedness(rows: list[dict[str, Any]]) -> bool:
@@ -120,9 +116,7 @@ def evaluate_trace_rows(
 
     dataset = rows_with_expected_responses(rows)
     if not dataset:
-        raise ValueError(
-            "No annotated traces with expectations.expected_response were found."
-        )
+        raise ValueError("No annotated traces with expectations.expected_response were found.")
 
     scorers = build_default_scorers(
         include_safety=include_safety,
@@ -131,17 +125,13 @@ def evaluate_trace_rows(
 
     from .scorers import build_rlm_scorers
 
-    rlm_scorers = build_rlm_scorers(
-        include_retrieval_groundedness=_dataset_supports_retrieval_groundedness(dataset)
-    )
+    rlm_scorers = build_rlm_scorers(include_retrieval_groundedness=_dataset_supports_retrieval_groundedness(dataset))
     scorers.extend(rlm_scorers)
 
     mlflow_genai = getattr(mlflow, "genai", None)
     evaluate = getattr(mlflow_genai, "evaluate", None)
     if evaluate is None:
-        raise RuntimeError(
-            "MLflow GenAI evaluate() is unavailable in this environment."
-        )
+        raise RuntimeError("MLflow GenAI evaluate() is unavailable in this environment.")
 
     return cast(Any, evaluate)(
         data=dataset,

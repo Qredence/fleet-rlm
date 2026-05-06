@@ -114,19 +114,14 @@ class FakeDaytonaWorkspaceSession:
             items.setdefault(segment, bool(tail))
         if not items:
             raise FileNotFoundError(resolved)
-        return [
-            type("Entry", (), {"name": name, "is_dir": is_dir})()
-            for name, is_dir in sorted(items.items())
-        ]
+        return [type("Entry", (), {"name": name, "is_dir": is_dir})() for name, is_dir in sorted(items.items())]
 
 
 class FakeDaytonaRuntime:
     def __init__(self, session: FakeDaytonaSession | None = None) -> None:
         self.session = session or FakeDaytonaSession()
         self._resolved_config = object()
-        self.create_calls: list[
-            tuple[str | None, str | None, list[str], str | None]
-        ] = []
+        self.create_calls: list[tuple[str | None, str | None, list[str], str | None]] = []
         self.create_specs: list[object | None] = []
         self.resume_calls: list[tuple[str, str | None, str | None, str]] = []
         self.close_calls = 0
@@ -140,9 +135,7 @@ class FakeDaytonaRuntime:
         volume_name: str | None = None,
         spec: object | None = None,
     ) -> FakeDaytonaSession:
-        self.create_calls.append(
-            (repo_url, ref, list(context_paths or []), volume_name)
-        )
+        self.create_calls.append((repo_url, ref, list(context_paths or []), volume_name))
         self.create_specs.append(spec)
         self.session.bind_current_async_owner()
         return self.session
@@ -173,9 +166,7 @@ class FakeDaytonaRuntime:
         context_paths: list[str] | None = None,
         volume_name: str | None = None,
     ) -> FakeDaytonaSession:
-        self.create_calls.append(
-            (repo_url, ref, list(context_paths or []), volume_name)
-        )
+        self.create_calls.append((repo_url, ref, list(context_paths or []), volume_name))
         return self.session
 
     def close(self) -> None:

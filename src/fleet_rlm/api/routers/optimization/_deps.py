@@ -49,9 +49,7 @@ logger = logging.getLogger(__name__)
 OpenAPIResponses: TypeAlias = dict[int | str, dict[str, Any]]
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
 }
 
 
@@ -72,9 +70,7 @@ def _resolve_optimization_timeout_seconds() -> int:
 
 OPTIMIZATION_TIMEOUT_SECONDS = _resolve_optimization_timeout_seconds()
 
-OPTIMIZATION_DATA_ROOT = Path(
-    os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())
-).resolve()
+OPTIMIZATION_DATA_ROOT = Path(os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +137,7 @@ def _dataset_row_from_example(example: Any, output_key: str | None) -> dict[str,
 def _require_workspace_id(identity: IdentityUpsertResult) -> uuid.UUID:
     workspace_id = identity.workspace_id
     if workspace_id is None:
-        raise HTTPException(
-            status_code=503, detail="Workspace persistence is unavailable."
-        )
+        raise HTTPException(status_code=503, detail="Workspace persistence is unavailable.")
     return workspace_id
 
 
@@ -158,9 +152,7 @@ def _resolve_relative_dataset_lookup(relative_path: str) -> str:
 
     parts = normalized.parts
     if not parts or any(part in {"", ".", ".."} for part in parts):
-        raise HTTPException(
-            status_code=400, detail="Path escapes the allowed data directory."
-        )
+        raise HTTPException(status_code=400, detail="Path escapes the allowed data directory.")
     return normalized.as_posix()
 
 
@@ -255,9 +247,7 @@ async def _resolve_dataset_request(
     dataset_lookup = _resolve_relative_dataset_lookup(dataset_path)
     dataset = _find_dataset_under_root(OPTIMIZATION_DATA_ROOT, dataset_lookup)
     if dataset is None:
-        raise HTTPException(
-            status_code=400, detail=f"Dataset file not found: {dataset_path}"
-        )
+        raise HTTPException(status_code=400, detail=f"Dataset file not found: {dataset_path}")
     return dataset, dataset_lookup
 
 
@@ -272,16 +262,12 @@ def _db_run_to_response(row: Any) -> OptimizationRunResponse:
     return OptimizationRunResponse(
         id=str(row.id),
         status=row.status.value if hasattr(row.status, "value") else str(row.status),
-        module_slug=getattr(row, "module_slug", None)
-        or _extract_metadata_str(metadata, "module_slug"),
+        module_slug=getattr(row, "module_slug", None) or _extract_metadata_str(metadata, "module_slug"),
         program_spec=row.program_spec,
-        optimizer=row.optimizer.value
-        if hasattr(row.optimizer, "value")
-        else str(row.optimizer),
+        optimizer=row.optimizer.value if hasattr(row.optimizer, "value") else str(row.optimizer),
         auto=row.auto,
         train_ratio=row.train_ratio,
-        dataset_path=getattr(row, "dataset_path", None)
-        or _extract_metadata_str(metadata, "dataset_path"),
+        dataset_path=getattr(row, "dataset_path", None) or _extract_metadata_str(metadata, "dataset_path"),
         train_examples=row.train_examples,
         validation_examples=row.validation_examples,
         validation_score=row.validation_score,
@@ -300,10 +286,7 @@ def _dataset_to_response(row: Any) -> DatasetResponse:
         id=str(row.id),
         name=row.name,
         row_count=row.row_count or 0,
-        format=row.format.value
-        if hasattr(row.format, "value")
-        else str(row.format or ""),
-        module_slug=getattr(row, "module_slug", None)
-        or _extract_metadata_str(metadata, "module_slug"),
+        format=row.format.value if hasattr(row.format, "value") else str(row.format or ""),
+        module_slug=getattr(row, "module_slug", None) or _extract_metadata_str(metadata, "module_slug"),
         created_at=row.created_at.isoformat(),
     )

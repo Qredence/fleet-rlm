@@ -252,12 +252,8 @@ async def run_optimization_background(
         # Log validation score to MLflow when available
         try:
             if _mlflow_log_metric is not None:
-                cast(Any, _mlflow_log_metric)(
-                    "gepa_train_examples", result.get("train_examples", 0)
-                )
-                cast(Any, _mlflow_log_metric)(
-                    "gepa_validation_examples", result.get("validation_examples", 0)
-                )
+                cast(Any, _mlflow_log_metric)("gepa_train_examples", result.get("train_examples", 0))
+                cast(Any, _mlflow_log_metric)("gepa_validation_examples", result.get("validation_examples", 0))
                 val_score = result.get("validation_score")
                 if val_score is not None:
                     cast(Any, _mlflow_log_metric)("gepa_validation_score", val_score)

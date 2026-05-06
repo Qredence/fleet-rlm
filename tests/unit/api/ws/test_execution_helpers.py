@@ -31,8 +31,7 @@ class _ClosedSendWebSocket:
     async def send_json(self, payload: Any) -> None:
         _ = payload
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.send', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed."
         )
 
 
@@ -40,8 +39,7 @@ class _ClosedCloseWebSocket:
     async def close(self, code: int = 1000) -> None:
         _ = code
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.close', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.close', after sending 'websocket.close' or response already completed."
         )
 
 
@@ -133,17 +131,11 @@ class _InterpreterHookStepBuilder:
 
 
 def test_try_send_json_returns_false_after_websocket_close() -> None:
-    assert (
-        asyncio.run(_try_send_json(cast(Any, _ClosedSendWebSocket()), {"ok": True}))
-        is False
-    )
+    assert asyncio.run(_try_send_json(cast(Any, _ClosedSendWebSocket()), {"ok": True})) is False
 
 
 def test_try_send_json_returns_false_on_disconnect() -> None:
-    assert (
-        asyncio.run(_try_send_json(cast(Any, _DisconnectingWebSocket()), {"ok": True}))
-        is False
-    )
+    assert asyncio.run(_try_send_json(cast(Any, _DisconnectingWebSocket()), {"ok": True})) is False
 
 
 def test_close_websocket_safely_swallows_duplicate_close_runtime_error() -> None:
@@ -195,9 +187,7 @@ def test_emit_stream_event_sends_terminal_error_before_run_completion() -> None:
     asyncio.run(scenario())
 
 
-def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook() -> (
-    None
-):
+def test_repl_hook_bridge_uses_execution_event_callback_and_chains_previous_hook() -> None:
     async def scenario() -> None:
         lifecycle = _RecordingLifecycle()
         previous_calls: list[dict[str, Any]] = []
@@ -290,9 +280,7 @@ def test_emit_stream_event_persists_terminal_error_before_run_completion() -> No
         )
 
         deadline = asyncio.get_running_loop().time() + 0.2
-        while (
-            not websocket.sent or not persist_calls
-        ) and asyncio.get_running_loop().time() < deadline:
+        while (not websocket.sent or not persist_calls) and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.01)
 
         assert websocket.sent

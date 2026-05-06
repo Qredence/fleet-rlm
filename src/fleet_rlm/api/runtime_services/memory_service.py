@@ -52,19 +52,11 @@ class MemoryService:
             items=[
                 MemoryItemResponse(
                     id=str(item.id),
-                    scope=item.scope.value
-                    if hasattr(item.scope, "value")
-                    else str(item.scope),
+                    scope=item.scope.value if hasattr(item.scope, "value") else str(item.scope),
                     scope_id=item.scope_id,
-                    kind=item.kind.value
-                    if hasattr(item.kind, "value")
-                    else str(item.kind),
-                    source=item.source.value
-                    if hasattr(item.source, "value")
-                    else str(item.source),
-                    status=item.status.value
-                    if hasattr(item.status, "value")
-                    else str(item.status),
+                    kind=item.kind.value if hasattr(item.kind, "value") else str(item.kind),
+                    source=item.source.value if hasattr(item.source, "value") else str(item.source),
+                    status=item.status.value if hasattr(item.status, "value") else str(item.status),
                     content_text=item.content_text,
                     importance=item.importance,
                     tags=list(item.tags) if item.tags is not None else [],

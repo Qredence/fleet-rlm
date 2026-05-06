@@ -37,9 +37,7 @@ class _SandboxFilesystemToolContext:
 def _get_sandbox_fs(ctx: _SandboxFilesystemToolContext) -> Any:
     """Return the ``sandbox.fs`` object from the interpreter."""
     if ctx.interpreter is None:
-        raise RuntimeError(
-            "sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter."
-        )
+        raise RuntimeError("sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter.")
     session = getattr(ctx.interpreter, "_session", None)
     if session is None:
         aget = getattr(ctx.interpreter, "aget_session", None)
@@ -59,9 +57,7 @@ def _get_sandbox_fs(ctx: _SandboxFilesystemToolContext) -> Any:
 def _get_sandbox_session(ctx: _SandboxFilesystemToolContext) -> Any:
     """Return the active Daytona sandbox session from the interpreter."""
     if ctx.interpreter is None:
-        raise RuntimeError(
-            "sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter."
-        )
+        raise RuntimeError("sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter.")
     session = getattr(ctx.interpreter, "_session", None)
     if session is None:
         aget = getattr(ctx.interpreter, "aget_session", None)
@@ -110,9 +106,7 @@ def _run_session_fs_call(
         if fs is None:
             raise RuntimeError("No Daytona filesystem available.")
         resolve = getattr(session, "_resolve_sandbox_path", None)
-        resolved = (
-            resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
-        )
+        resolved = resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
         method = getattr(fs, method_name)
         return await _await_if_needed(method(resolved, *args))
 
@@ -124,9 +118,7 @@ def _run_session_fs_call(
 # ---------------------------------------------------------------------------
 
 
-def _sandbox_list_files_impl(
-    ctx: _SandboxFilesystemToolContext, path: str = "."
-) -> dict[str, Any]:
+def _sandbox_list_files_impl(ctx: _SandboxFilesystemToolContext, path: str = ".") -> dict[str, Any]:
     """List files and directories in the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     entries = _run_session_fs_call(ctx, path, "list_files")
@@ -158,9 +150,7 @@ def _sandbox_list_files_impl(
     }
 
 
-def _sandbox_read_file_impl(
-    ctx: _SandboxFilesystemToolContext, path: str
-) -> dict[str, Any]:
+def _sandbox_read_file_impl(ctx: _SandboxFilesystemToolContext, path: str) -> dict[str, Any]:
     """Read a text file from the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     raw = _run_session_fs_call(ctx, path, "download_file")
@@ -178,9 +168,7 @@ def _sandbox_read_file_impl(
     }
 
 
-def _sandbox_write_file_impl(
-    ctx: _SandboxFilesystemToolContext, path: str, content: str
-) -> dict[str, Any]:
+def _sandbox_write_file_impl(ctx: _SandboxFilesystemToolContext, path: str, content: str) -> dict[str, Any]:
     """Write a text file to the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     payload = content.encode("utf-8")
@@ -205,9 +193,7 @@ def _sandbox_write_file_impl(
     }
 
 
-def _sandbox_create_directory_impl(
-    ctx: _SandboxFilesystemToolContext, path: str
-) -> dict[str, Any]:
+def _sandbox_create_directory_impl(ctx: _SandboxFilesystemToolContext, path: str) -> dict[str, Any]:
     """Create a directory in the Daytona sandbox."""
     # Detect a bare relative name (no path separator) and ask for clarification
     # so the agent can confirm whether the user means the persistent volume or
@@ -241,9 +227,7 @@ def _sandbox_create_directory_impl(
     return {"status": "ok", "path": resolved}
 
 
-def _sandbox_delete_file_impl(
-    ctx: _SandboxFilesystemToolContext, path: str
-) -> dict[str, Any]:
+def _sandbox_delete_file_impl(ctx: _SandboxFilesystemToolContext, path: str) -> dict[str, Any]:
     """Delete a file or directory from the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     _run_session_fs_call(ctx, path, "delete_file")
@@ -266,9 +250,7 @@ def _sandbox_move_file_impl(
     }
 
 
-def _sandbox_search_files_impl(
-    ctx: _SandboxFilesystemToolContext, path: str, pattern: str
-) -> dict[str, Any]:
+def _sandbox_search_files_impl(ctx: _SandboxFilesystemToolContext, path: str, pattern: str) -> dict[str, Any]:
     """Search files by name pattern (glob) in the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     result = _run_session_fs_call(ctx, path, "search_files", pattern)
@@ -286,9 +268,7 @@ def _sandbox_search_files_impl(
     }
 
 
-def _sandbox_find_in_files_impl(
-    ctx: _SandboxFilesystemToolContext, path: str, pattern: str
-) -> dict[str, Any]:
+def _sandbox_find_in_files_impl(ctx: _SandboxFilesystemToolContext, path: str, pattern: str) -> dict[str, Any]:
     """Search file contents by text pattern (grep-like) in the Daytona sandbox."""
     resolved = _resolve_sandbox_path(ctx, path)
     matches = _run_session_fs_call(ctx, path, "find_files", pattern)
@@ -322,11 +302,7 @@ def _sandbox_replace_in_files_impl(
     """Replace text in multiple files in the Daytona sandbox."""
     fs = _get_sandbox_fs(ctx)
     resolved_files = [_resolve_sandbox_path(ctx, f) for f in files]
-    result = _run_async_compat(
-        lambda: _await_if_needed(
-            fs.replace_in_files(resolved_files, pattern, replacement)
-        )
-    )
+    result = _run_async_compat(lambda: _await_if_needed(fs.replace_in_files(resolved_files, pattern, replacement)))
     return {
         "status": "ok",
         "files": resolved_files,
@@ -335,9 +311,7 @@ def _sandbox_replace_in_files_impl(
     }
 
 
-def _sandbox_get_file_info_impl(
-    ctx: _SandboxFilesystemToolContext, path: str
-) -> dict[str, Any]:
+def _sandbox_get_file_info_impl(ctx: _SandboxFilesystemToolContext, path: str) -> dict[str, Any]:
     """Get metadata for a file or directory in the Daytona sandbox."""
     fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
@@ -481,9 +455,7 @@ def sandbox_find_in_files(path: str, pattern: str) -> dict[str, Any]:
 
 
 @tool_fn
-def sandbox_replace_in_files(
-    files: list[str], pattern: str, replacement: str
-) -> dict[str, Any]:
+def sandbox_replace_in_files(files: list[str], pattern: str, replacement: str) -> dict[str, Any]:
     """Replace text in multiple files in the Daytona sandbox.
 
     Args:
@@ -495,9 +467,7 @@ def sandbox_replace_in_files(
         Dictionary with ``status``, ``files``, ``pattern``, and ``result``.
     """
     ctx = _SandboxFilesystemToolContext(interpreter=None)
-    return _sandbox_replace_in_files_impl(
-        ctx, files=files, pattern=pattern, replacement=replacement
-    )
+    return _sandbox_replace_in_files_impl(ctx, files=files, pattern=pattern, replacement=replacement)
 
 
 @tool_fn

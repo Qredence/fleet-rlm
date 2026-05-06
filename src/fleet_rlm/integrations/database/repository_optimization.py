@@ -168,13 +168,9 @@ class OptimizationRepository(RepositoryContextMixin):
                 )
             )
             if module_slug is not None:
-                stmt = stmt.where(
-                    Dataset.metadata_json["module_slug"].as_string() == module_slug
-                )
+                stmt = stmt.where(Dataset.metadata_json["module_slug"].as_string() == module_slug)
             total = await _count_from_stmt(session, stmt)
-            items_stmt = (
-                stmt.order_by(Dataset.created_at.desc()).offset(offset).limit(limit)
-            )
+            items_stmt = stmt.order_by(Dataset.created_at.desc()).offset(offset).limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
@@ -223,11 +219,7 @@ class OptimizationRepository(RepositoryContextMixin):
                 )
             )
             total = await _count_from_stmt(session, stmt)
-            items_stmt = (
-                stmt.order_by(DatasetExample.row_index.asc())
-                .offset(offset)
-                .limit(limit)
-            )
+            items_stmt = stmt.order_by(DatasetExample.row_index.asc()).offset(offset).limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
@@ -293,11 +285,7 @@ class OptimizationRepository(RepositoryContextMixin):
             )
             if status is not None:
                 stmt = stmt.where(OptimizationRun.status == status)
-            stmt = (
-                stmt.order_by(OptimizationRun.created_at.desc())
-                .offset(offset)
-                .limit(limit)
-            )
+            stmt = stmt.order_by(OptimizationRun.created_at.desc()).offset(offset).limit(limit)
             return list((await session.execute(stmt)).scalars().all())
 
     async def get_optimization_run(
@@ -449,12 +437,7 @@ class OptimizationRepository(RepositoryContextMixin):
     async def recover_stale_optimization_runs(self) -> int:
         async with self._db.session() as session, session.begin():
             await session.execute(
-                text(
-                    "SELECT set_config("
-                    "'app.maintenance_task', "
-                    "'recover_stale_optimization_runs', "
-                    "true)"
-                )
+                text("SELECT set_config('app.maintenance_task', 'recover_stale_optimization_runs', true)")
             )
             stmt = (
                 update(OptimizationRun)
@@ -490,11 +473,7 @@ class OptimizationRepository(RepositoryContextMixin):
             )
             if run is None:
                 raise ValueError(f"Optimization run not found: {run_id}")
-            await session.execute(
-                delete(EvaluationResult).where(
-                    EvaluationResult.optimization_run_id == run_id
-                )
-            )
+            await session.execute(delete(EvaluationResult).where(EvaluationResult.optimization_run_id == run_id))
             example_ids = await self._dataset_example_ids_by_row_index(
                 session,
                 dataset_id=run.dataset_id,
@@ -507,19 +486,11 @@ class OptimizationRepository(RepositoryContextMixin):
                             "tenant_id": tenant_id,
                             "workspace_id": run.workspace_id,
                             "optimization_run_id": run_id,
-                            "dataset_example_id": example_ids.get(
-                                int(result.get("example_index", 0))
-                            ),
+                            "dataset_example_id": example_ids.get(int(result.get("example_index", 0))),
                             "example_index": int(result.get("example_index", 0)),
-                            "input_data": self._normalize_input_data(
-                                result.get("input_data")
-                            ),
-                            "expected_output": self._optional_text(
-                                result.get("expected_output")
-                            ),
-                            "predicted_output": self._optional_text(
-                                result.get("predicted_output")
-                            ),
+                            "input_data": self._normalize_input_data(result.get("input_data")),
+                            "expected_output": self._optional_text(result.get("expected_output")),
+                            "predicted_output": self._optional_text(result.get("predicted_output")),
                             "score": float(result.get("score", 0.0)),
                             "metadata_json": {},
                         }
@@ -561,11 +532,7 @@ class OptimizationRepository(RepositoryContextMixin):
                 )
             )
             total = await _count_from_stmt(session, stmt)
-            items_stmt = (
-                stmt.order_by(EvaluationResult.example_index.asc())
-                .offset(offset)
-                .limit(limit)
-            )
+            items_stmt = stmt.order_by(EvaluationResult.example_index.asc()).offset(offset).limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
@@ -588,11 +555,7 @@ class OptimizationRepository(RepositoryContextMixin):
             )
             if run is None:
                 raise ValueError(f"Optimization run not found: {run_id}")
-            await session.execute(
-                delete(PromptSnapshot).where(
-                    PromptSnapshot.optimization_run_id == run_id
-                )
-            )
+            await session.execute(delete(PromptSnapshot).where(PromptSnapshot.optimization_run_id == run_id))
             if snapshots:
                 await session.execute(
                     insert(PromptSnapshot),
@@ -602,9 +565,7 @@ class OptimizationRepository(RepositoryContextMixin):
                             "workspace_id": run.workspace_id,
                             "optimization_run_id": run_id,
                             "predictor_name": str(snapshot["predictor_name"]),
-                            "prompt_type": PromptSnapshotType(
-                                str(snapshot["prompt_type"])
-                            ),
+                            "prompt_type": PromptSnapshotType(str(snapshot["prompt_type"])),
                             "prompt_text": str(snapshot["prompt_text"]),
                         }
                         for snapshot in snapshots
@@ -752,9 +713,7 @@ class OptimizationRepository(RepositoryContextMixin):
         if dataset_id is None:
             return {}
         rows = await session.execute(
-            select(DatasetExample.row_index, DatasetExample.id).where(
-                DatasetExample.dataset_id == dataset_id
-            )
+            select(DatasetExample.row_index, DatasetExample.id).where(DatasetExample.dataset_id == dataset_id)
         )
         return {row_index: example_id for row_index, example_id in rows.all()}
 
@@ -786,9 +745,7 @@ class OptimizationRepository(RepositoryContextMixin):
         module_input_keys = module.metadata_json.get("input_keys")
         if isinstance(module_input_keys, list):
             return [str(item) for item in module_input_keys if str(item)]
-        required_keys = [
-            str(item) for item in (module.required_dataset_keys or []) if str(item)
-        ]
+        required_keys = [str(item) for item in (module.required_dataset_keys or []) if str(item)]
         if output_key is None:
             return required_keys
         return [item for item in required_keys if item != output_key]

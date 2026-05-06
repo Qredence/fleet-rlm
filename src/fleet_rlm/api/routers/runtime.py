@@ -46,12 +46,8 @@ router = APIRouter(
 
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
-    503: {
-        "description": "Runtime services are unavailable because server startup is incomplete."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
+    503: {"description": "Runtime services are unavailable because server startup is incomplete."},
 }
 
 SETTINGS_WRITE_RESPONSES: OpenAPIResponses = {
@@ -63,26 +59,16 @@ SETTINGS_WRITE_RESPONSES: OpenAPIResponses = {
 VOLUME_TREE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The requested root path is invalid."},
-    502: {
-        "description": "The runtime volume provider failed to list the requested path."
-    },
-    504: {
-        "description": "Volume listing timed out before the backend returned a result."
-    },
+    502: {"description": "The runtime volume provider failed to list the requested path."},
+    504: {"description": "Volume listing timed out before the backend returned a result."},
 }
 
 VOLUME_FILE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
-    400: {
-        "description": "The requested file path is invalid or points to a directory."
-    },
+    400: {"description": "The requested file path is invalid or points to a directory."},
     404: {"description": "The requested runtime volume file does not exist."},
-    502: {
-        "description": "The runtime volume provider failed to read the requested file."
-    },
-    504: {
-        "description": "Volume file reading timed out before the backend returned a result."
-    },
+    502: {"description": "The runtime volume provider failed to read the requested file."},
+    504: {"description": "Volume file reading timed out before the backend returned a result."},
 }
 
 VOLUME_LIST_RESPONSES: OpenAPIResponses = {
@@ -104,9 +90,7 @@ async def get_runtime_settings(
 ) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
     _ = identity
-    return await asyncio.to_thread(
-        build_runtime_settings_snapshot, config_deps=config_deps
-    )
+    return await asyncio.to_thread(build_runtime_settings_snapshot, config_deps=config_deps)
 
 
 @router.patch(
@@ -216,9 +200,7 @@ async def get_volume_tree(
     ] = 3,
     provider: Annotated[
         VolumeProvider | None,
-        Query(
-            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
-        ),
+        Query(description="Optional runtime volume backend override. Defaults to the active sandbox provider."),
     ] = None,
 ) -> VolumeTreeResponse:
     """List the runtime volume tree for the active workspace and provider."""
@@ -256,9 +238,7 @@ async def get_volume_file_content(
     ] = 200_000,
     provider: Annotated[
         VolumeProvider | None,
-        Query(
-            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
-        ),
+        Query(description="Optional runtime volume backend override. Defaults to the active sandbox provider."),
     ] = None,
 ) -> VolumeFileContentResponse:
     """Read a text preview for a single file from the runtime volume."""
@@ -281,9 +261,7 @@ async def get_volumes(
     identity: HTTPIdentityDep,
     provider: Annotated[
         VolumeProvider | None,
-        Query(
-            description="Optional runtime volume backend override. Defaults to the active sandbox provider."
-        ),
+        Query(description="Optional runtime volume backend override. Defaults to the active sandbox provider."),
     ] = None,
 ) -> VolumeListResponse:
     """List the active workspace volume for the selected provider."""

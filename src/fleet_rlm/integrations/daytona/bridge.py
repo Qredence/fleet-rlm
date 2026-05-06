@@ -32,9 +32,7 @@ from .async_compat import _await_if_needed, _run_async_compat
 
 _BROKER_PORT = 3000
 _BROKER_SERVER_PATH = "/home/daytona/broker_server.py"
-_BROKER_SESSION_COMMAND = (
-    f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
-)
+_BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
 _BROKER_SERVER_CODE = """
 \"\"\"Broker server for mediating tool calls between sandbox code and the host.\"\"\"
 
@@ -156,9 +154,7 @@ if __name__ == "__main__":
 
 # Allow the broker tool-call polling timeout to be tuned via the host env.
 # The value is injected directly into the embedded server code at import time.
-_DAYTONA_BROKER_TOOL_CALL_TIMEOUT: float = float(
-    os.environ.get("DAYTONA_BROKER_TIMEOUT", "120.0")
-)
+_DAYTONA_BROKER_TOOL_CALL_TIMEOUT: float = float(os.environ.get("DAYTONA_BROKER_TIMEOUT", "120.0"))
 _BROKER_SERVER_CODE = _BROKER_SERVER_CODE.replace(
     "__DAYTONA_TOOL_CALL_TIMEOUT_S__",
     repr(_DAYTONA_BROKER_TOOL_CALL_TIMEOUT),
@@ -216,11 +212,7 @@ def generate_tool_wrapper(
     kwargs_parts: list[str] = []
     added_kw_only_separator = False
     last_positional_only_idx = max(
-        (
-            index
-            for index, param in enumerate(params)
-            if param.kind == inspect.Parameter.POSITIONAL_ONLY
-        ),
+        (index for index, param in enumerate(params) if param.kind == inspect.Parameter.POSITIONAL_ONLY),
         default=-1,
     )
 
@@ -259,9 +251,7 @@ def generate_tool_wrapper(
             sig_parts.append(f"**{param.name}")
             kwargs_parts.append(f"**{param.name}")
             continue
-        raise CodeInterpreterError(
-            f"Unsupported parameter kind for tool '{tool_name}': {param.kind}"
-        )
+        raise CodeInterpreterError(f"Unsupported parameter kind for tool '{tool_name}': {param.kind}")
 
     return _TOOL_WRAPPER_TEMPLATE.format(
         tool_name=tool_name,
@@ -347,9 +337,7 @@ class DaytonaToolBridge:
                         ),
                     )
                 )
-                preview = await _await_if_needed(
-                    self.sandbox.get_preview_link(_BROKER_PORT)
-                )
+                preview = await _await_if_needed(self.sandbox.get_preview_link(_BROKER_PORT))
                 self._broker_session_id = session_id
                 self._broker_url = str(preview.url).rstrip("/")
                 self._broker_token = str(getattr(preview, "token", "") or "")
@@ -364,9 +352,7 @@ class DaytonaToolBridge:
                 self._broker_token = None
                 self._broker_session_id = None
                 try:
-                    await _await_if_needed(
-                        self.sandbox.process.delete_session(session_id)
-                    )
+                    await _await_if_needed(self.sandbox.process.delete_session(session_id))
                 except Exception:
                     pass  # Best-effort session cleanup
                 if attempt < self.broker_start_retries:
@@ -398,9 +384,7 @@ class DaytonaToolBridge:
                 )
             )
             if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to inject tool '{tool_name}': {result.error.value}"
-                )
+                raise CodeInterpreterError(f"Failed to inject tool '{tool_name}': {result.error.value}")
             self._injected_tools.add(tool_name)
 
     def sync_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
@@ -548,28 +532,19 @@ class DaytonaToolBridge:
 
         def _fetch_pending(max_items: int) -> list[dict[str, Any]]:
             request = urllib.request.Request(
-                (
-                    f"{broker_url}/pending?max={max_items}"
-                    f"&lease_seconds={self.tool_claim_lease_seconds}"
-                ),
+                (f"{broker_url}/pending?max={max_items}&lease_seconds={self.tool_claim_lease_seconds}"),
                 headers=self._preview_headers(),
                 method="GET",
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             if isinstance(payload, dict) and isinstance(payload.get("requests"), list):
-                return [
-                    item
-                    for item in payload["requests"]
-                    if isinstance(item, dict) and item.get("id")
-                ]
+                return [item for item in payload["requests"] if isinstance(item, dict) and item.get("id")]
             return []
 
         def _post_result(call_id: str, result: Any, claim_token: str | None) -> None:
             encoded_result = result if isinstance(result, str) else json.dumps(result)
-            payload = json.dumps(
-                {"result": encoded_result, "claim_token": claim_token}
-            ).encode("utf-8")
+            payload = json.dumps({"result": encoded_result, "claim_token": claim_token}).encode("utf-8")
             request = urllib.request.Request(
                 f"{broker_url}/result/{call_id}",
                 data=payload,
@@ -589,15 +564,9 @@ class DaytonaToolBridge:
             kwargs = pending.get("kwargs")
             claim_token = str(pending.get("claim_token") or "")
             safe_args = list(args) if isinstance(args, list) else []
-            safe_kwargs = (
-                {str(key): value for key, value in kwargs.items()}
-                if isinstance(kwargs, dict)
-                else {}
-            )
+            safe_kwargs = {str(key): value for key, value in kwargs.items()} if isinstance(kwargs, dict) else {}
             try:
-                result = await asyncio.to_thread(
-                    tool_executor, tool_name, safe_args, safe_kwargs
-                )
+                result = await asyncio.to_thread(tool_executor, tool_name, safe_args, safe_kwargs)
             except Exception as exc:  # pragma: no cover - host callback boundary
                 result = {"error": f"{type(exc).__name__}: {exc}"}
             try:

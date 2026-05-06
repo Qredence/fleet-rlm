@@ -13,9 +13,7 @@ from tests.unit.fixtures_env import SANITIZATION_CASES
 
 
 @pytest.mark.parametrize(("raw", "expected_snippets"), SANITIZATION_CASES[:1])
-def test_redact_sensitive_masks_common_tokens(
-    raw: str, expected_snippets: list[str]
-) -> None:
+def test_redact_sensitive_masks_common_tokens(raw: str, expected_snippets: list[str]) -> None:
     redacted = redact_sensitive(raw)
 
     for snippet in expected_snippets:
@@ -23,9 +21,7 @@ def test_redact_sensitive_masks_common_tokens(
 
 
 @pytest.mark.parametrize(("text", "expected_snippets"), SANITIZATION_CASES[1:])
-def test_redact_sensitive_preserves_non_sensitive_text(
-    text: str, expected_snippets: list[str]
-) -> None:
+def test_redact_sensitive_preserves_non_sensitive_text(text: str, expected_snippets: list[str]) -> None:
     redacted = redact_sensitive(text)
     for snippet in expected_snippets:
         assert snippet == redacted

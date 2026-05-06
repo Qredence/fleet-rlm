@@ -89,10 +89,7 @@ def fake_daytona_sandboxes(monkeypatch: pytest.MonkeyPatch) -> list[SimpleNamesp
                 items = [
                     sandbox
                     for sandbox in sandboxes
-                    if all(
-                        getattr(sandbox, "labels", {}).get(key) == value
-                        for key, value in labels.items()
-                    )
+                    if all(getattr(sandbox, "labels", {}).get(key) == value for key, value in labels.items())
                 ]
             return SimpleNamespace(
                 items=items,

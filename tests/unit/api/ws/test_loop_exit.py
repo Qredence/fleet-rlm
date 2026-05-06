@@ -42,12 +42,8 @@ class _LifecycleStub:
 
 def test_handle_chat_disconnect_cancels_tasks_and_completes_cancelled() -> None:
     async def scenario() -> None:
-        pending_receive_task = cast(
-            asyncio.Task[object], asyncio.create_task(asyncio.sleep(10))
-        )
-        stream_task = cast(
-            asyncio.Task[str | None], asyncio.create_task(asyncio.sleep(10))
-        )
+        pending_receive_task = cast(asyncio.Task[object], asyncio.create_task(asyncio.sleep(10)))
+        stream_task = cast(asyncio.Task[str | None], asyncio.create_task(asyncio.sleep(10)))
         await asyncio.sleep(0)
 
         cancel_flag = {"cancelled": False}

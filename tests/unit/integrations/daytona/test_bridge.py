@@ -108,9 +108,7 @@ async def test_daytona_bridge_resets_state_after_all_retries_fail(
     monkeypatch.setattr(
         DaytonaToolBridge,
         "_await_health",
-        lambda _self, timeout: (_ for _ in ()).throw(
-            CodeInterpreterError("health check failed")
-        ),
+        lambda _self, timeout: (_ for _ in ()).throw(CodeInterpreterError("health check failed")),
     )
 
     with pytest.raises(CodeInterpreterError):

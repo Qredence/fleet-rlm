@@ -140,21 +140,12 @@ class SessionHistoryRepository:
             items = [
                 item
                 for item in items
-                if needle in item.title.lower()
-                or needle in item.metadata_json["external_session_id"].lower()
+                if needle in item.title.lower() or needle in item.metadata_json["external_session_id"].lower()
             ]
         if model_name is not None:
-            items = [
-                item
-                for item in items
-                if getattr(item, "model_name", None) == model_name
-            ]
+            items = [item for item in items if getattr(item, "model_name", None) == model_name]
         if model_provider is not None:
-            items = [
-                item
-                for item in items
-                if getattr(item, "model_provider", None) == model_provider
-            ]
+            items = [item for item in items if getattr(item, "model_provider", None) == model_provider]
         total = len(items)
         return items[offset : offset + limit], total
 
@@ -226,14 +217,8 @@ class SessionHistoryRepository:
 def test_required_http_and_websocket_routes_are_registered(
     local_client: TestClient,
 ) -> None:
-    http_paths = {
-        route.path for route in local_client.app.routes if isinstance(route, APIRoute)
-    }
-    ws_paths = {
-        route.path
-        for route in local_client.app.routes
-        if isinstance(route, WebSocketRoute)
-    }
+    http_paths = {route.path for route in local_client.app.routes if isinstance(route, APIRoute)}
+    ws_paths = {route.path for route in local_client.app.routes if isinstance(route, WebSocketRoute)}
 
     assert _REQUIRED_HTTP_PATHS.issubset(http_paths)
     assert _REQUIRED_WS_PATHS.issubset(ws_paths)
@@ -291,7 +276,7 @@ def test_ws_router_split_modules_import() -> None:
     assert ws_commands._handle_command is not None
     assert ws_stream.build_execution_completion_summary is not None
     assert chat_persistence.get_execution_emitter is not None
-    assert ws_transport.handle_stream_error is not None
+    assert ws_stream.handle_stream_error is not None
     assert chat_persistence.classify_stream_failure is not None
     assert chat_persistence.ExecutionLifecycleManager is not None
     assert chat_persistence.handle_chat_disconnect is not None
@@ -311,9 +296,7 @@ def test_ws_router_split_modules_import() -> None:
 def test_ws_router_registers_expected_websocket_routes() -> None:
     import fleet_rlm.api.routers.ws as ws
 
-    websocket_paths = {
-        route.path for route in ws.router.routes if getattr(route, "path", None)
-    }
+    websocket_paths = {route.path for route in ws.router.routes if getattr(route, "path", None)}
     assert "/ws/execution" in websocket_paths
     assert "/ws/execution/events" in websocket_paths
 
@@ -345,10 +328,7 @@ def test_optimization_modules_endpoint_returns_longcot_reasoner(
     assert "longcot-reasoner" in slugs
     longcot = next(m for m in payload if m["slug"] == "longcot-reasoner")
     assert longcot["label"] == "LongCoT QA Reasoner"
-    assert (
-        longcot["program_spec"]
-        == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
-    )
+    assert longcot["program_spec"] == "fleet_rlm.runtime.agent.signatures:LongCoTQASignature"
     assert "question" in longcot["required_dataset_keys"]
 
 
@@ -692,10 +672,7 @@ def test_session_export_route_loads_repository_turns_in_one_call(
     assert payload["row_count"] == 5
     # Export now issues a single bounded list_chat_turns call instead of paging.
     assert repository.turn_list_calls[-1]["offset"] == 0
-    assert (
-        repository.turn_list_calls[-1]["limit"]
-        == sessions_router._TRANSCRIPT_EXPORT_MAX_TURNS
-    )
+    assert repository.turn_list_calls[-1]["limit"] == sessions_router._TRANSCRIPT_EXPORT_MAX_TURNS
 
 
 def test_session_export_route_rejects_oversized_sessions(
@@ -743,9 +720,7 @@ def test_sandbox_list_paginates_with_limit(
 ) -> None:
     calls: list[dict[str, int]] = []
 
-    async def fake_load_sandbox_list(
-        *, page: int, limit: int, **kwargs: object
-    ) -> dict[str, object]:
+    async def fake_load_sandbox_list(*, page: int, limit: int, **kwargs: object) -> dict[str, object]:
         _ = kwargs
         calls.append({"page": page, "limit": limit})
         return {"items": [], "total": 0, "page": page, "total_pages": 0}
@@ -776,8 +751,7 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
     schema = local_client.app.openapi()
     security_schemes = schema.get("components", {}).get("securitySchemes", {})
     assert any(
-        scheme.get("type") == "http" and scheme.get("scheme") == "bearer"
-        for scheme in security_schemes.values()
+        scheme.get("type") == "http" and scheme.get("scheme") == "bearer" for scheme in security_schemes.values()
     )
 
     protected_operations = [
@@ -792,16 +766,11 @@ def test_openapi_publishes_http_bearer_security_for_protected_routes(
     ]
     for method, path in protected_operations:
         operation = schema["paths"][path][method]
-        assert operation.get("security"), (
-            f"expected OpenAPI security on {method} {path}"
-        )
+        assert operation.get("security"), f"expected OpenAPI security on {method} {path}"
 
 
 def test_openapi_and_health_share_the_same_version(local_client: TestClient) -> None:
-    assert (
-        local_client.app.openapi()["info"]["version"]
-        == local_client.get("/health").json()["version"]
-    )
+    assert local_client.app.openapi()["info"]["version"] == local_client.get("/health").json()["version"]
 
 
 def test_runtime_contract_endpoints_remain_available(
@@ -1177,10 +1146,7 @@ def test_trace_feedback_logs_feedback_by_trace_id(
     )
     monkeypatch.setattr(
         "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
-        lambda **kwargs: (
-            calls.append(kwargs)
-            or {"feedback_logged": True, "expectation_logged": True}
-        ),
+        lambda **kwargs: calls.append(kwargs) or {"feedback_logged": True, "expectation_logged": True},
     )
 
     response = default_client.post(
@@ -1257,9 +1223,7 @@ def test_trace_feedback_returns_403_for_other_users_trace(
     )
     monkeypatch.setattr(
         "fleet_rlm.api.runtime_services.trace_service.log_trace_feedback",
-        lambda **kwargs: pytest.fail(
-            "feedback logging should not run for another user's trace"
-        ),
+        lambda **kwargs: pytest.fail("feedback logging should not run for another user's trace"),
     )
 
     response = default_client.post(

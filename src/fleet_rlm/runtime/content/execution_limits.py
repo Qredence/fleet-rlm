@@ -29,12 +29,8 @@ def execution_max_text_chars() -> int:
 
 
 def execution_max_collection_items() -> int:
-    return env_positive_int(
-        "WS_EXECUTION_MAX_COLLECTION_ITEMS", DEFAULT_MAX_COLLECTION_ITEMS
-    )
+    return env_positive_int("WS_EXECUTION_MAX_COLLECTION_ITEMS", DEFAULT_MAX_COLLECTION_ITEMS)
 
 
 def execution_max_recursion_depth() -> int:
-    return env_positive_int(
-        "WS_EXECUTION_MAX_RECURSION_DEPTH", DEFAULT_MAX_RECURSION_DEPTH
-    )
+    return env_positive_int("WS_EXECUTION_MAX_RECURSION_DEPTH", DEFAULT_MAX_RECURSION_DEPTH)

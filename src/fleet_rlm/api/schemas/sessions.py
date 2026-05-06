@@ -68,9 +68,7 @@ class SessionListItem(BaseModel):
     title: str = Field(description="Human-readable session title.")
     status: str = Field(description="Session status (active, archived).")
     model_name: str | None = Field(default=None, description="Model used in session.")
-    external_session_id: str | None = Field(
-        default=None, description="Canonical runtime session identifier."
-    )
+    external_session_id: str | None = Field(default=None, description="Canonical runtime session identifier.")
     created_at: str = Field(description="ISO-8601 creation timestamp.")
     updated_at: str = Field(description="ISO-8601 last-update timestamp.")
 
@@ -92,9 +90,7 @@ class SessionDetailResponse(BaseModel):
     title: str = Field(description="Human-readable session title.")
     status: str = Field(description="Session status (active, archived).")
     model_name: str | None = Field(default=None, description="Model used in session.")
-    external_session_id: str | None = Field(
-        default=None, description="Canonical runtime session identifier."
-    )
+    external_session_id: str | None = Field(default=None, description="Canonical runtime session identifier.")
     workspace_id: str | None = Field(default=None, description="Workspace context.")
     turn_count: int = Field(description="Total number of turns in this session.")
     created_at: str = Field(description="ISO-8601 creation timestamp.")
@@ -107,9 +103,7 @@ class TurnItem(BaseModel):
     id: str = Field(description="Durable turn identifier.")
     turn_index: int = Field(description="Zero-based turn position.")
     user_message: str = Field(description="User message text.")
-    assistant_message: str | None = Field(
-        default=None, description="Assistant response text."
-    )
+    assistant_message: str | None = Field(default=None, description="Assistant response text.")
     created_at: str = Field(description="ISO-8601 creation timestamp.")
 
 
@@ -179,8 +173,7 @@ class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
 
     module_slug: str = Field(
-        description="Target GEPA module slug whose dataset keys "
-        "determine the export column mapping."
+        description="Target GEPA module slug whose dataset keys determine the export column mapping."
     )
 
 
@@ -200,9 +193,7 @@ class TranscriptTurnInput(BaseModel):
 class TranscriptDatasetRequest(BaseModel):
     """Request body for converting transcript turns into a GEPA dataset."""
 
-    module_slug: str = Field(
-        description="Target GEPA module slug whose dataset keys determine row mapping."
-    )
+    module_slug: str = Field(description="Target GEPA module slug whose dataset keys determine row mapping.")
     title: str | None = Field(
         default=None,
         description="Optional human-readable transcript title used for dataset naming.",

@@ -129,9 +129,7 @@ def build_local_mlflow_unavailable_error(
     """Return actionable guidance when local MLflow auto-start remains unavailable."""
 
     resolved_tracking_uri = tracking_uri.strip() or "http://127.0.0.1:5001"
-    resolved_backend_store_uri = (
-        backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
-    )
+    resolved_backend_store_uri = backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
     return (
         f"Local MLflow auto-start did not become reachable at {resolved_tracking_uri}. "
         f"Backend store: {resolved_backend_store_uri}. "
@@ -150,20 +148,14 @@ def resolve_mlflow_auto_start_enabled(
 ) -> bool:
     """Return the effective MLflow auto-start decision for the current runtime."""
 
-    raw_value = (
-        auto_start_env if auto_start_env is not None else os.getenv("MLFLOW_AUTO_START")
-    )
+    raw_value = auto_start_env if auto_start_env is not None else os.getenv("MLFLOW_AUTO_START")
     normalized = (raw_value or "").strip().lower()
     if normalized in _MLFLOW_AUTO_START_TRUTHY:
         return True
     if normalized in _MLFLOW_AUTO_START_FALSEY:
         return False
 
-    return bool(
-        mlflow_enabled
-        and app_env == "local"
-        and is_local_mlflow_tracking_uri(tracking_uri)
-    )
+    return bool(mlflow_enabled and app_env == "local" and is_local_mlflow_tracking_uri(tracking_uri))
 
 
 async def start_mlflow_server(
@@ -185,9 +177,7 @@ async def start_mlflow_server(
         return None
 
     port = resolve_mlflow_tracking_port(tracking_uri)
-    resolved_backend_store_uri = (
-        backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
-    )
+    resolved_backend_store_uri = backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
 
     if _mlflow_startup_socket_ready(port=port):
         logger.info("MLflow tracking server already running at %s", tracking_uri)
@@ -215,9 +205,7 @@ async def start_mlflow_server(
             env=os.environ.copy(),
         )
 
-        attempts = max(
-            1, _MLFLOW_STARTUP_TIMEOUT_SECONDS // _MLFLOW_STARTUP_POLL_INTERVAL_SECONDS
-        )
+        attempts = max(1, _MLFLOW_STARTUP_TIMEOUT_SECONDS // _MLFLOW_STARTUP_POLL_INTERVAL_SECONDS)
         for attempt in range(attempts):
             await asyncio.sleep(_MLFLOW_STARTUP_POLL_INTERVAL_SECONDS)
             exit_code = proc.poll()
@@ -253,9 +241,7 @@ async def start_mlflow_server(
         return None
 
 
-def emit_posthog_startup_event(
-    *, app_env: str, auth_mode: str, database_required: bool
-) -> bool:
+def emit_posthog_startup_event(*, app_env: str, auth_mode: str, database_required: bool) -> bool:
     """Emit a startup event when PostHog runtime analytics is configured."""
     posthog_cfg = PostHogConfig.from_env()
     from fleet_rlm.integrations.observability.client import get_posthog_client

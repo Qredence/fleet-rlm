@@ -47,8 +47,8 @@ Active top-level areas under `src/fleet_rlm/`:
 
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
-- `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime models
-  - `runtime/models/builders.py` hosts the runtime RLM factories including `build_recursive_subquery_rlm`, `build_variable_mode_rlm`, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
+- `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime modules
+  - `runtime/modules/` hosts runtime RLM factories, module registry definitions, variable-mode modules, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
   - `runtime/tools/rlm_delegate.py` owns `delegate_to_rlm` / `delegate_to_rlm_batched` plus host-side trajectory persistence into `external_traces`
 - `integrations/`: config, database, observability, and external-system integrations
   - `integrations/daytona/evidence_bridge.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` to sandbox code via `bridge_callbacks.py`; `DATABASE_URL` is never exposed to the sandbox
@@ -147,7 +147,7 @@ Layering rules:
 Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
-- Keep runtime model construction/registration in `runtime/models/builders.py`, `runtime/models/registry.py`, or the `fleet_rlm.runtime.models` package exports
+- Keep runtime module construction/registration in `runtime/modules/factory.py`, `runtime/modules/registry.py`, or the `fleet_rlm.runtime.modules` package exports
 - Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent) and `runtime/agent/runtime.py` (AgentRuntime)
 - Keep the public Daytona interpreter facade in `integrations/daytona/interpreter.py`; durable workspace/session behavior lives in `workspace_manager.py`, code execution and bridge state live in `sandbox_executor.py`, and recursive child construction lives in `child_delegation.py`.
 - Keep Daytona collaborator boundaries typed with small internal Protocols. Use Pydantic v2 for validated configuration/state boundary models such as `WorkspaceConfig`, but keep hot execution-path payloads and bridge result carriers as dataclasses/functions.
@@ -256,7 +256,7 @@ Daytona workflow:
 
 These issues are documented for awareness. Workers should not attempt fixes unless explicitly tasked.
 
-- **Import-time side effects in runtime packages** — `runtime/models/__init__.py`, `quality/__init__.py`, and `quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; runtime models and quality packages do not yet.
+- **Import-time side effects in runtime packages** — `quality/__init__.py` and `quality/scorers.py` import DSPy or MLflow at the top level. The observability package mitigates this with lazy `__getattr__`; quality packages do not yet.
 - **Module registry entrypoint drift** — `quality/module_registry.py` currently seeds `_MODULE_ENTRYPOINTS` with `fleet_rlm.quality.optimize_longcot`, which registers `longcot-reasoner`. Keep `_MODULE_ENTRYPOINTS` aligned with any additional `quality/optimize_*.py` modules so CLI/API metadata stays accurate.
 - **Import-time side effects in `cli/runners.py`** — Top-level imports of `dspy`, `DaytonaInterpreter`, and MLflow observability modules. This is mitigated by lazy loading in `cli/__init__.py` but still violates the import-time rule.
 - **`daytona/interpreter.py` eagerly imports `dspy`** — Any upstream import of `DaytonaInterpreter` loads DSPy into the process.

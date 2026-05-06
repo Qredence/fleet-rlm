@@ -70,12 +70,8 @@ def test_each_registry_entry_has_signature_and_classname():
 
     for name, defn in RUNTIME_MODULE_REGISTRY.items():
         assert defn.signature is not None, f"No signature for {name}"
-        assert isinstance(defn.class_name, str) and defn.class_name, (
-            f"No class_name for {name}"
-        )
-        assert issubclass(defn.signature, dspy.Signature), (
-            f"{name} signature is not a dspy.Signature subclass"
-        )
+        assert isinstance(defn.class_name, str) and defn.class_name, f"No class_name for {name}"
+        assert issubclass(defn.signature, dspy.Signature), f"{name} signature is not a dspy.Signature subclass"
 
 
 # ---------------------------------------------------------------------------

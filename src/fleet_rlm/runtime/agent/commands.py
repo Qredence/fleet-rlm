@@ -206,10 +206,7 @@ async def execute_command(
     back to a direct method lookup on the agent for ``reset``.
     """
     if command not in COMMAND_DISPATCH:
-        raise ValueError(
-            f"Unknown command: {command}. "
-            f"Available: {', '.join(sorted(COMMAND_DISPATCH))}"
-        )
+        raise ValueError(f"Unknown command: {command}. Available: {', '.join(sorted(COMMAND_DISPATCH))}")
 
     tool_name, required, optional = COMMAND_DISPATCH[command]
     missing = [k for k in required if k not in args]
@@ -227,10 +224,7 @@ async def execute_command(
     except AttributeError as exc:
         message = f"Command {command} is not available in the current runtime."
         if command == "parallel_semantic_map":
-            message += (
-                " Use analyze_document, summarize_document, extract_logs, "
-                "grounded_answer, or rlm_query instead."
-            )
+            message += " Use analyze_document, summarize_document, extract_logs, grounded_answer, or rlm_query instead."
         raise ValueError(message) from exc
 
     if command in _BLOCKING_COMMANDS:

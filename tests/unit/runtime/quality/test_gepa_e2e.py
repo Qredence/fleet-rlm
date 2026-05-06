@@ -121,9 +121,7 @@ class _FakeGEPA:
         self.auto = auto
         self.reflection_lm = reflection_lm
 
-    def compile(
-        self, program: Any, trainset: Any = None, valset: Any = None
-    ) -> _FakeOptimizedProgram:
+    def compile(self, program: Any, trainset: Any = None, valset: Any = None) -> _FakeOptimizedProgram:
         return _FakeOptimizedProgram()
 
 
@@ -402,9 +400,7 @@ class TestGepaPersistence:
         tmp_path: Path,
     ) -> None:
         """When run_id is provided, evaluation results are persisted."""
-        with patch(
-            "fleet_rlm.quality.optimization_runner._persist_run_artifacts"
-        ) as mock_persist:
+        with patch("fleet_rlm.quality.optimization_runner._persist_run_artifacts") as mock_persist:
             run_module_optimization(
                 longcot_spec,
                 dataset_path=ten_example_dataset,
@@ -491,9 +487,7 @@ class TestGepaCrossArea:
             }
             for i in range(10)
         ]
-        dataset_path.write_text(
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
-        )
+        dataset_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
 
         spec = get_module_spec("longcot-reasoner")
         assert spec is not None

@@ -14,9 +14,7 @@ ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 
-    env_path: str = Field(
-        description="Filesystem path to the environment file being edited."
-    )
+    env_path: str = Field(description="Filesystem path to the environment file being edited.")
     keys: list[str] = Field(
         default_factory=list,
         description="Ordered list of runtime setting keys surfaced by the Settings API.",
@@ -47,23 +45,15 @@ class RuntimeSettingsUpdateResponse(BaseModel):
         default_factory=list,
         description="Runtime setting keys that were successfully updated.",
     )
-    env_path: str = Field(
-        description="Filesystem path to the environment file that was updated."
-    )
+    env_path: str = Field(description="Filesystem path to the environment file that was updated.")
 
 
 class RuntimeConnectivityTestResponse(BaseModel):
     """Result payload for runtime connectivity and preflight diagnostics."""
 
-    kind: Literal["lm", "daytona"] = Field(
-        description="Runtime subsystem that was tested."
-    )
-    ok: bool = Field(
-        description="Whether the connectivity test completed successfully."
-    )
-    preflight_ok: bool = Field(
-        description="Whether prerequisite configuration checks passed."
-    )
+    kind: Literal["lm", "daytona"] = Field(description="Runtime subsystem that was tested.")
+    ok: bool = Field(description="Whether the connectivity test completed successfully.")
+    preflight_ok: bool = Field(description="Whether prerequisite configuration checks passed.")
     checked_at: str = Field(description="UTC timestamp when the test completed.")
     checks: dict[str, Any] = Field(
         default_factory=dict,
@@ -103,12 +93,8 @@ class RuntimeTestCache(BaseModel):
 class RuntimeActiveModels(BaseModel):
     """Resolved active model identifiers currently loaded by the runtime."""
 
-    planner: str = Field(
-        default="", description="Planner model identifier currently in use."
-    )
-    delegate: str = Field(
-        default="", description="Delegate model identifier currently in use."
-    )
+    planner: str = Field(default="", description="Planner model identifier currently in use.")
+    delegate: str = Field(default="", description="Delegate model identifier currently in use.")
     delegate_small: str = Field(
         default="",
         description="Small delegate model identifier currently in use, when configured.",
@@ -118,18 +104,10 @@ class RuntimeActiveModels(BaseModel):
 class RuntimeStatusResponse(BaseModel):
     """Combined readiness and diagnostics snapshot for the runtime settings UI."""
 
-    app_env: str = Field(
-        description="Current application environment, such as `local` or `prod`."
-    )
-    write_enabled: bool = Field(
-        description="Whether runtime settings writes are currently allowed."
-    )
-    ready: bool = Field(
-        description="Whether critical runtime services are ready to serve requests."
-    )
-    active_models: RuntimeActiveModels = Field(
-        description="Resolved planner and delegate model identities."
-    )
+    app_env: str = Field(description="Current application environment, such as `local` or `prod`.")
+    write_enabled: bool = Field(description="Whether runtime settings writes are currently allowed.")
+    ready: bool = Field(description="Whether critical runtime services are ready to serve requests.")
+    active_models: RuntimeActiveModels = Field(description="Resolved planner and delegate model identities.")
     sandbox_provider: VolumeProvider = Field(
         default="daytona",
         description="Active sandbox backend selected for runtime execution and volume browsing.",
@@ -146,9 +124,7 @@ class RuntimeStatusResponse(BaseModel):
         default_factory=dict,
         description="Daytona configuration and readiness diagnostics.",
     )
-    tests: RuntimeTestCache = Field(
-        description="Cached runtime connectivity test results exposed in the Settings UI."
-    )
+    tests: RuntimeTestCache = Field(description="Cached runtime connectivity test results exposed in the Settings UI.")
     guidance: list[str] = Field(
         default_factory=list,
         description="Human-readable remediation steps for incomplete runtime setup.",

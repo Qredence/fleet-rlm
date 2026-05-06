@@ -126,11 +126,7 @@ def _migrate_optimization_runs(engine: Any) -> None:
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
             try:
-                conn.execute(
-                    text(
-                        f"ALTER TABLE optimization_runs ADD COLUMN {col_name} {col_type}"
-                    )
-                )
+                conn.execute(text(f"ALTER TABLE optimization_runs ADD COLUMN {col_name} {col_type}"))
             except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
@@ -149,9 +145,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
             try:
-                conn.execute(
-                    text(f"ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}")
-                )
+                conn.execute(text(f"ALTER TABLE chat_sessions ADD COLUMN {col_name} {col_type}"))
             except (OperationalError, ProgrammingError):
                 pass  # column already exists
         # Best-effort index for ownership queries
@@ -178,9 +172,7 @@ def _migrate_dataset_columns(engine: Any) -> None:
     with engine.connect() as conn:
         for col_name, col_type in new_columns:
             try:
-                conn.execute(
-                    text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}")
-                )
+                conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}"))
             except (OperationalError, ProgrammingError):
                 pass  # column already exists
         conn.commit()
@@ -194,13 +186,11 @@ def _migrate_evaluation_tables(engine: Any) -> None:
     indexes = [
         (
             "ix_evaluation_results_run_index",
-            "CREATE INDEX IF NOT EXISTS ix_evaluation_results_run_index "
-            "ON evaluation_results (run_id, example_index)",
+            "CREATE INDEX IF NOT EXISTS ix_evaluation_results_run_index ON evaluation_results (run_id, example_index)",
         ),
         (
             "ix_prompt_snapshots_run_type",
-            "CREATE INDEX IF NOT EXISTS ix_prompt_snapshots_run_type "
-            "ON prompt_snapshots (run_id, prompt_type)",
+            "CREATE INDEX IF NOT EXISTS ix_prompt_snapshots_run_type ON prompt_snapshots (run_id, prompt_type)",
         ),
     ]
     with engine.connect() as conn:
@@ -307,12 +297,8 @@ class EvaluationResult(SQLModel, table=True):
     run_id: int = Field(foreign_key="optimization_runs.id", index=True)
     example_index: int = Field(description="Zero-based index in the evaluation dataset")
     input_data: str = Field(description="JSON-serialized input fields for this example")
-    expected_output: str | None = Field(
-        default=None, description="Expected/gold output"
-    )
-    predicted_output: str | None = Field(
-        default=None, description="Model predicted output"
-    )
+    expected_output: str | None = Field(default=None, description="Expected/gold output")
+    predicted_output: str | None = Field(default=None, description="Model predicted output")
     score: float = Field(description="Score for this individual example (0.0-1.0)")
     created_at: datetime = Field(default_factory=_utc_now)
 
@@ -322,9 +308,7 @@ class PromptSnapshot(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     run_id: int = Field(foreign_key="optimization_runs.id", index=True)
-    predictor_name: str = Field(
-        max_length=255, description="Name from named_predictors()"
-    )
+    predictor_name: str = Field(max_length=255, description="Name from named_predictors()")
     prompt_type: str = Field(max_length=16, description="'before' or 'after'")
     prompt_text: str = Field(description="Full prompt/instruction text")
     created_at: datetime = Field(default_factory=_utc_now)
@@ -427,11 +411,7 @@ def add_turn(
 
 def get_turns(session_id: int) -> list[ChatTurn]:
     with get_session() as db:
-        stmt = (
-            select(ChatTurn)
-            .where(ChatTurn.session_id == session_id)
-            .order_by(text("turn_index"))
-        )
+        stmt = select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(text("turn_index"))
         return list(db.exec(stmt).all())
 
 
@@ -572,9 +552,7 @@ def recover_stale_optimization_runs() -> int:
     Returns the number of rows recovered.
     """
     with get_session() as db:
-        stmt = select(OptimizationRun).where(
-            OptimizationRun.status == RunStatus.RUNNING
-        )
+        stmt = select(OptimizationRun).where(OptimizationRun.status == RunStatus.RUNNING)
         stale = list(db.exec(stmt).all())
         for row in stale:
             row.status = RunStatus.FAILED
@@ -786,11 +764,7 @@ def save_evaluation_results(
     """Bulk save per-example evaluation results for an optimization run."""
     with get_session() as db:
         existing_rows = list(
-            db.exec(
-                select(EvaluationResult).where(
-                    cast(Any, EvaluationResult.run_id) == run_id
-                )
-            ).all()
+            db.exec(select(EvaluationResult).where(cast(Any, EvaluationResult.run_id) == run_id)).all()
         )
         for existing in existing_rows:
             db.delete(existing)
@@ -842,11 +816,7 @@ def save_prompt_snapshots(
 ) -> list[PromptSnapshot]:
     """Bulk save before/after prompt snapshots for an optimization run."""
     with get_session() as db:
-        existing_rows = list(
-            db.exec(
-                select(PromptSnapshot).where(cast(Any, PromptSnapshot.run_id) == run_id)
-            ).all()
-        )
+        existing_rows = list(db.exec(select(PromptSnapshot).where(cast(Any, PromptSnapshot.run_id) == run_id)).all())
         for existing in existing_rows:
             db.delete(existing)
         rows: list[PromptSnapshot] = []
@@ -1031,6 +1001,8 @@ def _uuid_to_int(value: uuid.UUID | None) -> int | None:
     we can recover the original value via ``value.int``.
     """
     if value is None:
+        return None
+    if value.int > 2**63 - 1:
         return None
     return value.int
 

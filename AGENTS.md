@@ -48,7 +48,7 @@ The backend is organized into two layers, innermost first:
 1. **DSPy ReAct Agent** — single agent with tool registry
    - `src/fleet_rlm/runtime/agent/` — agent module (`agent.py`), runtime (`runtime.py`), chat orchestration (`chat.py`), session state, signatures
    - `src/fleet_rlm/runtime/execution/` — execution drivers and event assembly
-   - `src/fleet_rlm/runtime/models/` — runtime model construction and registry
+  - `src/fleet_rlm/runtime/modules/` — runtime module construction and registry
    - `src/fleet_rlm/runtime/content/` — content-oriented helpers
    - `src/fleet_rlm/runtime/tools/` — grouped tool helpers (content, sandbox, filesystem, batch, LLM)
    - `src/fleet_rlm/quality/` — offline DSPy evaluation, GEPA optimization, datasets, scoring, module registry

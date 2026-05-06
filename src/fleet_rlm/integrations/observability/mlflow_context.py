@@ -29,15 +29,13 @@ class MlflowTraceRequestContext:
     total_output_tokens: int = 0
 
 
-_CURRENT_REQUEST_CONTEXT: contextvars.ContextVar[MlflowTraceRequestContext | None] = (
-    contextvars.ContextVar[MlflowTraceRequestContext | None](
-        "fleet_rlm_mlflow_request_context",
-        default=None,
-    )
-)
-_CURRENT_TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[
-    str | None
+_CURRENT_REQUEST_CONTEXT: contextvars.ContextVar[MlflowTraceRequestContext | None] = contextvars.ContextVar[
+    MlflowTraceRequestContext | None
 ](
+    "fleet_rlm_mlflow_request_context",
+    default=None,
+)
+_CURRENT_TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[str | None](
     "fleet_rlm_mlflow_trace_id",
     default=None,
 )
@@ -128,18 +126,14 @@ def _has_active_mlflow_trace(mlflow: Any) -> bool:
             if get_current_active_span() is not None:
                 return True
         except Exception:
-            _runtime_module().logger.debug(
-                "Failed to inspect current MLflow span.", exc_info=True
-            )
+            _runtime_module().logger.debug("Failed to inspect current MLflow span.", exc_info=True)
 
     get_active_trace_id = getattr(mlflow, "get_active_trace_id", None)
     if callable(get_active_trace_id):
         try:
             return bool(get_active_trace_id())
         except Exception:
-            _runtime_module().logger.debug(
-                "Failed to inspect current MLflow trace id.", exc_info=True
-            )
+            _runtime_module().logger.debug("Failed to inspect current MLflow trace id.", exc_info=True)
 
     return False
 
@@ -225,9 +219,7 @@ def capture_last_active_trace_id() -> str | None:
             _CURRENT_TRACE_ID.set(context.resolved_trace_id)
             return context.resolved_trace_id
         with _TRACE_ID_LOCK:
-            request_trace_id = _TRACE_IDS_BY_CLIENT_REQUEST_ID.get(
-                context.client_request_id
-            )
+            request_trace_id = _TRACE_IDS_BY_CLIENT_REQUEST_ID.get(context.client_request_id)
         if request_trace_id:
             context.resolved_trace_id = request_trace_id
             _CURRENT_TRACE_ID.set(request_trace_id)

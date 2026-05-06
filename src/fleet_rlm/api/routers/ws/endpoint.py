@@ -199,9 +199,7 @@ class _ExecutionWebSocketConnection:
             emit_event=_emit_event,
         )
 
-    async def _cancel_startup_status_task(
-        self, task: asyncio.Task[None] | None
-    ) -> None:
+    async def _cancel_startup_status_task(self, task: asyncio.Task[None] | None) -> None:
         await _cancel_startup_status_task(task)
 
     async def _receive_initial_message(self):
@@ -236,9 +234,7 @@ class _ExecutionWebSocketConnection:
             ):
                 initial_msg = await self._receive_initial_message()
                 if initial_msg.type == "message":
-                    startup_status_task = asyncio.create_task(
-                        self._emit_delayed_startup_status()
-                    )
+                    startup_status_task = asyncio.create_task(self._emit_delayed_startup_status())
                 agent_context = await _build_chat_agent_context(runtime)
                 async with agent_context as agent:
                     await self._cancel_startup_status_task(startup_status_task)
@@ -269,9 +265,7 @@ class _ExecutionWebSocketConnection:
             return
         except Exception as exc:
             await self._cancel_startup_status_task(startup_status_task)
-            logger.exception(
-                "WebSocket execution startup failed: %s", _sanitize_for_log(exc)
-            )
+            logger.exception("WebSocket execution startup failed: %s", _sanitize_for_log(exc))
             if await _try_send_json(self.websocket, chat_startup_error_payload(exc)):
                 await _close_websocket_safely(self.websocket, code=1011)
 

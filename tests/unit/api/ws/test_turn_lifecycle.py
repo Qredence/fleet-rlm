@@ -69,9 +69,7 @@ def test_initialize_turn_lifecycle_records_run_id_and_session_record() -> None:
 
 def test_initialize_turn_lifecycle_raises_when_run_persist_required() -> None:
     async def scenario() -> None:
-        with pytest.raises(
-            PersistenceRequiredError, match="Failed to persist run start"
-        ):
+        with pytest.raises(PersistenceRequiredError, match="Failed to persist run start"):
             await initialize_turn_lifecycle(
                 planner_lm=SimpleNamespace(model="openai/gpt-4o"),
                 cfg=SimpleNamespace(sandbox_provider="daytona"),

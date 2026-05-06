@@ -29,12 +29,7 @@ def _register_test_module_spec():
     )
 
     def _stub_row_converter(rows):
-        return [
-            dspy.Example(**{k: str(v) for k, v in row.items()}).with_inputs(
-                "user_request"
-            )
-            for row in rows
-        ]
+        return [dspy.Example(**{k: str(v) for k, v in row.items()}).with_inputs("user_request") for row in rows]
 
     spec = ModuleOptimizationSpec(
         module_slug="reflect-and-revise",

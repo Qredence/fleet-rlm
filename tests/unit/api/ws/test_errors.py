@@ -11,8 +11,7 @@ class _ClosedSendWebSocket:
     async def send_json(self, payload: Any) -> None:
         _ = payload
         raise RuntimeError(
-            "Unexpected ASGI message 'websocket.send', after sending "
-            "'websocket.close' or response already completed."
+            "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed."
         )
 
 

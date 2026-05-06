@@ -190,11 +190,13 @@ class TestForwardLoop:
                 confidence=0.9,
             )
         )
-        child_error = json.dumps({
-            "status": "error",
-            "reason": "child_error",
-            "error": "child failed",
-        })
+        child_error = json.dumps(
+            {
+                "status": "error",
+                "reason": "child_error",
+                "error": "child failed",
+            }
+        )
 
         with (
             patch.object(module, "_execute_subqueries", return_value=[child_error]),
@@ -699,12 +701,14 @@ class TestHelpers:
         module = _build_module()
 
         outputs = [
-            json.dumps({
-                "status": "error",
-                "reason": "tool_error",
-                "tool_name": "store_evidence",
-                "error": "Failed to inject tool 'store_evidence'",
-            })
+            json.dumps(
+                {
+                    "status": "error",
+                    "reason": "tool_error",
+                    "tool_name": "store_evidence",
+                    "error": "Failed to inject tool 'store_evidence'",
+                }
+            )
         ]
 
         assert module._classify_subquery_failures(outputs) == [

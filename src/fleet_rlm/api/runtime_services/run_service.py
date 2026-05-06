@@ -59,9 +59,7 @@ class RunService:
                 RunStepItem(
                     id=str(s.id),
                     step_index=s.step_index,
-                    step_type=s.step_type.value
-                    if hasattr(s.step_type, "value")
-                    else str(s.step_type),
+                    step_type=s.step_type.value if hasattr(s.step_type, "value") else str(s.step_type),
                     tool_name=s.tool_name,
                     tokens_in=s.tokens_in,
                     tokens_out=s.tokens_out,

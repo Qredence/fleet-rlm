@@ -34,9 +34,7 @@ def test_staging_test_jwt_secret_meets_hs256_guidance() -> None:
     assert len(STAGING_TEST_JWT_SECRET) >= 32
 
 
-def test_runtime_settings_masks_secrets(
-    local_client: TestClient, monkeypatch: pytest.MonkeyPatch
-):
+def test_runtime_settings_masks_secrets(local_client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o-mini")
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-super-secret")
 
@@ -154,9 +152,7 @@ def test_runtime_settings_patch_config_only_updates_keep_loaded_models(
 
     def _unexpected_reload(**kwargs):
         _ = kwargs
-        raise AssertionError(
-            "runtime model reload should not run for config-only updates"
-        )
+        raise AssertionError("runtime model reload should not run for config-only updates")
 
     monkeypatch.setattr(
         "fleet_rlm.api.routers.runtime.get_planner_lm_from_env",
@@ -483,10 +479,7 @@ def test_runtime_status_ignores_malformed_cached_runtime_tests(
         "lm": None,
         "daytona": None,
     }
-    assert (
-        "Run Runtime connection tests to validate live provider connectivity."
-        in payload["guidance"]
-    )
+    assert "Run Runtime connection tests to validate live provider connectivity." in payload["guidance"]
 
 
 def test_runtime_status_includes_mlflow_startup_state(
@@ -495,9 +488,7 @@ def test_runtime_status_includes_mlflow_startup_state(
 ) -> None:
     state = _server_state(local_client)
     state.optional_service_status["mlflow"] = "degraded"
-    state.optional_service_errors["mlflow"] = (
-        "MLflow runtime initialization unavailable"
-    )
+    state.optional_service_errors["mlflow"] = "MLflow runtime initialization unavailable"
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
     monkeypatch.setenv("MLFLOW_AUTO_START", "yes")
 
@@ -596,10 +587,7 @@ def test_runtime_status_stays_degraded_until_daytona_and_lm_smoke_pass(
     assert payload["ready"] is False
     assert payload["llm"]["model_set"] is False
     assert payload["daytona"]["configured"] is False
-    assert (
-        "Run Runtime connection tests to validate live provider connectivity."
-        in payload["guidance"]
-    )
+    assert "Run Runtime connection tests to validate live provider connectivity." in payload["guidance"]
 
 
 def test_runtime_status_keeps_daytona_guidance_nested(
@@ -614,9 +602,7 @@ def test_runtime_status_keeps_daytona_guidance_nested(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.resolve_daytona_config",
         lambda: (_ for _ in ()).throw(
-            DaytonaConfigError(
-                "Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands."
-            )
+            DaytonaConfigError("Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.")
         ),
     )
 
@@ -641,10 +627,7 @@ def test_runtime_daytona_volume_name_uses_workspace_claim(
 
     identity = SimpleNamespace(tenant_claim="tenant/a", user_claim="user-a")
 
-    assert (
-        resolve_daytona_volume_name(identity=identity, config_deps=state.config_deps)
-        == "tenant-a"
-    )
+    assert resolve_daytona_volume_name(identity=identity, config_deps=state.config_deps) == "tenant-a"
 
 
 def test_runtime_volume_tree_maps_backend_errors_to_502(
@@ -1032,9 +1015,7 @@ def test_runtime_volume_tree_rejects_path_traversal(
     state.config.sandbox_provider = "daytona"
     monkeypatch.setattr(
         "fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("volume backend should not be called")
-        ),
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("volume backend should not be called")),
     )
 
     response = local_client.get(

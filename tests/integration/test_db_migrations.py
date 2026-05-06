@@ -73,9 +73,7 @@ async def test_migrations_apply_and_core_tables_exist(
                         """
                     )
                 )
-                control_plane_columns = {
-                    (row[0], row[1]) for row in column_result.fetchall()
-                }
+                control_plane_columns = {(row[0], row[1]) for row in column_result.fetchall()}
 
                 index_result = await session.execute(
                     text(
@@ -121,14 +119,9 @@ async def test_migrations_apply_and_core_tables_exist(
                         """
                     )
                 )
-                rls_state = {
-                    row[0]: (bool(row[1]), bool(row[2]))
-                    for row in rls_result.fetchall()
-                }
+                rls_state = {row[0]: (bool(row[1]), bool(row[2])) for row in rls_result.fetchall()}
 
-                uuid_helper_result = await session.execute(
-                    text("select to_regprocedure('app.uuid_v7()')")
-                )
+                uuid_helper_result = await session.execute(text("select to_regprocedure('app.uuid_v7()')"))
                 uuid_helper = uuid_helper_result.scalar_one()
 
         expected_tables = {

@@ -184,9 +184,7 @@ class IdentityRepository(RepositoryContextMixin):
         membership_role: MembershipRole = MembershipRole.MEMBER,
     ) -> IdentityUpsertResult | None:
         async with self._db.session() as session, session.begin():
-            tenant_result = await session.execute(
-                select(Tenant).where(Tenant.entra_tenant_id == entra_tenant_id)
-            )
+            tenant_result = await session.execute(select(Tenant).where(Tenant.entra_tenant_id == entra_tenant_id))
             tenant = tenant_result.scalar_one_or_none()
             if tenant is None:
                 return None

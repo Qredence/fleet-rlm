@@ -194,11 +194,7 @@ def test_configure_analytics_is_idempotent(monkeypatch) -> None:
 
         assert cb1 is not None
         assert cb1 is cb2
-        callbacks = [
-            cb
-            for cb in (getattr(dspy.settings, "callbacks", []) or [])
-            if isinstance(cb, PostHogLLMCallback)
-        ]
+        callbacks = [cb for cb in (getattr(dspy.settings, "callbacks", []) or []) if isinstance(cb, PostHogLLMCallback)]
         assert len(callbacks) == 1
     finally:
         dspy.configure(callbacks=old_callbacks)

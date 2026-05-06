@@ -48,9 +48,7 @@ def resolve_active_model(value: str | None, env_key: str) -> str:
     return fallback
 
 
-def cache_runtime_test(
-    *, diagnostics: DiagnosticsDeps, result: RuntimeConnectivityTestResponse
-) -> None:
+def cache_runtime_test(*, diagnostics: DiagnosticsDeps, result: RuntimeConnectivityTestResponse) -> None:
     diagnostics.runtime_test_results[result.kind] = result.model_dump(mode="json")
 
 
@@ -70,13 +68,7 @@ def connectivity_result_from_cache(
 
 def lm_preflight() -> tuple[dict[str, bool], list[str]]:
     has_model = bool((os.environ.get("DSPY_LM_MODEL") or "").strip())
-    has_api_key = bool(
-        (
-            os.environ.get("DSPY_LLM_API_KEY")
-            or os.environ.get("DSPY_LM_API_KEY")
-            or ""
-        ).strip()
-    )
+    has_api_key = bool((os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY") or "").strip())
     checks = {
         "model_set": has_model,
         "api_key_set": has_api_key,
@@ -118,9 +110,7 @@ def daytona_preflight(
         guidance.append(str(exc))
 
     if legacy_api_base:
-        guidance.append(
-            "DAYTONA_API_BASE_URL is not supported here. Use DAYTONA_API_URL instead."
-        )
+        guidance.append("DAYTONA_API_BASE_URL is not supported here. Use DAYTONA_API_URL instead.")
 
     deduped_guidance: list[str] = []
     for item in guidance:
@@ -251,13 +241,9 @@ async def run_lm_connection_test(
 
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
         if planner_loader is None and delegate_loader is None:
-            planner_lm, delegate_lm = await _ensure_runtime_models(
-                lm_deps, config_deps, diagnostics_deps
-            )
+            planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
             if planner_lm is None:
-                raise RuntimeError(
-                    "Failed to construct planner LM from environment settings."
-                )
+                raise RuntimeError("Failed to construct planner LM from environment settings.")
         else:
             if planner_loader is None:
                 raise ValueError(
@@ -273,9 +259,7 @@ async def run_lm_connection_test(
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
             if planner_lm is None:
-                raise RuntimeError(
-                    "Failed to construct planner LM from environment settings."
-                )
+                raise RuntimeError("Failed to construct planner LM from environment settings.")
             delegate_lm = None
             if delegate_loader is not None:
                 delegate_lm = await run_blocking(
@@ -310,8 +294,7 @@ async def run_lm_connection_test(
         preflight_error="LM preflight checks failed.",
         default_error="LM connectivity test failed.",
         timeout_error=(
-            f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
-            "Check API connectivity and credentials."
+            f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. Check API connectivity and credentials."
         ),
         run_smoke=_run_smoke,
     )
@@ -363,8 +346,7 @@ async def run_daytona_connection_test(
         preflight_error="Daytona preflight checks failed.",
         default_error="Daytona connectivity test failed.",
         timeout_error=(
-            f"Daytona test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. "
-            "Check connectivity and credentials."
+            f"Daytona test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. Check connectivity and credentials."
         ),
         run_smoke=_run_smoke,
     )
@@ -383,9 +365,7 @@ def build_runtime_status_response(
     )
 
     lm_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="lm")
-    daytona_test = connectivity_result_from_cache(
-        diagnostics=diagnostics_deps, kind="daytona"
-    )
+    daytona_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="daytona")
 
     state = ServerState.__new__(ServerState)
     state.config_deps = config_deps
@@ -395,24 +375,15 @@ def build_runtime_status_response(
     state.persistence_deps = PersistenceDeps()
     state.diagnostics_deps = diagnostics_deps
 
-    ready = state.is_ready and bool(
-        daytona_test is not None
-        and daytona_test.ok
-        and lm_test is not None
-        and lm_test.ok
-    )
-    mlflow_startup_status = diagnostics_deps.optional_service_status.get(
-        "mlflow", "pending"
-    )
+    ready = state.is_ready and bool(daytona_test is not None and daytona_test.ok and lm_test is not None and lm_test.ok)
+    mlflow_startup_status = diagnostics_deps.optional_service_status.get("mlflow", "pending")
     mlflow_startup_error = diagnostics_deps.optional_service_errors.get("mlflow")
 
     guidance: list[str] = []
     guidance.extend(llm_guidance)
     guidance.extend(daytona_guidance)
     if daytona_test is None or lm_test is None:
-        guidance.append(
-            "Run Runtime connection tests to validate live provider connectivity."
-        )
+        guidance.append("Run Runtime connection tests to validate live provider connectivity.")
     for runtime_test in (lm_test, daytona_test):
         if runtime_test is None or runtime_test.ok:
             continue
@@ -444,9 +415,7 @@ def build_runtime_status_response(
         ready=ready,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(
-            planner=resolve_active_model(
-                config_deps.config.agent_model, "DSPY_LM_MODEL"
-            ),
+            planner=resolve_active_model(config_deps.config.agent_model, "DSPY_LM_MODEL"),
             delegate=resolve_active_model(
                 config_deps.config.agent_delegate_model,
                 "DSPY_DELEGATE_LM_MODEL",
@@ -459,9 +428,7 @@ def build_runtime_status_response(
         llm={
             **llm_checks,
             "planner_configured": lm_deps.planner_lm is not None,
-            "startup_status": diagnostics_deps.optional_service_status.get(
-                "planner_lm", "pending"
-            ),
+            "startup_status": diagnostics_deps.optional_service_status.get("planner_lm", "pending"),
             "startup_error": diagnostics_deps.optional_service_errors.get("planner_lm"),
         },
         mlflow={

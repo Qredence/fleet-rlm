@@ -84,9 +84,7 @@ def test_final_variable_does_not_leak_across_commands(monkeypatch):
         "tool_names": [],
         "output_names": [],
     }
-    messages = _run_driver(
-        monkeypatch, [json.dumps(command_one), json.dumps(command_two)]
-    )
+    messages = _run_driver(monkeypatch, [json.dumps(command_one), json.dumps(command_two)])
 
     assert len(messages) == 2
     assert messages[0]["final"] == {"status": "ok"}
@@ -105,10 +103,7 @@ def test_root_profile_blocks_helper_access(monkeypatch):
 
     assert len(messages) == 1
     assert messages[0]["final"] is None
-    assert (
-        "Helper 'peek' is not available in ROOT_INTERLOCUTOR profile"
-        in messages[0]["stderr"]
-    )
+    assert "Helper 'peek' is not available in ROOT_INTERLOCUTOR profile" in messages[0]["stderr"]
 
 
 def test_extracted_driver_source_runs_standalone(monkeypatch):

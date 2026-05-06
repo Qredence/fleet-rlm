@@ -22,12 +22,8 @@ router = APIRouter(
 
 
 AUTH_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
-    503: {
-        "description": "Run services are unavailable because server startup is incomplete."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
+    503: {"description": "Run services are unavailable because server startup is incomplete."},
 }
 
 RUN_ERROR_RESPONSES: OpenAPIResponses = {
@@ -47,9 +43,7 @@ async def get_run_steps(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    run_id: Annotated[
-        str, Path(description="Identifier of the run whose steps to list.")
-    ],
+    run_id: Annotated[str, Path(description="Identifier of the run whose steps to list.")],
     limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> RunStepListResponse:

@@ -43,9 +43,7 @@ class _FakeAgentInterpreter:
         finally:
             self.default_execution_profile = previous
 
-    def execute(
-        self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any
-    ):
+    def execute(self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any):
         _ = kwargs
         variables = variables or {}
         if "load_from_volume" in code:
@@ -59,9 +57,7 @@ class _FakeAgentInterpreter:
             return FinalOutput({"saved_path": path})
         return FinalOutput({})
 
-    async def aexecute(
-        self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any
-    ):
+    async def aexecute(self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any):
         return self.execute(code, variables, **kwargs)
 
     def configure_workspace(
@@ -186,9 +182,7 @@ class FakeChatAgent:
             await asyncio.sleep(0.01)
             yield event
 
-    async def execute_command(
-        self, command: str, args: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", "command": command, "args": args}
 
     def load_document(self, path: str, alias: str = "active") -> None:

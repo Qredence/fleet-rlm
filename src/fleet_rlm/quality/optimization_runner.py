@@ -115,9 +115,7 @@ def _reflection_lm_provenance(reflection_lm: Any) -> dict[str, str]:
     delegate_model = (os.environ.get("DSPY_DELEGATE_LM_MODEL") or "").strip()
     planner_model = (os.environ.get("DSPY_LM_MODEL") or "").strip()
     resolved_model = _resolve_model_name(reflection_lm)
-    source = (
-        "delegate" if delegate_model and resolved_model == delegate_model else "planner"
-    )
+    source = "delegate" if delegate_model and resolved_model == delegate_model else "planner"
     provenance = {
         "model": resolved_model,
         "source": source,
@@ -142,9 +140,7 @@ def _capture_prompt_snapshots(module: Any, prompt_type: str) -> list[dict[str, s
     snapshots: list[dict[str, str]] = []
     try:
         for name, predictor in module.named_predictors():
-            instructions = getattr(
-                getattr(predictor, "signature", None), "instructions", None
-            )
+            instructions = getattr(getattr(predictor, "signature", None), "instructions", None)
             if instructions:
                 snapshots.append(
                     {
@@ -185,11 +181,7 @@ def _evaluate_per_example(
                 {
                     "example_index": idx,
                     "input_data": _serialize_inputs(example),
-                    "expected_output": str(
-                        getattr(example, "answer", None)
-                        or getattr(example, "output", None)
-                        or ""
-                    ),
+                    "expected_output": str(getattr(example, "answer", None) or getattr(example, "output", None) or ""),
                     "predicted_output": str(prediction) if prediction else "",
                     "score": score,
                 }
@@ -200,11 +192,7 @@ def _evaluate_per_example(
                 idx,
                 exc_info=True,
             )
-            expected_output = (
-                getattr(example, "answer", None)
-                or getattr(example, "output", None)
-                or ""
-            )
+            expected_output = getattr(example, "answer", None) or getattr(example, "output", None) or ""
             results.append(
                 {
                     "example_index": idx,
@@ -258,33 +246,19 @@ def _build_holdout_comparisons(
 ) -> list[dict[str, Any]]:
     """Build same-split baseline-versus-optimized holdout rows for review."""
     comparisons: list[dict[str, Any]] = []
-    total_rows = max(
-        len(dataset_indexes), len(baseline_results), len(optimized_results)
-    )
+    total_rows = max(len(dataset_indexes), len(baseline_results), len(optimized_results))
     for offset in range(total_rows):
-        baseline_row = (
-            baseline_results[offset] if offset < len(baseline_results) else {}
-        )
-        optimized_row = (
-            optimized_results[offset] if offset < len(optimized_results) else {}
-        )
+        baseline_row = baseline_results[offset] if offset < len(baseline_results) else {}
+        optimized_row = optimized_results[offset] if offset < len(optimized_results) else {}
         shared_row = optimized_row or baseline_row
         comparisons.append(
             {
                 "validation_example_index": int(
-                    shared_row.get(
-                        "example_index", baseline_row.get("example_index", offset)
-                    )
+                    shared_row.get("example_index", baseline_row.get("example_index", offset))
                 ),
-                "dataset_row_index": (
-                    dataset_indexes[offset] if offset < len(dataset_indexes) else None
-                ),
-                "input_data": shared_row.get("input_data")
-                or baseline_row.get("input_data")
-                or "{}",
-                "expected_output": shared_row.get("expected_output")
-                or baseline_row.get("expected_output")
-                or "",
+                "dataset_row_index": (dataset_indexes[offset] if offset < len(dataset_indexes) else None),
+                "input_data": shared_row.get("input_data") or baseline_row.get("input_data") or "{}",
+                "expected_output": shared_row.get("expected_output") or baseline_row.get("expected_output") or "",
                 "baseline": {
                     "predicted_output": baseline_row.get("predicted_output", ""),
                     "score": float(baseline_row.get("score", 0.0)),
@@ -379,11 +353,7 @@ def run_module_optimization(
     program = spec.module_factory()
     before_snapshots = _capture_prompt_snapshots(program, "before")
     validation_dataset_indexes = split.validation_indexes
-    baseline_results = (
-        _evaluate_per_example(program, valset, metric)
-        if len(valset) >= _MIN_VAL_EXAMPLES
-        else []
-    )
+    baseline_results = _evaluate_per_example(program, valset, metric) if len(valset) >= _MIN_VAL_EXAMPLES else []
     baseline_validation_score = _mean_score(baseline_results)
 
     reflection_lm = _resolve_reflection_lm()
@@ -407,9 +377,7 @@ def run_module_optimization(
             validation_score = _mean_score(per_example_results)
         else:
             # Fallback to aggregate evaluator if per-example returned nothing
-            validation_score = float(
-                dspy.Evaluate(devset=valset, metric=metric)(optimized)
-            )
+            validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
     else:
         logger.warning(
             "Validation split is empty for %s — skipping evaluation. "
@@ -457,17 +425,14 @@ def run_module_optimization(
                 "validation_examples": len(valset),
                 "train_dataset_indexes": split.train_indexes,
                 "validation_dataset_indexes": validation_dataset_indexes,
-                "validation_range": validation_range_for_indexes(
-                    validation_dataset_indexes
-                ),
+                "validation_range": validation_range_for_indexes(validation_dataset_indexes),
                 "strata": split.strata,
             },
             "baseline_score": baseline_validation_score,
             "optimized_score": validation_score,
             "score_delta": (
                 round(validation_score - baseline_validation_score, 4)
-                if validation_score is not None
-                and baseline_validation_score is not None
+                if validation_score is not None and baseline_validation_score is not None
                 else None
             ),
             "comparisons": holdout_comparisons,

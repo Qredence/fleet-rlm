@@ -27,9 +27,7 @@ def test_initialize_mlflow_wires_tracking_experiment_autolog_and_callback(
     fake_mlflow = SimpleNamespace(
         set_tracking_uri=lambda uri: calls.__setitem__("tracking_uri", uri),
         set_experiment=lambda **kwargs: calls.__setitem__("experiment", kwargs),
-        dspy=SimpleNamespace(
-            autolog=lambda **kwargs: calls.__setitem__("autolog", kwargs)
-        ),
+        dspy=SimpleNamespace(autolog=lambda **kwargs: calls.__setitem__("autolog", kwargs)),
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
@@ -69,22 +67,15 @@ def test_initialize_mlflow_wires_tracking_experiment_autolog_and_callback(
     }
     callbacks = calls["callbacks"]
     assert isinstance(callbacks, list)
-    assert any(
-        isinstance(callback, mlflow_integration.FleetMlflowTraceCallback)
-        for callback in callbacks
-    )
+    assert any(isinstance(callback, mlflow_integration.FleetMlflowTraceCallback) for callback in callbacks)
 
 
 def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
     calls = {"tracking_uri": 0, "autolog": 0}
     fake_mlflow = SimpleNamespace(
-        set_tracking_uri=lambda uri: calls.__setitem__(
-            "tracking_uri", calls["tracking_uri"] + 1
-        ),
+        set_tracking_uri=lambda uri: calls.__setitem__("tracking_uri", calls["tracking_uri"] + 1),
         set_experiment=lambda **kwargs: None,
-        dspy=SimpleNamespace(
-            autolog=lambda **kwargs: calls.__setitem__("autolog", calls["autolog"] + 1)
-        ),
+        dspy=SimpleNamespace(autolog=lambda **kwargs: calls.__setitem__("autolog", calls["autolog"] + 1)),
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
@@ -224,14 +215,8 @@ def test_initialize_mlflow_logs_actionable_warning_for_http_403(
 
     assert any("HTTP 403" in message for message in warning_messages)
     assert any("MLFLOW_TRACKING_TOKEN" in message for message in warning_messages)
-    assert any(
-        "https://user:***@mlflow.example.com/api" in message
-        for message in warning_messages
-    )
-    assert all(
-        "secret" not in message and "token=hidden" not in message
-        for message in warning_messages
-    )
+    assert any("https://user:***@mlflow.example.com/api" in message for message in warning_messages)
+    assert all("secret" not in message and "token=hidden" not in message for message in warning_messages)
     assert any(exc_info is not None for exc_info in debug_exc_infos)
     assert calls["set_experiment"] == 1
 
@@ -266,9 +251,7 @@ def test_trace_result_metadata_includes_trace_and_client_request_id(
 ):
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", object)
-    monkeypatch.setattr(
-        mlflow_integration, "initialize_mlflow", lambda config=None: True
-    )
+    monkeypatch.setattr(mlflow_integration, "initialize_mlflow", lambda config=None: True)
     monkeypatch.setattr(
         "fleet_rlm.integrations.observability.mlflow_context.update_current_mlflow_trace",
         lambda response_preview=None, trace_metadata=None: "trace-123",
@@ -290,9 +273,7 @@ def test_trace_result_metadata_forwards_trace_metadata_to_mlflow_update(
 
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", object)
-    monkeypatch.setattr(
-        mlflow_integration, "initialize_mlflow", lambda config=None: True
-    )
+    monkeypatch.setattr(mlflow_integration, "initialize_mlflow", lambda config=None: True)
     monkeypatch.setattr(
         "fleet_rlm.integrations.observability.mlflow_context.update_current_mlflow_trace",
         lambda response_preview=None, trace_metadata=None: (
@@ -387,19 +368,12 @@ def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(
 
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
-    monkeypatch.setattr(
-        mlflow_integration, "initialize_mlflow", lambda config=None: True
-    )
+    monkeypatch.setattr(mlflow_integration, "initialize_mlflow", lambda config=None: True)
 
     with mlflow_integration.mlflow_request_context(
         mlflow_integration.MlflowTraceRequestContext(client_request_id="req-threaded")
     ):
-        assert (
-            asyncio.run(
-                asyncio.to_thread(mlflow_integration.capture_last_active_trace_id)
-            )
-            == "trace-worker"
-        )
+        assert asyncio.run(asyncio.to_thread(mlflow_integration.capture_last_active_trace_id)) == "trace-worker"
 
         assert mlflow_integration.trace_result_metadata() == {
             "mlflow_trace_id": "trace-worker",
@@ -408,17 +382,12 @@ def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(
 
 
 def test_sanitize_log_field_escapes_newlines_and_carriage_returns() -> None:
-    assert (
-        mlflow_integration._sanitize_log_field("trace-1\r\nforged-entry")
-        == "trace-1\\r\\nforged-entry"
-    )
+    assert mlflow_integration._sanitize_log_field("trace-1\r\nforged-entry") == "trace-1\\r\\nforged-entry"
 
 
 def test_sanitize_tracking_uri_redacts_credentials_and_query() -> None:
     assert (
-        mlflow_integration._sanitize_tracking_uri(
-            "https://user:secret@mlflow.example.com/api?token=hidden"
-        )
+        mlflow_integration._sanitize_tracking_uri("https://user:secret@mlflow.example.com/api?token=hidden")
         == "https://user:***@mlflow.example.com/api"
     )
 
@@ -427,16 +396,10 @@ def test_resolve_trace_by_client_request_id_uses_server_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
-    matching_trace = SimpleNamespace(
-        info=SimpleNamespace(client_request_id="req-123", timestamp_ms=20)
-    )
-    older_trace = SimpleNamespace(
-        info=SimpleNamespace(client_request_id="req-123", timestamp_ms=10)
-    )
+    matching_trace = SimpleNamespace(info=SimpleNamespace(client_request_id="req-123", timestamp_ms=20))
+    older_trace = SimpleNamespace(info=SimpleNamespace(client_request_id="req-123", timestamp_ms=10))
     fake_mlflow = SimpleNamespace(
-        search_traces=lambda **kwargs: (
-            calls.append(kwargs) or [older_trace, matching_trace]
-        ),
+        search_traces=lambda **kwargs: calls.append(kwargs) or [older_trace, matching_trace],
     )
 
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
@@ -477,10 +440,7 @@ def test_update_current_mlflow_trace_skips_when_no_active_trace(
     with mlflow_integration.mlflow_request_context(
         mlflow_integration.MlflowTraceRequestContext(client_request_id="req-123")
     ):
-        assert (
-            mlflow_integration.update_current_mlflow_trace(response_preview="done")
-            is None
-        )
+        assert mlflow_integration.update_current_mlflow_trace(response_preview="done") is None
 
     assert calls == []
 
@@ -564,9 +524,7 @@ def test_trace_to_dataset_row_extracts_expectations_and_feedback():
 def test_extract_token_usage_parses_standard_usage():
     from fleet_rlm.integrations.observability.mlflow_runtime import _extract_token_usage
 
-    inp, out = _extract_token_usage(
-        {"usage": {"prompt_tokens": 10, "completion_tokens": 20}}
-    )
+    inp, out = _extract_token_usage({"usage": {"prompt_tokens": 10, "completion_tokens": 20}})
     assert inp == 10
     assert out == 20
 
@@ -574,9 +532,7 @@ def test_extract_token_usage_parses_standard_usage():
 def test_extract_token_usage_parses_alternative_key_names():
     from fleet_rlm.integrations.observability.mlflow_runtime import _extract_token_usage
 
-    inp, out = _extract_token_usage(
-        {"token_usage": {"inputTokens": 5, "outputTokens": 8}}
-    )
+    inp, out = _extract_token_usage({"token_usage": {"inputTokens": 5, "outputTokens": 8}})
     assert inp == 5
     assert out == 8
 
@@ -601,9 +557,7 @@ def test_on_lm_end_accumulates_tokens_on_context(
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
-    context = mlflow_integration.MlflowTraceRequestContext(
-        client_request_id="req-tokens"
-    )
+    context = mlflow_integration.MlflowTraceRequestContext(client_request_id="req-tokens")
     with mlflow_integration.mlflow_request_context(context):
         cb = mlflow_integration.FleetMlflowTraceCallback()
         cb.on_lm_end(

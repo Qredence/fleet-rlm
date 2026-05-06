@@ -57,9 +57,7 @@ class ExecutionCallbacks:
     requires_bridge: Callable[[str, dict[str, Callable[..., Any]]], bool]
     ensure_bridge: Callable[..., Any]
     execute_direct: Callable[..., Any]
-    response_from_execution: Callable[
-        [DaytonaBridgeExecution], DaytonaExecutionResponse
-    ]
+    response_from_execution: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse]
 
 
 class CodeSanitizationError(Exception):
@@ -205,10 +203,7 @@ async def aensure_setup(
     submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None],
 ) -> Any:
     context = await session.aensure_context()
-    if (
-        owner._setup_context_id != session.context_id
-        or owner._setup_workspace_path != session.workspace_path
-    ):
+    if owner._setup_context_id != session.context_id or owner._setup_workspace_path != session.workspace_path:
         result = await _await_if_needed(
             session.sandbox.code_interpreter.run_code(
                 base_setup_code(
@@ -219,9 +214,7 @@ async def aensure_setup(
             )
         )
         if result.error:
-            raise CodeInterpreterError(
-                f"Failed to initialize Daytona sandbox helpers: {result.error.value}"
-            )
+            raise CodeInterpreterError(f"Failed to initialize Daytona sandbox helpers: {result.error.value}")
         owner._setup_context_id = session.context_id
         owner._setup_workspace_path = session.workspace_path
         owner._submit_signature_key = None
@@ -236,9 +229,7 @@ async def aensure_setup(
                 )
             )
             if result.error:
-                raise CodeInterpreterError(
-                    f"Failed to restore generic SUBMIT: {result.error.value}"
-                )
+                raise CodeInterpreterError(f"Failed to restore generic SUBMIT: {result.error.value}")
             owner._submit_signature_key = None
         return context
 
@@ -250,9 +241,7 @@ async def aensure_setup(
             )
         )
         if result.error:
-            raise CodeInterpreterError(
-                f"Failed to register typed SUBMIT: {result.error.value}"
-            )
+            raise CodeInterpreterError(f"Failed to register typed SUBMIT: {result.error.value}")
         owner._submit_signature_key = current_submit_signature
     return context
 
@@ -270,11 +259,7 @@ async def aensure_bridge(
     sandbox_id = session.sandbox_id
     context_id = session.context_id
     bridge = owner._bridge
-    if (
-        bridge is None
-        or owner._bridge_sandbox_id != sandbox_id
-        or owner._bridge_context_id != context_id
-    ):
+    if bridge is None or owner._bridge_sandbox_id != sandbox_id or owner._bridge_context_id != context_id:
         await owner._aclose_bridge()
         bridge = bridge_cls(
             sandbox=session.sandbox,
@@ -298,14 +283,10 @@ async def aexecute_in_session(
     envs: dict[str, str] | None = None,
     bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
     reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
-    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
-    | None = None,
+    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
     aensure_bridge_fn: Callable[..., Any] | None = None,
     aexecute_direct_fn: Callable[..., Any] | None = None,
-    response_from_execution_fn: Callable[
-        [DaytonaBridgeExecution], DaytonaExecutionResponse
-    ]
-    | None = None,
+    response_from_execution_fn: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse] | None = None,
 ) -> DaytonaExecutionResponse:
     callbacks = resolve_execution_callbacks(
         owner,
@@ -343,14 +324,10 @@ def resolve_execution_callbacks(
     *,
     bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
     reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
-    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
-    | None = None,
+    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
     aensure_bridge_fn: Callable[..., Any] | None = None,
     aexecute_direct_fn: Callable[..., Any] | None = None,
-    response_from_execution_fn: Callable[
-        [DaytonaBridgeExecution], DaytonaExecutionResponse
-    ]
-    | None = None,
+    response_from_execution_fn: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse] | None = None,
 ) -> ExecutionCallbacks:
     return ExecutionCallbacks(
         bridge_tools=bridge_tools_fn or owner._bridge_tools,
@@ -528,10 +505,7 @@ def response_from_execution(
         )
 
     error_text = (
-        ": ".join(part for part in [error_name, error_value] if part)
-        or error_value
-        or error_name
-        or "Execution failed"
+        ": ".join(part for part in [error_name, error_value] if part) or error_value or error_name or "Execution failed"
     )
     return DaytonaExecutionResponse(
         stdout=execution.stdout,
@@ -602,11 +576,7 @@ def finalize_execution_result(
         return f"{combined}\n{error_text}" if combined else error_text
 
     if final_payload is not None:
-        output_keys = (
-            [str(key) for key in list(final_payload.keys())[:50]]
-            if isinstance(final_payload, dict)
-            else None
-        )
+        output_keys = [str(key) for key in list(final_payload.keys())[:50]] if isinstance(final_payload, dict) else None
         emit_execution_event(
             owner,
             complete_event_data(
@@ -869,8 +839,7 @@ class SandboxExecutor:
         self: Any,
         session: DaytonaSandboxSession,
         *,
-        submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None]
-        | None = None,
+        submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None] | None = None,
     ) -> Any:
         submit_signature_fn = submit_signature_fn or self.submit_signature
         return await _aensure_setup(
@@ -907,14 +876,10 @@ class SandboxExecutor:
         envs: dict[str, str] | None = None,
         bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
         reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
-        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
-        | None = None,
+        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
         aensure_bridge_fn: Callable[..., Any] | None = None,
         aexecute_direct_fn: Callable[..., Any] | None = None,
-        response_from_execution_fn: Callable[
-            [DaytonaBridgeExecution], _DaytonaExecutionResponse
-        ]
-        | None = None,
+        response_from_execution_fn: Callable[[DaytonaBridgeExecution], _DaytonaExecutionResponse] | None = None,
     ) -> _DaytonaExecutionResponse:
         return await _aexecute_in_session(
             self,
@@ -935,14 +900,10 @@ class SandboxExecutor:
         *,
         bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
         reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
-        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool]
-        | None = None,
+        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
         aensure_bridge_fn: Callable[..., Any] | None = None,
         aexecute_direct_fn: Callable[..., Any] | None = None,
-        response_from_execution_fn: Callable[
-            [DaytonaBridgeExecution], _DaytonaExecutionResponse
-        ]
-        | None = None,
+        response_from_execution_fn: Callable[[DaytonaBridgeExecution], _DaytonaExecutionResponse] | None = None,
     ) -> _ExecutionCallbacks:
         return _resolve_execution_callbacks(
             self,
@@ -973,9 +934,7 @@ class SandboxExecutor:
         return _sanitize_execution_code(code)
 
     @staticmethod
-    def _structured_execution_error(
-        *, reason: str, error: str
-    ) -> _DaytonaExecutionResponse:
+    def _structured_execution_error(*, reason: str, error: str) -> _DaytonaExecutionResponse:
         return _structured_execution_error(reason=reason, error=error)
 
     async def _arun_prepared_execution(

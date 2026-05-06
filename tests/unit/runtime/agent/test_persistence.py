@@ -130,43 +130,33 @@ def test_history_volume_path_ends_with_json() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_serialize_history_has_required_keys(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_has_required_keys(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: Serialized payload contains all required schema keys."""
     payload = serialize_history(sample_history, sample_session_id)
     missing = REQUIRED_SCHEMA_KEYS - set(payload.keys())
     assert not missing, f"Missing schema keys: {missing}"
 
 
-def test_serialize_history_schema_version(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_schema_version(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: schema_version matches HISTORY_SCHEMA_VERSION."""
     payload = serialize_history(sample_history, sample_session_id)
     assert payload["schema_version"] == HISTORY_SCHEMA_VERSION
 
 
-def test_serialize_history_session_id(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_session_id(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: session_id matches the supplied value."""
     payload = serialize_history(sample_history, sample_session_id)
     assert payload["session_id"] == sample_session_id
 
 
-def test_serialize_history_timestamp_is_float(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_timestamp_is_float(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: timestamp is a numeric float."""
     payload = serialize_history(sample_history, sample_session_id)
     assert isinstance(payload["timestamp"], (int, float))
     assert payload["timestamp"] > 0
 
 
-def test_serialize_history_turns_list(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_turns_list(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: turns is a list with one entry per message."""
     payload = serialize_history(sample_history, sample_session_id)
     turns = payload["turns"]
@@ -174,9 +164,7 @@ def test_serialize_history_turns_list(
     assert len(turns) == 2
 
 
-def test_serialize_history_turns_have_required_fields(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_turns_have_required_fields(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: Each turn dict has user_message and response keys."""
     payload = serialize_history(sample_history, sample_session_id)
     for turn in payload["turns"]:
@@ -190,9 +178,7 @@ def test_serialize_history_empty(empty_history: dspy.History) -> None:
     assert payload["turns"] == []
 
 
-def test_serialize_history_is_json_serializable(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_is_json_serializable(sample_history: dspy.History, sample_session_id: str) -> None:
     """VAL-PERSIST-004: Output is fully JSON-serializable."""
     payload = serialize_history(sample_history, sample_session_id)
     dumped = json.dumps(payload)
@@ -201,9 +187,7 @@ def test_serialize_history_is_json_serializable(
     assert loaded["session_id"] == sample_session_id
 
 
-def test_serialize_history_custom_timestamp(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_serialize_history_custom_timestamp(sample_history: dspy.History, sample_session_id: str) -> None:
     """serialize_history accepts an explicit timestamp."""
     ts = 1234567890.0
     payload = serialize_history(sample_history, sample_session_id, timestamp=ts)
@@ -215,18 +199,14 @@ def test_serialize_history_custom_timestamp(
 # ---------------------------------------------------------------------------
 
 
-def test_deserialize_history_returns_dspy_history(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_deserialize_history_returns_dspy_history(sample_history: dspy.History, sample_session_id: str) -> None:
     """deserialize_history returns a dspy.History instance."""
     payload = serialize_history(sample_history, sample_session_id)
     restored = deserialize_history(payload)
     assert isinstance(restored, dspy.History)
 
 
-def test_deserialize_history_preserves_messages(
-    sample_history: dspy.History, sample_session_id: str
-) -> None:
+def test_deserialize_history_preserves_messages(sample_history: dspy.History, sample_session_id: str) -> None:
     """deserialize_history reconstructs the same messages."""
     payload = serialize_history(sample_history, sample_session_id)
     restored = deserialize_history(payload)
@@ -464,9 +444,7 @@ async def test_restore_history_from_volume_returns_none_on_bad_json(
 
     interp.aread_file = _aread
 
-    restored = await restore_history_from_volume(
-        interp, sample_workspace_id, sample_user_id, sample_session_id
-    )
+    restored = await restore_history_from_volume(interp, sample_workspace_id, sample_user_id, sample_session_id)
     assert restored is None
 
 
@@ -490,9 +468,7 @@ async def test_restore_history_from_volume_returns_none_for_non_dict_json(
 
     interp.aread_file = _aread
 
-    restored = await restore_history_from_volume(
-        interp, sample_workspace_id, sample_user_id, sample_session_id
-    )
+    restored = await restore_history_from_volume(interp, sample_workspace_id, sample_user_id, sample_session_id)
     assert restored is None
 
 

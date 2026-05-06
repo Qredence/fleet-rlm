@@ -14,9 +14,7 @@ _PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILIN
 
 def _load_version_from_pyproject() -> str:
     pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    match = _PYPROJECT_VERSION_PATTERN.search(
-        pyproject_path.read_text(encoding="utf-8")
-    )
+    match = _PYPROJECT_VERSION_PATTERN.search(pyproject_path.read_text(encoding="utf-8"))
     if match is None:
         msg = "Could not locate [project].version in pyproject.toml"
         raise RuntimeError(msg)

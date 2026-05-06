@@ -128,9 +128,7 @@ def optimize_program_with_mipro(
         }
     )
     if not initialize_mlflow(resolved):
-        raise RuntimeError(
-            "MLflow optimization is unavailable. Check MLFLOW_* settings."
-        )
+        raise RuntimeError("MLflow optimization is unavailable. Check MLFLOW_* settings.")
 
     rows = load_trace_rows(dataset_path)
     examples = rows_to_examples(
@@ -147,9 +145,7 @@ def optimize_program_with_mipro(
     start_run = getattr(mlflow, "start_run", None)
     log_metric = getattr(mlflow, "log_metric", None)
     if start_run is None or log_metric is None:
-        raise RuntimeError(
-            "MLflow tracking helpers are unavailable in this environment."
-        )
+        raise RuntimeError("MLflow tracking helpers are unavailable in this environment.")
 
     with cast(Any, start_run)(run_name=resolved_run_name):
         optimized = optimizer.compile(
@@ -161,9 +157,7 @@ def optimize_program_with_mipro(
         if valset:
             evaluator = dspy.Evaluate(devset=valset, metric=metric)
             validation_score = evaluator(optimized)
-            cast(Any, log_metric)(
-                "optimization_validation_score", float(validation_score)
-            )
+            cast(Any, log_metric)("optimization_validation_score", float(validation_score))
 
         if output_path is not None:
             output_path.parent.mkdir(parents=True, exist_ok=True)

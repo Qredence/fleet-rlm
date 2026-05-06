@@ -70,9 +70,7 @@ def _structured_transcript_row(
 
     input_keys = list(spec.input_keys)
     if not input_keys:
-        raise ValueError(
-            f"Module {spec.module_slug!r} does not declare transcript input keys."
-        )
+        raise ValueError(f"Module {spec.module_slug!r} does not declare transcript input keys.")
     row[input_keys[0]] = user_message
 
     assistant_sink = _ASSISTANT_SINKS.get(spec.module_slug)
@@ -82,9 +80,7 @@ def _structured_transcript_row(
 
     output_keys = [key for key in spec.required_dataset_keys if key not in input_keys]
     if len(output_keys) != 1:
-        raise ValueError(
-            f"Module {spec.module_slug!r} requires a dedicated transcript export mapping."
-        )
+        raise ValueError(f"Module {spec.module_slug!r} requires a dedicated transcript export mapping.")
     row[output_keys[0]] = assistant_message
     return row
 
@@ -100,9 +96,7 @@ def build_transcript_dataset_rows(
     if spec is None:
         raise ValueError(f"Unknown module slug: {module_slug!r}")
     if not spec.required_dataset_keys:
-        raise ValueError(
-            f"Module {module_slug!r} does not declare any required dataset keys."
-        )
+        raise ValueError(f"Module {module_slug!r} does not declare any required dataset keys.")
 
     rows: list[dict[str, Any]] = []
     for user_message, assistant_message in turns:
@@ -117,9 +111,6 @@ def build_transcript_dataset_rows(
         )
 
     if not rows:
-        raise ValueError(
-            "Transcript has no usable turns "
-            "(both user and assistant messages required)."
-        )
+        raise ValueError("Transcript has no usable turns (both user and assistant messages required).")
 
     return rows, spec.label

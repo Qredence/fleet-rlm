@@ -23,7 +23,7 @@ def _runtime_cfg() -> SimpleNamespace:
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_acquire_returns_interpreter_when_daytona_available(monkeypatch) -> None:
     calls: list[dict[str, Any]] = []
 
@@ -56,7 +56,7 @@ async def test_acquire_returns_interpreter_when_daytona_available(monkeypatch) -
     ]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_acquire_returns_none_on_import_error(monkeypatch) -> None:
     def _raise_import(*_args: object, **_kwargs: object) -> None:
         raise ImportError("no daytona")
@@ -71,7 +71,7 @@ async def test_acquire_returns_none_on_import_error(monkeypatch) -> None:
     assert result is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_acquire_returns_none_on_config_error(monkeypatch) -> None:
     class _FakeDaytonaConfigError(Exception):
         pass
@@ -95,7 +95,7 @@ async def test_acquire_returns_none_on_config_error(monkeypatch) -> None:
     assert result is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_release_calls_ashutdown_when_available() -> None:
     shutdown_calls: list[Any] = []
 
@@ -108,7 +108,7 @@ async def test_release_calls_ashutdown_when_available() -> None:
     assert shutdown_calls == ["ashutdown"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_release_calls_shutdown_when_ashutdown_unavailable() -> None:
     shutdown_calls: list[Any] = []
 
@@ -121,7 +121,7 @@ async def test_release_calls_shutdown_when_ashutdown_unavailable() -> None:
     assert shutdown_calls == ["shutdown"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_release_swallows_exceptions() -> None:
     class _FailingInterpreter:
         async def ashutdown(self) -> None:
@@ -132,7 +132,7 @@ async def test_release_swallows_exceptions() -> None:
     await pool.release(_FailingInterpreter())
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_release_noop_for_none() -> None:
     pool = InterpreterPool()
     # Should not raise

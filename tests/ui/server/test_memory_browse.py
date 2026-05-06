@@ -228,11 +228,7 @@ class _MemoryBrowseRepository:
         if tenant_id != self.tenant_id or workspace_id != self.workspace_id:
             return []
         allowed_scopes = {MemoryScope.USER, MemoryScope.RUN, MemoryScope.SESSION}
-        items = [
-            item
-            for item in self.items
-            if item.scope in allowed_scopes and item.user_id == user_id
-        ]
+        items = [item for item in self.items if item.scope in allowed_scopes and item.user_id == user_id]
         if scope is not None:
             if scope not in allowed_scopes:
                 return []
@@ -272,9 +268,7 @@ def test_list_memory_returns_all_items(default_client, auth_headers, memory_repo
     assert payload["offset"] == 0
     assert len(payload["items"]) == 4
     assert all("Other user's" not in item["content_text"] for item in payload["items"])
-    assert all(
-        item["scope"] != MemoryScope.WORKSPACE.value for item in payload["items"]
-    )
+    assert all(item["scope"] != MemoryScope.WORKSPACE.value for item in payload["items"])
 
     first = payload["items"][0]
     assert first["scope"] == MemoryScope.SESSION.value
@@ -299,9 +293,7 @@ def test_list_memory_filters_by_scope(default_client, auth_headers, memory_repo)
     assert all(item["scope"] == "session" for item in payload["items"])
 
 
-def test_list_memory_paginates_without_truncating_total(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_paginates_without_truncating_total(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?limit=1&offset=1",
         headers=auth_headers,
@@ -314,9 +306,7 @@ def test_list_memory_paginates_without_truncating_total(
     assert len(payload["items"]) == 1
 
 
-def test_list_memory_user_scope_returns_current_user_only(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_user_scope_returns_current_user_only(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?scope=user",
         headers=auth_headers,
@@ -328,9 +318,7 @@ def test_list_memory_user_scope_returns_current_user_only(
     assert payload["items"][0]["content_text"] == "Current user's profile memory"
 
 
-def test_list_memory_filters_by_scope_and_scope_id(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_filters_by_scope_and_scope_id(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?scope=session&scope_id=session-1",
         headers=auth_headers,
@@ -343,9 +331,7 @@ def test_list_memory_filters_by_scope_and_scope_id(
     assert payload["items"][0]["scope_id"] == "session-1"
 
 
-def test_list_memory_rejects_other_user_scope_id(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_rejects_other_user_scope_id(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?scope=session&scope_id=other-session",
         headers=auth_headers,
@@ -356,9 +342,7 @@ def test_list_memory_rejects_other_user_scope_id(
     assert payload["items"] == []
 
 
-def test_list_memory_rejects_other_user_user_scope_id(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_rejects_other_user_user_scope_id(default_client, auth_headers, memory_repo):
     response = default_client.get(
         f"/api/v1/memory?scope=user&scope_id={memory_repo.other_user_id}",
         headers=auth_headers,
@@ -369,9 +353,7 @@ def test_list_memory_rejects_other_user_user_scope_id(
     assert payload["items"] == []
 
 
-def test_list_memory_excludes_non_caller_run_scope_id(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_excludes_non_caller_run_scope_id(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?scope=run&scope_id=other-run",
         headers=auth_headers,
@@ -382,9 +364,7 @@ def test_list_memory_excludes_non_caller_run_scope_id(
     assert payload["items"] == []
 
 
-def test_list_memory_workspace_scope_returns_empty(
-    default_client, auth_headers, memory_repo
-):
+def test_list_memory_workspace_scope_returns_empty(default_client, auth_headers, memory_repo):
     response = default_client.get(
         "/api/v1/memory?scope=workspace",
         headers=auth_headers,

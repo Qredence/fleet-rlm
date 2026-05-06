@@ -126,9 +126,7 @@ def get_execution_emitter(diagnostics: DiagnosticsDeps) -> ExecutionEventEmitter
     return emitter
 
 
-def get_execution_emitter_with_config(
-    diagnostics: DiagnosticsDeps, config_deps: ConfigDeps
-) -> ExecutionEventEmitter:
+def get_execution_emitter_with_config(diagnostics: DiagnosticsDeps, config_deps: ConfigDeps) -> ExecutionEventEmitter:
     emitter = diagnostics.events_event_emitter
     if emitter is not None:
         return emitter
@@ -312,11 +310,7 @@ def build_workspace_task_request(
         docs_path=prepared_turn.docs_path,
         repo_url=prepared_turn.repo_url,
         repo_ref=prepared_turn.repo_ref,
-        context_paths=(
-            list(prepared_turn.context_paths)
-            if prepared_turn.context_paths is not None
-            else None
-        ),
+        context_paths=(list(prepared_turn.context_paths) if prepared_turn.context_paths is not None else None),
         batch_concurrency=prepared_turn.batch_concurrency,
         workspace_id=prepared_turn.workspace_id,
         cancel_check=cancel_check,
@@ -337,10 +331,7 @@ def _is_final_output(result: Any) -> bool:
 
 def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
     safe_session_id = _sanitize_id(session_id, "default-session")
-    return (
-        f"meta/workspaces/{workspace_id}/users/{user_id}/"
-        f"react-session-{safe_session_id}.json"
-    )
+    return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
 def _legacy_manifest_path(path: str) -> str | None:
@@ -432,11 +423,7 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
         output = getattr(result, "output", None)
         output = output if isinstance(output, dict) else {}
         text = str(output.get("text", ""))
-        if (
-            not text
-            or text.startswith("[file not found:")
-            or text.startswith("[error:")
-        ):
+        if not text or text.startswith("[file not found:") or text.startswith("[error:"):
             continue
         try:
             parsed = json.loads(text)
@@ -542,11 +529,7 @@ class ExecutionLifecycleManager:
 
     @property
     def _can_persist(self) -> bool:
-        return (
-            self.repository is not None
-            and self.identity_rows is not None
-            and self.active_run_db_id is not None
-        )
+        return self.repository is not None and self.identity_rows is not None and self.active_run_db_id is not None
 
     def raise_if_persistence_error(self) -> None:
         if self.strict_persistence and self._persistence_error is not None:
@@ -665,9 +648,7 @@ class ExecutionLifecycleManager:
         self.raise_if_persistence_error()
 
     async def emit_step(self, step: ExecutionStep) -> None:
-        await self.execution_emitter.emit(
-            self._build_event("execution_step", step=step)
-        )
+        await self.execution_emitter.emit(self._build_event("execution_step", step=step))
 
     async def complete_run(
         self,
@@ -684,12 +665,8 @@ class ExecutionLifecycleManager:
         effective_status = status
         effective_error = dict(error_json or {})
         if self._persistence_error is not None:
-            effective_error.setdefault(
-                "durable_write_error", str(self._persistence_error)
-            )
-            effective_error.setdefault(
-                "error_type", type(self._persistence_error).__name__
-            )
+            effective_error.setdefault("durable_write_error", str(self._persistence_error))
+            effective_error.setdefault("error_type", type(self._persistence_error).__name__)
             if self.strict_persistence:
                 effective_status = RunStatus.FAILED
                 effective_error.setdefault("code", "durable_state_write_failed")
@@ -711,12 +688,8 @@ class ExecutionLifecycleManager:
                         "run_status_persist_failed",
                         f"Failed to persist run status: {exc}",
                     ) from exc
-                logger.warning(
-                    "Failed to persist run status: %s", _sanitize_for_log(exc)
-                )
-        await self.execution_emitter.emit(
-            self._build_event("execution_completed", step=step, summary=summary)
-        )
+                logger.warning("Failed to persist run status: %s", _sanitize_for_log(exc))
+        await self.execution_emitter.emit(self._build_event("execution_completed", step=step, summary=summary))
         self.run_completed = True
 
 
@@ -752,14 +725,8 @@ async def initialize_turn_lifecycle(
             },
         )
 
-    if (
-        repository is not None
-        and identity_rows is not None
-        and identity_rows.user_id is not None
-    ):
-        model_provider, model_name = parse_model_identity(
-            getattr(planner_lm, "model", None)
-        )
+    if repository is not None and identity_rows is not None and identity_rows.user_id is not None:
+        model_provider, model_name = parse_model_identity(getattr(planner_lm, "model", None))
         try:
             run_row = await repository.create_run(
                 RunCreateRequest(
@@ -769,9 +736,7 @@ async def initialize_turn_lifecycle(
                     status=RunStatus.RUNNING,
                     model_provider=model_provider,
                     model_name=model_name,
-                    sandbox_provider=resolve_sandbox_provider(
-                        sandbox_provider or cfg.sandbox_provider
-                    ),
+                    sandbox_provider=resolve_sandbox_provider(sandbox_provider or cfg.sandbox_provider),
                 )
             )
             active_run_db_id = run_row.id
@@ -861,9 +826,7 @@ def update_manifest_from_exported_state(
     generated_docs[:] = sorted(list(exported_state.get("documents", {}).keys()))
 
     previous_rev_raw = manifest.get("rev", 0)
-    previous_rev_candidate = (
-        previous_rev_raw if isinstance(previous_rev_raw, (int, float, str)) else 0
-    )
+    previous_rev_candidate = previous_rev_raw if isinstance(previous_rev_raw, (int, float, str)) else 0
     try:
         previous_rev = int(previous_rev_candidate)
     except (TypeError, ValueError):
@@ -916,9 +879,7 @@ async def persist_memory_item_if_needed(
                 workspace_id=identity_rows.workspace_id,
                 user_id=identity_rows.user_id,
                 run_id=active_run_db_id,
-                scope=MemoryScope.RUN
-                if active_run_db_id is not None
-                else MemoryScope.USER,
+                scope=MemoryScope.RUN if active_run_db_id is not None else MemoryScope.USER,
                 scope_id=str(active_run_db_id or identity_rows.user_id),
                 kind=MemoryKind.NOTE,
                 source=MemorySource.USER_INPUT,
@@ -973,31 +934,21 @@ async def persist_session_state(
     if include_volume_save and active_manifest_path and interpreter is not None:
         remote_manifest = await load_manifest_from_volume(agent, active_manifest_path)
         remote_rev_raw = remote_manifest.get("rev", 0)
-        remote_rev_candidate = (
-            remote_rev_raw if isinstance(remote_rev_raw, (int, float, str)) else 0
-        )
+        remote_rev_candidate = remote_rev_raw if isinstance(remote_rev_raw, (int, float, str)) else 0
         try:
             remote_rev = int(remote_rev_candidate)
         except (TypeError, ValueError):
             remote_rev = 0
 
         if remote_rev > previous_rev:
-            message = (
-                "Session manifest revision conflict detected "
-                f"(remote_rev={remote_rev}, local_rev={previous_rev})"
-            )
+            message = f"Session manifest revision conflict detected (remote_rev={remote_rev}, local_rev={previous_rev})"
             if persistence_required:
                 raise PersistenceRequiredError("manifest_conflict", message)
             logger.warning(message)
         else:
-            saved_path = await save_manifest_to_volume(
-                agent, active_manifest_path, manifest
-            )
+            saved_path = await save_manifest_to_volume(agent, active_manifest_path, manifest)
             if saved_path is None:
-                message = (
-                    "Failed to save session manifest to volume "
-                    f"(path={active_manifest_path})"
-                )
+                message = f"Failed to save session manifest to volume (path={active_manifest_path})"
                 if persistence_required:
                     raise PersistenceRequiredError("manifest_write_failed", message)
                 logger.warning(message)

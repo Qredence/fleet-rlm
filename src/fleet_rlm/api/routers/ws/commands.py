@@ -83,9 +83,7 @@ async def _handle_command(
     command, args = _extract_command_and_args(payload)
 
     if not command:
-        await websocket.send_json(
-            {"type": "error", "message": "Command name cannot be empty"}
-        )
+        await websocket.send_json({"type": "error", "message": "Command name cannot be empty"})
         return
     if args is None:
         await _send_command_args_error(websocket=websocket, command=command)
@@ -110,9 +108,7 @@ async def _handle_command(
             persistence_required=persistence_required,
         )
 
-        await websocket.send_json(
-            _command_response(command=command, result=normalized_result)
-        )
+        await websocket.send_json(_command_response(command=command, result=normalized_result))
     except (ValueError, FileNotFoundError, KeyError) as exc:
         await websocket.send_json(
             _command_response(

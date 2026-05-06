@@ -119,9 +119,7 @@ class TraceService:
         resolved_trace_id = str(trace_info.get("trace_id") or "")
         raw_client_request_id = trace_info.get("client_request_id")
         resolved_client_request_id = (
-            str(raw_client_request_id).strip()
-            if raw_client_request_id is not None
-            else None
+            str(raw_client_request_id).strip() if raw_client_request_id is not None else None
         ) or None
 
         if not resolved_trace_id:
@@ -167,9 +165,7 @@ class TraceService:
                     "source": "mlflow",
                     "mlflow_outcome": {
                         "feedback_logged": bool(outcome.get("feedback_logged", False)),
-                        "expectation_logged": bool(
-                            outcome.get("expectation_logged", False)
-                        ),
+                        "expectation_logged": bool(outcome.get("expectation_logged", False)),
                     },
                 },
             )

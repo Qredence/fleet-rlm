@@ -30,23 +30,17 @@ class LLMTraceContext:
         )
 
 
-_CURRENT_TRACE: contextvars.ContextVar[LLMTraceContext | None] = contextvars.ContextVar[
-    LLMTraceContext | None
-](
+_CURRENT_TRACE: contextvars.ContextVar[LLMTraceContext | None] = contextvars.ContextVar[LLMTraceContext | None](
     "fleet_rlm_current_trace",
     default=None,
 )
-_RUNTIME_DISTINCT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[
-    str | None
-](
+_RUNTIME_DISTINCT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[str | None](
     "fleet_rlm_runtime_distinct_id",
     default=None,
 )
-_RUNTIME_TELEMETRY_ENABLED: contextvars.ContextVar[bool | None] = (
-    contextvars.ContextVar[bool | None](
-        "fleet_rlm_runtime_telemetry_enabled",
-        default=None,
-    )
+_RUNTIME_TELEMETRY_ENABLED: contextvars.ContextVar[bool | None] = contextvars.ContextVar[bool | None](
+    "fleet_rlm_runtime_telemetry_enabled",
+    default=None,
 )
 
 

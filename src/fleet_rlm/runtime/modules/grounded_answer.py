@@ -32,9 +32,7 @@ def _normalize_chunk_strategy(strategy: str) -> str:
         "json_keys": "json_keys",
     }
     if normalized not in mapping:
-        raise ValueError(
-            "Unsupported strategy. Choose one of: size, headers, timestamps, json_keys"
-        )
+        raise ValueError("Unsupported strategy. Choose one of: size, headers, timestamps, json_keys")
     return mapping[normalized]
 
 

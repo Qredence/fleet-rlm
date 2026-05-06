@@ -445,7 +445,6 @@ class WorkspaceManager:
     async def _areset_execution_state(self) -> None:
         await self._reset_executor()
 
-
     def configure_workspace(
         self,
         *,

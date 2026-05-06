@@ -4,9 +4,7 @@ import fleet_rlm.quality.mlflow_evaluation as mlflow_evaluation
 import fleet_rlm.quality.scorers as scorer_module
 
 
-def test_dataset_supports_retrieval_groundedness_requires_retrievers_for_all_rows() -> (
-    None
-):
+def test_dataset_supports_retrieval_groundedness_requires_retrievers_for_all_rows() -> None:
     assert (
         mlflow_evaluation._dataset_supports_retrieval_groundedness(
             [
@@ -30,18 +28,10 @@ def test_dataset_supports_retrieval_groundedness_requires_retrievers_for_all_row
 def test_build_rlm_scorers_skips_retrieval_groundedness_when_disabled(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        scorer_module, "RelevanceToQuery", lambda model: f"relevance:{model}"
-    )
-    monkeypatch.setattr(
-        scorer_module, "ToolCallCorrectness", lambda model: f"correctness:{model}"
-    )
-    monkeypatch.setattr(
-        scorer_module, "ToolCallEfficiency", lambda model: f"efficiency:{model}"
-    )
-    monkeypatch.setattr(
-        scorer_module, "RetrievalGroundedness", lambda model: f"retrieval:{model}"
-    )
+    monkeypatch.setattr(scorer_module, "RelevanceToQuery", lambda model: f"relevance:{model}")
+    monkeypatch.setattr(scorer_module, "ToolCallCorrectness", lambda model: f"correctness:{model}")
+    monkeypatch.setattr(scorer_module, "ToolCallEfficiency", lambda model: f"efficiency:{model}")
+    monkeypatch.setattr(scorer_module, "RetrievalGroundedness", lambda model: f"retrieval:{model}")
 
     scorers = scorer_module.build_rlm_scorers(
         model="judge-model",

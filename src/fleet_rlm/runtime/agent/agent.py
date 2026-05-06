@@ -15,9 +15,7 @@ from .signatures import RLMReActChatSignature
 class FleetAgentSignature(dspy.Signature):
     """Simplified ReAct chat signature for FleetAgent."""
 
-    chat_history: dspy.History = dspy.InputField(
-        desc="Prior conversation turns (keys: user_message, response)"
-    )
+    chat_history: dspy.History = dspy.InputField(desc="Prior conversation turns (keys: user_message, response)")
     user_message: str = dspy.InputField(desc="Current user message")
     response: str = dspy.OutputField(desc="Agent response to the user")
 

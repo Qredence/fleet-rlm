@@ -24,9 +24,7 @@ def _make_fake_react(records: list[dict[str, Any]]):
 
     class _FakeReAct:
         def __init__(self, *, signature, tools, max_iters, **kwargs):
-            records.append(
-                {"signature": signature, "tools": list(tools), "max_iters": max_iters}
-            )
+            records.append({"signature": signature, "tools": list(tools), "max_iters": max_iters})
             self.signature = signature
 
         def __call__(self, **kwargs):

@@ -31,9 +31,7 @@ async def _arun_admin_code(
     try:
         from daytona.common.process import CodeRunParams
 
-        result = await _await_if_needed(
-            sandbox.process.code_run(code, params=CodeRunParams())
-        )
+        result = await _await_if_needed(sandbox.process.code_run(code, params=CodeRunParams()))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"{error_prefix}: {exc}",
@@ -122,17 +120,13 @@ class DaytonaSandboxSession:
         if self.context_id:
             existing_contexts: list[Any] | None = None
             with suppress(Exception):
-                existing_contexts = await _await_if_needed(
-                    self.sandbox.code_interpreter.list_contexts()
-                )
+                existing_contexts = await _await_if_needed(self.sandbox.code_interpreter.list_contexts())
             if existing_contexts is not None:
                 for existing in existing_contexts:
                     if str(getattr(existing, "id", "") or "") == self.context_id:
                         self._context = existing
                         return existing
-        context = await _await_if_needed(
-            self.sandbox.code_interpreter.create_context(cwd=self.workspace_path)
-        )
+        context = await _await_if_needed(self.sandbox.code_interpreter.create_context(cwd=self.workspace_path))
         self._context = context
         self.context_id = str(getattr(context, "id", "") or "") or None
         return context
@@ -159,18 +153,14 @@ class DaytonaSandboxSession:
         self._context = None
         if context is None and self.context_id:
             with suppress(Exception):
-                existing_contexts = await _await_if_needed(
-                    self.sandbox.code_interpreter.list_contexts()
-                )
+                existing_contexts = await _await_if_needed(self.sandbox.code_interpreter.list_contexts())
                 for existing in existing_contexts:
                     if str(getattr(existing, "id", "") or "") == self.context_id:
                         context = existing
                         break
         if context is not None:
             with suppress(Exception):
-                await _await_if_needed(
-                    self.sandbox.code_interpreter.delete_context(context)
-                )
+                await _await_if_needed(self.sandbox.code_interpreter.delete_context(context))
         self.context_id = None
         self._driver_started = False
 
@@ -198,9 +188,7 @@ class DaytonaSandboxSession:
 
     async def aread_file(self, path: str) -> str:
         await self._arebind_sandbox_if_needed()
-        raw = await _await_if_needed(
-            self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
-        )
+        raw = await _await_if_needed(self.sandbox.fs.download_file(self._resolve_sandbox_path(path)))
         if raw is None:
             return ""
         if isinstance(raw, str):
@@ -251,9 +239,7 @@ class DaytonaSandboxSession:
 
     async def alist_files(self, path: str) -> list[Any]:
         await self._arebind_sandbox_if_needed()
-        entries = await _await_if_needed(
-            self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
-        )
+        entries = await _await_if_needed(self.sandbox.fs.list_files(self._resolve_sandbox_path(path)))
         return list(entries)
 
     def list_files(self, path: str) -> list[Any]:
@@ -293,9 +279,7 @@ class DaytonaSandboxSession:
     async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:
         from daytona import Resources
 
-        await _await_if_needed(
-            self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
-        )
+        await _await_if_needed(self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk)))
 
     def resize(self, *, cpu: int, memory: int, disk: int) -> None:
         _run_async_compat(self.aresize, cpu=cpu, memory=memory, disk=disk)

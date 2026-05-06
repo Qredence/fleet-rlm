@@ -58,9 +58,7 @@ def generated_dataset_path(tmp_path: Path) -> Path:
         text=True,
         cwd=str(REPO_ROOT),
     )
-    assert result.returncode == 0, (
-        f"Dataset generation failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Dataset generation failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     return output
 
 
@@ -86,9 +84,7 @@ def test_all_rows_have_required_keys(generated_dataset_path: Path) -> None:
     spec = get_module_spec("longcot-reasoner")
     assert spec is not None, "longcot-reasoner module spec not found"
     valid_rows = validate_required_keys(rows, spec.required_dataset_keys, spec.label)
-    assert len(valid_rows) == len(rows), (
-        f"Only {len(valid_rows)} of {len(rows)} rows passed key validation"
-    )
+    assert len(valid_rows) == len(rows), f"Only {len(valid_rows)} of {len(rows)} rows passed key validation"
 
 
 def test_all_rows_have_non_empty_question(generated_dataset_path: Path) -> None:

@@ -445,11 +445,7 @@ async def _agit_ref_probe(
     ref: str,
     verify_arg: str = "rev-parse",
 ) -> bool:
-    args = (
-        ("show-ref", "--verify", ref)
-        if verify_arg == "show-ref"
-        else ("rev-parse", "--verify", ref)
-    )
+    args = ("show-ref", "--verify", ref) if verify_arg == "show-ref" else ("rev-parse", "--verify", ref)
     result = await _aexec_git_command(
         sandbox=sandbox,
         workspace_path=workspace_path,
@@ -670,9 +666,7 @@ async def acreate_workspace_session(
 
     timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
     sandbox: Any | None = None
-    resolved_spec = request.spec or runtime.build_sandbox_spec(
-        volume_name=request.volume_name
-    )
+    resolved_spec = request.spec or runtime.build_sandbox_spec(volume_name=request.volume_name)
     try:
         create_started = time.perf_counter()
         sandbox = await acreate_sandbox(runtime=runtime, spec=resolved_spec)
@@ -686,11 +680,7 @@ async def acreate_workspace_session(
             )
 
         workspace_path = await _abuild_workspace_path(sandbox, request.repo_url)
-        resolved_ref = (
-            await _aresolve_clone_ref(request.repo_url, request.ref)
-            if request.repo_url
-            else request.ref
-        )
+        resolved_ref = await _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
         if request.repo_url:
             clone_started = time.perf_counter()
             await _aclone_repo(
@@ -752,20 +742,14 @@ async def areconcile_workspace_session(
 
     workspace_started = time.perf_counter()
     workspace_path = await _abuild_workspace_path(session.sandbox, request.repo_url)
-    resolved_ref = (
-        await _aresolve_clone_ref(request.repo_url, request.ref)
-        if request.repo_url
-        else request.ref
-    )
+    resolved_ref = await _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
     await _areconcile_repo_checkout(
         sandbox=session.sandbox,
         repo_url=request.repo_url,
         ref=resolved_ref,
         workspace_path=workspace_path,
     )
-    session.phase_timings_ms["workspace_reconcile"] = int(
-        (time.perf_counter() - workspace_started) * 1000
-    )
+    session.phase_timings_ms["workspace_reconcile"] = int((time.perf_counter() - workspace_started) * 1000)
 
     context_started = time.perf_counter()
     context_sources = await _astage_context_paths(
@@ -774,9 +758,7 @@ async def areconcile_workspace_session(
         context_paths=request.context_paths or None,
         reset_existing=True,
     )
-    session.phase_timings_ms["context_stage"] = int(
-        (time.perf_counter() - context_started) * 1000
-    )
+    session.phase_timings_ms["context_stage"] = int((time.perf_counter() - context_started) * 1000)
     session.repo_url = request.repo_url
     session.ref = resolved_ref
     session.workspace_path = workspace_path

@@ -163,10 +163,7 @@ async def test_repository_smoke_flow(repository: FleetRepository):
     assert job.id is not None
     assert leased_jobs
     assert memory_items
-    assert any(
-        item.uri == f"daytona-volume://memory/{run.id}/summary.md"
-        for item in memory_items
-    )
+    assert any(item.uri == f"daytona-volume://memory/{run.id}/summary.md" for item in memory_items)
 
 
 @pytest.mark.asyncio
@@ -225,10 +222,7 @@ async def test_repository_chat_session_and_turn_flow(repository: FleetRepository
     assert second_turn.turn_index == 1
     assert updated_session.id == chat_session.id
     assert updated_session.title == "Session A (updated)"
-    assert (
-        updated_session.active_manifest_path
-        == "meta/workspaces/default/session-a-v2.json"
-    )
+    assert updated_session.active_manifest_path == "meta/workspaces/default/session-a-v2.json"
 
     async with repository._db.session() as session:
         async with session.begin():
@@ -611,10 +605,7 @@ async def test_repository_optimization_dataset_and_run_flow(
     assert run_detail.phase == "completed"
     assert run_detail.metadata_json["module_slug"] == "reflect-and-revise"
     assert run_detail.metadata_json["dataset_path"] == "datasets/reflect.jsonl"
-    assert (
-        run_detail.metadata_json["review_bundle"]["reflection_model"]["source"]
-        == "delegate"
-    )
+    assert run_detail.metadata_json["review_bundle"]["reflection_model"]["source"] == "delegate"
     assert [item.id for item in listed_runs] == [run.id]
     assert evaluation_total == 2
     assert [item.example_index for item in evaluation_results] == [0, 1]
@@ -737,9 +728,7 @@ async def test_session_delete_nulls_execution_run_session_reference(
             identity.user_id,
             identity.workspace_id,
         )
-        await session.execute(
-            delete(ChatSession).where(ChatSession.id == chat_session.id)
-        )
+        await session.execute(delete(ChatSession).where(ChatSession.id == chat_session.id))
 
     async with repository._db.session() as session, session.begin():
         await repository._set_request_context(
@@ -863,12 +852,8 @@ async def test_resolve_tenant_by_entra_claim_returns_existing_tenant(
         display_name="Lookup Tenant",
     )
 
-    resolved = await repository.resolve_tenant_by_entra_claim(
-        entra_tenant_id=tenant_claim
-    )
-    missing = await repository.resolve_tenant_by_entra_claim(
-        entra_tenant_id=f"tenant-missing-{uuid.uuid4()}"
-    )
+    resolved = await repository.resolve_tenant_by_entra_claim(entra_tenant_id=tenant_claim)
+    missing = await repository.resolve_tenant_by_entra_claim(entra_tenant_id=f"tenant-missing-{uuid.uuid4()}")
 
     assert resolved is not None
     assert resolved.id == tenant.id
@@ -926,11 +911,7 @@ async def test_resolve_control_plane_identity_does_not_upsert_inactive_tenant(
 
     async with repository._db.session() as session:
         async with session.begin():
-            await session.execute(
-                update(Tenant)
-                .where(Tenant.id == tenant.id)
-                .values(status=TenantStatus.SUSPENDED)
-            )
+            await session.execute(update(Tenant).where(Tenant.id == tenant.id).values(status=TenantStatus.SUSPENDED))
 
     resolved = await repository.resolve_control_plane_identity(
         entra_tenant_id=tenant_claim,
@@ -1123,9 +1104,7 @@ async def test_upsert_sandbox_session_tracks_created_by_user(
 
     async with repository._db.session() as session:
         async with session.begin():
-            result = await session.execute(
-                select(SandboxSession).where(SandboxSession.id == sandbox_session_id)
-            )
+            result = await session.execute(select(SandboxSession).where(SandboxSession.id == sandbox_session_id))
             sandbox_session = result.scalar_one()
 
     assert sandbox_session.created_by_user_id == identity.user_id

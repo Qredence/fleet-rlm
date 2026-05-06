@@ -58,9 +58,7 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
     env_path = _resolve_env_path()
     updates: dict[str, str] = {}
 
-    session.console.print(
-        Panel("Update LLM configuration in local .env", title="settings")
-    )
+    session.console.print(Panel("Update LLM configuration in local .env", title="settings"))
 
     model_value = _prompt_value(
         key="DSPY_LM_MODEL",
@@ -106,9 +104,7 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
         return
 
     _write_env_updates(env_path=env_path, updates=updates)
-    session.console.print(
-        f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]"
-    )
+    session.console.print(f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]")
 
 
 def run_long_context(session: Any, arg_text: str) -> None:
@@ -145,9 +141,7 @@ def run_long_context(session: Any, arg_text: str) -> None:
         session._print_error("usage: /run-long-context <docs_path> <query> [summarize]")
         return
 
-    with session.console.status(
-        "[cyan]Running long-context task...[/]", spinner="line"
-    ):
+    with session.console.status("[cyan]Running long-context task...[/]", spinner="line"):
         try:
             result = runners.run_long_context(
                 docs_path=docs_path,

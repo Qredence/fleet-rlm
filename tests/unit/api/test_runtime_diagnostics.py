@@ -35,10 +35,7 @@ async def test_run_connectivity_test_returns_preflight_failure_without_smoke() -
     assert result.ok is False
     assert result.preflight_ok is False
     assert result.error == "Daytona preflight checks failed."
-    assert (
-        diagnostics_deps.runtime_test_results["daytona"]["error"]
-        == "Daytona preflight checks failed."
-    )
+    assert diagnostics_deps.runtime_test_results["daytona"]["error"] == "Daytona preflight checks failed."
 
 
 @pytest.mark.asyncio
@@ -97,9 +94,7 @@ async def test_run_daytona_connection_test_caches_success(
     assert result.kind == "daytona"
     assert result.ok is True
     assert result.preflight_ok is True
-    assert result.output_preview == (
-        "Daytona connectivity verified. Found 2 sandboxes (limited)."
-    )
+    assert result.output_preview == ("Daytona connectivity verified. Found 2 sandboxes (limited).")
     assert diagnostics_deps.runtime_test_results["daytona"]["ok"] is True
     assert _FakeAsyncDaytona.instances[-1].closed is True
 
@@ -128,9 +123,7 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
     )
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.config.build_daytona_client",
-        lambda _cfg: (_ for _ in ()).throw(
-            RuntimeError("Daytona SDK is not available.")
-        ),
+        lambda _cfg: (_ for _ in ()).throw(RuntimeError("Daytona SDK is not available.")),
     )
 
     result = await diagnostics.run_daytona_connection_test(
@@ -140,10 +133,7 @@ async def test_run_daytona_connection_test_reports_missing_sdk(
 
     assert result.ok is False
     assert "Daytona SDK is not available" in result.error
-    assert (
-        "Daytona SDK is not available"
-        in diagnostics_deps.runtime_test_results["daytona"]["error"]
-    )
+    assert "Daytona SDK is not available" in diagnostics_deps.runtime_test_results["daytona"]["error"]
 
 
 def test_build_runtime_status_response_includes_cached_test_failures_in_guidance(

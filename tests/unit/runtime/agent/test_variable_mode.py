@@ -169,9 +169,7 @@ def test_build_runtime_module_variable_mode_returns_variable_module():
     from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     mock_interp = MagicMock(spec=[])
-    with patch(
-        "fleet_rlm.runtime.modules.registry.RLMVariableExecutionModule"
-    ) as mock_cls:
+    with patch("fleet_rlm.runtime.modules.registry.RLMVariableExecutionModule") as mock_cls:
         mock_cls.return_value = MagicMock(spec=RLMVariableExecutionModule)
         build_runtime_module(
             "summarize_long_document",

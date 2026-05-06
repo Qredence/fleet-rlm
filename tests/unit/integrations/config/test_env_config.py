@@ -167,14 +167,8 @@ def test_config_model_defaults_match_hydra_yaml():
     assert RlmSettings().max_iters == rlm_cfg["max_iters"]
     assert RlmSettings().deep_max_iters == rlm_cfg["deep_max_iters"]
     assert RlmSettings().enable_adaptive_iters == bool(rlm_cfg["enable_adaptive_iters"])
-    assert (
-        RlmSettings().delegate_max_calls_per_turn
-        == rlm_cfg["delegate_max_calls_per_turn"]
-    )
-    assert (
-        RlmSettings().delegate_result_truncation_chars
-        == rlm_cfg["delegate_result_truncation_chars"]
-    )
+    assert RlmSettings().delegate_max_calls_per_turn == rlm_cfg["delegate_max_calls_per_turn"]
+    assert RlmSettings().delegate_result_truncation_chars == rlm_cfg["delegate_result_truncation_chars"]
 
 
 def test_get_delegate_lm_from_env_uses_delegate_model(monkeypatch, tmp_path: Path):
@@ -237,9 +231,7 @@ def test_get_runtime_module_adapter_allows_chat_override(monkeypatch, tmp_path: 
     assert adapter.kwargs == {"use_native_function_calling": False}
 
 
-def test_get_runtime_module_adapter_can_opt_into_native_function_calling(
-    monkeypatch, tmp_path: Path
-):
+def test_get_runtime_module_adapter_can_opt_into_native_function_calling(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
         lines=[
@@ -265,9 +257,7 @@ def test_get_runtime_module_adapter_can_opt_into_native_function_calling(
     assert adapter.kwargs == {"use_native_function_calling": True}
 
 
-def test_build_dspy_context_uses_structure_sensitive_adapter(
-    monkeypatch, tmp_path: Path
-):
+def test_build_dspy_context_uses_structure_sensitive_adapter(monkeypatch, tmp_path: Path):
     captured: dict[str, object] = {}
 
     class _FakeContext:
@@ -336,9 +326,7 @@ def test_configure_planner_from_env_passes_default_adapter(monkeypatch, tmp_path
     assert captured["adapter"].kwargs == {"use_native_function_calling": False}
 
 
-def test_configure_planner_from_env_can_opt_into_native_function_calling(
-    monkeypatch, tmp_path: Path
-):
+def test_configure_planner_from_env_can_opt_into_native_function_calling(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
         lines=[
@@ -371,9 +359,7 @@ def test_configure_planner_from_env_can_opt_into_native_function_calling(
     assert captured["adapter"].kwargs == {"use_native_function_calling": True}
 
 
-def test_get_delegate_lm_from_env_returns_none_on_init_error(
-    monkeypatch, tmp_path: Path
-):
+def test_get_delegate_lm_from_env_returns_none_on_init_error(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
         lines=[
@@ -404,9 +390,7 @@ def test_get_delegate_lm_from_env_returns_none_on_init_error(
     ]
 
 
-def test_get_planner_lm_from_env_local_overrides_process_env(
-    monkeypatch, tmp_path: Path
-):
+def test_get_planner_lm_from_env_local_overrides_process_env(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
         lines=[
@@ -429,9 +413,7 @@ def test_get_planner_lm_from_env_local_overrides_process_env(
     assert lm.api_base == "https://file.example"
 
 
-def test_get_planner_lm_from_env_production_keeps_process_env(
-    monkeypatch, tmp_path: Path
-):
+def test_get_planner_lm_from_env_production_keeps_process_env(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
         lines=[
@@ -454,9 +436,7 @@ def test_get_planner_lm_from_env_production_keeps_process_env(
     assert lm.api_base == "https://process.example"
 
 
-def test_prepare_env_skips_mlflow_initialization(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prepare_env_skips_mlflow_initialization(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(config, "configure_posthog_analytics_from_env", lambda: None)
     monkeypatch.setenv("APP_ENV", "local")
 
@@ -464,9 +444,7 @@ def test_prepare_env_skips_mlflow_initialization(
     config._prepare_env(env_file=env_file)
 
 
-def test_prepare_env_honors_explicit_fleet_env_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_prepare_env_honors_explicit_fleet_env_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     env_file = write_env_file(tmp_path, lines=["MLFLOW_ENABLED=false"])
 
     monkeypatch.setenv("APP_ENV", "local")

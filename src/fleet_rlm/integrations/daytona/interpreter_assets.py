@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
-_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES: frozenset[str] = frozenset(
-    {"run", "workspace_write", "workspace_read"}
-)
+_DAYTONA_SANDBOX_NATIVE_TOOL_NAMES: frozenset[str] = frozenset({"run", "workspace_write", "workspace_read"})
 # Agent-level tools that must NOT be called from inside sandbox code.
 # Note: sub_rlm / sub_rlm_batched ARE allowed — they are the true-RLM
 # recursive primitives bridged via the HTTP broker.

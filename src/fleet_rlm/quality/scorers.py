@@ -31,9 +31,7 @@ except ImportError:
             pass
 
         def __call__(self, *args, **kwargs):
-            return Feedback(
-                value=1, rationale="Scorer not available in this environment"
-            )
+            return Feedback(value=1, rationale="Scorer not available in this environment")
 
     RelevanceToQuery: Any = PlaceholderScorer
     RetrievalGroundedness: Any = PlaceholderScorer
@@ -81,9 +79,12 @@ def build_rlm_scorers(
 
     # The reasoning-quality judge may expose trace inputs (including tool I/O, URLs,
     # or user data) to an external LLM. Require explicit opt-in to enable it.
-    enable_reasoning_judge = os.environ.get(
-        "FLEET_RLM_ENABLE_REASONING_JUDGE", ""
-    ).lower() in {"1", "true", "yes", "on"}
+    enable_reasoning_judge = os.environ.get("FLEET_RLM_ENABLE_REASONING_JUDGE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if enable_reasoning_judge:
         # Custom reasoning judge
         scorers.append(reasoning_quality_scorer(judge_model))
@@ -158,9 +159,7 @@ def reasoning_quality_scorer(model: str) -> Any:
 
         max_reasoning_len = 4000
         if len(reasoning_text) > max_reasoning_len:
-            reasoning_text = (
-                reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
-            )
+            reasoning_text = reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
 
         prompt = f"""
             Evaluate the reasoning quality of an AI agent based on its execution trace.
@@ -194,16 +193,9 @@ def reasoning_quality_scorer(model: str) -> Any:
             if isinstance(raw, str):
                 content = raw
             elif isinstance(raw, dict):
-                content = (
-                    raw.get("content")
-                    or raw.get("text")
-                    or (raw.get("message") or {}).get("content")
-                    or ""
-                )
+                content = raw.get("content") or raw.get("text") or (raw.get("message") or {}).get("content") or ""
             else:
-                raise ValueError(
-                    f"Unexpected DSPy LM response type: {type(raw).__name__}"
-                )
+                raise ValueError(f"Unexpected DSPy LM response type: {type(raw).__name__}")
 
             if content.startswith("```json"):
                 content = content[7:]

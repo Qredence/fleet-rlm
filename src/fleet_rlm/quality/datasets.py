@@ -54,9 +54,7 @@ def load_dataset_rows(dataset_path: str | Path) -> list[DatasetRow]:
             raise ValueError(f"JSON dataset is an empty array: {path}")
         return payload
 
-    raise ValueError(
-        f"Expected a JSON array or JSONL file of trace examples, got {type(payload).__name__}: {path}"
-    )
+    raise ValueError(f"Expected a JSON array or JSONL file of trace examples, got {type(payload).__name__}: {path}")
 
 
 def validate_required_keys(
@@ -92,8 +90,7 @@ def validate_required_keys(
 
     if not valid:
         raise ValueError(
-            f"No valid {module_name} examples after filtering {len(rows)} rows "
-            f"for required keys {list(required_keys)}."
+            f"No valid {module_name} examples after filtering {len(rows)} rows for required keys {list(required_keys)}."
         )
 
     skipped = len(rows) - len(valid)
@@ -127,9 +124,7 @@ def split_examples(
     return examples[:cutoff], examples[cutoff:]
 
 
-def _prefix_split_indexes(
-    total_examples: int, train_ratio: float
-) -> tuple[list[int], list[int]]:
+def _prefix_split_indexes(total_examples: int, train_ratio: float) -> tuple[list[int], list[int]]:
     """Return deterministic prefix train/validation indexes."""
     if total_examples <= 0:
         raise ValueError("No optimization examples were produced from the dataset.")
@@ -187,9 +182,7 @@ def split_examples_with_metadata(
     if not examples:
         raise ValueError("No optimization examples were produced from the dataset.")
 
-    train_indexes, validation_indexes = _prefix_split_indexes(
-        len(examples), train_ratio
-    )
+    train_indexes, validation_indexes = _prefix_split_indexes(len(examples), train_ratio)
     if len(examples) == 1:
         return ExampleSplit(
             train=[examples[0]],

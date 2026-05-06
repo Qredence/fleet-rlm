@@ -124,9 +124,7 @@ STRONG_REASONING = (
     "conclusion matches the question."
 )
 SHALLOW_REASONING = "Because Paris is France's capital."
-FILLER_REASONING = (
-    "Paris answer Paris answer Paris answer Paris answer Paris answer Paris answer."
-)
+FILLER_REASONING = "Paris answer Paris answer Paris answer Paris answer Paris answer Paris answer."
 
 
 def _score_prediction(
@@ -174,9 +172,7 @@ def test_metric_continuous_answer_tiers_with_substantive_reasoning() -> None:
     assert spec is not None
     metric = spec.metric_builder()
 
-    exact = _score_prediction(
-        metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING
-    )
+    exact = _score_prediction(metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING)
     partial = _score_prediction(
         metric,
         pred_answer="The final answer is Paris.",
@@ -200,12 +196,8 @@ def test_metric_reasoning_changes_score_when_answer_is_fixed() -> None:
     assert spec is not None
     metric = spec.metric_builder()
 
-    strong = _score_prediction(
-        metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING
-    )
-    shallow = _score_prediction(
-        metric, pred_answer="Paris", pred_reasoning=SHALLOW_REASONING
-    )
+    strong = _score_prediction(metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING)
+    shallow = _score_prediction(metric, pred_answer="Paris", pred_reasoning=SHALLOW_REASONING)
     none = _score_prediction(metric, pred_answer="Paris", pred_reasoning="")
 
     assert strong.score > shallow.score > none.score
@@ -256,13 +248,8 @@ def test_metric_structured_reasoning_beats_matched_length_filler() -> None:
     )
 
     assert structured.score > filler.score
-    assert (
-        "step" in structured.feedback.lower()
-        or "structured" in structured.feedback.lower()
-    )
-    assert (
-        "filler" in filler.feedback.lower() or "repetitive" in filler.feedback.lower()
-    )
+    assert "step" in structured.feedback.lower() or "structured" in structured.feedback.lower()
+    assert "filler" in filler.feedback.lower() or "repetitive" in filler.feedback.lower()
 
 
 def test_metric_formatting_only_answer_variants_beat_materially_wrong_answers() -> None:
@@ -366,16 +353,12 @@ def test_metric_partial_answer_bands() -> None:
     assert wrapper_overlap.score > related_wrong.score
 
 
-def test_metric_feedback_tiers_are_actionable_and_separate_answer_and_reasoning() -> (
-    None
-):
+def test_metric_feedback_tiers_are_actionable_and_separate_answer_and_reasoning() -> None:
     spec = get_module_spec("longcot-reasoner")
     assert spec is not None
     metric = spec.metric_builder()
 
-    strong = _score_prediction(
-        metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING
-    )
+    strong = _score_prediction(metric, pred_answer="Paris", pred_reasoning=STRONG_REASONING)
     partial = _score_prediction(
         metric,
         pred_answer="The final answer is Paris.",

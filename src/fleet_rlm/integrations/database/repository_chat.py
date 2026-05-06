@@ -294,9 +294,7 @@ class ChatRepository(RepositoryContextMixin):
     ) -> tuple[list[ChatSession], int]:
         async with self._db.session() as session, session.begin():
             await self._set_request_context(session, tenant_id, user_id, workspace_id)
-            stmt: Select[tuple[ChatSession]] = select(ChatSession).where(
-                ChatSession.tenant_id == tenant_id
-            )
+            stmt: Select[tuple[ChatSession]] = select(ChatSession).where(ChatSession.tenant_id == tenant_id)
             if user_id is not None:
                 stmt = stmt.where(ChatSession.user_id == user_id)
             if workspace_id is not None:
@@ -310,9 +308,7 @@ class ChatRepository(RepositoryContextMixin):
                 stmt = stmt.where(
                     or_(
                         ChatSession.title.ilike(like_pattern),
-                        ChatSession.metadata_json["external_session_id"]
-                        .as_string()
-                        .ilike(like_pattern),
+                        ChatSession.metadata_json["external_session_id"].as_string().ilike(like_pattern),
                     )
                 )
             if created_after is not None:
@@ -325,9 +321,7 @@ class ChatRepository(RepositoryContextMixin):
                 stmt = stmt.where(ChatSession.model_provider == model_provider)
 
             total = await _count_from_stmt(session, stmt)
-            items_stmt = (
-                stmt.order_by(ChatSession.updated_at.desc()).offset(offset).limit(limit)
-            )
+            items_stmt = stmt.order_by(ChatSession.updated_at.desc()).offset(offset).limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
@@ -498,12 +492,7 @@ class ChatRepository(RepositoryContextMixin):
                 values["completed_at"] = _utc_now()
             if error_json is not None:
                 values["error_json"] = error_json
-            stmt = (
-                update(Run)
-                .where(and_(Run.id == run_id, Run.tenant_id == tenant_id))
-                .values(**values)
-                .returning(Run)
-            )
+            stmt = update(Run).where(and_(Run.id == run_id, Run.tenant_id == tenant_id)).values(**values).returning(Run)
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
@@ -557,11 +546,7 @@ class ChatRepository(RepositoryContextMixin):
             workspace_id = request.workspace_id
             if workspace_id is None and request.run_id is not None:
                 run_workspace = await session.execute(
-                    select(Run.workspace_id).where(
-                        and_(
-                            Run.id == request.run_id, Run.tenant_id == request.tenant_id
-                        )
-                    )
+                    select(Run.workspace_id).where(and_(Run.id == request.run_id, Run.tenant_id == request.tenant_id))
                 )
                 workspace_id = run_workspace.scalar_one_or_none()
             workspace_id = await self._resolve_workspace_id_in_session(
@@ -569,9 +554,7 @@ class ChatRepository(RepositoryContextMixin):
                 tenant_id=request.tenant_id,
                 workspace_id=workspace_id,
             )
-            await self._set_request_context(
-                session, request.tenant_id, workspace_id=workspace_id
-            )
+            await self._set_request_context(session, request.tenant_id, workspace_id=workspace_id)
             stmt = (
                 insert(Artifact)
                 .values(
@@ -619,9 +602,7 @@ class ChatRepository(RepositoryContextMixin):
             if user_id is not None:
                 session_stmt = session_stmt.where(ChatSession.user_id == user_id)
             if workspace_id is not None:
-                session_stmt = session_stmt.where(
-                    ChatSession.workspace_id == workspace_id
-                )
+                session_stmt = session_stmt.where(ChatSession.workspace_id == workspace_id)
             session_row = (await session.execute(session_stmt)).scalar_one_or_none()
             if session_row is None:
                 return None
@@ -766,11 +747,7 @@ class ChatRepository(RepositoryContextMixin):
             total = int((await session.execute(count_stmt)).scalar_one())
 
             items_stmt = (
-                select(RunStep)
-                .where(base_filter)
-                .order_by(RunStep.step_index.asc())
-                .offset(offset)
-                .limit(limit)
+                select(RunStep).where(base_filter).order_by(RunStep.step_index.asc()).offset(offset).limit(limit)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total

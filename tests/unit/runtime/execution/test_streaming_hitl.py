@@ -16,9 +16,7 @@ from fleet_rlm.runtime.schemas import StreamEvent
 
 def test_hitl_request_from_clarification_questions_with_questions():
     """clarification_questions with non-empty questions list emits hitl_request."""
-    payload = {
-        "tool_output": json.dumps({"questions": ["What scope?", "Which environment?"]})
-    }
+    payload = {"tool_output": json.dumps({"questions": ["What scope?", "Which environment?"]})}
     event = _try_parse_hitl_request("clarification_questions", payload)
 
     assert event is not None
@@ -134,16 +132,10 @@ def test_hitl_request_payload_has_required_fields():
     cq_event = _try_parse_hitl_request("clarification_questions", cq_payload)
     assert cq_event is not None
     for key in ("options", "source", "requires_response"):
-        assert key in cq_event.payload, (
-            f"Missing key in clarification_questions payload: {key}"
-        )
+        assert key in cq_event.payload, f"Missing key in clarification_questions payload: {key}"
 
-    ma_payload = {
-        "tool_output": json.dumps({"intent": "purge", "requires_confirmation": True})
-    }
+    ma_payload = {"tool_output": json.dumps({"intent": "purge", "requires_confirmation": True})}
     ma_event = _try_parse_hitl_request("memory_action_intent", ma_payload)
     assert ma_event is not None
     for key in ("action", "source", "requires_response"):
-        assert key in ma_event.payload, (
-            f"Missing key in memory_action_intent payload: {key}"
-        )
+        assert key in ma_event.payload, f"Missing key in memory_action_intent payload: {key}"

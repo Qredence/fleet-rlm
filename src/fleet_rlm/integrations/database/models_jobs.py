@@ -38,9 +38,7 @@ class Job(Base):
             ondelete="CASCADE",
             name="fk_jobs_tenant_workspace__workspaces_tenant_id_id",
         ),
-        UniqueConstraint(
-            "workspace_id", "idempotency_key", name="uq_jobs_workspace_idempotency_key"
-        ),
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_jobs_workspace_idempotency_key"),
         Index("ix_jobs_status_available_at", "status", "available_at"),
         Index(
             "ix_jobs_workspace_status_available",
@@ -51,42 +49,26 @@ class Job(Base):
         Index("ix_jobs_workspace_created_at", "workspace_id", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    job_type: Mapped[JobType] = mapped_column(
-        _pg_enum(JobType, name="job_type"), nullable=False
-    )
+    job_type: Mapped[JobType] = mapped_column(_pg_enum(JobType, name="job_type"), nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         _pg_enum(JobStatus, name="job_status"),
         nullable=False,
         server_default=JobStatus.QUEUED.value,
     )
-    payload: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
-    max_attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("5")
-    )
-    available_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    locked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("5"))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     last_error: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -113,36 +95,24 @@ class OutboxEvent(Base):
         Index("ix_outbox_events_workspace_created_at", "workspace_id", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    aggregate_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    aggregate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
-    payload_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[OutboxStatus] = mapped_column(
         _pg_enum(OutboxStatus, name="outbox_status"),
         nullable=False,
         server_default=OutboxStatus.PENDING.value,
     )
-    available_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_error: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -164,9 +134,7 @@ class TenantSubscription(Base):
         Index("ix_tenant_subscriptions_status", "status"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -184,15 +152,9 @@ class TenantSubscription(Base):
         nullable=False,
         server_default=SubscriptionStatus.ACTIVE.value,
     )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    ended_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

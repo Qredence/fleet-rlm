@@ -37,9 +37,7 @@ class _FakePredictor:
 class _FakeModule:
     """Fake DSPy module with named_predictors()."""
 
-    def __init__(
-        self, predictors: list[tuple[str, _FakePredictor]] | None = None
-    ) -> None:
+    def __init__(self, predictors: list[tuple[str, _FakePredictor]] | None = None) -> None:
         self._predictors = predictors or []
 
     def named_predictors(self) -> list[tuple[str, _FakePredictor]]:
@@ -79,9 +77,7 @@ class _FakeGEPA:
         self.auto = auto
         self.reflection_lm = reflection_lm
 
-    def compile(
-        self, program: Any, trainset: Any = None, valset: Any = None
-    ) -> _FakeOptimizedProgram:
+    def compile(self, program: Any, trainset: Any = None, valset: Any = None) -> _FakeOptimizedProgram:
         return _FakeOptimizedProgram()
 
 
@@ -306,9 +302,7 @@ class TestEvaluatePerExample:
 
 def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
     spec = _make_spec(tmp_path)
-    dataset_path = _write_dataset(
-        tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)]
-    )
+    dataset_path = _write_dataset(tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)])
     output_path = tmp_path / "output" / "test_module.json"
 
     result = run_module_optimization(
@@ -336,16 +330,12 @@ def test_run_module_optimization_end_to_end(tmp_path: Path) -> None:
     assert manifest["review_bundle"]["holdout"]["optimized_score"] == 1.0
     assert manifest["review_bundle"]["artifact"]["loader"] == "dspy.Module.load"
     assert result["review_bundle"]["holdout"]["comparisons"]
-    assert result["run_metadata"]["review_bundle"]["holdout"]["split_reference"][
-        "validation_dataset_indexes"
-    ] == [8, 9]
+    assert result["run_metadata"]["review_bundle"]["holdout"]["split_reference"]["validation_dataset_indexes"] == [8, 9]
 
 
 def test_run_module_optimization_no_validation(tmp_path: Path) -> None:
     spec = _make_spec(tmp_path)
-    dataset_path = _write_dataset(
-        tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(5)]
-    )
+    dataset_path = _write_dataset(tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(5)])
 
     result = run_module_optimization(
         spec,
@@ -384,13 +374,9 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
 ) -> None:
     """When run_id is provided, eval results and snapshots are persisted."""
     spec = _make_spec(tmp_path)
-    dataset_path = _write_dataset(
-        tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)]
-    )
+    dataset_path = _write_dataset(tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)])
 
-    with patch(
-        "fleet_rlm.quality.optimization_runner._persist_run_artifacts"
-    ) as mock_persist:
+    with patch("fleet_rlm.quality.optimization_runner._persist_run_artifacts") as mock_persist:
         result = run_module_optimization(
             spec,
             dataset_path=dataset_path,
@@ -406,19 +392,14 @@ def test_run_module_optimization_with_run_id_persists_artifacts(
         per_example = call_args[0][1]
         assert len(per_example) == 2  # 2 validation examples
         assert all(r["score"] == 1.0 for r in per_example)
-        assert result["review_bundle"]["holdout"]["comparisons"][0]["baseline"][
-            "score"
-        ] == pytest.approx(1.0)
+        assert result["review_bundle"]["holdout"]["comparisons"][0]["baseline"]["score"] == pytest.approx(1.0)
 
 
 def test_run_module_optimization_uses_metadata_stratified_split(tmp_path: Path) -> None:
     spec = _make_metadata_spec(tmp_path)
     dataset_path = _write_dataset(
         tmp_path,
-        [
-            {"q": f"math-{i}", "a": str(i), "domain": "math", "difficulty": "easy"}
-            for i in range(4)
-        ]
+        [{"q": f"math-{i}", "a": str(i), "domain": "math", "difficulty": "easy"} for i in range(4)]
         + [
             {
                 "q": f"logic-{i}",
@@ -452,13 +433,9 @@ def test_run_module_optimization_without_run_id_skips_persist(
 ) -> None:
     """When run_id is None (default), _persist_run_artifacts is not called."""
     spec = _make_spec(tmp_path)
-    dataset_path = _write_dataset(
-        tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)]
-    )
+    dataset_path = _write_dataset(tmp_path, [{"q": f"q{i}", "a": f"a{i}"} for i in range(10)])
 
-    with patch(
-        "fleet_rlm.quality.optimization_runner._persist_run_artifacts"
-    ) as mock_persist:
+    with patch("fleet_rlm.quality.optimization_runner._persist_run_artifacts") as mock_persist:
         run_module_optimization(
             spec,
             dataset_path=dataset_path,

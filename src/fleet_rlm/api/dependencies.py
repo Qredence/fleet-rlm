@@ -84,9 +84,7 @@ class PersistenceDeps:
 class DiagnosticsDeps:
     """Runtime diagnostics / observability dependency slice."""
 
-    events_event_emitter: ExecutionEventEmitter = field(
-        default_factory=ExecutionEventEmitter
-    )
+    events_event_emitter: ExecutionEventEmitter = field(default_factory=ExecutionEventEmitter)
     runtime_test_results: dict[str, dict[str, Any]] = field(default_factory=dict)
     optional_service_status: dict[str, str] = field(
         default_factory=lambda: {
@@ -254,10 +252,7 @@ class ServerState:
     def is_ready(self) -> bool:
         """Return whether critical server dependencies are ready to serve requests."""
         db_ready = not self.config.database_required or self.repository is not None
-        planner_ready = (
-            self.planner_lm is not None
-            or self.optional_service_status.get("planner_lm") == "ready"
-        )
+        planner_ready = self.planner_lm is not None or self.optional_service_status.get("planner_lm") == "ready"
         return db_ready and planner_ready
 
 
@@ -270,9 +265,7 @@ def _require_server_state(app: Any) -> ServerState:
     candidate = getattr(getattr(app, "state", None), "server_state", None)
     if isinstance(candidate, ServerState):
         return candidate
-    raise RuntimeError(
-        "Server state is not initialized. Ensure FastAPI lifespan startup has completed."
-    )
+    raise RuntimeError("Server state is not initialized. Ensure FastAPI lifespan startup has completed.")
 
 
 def get_server_state(request: Request) -> ServerState:
@@ -311,10 +304,7 @@ def _require_dep(app: Any, attr: str) -> Any:
         dep = mapping.get(attr)
         if dep is not None:
             return dep
-    raise RuntimeError(
-        f"Server dependency '{attr}' is not initialized. "
-        "Ensure FastAPI lifespan startup has completed."
-    )
+    raise RuntimeError(f"Server dependency '{attr}' is not initialized. Ensure FastAPI lifespan startup has completed.")
 
 
 def get_config_deps(request: Request) -> ConfigDeps:
@@ -450,9 +440,7 @@ async def require_http_identity(
     cfg = config_deps.config
     if provider is None:
         if cfg.auth_required:
-            raise HTTPException(
-                status_code=503, detail="Auth provider is not configured"
-            )
+            raise HTTPException(status_code=503, detail="Auth provider is not configured")
         identity = build_unauthenticated_identity(cfg)
         request.state.identity = identity
         return identity
@@ -460,9 +448,7 @@ async def require_http_identity(
         identity = await provider.authenticate_http(request)
     except AuthError as exc:
         if cfg.auth_required:
-            raise HTTPException(
-                status_code=exc.status_code, detail=exc.message
-            ) from exc
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         logger.debug("HTTP auth optional; continuing without auth: %s", exc.message)
         identity = build_unauthenticated_identity(cfg)
     request.state.identity = identity
@@ -483,9 +469,7 @@ async def resolve_persisted_identity(
             try:
                 return await resolve_admitted_identity(persistence, identity)
             except AuthError as exc:
-                raise HTTPException(
-                    status_code=exc.status_code, detail=exc.message
-                ) from exc
+                raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         return await persistence.upsert_identity(
             entra_tenant_id=identity.tenant_claim,
             entra_user_id=identity.user_claim,
@@ -500,9 +484,7 @@ async def resolve_persisted_identity(
     )
 
 
-PersistedIdentityDep = Annotated[
-    IdentityUpsertResult, Depends(resolve_persisted_identity)
-]
+PersistedIdentityDep = Annotated[IdentityUpsertResult, Depends(resolve_persisted_identity)]
 
 
 def get_request_identity(request: Request) -> NormalizedIdentity | None:

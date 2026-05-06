@@ -34,15 +34,9 @@ from ._types import OpenAPIResponses
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 SESSIONS_ERROR_RESPONSES: OpenAPIResponses = {
-    401: {
-        "description": "Authentication is required or the provided token is invalid."
-    },
-    403: {
-        "description": "The caller does not have permission to access this resource."
-    },
-    503: {
-        "description": "Session services are unavailable because server startup is incomplete."
-    },
+    401: {"description": "Authentication is required or the provided token is invalid."},
+    403: {"description": "The caller does not have permission to access this resource."},
+    503: {"description": "Session services are unavailable because server startup is incomplete."},
 }
 
 SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
@@ -55,12 +49,8 @@ SESSION_DETAIL_RESPONSES: OpenAPIResponses = {
     "/state",
     response_model=SessionStateResponse,
     responses={
-        401: {
-            "description": "Authentication is required or the provided token is invalid."
-        },
-        503: {
-            "description": "Session state is unavailable because server startup is incomplete."
-        },
+        401: {"description": "Authentication is required or the provided token is invalid."},
+        503: {"description": "Session state is unavailable because server startup is incomplete."},
     },
 )
 def list_session_state(
@@ -90,12 +80,8 @@ async def list_sessions_endpoint(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    search: Annotated[
-        str | None, Query(description="Full-text search on title")
-    ] = None,
-    status: Annotated[
-        str | None, Query(description="Filter by status (active, archived)")
-    ] = None,
+    search: Annotated[str | None, Query(description="Full-text search on title")] = None,
+    status: Annotated[str | None, Query(description="Filter by status (active, archived)")] = None,
     created_after: Annotated[
         datetime | None,
         Query(description="Filter sessions created on or after this date (ISO 8601)"),
@@ -104,12 +90,8 @@ async def list_sessions_endpoint(
         datetime | None,
         Query(description="Filter sessions created on or before this date (ISO 8601)"),
     ] = None,
-    model_name: Annotated[
-        str | None, Query(description="Filter by exact model name")
-    ] = None,
-    model_provider: Annotated[
-        str | None, Query(description="Filter by exact model provider")
-    ] = None,
+    model_name: Annotated[str | None, Query(description="Filter by exact model name")] = None,
+    model_provider: Annotated[str | None, Query(description="Filter by exact model provider")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> SessionListResponse:
@@ -138,9 +120,7 @@ async def get_session_detail(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session to inspect.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session to inspect.")],
 ) -> SessionDetailResponse:
     """Return full session detail with turn count."""
     return await SessionService(persistence).get_session_detail(
@@ -161,9 +141,7 @@ async def patch_session_endpoint(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session to update.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session to update.")],
 ) -> SessionDetailResponse:
     """Update session title and/or metadata."""
     return await SessionService(persistence).patch_session(
@@ -184,9 +162,7 @@ async def get_session_turns(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session whose turns to list.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session whose turns to list.")],
     limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
     offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
 ) -> TurnListResponse:
@@ -210,9 +186,7 @@ async def get_session_stats(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session whose stats to retrieve.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session whose stats to retrieve.")],
 ) -> SessionStatsResponse:
     """Return aggregated usage stats for a session."""
     return await SessionService(persistence).get_session_stats(
@@ -232,9 +206,7 @@ async def delete_session_endpoint(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session to archive.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session to archive.")],
 ) -> SessionDeleteResponse:
     """Archive a session (soft delete)."""
     return await SessionService(persistence).delete_session(
@@ -261,9 +233,7 @@ async def restore_session_endpoint(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session to restore.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session to restore.")],
 ) -> SessionRestoreResponse:
     """Restore an archived session to active status."""
     return await SessionService(persistence).restore_session(
@@ -291,9 +261,7 @@ async def export_session_endpoint(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
     persisted_identity: PersistedIdentityDep,
-    session_id: Annotated[
-        str, Path(description="Identifier of the session to export as a dataset.")
-    ],
+    session_id: Annotated[str, Path(description="Identifier of the session to export as a dataset.")],
 ) -> DatasetResponse:
     """Export a session as a GEPA dataset."""
     return await SessionService(persistence).export_session(

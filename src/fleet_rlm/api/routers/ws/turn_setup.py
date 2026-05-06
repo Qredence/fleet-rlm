@@ -72,9 +72,7 @@ def normalize_daytona_chat_request(
 
     repo_url = str(msg.repo_url or "").strip() or None
     repo_ref = str(msg.repo_ref or "").strip() or None
-    context_paths = [
-        str(item).strip() for item in (msg.context_paths or []) if str(item).strip()
-    ]
+    context_paths = [str(item).strip() for item in (msg.context_paths or []) if str(item).strip()]
     return DaytonaChatRequestOptions(
         repo_url=repo_url,
         repo_ref=repo_ref,
@@ -116,9 +114,7 @@ async def prepare_daytona_workspace_for_turn(
 
     raw_loaded_paths = getattr(agent, "loaded_document_paths", ())
     loaded_document_paths = (
-        [str(item) for item in raw_loaded_paths]
-        if isinstance(raw_loaded_paths, (list, tuple))
-        else []
+        [str(item) for item in raw_loaded_paths] if isinstance(raw_loaded_paths, (list, tuple)) else []
     )
     docs_paths = [str(docs_path)] if docs_path is not None else []
     context_paths = _normalize_context_paths(
@@ -311,9 +307,7 @@ async def prepare_chat_message_turn(
         execution_mode=execution_mode,
     )
     if session.lifecycle is None:
-        raise RuntimeError(
-            "Turn lifecycle initialization returned no lifecycle manager"
-        )
+        raise RuntimeError("Turn lifecycle initialization returned no lifecycle manager")
 
     context_paths = _optional_context_paths(
         msg.context_paths,

@@ -297,10 +297,7 @@ def _extract_token_usage(
         return None
 
     input_tokens = _int_or_none(
-        usage.get("prompt_tokens")
-        or usage.get("input_tokens")
-        or usage.get("promptTokens")
-        or usage.get("inputTokens")
+        usage.get("prompt_tokens") or usage.get("input_tokens") or usage.get("promptTokens") or usage.get("inputTokens")
     )
     output_tokens = _int_or_none(
         usage.get("completion_tokens")
@@ -338,9 +335,7 @@ def _set_span_error_description(exception: Exception) -> None:
 class FleetMlflowTraceCallback(BaseCallback):
     """DSPy callback that propagates per-request context into MLflow traces."""
 
-    def on_module_start(
-        self, call_id: str, instance: Any, inputs: dict[str, Any]
-    ) -> None:
+    def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         _ = (call_id, instance, inputs)
         update_current_mlflow_trace()
 
@@ -377,10 +372,7 @@ class FleetMlflowTraceCallback(BaseCallback):
                 first = choices[0]
                 if isinstance(first, dict):
                     preview = str(
-                        first.get("text")
-                        or first.get("content")
-                        or first.get("message", {}).get("content")
-                        or ""
+                        first.get("text") or first.get("content") or first.get("message", {}).get("content") or ""
                     )
         # Accumulate token usage on the per-request context.
         input_tokens, output_tokens = _extract_token_usage(outputs)

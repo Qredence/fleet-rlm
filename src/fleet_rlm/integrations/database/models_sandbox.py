@@ -61,16 +61,12 @@ class SandboxSession(Base):
         Index("ix_sandbox_sessions_workspace_status", "workspace_id", "status"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     provider: Mapped[SandboxProvider] = mapped_column(
         _pg_enum(SandboxProvider, name="sandbox_provider"), nullable=False
     )
@@ -82,21 +78,11 @@ class SandboxSession(Base):
     )
     volume_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    metadata_json: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    diagnostics_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    ended_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    diagnostics_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -120,14 +106,10 @@ class WorkspaceVolume(Base):
             name="uq_workspace_volumes_workspace_external_id",
         ),
         Index("ix_workspace_volumes_workspace_status", "workspace_id", "status"),
-        Index(
-            "ix_workspace_volumes_workspace_updated_at", "workspace_id", "updated_at"
-        ),
+        Index("ix_workspace_volumes_workspace_updated_at", "workspace_id", "updated_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -144,12 +126,8 @@ class WorkspaceVolume(Base):
         nullable=False,
         server_default=WorkspaceVolumeStatus.PROVISIONING.value,
     )
-    metadata_json: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -186,16 +164,12 @@ class VolumeObject(Base):
         Index("ix_volume_objects_workspace_path", "workspace_id", "path"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()")
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    workspace_volume_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
-    )
+    workspace_volume_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     object_type: Mapped[VolumeObjectType] = mapped_column(
         _pg_enum(VolumeObjectType, name="volume_object_type"), nullable=False
@@ -203,15 +177,9 @@ class VolumeObject(Base):
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    modified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    metadata_json: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

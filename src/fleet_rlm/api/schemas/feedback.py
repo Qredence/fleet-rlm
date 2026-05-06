@@ -16,9 +16,7 @@ class TraceFeedbackRequest(BaseModel):
         default=None,
         description="Client request identifier used to resolve the trace when trace_id is absent.",
     )
-    is_correct: bool = Field(
-        description="Whether the model output was considered correct."
-    )
+    is_correct: bool = Field(description="Whether the model output was considered correct.")
     comment: str | None = Field(
         default=None,
         description="Optional free-form reviewer comment explaining the feedback.",
@@ -38,12 +36,8 @@ class TraceFeedbackRequest(BaseModel):
 class TraceFeedbackResponse(BaseModel):
     """Result payload after MLflow feedback has been recorded."""
 
-    ok: bool = Field(
-        default=True, description="Whether the feedback request completed successfully."
-    )
-    trace_id: str = Field(
-        description="Resolved MLflow trace identifier that received the feedback."
-    )
+    ok: bool = Field(default=True, description="Whether the feedback request completed successfully.")
+    trace_id: str = Field(description="Resolved MLflow trace identifier that received the feedback.")
     client_request_id: str | None = Field(
         default=None,
         description="Resolved client request identifier associated with the trace, when available.",

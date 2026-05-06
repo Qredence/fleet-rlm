@@ -156,9 +156,7 @@ def build_stream_event_dict(
 
 def _terminal_run_status(event: StreamEventLike) -> RunStatus:
     """Return the authoritative terminal run status for one event."""
-    if event.kind == "done" and (
-        isinstance(event.payload, dict) and event.payload.get("cancelled")
-    ):
+    if event.kind == "done" and (isinstance(event.payload, dict) and event.payload.get("cancelled")):
         return RunStatus.CANCELLED
     if event.kind == "done":
         payload = event.payload if isinstance(event.payload, dict) else {}
@@ -217,9 +215,7 @@ async def handle_terminal_stream_event(
             exc_info=True,
         )
 
-    error_json: dict[str, Any] | None = (
-        {"error": event.text, "kind": event.kind} if event.kind == "error" else None
-    )
+    error_json: dict[str, Any] | None = {"error": event.text, "kind": event.kind} if event.kind == "error" else None
     await lifecycle.complete_run(
         _terminal_run_status(event),
         step=step,
@@ -247,13 +243,8 @@ def _normalize_text_list(value: Any) -> list[str]:
 
 def final_event_failed(payload: dict[str, Any]) -> bool:
     runtime = _as_record(payload.get("runtime"))
-    runtime_degraded = bool(
-        payload.get("runtime_degraded", runtime.get("runtime_degraded", False))
-    )
-    category = _as_text(
-        payload.get("runtime_failure_category")
-        or runtime.get("runtime_failure_category")
-    )
+    runtime_degraded = bool(payload.get("runtime_degraded", runtime.get("runtime_degraded", False)))
+    category = _as_text(payload.get("runtime_failure_category") or runtime.get("runtime_failure_category"))
     return runtime_degraded and category == "tool_execution_error"
 
 
@@ -265,8 +256,7 @@ def _extract_human_review_payload(payload: dict[str, Any]) -> dict[str, Any] | N
             return None
         return {
             "required": True,
-            "reason": _as_text(raw.get("reason"))
-            or "Recursive repair requested human review before continuing.",
+            "reason": _as_text(raw.get("reason")) or "Recursive repair requested human review before continuing.",
             "repair_mode": _as_text(raw.get("repair_mode")),
             "repair_target": _as_text(raw.get("repair_target")),
             "repair_steps": _normalize_text_list(raw.get("repair_steps")),
@@ -387,14 +377,11 @@ def build_execution_completion_summary(
         human_review_required=human_review is not None,
     )
     resolved_termination_reason = _resolve_termination_reason(
-        existing_reason=run_result.get("termination_reason")
-        or summary_payload.get("termination_reason"),
+        existing_reason=run_result.get("termination_reason") or summary_payload.get("termination_reason"),
         event_kind=event.kind,
         human_review_required=human_review is not None,
     )
-    warnings = list(
-        summary_payload.get("warnings") or payload.get("guardrail_warnings") or []
-    )
+    warnings = list(summary_payload.get("warnings") or payload.get("guardrail_warnings") or [])
     minimum_summary = _build_minimum_summary(
         event=event,
         summary_payload=summary_payload,
@@ -405,9 +392,7 @@ def build_execution_completion_summary(
 
     if run_result:
         normalized = dict(run_result)
-        normalized.setdefault(
-            "run_id", run_result.get("run_id") or runtime.get("run_id") or run_id
-        )
+        normalized.setdefault("run_id", run_result.get("run_id") or runtime.get("run_id") or run_id)
         normalized.setdefault("runtime_mode", runtime_mode)
         normalized.setdefault("task", run_result.get("task") or request_message)
         normalized["status"] = _resolve_terminal_status(
@@ -571,9 +556,7 @@ async def stream_agent_turn(
         request.agent.set_execution_mode(request.execution_mode)
     if request.prepare is not None:
         await request.prepare()
-    async for runtime_event in request.agent.aiter_chat_turn_stream(
-        **_build_agent_stream_kwargs(request)
-    ):
+    async for runtime_event in request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request)):
         yield _to_workspace_event(runtime_event)
 
 
@@ -725,9 +708,7 @@ async def _emit_stream_event(
         payload = merge_trace_result_metadata(
             payload if isinstance(payload, dict) else None,
             response_preview=event.text,
-            trace_metadata=_runtime_trace_metadata(
-                payload if isinstance(payload, dict) else None
-            ),
+            trace_metadata=_runtime_trace_metadata(payload if isinstance(payload, dict) else None),
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = _is_terminal_transport_event(event)
@@ -831,9 +812,7 @@ async def _await_message_while_streaming(
     stream_task: asyncio.Task[str | None],
     pending_receive_task: asyncio.Task[object] | None,
     session: _ChatSessionState,
-) -> tuple[
-    WSMessage | None, asyncio.Task[str | None] | None, asyncio.Task[object] | None
-]:
+) -> tuple[WSMessage | None, asyncio.Task[str | None] | None, asyncio.Task[object] | None]:
     pending_receive_task = _ensure_pending_receive_task(
         websocket=websocket,
         pending_receive_task=pending_receive_task,
@@ -889,8 +868,7 @@ async def _handle_message_while_streaming(
         {
             "type": "error",
             "message": (
-                "A run is already in progress. Cancel it or wait for "
-                "completion before sending another message."
+                "A run is already in progress. Cancel it or wait for completion before sending another message."
             ),
         },
     )

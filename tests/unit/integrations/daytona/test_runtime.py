@@ -101,17 +101,13 @@ class _FakeSandbox:
         self.process.code_run_calls.append(code)
         return _FakeProcessExecResult()
 
-    async def _experimental_fork(
-        self, *, name: str | None = None, timeout: float | None = 60
-    ) -> "_FakeSandbox":
+    async def _experimental_fork(self, *, name: str | None = None, timeout: float | None = 60) -> "_FakeSandbox":
         self.fork_calls.append((name, timeout))
         forked = _FakeSandbox()
         forked.id = f"{self.id}-fork"
         return forked
 
-    async def _experimental_create_snapshot(
-        self, *, name: str, timeout: float | None = 60
-    ) -> None:
+    async def _experimental_create_snapshot(self, *, name: str, timeout: float | None = 60) -> None:
         self.snapshot_calls.append((name, timeout))
 
 
@@ -217,9 +213,7 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
     context_file.write_text("# Notes\nHello\n", encoding="utf-8")
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
@@ -264,9 +258,7 @@ def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> Non
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url=None,
@@ -299,9 +291,7 @@ def test_create_workspace_session_reports_400_quota_errors(monkeypatch) -> None:
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
 
     with pytest.raises(DaytonaDiagnosticError) as exc_info:
@@ -325,9 +315,7 @@ def test_create_workspace_session_aborts_on_invalid_context_path(
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     missing_context = tmp_path / "missing.md"
 
@@ -339,9 +327,7 @@ def test_create_workspace_session_aborts_on_invalid_context_path(
             volume_name="tenant-a",
         )
 
-    assert not any(
-        path.endswith("manifest.json") for path in fake_client.sandbox.fs.uploads
-    )
+    assert not any(path.endswith("manifest.json") for path in fake_client.sandbox.fs.uploads)
 
 
 def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
@@ -352,9 +338,7 @@ def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.resume_workspace_session(
         sandbox_id="sbx-123",
@@ -387,9 +371,7 @@ def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
 
     first_loop = asyncio.new_event_loop()
@@ -415,9 +397,7 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     # Client is created lazily; trigger creation before closing.
     asyncio.run(runtime._aget_client())
@@ -437,9 +417,7 @@ def test_create_workspace_session_and_context_share_async_owner_loop(
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url=None,
@@ -451,9 +429,7 @@ def test_create_workspace_session_and_context_share_async_owner_loop(
     context = session.ensure_context()
 
     assert getattr(context, "id", None) == "ctx-123"
-    assert fake_client.sandbox.code_interpreter.context_calls == [
-        "/workspace/workspace/daytona-workspace"
-    ]
+    assert fake_client.sandbox.code_interpreter.context_calls == ["/workspace/workspace/daytona-workspace"]
 
 
 def test_create_workspace_session_ignores_local_daytona_builder_files(
@@ -475,9 +451,7 @@ def test_create_workspace_session_ignores_local_daytona_builder_files(
     )
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url=None,
@@ -507,9 +481,7 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     second_context.write_text("# B\n", encoding="utf-8")
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
@@ -536,8 +508,7 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     assert "context_stage" in session.phase_timings_ms
     assert len(fake_client.sandbox.process.code_run_calls) == 1
     assert any(
-        command.startswith("rm -rf -- /workspace/workspace/other")
-        for command in fake_client.sandbox.process.exec_calls
+        command.startswith("rm -rf -- /workspace/workspace/other") for command in fake_client.sandbox.process.exec_calls
     )
     upload_paths = set(fake_client.sandbox.fs.uploads)
     assert any(path.endswith("notes-b.md") for path in upload_paths)
@@ -558,9 +529,7 @@ def test_reconcile_workspace_session_failure_keeps_existing_session_context(
     missing_context = tmp_path / "notes-missing.md"
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     session = runtime.create_workspace_session(
         repo_url="https://github.com/example/repo.git",
@@ -893,9 +862,7 @@ def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
 
 def test_daytona_session_list_files_rebinds_sandbox_on_loop_change() -> None:
     replacement_sandbox = _FakeSandbox()
-    replacement_sandbox.fs.listings["/workspace/repo"] = [
-        SimpleNamespace(name="notes.txt", is_dir=False)
-    ]
+    replacement_sandbox.fs.listings["/workspace/repo"] = [SimpleNamespace(name="notes.txt", is_dir=False)]
 
     class _RuntimeRef:
         def __init__(self) -> None:
@@ -955,9 +922,7 @@ def test_runtime_fork_sandbox_creates_session() -> None:
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
@@ -992,9 +957,7 @@ def test_runtime_create_sandbox_snapshot_returns_summary() -> None:
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
 
     runtime = DaytonaSandboxRuntime(
-        config=SimpleNamespace(
-            api_key="key", api_url="https://api.daytona.test", target=None
-        )
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     sandbox = _FakeSandbox()
     session = DaytonaSandboxSession(
