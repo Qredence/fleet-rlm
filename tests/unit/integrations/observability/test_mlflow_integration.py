@@ -27,6 +27,7 @@ def test_initialize_mlflow_wires_tracking_experiment_autolog_and_callback(
     fake_mlflow = SimpleNamespace(
         set_tracking_uri=lambda uri: calls.__setitem__("tracking_uri", uri),
         set_experiment=lambda **kwargs: calls.__setitem__("experiment", kwargs),
+        get_experiment_by_name=lambda name: None,
         dspy=SimpleNamespace(autolog=lambda **kwargs: calls.__setitem__("autolog", kwargs)),
     )
 
@@ -75,6 +76,7 @@ def test_initialize_mlflow_is_idempotent(monkeypatch: pytest.MonkeyPatch):
     fake_mlflow = SimpleNamespace(
         set_tracking_uri=lambda uri: calls.__setitem__("tracking_uri", calls["tracking_uri"] + 1),
         set_experiment=lambda **kwargs: None,
+        get_experiment_by_name=lambda name: None,
         dspy=SimpleNamespace(autolog=lambda **kwargs: calls.__setitem__("autolog", calls["autolog"] + 1)),
     )
 
@@ -710,6 +712,49 @@ def test_finalize_trace_works_without_request_context(
 # ---------------------------------------------------------------------------
 # Phase 4: Assessment pipeline config ---------------------------------------
 # ---------------------------------------------------------------------------
+
+
+def test_update_current_mlflow_trace_passes_native_session_and_user(monkeypatch: pytest.MonkeyPatch):
+    import fleet_rlm.integrations.observability.mlflow_context as mlflow_context
+
+    update_calls: dict[str, object] = {}
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: SimpleNamespace(),
+        update_current_trace=lambda **kwargs: update_calls.update(kwargs),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            get_mlflow_config=lambda: MlflowConfig(enabled=True, active_model_id=None),
+            logger=mlflow_integration.logger,
+        ),
+    )
+
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        _CURRENT_REQUEST_CONTEXT,
+        MlflowTraceRequestContext,
+        update_current_mlflow_trace,
+    )
+
+    ctx = MlflowTraceRequestContext(
+        client_request_id="req-1",
+        session_id="sess-abc",
+        user_id="user-xyz",
+        app_env="local",
+    )
+    token = _CURRENT_REQUEST_CONTEXT.set(ctx)
+    try:
+        update_current_mlflow_trace()
+        assert update_calls["session_id"] == "sess-abc"
+        assert update_calls["user"] == "user-xyz"
+        # Should NOT be in metadata dict
+        metadata = update_calls.get("metadata", {})
+        assert "mlflow.trace.session" not in metadata
+        assert "mlflow.trace.user" not in metadata
+    finally:
+        _CURRENT_REQUEST_CONTEXT.reset(token)
 
 
 def test_mlflow_config_enable_auto_assessment_default_false():

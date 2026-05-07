@@ -100,10 +100,6 @@ def _trace_metadata_from_context(
     context: MlflowTraceRequestContext,
 ) -> dict[str, str]:
     metadata: dict[str, str] = {}
-    if context.session_id:
-        metadata["mlflow.trace.session"] = context.session_id
-    if context.user_id:
-        metadata["mlflow.trace.user"] = context.user_id
     if context.app_env:
         metadata["app_env"] = context.app_env
 
@@ -111,10 +107,6 @@ def _trace_metadata_from_context(
         text = _stringify_metadata(value).strip()
         if text:
             metadata[key] = text
-
-    config = _runtime_module().get_mlflow_config()
-    if config.active_model_id:
-        metadata["fleet_rlm.active_model_id"] = config.active_model_id
 
     return metadata
 
@@ -167,6 +159,8 @@ def update_current_mlflow_trace(
             request_preview=_trim_preview(context.request_preview),
             response_preview=_trim_preview(response_preview),
             model_id=model_id,
+            session_id=context.session_id,
+            user=context.user_id,
         )
     except Exception:
         runtime.logger.debug("MLflow trace update skipped.", exc_info=True)
