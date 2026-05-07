@@ -275,11 +275,11 @@ Fast backend confidence:
 
 Focused backend/runtime coverage:
 
-- `uv run pytest -q tests/unit/api/ws/test_messages.py tests/unit/api/ws/test_execution_helpers.py tests/unit/package/test_exports.py tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py`
+- `uv run pytest -q tests/unit/api/ws/test_transport.py tests/unit/api/ws/test_execution_helpers.py tests/unit/api/ws/test_chat_persistence.py tests/unit/package/test_exports.py tests/unit/api/test_auth.py`
 
 Daytona-focused backend coverage:
 
-- `uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_smoke.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_chat_agent_runtime.py`
+- `uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_smoke.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_runtime.py tests/unit/runtime/agent/test_sub_rlm.py tests/unit/runtime/tools/test_rlm_delegate.py`
 
 Shared-contract or release-sensitive work:
 

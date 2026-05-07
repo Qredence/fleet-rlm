@@ -21,12 +21,12 @@ from fleet_rlm.api.runtime_services.chat_persistence import (
     should_reload_docs_path,
 )
 from fleet_rlm.integrations.database import RunStatus
-from tests.ui.fixtures_ui import FakeChatAgent
 from tests.unit.fixtures_daytona import FakeDaytonaStorageSession
+from tests.unit.fixtures_ui import FakeChatAgent
 
 
 # ---------------------------------------------------------------------------
-# Helpers from test_manifest.py
+# Manifest helpers
 # ---------------------------------------------------------------------------
 class _RecordingInterpreter:
     def __init__(self, result: object) -> None:
@@ -50,7 +50,7 @@ class _RecordingInterpreter:
 
 
 # ---------------------------------------------------------------------------
-# Helpers from test_turn_lifecycle.py
+# Turn lifecycle helpers
 # ---------------------------------------------------------------------------
 class _RepositoryStub:
     def __init__(self, run_id: uuid.UUID | None = None) -> None:
@@ -69,7 +69,7 @@ class _FailingRepositoryStub:
 
 
 # ===========================================================================
-# Manifest path / load / save  (from test_manifest.py)
+# Manifest path / load / save
 # ===========================================================================
 def test_manifest_path_uses_default_session_id_when_missing() -> None:
     assert (
@@ -250,7 +250,7 @@ def test_save_manifest_to_volume_uses_daytona_session(monkeypatch) -> None:
 
 
 # ===========================================================================
-# Turn lifecycle  (from test_turn_lifecycle.py)
+# Turn lifecycle
 # ===========================================================================
 def test_initialize_turn_lifecycle_records_run_id_and_session_record() -> None:
     async def scenario() -> None:
@@ -315,7 +315,7 @@ def test_initialize_turn_lifecycle_raises_when_run_persist_required() -> None:
 
 
 # ===========================================================================
-# Session persistence / lifecycle manager  (from test_persistence.py)
+# Session persistence / lifecycle manager
 # ===========================================================================
 def test_ensure_manifest_shape_initializes_expected_collections() -> None:
     manifest = ws_persistence.ensure_manifest_shape({})
@@ -570,7 +570,7 @@ def test_lifecycle_without_repository_does_not_start_persist_worker() -> None:
 
 
 # ===========================================================================
-# Task control  (from test_task_control.py)
+# Task control
 # ===========================================================================
 def test_should_reload_docs_path_dedupes_same_path() -> None:
     assert should_reload_docs_path(None, None) is False

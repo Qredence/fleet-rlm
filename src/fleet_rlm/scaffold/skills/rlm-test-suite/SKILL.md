@@ -26,10 +26,10 @@ make quality-gate
 ```bash
 # from repo root
 uv run pytest -q \
-  tests/ui/server/test_api_contract_routes.py \
-  tests/ui/server/test_router_runtime.py \
-  tests/ui/ws/test_chat_stream.py \
-  tests/ui/ws/test_commands.py \
+  tests/unit/api/test_auth.py \
+  tests/unit/api/ws/test_chat_persistence.py \
+  tests/unit/api/ws/test_transport.py \
+  tests/unit/runtime/agent/test_commands.py \
   tests/unit/api/ws/test_execution_helpers.py
 ```
 
@@ -42,9 +42,9 @@ uv run pytest -q \
   tests/unit/integrations/daytona/test_smoke.py \
   tests/unit/integrations/daytona/test_runtime.py \
   tests/unit/integrations/daytona/test_interpreter.py \
-  tests/unit/runtime/agent/test_chat_agent_daytona.py \
-  tests/unit/runtime/agent/test_chat_agent_runtime.py \
-  tests/unit/runtime/tools/sandbox/test_async_tools.py
+  tests/unit/runtime/agent/test_runtime.py \
+  tests/unit/runtime/agent/test_sub_rlm.py \
+  tests/unit/runtime/tools/test_rlm_delegate.py
 ```
 
 ## MLflow / Observability Coverage
@@ -60,7 +60,17 @@ uv run pytest -q \
   tests/unit/integrations/observability/test_posthog_callback.py
 ```
 
-## Test File Inventory (unit/)
+## Test File Inventory
+
+### Integration Tests
+
+| File                                    | What It Validates                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `integration/test_qre301_live_trace.py` | Live end-to-end websocket and persistence flow (opt-in, requires live credentials) |
+| `integration/test_simplified_flows.py`  | Runtime/agent end-to-end flows                                                     |
+| `integration/test_db_repository.py`     | Database repository operations                                                     |
+
+### Unit Tests by Directory
 
 - `tests/unit/api/`: FastAPI bootstrap, auth, runtime diagnostics/settings, and event helpers
 - `tests/unit/api/ws/`: websocket helper, lifecycle, parsing, persistence, completion, and terminal flow tests
@@ -81,15 +91,40 @@ uv run pytest -q \
 - `tests/unit/utils/`: shared utility helpers such as regex extraction
 - `tests/unit/package/`: top-level `fleet_rlm` package export coverage
 
-## Test File Inventory (ui/)
+### Key Unit Test Files
 
-| File                                    | What It Validates                        |
-| --------------------------------------- | ---------------------------------------- |
-| `ui/server/test_api_contract_routes.py` | HTTP route mounts and response contracts |
-| `ui/server/test_router_runtime.py`      | `/api/v1/runtime/*` router               |
-| `ui/server/test_server_config.py`       | FastAPI app factory and server config    |
-| `ui/ws/test_chat_stream.py`             | Full WS chat turn streaming              |
-| `ui/ws/test_commands.py`                | WS command dispatch end-to-end           |
+| File                                      | What It Validates                 |
+| ----------------------------------------- | --------------------------------- |
+| `unit/api/test_auth.py`                   | Auth router and token validation  |
+| `unit/api/ws/test_chat_persistence.py`    | WS chat persistence and lifecycle |
+| `unit/api/ws/test_transport.py`           | WS message transport and parsing  |
+| `unit/api/ws/test_execution_helpers.py`   | Execution helper logic            |
+| `unit/runtime/agent/test_commands.py`     | Agent command dispatch            |
+| `unit/runtime/agent/test_runtime.py`      | Agent runtime behavior            |
+| `unit/runtime/tools/test_rlm_delegate.py` | RLM delegation tools              |
+
+## API Contract Validation
+
+HTTP route contracts are validated through OpenAPI spec generation and frontend type synchronization, not through HTTP-level integration tests:
+
+```bash
+# Regenerate OpenAPI spec from backend routes
+uv run python scripts/openapi_tools.py generate
+
+# Sync frontend artifacts and verify no drift
+cd src/frontend && pnpm run api:sync
+pnpm run api:check
+```
+
+This approach validates:
+
+- Route registration and path correctness
+- Request/response schema validation
+- OpenAPI schema generation
+- Frontend TypeScript type generation
+- Breaking change detection via type system
+
+The `make quality-gate` target includes `frontend-check` which runs `pnpm run api:check` as part of CI validation.
 
 ## Native Daytona Validation
 

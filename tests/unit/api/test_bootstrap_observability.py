@@ -266,7 +266,7 @@ def test_emit_posthog_startup_event_handles_capture_error(
 
 
 # ===========================================================================
-# MLflow server subprocess  (from test_bootstrap_observability_mlflow_server.py)
+# MLflow server subprocess
 # ===========================================================================
 class _FakeProcess:
     def __init__(self, pid: int = 1234, exit_code: int | None = None) -> None:
