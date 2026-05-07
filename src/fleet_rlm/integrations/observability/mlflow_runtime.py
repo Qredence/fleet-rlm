@@ -45,6 +45,9 @@ def _mlflow_identity(config: MlflowConfig) -> tuple[Any, ...]:
         config.dspy_log_compiles,
         config.dspy_log_evals,
         config.enable_auto_assessment,
+        config.auto_assessment_sample_rate,
+        tuple(config.auto_assessment_scorers),
+        config.enable_span_processors,
         *_mlflow_tracking_auth_identity(),
     )
 
@@ -232,6 +235,26 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 disable=False,
                 silent=True,
             )
+
+            if resolved.enable_span_processors:
+                try:
+                    from .span_processors import build_span_processors
+
+                    processors = build_span_processors(
+                        app_env=os.getenv("APP_ENV"),
+                        workspace_id=os.getenv("WS_DEFAULT_WORKSPACE_ID"),
+                    )
+                    mlflow.tracing.configure(span_processors=processors)
+                except Exception:
+                    logger.debug("Failed to configure span processors", exc_info=True)
+
+            if resolved.enable_auto_assessment:
+                try:
+                    from .auto_assessment import configure_auto_assessment
+
+                    configure_auto_assessment(resolved)
+                except Exception:
+                    logger.debug("Failed to configure auto-assessment", exc_info=True)
 
             if _existing_trace_callback() is None:
                 callbacks = list(getattr(dspy.settings, "callbacks", []) or [])

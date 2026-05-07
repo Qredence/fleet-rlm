@@ -63,6 +63,9 @@ class MlflowConfig(BaseModel):
     dspy_log_compiles: bool = Field(default=False)
     dspy_log_evals: bool = Field(default=False)
     enable_auto_assessment: bool = Field(default=False)
+    auto_assessment_sample_rate: float = Field(default=1.0)
+    auto_assessment_scorers: list[str] = Field(default_factory=lambda: ["safety", "guidelines"])
+    enable_span_processors: bool = Field(default=True)
 
     @classmethod
     def from_env(cls) -> MlflowConfig:
@@ -99,5 +102,15 @@ class MlflowConfig(BaseModel):
             enable_auto_assessment=_env_bool(
                 os.getenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT"),
                 default=False,
+            ),
+            auto_assessment_sample_rate=float(os.getenv("FLEET_RLM_AUTO_ASSESSMENT_SAMPLE_RATE", "1.0")),
+            auto_assessment_scorers=[
+                s.strip()
+                for s in (os.getenv("FLEET_RLM_AUTO_ASSESSMENT_SCORERS") or "safety,guidelines").split(",")
+                if s.strip()
+            ],
+            enable_span_processors=_env_bool(
+                os.getenv("MLFLOW_ENABLE_SPAN_PROCESSORS"),
+                default=True,
             ),
         )
