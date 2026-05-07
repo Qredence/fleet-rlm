@@ -445,25 +445,27 @@ def test_update_current_mlflow_trace_skips_when_no_active_trace(
     assert calls == []
 
 
-def test_flush_mlflow_traces_skips_exporters_without_async_queue(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    class _Exporter:
-        pass
-
+def test_flush_mlflow_traces_calls_flush_async_logging(monkeypatch: pytest.MonkeyPatch):
+    calls = {}
     fake_mlflow = SimpleNamespace(
-        flush_trace_async_logging=lambda terminate=False: pytest.fail(
-            "flush_trace_async_logging should not be called without an async queue"
-        )
+        flush_trace_async_logging=lambda terminate=False: calls.__setitem__("terminate", terminate),
     )
-
-    mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
     monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
 
-    import mlflow.tracing.provider as provider
+    mlflow_integration.flush_mlflow_traces()
+    assert calls == {"terminate": False}
 
-    monkeypatch.setattr(provider, "_get_trace_exporter", lambda: _Exporter())
+    mlflow_integration.flush_mlflow_traces(terminate=True)
+    assert calls == {"terminate": True}
 
+
+def test_flush_mlflow_traces_handles_exception_gracefully(monkeypatch: pytest.MonkeyPatch):
+    def _raise(**_):
+        raise RuntimeError("flush failed")
+
+    fake_mlflow = SimpleNamespace(flush_trace_async_logging=_raise)
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    # Should not raise
     mlflow_integration.flush_mlflow_traces()
 
 

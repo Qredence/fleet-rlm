@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from collections.abc import Callable
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -247,21 +246,6 @@ def flush_mlflow_traces(*, terminate: bool = False) -> None:
     mlflow = _import_mlflow()
     if mlflow is None:
         return
-    trace_exporter_getter: Callable[[], Any] | None = None
-    try:
-        from mlflow.tracing.provider import _get_trace_exporter
-    except ImportError:
-        pass
-    else:
-        trace_exporter_getter = _get_trace_exporter
-
-    if trace_exporter_getter is not None:
-        try:
-            exporter = trace_exporter_getter()
-        except Exception:
-            exporter = None
-        if exporter is None or not hasattr(exporter, "_async_queue"):
-            return
     try:
         mlflow.flush_trace_async_logging(terminate=terminate)
     except Exception:
