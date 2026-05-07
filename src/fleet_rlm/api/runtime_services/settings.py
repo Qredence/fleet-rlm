@@ -39,19 +39,21 @@ from ..schemas.runtime import (
     RuntimeSettingsUpdateResponse,
 )
 
-RUNTIME_MODEL_RELOAD_KEYS = frozenset({
-    "DSPY_LM_MODEL",
-    "DSPY_DELEGATE_LM_MODEL",
-    "DSPY_DELEGATE_LM_SMALL_MODEL",
-    "DSPY_DELEGATE_LM_MAX_TOKENS",
-    "DSPY_LM_API_BASE",
-    "DSPY_LM_MAX_TOKENS",
-    "DSPY_ADAPTER",
-    "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
-    "DSPY_LLM_API_KEY",
-    "DSPY_LM_API_KEY",
-    "DSPY_DELEGATE_LM_API_KEY",
-})
+RUNTIME_MODEL_RELOAD_KEYS = frozenset(
+    {
+        "DSPY_LM_MODEL",
+        "DSPY_DELEGATE_LM_MODEL",
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "DSPY_DELEGATE_LM_MAX_TOKENS",
+        "DSPY_LM_API_BASE",
+        "DSPY_LM_MAX_TOKENS",
+        "DSPY_ADAPTER",
+        "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
+        "DSPY_LLM_API_KEY",
+        "DSPY_LM_API_KEY",
+        "DSPY_DELEGATE_LM_API_KEY",
+    }
+)
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 

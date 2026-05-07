@@ -65,7 +65,11 @@ const runtimeSettingCategories = [
         "Optional custom API base URL for LiteLLM-compatible providers.",
       ],
       ["DSPY_LM_MAX_TOKENS", "Planner max tokens", "Maximum token budget for planner responses."],
-      ["DSPY_ADAPTER", "DSPy adapter", "Optional default DSPy adapter for non-runtime-module calls."],
+      [
+        "DSPY_ADAPTER",
+        "DSPy adapter",
+        "Optional default DSPy adapter for non-runtime-module calls.",
+      ],
       [
         "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
         "Native function calling",
@@ -127,13 +131,21 @@ const runtimeSettingCategories = [
     label: "Database",
     description: "Postgres persistence URLs and database startup behavior.",
     fields: [
-      ["DATABASE_URL", "Runtime database URL", "Pooled Postgres URL used by application runtime traffic."],
+      [
+        "DATABASE_URL",
+        "Runtime database URL",
+        "Pooled Postgres URL used by application runtime traffic.",
+      ],
       [
         "DATABASE_ADMIN_URL",
         "Admin database URL",
         "Direct Postgres URL used for Alembic, schema, and admin tasks.",
       ],
-      ["DATABASE_REQUIRED", "Require database", "Require database connectivity during server startup."],
+      [
+        "DATABASE_REQUIRED",
+        "Require database",
+        "Require database connectivity during server startup.",
+      ],
       ["DB_ECHO", "SQL echo", "Enable SQLAlchemy SQL echo logging."],
       [
         "DB_VALIDATE_ON_STARTUP",

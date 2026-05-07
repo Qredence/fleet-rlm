@@ -58,7 +58,9 @@ describe("computeRuntimeUpdates", () => {
     };
 
     expect(
-      computeRuntimeUpdates(current, baseline, undefined, Object.keys(current), ["DSPY_LLM_API_KEY"]),
+      computeRuntimeUpdates(current, baseline, undefined, Object.keys(current), [
+        "DSPY_LLM_API_KEY",
+      ]),
     ).toEqual({});
   });
 
@@ -105,10 +107,7 @@ describe("computeRuntimeUpdates", () => {
     };
 
     expect(
-      computeRuntimeUpdates(current, baseline, undefined, [
-        "TIMEOUT",
-        "INTERPRETER_ASYNC_EXECUTE",
-      ]),
+      computeRuntimeUpdates(current, baseline, undefined, ["TIMEOUT", "INTERPRETER_ASYNC_EXECUTE"]),
     ).toEqual({
       TIMEOUT: "1200",
       INTERPRETER_ASYNC_EXECUTE: "false",
