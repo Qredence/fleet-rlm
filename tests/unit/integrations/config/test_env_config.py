@@ -32,6 +32,13 @@ class _FakeChatAdapter:
         self.kwargs = kwargs
 
 
+def _oc_env_default(value: object) -> str:
+    text = str(value)
+    if text.startswith("${oc.env:") and text.endswith("}"):
+        return text.rsplit(",", 1)[1][:-1]
+    return text
+
+
 def test_configure_planner_from_env_with_quotes(monkeypatch, tmp_path: Path):
     env_file = write_env_file(
         tmp_path,
@@ -129,6 +136,89 @@ def test_app_config_includes_rlm_settings():
     assert config.rlm_settings.max_depth == 3
 
 
+def test_app_config_syncs_categorized_runtime_sections():
+    """Categorized runtime sections should populate legacy CLI-compatible sections."""
+    from fleet_rlm.integrations.config.env import AppConfig
+
+    config = AppConfig(
+        llm={
+            "model": "openai/gpt-4.1",
+            "delegate_model": "openai/gpt-4.1-mini",
+            "delegate_small_model": "openai/gpt-4o-mini",
+            "max_tokens": 8192,
+            "delegate_max_tokens": 2048,
+            "api_base": "https://proxy.example/v1",
+            "adapter": "chat",
+            "adapter_use_native_function_calling": True,
+        },
+        sandbox={
+            "image": "python:3.13-slim-bookworm",
+            "timeout": 120,
+            "secret_name": "CUSTOM_SECRET",
+            "async_execute": False,
+        },
+        volumes={"name": "custom-volume"},
+        database={"url": "postgresql://runtime", "required": True},
+    )
+
+    assert config.agent.model == "openai/gpt-4.1"
+    assert config.agent.delegate_model == "openai/gpt-4.1-mini"
+    assert config.llm.delegate_small_model == "openai/gpt-4o-mini"
+    assert config.llm.max_tokens == 8192
+    assert config.agent.delegate_max_tokens == 2048
+    assert config.llm.api_base == "https://proxy.example/v1"
+    assert config.llm.adapter == "chat"
+    assert config.llm.adapter_use_native_function_calling is True
+    assert config.interpreter.timeout == 120
+    assert config.interpreter.secrets == ["CUSTOM_SECRET"]
+    assert config.interpreter.volume_name == "custom-volume"
+    assert config.interpreter.async_execute is False
+    assert config.database.url == "postgresql://runtime"
+    assert config.database.required is True
+
+
+def test_app_config_prefers_categorized_sections_over_legacy_sections():
+    """Categorized runtime sections should be authoritative when both schemas are present."""
+    from fleet_rlm.integrations.config.env import AppConfig
+
+    config = AppConfig(
+        llm={
+            "model": "openai/new-model",
+            "delegate_model": "openai/new-delegate",
+            "delegate_small_model": "openai/new-small",
+            "delegate_max_tokens": 4096,
+        },
+        agent={
+            "model": "openai/legacy-model",
+            "delegate_model": "openai/legacy-delegate",
+            "delegate_max_tokens": 1024,
+        },
+        sandbox={
+            "timeout": 321,
+            "secret_name": "NEW_SECRET",
+            "async_execute": False,
+        },
+        volumes={"name": "new-volume"},
+        interpreter={
+            "timeout": 111,
+            "secrets": ["LEGACY_SECRET"],
+            "volume_name": "legacy-volume",
+            "async_execute": True,
+        },
+    )
+
+    assert config.llm.model == "openai/new-model"
+    assert config.llm.delegate_model == "openai/new-delegate"
+    assert config.llm.delegate_small_model == "openai/new-small"
+    assert config.agent.model == "openai/new-model"
+    assert config.agent.delegate_model == "openai/new-delegate"
+    assert config.agent.delegate_max_tokens == 4096
+    assert config.interpreter.timeout == 321
+    assert config.interpreter.secrets == ["NEW_SECRET"]
+    assert config.interpreter.volume_name == "new-volume"
+    assert config.interpreter.async_execute is False
+
+
 def test_interpreter_config_async_execute_default():
     """InterpreterConfig should default async_execute to True."""
     from fleet_rlm.integrations.config.env import InterpreterConfig
@@ -143,7 +233,7 @@ def test_agent_config_guardrail_defaults():
 
     agent = AgentConfig()
     assert agent.max_iters == 60
-    assert agent.temperature == 1.0
+    assert agent.temperature == pytest.approx(1.0)
     assert agent.delegate_model is None
     assert agent.delegate_max_tokens == 64000
     assert agent.guardrail_mode == "off"
@@ -152,18 +242,21 @@ def test_agent_config_guardrail_defaults():
 
 def test_config_model_defaults_match_hydra_yaml():
     """Pydantic defaults should mirror Hydra defaults for shared runtime keys."""
-    from fleet_rlm.integrations.config.env import AgentConfig, RlmSettings
+    from fleet_rlm.integrations.config.env import LlmConfig, RlmSettings, SandboxConfig
 
     config_path = Path("src/fleet_rlm/integrations/config/config.yaml")
     raw = yaml.safe_load(config_path.read_text())
 
     assert isinstance(raw, dict)
-    agent_cfg = raw["agent"]
+    llm_cfg = raw["llm"]
+    sandbox_cfg = raw["sandbox"]
     rlm_cfg = raw["rlm_settings"]
 
-    assert AgentConfig().max_iters == agent_cfg["max_iters"]
-    assert AgentConfig().temperature == float(agent_cfg["temperature"])
-    assert AgentConfig().delegate_max_tokens == int(agent_cfg["delegate_max_tokens"])
+    assert LlmConfig().max_iters == llm_cfg["max_iters"]
+    assert LlmConfig().temperature == pytest.approx(float(llm_cfg["temperature"]))
+    assert LlmConfig().delegate_max_tokens == int(_oc_env_default(llm_cfg["delegate_max_tokens"]))
+    assert SandboxConfig().image == sandbox_cfg["image"]
+    assert SandboxConfig().secret_name == sandbox_cfg["secret_name"]
     assert RlmSettings().max_iters == rlm_cfg["max_iters"]
     assert RlmSettings().deep_max_iters == rlm_cfg["deep_max_iters"]
     assert RlmSettings().enable_adaptive_iters == bool(rlm_cfg["enable_adaptive_iters"])

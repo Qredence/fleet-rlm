@@ -15,6 +15,6 @@ def test_resolve_server_volume_name_defaults_to_persistent_volume() -> None:
 def test_resolve_server_volume_name_preserves_configured_volume() -> None:
     """Configured volume name should be preserved when set."""
     config = AppConfig(
-        interpreter={"volume_name": "custom-volume"},
+        volumes={"name": "custom-volume"},
     )
     assert resolve_server_volume_name(config) == "custom-volume"

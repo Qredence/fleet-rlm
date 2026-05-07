@@ -11,21 +11,39 @@ from .volumes import VolumeProvider
 ExecutionMode = Literal["auto", "rlm_only", "tools_only"]
 
 
+class RuntimeSettingsField(BaseModel):
+    """Single display-safe runtime setting field."""
+
+    key: str = Field(description="Environment variable key backing this setting.")
+    label: str = Field(description="Human-readable setting label.")
+    description: str = Field(description="Human-readable setting description.")
+    value: str = Field(default="", description="Display-safe setting value.")
+    masked_value: str = Field(default="", description="Masked display value for secret settings.")
+    secret: bool = Field(default=False, description="Whether the field stores sensitive data.")
+    editable: bool = Field(default=True, description="Whether the field can be patched through the Settings API.")
+    reload_required: bool = Field(
+        default=False, description="Whether applying this setting reloads runtime dependencies."
+    )
+    placeholder: str | None = Field(default=None, description="Optional UI placeholder.")
+    default: str | None = Field(default=None, description="Optional default value displayed by settings clients.")
+
+
+class RuntimeSettingsCategory(BaseModel):
+    """Categorized group of runtime settings fields."""
+
+    id: str = Field(description="Stable category identifier.")
+    label: str = Field(description="Human-readable category label.")
+    description: str = Field(description="Human-readable category description.")
+    fields: list[RuntimeSettingsField] = Field(default_factory=list, description="Fields in this category.")
+
+
 class RuntimeSettingsSnapshot(BaseModel):
     """Current runtime settings snapshot returned by the Settings API."""
 
     env_path: str = Field(description="Filesystem path to the environment file being edited.")
-    keys: list[str] = Field(
+    categories: list[RuntimeSettingsCategory] = Field(
         default_factory=list,
-        description="Ordered list of runtime setting keys surfaced by the Settings API.",
-    )
-    values: dict[str, str] = Field(
-        default_factory=dict,
-        description="Unmasked runtime setting values that are safe to return directly.",
-    )
-    masked_values: dict[str, str] = Field(
-        default_factory=dict,
-        description="Masked secret values returned for display-only settings fields.",
+        description="Categorized runtime setting fields surfaced by the Settings API.",
     )
 
 

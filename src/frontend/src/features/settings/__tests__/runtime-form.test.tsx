@@ -4,29 +4,130 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RuntimeForm, shouldHydrateRuntimeForm } from "@/features/settings/runtime-form";
 
 vi.mock("@/features/settings/use-runtime-settings", () => ({
+  flattenRuntimeSettingsValues: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; value?: string }> }>;
+  }) =>
+    Object.fromEntries(
+      (snapshot?.categories ?? []).flatMap((category) =>
+        (category.fields ?? []).map((field) => [field.key, field.value ?? ""]),
+      ),
+    ),
+  flattenRuntimeSettingsMaskedValues: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; value?: string; masked_value?: string }> }>;
+  }) =>
+    Object.fromEntries(
+      (snapshot?.categories ?? []).flatMap((category) =>
+        (category.fields ?? []).map((field) => [
+          field.key,
+          field.masked_value ?? field.value ?? "",
+        ]),
+      ),
+    ),
+  runtimeEditableKeysFromSnapshot: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; editable?: boolean }> }>;
+  }) =>
+    (snapshot?.categories ?? []).flatMap((category) =>
+      (category.fields ?? []).filter((field) => field.editable).map((field) => field.key),
+    ),
+  runtimeSecretKeysFromSnapshot: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; editable?: boolean; secret?: boolean }> }>;
+  }) =>
+    (snapshot?.categories ?? []).flatMap((category) =>
+      (category.fields ?? [])
+        .filter((field) => field.editable && field.secret)
+        .map((field) => field.key),
+    ),
   useRuntimeSettings: () => ({
     settingsQuery: {
       data: {
         env_path: "/tmp/.env",
-        keys: [],
-        values: {
-          DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
-          DSPY_LLM_API_KEY: "sk-...yz",
-          DSPY_LM_API_BASE: "https://api.example.com/v1",
-          DSPY_LM_MAX_TOKENS: "64000",
-          DAYTONA_API_KEY: "daytona-...12",
-          DAYTONA_API_URL: "https://daytona.example.com",
-          DAYTONA_TARGET: "local",
-        },
-        masked_values: {
-          DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
-          DSPY_LLM_API_KEY: "sk-...yz",
-          DSPY_LM_API_BASE: "https://api.example.com/v1",
-          DSPY_LM_MAX_TOKENS: "64000",
-          DAYTONA_API_KEY: "daytona-...12",
-          DAYTONA_API_URL: "https://daytona.example.com",
-          DAYTONA_TARGET: "local",
-        },
+        categories: [
+          {
+            id: "llm",
+            label: "LLM provider and models",
+            description: "Planner and provider settings.",
+            fields: [
+              {
+                key: "DSPY_LM_MODEL",
+                label: "Planner LM model",
+                description: "Planner model identifier.",
+                value: "openai/gemini-3-flash-preview",
+                masked_value: "openai/gemini-3-flash-preview",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DSPY_LM_API_BASE",
+                label: "Provider API base",
+                description: "Optional base URL for LM provider routing.",
+                value: "https://api.example.com/v1",
+                masked_value: "https://api.example.com/v1",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DSPY_LM_MAX_TOKENS",
+                label: "Planner max tokens",
+                description: "Maximum token budget per planner response.",
+                value: "64000",
+                masked_value: "64000",
+                secret: false,
+                editable: true,
+              },
+            ],
+          },
+          {
+            id: "api_keys",
+            label: "API keys and credentials",
+            description: "Write-only credentials.",
+            fields: [
+              {
+                key: "DSPY_LLM_API_KEY",
+                label: "Primary LM API key",
+                description:
+                  "Primary provider key for LM calls. Leave unchanged to keep current value.",
+                value: "sk-...yz",
+                masked_value: "sk-...yz",
+                secret: true,
+                editable: true,
+              },
+              {
+                key: "DAYTONA_API_KEY",
+                label: "Daytona API key",
+                description: "API key for Daytona Workspace provisioning.",
+                value: "daytona-...12",
+                masked_value: "daytona-...12",
+                secret: true,
+                editable: true,
+              },
+            ],
+          },
+          {
+            id: "sandbox_volumes",
+            label: "Sandbox and volumes",
+            description: "Daytona runtime settings.",
+            fields: [
+              {
+                key: "DAYTONA_API_URL",
+                label: "Daytona API URL",
+                description: "URL for Daytona API.",
+                value: "https://daytona.example.com",
+                masked_value: "https://daytona.example.com",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DAYTONA_TARGET",
+                label: "Daytona target",
+                description: "Execution target/backend for Daytona provisioning.",
+                value: "local",
+                masked_value: "local",
+                secret: false,
+                editable: true,
+              },
+            ],
+          },
+        ],
       },
     },
     statusQuery: {
@@ -92,8 +193,8 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
 describe("RuntimeForm", () => {
   it("hydrates runtime form only when snapshot exists and no unsaved edits", () => {
     expect(shouldHydrateRuntimeForm(undefined, false)).toBe(false);
-    expect(shouldHydrateRuntimeForm({ values: {} }, true)).toBe(false);
-    expect(shouldHydrateRuntimeForm({ values: {} }, false)).toBe(true);
+    expect(shouldHydrateRuntimeForm({ categories: [] }, true)).toBe(false);
+    expect(shouldHydrateRuntimeForm({ categories: [] }, false)).toBe(true);
   });
 
   it("renders masked runtime values and smoke-test states", () => {

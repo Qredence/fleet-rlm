@@ -1,33 +1,52 @@
 defaults:
   - _self_
 
-agent:
+llm:
   max_iters: 60
-  # Default to DSPY_LM_MODEL environment variable if set, otherwise fallback to a known model
-  # from config/config.yaml (e.g., gemini-3-flash-preview or deepseek-v3.2-maas).
-  # We use OC env interpolation to respect user's existing .env setup.
   model: ${oc.env:DSPY_LM_MODEL,openai/gemini-3-flash-preview}
   temperature: 1
   delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
-  delegate_max_tokens: 64000
+  delegate_small_model: ${oc.env:DSPY_DELEGATE_LM_SMALL_MODEL,null}
+  max_tokens: ${oc.env:DSPY_LM_MAX_TOKENS,64000}
+  delegate_max_tokens: ${oc.env:DSPY_DELEGATE_LM_MAX_TOKENS,64000}
+  api_base: ${oc.env:DSPY_LM_API_BASE,null}
+  adapter: ${oc.env:DSPY_ADAPTER,null}
+  adapter_use_native_function_calling: ${oc.env:DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING,false}
   rlm_max_iterations: 30
   guardrail_mode: "off"
   min_substantive_chars: 20
 
-interpreter:
+api_keys:
+  llm_api_key: ${oc.env:DSPY_LLM_API_KEY,null}
+  legacy_lm_api_key: ${oc.env:DSPY_LM_API_KEY,null}
+  delegate_lm_api_key: ${oc.env:DSPY_DELEGATE_LM_API_KEY,null}
+  daytona_api_key: ${oc.env:DAYTONA_API_KEY,null}
+  posthog_api_key: ${oc.env:POSTHOG_API_KEY,null}
+
+sandbox:
+  provider: "daytona"
   image: "python:3.13-slim-bookworm"
-  timeout: 900
-  secrets: ["LITELLM"]
-  volume_name: ${oc.env:VOLUME_NAME,null}
-  async_execute: true
+  timeout: ${oc.env:TIMEOUT,900}
+  secret_name: "LITELLM"
+  daytona_api_url: ${oc.env:DAYTONA_API_URL,null}
+  daytona_target: ${oc.env:DAYTONA_TARGET,null}
+  async_execute: ${oc.env:INTERPRETER_ASYNC_EXECUTE,true}
+
+volumes:
+  name: ${oc.env:VOLUME_NAME,null}
+
+database:
+  url: ${oc.env:DATABASE_URL,null}
+  admin_url: ${oc.env:DATABASE_ADMIN_URL,null}
+  required: ${oc.env:DATABASE_REQUIRED,false}
+  echo: ${oc.env:DB_ECHO,false}
+  validate_on_startup: ${oc.env:DB_VALIDATE_ON_STARTUP,false}
 
 memory:
-  # Limits for core memory blocks (in characters)
   core_memory_limits:
     persona: 2000
     human: 2000
     scratchpad: 1000
-  # Path in the volume for archival memory
   archival_path: "/data/memory"
 
 rlm_settings:

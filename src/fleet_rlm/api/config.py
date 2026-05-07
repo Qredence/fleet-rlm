@@ -36,7 +36,7 @@ def _resolve_server_env_path() -> Path:
 
 def resolve_server_volume_name(config: AppConfig) -> str | None:
     """Resolve the server-side volume name from shared app config."""
-    volume_name = config.interpreter.volume_name
+    volume_name = config.volumes.name
     return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
@@ -157,27 +157,32 @@ class ServerRuntimeConfig(BaseSettings):
     def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
         """Build server runtime settings from the shared application config."""
         kwargs: dict = {
-            "secret_name": config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM",
+            "secret_name": config.sandbox.secret_name,
             "volume_name": resolve_server_volume_name(config),
-            "timeout": config.interpreter.timeout,
+            "timeout": config.sandbox.timeout,
             "react_max_iters": config.rlm_settings.max_iters,
             "deep_react_max_iters": config.rlm_settings.deep_max_iters,
             "enable_adaptive_iters": config.rlm_settings.enable_adaptive_iters,
-            "rlm_max_iterations": config.agent.rlm_max_iterations,
+            "rlm_max_iterations": config.llm.rlm_max_iterations,
             "rlm_max_llm_calls": config.rlm_settings.max_llm_calls,
             "rlm_max_depth": config.rlm_settings.max_depth,
             "rlm_child_isolation_mode": config.rlm_settings.child_isolation_mode,
             "rlm_child_fork_fallback": config.rlm_settings.child_fork_fallback,
             "delegate_max_calls_per_turn": config.rlm_settings.delegate_max_calls_per_turn,
             "delegate_result_truncation_chars": config.rlm_settings.delegate_result_truncation_chars,
-            "interpreter_async_execute": config.interpreter.async_execute,
-            "agent_guardrail_mode": config.agent.guardrail_mode,
-            "agent_min_substantive_chars": config.agent.min_substantive_chars,
+            "interpreter_async_execute": config.sandbox.async_execute,
+            "agent_guardrail_mode": config.llm.guardrail_mode,
+            "agent_min_substantive_chars": config.llm.min_substantive_chars,
             "agent_max_output_chars": config.rlm_settings.max_output_chars,
-            "agent_model": config.agent.model,
-            "agent_delegate_model": config.agent.delegate_model,
-            "agent_delegate_max_tokens": config.agent.delegate_max_tokens,
-            "db_validate_on_startup": True,
+            "agent_model": config.llm.model,
+            "agent_delegate_model": config.llm.delegate_model,
+            "agent_delegate_small_model": config.llm.delegate_small_model,
+            "agent_delegate_max_tokens": config.llm.delegate_max_tokens,
+            "database_url": config.database.url,
+            "database_admin_url": config.database.admin_url,
+            "database_required": config.database.required,
+            "db_echo": config.database.echo,
+            "db_validate_on_startup": config.database.validate_on_startup,
         }
         return cls(**kwargs)
 
