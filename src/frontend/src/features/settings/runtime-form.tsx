@@ -20,9 +20,12 @@ import {
 } from "@/components/ui/input-group";
 import {
   computeRuntimeUpdates,
+  flattenRuntimeSettingsMaskedValues,
+  flattenRuntimeSettingsValues,
+  runtimeEditableKeysFromSnapshot,
+  runtimeSecretKeysFromSnapshot,
   useRuntimeSettings,
-  type RuntimeEditableKey,
-  type RuntimeSecretEditableKey,
+  type CategorizedRuntimeSettingsSnapshot,
 } from "./use-runtime-settings";
 import type { RuntimeStatusResponse } from "@/lib/rlm-api";
 import { RuntimeStatusPanel, shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
@@ -31,60 +34,15 @@ import { RuntimeConnectivityPanel } from "./runtime-connectivity-panel";
 export { shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
 
 type RuntimeField = {
-  key: RuntimeEditableKey;
+  key: string;
   label: string;
   description: string;
   isSecret?: boolean;
   placeholder?: string;
 };
 
-const RUNTIME_FIELDS: RuntimeField[] = [
-  {
-    key: "DSPY_LM_MODEL",
-    label: "LM Model",
-    description: "Planner model identifier (for example: openai/gemini-3.1-pro).",
-  },
-  {
-    key: "DSPY_LLM_API_KEY",
-    label: "LM API Key",
-    description: "Primary provider key for LM calls. Leave unchanged to keep current value.",
-    isSecret: true,
-  },
-  {
-    key: "DAYTONA_API_KEY",
-    label: "Daytona API Key",
-    description: "API Key for Daytona Workspace provisioning.",
-    isSecret: true,
-  },
-  {
-    key: "DAYTONA_API_URL",
-    label: "Daytona API URL",
-    description: "URL for Daytona API (e.g. http://127.0.0.1:3000).",
-  },
-  {
-    key: "DAYTONA_TARGET",
-    label: "Daytona Target",
-    description: "Execution target/backend for Daytona provisioning (e.g. local).",
-  },
-  {
-    key: "DSPY_LM_API_BASE",
-    label: "LM API Base",
-    description: "Optional base URL for LM provider routing.",
-  },
-  {
-    key: "DSPY_LM_MAX_TOKENS",
-    label: "LM Max Tokens",
-    description: "Maximum token budget per planner response.",
-    placeholder: "64000",
-  },
-];
-
-const RUNTIME_SECRET_KEYS: RuntimeSecretEditableKey[] = ["DSPY_LLM_API_KEY", "DAYTONA_API_KEY"];
-
-const RUNTIME_SECRET_KEY_SET = new Set<RuntimeSecretEditableKey>(RUNTIME_SECRET_KEYS);
-
-function isRuntimeSecretKey(key: RuntimeEditableKey): key is RuntimeSecretEditableKey {
-  return RUNTIME_SECRET_KEY_SET.has(key as RuntimeSecretEditableKey);
+function isRuntimeSecretKey(key: string, secretKeys: readonly string[]): boolean {
+  return secretKeys.includes(key);
 }
 
 export function RuntimeForm() {
@@ -97,34 +55,63 @@ export function RuntimeForm() {
     testAllConnections,
   } = useRuntimeSettings();
 
-  const initialValues = settingsQuery.data?.values ?? {};
-  const maskedValues = settingsQuery.data?.masked_values ?? initialValues;
+  const snapshot = settingsQuery.data as CategorizedRuntimeSettingsSnapshot | undefined;
+  const runtimeFields = useMemo<RuntimeField[]>(
+    () =>
+      (snapshot?.categories ?? []).flatMap((category) =>
+        (category.fields ?? [])
+          .filter((field) => field.editable)
+          .map((field) => ({
+            key: field.key,
+            label: field.label,
+            description: field.description,
+            isSecret: field.secret,
+            placeholder: field.placeholder ?? field.default ?? undefined,
+          })),
+      ),
+    [snapshot],
+  );
+  const runtimeEditableKeys = useMemo(() => runtimeEditableKeysFromSnapshot(snapshot), [snapshot]);
+  const runtimeSecretKeys = useMemo(() => runtimeSecretKeysFromSnapshot(snapshot), [snapshot]);
+  const initialValues = useMemo(() => flattenRuntimeSettingsValues(snapshot), [snapshot]);
+  const maskedValues = useMemo(() => flattenRuntimeSettingsMaskedValues(snapshot), [snapshot]);
   const [baselineValues, setBaselineValues] = useState<Record<string, string>>(initialValues);
   const [formValues, setFormValues] = useState<Record<string, string>>(initialValues);
-  const [clearSecretFlags, setClearSecretFlags] = useState<
-    Partial<Record<RuntimeSecretEditableKey, boolean>>
-  >({});
+  const [clearSecretFlags, setClearSecretFlags] = useState<Record<string, boolean>>({});
 
   const clearedSecrets = useMemo(
-    () => RUNTIME_SECRET_KEYS.filter((key) => clearSecretFlags[key] === true),
-    [clearSecretFlags],
+    () => runtimeSecretKeys.filter((key) => clearSecretFlags[key] === true),
+    [clearSecretFlags, runtimeSecretKeys],
   );
 
   const secretInputs = useMemo(
     () =>
-      Object.fromEntries(RUNTIME_SECRET_KEYS.map((key) => [key, formValues[key] ?? ""])) as Partial<
-        Record<RuntimeSecretEditableKey, string>
+      Object.fromEntries(runtimeSecretKeys.map((key) => [key, formValues[key] ?? ""])) as Partial<
+        Record<string, string>
       >,
-    [formValues],
+    [formValues, runtimeSecretKeys],
   );
 
   const updates = useMemo(
     () =>
-      computeRuntimeUpdates(formValues, baselineValues, {
-        secretInputs,
-        clearedSecrets,
-      }),
-    [baselineValues, clearedSecrets, formValues, secretInputs],
+      computeRuntimeUpdates(
+        formValues,
+        baselineValues,
+        {
+          secretInputs,
+          clearedSecrets,
+        },
+        runtimeEditableKeys,
+        runtimeSecretKeys,
+      ),
+    [
+      baselineValues,
+      clearedSecrets,
+      formValues,
+      runtimeEditableKeys,
+      runtimeSecretKeys,
+      secretInputs,
+    ],
   );
   const dirtyKeys = useMemo(() => Object.keys(updates), [updates]);
   const hasUnsavedRuntimeChanges = dirtyKeys.length > 0;
@@ -133,18 +120,17 @@ export function RuntimeForm() {
   const lmTest = status?.tests?.lm;
 
   useEffect(() => {
-    const snapshot = settingsQuery.data;
     if (!snapshot) return;
     if (!shouldHydrateRuntimeForm(snapshot, hasUnsavedRuntimeChanges)) return;
-    const nextBaseline = snapshot.values ?? {};
+    const nextBaseline = flattenRuntimeSettingsValues(snapshot);
     const nextFormValues = { ...nextBaseline };
-    for (const key of RUNTIME_SECRET_KEYS) {
+    for (const key of runtimeSecretKeys) {
       nextFormValues[key] = "";
     }
     setBaselineValues(nextBaseline);
     setFormValues(nextFormValues);
     setClearSecretFlags({});
-  }, [hasUnsavedRuntimeChanges, settingsQuery.data]);
+  }, [hasUnsavedRuntimeChanges, runtimeSecretKeys, snapshot]);
 
   const showUnsavedRuntimeTestWarning = () => {
     toast.error("Save runtime settings before testing", {
@@ -185,7 +171,7 @@ export function RuntimeForm() {
         }
         setFormValues((prev) => {
           const next = { ...prev };
-          for (const key of RUNTIME_SECRET_KEYS) {
+          for (const key of runtimeSecretKeys) {
             next[key] = "";
           }
           return next;
@@ -271,9 +257,9 @@ export function RuntimeForm() {
     !hasUnsavedRuntimeChanges || saveSettings.isPending || status?.write_enabled === false;
   const runtimeGuidance = status?.guidance ?? ["No guidance available."];
 
-  const updateFieldValue = (key: RuntimeEditableKey, value: string) => {
+  const updateFieldValue = (key: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
-    if (isRuntimeSecretKey(key)) {
+    if (isRuntimeSecretKey(key, runtimeSecretKeys)) {
       setClearSecretFlags((prev) => ({
         ...prev,
         [key]: false,
@@ -281,7 +267,7 @@ export function RuntimeForm() {
     }
   };
 
-  const toggleClearSecret = (secretKey: RuntimeSecretEditableKey) => {
+  const toggleClearSecret = (secretKey: string) => {
     const nextClear = !(clearSecretFlags[secretKey] ?? false);
     setClearSecretFlags((prev) => ({
       ...prev,
@@ -308,8 +294,8 @@ export function RuntimeForm() {
         </SectionCardHeader>
         <SectionCardContent className="pt-6">
           <FieldGroup className="gap-5">
-            {RUNTIME_FIELDS.map((field) => {
-              const secretKey = isRuntimeSecretKey(field.key) ? field.key : null;
+            {runtimeFields.map((field) => {
+              const secretKey = isRuntimeSecretKey(field.key, runtimeSecretKeys) ? field.key : null;
               const inputId = `runtime-${field.key.toLowerCase()}`;
               const inputValue = formValues[field.key] ?? "";
               return (

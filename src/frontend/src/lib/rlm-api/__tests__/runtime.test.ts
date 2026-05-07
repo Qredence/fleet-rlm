@@ -47,9 +47,7 @@ describe("runtimeEndpoints", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       mockJsonResponse({
         env_path: "/tmp/.env",
-        keys: [],
-        values: {},
-        masked_values: {},
+        categories: [],
       }),
     );
     vi.stubGlobal("fetch", fetchMock);

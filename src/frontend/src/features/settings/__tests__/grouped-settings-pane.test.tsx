@@ -6,6 +6,39 @@ import type { ComponentProps } from "react";
 import { GroupedSettingsPane } from "@/features/settings/settings-screen";
 
 vi.mock("@/features/settings/use-runtime-settings", () => ({
+  flattenRuntimeSettingsValues: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; value?: string }> }>;
+  }) =>
+    Object.fromEntries(
+      (snapshot?.categories ?? []).flatMap((category) =>
+        (category.fields ?? []).map((field) => [field.key, field.value ?? ""]),
+      ),
+    ),
+  flattenRuntimeSettingsMaskedValues: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; value?: string; masked_value?: string }> }>;
+  }) =>
+    Object.fromEntries(
+      (snapshot?.categories ?? []).flatMap((category) =>
+        (category.fields ?? []).map((field) => [
+          field.key,
+          field.masked_value ?? field.value ?? "",
+        ]),
+      ),
+    ),
+  runtimeEditableKeysFromSnapshot: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; editable?: boolean }> }>;
+  }) =>
+    (snapshot?.categories ?? []).flatMap((category) =>
+      (category.fields ?? []).filter((field) => field.editable).map((field) => field.key),
+    ),
+  runtimeSecretKeysFromSnapshot: (snapshot?: {
+    categories?: Array<{ fields?: Array<{ key: string; editable?: boolean; secret?: boolean }> }>;
+  }) =>
+    (snapshot?.categories ?? []).flatMap((category) =>
+      (category.fields ?? [])
+        .filter((field) => field.editable && field.secret)
+        .map((field) => field.key),
+    ),
   computeRuntimeUpdates: (current: Record<string, string>, baseline: Record<string, string>) => {
     const updates: Record<string, string> = {};
     for (const key of [
@@ -43,17 +76,67 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
   useRuntimeSettings: () => ({
     settingsQuery: {
       data: {
-        values: {
-          DSPY_LM_MODEL: "openai/gpt-4o-mini",
-          DSPY_DELEGATE_LM_MODEL: "openai/gpt-4.1-mini",
-          DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gpt-4o-mini",
-          DSPY_LM_MAX_TOKENS: "64000",
-          DSPY_LM_API_BASE: "https://litellm.example.com/v1",
-          DSPY_LLM_API_KEY: "[REDACTED:api-key]",
-          DAYTONA_API_KEY: "[REDACTED:daytona-key]",
-          DAYTONA_API_URL: "https://daytona.example.com",
-          DAYTONA_TARGET: "local",
-        },
+        categories: [
+          {
+            id: "llm",
+            label: "LLM provider and models",
+            description: "Planner and provider settings.",
+            fields: [
+              {
+                key: "DSPY_LM_MODEL",
+                label: "Planner LM model",
+                description: "LiteLLM model identifier for the planner runtime.",
+                value: "openai/gpt-4o-mini",
+                masked_value: "openai/gpt-4o-mini",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DSPY_DELEGATE_LM_MODEL",
+                label: "Delegate LM model",
+                description: "Optional model identifier for recursive delegate turns.",
+                value: "openai/gpt-4.1-mini",
+                masked_value: "openai/gpt-4.1-mini",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DSPY_DELEGATE_LM_SMALL_MODEL",
+                label: "Delegate small LM model",
+                description: "Optional small model used by lightweight delegate tasks.",
+                value: "openai/gpt-4o-mini",
+                masked_value: "openai/gpt-4o-mini",
+                secret: false,
+                editable: true,
+              },
+              {
+                key: "DSPY_LM_API_BASE",
+                label: "Provider API base",
+                description: "Custom API endpoint for LiteLLM-compatible providers.",
+                value: "https://litellm.example.com/v1",
+                masked_value: "https://litellm.example.com/v1",
+                secret: false,
+                editable: true,
+              },
+            ],
+          },
+          {
+            id: "api_keys",
+            label: "API keys and credentials",
+            description: "Write-only credentials.",
+            fields: [
+              {
+                key: "DSPY_LLM_API_KEY",
+                label: "API key",
+                description: "Primary provider key for planner and fallback delegate LM calls.",
+                value: "[REDACTED:api-key]",
+                masked_value: "[REDACTED:api-key]",
+                secret: true,
+                editable: true,
+              },
+            ],
+          },
+        ],
       },
     },
     statusQuery: {

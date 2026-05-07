@@ -1168,6 +1168,93 @@ export interface components {
       error?: string | null;
     };
     /**
+     * RuntimeSettingsCategory
+     * @description Categorized group of runtime settings fields.
+     */
+    RuntimeSettingsCategory: {
+      /**
+       * Id
+       * @description Stable category identifier.
+       */
+      id: string;
+      /**
+       * Label
+       * @description Human-readable category label.
+       */
+      label: string;
+      /**
+       * Description
+       * @description Human-readable category description.
+       */
+      description: string;
+      /**
+       * Fields
+       * @description Fields in this category.
+       */
+      fields?: components["schemas"]["RuntimeSettingsField"][];
+    };
+    /**
+     * RuntimeSettingsField
+     * @description Single display-safe runtime setting field.
+     */
+    RuntimeSettingsField: {
+      /**
+       * Key
+       * @description Environment variable key backing this setting.
+       */
+      key: string;
+      /**
+       * Label
+       * @description Human-readable setting label.
+       */
+      label: string;
+      /**
+       * Description
+       * @description Human-readable setting description.
+       */
+      description: string;
+      /**
+       * Value
+       * @description Display-safe setting value.
+       * @default
+       */
+      value?: string;
+      /**
+       * Masked Value
+       * @description Masked display value for secret settings.
+       * @default
+       */
+      masked_value?: string;
+      /**
+       * Secret
+       * @description Whether the field stores sensitive data.
+       * @default false
+       */
+      secret?: boolean;
+      /**
+       * Editable
+       * @description Whether the field can be patched through the Settings API.
+       * @default true
+       */
+      editable?: boolean;
+      /**
+       * Reload Required
+       * @description Whether applying this setting reloads runtime dependencies.
+       * @default false
+       */
+      reload_required?: boolean;
+      /**
+       * Placeholder
+       * @description Optional UI placeholder.
+       */
+      placeholder?: string | null;
+      /**
+       * Default
+       * @description Optional default value displayed by settings clients.
+       */
+      default?: string | null;
+    };
+    /**
      * RuntimeSettingsSnapshot
      * @description Current runtime settings snapshot returned by the Settings API.
      */
@@ -1178,24 +1265,10 @@ export interface components {
        */
       env_path: string;
       /**
-       * Keys
-       * @description Ordered list of runtime setting keys surfaced by the Settings API.
+       * Categories
+       * @description Categorized runtime setting fields surfaced by the Settings API.
        */
-      keys?: string[];
-      /**
-       * Values
-       * @description Unmasked runtime setting values that are safe to return directly.
-       */
-      values?: {
-        [key: string]: string;
-      };
-      /**
-       * Masked Values
-       * @description Masked secret values returned for display-only settings fields.
-       */
-      masked_values?: {
-        [key: string]: string;
-      };
+      categories?: components["schemas"]["RuntimeSettingsCategory"][];
     };
     /**
      * RuntimeSettingsUpdateRequest

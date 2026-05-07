@@ -10,7 +10,7 @@ export function formatCheckLabel(key: string): string {
 }
 
 export function shouldHydrateRuntimeForm(
-  snapshot: { values?: Record<string, string> } | undefined,
+  snapshot: object | undefined,
   hasUnsavedRuntimeChanges: boolean,
 ): boolean {
   return Boolean(snapshot) && !hasUnsavedRuntimeChanges;

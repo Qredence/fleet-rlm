@@ -28,7 +28,7 @@ describe("computeRuntimeUpdates", () => {
       DAYTONA_TARGET: "staging",
     };
 
-    expect(computeRuntimeUpdates(current, baseline)).toEqual({
+    expect(computeRuntimeUpdates(current, baseline, undefined, Object.keys(current))).toEqual({
       DSPY_LM_MODEL: "openai/gpt-4.1-mini",
       DAYTONA_TARGET: "staging",
     });
@@ -42,7 +42,7 @@ describe("computeRuntimeUpdates", () => {
       DAYTONA_API_URL: "",
     };
 
-    expect(computeRuntimeUpdates(current, baseline)).toEqual({
+    expect(computeRuntimeUpdates(current, baseline, undefined, Object.keys(current))).toEqual({
       DAYTONA_API_URL: "",
     });
   });
@@ -57,7 +57,11 @@ describe("computeRuntimeUpdates", () => {
       DSPY_LLM_API_KEY: "",
     };
 
-    expect(computeRuntimeUpdates(current, baseline)).toEqual({});
+    expect(
+      computeRuntimeUpdates(current, baseline, undefined, Object.keys(current), [
+        "DSPY_LLM_API_KEY",
+      ]),
+    ).toEqual({});
   });
 
   it("includes secret keys when a new secret is entered", () => {
@@ -66,12 +70,14 @@ describe("computeRuntimeUpdates", () => {
       {},
       {
         secretInputs: {
-          DSPY_LLM_API_KEY: "sk-new",
+          DATABASE_URL: "postgresql://runtime",
         },
       },
+      ["DATABASE_URL"],
+      ["DATABASE_URL"],
     );
     expect(updates).toEqual({
-      DSPY_LLM_API_KEY: "sk-new",
+      DATABASE_URL: "postgresql://runtime",
     });
   });
 
@@ -80,11 +86,31 @@ describe("computeRuntimeUpdates", () => {
       {},
       {},
       {
-        clearedSecrets: ["DSPY_LLM_API_KEY"],
+        clearedSecrets: ["DATABASE_ADMIN_URL"],
       },
+      ["DATABASE_ADMIN_URL"],
+      ["DATABASE_ADMIN_URL"],
     );
     expect(updates).toEqual({
-      DSPY_LLM_API_KEY: "",
+      DATABASE_ADMIN_URL: "",
+    });
+  });
+
+  it("uses backend-provided editable keys to include new non-secret settings", () => {
+    const baseline = {
+      TIMEOUT: "900",
+      INTERPRETER_ASYNC_EXECUTE: "true",
+    };
+    const current = {
+      TIMEOUT: "1200",
+      INTERPRETER_ASYNC_EXECUTE: "false",
+    };
+
+    expect(
+      computeRuntimeUpdates(current, baseline, undefined, ["TIMEOUT", "INTERPRETER_ASYNC_EXECUTE"]),
+    ).toEqual({
+      TIMEOUT: "1200",
+      INTERPRETER_ASYNC_EXECUTE: "false",
     });
   });
 });

@@ -47,9 +47,23 @@ RUNTIME_MODEL_RELOAD_KEYS = frozenset(
         "DSPY_DELEGATE_LM_MAX_TOKENS",
         "DSPY_LM_API_BASE",
         "DSPY_LM_MAX_TOKENS",
+        "DSPY_ADAPTER",
+        "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
         "DSPY_LLM_API_KEY",
+        "DSPY_LM_API_KEY",
+        "DSPY_DELEGATE_LM_API_KEY",
     }
 )
+
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _settings_bool(value: str) -> bool:
+    return value.strip().lower() in _TRUE_VALUES
+
+
+def _settings_positive_int(value: str, *, default: int) -> int:
+    return max(int(value.strip() or str(default)), 1)
 
 
 class RuntimeConfigSnapshot(TypedDict):
@@ -75,10 +89,37 @@ def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized:
         config.agent_delegate_small_model = resolved_delegate_small_model or None
 
     if "DSPY_DELEGATE_LM_MAX_TOKENS" in normalized:
-        config.agent_delegate_max_tokens = max(
-            int(normalized["DSPY_DELEGATE_LM_MAX_TOKENS"].strip() or "64000"),
-            1,
+        config.agent_delegate_max_tokens = _settings_positive_int(
+            normalized["DSPY_DELEGATE_LM_MAX_TOKENS"],
+            default=64000,
         )
+
+    if "VOLUME_NAME" in normalized:
+        resolved_volume_name = normalized["VOLUME_NAME"].strip()
+        config.volume_name = resolved_volume_name or None
+
+    if "TIMEOUT" in normalized:
+        config.timeout = _settings_positive_int(normalized["TIMEOUT"], default=900)
+
+    if "INTERPRETER_ASYNC_EXECUTE" in normalized:
+        config.interpreter_async_execute = _settings_bool(normalized["INTERPRETER_ASYNC_EXECUTE"])
+
+    if "DATABASE_URL" in normalized:
+        resolved_database_url = normalized["DATABASE_URL"].strip()
+        config.database_url = resolved_database_url or None
+
+    if "DATABASE_ADMIN_URL" in normalized:
+        resolved_database_admin_url = normalized["DATABASE_ADMIN_URL"].strip()
+        config.database_admin_url = resolved_database_admin_url or None
+
+    if "DATABASE_REQUIRED" in normalized:
+        config.database_required = _settings_bool(normalized["DATABASE_REQUIRED"])
+
+    if "DB_ECHO" in normalized:
+        config.db_echo = _settings_bool(normalized["DB_ECHO"])
+
+    if "DB_VALIDATE_ON_STARTUP" in normalized:
+        config.db_validate_on_startup = _settings_bool(normalized["DB_VALIDATE_ON_STARTUP"])
 
 
 def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: LmDeps) -> RuntimeConfigSnapshot:
@@ -156,6 +197,12 @@ async def apply_runtime_settings_patch(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    validation_config = config.model_copy(deep=True)
+    try:
+        apply_runtime_settings_to_config(config=validation_config, normalized=normalized)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid runtime setting value: {exc}") from exc
 
     runtime_snapshot = _capture_runtime_config_snapshot(config=config, lm_deps=lm_deps)
     env_text = config.env_path.read_text(encoding="utf-8") if config.env_path.exists() else None

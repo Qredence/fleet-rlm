@@ -19,7 +19,13 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
-import { computeLmRuntimeUpdates, useRuntimeSettings } from "./use-runtime-settings";
+import {
+  computeLmRuntimeUpdates,
+  flattenRuntimeSettingsMaskedValues,
+  flattenRuntimeSettingsValues,
+  useRuntimeSettings,
+  type CategorizedRuntimeSettingsSnapshot,
+} from "./use-runtime-settings";
 import type { SettingsSection } from "./settings-content";
 import { sectionDescriptions } from "./settings-content";
 
@@ -52,13 +58,15 @@ export function LiteLlmForm({ showAllSections, section }: LiteLlmFormProps) {
   const [baselineDelegateLmSmallModel, setBaselineDelegateLmSmallModel] = useState("");
 
   useEffect(() => {
-    const values = settingsQuery.data?.values;
-    if (!values) return;
+    const snapshot = settingsQuery.data as CategorizedRuntimeSettingsSnapshot | undefined;
+    if (!snapshot) return;
+    const values = flattenRuntimeSettingsValues(snapshot);
+    const maskedValues = flattenRuntimeSettingsMaskedValues(snapshot);
     const nextLmModel = values.DSPY_LM_MODEL ?? "";
     const nextDelegateLmModel = values.DSPY_DELEGATE_LM_MODEL ?? "";
     const nextDelegateLmSmallModel = values.DSPY_DELEGATE_LM_SMALL_MODEL ?? "";
     const nextApiBase = values.DSPY_LM_API_BASE ?? "";
-    const nextApiKey = values.DSPY_LLM_API_KEY ?? "";
+    const nextApiKey = maskedValues.DSPY_LLM_API_KEY ?? "";
     setLmModel(nextLmModel);
     setDelegateLmModel(nextDelegateLmModel);
     setDelegateLmSmallModel(nextDelegateLmSmallModel);

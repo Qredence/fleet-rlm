@@ -16,22 +16,261 @@ class RuntimeSettingDefinition:
     """Single-source metadata for runtime settings surfaces."""
 
     key: str
+    category: str
+    category_label: str
+    category_description: str
+    label: str
+    description: str
     secret: bool = False
     include_in_default_snapshot: bool = True
     editable: bool = True
+    reload_required: bool = False
+    placeholder: str | None = None
+    default: str | None = None
+
+
+_CATEGORY_METADATA: tuple[tuple[str, str, str], ...] = (
+    (
+        "llm",
+        "LLM provider and models",
+        "Planner, delegate, adapter, and provider routing settings used by DSPy.",
+    ),
+    (
+        "api_keys",
+        "API keys and credentials",
+        "Write-only credentials used by language-model providers, Daytona, and optional services.",
+    ),
+    (
+        "sandbox_volumes",
+        "Sandbox and volumes",
+        "Daytona runtime, sandbox execution, and durable volume parameters.",
+    ),
+    (
+        "database",
+        "Database",
+        "Postgres persistence URLs and database startup behavior.",
+    ),
+)
+
+
+_CATEGORY_INDEX = {category: (label, description) for category, label, description in _CATEGORY_METADATA}
+
+
+def _definition(
+    key: str,
+    *,
+    category: str,
+    label: str,
+    description: str,
+    secret: bool = False,
+    include_in_default_snapshot: bool = True,
+    editable: bool = True,
+    reload_required: bool = False,
+    placeholder: str | None = None,
+    default: str | None = None,
+) -> RuntimeSettingDefinition:
+    category_label, category_description = _CATEGORY_INDEX[category]
+    return RuntimeSettingDefinition(
+        key=key,
+        category=category,
+        category_label=category_label,
+        category_description=category_description,
+        label=label,
+        description=description,
+        secret=secret,
+        include_in_default_snapshot=include_in_default_snapshot,
+        editable=editable,
+        reload_required=reload_required,
+        placeholder=placeholder,
+        default=default,
+    )
 
 
 _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
-    RuntimeSettingDefinition("DSPY_LM_MODEL"),
-    RuntimeSettingDefinition("DSPY_DELEGATE_LM_MODEL"),
-    RuntimeSettingDefinition("DSPY_DELEGATE_LM_SMALL_MODEL"),
-    RuntimeSettingDefinition("DSPY_DELEGATE_LM_MAX_TOKENS"),
-    RuntimeSettingDefinition("DSPY_LLM_API_KEY", secret=True),
-    RuntimeSettingDefinition("DSPY_LM_API_BASE"),
-    RuntimeSettingDefinition("DSPY_LM_MAX_TOKENS"),
-    RuntimeSettingDefinition("DAYTONA_API_KEY", secret=True),
-    RuntimeSettingDefinition("DAYTONA_API_URL"),
-    RuntimeSettingDefinition("DAYTONA_TARGET"),
+    _definition(
+        "DSPY_LM_MODEL",
+        category="llm",
+        label="Planner LM model",
+        description="LiteLLM model identifier for the planner runtime.",
+        reload_required=True,
+        placeholder="openai/gpt-4o",
+        default="openai/gemini-3-flash-preview",
+    ),
+    _definition(
+        "DSPY_DELEGATE_LM_MODEL",
+        category="llm",
+        label="Delegate LM model",
+        description="Optional model identifier for recursive delegate turns.",
+        reload_required=True,
+        placeholder="openai/gpt-4o-mini",
+    ),
+    _definition(
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        category="llm",
+        label="Delegate small LM model",
+        description="Optional small model used by lightweight delegate tasks.",
+        reload_required=True,
+        placeholder="openai/gpt-4o-mini",
+    ),
+    _definition(
+        "DSPY_DELEGATE_LM_MAX_TOKENS",
+        category="llm",
+        label="Delegate max tokens",
+        description="Maximum token budget for delegate model calls.",
+        reload_required=True,
+        placeholder="64000",
+        default="64000",
+    ),
+    _definition(
+        "DSPY_LM_API_BASE",
+        category="llm",
+        label="Provider API base",
+        description="Optional custom API base URL for LiteLLM-compatible providers.",
+        reload_required=True,
+        placeholder="https://api.openai.com/v1",
+    ),
+    _definition(
+        "DSPY_LM_MAX_TOKENS",
+        category="llm",
+        label="Planner max tokens",
+        description="Maximum token budget for planner responses.",
+        reload_required=True,
+        placeholder="64000",
+        default="64000",
+    ),
+    _definition(
+        "DSPY_ADAPTER",
+        category="llm",
+        label="DSPy adapter",
+        description="Optional default DSPy adapter for non-runtime-module calls.",
+        reload_required=True,
+        placeholder="chat",
+    ),
+    _definition(
+        "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
+        category="llm",
+        label="Native function calling",
+        description="Enable native function calling for the default DSPy adapter.",
+        reload_required=True,
+        placeholder="false",
+        default="false",
+    ),
+    _definition(
+        "DSPY_LLM_API_KEY",
+        category="api_keys",
+        label="Primary LM API key",
+        description="Primary provider key for planner and fallback delegate LM calls.",
+        secret=True,
+        reload_required=True,
+    ),
+    _definition(
+        "DSPY_LM_API_KEY",
+        category="api_keys",
+        label="Legacy LM API key",
+        description="Backward-compatible LM provider key used when the primary key is unset.",
+        secret=True,
+        reload_required=True,
+    ),
+    _definition(
+        "DSPY_DELEGATE_LM_API_KEY",
+        category="api_keys",
+        label="Delegate LM API key",
+        description="Optional provider key dedicated to delegate model calls.",
+        secret=True,
+        reload_required=True,
+    ),
+    _definition(
+        "DAYTONA_API_KEY",
+        category="api_keys",
+        label="Daytona API key",
+        description="API key used for Daytona workspace and volume provisioning.",
+        secret=True,
+    ),
+    _definition(
+        "POSTHOG_API_KEY",
+        category="api_keys",
+        label="PostHog API key",
+        description="Optional PostHog project key for analytics.",
+        secret=True,
+    ),
+    _definition(
+        "DAYTONA_API_URL",
+        category="sandbox_volumes",
+        label="Daytona API URL",
+        description="Base URL for the Daytona API.",
+        placeholder="http://127.0.0.1:3000",
+    ),
+    _definition(
+        "DAYTONA_TARGET",
+        category="sandbox_volumes",
+        label="Daytona target",
+        description="Execution target or backend selected for Daytona provisioning.",
+        placeholder="local",
+    ),
+    _definition(
+        "VOLUME_NAME",
+        category="sandbox_volumes",
+        label="Volume name",
+        description="Durable Daytona volume mounted into workbench sandboxes.",
+        placeholder="rlm-volume-dspy",
+        default="rlm-volume-dspy",
+    ),
+    _definition(
+        "TIMEOUT",
+        category="sandbox_volumes",
+        label="Sandbox timeout",
+        description="Maximum sandbox execution time in seconds.",
+        placeholder="900",
+        default="900",
+    ),
+    _definition(
+        "INTERPRETER_ASYNC_EXECUTE",
+        category="sandbox_volumes",
+        label="Async interpreter execution",
+        description="Run interpreter execute calls through the async wrapper.",
+        placeholder="true",
+        default="true",
+    ),
+    _definition(
+        "DATABASE_URL",
+        category="database",
+        label="Runtime database URL",
+        description="Pooled Postgres URL used by application runtime traffic.",
+        secret=True,
+        placeholder="postgresql://...",
+    ),
+    _definition(
+        "DATABASE_ADMIN_URL",
+        category="database",
+        label="Admin database URL",
+        description="Direct Postgres URL used for Alembic, schema, and admin tasks.",
+        secret=True,
+        placeholder="postgresql://...",
+    ),
+    _definition(
+        "DATABASE_REQUIRED",
+        category="database",
+        label="Require database",
+        description="Require database connectivity during server startup.",
+        placeholder="false",
+        default="false",
+    ),
+    _definition(
+        "DB_ECHO",
+        category="database",
+        label="SQL echo",
+        description="Enable SQLAlchemy SQL echo logging.",
+        placeholder="false",
+        default="false",
+    ),
+    _definition(
+        "DB_VALIDATE_ON_STARTUP",
+        category="database",
+        label="Validate database on startup",
+        description="Ping the configured database during server startup.",
+        placeholder="false",
+        default="false",
+    ),
 )
 
 _RUNTIME_SETTING_INDEX: dict[str, RuntimeSettingDefinition] = {
@@ -47,6 +286,7 @@ RUNTIME_SETTINGS_KEYS: tuple[str, ...] = tuple(
 )
 
 RUNTIME_SETTINGS_ALLOWLIST: frozenset[str] = frozenset(RUNTIME_SETTINGS_KEYS)
+RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = _RUNTIME_SETTING_DEFINITIONS
 
 _LEGACY_SECRET_KEYS = frozenset({"DSPY_LM_API_KEY"})
 _NON_SECRET_KEYS = frozenset(definition.key for definition in _RUNTIME_SETTING_DEFINITIONS if not definition.secret)
@@ -191,6 +431,7 @@ def get_settings_snapshot(
     resolved_env_path = env_path or resolve_env_path()
     file_values = _read_env_file_values(resolved_env_path)
     raw_values: dict[str, str] = {}
+    requested = {key.upper() for key in keys}
 
     for key in keys:
         env_value = file_values.get(key)
@@ -202,12 +443,40 @@ def get_settings_snapshot(
         extra = extras.get(key)
         raw_values[key] = "" if extra is None else str(extra)
 
-    masked_values = {key: mask_secret(value) if should_mask_key(key) else value for key, value in raw_values.items()}
+    categories: list[dict[str, Any]] = []
+    for category, category_label, category_description in _CATEGORY_METADATA:
+        fields: list[dict[str, Any]] = []
+        for definition in _RUNTIME_SETTING_DEFINITIONS:
+            if definition.category != category or definition.key not in requested:
+                continue
+            value = raw_values.get(definition.key, "")
+            masked_value = mask_secret(value) if should_mask_key(definition.key) else value
+            fields.append(
+                {
+                    "key": definition.key,
+                    "label": definition.label,
+                    "description": definition.description,
+                    "value": masked_value,
+                    "masked_value": masked_value,
+                    "secret": definition.secret,
+                    "editable": definition.editable,
+                    "reload_required": definition.reload_required,
+                    "placeholder": definition.placeholder,
+                    "default": definition.default,
+                }
+            )
+        if fields:
+            categories.append(
+                {
+                    "id": category,
+                    "label": category_label,
+                    "description": category_description,
+                    "fields": fields,
+                }
+            )
     return {
         "env_path": str(resolved_env_path),
-        "keys": keys,
-        "values": masked_values,
-        "masked_values": masked_values,
+        "categories": categories,
     }
 
 

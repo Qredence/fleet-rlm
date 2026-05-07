@@ -2565,31 +2565,104 @@ components:
       - checked_at
       title: RuntimeConnectivityTestResponse
       description: Result payload for runtime connectivity and preflight diagnostics.
+    RuntimeSettingsCategory:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Stable category identifier.
+        label:
+          type: string
+          title: Label
+          description: Human-readable category label.
+        description:
+          type: string
+          title: Description
+          description: Human-readable category description.
+        fields:
+          items:
+            $ref: '#/components/schemas/RuntimeSettingsField'
+          type: array
+          title: Fields
+          description: Fields in this category.
+      type: object
+      required:
+      - id
+      - label
+      - description
+      title: RuntimeSettingsCategory
+      description: Categorized group of runtime settings fields.
+    RuntimeSettingsField:
+      properties:
+        key:
+          type: string
+          title: Key
+          description: Environment variable key backing this setting.
+        label:
+          type: string
+          title: Label
+          description: Human-readable setting label.
+        description:
+          type: string
+          title: Description
+          description: Human-readable setting description.
+        value:
+          type: string
+          title: Value
+          description: Display-safe setting value.
+          default: ''
+        masked_value:
+          type: string
+          title: Masked Value
+          description: Masked display value for secret settings.
+          default: ''
+        secret:
+          type: boolean
+          title: Secret
+          description: Whether the field stores sensitive data.
+          default: false
+        editable:
+          type: boolean
+          title: Editable
+          description: Whether the field can be patched through the Settings API.
+          default: true
+        reload_required:
+          type: boolean
+          title: Reload Required
+          description: Whether applying this setting reloads runtime dependencies.
+          default: false
+        placeholder:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Placeholder
+          description: Optional UI placeholder.
+        default:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Default
+          description: Optional default value displayed by settings clients.
+      type: object
+      required:
+      - key
+      - label
+      - description
+      title: RuntimeSettingsField
+      description: Single display-safe runtime setting field.
     RuntimeSettingsSnapshot:
       properties:
         env_path:
           type: string
           title: Env Path
           description: Filesystem path to the environment file being edited.
-        keys:
+        categories:
           items:
-            type: string
+            $ref: '#/components/schemas/RuntimeSettingsCategory'
           type: array
-          title: Keys
-          description: Ordered list of runtime setting keys surfaced by the Settings
+          title: Categories
+          description: Categorized runtime setting fields surfaced by the Settings
             API.
-        values:
-          additionalProperties:
-            type: string
-          type: object
-          title: Values
-          description: Unmasked runtime setting values that are safe to return directly.
-        masked_values:
-          additionalProperties:
-            type: string
-          type: object
-          title: Masked Values
-          description: Masked secret values returned for display-only settings fields.
       type: object
       required:
       - env_path

@@ -11,20 +11,153 @@ const fallbackValues: Record<string, string> = {
   DSPY_LM_MODEL: "openai/gemini-3-flash-preview",
   DSPY_DELEGATE_LM_MODEL: "openai/gemini-3-flash-preview",
   DSPY_DELEGATE_LM_SMALL_MODEL: "openai/gemini-3-flash-preview",
+  DSPY_DELEGATE_LM_MAX_TOKENS: "64000",
   DSPY_LM_API_BASE: "",
   DSPY_LM_MAX_TOKENS: "64000",
+  DSPY_ADAPTER: "",
+  DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING: "false",
   DAYTONA_API_URL: "http://127.0.0.1:3000",
   DAYTONA_TARGET: "local",
+  VOLUME_NAME: "rlm-volume-dspy",
+  TIMEOUT: "900",
+  INTERPRETER_ASYNC_EXECUTE: "true",
+  DATABASE_REQUIRED: "false",
+  DB_ECHO: "false",
+  DB_VALIDATE_ON_STARTUP: "false",
 };
 
 const fallbackMaskedValues: Record<string, string> = {
   DSPY_LLM_API_KEY: "sk-...demo",
+  DSPY_LM_API_KEY: "sk-...legacy",
+  DSPY_DELEGATE_LM_API_KEY: "sk-...delegate",
   DAYTONA_API_KEY: "dyt-...demo",
+  POSTHOG_API_KEY: "phc-...demo",
+  DATABASE_URL: "pos.../db",
+  DATABASE_ADMIN_URL: "pos...admin",
   ...fallbackValues,
 };
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+const runtimeSettingCategories = [
+  {
+    id: "llm",
+    label: "LLM provider and models",
+    description: "Planner, delegate, adapter, and provider routing settings used by DSPy.",
+    fields: [
+      ["DSPY_LM_MODEL", "Planner LM model", "LiteLLM model identifier for the planner runtime."],
+      [
+        "DSPY_DELEGATE_LM_MODEL",
+        "Delegate LM model",
+        "Optional model identifier for recursive delegate turns.",
+      ],
+      [
+        "DSPY_DELEGATE_LM_SMALL_MODEL",
+        "Delegate small LM model",
+        "Optional small model used by lightweight delegate tasks.",
+      ],
+      [
+        "DSPY_DELEGATE_LM_MAX_TOKENS",
+        "Delegate max tokens",
+        "Maximum token budget for delegate model calls.",
+      ],
+      [
+        "DSPY_LM_API_BASE",
+        "Provider API base",
+        "Optional custom API base URL for LiteLLM-compatible providers.",
+      ],
+      ["DSPY_LM_MAX_TOKENS", "Planner max tokens", "Maximum token budget for planner responses."],
+      [
+        "DSPY_ADAPTER",
+        "DSPy adapter",
+        "Optional default DSPy adapter for non-runtime-module calls.",
+      ],
+      [
+        "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
+        "Native function calling",
+        "Enable native function calling for the default DSPy adapter.",
+      ],
+    ],
+  },
+  {
+    id: "api_keys",
+    label: "API keys and credentials",
+    description:
+      "Write-only credentials used by language-model providers, Daytona, and optional services.",
+    fields: [
+      [
+        "DSPY_LLM_API_KEY",
+        "Primary LM API key",
+        "Primary provider key for planner and fallback delegate LM calls.",
+      ],
+      [
+        "DSPY_LM_API_KEY",
+        "Legacy LM API key",
+        "Backward-compatible LM provider key used when the primary key is unset.",
+      ],
+      [
+        "DSPY_DELEGATE_LM_API_KEY",
+        "Delegate LM API key",
+        "Optional provider key dedicated to delegate model calls.",
+      ],
+      [
+        "DAYTONA_API_KEY",
+        "Daytona API key",
+        "API key used for Daytona workspace and volume provisioning.",
+      ],
+      ["POSTHOG_API_KEY", "PostHog API key", "Optional PostHog project key for analytics."],
+    ],
+  },
+  {
+    id: "sandbox_volumes",
+    label: "Sandbox and volumes",
+    description: "Daytona runtime, sandbox execution, and durable volume parameters.",
+    fields: [
+      ["DAYTONA_API_URL", "Daytona API URL", "Base URL for the Daytona API."],
+      [
+        "DAYTONA_TARGET",
+        "Daytona target",
+        "Execution target or backend selected for Daytona provisioning.",
+      ],
+      ["VOLUME_NAME", "Volume name", "Durable Daytona volume mounted into workbench sandboxes."],
+      ["TIMEOUT", "Sandbox timeout", "Maximum sandbox execution time in seconds."],
+      [
+        "INTERPRETER_ASYNC_EXECUTE",
+        "Async interpreter execution",
+        "Run interpreter execute calls through the async wrapper.",
+      ],
+    ],
+  },
+  {
+    id: "database",
+    label: "Database",
+    description: "Postgres persistence URLs and database startup behavior.",
+    fields: [
+      [
+        "DATABASE_URL",
+        "Runtime database URL",
+        "Pooled Postgres URL used by application runtime traffic.",
+      ],
+      [
+        "DATABASE_ADMIN_URL",
+        "Admin database URL",
+        "Direct Postgres URL used for Alembic, schema, and admin tasks.",
+      ],
+      [
+        "DATABASE_REQUIRED",
+        "Require database",
+        "Require database connectivity during server startup.",
+      ],
+      ["DB_ECHO", "SQL echo", "Enable SQLAlchemy SQL echo logging."],
+      [
+        "DB_VALIDATE_ON_STARTUP",
+        "Validate database on startup",
+        "Ping the configured database during server startup.",
+      ],
+    ],
+  },
+] as const;
+
+function isMockSecretKey(key: string): boolean {
+  return key.endsWith("API_KEY") || (key.endsWith("_URL") && key.startsWith("DATABASE_"));
 }
 
 function buildConnectivityTest(
@@ -51,10 +184,24 @@ function buildConnectivityTest(
 export function getMockRuntimeSettings(): RuntimeSettingsSnapshot {
   return {
     env_path: FALLBACK_ENV_PATH,
-    keys: Object.keys(fallbackValues),
-    values: clone(fallbackValues),
-    masked_values: clone(fallbackMaskedValues),
-  };
+    categories: runtimeSettingCategories.map((category) => ({
+      id: category.id,
+      label: category.label,
+      description: category.description,
+      fields: category.fields.map(([key, label, description]) => ({
+        key,
+        label,
+        description,
+        value: fallbackMaskedValues[key] ?? fallbackValues[key] ?? "",
+        masked_value: fallbackMaskedValues[key] ?? fallbackValues[key] ?? "",
+        secret: isMockSecretKey(key),
+        editable: true,
+        reload_required: key.startsWith("DSPY_"),
+        placeholder: null,
+        default: null,
+      })),
+    })),
+  } as RuntimeSettingsSnapshot;
 }
 
 export function getMockRuntimeStatus(): RuntimeStatusResponse {
@@ -101,7 +248,7 @@ export function applyMockRuntimeUpdates(
     }
 
     fallbackValues[key] = value;
-    fallbackMaskedValues[key] = key.endsWith("API_KEY")
+    fallbackMaskedValues[key] = isMockSecretKey(key)
       ? value.length > 8
         ? `${value.slice(0, 2)}...${value.slice(-4)}`
         : "***"
