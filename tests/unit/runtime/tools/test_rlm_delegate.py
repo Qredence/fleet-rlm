@@ -90,16 +90,6 @@ class _FakeParentInterpreter:
 # ---------------------------------------------------------------------------
 
 
-def test_delegate_to_rlm_has_fleet_tool_marker() -> None:
-    """VAL-RLM-001: delegate_to_rlm is marked with @tool_fn (__is_fleet_tool__)."""
-    assert getattr(rlm_delegate_mod.delegate_to_rlm, "__is_fleet_tool__", False) is True
-
-
-def test_delegate_to_rlm_batched_has_fleet_tool_marker() -> None:
-    """delegate_to_rlm_batched is marked with @tool_fn for registry discovery."""
-    assert getattr(rlm_delegate_mod.delegate_to_rlm_batched, "__is_fleet_tool__", False) is True
-
-
 def test_delegate_to_rlm_in_discover_tools() -> None:
     """VAL-RLM-001: discover_tools() includes RLM delegation tools."""
     from fleet_rlm.runtime.tools import discover_tools

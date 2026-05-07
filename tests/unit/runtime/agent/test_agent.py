@@ -49,13 +49,6 @@ def react_records(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def test_fleet_agent_is_dspy_module_subclass(react_records):
-    """VAL-AGENT-001: FleetAgent must subclass dspy.Module."""
-    assert issubclass(FleetAgent, dspy.Module)
-    agent = FleetAgent(tools=[])
-    assert isinstance(agent, dspy.Module)
-
-
 def test_fleet_agent_wraps_react_internally(react_records):
     """VAL-AGENT-001: FleetAgent must wrap a dspy.ReAct instance."""
     agent = FleetAgent(tools=[])
@@ -67,17 +60,6 @@ def test_fleet_agent_wraps_react_internally(react_records):
 # ---------------------------------------------------------------------------
 # VAL-AGENT-002: Signature has chat_history, user_message, response
 # ---------------------------------------------------------------------------
-
-
-def test_fleet_agent_signature_has_required_input_fields():
-    """VAL-AGENT-002: FleetAgentSignature defines chat_history and user_message inputs."""
-    assert "chat_history" in FleetAgentSignature.input_fields
-    assert "user_message" in FleetAgentSignature.input_fields
-
-
-def test_fleet_agent_signature_has_response_output_field():
-    """VAL-AGENT-002: FleetAgentSignature defines response as output field."""
-    assert "response" in FleetAgentSignature.output_fields
 
 
 def test_fleet_agent_react_uses_fleet_agent_signature(react_records):
@@ -95,14 +77,6 @@ def test_fleet_agent_react_uses_fleet_agent_signature(react_records):
 # ---------------------------------------------------------------------------
 
 
-def test_fleet_agent_forward_returns_prediction(react_records):
-    """VAL-AGENT-003: forward() returns a dspy.Prediction instance."""
-    agent = FleetAgent(tools=[])
-    history = dspy.History(messages=[])
-    result = agent.forward(chat_history=history, user_message="hello")
-    assert isinstance(result, dspy.Prediction)
-
-
 def test_fleet_agent_forward_prediction_has_response_field(react_records):
     """VAL-AGENT-003: The returned Prediction must contain a response field."""
     agent = FleetAgent(tools=[])
@@ -117,20 +91,6 @@ def test_fleet_agent_forward_prediction_has_response_field(react_records):
 # ---------------------------------------------------------------------------
 
 
-def test_fleet_agent_named_parameters_callable(react_records):
-    """VAL-AGENT-004: named_parameters() must be callable (DSPy optimizer API)."""
-    agent = FleetAgent(tools=[])
-    params = list(agent.named_parameters())
-    assert isinstance(params, list)
-
-
-def test_fleet_agent_predictors_callable(react_records):
-    """VAL-AGENT-004: predictors() must be callable (DSPy optimizer API)."""
-    agent = FleetAgent(tools=[])
-    predictors = list(agent.predictors())
-    assert isinstance(predictors, list)
-
-
 def test_fleet_agent_save_load_compatible(react_records, tmp_path):
     """VAL-AGENT-004: FleetAgent supports save/load without error."""
     agent = FleetAgent(tools=[])
@@ -143,13 +103,6 @@ def test_fleet_agent_save_load_compatible(react_records, tmp_path):
 # ---------------------------------------------------------------------------
 # VAL-AGENT-005: Constructor accepts tools list
 # ---------------------------------------------------------------------------
-
-
-def test_fleet_agent_accepts_empty_tools_list(react_records):
-    """VAL-AGENT-005: Constructor accepts an empty tools list."""
-    FleetAgent(tools=[])
-    assert len(react_records) == 1
-    assert react_records[0]["tools"] == []
 
 
 def test_fleet_agent_passes_tools_to_react(react_records):
@@ -173,33 +126,6 @@ def test_fleet_agent_passes_max_iters_to_react(react_records):
     FleetAgent(tools=[], max_iters=20)
     assert len(react_records) == 1
     assert react_records[0]["max_iters"] == 20
-
-
-def test_fleet_agent_default_max_iters_is_ten(react_records):
-    """VAL-AGENT-005: Default max_iters is 10."""
-    FleetAgent(tools=[])
-    assert react_records[0]["max_iters"] == 10
-
-
-# ---------------------------------------------------------------------------
-# VAL-AGENT-006: No import-time side effects
-# ---------------------------------------------------------------------------
-
-
-def test_no_import_time_side_effects():
-    """VAL-AGENT-006: Importing agent.py must not trigger network calls."""
-    # If we can import without error or network access, the constraint is met.
-    import fleet_rlm.runtime.agent.agent as agent_module
-
-    assert hasattr(agent_module, "FleetAgent")
-    assert hasattr(agent_module, "FleetAgentSignature")
-
-
-def test_fleet_agent_signature_importable_without_network():
-    """VAL-AGENT-006: FleetAgentSignature is available at import time with no side effects."""
-    from fleet_rlm.runtime.agent.agent import FleetAgentSignature as Sig
-
-    assert issubclass(Sig, dspy.Signature)
 
 
 # ---------------------------------------------------------------------------

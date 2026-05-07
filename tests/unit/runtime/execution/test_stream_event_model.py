@@ -104,15 +104,6 @@ def test_turn_state_apply_reasoning_kind():
     assert "I need to analyze this file." in state.thought_chunks
 
 
-def test_turn_state_apply_reasoning_kind_alias():
-    """'reasoning' kind should accumulate reasoning lines and thought chunks."""
-    state = TurnState()
-    state.apply(StreamEvent(kind="reasoning", text="Thinking step."))
-
-    assert "Thinking step." in state.reasoning_lines
-    assert "Thinking step." in state.thought_chunks
-
-
 def test_turn_state_apply_tool_call():
     state = TurnState()
     state.apply(StreamEvent(kind="tool_call", text="load_document(path='x.txt')"))

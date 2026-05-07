@@ -11,7 +11,6 @@ fleet-rlm uses pytest markers to categorize tests by scope and runtime requireme
 | Marker        | Description                                    | Typical Duration               |
 | ------------- | ---------------------------------------------- | ------------------------------ |
 | `unit`        | Fast unit tests for isolated modules           | Milliseconds                   |
-| `ui`          | UI/server tests for API and WebSocket behavior | Seconds                        |
 | `integration` | Integration tests across DB/runtime boundaries | Seconds                        |
 | `db`          | Database-backed integration tests              | Seconds                        |
 | `e2e`         | End-to-end workflow smoke tests                | Seconds to minutes             |
@@ -40,9 +39,6 @@ This ensures fast feedback during development without requiring:
 ```bash
 # Unit tests only
 uv run pytest -q tests/unit -m "not live_llm and not benchmark"
-
-# UI/server tests
-uv run pytest -q tests/ui -m "not live_llm and not benchmark"
 
 # Integration tests
 uv run pytest -q tests/integration -m "not live_llm and not benchmark"
@@ -79,10 +75,6 @@ Tests are organized by scope in the `tests/` directory:
 tests/
 ├── conftest.py           # Shared fixtures and marker registration
 ├── unit/                 # Fast unit tests for isolated modules
-├── ui/                   # API + WebSocket behavior tests
-│   ├── conftest.py       # UI/server fixture boundaries
-│   ├── server/           # HTTP API contract tests
-│   └── ws/               # WebSocket tests
 ├── integration/          # Integration tests across DB/runtime
 │   └── conftest.py       # Integration runtime gates + DB fixtures
 └── e2e/                  # End-to-end workflow smoke tests
@@ -93,18 +85,13 @@ tests/
 | Directory            | Purpose                                          | Dependencies        |
 | -------------------- | ------------------------------------------------ | ------------------- |
 | `tests/unit/`        | Isolated module tests, no external services      | None                |
-| `tests/ui/`          | API routes, WebSocket endpoints, server behavior | FastAPI test client |
 | `tests/integration/` | Cross-boundary tests, database operations        | Database, runtime   |
 | `tests/e2e/`         | Full workflow smoke tests                        | Full stack          |
 
 ### Fixture Organization
 
 - **Root fixtures**: `tests/conftest.py` contains shared suite fixtures
-- **UI fixtures**: `tests/ui/conftest.py` defines UI/server fixture boundaries
-- **WebSocket fixtures**: `tests/ui/ws/` contains WebSocket test fakes
 - **Integration fixtures**: `tests/integration/conftest.py` has DB fixtures
-
-> **Best Practice:** Consolidate related WebSocket behavior into `tests/ui/ws/test_chat_stream.py` and HTTP contract checks into `tests/ui/server/test_api_contract_routes.py` instead of creating many tiny route-specific files.
 
 ## Backend Test Commands
 
@@ -116,7 +103,6 @@ The `Makefile` provides convenient targets for running tests:
 | ----------------------- | -------------------------------------------------------------- |
 | `make test-fast`        | Run default test suite (excludes `live_llm` and `benchmark`)   |
 | `make test-unit`        | Run unit tests only                                            |
-| `make test-ui`          | Run UI/server tests only                                       |
 | `make test-integration` | Run integration + e2e tests                                    |
 | `make quality-gate`     | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
 | `make release-check`    | Run release-oriented validation, including security and packaging |

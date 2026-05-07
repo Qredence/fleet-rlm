@@ -5,7 +5,7 @@ PYTEST_FAST_MARKERS = not live_llm and not benchmark
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-ui test-integration test-e2e \
+	test test-fast test-unit test-integration test-e2e \
 	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
@@ -28,7 +28,6 @@ help:
 	@echo "Testing:"
 	@echo "  make test             - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
-	@echo "  make test-ui          - Run UI tests (non-live/non-benchmark)"
 	@echo "  make test-integration - Run integration + e2e tests (non-live/non-benchmark)"
 	@echo "  make test-e2e         - Run frontend Playwright tests when frontend exists"
 	@echo ""
@@ -91,9 +90,6 @@ test-fast: test
 
 test-unit:
 	uv run pytest -q tests/unit -m "$(PYTEST_FAST_MARKERS)"
-
-test-ui:
-	uv run pytest -q tests/ui -m "$(PYTEST_FAST_MARKERS)"
 
 test-integration:
 	uv run pytest -q tests/integration tests/e2e -m "$(PYTEST_FAST_MARKERS)"

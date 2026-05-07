@@ -13,7 +13,7 @@ from fleet_rlm.api.runtime_services.chat_runtime import (
 )
 from fleet_rlm.api.schemas import WSMessage
 from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
-from tests.ui.fixtures_ui import FakeChatAgent
+from tests.unit.fixtures_ui import FakeChatAgent
 
 
 class _RecordingWebSocket:

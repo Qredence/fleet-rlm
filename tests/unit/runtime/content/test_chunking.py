@@ -28,9 +28,19 @@ from fleet_rlm.runtime.content.chunking import (
 class TestChunkBySize:
     """Tests for chunk_by_size()."""
 
-    def test_basic_split(self):
-        result = chunk_by_size("abcdefghij", size=4)
-        assert result == ["abcd", "efgh", "ij"]
+    @pytest.mark.parametrize(
+        ("text", "size", "overlap", "expected"),
+        [
+            ("abcdefghij", 4, 0, ["abcd", "efgh", "ij"]),
+            ("", 10, 0, []),
+            ("abc", 10, 0, ["abc"]),
+            ("abcdef", 3, 0, ["abc", "def"]),
+            ("abc", 1, 0, ["a", "b", "c"]),
+        ],
+    )
+    def test_happy_path(self, text, size, overlap, expected):
+        result = chunk_by_size(text, size=size, overlap=overlap)
+        assert result == expected
 
     def test_overlap(self):
         result = chunk_by_size("abcdefghij", size=4, overlap=1)
@@ -38,31 +48,17 @@ class TestChunkBySize:
         assert result[1] == "defg"
         # Overlapping means 'd' appears in both chunk 0 and chunk 1
 
-    def test_empty_text(self):
-        assert chunk_by_size("") == []
-
-    def test_text_shorter_than_size(self):
-        assert chunk_by_size("abc", size=10) == ["abc"]
-
-    def test_exact_multiple(self):
-        result = chunk_by_size("abcdef", size=3)
-        assert result == ["abc", "def"]
-
-    def test_size_of_one(self):
-        result = chunk_by_size("abc", size=1)
-        assert result == ["a", "b", "c"]
-
-    def test_invalid_size_raises(self):
-        with pytest.raises(ValueError, match="size must be positive"):
-            chunk_by_size("abc", size=0)
-
-    def test_negative_overlap_raises(self):
-        with pytest.raises(ValueError, match="overlap must be non-negative"):
-            chunk_by_size("abc", size=4, overlap=-1)
-
-    def test_overlap_equals_size_raises(self):
-        with pytest.raises(ValueError, match="overlap must be less than size"):
-            chunk_by_size("abc", size=4, overlap=4)
+    @pytest.mark.parametrize(
+        ("text", "size", "overlap", "match"),
+        [
+            ("abc", 0, 0, "size must be positive"),
+            ("abc", 4, -1, "overlap must be non-negative"),
+            ("abc", 4, 4, "overlap must be less than size"),
+        ],
+    )
+    def test_invalid_params_raise(self, text, size, overlap, match):
+        with pytest.raises(ValueError, match=match):
+            chunk_by_size(text, size=size, overlap=overlap)
 
     def test_large_text(self):
         text = "x" * 10_000
@@ -192,13 +188,16 @@ class TestChunkByJsonKeys:
     def test_empty_text(self):
         assert chunk_by_json_keys("") == []
 
-    def test_invalid_json_raises(self):
-        with pytest.raises(ValueError, match="Invalid JSON"):
-            chunk_by_json_keys("not json")
-
-    def test_non_object_raises(self):
-        with pytest.raises(ValueError, match="Expected JSON object"):
-            chunk_by_json_keys("[1, 2, 3]")
+    @pytest.mark.parametrize(
+        ("text", "match"),
+        [
+            ("not json", "Invalid JSON"),
+            ("[1, 2, 3]", "Expected JSON object"),
+        ],
+    )
+    def test_invalid_input_raises(self, text, match):
+        with pytest.raises(ValueError, match=match):
+            chunk_by_json_keys(text)
 
     def test_empty_object(self):
         assert chunk_by_json_keys("{}") == []

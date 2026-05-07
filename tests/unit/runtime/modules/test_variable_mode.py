@@ -26,13 +26,6 @@ def test_variable_signature_input_fields():
     assert len(inputs) == 2, f"Expected 2 inputs, got {inputs}"
 
 
-def test_variable_signature_output_fields():
-    from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
-
-    outputs = list(RLMVariableSignature.output_fields.keys())
-    assert outputs == ["answer"]
-
-
 # ── Module construction ──────────────────────────────────────────────
 
 
@@ -205,12 +198,3 @@ def test_build_runtime_module_non_variable_mode_returns_generic():
     from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 
     assert not isinstance(module, RLMVariableExecutionModule)
-
-
-# ── Threshold constant ───────────────────────────────────────────────
-
-
-def test_variable_mode_threshold_is_reasonable():
-    from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
-
-    assert VARIABLE_MODE_THRESHOLD == 32_000

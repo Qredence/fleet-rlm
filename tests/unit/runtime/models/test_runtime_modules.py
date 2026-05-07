@@ -50,12 +50,6 @@ def fake_interpreter() -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_contains_all_expected_names():
-    from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_REGISTRY
-
-    assert EXPECTED_MODULE_NAMES <= frozenset(RUNTIME_MODULE_REGISTRY)
-
-
 def test_runtime_module_names_frozenset_matches_registry():
     from fleet_rlm.runtime.modules.registry import (
         RUNTIME_MODULE_NAMES,

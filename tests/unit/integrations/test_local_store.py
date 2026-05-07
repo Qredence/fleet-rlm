@@ -79,18 +79,14 @@ def test_create_dataset():
     assert ds.module_slug == "qa"
     assert ds.uri == "/fake/path/test-ds.jsonl"
 
-
-def test_create_dataset_no_module():
-    from fleet_rlm.integrations.local_store import create_dataset
-
-    ds = create_dataset(
+    ds2 = create_dataset(
         name="plain",
         row_count=10,
         format="json",
         uri="/fake/path/plain.json",
     )
-    assert ds.id is not None
-    assert ds.module_slug is None
+    assert ds2.id is not None
+    assert ds2.module_slug is None
 
 
 def test_list_datasets_empty():
@@ -144,7 +140,7 @@ def test_list_datasets_pagination():
     assert len(page3) == 1
 
 
-def test_get_dataset_found():
+def test_get_dataset_found_and_not_found():
     from fleet_rlm.integrations.local_store import create_dataset, get_dataset
 
     ds = create_dataset(name="x", row_count=7, format="jsonl", uri="/x.jsonl")
@@ -154,14 +150,10 @@ def test_get_dataset_found():
     assert fetched.name == "x"
     assert fetched.row_count == 7
 
-
-def test_get_dataset_not_found():
-    from fleet_rlm.integrations.local_store import get_dataset
-
     assert get_dataset(99999) is None
 
 
-def test_get_dataset_root_creates_dir(tmp_path, monkeypatch):
+def test_get_dataset_root(tmp_path, monkeypatch):
     ds_root = str(tmp_path / "custom_root" / "datasets")
     monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", ds_root)
 
@@ -171,15 +163,10 @@ def test_get_dataset_root_creates_dir(tmp_path, monkeypatch):
     assert root == Path(ds_root).resolve()
     assert root.is_dir()
 
-
-def test_get_dataset_root_default(tmp_path, monkeypatch):
     monkeypatch.delenv("FLEET_RLM_DATASET_ROOT", raising=False)
-
-    from fleet_rlm.integrations.local_store import get_dataset_root
-
-    root = get_dataset_root()
-    assert root.name == "datasets"
-    assert root.parent.name == ".data"
+    root2 = get_dataset_root()
+    assert root2.name == "datasets"
+    assert root2.parent.name == ".data"
 
 
 # ---------------------------------------------------------------------------
@@ -391,10 +378,6 @@ def test_get_optimization_run():
     assert fetched.id == created.id
     assert fetched.program_spec == "test:mod"
 
-
-def test_get_optimization_run_not_found():
-    from fleet_rlm.integrations.local_store import get_optimization_run
-
     assert get_optimization_run(99999) is None
 
 
@@ -595,7 +578,7 @@ def test_migration_adds_columns_to_existing_db(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_create_session_with_ownership():
+def test_create_session():
     from fleet_rlm.integrations.local_store import create_session
 
     sess = create_session(
@@ -611,14 +594,10 @@ def test_create_session_with_ownership():
     assert sess.owner_user == "user-1"
     assert sess.workspace_id == "ws-001"
 
-
-def test_create_session_defaults_to_none_ownership():
-    from fleet_rlm.integrations.local_store import create_session
-
-    sess = create_session(title="legacy")
-    assert sess.owner_tenant is None
-    assert sess.owner_user is None
-    assert sess.external_session_id is None
+    sess2 = create_session(title="legacy")
+    assert sess2.owner_tenant is None
+    assert sess2.owner_user is None
+    assert sess2.external_session_id is None
 
 
 def test_list_sessions_returns_active_only_by_default():
@@ -683,7 +662,7 @@ def test_list_sessions_pagination():
     assert {s.id for s in items} & {s.id for s in items2} == set()
 
 
-def test_get_chat_session_returns_owned():
+def test_get_chat_session():
     from fleet_rlm.integrations.local_store import create_session, get_chat_session
 
     sess = create_session(title="mine", owner_tenant="t", owner_user="u")
@@ -691,18 +670,8 @@ def test_get_chat_session_returns_owned():
     assert result is not None
     assert result.id == sess.id
 
-
-def test_get_chat_session_rejects_wrong_owner():
-    from fleet_rlm.integrations.local_store import create_session, get_chat_session
-
-    sess = create_session(title="mine", owner_tenant="t1", owner_user="u1")
-    result = get_chat_session(sess.id, owner_tenant="t2", owner_user="u2")
-    assert result is None
-
-
-def test_get_chat_session_returns_none_for_missing():
-    from fleet_rlm.integrations.local_store import get_chat_session
-
+    sess2 = create_session(title="mine", owner_tenant="t1", owner_user="u1")
+    assert get_chat_session(sess2.id, owner_tenant="t2", owner_user="u2") is None
     assert get_chat_session(99999) is None
 
 
@@ -721,17 +690,8 @@ def test_archive_session():
     assert result is not None
     assert result.status == SessionStatus.ARCHIVED
 
-
-def test_archive_session_wrong_owner():
-    from fleet_rlm.integrations.local_store import archive_session, create_session
-
-    sess = create_session(title="owned", owner_tenant="t1", owner_user="u1")
-    assert archive_session(sess.id, owner_tenant="t2", owner_user="u2") is False
-
-
-def test_archive_session_nonexistent():
-    from fleet_rlm.integrations.local_store import archive_session
-
+    sess2 = create_session(title="owned", owner_tenant="t1", owner_user="u1")
+    assert archive_session(sess2.id, owner_tenant="t2", owner_user="u2") is False
     assert archive_session(99999) is False
 
 

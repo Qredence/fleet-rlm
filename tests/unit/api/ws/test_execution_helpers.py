@@ -30,7 +30,7 @@ from fleet_rlm.api.runtime_services.chat_runtime import SessionContext
 from fleet_rlm.api.schemas import WSMessage
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.schemas import StreamEvent
-from tests.ui.fixtures_ui import FakeChatAgent, ts
+from tests.unit.fixtures_ui import FakeChatAgent, ts
 
 
 class _ClosedSendWebSocket:

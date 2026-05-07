@@ -280,7 +280,7 @@ make release-artifacts
 make release-check
 
 # Focused backend/runtime regression lane
-uv run pytest -q tests/ui/server/test_api_contract_routes.py tests/ui/server/test_router_runtime.py tests/ui/ws/test_chat_stream.py tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_chat_agent_runtime.py -m "not live_llm and not live_daytona and not benchmark"
+uv run pytest -q tests/unit/integrations/daytona/test_config.py tests/unit/integrations/daytona/test_runtime.py tests/unit/integrations/daytona/test_interpreter.py tests/unit/runtime/agent/test_runtime.py -m "not live_llm and not live_daytona and not benchmark"
 ```
 
 Focused docs validation:

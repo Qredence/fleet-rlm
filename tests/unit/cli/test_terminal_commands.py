@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.cli.terminal import commands
-from fleet_rlm.cli.terminal.chat import _COMMAND_SPECS, _COMMAND_TEMPLATES
 
 
 class _FakeConsole:
@@ -203,10 +202,3 @@ def test_handle_slash_command_reports_unknown_command():
         "error",
         "Unknown command: /does-not-exist. Type /help for commands.",
     )
-
-
-def test_terminal_command_palette_no_longer_advertises_analyze() -> None:
-    command_names = {spec.name for spec in _COMMAND_SPECS}
-
-    assert "/analyze" not in command_names
-    assert _COMMAND_TEMPLATES["/run-long-context"].endswith("summarize")

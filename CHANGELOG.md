@@ -937,7 +937,6 @@ All notable changes to this project are documented in this file.
 - `src/fleet_rlm/interactive/config.py`
 - `src/fleet_rlm/interactive/session.py`
 - `src/fleet_rlm/interactive/ui.py`
-- `tests/ui/test_textual_app.py`
 
 ### Internal Cleanup
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fleet_rlm.runtime.execution.streaming_events import (
     try_parse_hitl_request as _try_parse_hitl_request,
 )
@@ -27,25 +29,26 @@ def test_hitl_request_from_clarification_questions_with_questions():
     assert event.payload["options"] == ["What scope?", "Which environment?"]
 
 
-def test_hitl_request_from_clarification_questions_empty_list():
-    """clarification_questions with empty questions list returns None."""
-    payload = {"tool_output": json.dumps({"questions": []})}
-    event = _try_parse_hitl_request("clarification_questions", payload)
-    assert event is None
-
-
-def test_hitl_request_from_clarification_questions_no_questions_key():
-    """clarification_questions with JSON missing 'questions' key returns None."""
-    payload = {"tool_output": json.dumps({"answer": "something"})}
-    event = _try_parse_hitl_request("clarification_questions", payload)
-    assert event is None
-
-
-def test_hitl_request_from_clarification_questions_plain_text():
-    """clarification_questions with non-JSON tool_output returns None (can't parse)."""
-    payload = {"tool_output": "This is a plain text response."}
-    event = _try_parse_hitl_request("clarification_questions", payload)
-    assert event is None
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("clarification_questions", {"tool_output": json.dumps({"questions": []})}),
+        ("clarification_questions", {"tool_output": json.dumps({"answer": "something"})}),
+        ("clarification_questions", {"tool_output": "This is a plain text response."}),
+        (
+            "memory_action_intent",
+            {"tool_output": json.dumps({"intent": "read_memory_path", "requires_confirmation": False})},
+        ),
+        ("memory_action_intent", {"tool_output": json.dumps({"intent": "read_memory_path"})}),
+        ("load_document", {"tool_output": json.dumps({"questions": ["Should I proceed?"]})}),
+        (None, {"tool_output": json.dumps({"questions": ["Yes?"]})}),
+        ("clarification_questions", {}),
+        ("clarification_questions", {"tool_output": 12345}),
+    ],
+)
+def test_hitl_request_returns_none(tool_name, payload):
+    """Various invalid inputs should all return None."""
+    assert _try_parse_hitl_request(tool_name, payload) is None
 
 
 # ---------------------------------------------------------------------------
@@ -71,59 +74,6 @@ def test_hitl_request_from_memory_action_intent_requires_confirmation():
     assert event.payload["source"] == "memory_action_intent"
     assert event.payload["action"] == "delete_memory_path"
     assert event.payload["requires_response"] is True
-
-
-def test_hitl_request_from_memory_action_intent_no_confirmation():
-    """memory_action_intent without requires_confirmation=True returns None."""
-    payload = {
-        "tool_output": json.dumps(
-            {
-                "intent": "read_memory_path",
-                "requires_confirmation": False,
-            }
-        )
-    }
-    event = _try_parse_hitl_request("memory_action_intent", payload)
-    assert event is None
-
-
-def test_hitl_request_from_memory_action_intent_confirmation_missing():
-    """memory_action_intent with no confirmation key returns None."""
-    payload = {"tool_output": json.dumps({"intent": "read_memory_path"})}
-    event = _try_parse_hitl_request("memory_action_intent", payload)
-    assert event is None
-
-
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
-
-
-def test_hitl_request_returns_none_for_unknown_tool():
-    """Unknown tool name never triggers an HITL request."""
-    payload = {"tool_output": json.dumps({"questions": ["Should I proceed?"]})}
-    event = _try_parse_hitl_request("load_document", payload)
-    assert event is None
-
-
-def test_hitl_request_returns_none_when_tool_name_is_none():
-    """None tool name returns None without error."""
-    payload = {"tool_output": json.dumps({"questions": ["Yes?"]})}
-    event = _try_parse_hitl_request(None, payload)
-    assert event is None
-
-
-def test_hitl_request_returns_none_when_tool_output_missing():
-    """Missing tool_output key in payload returns None."""
-    event = _try_parse_hitl_request("clarification_questions", {})
-    assert event is None
-
-
-def test_hitl_request_returns_none_when_tool_output_not_string():
-    """Non-string tool_output value returns None."""
-    payload = {"tool_output": 12345}
-    event = _try_parse_hitl_request("clarification_questions", payload)
-    assert event is None
 
 
 def test_hitl_request_payload_has_required_fields():

@@ -126,7 +126,6 @@ make lint                     # ruff check
 make typecheck                # ty check src
 make test                     # pytest excluding live_llm and benchmark
 make test-unit                # unit tests only
-make test-ui                  # UI/server tests only
 make test-integration         # integration + e2e tests
 make check                    # lint + format-check + typecheck + test + check-release + check-docs + check-frontend
 make quality-gate             # alias for make check
@@ -196,12 +195,10 @@ make release                  # clean + check + security + build-release
 - **Framework**: `pytest` with `pytest-asyncio` and `pytest-timeout`
 - **Test directories**:
   - `tests/unit/` — unit tests
-  - `tests/ui/` — UI/server tests
   - `tests/integration/` — integration tests
   - `tests/e2e/` — backend e2e tests
 - **Markers**:
   - `unit` — unit test suite
-  - `ui` — UI/server test suite
   - `integration` — integration test suite
   - `db` — database-backed integration tests
   - `e2e` — end-to-end test suite
@@ -225,9 +222,8 @@ GitHub Actions runs on push to `main`/`master` and on PRs:
 
 1. **Quality** — release hygiene, docs quality, AGENTS.md freshness, security (pip-audit + bandit), deptry, ruff, ty
 2. **Test Unit** — pytest unit tests (non-live, 120s timeout)
-3. **Test UI** — pytest UI tests (non-live, 120s timeout)
-4. **Test Integration** — pytest integration + e2e (non-live)
-5. **Frontend Check** — pnpm install, knip, Vite+ check, vitest, build
+3. **Test Integration** — pytest integration + e2e (non-live)
+4. **Frontend Check** — pnpm install, knip, Vite+ check, vitest, build
 
 ## Security Considerations
 

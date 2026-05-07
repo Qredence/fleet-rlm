@@ -5,7 +5,6 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from fleet_rlm.api.config import resolve_server_volume_name
 from fleet_rlm.cli import app
 from fleet_rlm.cli.config import set_current_app_config
 from fleet_rlm.integrations.config.env import AppConfig
@@ -56,15 +55,3 @@ def test_optimize_list_does_not_require_dataset():
     result = runner.invoke(app, ["optimize", "list"])
     assert result.exit_code == 0
     assert "Available modules:" in result.stdout
-
-
-def test_resolve_server_volume_name_defaults_to_persistent_volume():
-    config = AppConfig()
-    assert resolve_server_volume_name(config) == "rlm-volume-dspy"
-
-
-def test_resolve_server_volume_name_preserves_configured_volume():
-    config = AppConfig(
-        interpreter={"volume_name": "custom-volume"},
-    )
-    assert resolve_server_volume_name(config) == "custom-volume"

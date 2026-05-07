@@ -124,15 +124,20 @@ def runtime(mock_react, monkeypatch: pytest.MonkeyPatch, fake_tools):
 class TestRuntimeHoldsState:
     """VAL-AGENT-007: AgentRuntime owns agent, interpreter, history, tools, memory."""
 
-    def test_has_agent_attribute(self, runtime: AgentRuntime) -> None:
+    def test_initial_state(self, runtime: AgentRuntime) -> None:
         assert hasattr(runtime, "agent")
         assert runtime.agent is not None
-
-    def test_has_interpreter_attribute(self, runtime: AgentRuntime) -> None:
         assert hasattr(runtime, "interpreter")
-
-    def test_interpreter_defaults_to_none(self, runtime: AgentRuntime) -> None:
         assert runtime.interpreter is None
+        assert hasattr(runtime, "history")
+        assert isinstance(runtime.history, dspy.History)
+        messages = list(getattr(runtime.history, "messages", []) or [])
+        assert messages == []
+        assert hasattr(runtime, "tools")
+        assert isinstance(runtime.tools, list)
+        assert hasattr(runtime, "core_memory")
+        assert isinstance(runtime.core_memory, dict)
+        assert len(runtime.core_memory) > 0
 
     def test_interpreter_can_be_set(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -142,27 +147,6 @@ class TestRuntimeHoldsState:
         fake_interp = object()
         rt = AgentRuntime(interpreter=fake_interp)
         assert rt.interpreter is fake_interp
-
-    def test_has_history_attribute(self, runtime: AgentRuntime) -> None:
-        assert hasattr(runtime, "history")
-
-    def test_history_is_dspy_history(self, runtime: AgentRuntime) -> None:
-        assert isinstance(runtime.history, dspy.History)
-
-    def test_history_starts_empty(self, runtime: AgentRuntime) -> None:
-        messages = list(getattr(runtime.history, "messages", []) or [])
-        assert messages == []
-
-    def test_has_tools_attribute(self, runtime: AgentRuntime) -> None:
-        assert hasattr(runtime, "tools")
-        assert isinstance(runtime.tools, list)
-
-    def test_has_core_memory_attribute(self, runtime: AgentRuntime) -> None:
-        assert hasattr(runtime, "core_memory")
-        assert isinstance(runtime.core_memory, dict)
-
-    def test_core_memory_is_non_empty_by_default(self, runtime: AgentRuntime) -> None:
-        assert len(runtime.core_memory) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -476,26 +460,15 @@ class TestHistoryAccumulationAcrossTurns:
 class TestCoreMemoryAccessibility:
     """VAL-AGENT-010: Core memory is accessible by tool functions; tools can read/write."""
 
-    def test_core_memory_is_dict(self, runtime: AgentRuntime) -> None:
+    def test_core_memory_accessors(self, runtime: AgentRuntime) -> None:
         assert isinstance(runtime.core_memory, dict)
-
-    def test_get_core_memory_returns_dict(self, runtime: AgentRuntime) -> None:
         memory = runtime.get_core_memory()
         assert isinstance(memory, dict)
-
-    def test_get_core_memory_returns_same_object(self, runtime: AgentRuntime) -> None:
-        memory = runtime.get_core_memory()
         assert memory is runtime.core_memory
-
-    def test_set_core_memory_key_stores_value(self, runtime: AgentRuntime) -> None:
         runtime.set_core_memory_key("task", "write unit tests")
         assert runtime.core_memory["task"] == "write unit tests"
-
-    def test_get_core_memory_key_reads_value(self, runtime: AgentRuntime) -> None:
         runtime.core_memory["context"] = "python project"
         assert runtime.get_core_memory_key("context") == "python project"
-
-    def test_get_core_memory_key_returns_none_for_missing(self, runtime: AgentRuntime) -> None:
         assert runtime.get_core_memory_key("nonexistent_key_xyz") is None
 
     def test_tool_can_write_to_core_memory(self, runtime: AgentRuntime) -> None:
@@ -540,60 +513,37 @@ class TestCoreMemoryAccessibility:
 class TestResetClearsSandboxBuffers:
     """VAL-BACKEND-RUNTIME-003: reset(clear_sandbox_buffers=...) actually clears buffers."""
 
-    def test_reset_clear_sandbox_buffers_true_clears_buffers(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reset_behavior(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "fleet_rlm.runtime.agent.runtime.discover_tools",
             lambda: [],
         )
+
+        # clear_sandbox_buffers=True clears buffers
         interpreter = _FakeInterpreter()
         rt = AgentRuntime(interpreter=interpreter)
-
         result = rt.reset(clear_sandbox_buffers=True)
-
         assert result["status"] == "ok"
         assert result["buffers_cleared"] is True
-        # The interpreter should have received a clear_buffer call
         assert any("clear_buffer" in code for code, _vars in interpreter.calls)
 
-    def test_reset_clear_sandbox_buffers_false_preserves_buffers(
-        self, mock_react, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime.discover_tools",
-            lambda: [],
-        )
-        interpreter = _FakeInterpreter()
-        rt = AgentRuntime(interpreter=interpreter)
+        # clear_sandbox_buffers=False preserves buffers
+        interpreter2 = _FakeInterpreter()
+        rt2 = AgentRuntime(interpreter=interpreter2)
+        result2 = rt2.reset(clear_sandbox_buffers=False)
+        assert result2["status"] == "ok"
+        assert result2["buffers_cleared"] is False
+        assert not any("clear_buffer" in code for code, _vars in interpreter2.calls)
 
-        result = rt.reset(clear_sandbox_buffers=False)
+        # Without interpreter, ignores clear flag (no crash)
+        rt3 = AgentRuntime(interpreter=None)
+        result3 = rt3.reset(clear_sandbox_buffers=True)
+        assert result3["status"] == "ok"
+        assert result3["buffers_cleared"] is True
 
-        assert result["status"] == "ok"
-        assert result["buffers_cleared"] is False
-        # The interpreter should NOT have received a clear_buffer call
-        assert not any("clear_buffer" in code for code, _vars in interpreter.calls)
-
-    def test_reset_without_interpreter_ignores_clear_flag(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime.discover_tools",
-            lambda: [],
-        )
-        rt = AgentRuntime(interpreter=None)
-
-        result = rt.reset(clear_sandbox_buffers=True)
-
-        assert result["status"] == "ok"
-        assert result["buffers_cleared"] is True
-        # No crash despite missing interpreter
-
-    def test_reset_clears_history(self, mock_react, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime.discover_tools",
-            lambda: [],
-        )
-        rt = AgentRuntime()
-        rt.history = dspy.History(messages=[{"user_message": "hi", "response": "hello"}])
-
-        rt.reset(clear_sandbox_buffers=False)
-
-        messages = list(getattr(rt.history, "messages", []) or [])
+        # Reset clears history
+        rt4 = AgentRuntime()
+        rt4.history = dspy.History(messages=[{"user_message": "hi", "response": "hello"}])
+        rt4.reset(clear_sandbox_buffers=False)
+        messages = list(getattr(rt4.history, "messages", []) or [])
         assert messages == []
