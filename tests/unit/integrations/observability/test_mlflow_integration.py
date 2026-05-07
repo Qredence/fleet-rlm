@@ -142,6 +142,7 @@ def test_initialize_mlflow_retries_when_auth_env_changes(
     fake_mlflow = SimpleNamespace(
         set_tracking_uri=lambda uri: None,
         set_experiment=_set_experiment,
+        get_experiment_by_name=lambda name: None,
         dspy=SimpleNamespace(autolog=lambda **kwargs: None),
     )
 
@@ -768,3 +769,26 @@ def test_mlflow_config_enable_auto_assessment_from_env(
     monkeypatch.setenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT", "true")
     config = MlflowConfig.from_env()
     assert config.enable_auto_assessment is True
+
+
+def test_initialize_mlflow_sets_experiment_kind_tag(monkeypatch: pytest.MonkeyPatch):
+    calls: dict[str, object] = {}
+    experiment_obj = SimpleNamespace(experiment_id="42")
+
+    fake_client_instance = SimpleNamespace(
+        set_experiment_tag=lambda eid, key, value: calls.__setitem__("tag", (eid, key, value)),
+    )
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=lambda **kwargs: None,
+        get_experiment_by_name=lambda name: experiment_obj,
+        MlflowClient=lambda: fake_client_instance,
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", lambda: object())
+    config = MlflowConfig(enabled=True, experiment="test-exp")
+
+    mlflow_integration.initialize_mlflow(config)
+    assert calls["tag"] == ("42", "mlflow.experimentKind", "genai_development")

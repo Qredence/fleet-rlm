@@ -210,6 +210,19 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
             mlflow.set_tracking_uri(resolved.tracking_uri)
             if resolved.experiment:
                 mlflow.set_experiment(experiment_name=resolved.experiment)
+                try:
+                    experiment = mlflow.get_experiment_by_name(resolved.experiment)
+                    if experiment is not None:
+                        client = mlflow.MlflowClient()
+                        client.set_experiment_tag(
+                            experiment.experiment_id,
+                            "mlflow.experimentKind",
+                            "genai_development",
+                        )
+                except Exception:
+                    logger.debug("Failed to set mlflow.experimentKind tag", exc_info=True)
+            if resolved.active_model_id:
+                mlflow.set_active_model(name=resolved.active_model_id)
             mlflow.dspy.autolog(
                 log_traces=True,
                 log_traces_from_compile=resolved.dspy_log_traces_from_compile,
