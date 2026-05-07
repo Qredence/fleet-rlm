@@ -7,6 +7,8 @@ Tests the canonical WebSocket surfaces:
 
 from __future__ import annotations
 
+import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.main import create_app
@@ -44,13 +46,17 @@ def test_websocket_execution_rejects_query_session_id() -> None:
 
 
 def test_websocket_execution_events_requires_session_id() -> None:
-    """Verify /api/v1/ws/execution/events requires session_id query parameter."""
+    """Verify /api/v1/ws/execution/events rejects connections without session_id."""
     app = create_app()
     with TestClient(app) as client:
-        # Try to connect without session_id
-        response = client.get("/api/v1/ws/execution/events")
-        # Should fail without session_id
-        assert response.status_code in (400, 422)  # Missing required parameter
+        # Connecting without session_id should be accepted then closed by the
+        # server with a policy violation (1008) after sending an error envelope.
+        with client.websocket_connect("/api/v1/ws/execution/events") as websocket:
+            data = websocket.receive_json()
+            assert data.get("code") == "missing_session_id"
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                websocket.receive_json()
+            assert exc_info.value.code == 1008
 
 
 def test_websocket_routes_have_correct_tags() -> None:

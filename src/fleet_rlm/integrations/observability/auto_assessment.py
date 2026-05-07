@@ -13,10 +13,13 @@ from .config import MlflowConfig
 
 logger = logging.getLogger(__name__)
 
+_ScorerScheduleConfig: type[Any] | None = None
 try:
-    from mlflow.genai import ScorerScheduleConfig as _ScorerScheduleConfig
+    from mlflow.genai import ScorerScheduleConfig as _ImportedScorerScheduleConfig
+
+    _ScorerScheduleConfig = _ImportedScorerScheduleConfig
 except ImportError:
-    _ScorerScheduleConfig = None
+    pass
 
 _SCORER_REGISTRY: dict[str, Any] = {}
 

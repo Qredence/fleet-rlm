@@ -10,7 +10,6 @@ export type SessionListResponse = components["schemas"]["SessionListResponse"];
 export type SessionDetailResponse = components["schemas"]["SessionDetailResponse"];
 export type TurnItem = components["schemas"]["TurnItem"];
 export type TurnListResponse = components["schemas"]["TurnListResponse"];
-export type SessionExportRequest = components["schemas"]["SessionExportRequest"];
 export type DatasetResponse = components["schemas"]["DatasetResponse"];
 
 export interface SessionListParams {

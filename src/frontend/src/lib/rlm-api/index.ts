@@ -29,18 +29,11 @@ export type {
   WsServerMessage,
 } from "@/lib/rlm-api/ws-client";
 export type {
-  OpenApiPaths,
-  HealthResponse,
-  ReadyResponse,
   AuthMeResponse,
-  SessionStateResponse,
-  SessionStateSummary,
   TraceFeedbackRequest,
   TraceFeedbackResponse,
-  RuntimeConnectivityTestKind,
   RuntimeConnectivityTestResponse,
   RuntimeSettingsSnapshot,
   RuntimeSettingsUpdateResponse,
   RuntimeStatusResponse,
-  RuntimeTestCache,
 } from "@/lib/rlm-api/types";
