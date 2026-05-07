@@ -792,3 +792,46 @@ def test_initialize_mlflow_sets_experiment_kind_tag(monkeypatch: pytest.MonkeyPa
 
     mlflow_integration.initialize_mlflow(config)
     assert calls["tag"] == ("42", "mlflow.experimentKind", "genai_development")
+
+
+# ---------------------------------------------------------------------------
+# set_active_model wiring -----------------------------------------------------
+# ---------------------------------------------------------------------------
+
+
+def test_initialize_mlflow_calls_set_active_model_when_configured(monkeypatch: pytest.MonkeyPatch):
+    calls: dict[str, object] = {}
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=lambda **kwargs: None,
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="1"),
+        MlflowClient=lambda: SimpleNamespace(set_experiment_tag=lambda *a: None),
+        set_active_model=lambda **kwargs: calls.__setitem__("active_model", kwargs),
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", lambda: object())
+    config = MlflowConfig(enabled=True, active_model_id="fleet-rlm-agent-v1")
+
+    mlflow_integration.initialize_mlflow(config)
+    assert calls["active_model"] == {"name": "fleet-rlm-agent-v1"}
+
+
+def test_initialize_mlflow_skips_set_active_model_when_none(monkeypatch: pytest.MonkeyPatch):
+    calls: dict[str, object] = {}
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: None,
+        set_experiment=lambda **kwargs: None,
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="1"),
+        MlflowClient=lambda: SimpleNamespace(set_experiment_tag=lambda *a: None),
+        set_active_model=lambda **kwargs: calls.__setitem__("active_model", kwargs),
+        dspy=SimpleNamespace(autolog=lambda **kwargs: None),
+    )
+
+    monkeypatch.setattr(mlflow_integration, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(mlflow_integration, "_existing_trace_callback", lambda: object())
+    config = MlflowConfig(enabled=True, active_model_id=None)
+
+    mlflow_integration.initialize_mlflow(config)
+    assert "active_model" not in calls
