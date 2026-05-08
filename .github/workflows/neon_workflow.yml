@@ -42,9 +42,9 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Get branch expiration date as an env variable (2 weeks from now)
+      - name: Get branch expiration date (2 weeks from now)
         id: get_expiration_date
-        run: echo "EXPIRES_AT=$(date -u --date '+14 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+        run: echo "expires_at=$(date -u --date '+14 days' +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Create Neon Branch
         id: create_neon_branch
@@ -53,7 +53,7 @@ jobs:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
           api_key: ${{ secrets.NEON_API_KEY }}
-          expires_at: ${{ env.EXPIRES_AT }}
+          expires_at: ${{ steps.get_expiration_date.outputs.expires_at }}
 
       - name: Checkout repository
         uses: actions/checkout@v4

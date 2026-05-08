@@ -293,7 +293,7 @@ This guide assumes you have a FastAPI Cloud account and have run `fastapi login`
 
    ```toml
    [tool.fastapi]
-   entrypoint = "fleet_rlm.api.app:app"
+   entrypoint = "fleet_rlm.api.main:app"
    ```
 
 3. `fastapi[standard]` is in your project dependencies (present by default).

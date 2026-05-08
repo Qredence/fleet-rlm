@@ -8,7 +8,7 @@
   "python.analysis.languageServerMode": "default",
   "python.analysis.typeCheckingMode": "standard",
   "python.analysis.extraPaths": ["src"],
-  "fastapi.appPath": "src/fleet_rlm/api/app.py",
+  "fastapi.appPath": "src/fleet_rlm/api/main.py",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,

@@ -260,7 +260,7 @@ jobs:
           ROOT_HEADERS=$(mktemp)
           ROOT_BODY=$(mktemp)
 
-          python -m uvicorn fleet_rlm.api.app:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
+          python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >"$SERVER_LOG" 2>&1 &
           SERVER_PID=$!
 
           cleanup() {

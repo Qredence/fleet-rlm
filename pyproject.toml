@@ -117,7 +117,7 @@ fleet = "fleet_rlm.cli.main:main"
 fleet-rlm = "fleet_rlm.cli.fleet_cli:main"
 
 [tool.fastapi]
-entrypoint = "asgi:app"
+entrypoint = "fleet_rlm.api.main:app"
 
 [build-system]
 requires = ["setuptools>=77", "wheel"]
