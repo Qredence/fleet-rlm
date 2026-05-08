@@ -6,7 +6,7 @@ This VSCode workspace is configured to use **ty**, an extremely fast Python type
 
 ## ty Version
 
-- **ty version**: 0.0.29 (438a78d68 2026-04-05)
+- **ty version**: 0.0.34
 - **Configuration file**: `pyproject.toml` → `[tool.ty.src]`
 
 ## Configuration Details
