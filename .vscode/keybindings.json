@@ -1,0 +1,8 @@
+[
+    {
+        "key": "ctrl+shift+t",
+        "command": "workbench.action.tasks.runTask",
+        "args": "ty: Check types",
+        "when": "editorLangId == python"
+    }
+]

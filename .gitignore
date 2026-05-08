@@ -31,7 +31,6 @@ mlartifacts/
 # OS/editor
 .DS_Store
 **/.DS_Store
-.vscode/
 .idea/
 *.code-workspace
 inspector.json

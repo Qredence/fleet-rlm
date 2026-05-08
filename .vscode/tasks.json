@@ -1,0 +1,67 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "ty: Check types",
+            "type": "shell",
+            "command": "ty",
+            "args": ["check"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": {
+                "owner": "python",
+                "fileLocation": ["absolute"],
+                "pattern": {
+                    "regexp": "^(.+?):(\\d+):(\\d+): (.+)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "message": 4
+                }
+            },
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        },
+        {
+            "label": "ty: Watch types",
+            "type": "shell",
+            "command": "ty",
+            "args": ["check", "--watch"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "focus": false
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "python",
+                "fileLocation": ["absolute"],
+                "pattern": {
+                    "regexp": "^(.+?):(\\d+):(\\d+): (.+)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "message": 4
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^Checking",
+                    "endsPattern": "^Done"
+                }
+            }
+        },
+        {
+            "label": "ty: Explain rules",
+            "type": "shell",
+            "command": "ty",
+            "args": ["explain"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
+}

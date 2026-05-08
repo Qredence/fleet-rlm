@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "enter-your-module-name-here",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: FastAPI",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/.venv/bin/fleet-rlm",
+            "args": ["serve-api", "--port", "8000"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}

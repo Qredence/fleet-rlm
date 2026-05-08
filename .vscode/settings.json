@@ -1,0 +1,31 @@
+{
+  "workbench.editorAssociations": {
+    "*.copilotmd": "vscode.markdown.preview.editor",
+    "{git,gitlens,conflictResolution,vscode-local-history}:/**/*.tc.json": "default",
+    "{git,gitlens,conflictResolution,vscode-local-history}:/**/*.{asl.json,asl.yaml,asl.yml}": "default",
+    "file:/**/*.jsonl": "jupyter-data-wrangler"
+  },
+  "python.analysis.languageServerMode": "default",
+  "python.analysis.typeCheckingMode": "standard",
+  "python.analysis.extraPaths": ["src"],
+  "fastapi.appPath": "src/fleet_rlm/api/app.py",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "ruff.lint.enable": true,
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false,
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.ty_cache": true
+  }
+}
