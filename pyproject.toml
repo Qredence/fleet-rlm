@@ -96,7 +96,7 @@ evaluation = [
     "ipykernel==7.2.0",
     "ipython==9.13.0",
     "ipython-pygments-lexers==1.1.1",
-    "jedi==0.19.2",
+    "jedi==0.20.0",
     "jupyter-client==8.8.0",
     "jupyter-core==5.9.1",
     "matplotlib-inline==0.2.1",
