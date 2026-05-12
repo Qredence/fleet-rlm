@@ -5,22 +5,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ShellSidepanel } from "@/features/layout/sidepanel";
 
-vi.mock("@/stores/navigation-store", () => {
-  const actual = vi.importActual<typeof import("@/stores/navigation-store")>(
-    "@/stores/navigation-store",
-  );
-  return {
-    ...actual,
-    useNavigationStore: (selector?: (state: Record<string, unknown>) => unknown) => {
-      const state = {
-        canvasPanel: "volumes",
-        setCanvasPanel: vi.fn(),
-        closeCanvas: vi.fn(),
-      };
-      return selector ? selector(state) : state;
-    },
-  };
-});
+vi.mock("@/stores/navigation-store", () => ({
+  useNavigationStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      canvasPanel: "volumes",
+      closeCanvas: vi.fn(),
+    };
+    return selector ? selector(state) : state;
+  },
+}));
 
 vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigateTo: vi.fn() }),

@@ -13,14 +13,18 @@ import { ShellHeader } from "@/features/layout/header";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("lucide-react", () => ({
-  PanelRight: () => <svg aria-hidden="true" />,
+  Database: () => <svg aria-hidden="true" />,
+  GitBranch: () => <svg aria-hidden="true" />,
+  Terminal: () => <svg aria-hidden="true" />,
 }));
 
 vi.mock("@/stores/navigation-store", () => ({
   useNavigationStore: () => ({
     activeNav: "workspace",
     isCanvasOpen: false,
-    toggleCanvas: vi.fn(),
+    canvasPanel: "workspace",
+    setCanvasPanel: vi.fn(),
+    openCanvas: vi.fn(),
   }),
 }));
 

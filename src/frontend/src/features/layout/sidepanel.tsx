@@ -1,4 +1,4 @@
-import { Database, GitBranch, Terminal, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -13,11 +13,11 @@ import {
   WorkspaceCanvasUnavailablePanel,
 } from "@/features/workspace/screen/workspace-canvas-panel";
 
-const PANEL_TABS: { id: CanvasPanel; label: string; icon: typeof Terminal }[] = [
-  { id: "workspace", label: "Workbench", icon: Terminal },
-  { id: "graph", label: "Graph", icon: GitBranch },
-  { id: "volumes", label: "Volumes", icon: Database },
-];
+const PANEL_LABELS: Record<CanvasPanel, string> = {
+  workspace: "Workbench",
+  graph: "Graph",
+  volumes: "Volumes",
+};
 
 function PanelContent({ panel }: { panel: CanvasPanel }) {
   const coreReady = isRlmCoreEnabled();
@@ -51,58 +51,33 @@ function PanelContent({ panel }: { panel: CanvasPanel }) {
 }
 
 export function LayoutSidepanel() {
-  const { canvasPanel, setCanvasPanel, closeCanvas } = useNavigationStore();
+  const { canvasPanel, closeCanvas } = useNavigationStore();
 
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">
-      {/* Header with panel tab icons on the right */}
+      {/* Header: title + close */}
       <div className="flex shrink-0 items-center justify-between border-b border-border-subtle/80 px-4 py-2">
         <div className="truncate text-sm font-semibold tracking-tight text-foreground">
-          {PANEL_TABS.find((t) => t.id === canvasPanel)?.label ?? "Panel"}
+          {PANEL_LABELS[canvasPanel] ?? "Panel"}
         </div>
 
-        <div className="flex items-center gap-0.5">
-          {PANEL_TABS.map(({ id, label, icon: Icon }) => (
-            <Tooltip key={id}>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant={canvasPanel === id ? "secondary" : "ghost"}
-                  size="icon"
-                  className="size-7 rounded-lg"
-                  aria-label={label}
-                  aria-pressed={canvasPanel === id}
-                  onClick={() => setCanvasPanel(id)}
-                >
-                  <Icon className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                {label}
-              </TooltipContent>
-            </Tooltip>
-          ))}
-
-          <div className="mx-1 h-4 w-px bg-border-subtle/60" aria-hidden="true" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
-                aria-label="Close panel"
-                onClick={closeCanvas}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              Close panel
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+              aria-label="Close panel"
+              onClick={closeCanvas}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Close panel
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Panel content */}
