@@ -25,6 +25,11 @@ from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
 from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...events.event_adapter import (
+    adapt_stream_event,
+    build_chat_event_payload,
+    is_terminal_backend_event,
+)
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
     build_workspace_task_request,
@@ -144,14 +149,15 @@ def build_stream_event_dict(
     payload: Any,
 ) -> dict[str, Any]:
     """Serialize one stream event for websocket delivery."""
-    return {
-        "kind": event.kind,
-        "text": event.text,
-        "payload": payload,
-        "timestamp": event.timestamp.isoformat(),
-        "version": 2,
-        "event_id": uuid.uuid4().hex,
-    }
+    backend_event = adapt_stream_event(
+        kind=event.kind,
+        text=event.text,
+        payload=payload if isinstance(payload, dict) else None,
+        timestamp=event.timestamp,
+    )
+    event_dict = build_chat_event_payload(backend_event)
+    event_dict.setdefault("event_id", uuid.uuid4().hex)
+    return event_dict
 
 
 def _terminal_run_status(event: StreamEventLike) -> RunStatus:
@@ -508,10 +514,13 @@ async def handle_stream_error(
 def _is_terminal_transport_event(event: StreamEventLike) -> bool:
     """Return websocket-terminal semantics for worker and legacy runtime events."""
 
-    return bool(getattr(event, "terminal", False)) or event.kind in {
-        "done",
-        "error",
-    }
+    backend_event = adapt_stream_event(
+        kind=event.kind,
+        text=event.text,
+        payload=event.payload if isinstance(event.payload, dict) else None,
+        timestamp=event.timestamp,
+    )
+    return bool(getattr(event, "terminal", False)) or is_terminal_backend_event(backend_event)
 
 
 def _build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
