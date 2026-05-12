@@ -5,16 +5,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ShellSidepanel } from "@/features/layout/sidepanel";
 
-const fileDetailState = {
-  canvasPanel: "volumes" as const,
-  closeCanvas: () => {},
-  setCanvasPanel: () => {},
-};
-
-vi.mock("@/stores/navigation-store", () => ({
-  useNavigationStore: (selector?: (state: typeof fileDetailState) => unknown) =>
-    selector ? selector(fileDetailState) : fileDetailState,
-}));
+vi.mock("@/stores/navigation-store", () => {
+  const actual = vi.importActual<typeof import("@/stores/navigation-store")>(
+    "@/stores/navigation-store",
+  );
+  return {
+    ...actual,
+    useNavigationStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        canvasPanel: "volumes",
+        setCanvasPanel: vi.fn(),
+        closeCanvas: vi.fn(),
+      };
+      return selector ? selector(state) : state;
+    },
+  };
+});
 
 vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigateTo: vi.fn() }),
@@ -41,6 +47,10 @@ vi.mock("@/features/volumes/volumes-canvas-panel", () => ({
 vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
   WorkspaceCanvasPanel: () => <div>MessageInspectorPanel</div>,
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
+}));
+
+vi.mock("@/features/workspace/screen/graph-canvas-panel", () => ({
+  GraphCanvasPanel: () => <div>GraphCanvas</div>,
 }));
 
 vi.mock("@/lib/rlm-api", () => ({

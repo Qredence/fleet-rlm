@@ -1,4 +1,4 @@
-import { Database, Terminal, X } from "lucide-react";
+import { Database, GitBranch, Terminal, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -7,13 +7,15 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { useNavigationStore } from "@/stores/navigation-store";
 import type { CanvasPanel } from "@/stores/navigation-types";
 import { VolumesCanvasPanel } from "@/features/volumes/volumes-canvas-panel";
+import { GraphCanvasPanel } from "@/features/workspace/screen/graph-canvas-panel";
 import {
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/features/workspace/screen/workspace-canvas-panel";
 
 const PANEL_TABS: { id: CanvasPanel; label: string; icon: typeof Terminal }[] = [
-  { id: "workspace", label: "Workspace", icon: Terminal },
+  { id: "workspace", label: "Workbench", icon: Terminal },
+  { id: "graph", label: "Graph", icon: GitBranch },
   { id: "volumes", label: "Volumes", icon: Database },
 ];
 
@@ -29,6 +31,12 @@ function PanelContent({ panel }: { panel: CanvasPanel }) {
       ) : (
         <ErrorBoundary name="Mock Mode Active">
           <WorkspaceCanvasUnavailablePanel />
+        </ErrorBoundary>
+      );
+    case "graph":
+      return (
+        <ErrorBoundary name="Graph Canvas">
+          <GraphCanvasPanel />
         </ErrorBoundary>
       );
     case "volumes":

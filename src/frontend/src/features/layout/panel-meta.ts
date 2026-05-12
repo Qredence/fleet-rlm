@@ -14,9 +14,15 @@ export function getShellPanelMeta(panel: CanvasPanel): ShellPanelMeta {
         toggleLabel: "Panel",
         toggleDescription: "Toggle the side panel",
       };
+    case "graph":
+      return {
+        title: "Graph",
+        toggleLabel: "Panel",
+        toggleDescription: "Toggle the side panel",
+      };
     default:
       return {
-        title: "Workspace",
+        title: "Workbench",
         toggleLabel: "Panel",
         toggleDescription: "Toggle the side panel",
       };
