@@ -9,18 +9,26 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 import dspy
+from dspy.streaming import StreamListener, StreamResponse
 
-from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
+from fleet_rlm.runtime.execution.streaming_events import (
+    _normalize_trajectory,
+)
 from fleet_rlm.runtime.schemas import StreamEvent
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
 if TYPE_CHECKING:
     from .agent import FleetAgent
+
+from .agent import _is_finish_only_trajectory
+
+logger = logging.getLogger(__name__)
 
 
 def _default_core_memory() -> dict[str, str]:
@@ -29,6 +37,91 @@ def _default_core_memory() -> dict[str, str]:
         "human": "The user is a developer working on this project.",
         "scratchpad": "",
     }
+
+
+def _append_turn_to_history(
+    history: dspy.History,
+    *,
+    user_message: str,
+    response: str,
+    history_max_turns: int | None,
+) -> dspy.History:
+    messages = list(getattr(history, "messages", []) or [])
+    messages.append({"user_message": user_message, "response": response})
+    if history_max_turns is not None and len(messages) > history_max_turns:
+        messages = messages[-history_max_turns:]
+    return dspy.History(messages=messages)
+
+
+def _get_streamable_react_program(program: Any) -> Any | None:
+    react_program = getattr(program, "react", None)
+    if react_program is None:
+        return None
+
+    planner = getattr(react_program, "react", None)
+    extract = getattr(getattr(react_program, "extract", None), "predict", None)
+    format_trajectory = getattr(react_program, "_format_trajectory", None)
+    async_call = getattr(react_program, "_async_call_with_potential_trajectory_truncation", None)
+
+    if planner is None or extract is None:
+        return None
+    if not callable(format_trajectory) or not callable(async_call):
+        return None
+    return react_program
+
+
+def _normalize_tool_args(tool_args: Any) -> dict[str, Any]:
+    return dict(tool_args) if isinstance(tool_args, dict) else {}
+
+
+async def _call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
+    acall = getattr(tool, "acall", None)
+    if callable(acall):
+        return await acall(**tool_args)
+    return await asyncio.to_thread(tool, **tool_args)
+
+
+def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> StreamEvent:
+    return StreamEvent(
+        kind="tool_call",
+        text=f"Calling tool: {tool_name}({tool_args})",
+        payload={
+            "tool_name": tool_name,
+            "tool_input": str(tool_args),
+            "tool_args": tool_args,
+            "step_index": step_index,
+        },
+    )
+
+
+def _build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> StreamEvent:
+    return StreamEvent(
+        kind="tool_result",
+        text=f"Tool result: {observation}",
+        payload={
+            "tool_name": tool_name,
+            "tool_output": str(observation),
+            "step_index": step_index,
+        },
+    )
+
+
+def _build_clarification_event(observation: Any) -> StreamEvent | None:
+    if not isinstance(observation, dict) or observation.get("status") != "clarification_needed":
+        return None
+
+    import uuid as _uuid
+
+    return StreamEvent(
+        kind="clarification",
+        text=str(observation.get("question", "Please clarify your intent.")),
+        payload={
+            "message_id": str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+            "question": observation.get("question"),
+            "step_label": observation.get("step_label", "Clarification needed"),
+            "options": observation.get("options", []),
+        },
+    )
 
 
 class AgentRuntime:
@@ -105,16 +198,122 @@ class AgentRuntime:
             user_message=user_message,
         )
         response = str(getattr(result, "response", ""))
-        messages = list(getattr(self.history, "messages", []) or [])
-        messages.append({"user_message": user_message, "response": response})
-        if self.history_max_turns is not None and len(messages) > self.history_max_turns:
-            messages = messages[-self.history_max_turns :]
-        self.history = dspy.History(messages=messages)
+        self.history = _append_turn_to_history(
+            self.history,
+            user_message=user_message,
+            response=response,
+            history_max_turns=self.history_max_turns,
+        )
         return result
 
     async def achat_turn(self, user_message: str) -> dspy.Prediction:
         """Run one chat turn from async callers without blocking the event loop."""
         return await asyncio.to_thread(self.chat_turn, user_message)
+
+    async def _aiter_chat_turn_stream_posthoc(
+        self,
+        *,
+        message: str,
+        cancel_check: Callable[[], bool] | None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Fallback stream path that emits events after the turn finishes."""
+        if cancel_check is not None and cancel_check():
+            yield StreamEvent(
+                kind="done",
+                text="[cancelled]",
+                payload={"cancelled": True, "history_turns": self.history_turns()},
+            )
+            return
+
+        yield StreamEvent(kind="status", text="Starting turn...")
+
+        try:
+            result = await asyncio.to_thread(
+                self.agent,
+                chat_history=self.history,
+                user_message=message,
+            )
+        except Exception as exc:
+            yield StreamEvent(
+                kind="error",
+                text=str(exc),
+                payload={"history_turns": self.history_turns()},
+            )
+            return
+
+        if cancel_check is not None and cancel_check():
+            yield StreamEvent(
+                kind="done",
+                text="[cancelled]",
+                payload={"cancelled": True, "history_turns": self.history_turns()},
+            )
+            return
+
+        response = str(getattr(result, "response", ""))
+        trajectory_raw = getattr(result, "trajectory", None) or {}
+        trajectory = _normalize_trajectory(trajectory_raw)
+
+        for step in trajectory:
+            thought = step.get("thought")
+            if thought:
+                yield StreamEvent(
+                    kind="reasoning",
+                    text=str(thought),
+                    payload={"phase": "reasoning"},
+                )
+
+            tool_name = step.get("tool_name")
+            if tool_name:
+                tool_args = step.get("tool_args") or step.get("input", "")
+                yield StreamEvent(
+                    kind="tool_call",
+                    text=f"Calling tool: {tool_name}({tool_args})",
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_input": str(tool_args),
+                    },
+                )
+
+            observation = step.get("observation") or step.get("output", "")
+            if observation and tool_name:
+                yield StreamEvent(
+                    kind="tool_result",
+                    text=f"Tool result: {observation}",
+                    payload={
+                        "tool_name": tool_name,
+                        "tool_output": str(observation),
+                    },
+                )
+                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
+                    import uuid as _uuid
+
+                    clar_payload = observation
+                    yield StreamEvent(
+                        kind="clarification",
+                        text=str(clar_payload.get("question", "Please clarify your intent.")),
+                        payload={
+                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+                            "question": clar_payload.get("question"),
+                            "step_label": clar_payload.get("step_label", "Clarification needed"),
+                            "options": clar_payload.get("options", []),
+                        },
+                    )
+
+        if response:
+            yield StreamEvent(kind="text", text=response)
+
+        self.history = _append_turn_to_history(
+            self.history,
+            user_message=message,
+            response=response,
+            history_max_turns=self.history_max_turns,
+        )
+
+        done_payload: dict[str, Any] = {
+            "trajectory": {"steps": trajectory},
+            "history_turns": self.history_turns(),
+        }
+        yield StreamEvent(kind="done", text=response, payload=done_payload)
 
     # -----------------------------------------------------------------
     # Async context manager (required by ChatAgentProtocol)
@@ -297,6 +496,17 @@ class AgentRuntime:
         if batch_concurrency is not None:
             self.batch_concurrency = batch_concurrency
 
+        react_program = _get_streamable_react_program(self.agent)
+        if react_program is None:
+            logger.info("streaming_path=posthoc (react_program not streamable)")
+            async for event in self._aiter_chat_turn_stream_posthoc(
+                message=message,
+                cancel_check=cancel_check,
+            ):
+                yield event
+            return
+        logger.info("streaming_path=native (dspy.streamify per-token streaming)")
+
         if cancel_check is not None and cancel_check():
             yield StreamEvent(
                 kind="done",
@@ -305,18 +515,137 @@ class AgentRuntime:
             )
             return
 
+        import time as _time
+
+        t_turn_start = _time.monotonic()
+
         yield StreamEvent(kind="status", text="Starting turn...")
 
+        input_args = {
+            "chat_history": self.history,
+            "user_message": message,
+        }
+        trajectory_raw: dict[str, Any] = {}
+        extract_prediction: dspy.Prediction | None = None
+        response_streamed = False
+        final_reasoning = ""
+        response = ""
+
         try:
-            result = await asyncio.to_thread(
-                self.agent,
-                chat_history=self.history,
-                user_message=message,
-            )
+            max_iters = int(getattr(react_program, "max_iters", 1) or 1)
+            for step_index in range(max_iters):
+                if cancel_check is not None and cancel_check():
+                    yield StreamEvent(
+                        kind="done",
+                        text="[cancelled]",
+                        payload={"cancelled": True, "history_turns": self.history_turns()},
+                    )
+                    return
+
+                try:
+                    t_planner_start = _time.monotonic()
+                    prediction = await react_program._async_call_with_potential_trajectory_truncation(
+                        react_program.react,
+                        trajectory_raw,
+                        **input_args,
+                    )
+                    t_planner_ms = (_time.monotonic() - t_planner_start) * 1000
+                    logger.info("streaming: planner step %d completed in %.0fms", step_index, t_planner_ms)
+                except ValueError:
+                    break
+
+                thought = str(getattr(prediction, "next_thought", "") or "")
+                tool_name = str(getattr(prediction, "next_tool_name", "") or "")
+                tool_args = _normalize_tool_args(getattr(prediction, "next_tool_args", {}))
+
+                trajectory_raw[f"thought_{step_index}"] = thought
+                trajectory_raw[f"tool_name_{step_index}"] = tool_name
+                trajectory_raw[f"tool_args_{step_index}"] = tool_args
+
+                if thought:
+                    yield StreamEvent(
+                        kind="reasoning",
+                        text=thought,
+                        payload={"phase": "reasoning", "step_index": step_index},
+                    )
+
+                if not tool_name:
+                    break
+
+                if tool_name == "finish":
+                    trajectory_raw[f"observation_{step_index}"] = "Completed."
+                    break
+
+                tool = react_program.tools[tool_name]
+                yield _build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
+
+                try:
+                    observation = await _call_react_tool(tool, tool_args)
+                except Exception as err:
+                    observation = f"Execution error in {tool_name}: {err}"
+
+                trajectory_raw[f"observation_{step_index}"] = observation
+                yield _build_tool_result_event(
+                    tool_name=tool_name,
+                    observation=observation,
+                    step_index=step_index,
+                )
+
+                clarification_event = _build_clarification_event(observation)
+                if clarification_event is not None:
+                    yield clarification_event
+
+            # Fast path: skip the extract LLM call when the agent finished
+            # on the very first step without using any tool.  The planner
+            # thought already contains the final response, so we can emit
+            # it directly and avoid a full round-trip to the LM.
+            if _is_finish_only_trajectory(trajectory_raw):
+                t_fast_ms = (_time.monotonic() - t_turn_start) * 1000
+                logger.info(
+                    "streaming: finish-only trajectory, skipping extract LLM call (%.0fms since turn start)",
+                    t_fast_ms,
+                )
+                fast_response = str(trajectory_raw.get("thought_0", ""))
+                if fast_response:
+                    response = fast_response
+                    response_streamed = True
+                    yield StreamEvent(kind="text", text=fast_response)
+                extract_prediction = dspy.Prediction(response=fast_response)
+            else:
+                t_extract_start = _time.monotonic()
+                stream_extract = dspy.streamify(
+                    react_program.extract.predict,
+                    stream_listeners=[StreamListener(signature_field_name="response")],
+                    include_final_prediction_in_output_stream=True,
+                    async_streaming=True,
+                )
+                async for chunk in stream_extract(
+                    **input_args,
+                    trajectory=react_program._format_trajectory(trajectory_raw),
+                ):
+                    if isinstance(chunk, StreamResponse):
+                        if chunk.signature_field_name == "response" and chunk.chunk:
+                            response_streamed = True
+                            response += chunk.chunk
+                            yield StreamEvent(kind="text", text=chunk.chunk)
+                        continue
+
+                    if isinstance(chunk, dspy.Prediction):
+                        extract_prediction = chunk
+                t_extract_ms = (_time.monotonic() - t_extract_start) * 1000
+                logger.info("streaming: extract completed in %.0fms", t_extract_ms)
         except Exception as exc:
             yield StreamEvent(
                 kind="error",
                 text=str(exc),
+                payload={"history_turns": self.history_turns()},
+            )
+            return
+
+        if extract_prediction is None:
+            yield StreamEvent(
+                kind="error",
+                text="Streaming turn ended without a final prediction.",
                 payload={"history_turns": self.history_turns()},
             )
             return
@@ -329,71 +658,30 @@ class AgentRuntime:
             )
             return
 
-        response = str(getattr(result, "response", ""))
-        trajectory_raw = getattr(result, "trajectory", None) or {}
+        if not response_streamed:
+            response = str(getattr(extract_prediction, "response", "") or response)
+        final_reasoning = str(getattr(extract_prediction, "reasoning", "") or "")
         trajectory = _normalize_trajectory(trajectory_raw)
 
-        for step in trajectory:
-            thought = step.get("thought")
-            if thought:
-                yield StreamEvent(
-                    kind="reasoning",
-                    text=str(thought),
-                    payload={"phase": "reasoning"},
-                )
-
-            tool_name = step.get("tool_name")
-            if tool_name:
-                tool_args = step.get("tool_args") or step.get("input", "")
-                yield StreamEvent(
-                    kind="tool_call",
-                    text=f"Calling tool: {tool_name}({tool_args})",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_input": str(tool_args),
-                    },
-                )
-
-            observation = step.get("observation") or step.get("output", "")
-            if observation and tool_name:
-                yield StreamEvent(
-                    kind="tool_result",
-                    text=f"Tool result: {observation}",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_output": str(observation),
-                    },
-                )
-                # Emit a structured clarification event when a tool signals it.
-                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
-                    import uuid as _uuid
-
-                    clar_payload = observation
-                    yield StreamEvent(
-                        kind="clarification",
-                        text=str(clar_payload.get("question", "Please clarify your intent.")),
-                        payload={
-                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
-                            "question": clar_payload.get("question"),
-                            "step_label": clar_payload.get("step_label", "Clarification needed"),
-                            "options": clar_payload.get("options", []),
-                        },
-                    )
-
-        if response:
+        if response and not response_streamed:
             yield StreamEvent(kind="text", text=response)
 
-        # Accumulate history (mirrors chat_turn)
-        messages = list(getattr(self.history, "messages", []) or [])
-        messages.append({"user_message": message, "response": response})
-        if self.history_max_turns is not None and len(messages) > self.history_max_turns:
-            messages = messages[-self.history_max_turns :]
-        self.history = dspy.History(messages=messages)
+        self.history = _append_turn_to_history(
+            self.history,
+            user_message=message,
+            response=response,
+            history_max_turns=self.history_max_turns,
+        )
 
         done_payload: dict[str, Any] = {
             "trajectory": {"steps": trajectory},
             "history_turns": self.history_turns(),
         }
+        if final_reasoning:
+            done_payload["final_reasoning"] = final_reasoning
+
+        t_total_ms = (_time.monotonic() - t_turn_start) * 1000
+        logger.info("streaming: turn completed in %.0fms", t_total_ms)
         yield StreamEvent(kind="done", text=response, payload=done_payload)
 
     # -----------------------------------------------------------------

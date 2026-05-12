@@ -40,14 +40,16 @@ _CONTENT_TYPE_SUFFIX_MAP = {
 def _is_private_download_address(address: str) -> bool:
     """Return whether an IP address should be blocked for bridged downloads."""
     ip = ipaddress.ip_address(address)
-    return any((
-        ip.is_loopback,
-        ip.is_private,
-        ip.is_link_local,
-        ip.is_multicast,
-        ip.is_reserved,
-        ip.is_unspecified,
-    ))
+    return any(
+        (
+            ip.is_loopback,
+            ip.is_private,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_reserved,
+            ip.is_unspecified,
+        )
+    )
 
 
 def _validate_download_url(url: str) -> None:
@@ -147,14 +149,17 @@ def _download_url(url: str) -> Path:
         try:
             try:
                 downloaded = 0
-                while True:
-                    chunk = response.read(64 * 1024)
-                    if not chunk:
-                        break
-                    downloaded += len(chunk)
-                    if downloaded > _MAX_DOWNLOAD_BYTES:
-                        raise ValueError(f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit.")
-                    os.write(fd, chunk)
+                # Use a buffered file writer instead of raw os.write to
+                # batch system calls and improve I/O throughput.
+                with os.fdopen(fd, "wb", closefd=False) as handle:
+                    while True:
+                        chunk = response.read(64 * 1024)
+                        if not chunk:
+                            break
+                        downloaded += len(chunk)
+                        if downloaded > _MAX_DOWNLOAD_BYTES:
+                            raise ValueError(f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit.")
+                        handle.write(chunk)
             except Exception:
                 cleanup_tmp = True
                 raise

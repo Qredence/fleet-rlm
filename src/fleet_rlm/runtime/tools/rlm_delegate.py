@@ -16,20 +16,23 @@ import logging
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import Mock
 
 from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
+from fleet_rlm.utils.marker_search import contains_marker
 
 logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
+
+# Shared ThreadPoolExecutor for batched delegation to avoid creating
+# a new pool on every delegate_to_rlm_batched call.
+_DELEGATE_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="delegate_rlm")
 
 
 @tool_fn
@@ -120,53 +123,51 @@ def delegate_to_rlm_batched(
 
     result_by_index: dict[int, dict[str, Any]] = {}
     error_by_index: dict[int, dict[str, Any]] = {}
-    workers = max(1, min(len(normalized_queries), 4))
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        future_to_index = {
-            pool.submit(
-                copy_context().run,
-                _run_delegate_child,
-                interpreter,
-                query,
-                context,
-                document_url,
-                leases[index],
-            ): index
-            for index, query in enumerate(normalized_queries)
-        }
-        for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            query = normalized_queries[index]
-            try:
-                raw_child_result = future.result()
-                child_result = (
-                    raw_child_result
-                    if isinstance(raw_child_result, dict)
-                    else {"status": "error", "error": str(raw_child_result)}
-                )
-            except Exception as exc:
-                child_result = {"status": "error", "error": str(exc)}
-            child_result = cast(dict[str, Any], child_result)
+    future_to_index = {
+        _DELEGATE_EXECUTOR.submit(
+            copy_context().run,
+            _run_delegate_child,
+            interpreter,
+            query,
+            context,
+            document_url,
+            leases[index],
+        ): index
+        for index, query in enumerate(normalized_queries)
+    }
+    for future in as_completed(future_to_index):
+        index = future_to_index[future]
+        query = normalized_queries[index]
+        try:
+            raw_child_result = future.result()
+            child_result = (
+                raw_child_result
+                if isinstance(raw_child_result, dict)
+                else {"status": "error", "error": str(raw_child_result)}
+            )
+        except Exception as exc:
+            child_result = {"status": "error", "error": str(exc)}
+        child_result = cast(dict[str, Any], child_result)
 
-            if child_result.get("status") == "ok":
-                success: dict[str, Any] = {
-                    "query": query,
-                    "answer": str(child_result.get("answer", "")),
-                }
-                if child_result.get("degraded"):
-                    success["degraded"] = True
-                    success["degradation_reason"] = str(child_result.get("degradation_reason", ""))
-                    success["degradation_error"] = str(child_result.get("degradation_error", ""))
-                result_by_index[index] = success
-                continue
-
-            error_by_index[index] = {
-                "index": index,
+        if child_result.get("status") == "ok":
+            success: dict[str, Any] = {
                 "query": query,
-                "reason": str(child_result.get("reason", "child_error")),
-                "error": str(child_result.get("error", "unknown child error")),
+                "answer": str(child_result.get("answer", "")),
             }
+            if child_result.get("degraded"):
+                success["degraded"] = True
+                success["degradation_reason"] = str(child_result.get("degradation_reason", ""))
+                success["degradation_error"] = str(child_result.get("degradation_error", ""))
+            result_by_index[index] = success
+            continue
+
+        error_by_index[index] = {
+            "index": index,
+            "query": query,
+            "reason": str(child_result.get("reason", "child_error")),
+            "error": str(child_result.get("error", "unknown child error")),
+        }
 
     results = [result_by_index[index] for index in range(len(normalized_queries)) if index in result_by_index]
     errors = [error_by_index[index] for index in range(len(normalized_queries)) if index in error_by_index]
@@ -388,7 +389,7 @@ def _delegate_failure(
     prediction: Any,
     raw_answer: Any,
 ) -> dict[str, str] | None:
-    if _contains_marker(prediction, _BROKER_ERROR_MARKER):
+    if contains_marker(prediction, _BROKER_ERROR_MARKER):
         return {
             "reason": "broker_unavailable",
             "error": "Daytona broker unavailable during child RLM execution.",
@@ -399,44 +400,6 @@ def _delegate_failure(
             "error": "Child RLM completed without SUBMIT(answer=...).",
         }
     return None
-
-
-def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
-    if _depth > 6:
-        return False
-    if isinstance(value, str):
-        return marker in value
-    if value is None or isinstance(value, (bool, int, float)):
-        return False
-    if isinstance(value, Mapping):
-        return any(_contains_marker(item, marker, _depth=_depth + 1) for pair in value.items() for item in pair)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
-    value_dict = getattr(value, "__dict__", None)
-    if isinstance(value_dict, dict):
-        filtered = {
-            key: item
-            for key, item in value_dict.items()
-            if key in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
-        }
-        if _contains_marker(filtered, marker, _depth=_depth + 1):
-            return True
-    if not isinstance(value, Mock):
-        for attr in (
-            "answer",
-            "reasoning",
-            "code",
-            "trajectory",
-            "repl_history",
-            "history",
-        ):
-            try:
-                attr_value = getattr(value, attr)
-            except Exception:
-                continue
-            if _contains_marker(attr_value, marker, _depth=_depth + 1):
-                return True
-    return False
 
 
 def _append_local_workspace_context(
@@ -604,18 +567,20 @@ def _snapshot_terms(text: str) -> set[str]:
         }
     }
     if "rlm" in text.lower() or "recursive" in text.lower():
-        terms.update({
-            "rlm",
-            "recursive",
-            "delegate",
-            "sub_rlm",
-            "budget",
-            "sandbox",
-            "interpreter",
-            "session",
-            "persistence",
-            "restore",
-        })
+        terms.update(
+            {
+                "rlm",
+                "recursive",
+                "delegate",
+                "sub_rlm",
+                "budget",
+                "sandbox",
+                "interpreter",
+                "session",
+                "persistence",
+                "restore",
+            }
+        )
     return terms
 
 
@@ -623,7 +588,9 @@ def _snapshot_score(path: Path, terms: set[str]) -> int:
     rel = str(path).lower()
     score = sum(5 for term in terms if term in rel)
     try:
-        text = path.read_text(encoding="utf-8", errors="replace").lower()
+        # Read only the first 50 KB to avoid loading multi-megabyte files
+        # into memory for a heuristic score.
+        text = path.read_text(encoding="utf-8", errors="replace").lower()[:50_000]
     except OSError:
         return score
     for term in terms:
@@ -648,7 +615,12 @@ def _persist_child_trace(
     prediction: Any,
     started_at: float,
 ) -> None:
-    """Persist child RLM trajectory to NeonDB via the host repository."""
+    """Persist child RLM trajectory to NeonDB via the host repository.
+
+    The store is best-effort and asynchronous: if an event loop is already
+    running the coroutine is scheduled as a background task; otherwise it
+    runs in a short-lived daemon thread so the caller is never blocked.
+    """
     import asyncio
     import uuid as _uuid
 
@@ -673,20 +645,37 @@ def _persist_child_trace(
     latency_ms = int((time.time() - started_at) * 1000)
     trace_id = f"rlm-child-{_uuid.uuid4().hex[:12]}"
 
-    try:
-        asyncio.run(
-            repository.store_rlm_trace(
-                tenant_id=identity.tenant_id,
-                run_id=run_id,
-                trace_id=trace_id,
-                workspace_id=identity.workspace_id,
-                summary_text=answer_preview,
-                payload_json=payload,
-                latency_ms=latency_ms,
-            )
+    async def _store_coro() -> None:
+        await repository.store_rlm_trace(
+            tenant_id=identity.tenant_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            workspace_id=identity.workspace_id,
+            summary_text=answer_preview,
+            payload_json=payload,
+            latency_ms=latency_ms,
         )
-    except Exception as exc:
-        logger.warning("Failed to persist RLM child trace: %s", exc)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        # We are inside an active event loop (e.g. FastAPI request handler).
+        # Scheduling via create_task avoids blocking the caller and prevents
+        # the nested-event-loop error that asyncio.run() would raise here.
+        try:
+            loop.create_task(_store_coro())
+        except Exception as exc:
+            logger.warning("Failed to schedule RLM child trace: %s", exc)
+    else:
+        # No running loop – safe to block with asyncio.run (preserves
+        # synchronous test expectations and avoids fire-and-forget races).
+        try:
+            asyncio.run(_store_coro())
+        except Exception as exc:
+            logger.warning("Failed to persist RLM child trace: %s", exc)
 
 
 __all__ = ["delegate_to_rlm", "delegate_to_rlm_batched"]

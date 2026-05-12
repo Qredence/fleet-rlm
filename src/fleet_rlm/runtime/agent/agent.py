@@ -53,7 +53,11 @@ def _patch_finish_only_extract(
                 if tool_name not in getattr(react, "tools", {}):
                     raise ValueError(f"Agent failed to select a valid tool: {tool_name!r}")
                 return prediction
-            if module is extract_module and _is_finish_only_trajectory(trajectory):
+            if (
+                module is extract_module
+                and _is_finish_only_trajectory(trajectory)
+                and not getattr(react, "_force_extract_streaming", False)
+            ):
                 return _extract_finish_only_payload(signature=signature, trajectory=trajectory)
             return sync_helper(module, trajectory, **input_args)
 
@@ -69,7 +73,11 @@ def _patch_finish_only_extract(
                 if tool_name not in getattr(react, "tools", {}):
                     raise ValueError(f"Agent failed to select a valid tool: {tool_name!r}")
                 return prediction
-            if module is extract_module and _is_finish_only_trajectory(trajectory):
+            if (
+                module is extract_module
+                and _is_finish_only_trajectory(trajectory)
+                and not getattr(react, "_force_extract_streaming", False)
+            ):
                 return _extract_finish_only_payload(signature=signature, trajectory=trajectory)
             return await async_helper(module, trajectory, **input_args)
 
@@ -114,54 +122,47 @@ def _format_prompt_schema_type(schema: Any) -> str:
     return "any"
 
 
-def _format_prompt_tool_args(tool: Any) -> str:
-    """Render compact tool arguments as name:type=default fragments."""
-    args = getattr(tool, "args", {})
-    if not isinstance(args, dict) or not args:
-        return ""
-
-    parts: list[str] = []
-    for name, schema in args.items():
-        type_name = _format_prompt_schema_type(schema)
-        part = f"{name}:{type_name}"
-        if isinstance(schema, dict) and "default" in schema:
-            part = f"{part}={_format_prompt_default(schema['default'])}"
-        parts.append(part)
-    return ", ".join(parts)
+# Module-level cache for prompt lines per tool object to avoid
+# re-rendering static tool descriptions across agent initialisations.
+_TOOL_PROMPT_CACHE: dict[int, str] = {}
 
 
 def _format_prompt_tool(tool: Any) -> str:
     """Render a compact FleetAgent tool prompt line."""
+    tool_id = id(tool)
+    cached = _TOOL_PROMPT_CACHE.get(tool_id)
+    if cached is not None:
+        return cached
+
     tool_name = getattr(tool, "name", getattr(tool, "__name__", str(tool)))
     description = _normalize_prompt_text(
         "Stop and return the final response."
         if tool_name == "finish"
         else getattr(tool, "desc", getattr(tool, "__doc__", ""))
     )
-    signature = f"{tool_name}({_format_prompt_tool_args(tool)})"
-    return f"- {signature}: {description}" if description else f"- {signature}"
+
+    args = getattr(tool, "args", {})
+    if isinstance(args, dict) and args:
+        parts: list[str] = []
+        for name, schema in args.items():
+            type_name = _format_prompt_schema_type(schema)
+            part = f"{name}:{type_name}"
+            if isinstance(schema, dict) and "default" in schema:
+                part = f"{part}={_format_prompt_default(schema['default'])}"
+            parts.append(part)
+        args_str = ", ".join(parts)
+    else:
+        args_str = ""
+
+    signature = f"{tool_name}({args_str})"
+    result = f"- {signature}: {description}" if description else f"- {signature}"
+    _TOOL_PROMPT_CACHE[tool_id] = result
+    return result
 
 
-def _build_compact_react_instructions(react: Any) -> str:
-    """Build a compact ReAct instruction block for FleetAgent."""
-    signature = getattr(react, "signature", None)
-    if signature is None:
-        return ""
-
-    input_names = ", ".join(f"`{name}`" for name in signature.input_fields)
-    output_names = ", ".join(f"`{name}`" for name in signature.output_fields)
-    tool_lines = [_format_prompt_tool(tool) for tool in getattr(react, "tools", {}).values()]
-
-    lines = [
-        f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
-        "At each step output next_thought, next_tool_name, and next_tool_args.",
-        "Tool observations are appended to trajectory.",
-        "next_tool_args must be a JSON object for the selected tool.",
-        "Available tools:",
-        *tool_lines,
-        "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
-    ]
-    return "\n".join(lines)
+# Cache for compact ReAct signatures keyed by a hash of the tool set
+# and the base signature identity. Tool sets are static per process.
+_SIGNATURE_CACHE: dict[tuple[int, int], type[dspy.Signature]] = {}
 
 
 def _build_compact_react_signature(react: Any) -> type[dspy.Signature] | None:
@@ -170,14 +171,38 @@ def _build_compact_react_signature(react: Any) -> type[dspy.Signature] | None:
     if signature is None:
         return None
 
+    tools = getattr(react, "tools", {})
+    cache_key = (id(signature), id(tools))
+    cached = _SIGNATURE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    input_names = ", ".join(f"`{name}`" for name in signature.input_fields)
+    output_names = ", ".join(f"`{name}`" for name in signature.output_fields)
+    tool_lines = [_format_prompt_tool(tool) for tool in tools.values()]
+
+    instructions = "\n".join(
+        [
+            f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
+            "At each step output next_thought, next_tool_name, and next_tool_args.",
+            "Tool observations are appended to trajectory.",
+            "next_tool_args must be a JSON object for the selected tool.",
+            "Available tools:",
+            *tool_lines,
+            "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
+        ]
+    )
+
     signature_builder = cast(Any, dspy.Signature)
-    return (
-        signature_builder({**signature.input_fields}, _build_compact_react_instructions(react))
+    compact_signature = (
+        signature_builder({**signature.input_fields}, instructions)
         .append("trajectory", dspy.InputField(), type_=str)
         .append("next_thought", dspy.OutputField(), type_=str)
         .append("next_tool_name", dspy.OutputField(), type_=str)
         .append("next_tool_args", dspy.OutputField(), type_=dict[str, Any])
     )
+    _SIGNATURE_CACHE[cache_key] = compact_signature
+    return compact_signature
 
 
 def _patch_finish_only_prompt(react: Any) -> Any:

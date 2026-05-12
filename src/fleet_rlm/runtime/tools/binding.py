@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable
 from typing import Any
+
+from fleet_rlm.runtime.tools.rlm_delegate import (
+    delegate_to_rlm as _delegate_to_rlm,
+)
+from fleet_rlm.runtime.tools.rlm_delegate import (
+    delegate_to_rlm_batched as _delegate_to_rlm_batched,
+)
+from fleet_rlm.runtime.tools.sandbox_filesystem import (
+    _sandbox_create_directory_impl,
+    _sandbox_delete_file_impl,
+    _sandbox_find_in_files_impl,
+    _sandbox_get_file_info_impl,
+    _sandbox_list_files_impl,
+    _sandbox_move_file_impl,
+    _sandbox_read_file_impl,
+    _sandbox_replace_in_files_impl,
+    _sandbox_search_files_impl,
+    _sandbox_write_file_impl,
+    _SandboxFilesystemToolContext,
+)
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
@@ -114,26 +135,6 @@ def _bound_runtime_tool_factories(
     if interpreter is None:
         return factories
 
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        delegate_to_rlm as _delegate_to_rlm,
-    )
-    from fleet_rlm.runtime.tools.rlm_delegate import (
-        delegate_to_rlm_batched as _delegate_to_rlm_batched,
-    )
-    from fleet_rlm.runtime.tools.sandbox_filesystem import (
-        _sandbox_create_directory_impl,
-        _sandbox_delete_file_impl,
-        _sandbox_find_in_files_impl,
-        _sandbox_get_file_info_impl,
-        _sandbox_list_files_impl,
-        _sandbox_move_file_impl,
-        _sandbox_read_file_impl,
-        _sandbox_replace_in_files_impl,
-        _sandbox_search_files_impl,
-        _sandbox_write_file_impl,
-        _SandboxFilesystemToolContext,
-    )
-
     sandbox_ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
 
     def execute_code(
@@ -190,29 +191,16 @@ def _bound_runtime_tool_factories(
             "delegate_to_rlm_batched": delegate_to_rlm_batched,
             "execute_code": execute_code,
             "read_buffer": read_buffer,
-            "sandbox_list_files": lambda path=".": _sandbox_list_files_impl(sandbox_ctx, path=path),
-            "sandbox_read_file": lambda path: _sandbox_read_file_impl(sandbox_ctx, path=path),
-            "sandbox_write_file": lambda path, content: _sandbox_write_file_impl(
-                sandbox_ctx, path=path, content=content
-            ),
-            "sandbox_create_directory": lambda path: _sandbox_create_directory_impl(sandbox_ctx, path=path),
-            "sandbox_delete_file": lambda path: _sandbox_delete_file_impl(sandbox_ctx, path=path),
-            "sandbox_move_file": lambda source, destination: _sandbox_move_file_impl(
-                sandbox_ctx, source=source, destination=destination
-            ),
-            "sandbox_search_files": lambda path, pattern: _sandbox_search_files_impl(
-                sandbox_ctx, path=path, pattern=pattern
-            ),
-            "sandbox_find_in_files": lambda path, pattern: _sandbox_find_in_files_impl(
-                sandbox_ctx, path=path, pattern=pattern
-            ),
-            "sandbox_replace_in_files": lambda files, pattern, replacement: _sandbox_replace_in_files_impl(
-                sandbox_ctx,
-                files=files,
-                pattern=pattern,
-                replacement=replacement,
-            ),
-            "sandbox_get_file_info": lambda path: _sandbox_get_file_info_impl(sandbox_ctx, path=path),
+            "sandbox_list_files": functools.partial(_sandbox_list_files_impl, sandbox_ctx),
+            "sandbox_read_file": functools.partial(_sandbox_read_file_impl, sandbox_ctx),
+            "sandbox_write_file": functools.partial(_sandbox_write_file_impl, sandbox_ctx),
+            "sandbox_create_directory": functools.partial(_sandbox_create_directory_impl, sandbox_ctx),
+            "sandbox_delete_file": functools.partial(_sandbox_delete_file_impl, sandbox_ctx),
+            "sandbox_move_file": functools.partial(_sandbox_move_file_impl, sandbox_ctx),
+            "sandbox_search_files": functools.partial(_sandbox_search_files_impl, sandbox_ctx),
+            "sandbox_find_in_files": functools.partial(_sandbox_find_in_files_impl, sandbox_ctx),
+            "sandbox_replace_in_files": functools.partial(_sandbox_replace_in_files_impl, sandbox_ctx),
+            "sandbox_get_file_info": functools.partial(_sandbox_get_file_info_impl, sandbox_ctx),
             "write_buffer": write_buffer,
         }
     )

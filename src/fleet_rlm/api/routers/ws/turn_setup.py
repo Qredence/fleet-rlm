@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time as _time
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +29,8 @@ from ...runtime_services.chat_runtime import (
 )
 from ...schemas import WSMessage
 from .transport import _try_send_json
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -184,11 +188,14 @@ def _build_prepare_stream(
     )
 
     async def _prepare_stream() -> None:
+        t_ws_prep = _time.monotonic()
         await prepare_daytona_workspace_for_turn(
             agent=agent,
             request=daytona_request,
             docs_path=msg.docs_path,
         )
+        t_ws_prep_ms = (_time.monotonic() - t_ws_prep) * 1000
+        logger.info("turn_setup: prepare_daytona_workspace completed in %.0fms", t_ws_prep_ms)
 
     return daytona_request, _prepare_stream
 
@@ -264,6 +271,7 @@ async def prepare_chat_message_turn(
     execution_emitter: ExecutionEventEmitter,
 ) -> PreparedStreamingTurn | None:
     """Prepare lifecycle and trace metadata for one websocket chat message."""
+    t_setup_start = _time.monotonic()
     message = str(msg.content or "").strip()
     if await _reject_empty_message(websocket, message=message):
         return None
@@ -279,9 +287,15 @@ async def prepare_chat_message_turn(
     )
     sandbox_provider = "daytona"
 
-    await local_persist(include_volume_save=True, latest_user_message=message)
+    t_persist_start = _time.monotonic()
+    await local_persist(include_volume_save=False, latest_user_message=message)
+    t_persist_ms = (_time.monotonic() - t_persist_start) * 1000
+    logger.info("turn_setup: local_persist completed in %.0fms", t_persist_ms)
+
     session.cancel_flag["cancelled"] = False
     turn_index = agent.history_turns() + 1
+
+    t_lifecycle_start = _time.monotonic()
     (
         session.lifecycle,
         step_builder,
@@ -297,6 +311,9 @@ async def prepare_chat_message_turn(
         turn_index=turn_index,
         sandbox_provider=sandbox_provider,
     )
+    t_lifecycle_ms = (_time.monotonic() - t_lifecycle_start) * 1000
+    logger.info("turn_setup: lifecycle init completed in %.0fms", t_lifecycle_ms)
+
     trace_context = _build_trace_context(
         runtime=runtime,
         workspace_id=workspace_id,
@@ -313,6 +330,9 @@ async def prepare_chat_message_turn(
         msg.context_paths,
         daytona_request.context_paths,
     )
+
+    t_setup_total_ms = (_time.monotonic() - t_setup_start) * 1000
+    logger.info("turn_setup: total prepare_chat_message_turn completed in %.0fms", t_setup_total_ms)
 
     return PreparedStreamingTurn(
         message=message,

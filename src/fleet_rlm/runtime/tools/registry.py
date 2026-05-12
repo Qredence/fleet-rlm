@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import importlib
 from typing import Any, Iterable
 
@@ -66,8 +67,12 @@ def _import_tool_modules(
     return [importlib.import_module(f"fleet_rlm.runtime.tools.{module_name}") for module_name in module_names]
 
 
+@functools.lru_cache(maxsize=1)
 def discover_tools() -> list[Any]:
-    """Discover all explicitly registered fleet tool functions."""
+    """Discover all explicitly registered fleet tool functions.
+
+    The result is cached because tool modules are static after import.
+    """
     return _collect_tools_from_modules(_import_tool_modules())
 
 

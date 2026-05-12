@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextvars
 import logging
 import threading
-from collections.abc import Mapping, Sequence
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
@@ -19,15 +18,19 @@ from concurrent.futures import (
     TimeoutError as FutureTimeoutError,
 )
 from typing import Any
-from unittest.mock import Mock
 
 import dspy
 
 from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
+from fleet_rlm.utils.marker_search import contains_marker
 
 logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
+
+# Shared ThreadPoolExecutor for batched LLM queries to avoid creating
+# a new pool on every llm_query_batched / sub_rlm_batched call.
+_LLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm_batch")
 
 
 class LLMQueryMixin:
@@ -184,25 +187,20 @@ class LLMQueryMixin:
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
 
-        # Adaptive ThreadPool sizing: use min of max_llm_calls and 8, or batch size
-        # This prevents over-allocation for small batches and under-utilization for large ones
-        adaptive_workers = max(1, min(len(prompts), self.max_llm_calls, 8))
-
-        with ThreadPoolExecutor(max_workers=adaptive_workers) as executor:
-            future_to_idx = {
-                # Copy a fresh context per task. Reusing one Context object
-                # across concurrent threads can raise:
-                # "RuntimeError: cannot enter context ... is already entered".
-                executor.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
-                for i, p in enumerate(prompts)
-            }
-            for future in as_completed(future_to_idx):
-                idx = int(future_to_idx[future])
-                try:
-                    value = future.result()
-                    results[idx] = value if isinstance(value, str) else str(value)
-                except Exception as exc:
-                    errors.append((idx, exc))
+        future_to_idx = {
+            # Copy a fresh context per task. Reusing one Context object
+            # across concurrent threads can raise:
+            # "RuntimeError: cannot enter context ... is already entered".
+            _LLM_BATCH_EXECUTOR.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
+            for i, p in enumerate(prompts)
+        }
+        for future in as_completed(future_to_idx):
+            idx = int(future_to_idx[future])
+            try:
+                value = future.result()
+                results[idx] = value if isinstance(value, str) else str(value)
+            except Exception as exc:
+                errors.append((idx, exc))
 
         if errors:
             errors.sort(key=lambda x: x[0])
@@ -287,25 +285,23 @@ class LLMQueryMixin:
         leases = self._sub_rlm_budget_leases(len(prompts))
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
-        workers = max(1, min(len(prompts), 4))
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_idx = {
-                pool.submit(
-                    contextvars.copy_context().run,
-                    self._execute_sub_rlm,
-                    p,
-                    context,
-                    leases[i],
-                ): i
-                for i, p in enumerate(prompts)
-            }
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    results[idx] = str(future.result())
-                except Exception as exc:
-                    errors.append((idx, exc))
+        future_to_idx = {
+            _LLM_BATCH_EXECUTOR.submit(
+                contextvars.copy_context().run,
+                self._execute_sub_rlm,
+                p,
+                context,
+                leases[i],
+            ): i
+            for i, p in enumerate(prompts)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = str(future.result())
+            except Exception as exc:
+                errors.append((idx, exc))
 
         if errors:
             errors.sort(key=lambda x: x[0])
@@ -416,50 +412,12 @@ class LLMQueryMixin:
 
 
 def _validated_child_answer(prediction: Any) -> str:
-    if _contains_marker(prediction, _BROKER_ERROR_MARKER):
+    if contains_marker(prediction, _BROKER_ERROR_MARKER):
         raise RuntimeError("Daytona broker unavailable during child RLM execution.")
     raw_answer = getattr(prediction, "answer", None)
     if raw_answer is None:
         raise RuntimeError("Child RLM completed without SUBMIT(answer=...).")
     return str(raw_answer)
-
-
-def _contains_marker(value: Any, marker: str, *, _depth: int = 0) -> bool:
-    if _depth > 6:
-        return False
-    if isinstance(value, str):
-        return marker in value
-    if value is None or isinstance(value, (bool, int, float)):
-        return False
-    if isinstance(value, Mapping):
-        return any(_contains_marker(item, marker, _depth=_depth + 1) for pair in value.items() for item in pair)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return any(_contains_marker(item, marker, _depth=_depth + 1) for item in value)
-    value_dict = getattr(value, "__dict__", None)
-    if isinstance(value_dict, dict):
-        filtered = {
-            key: item
-            for key, item in value_dict.items()
-            if key in {"answer", "reasoning", "code", "trajectory", "repl_history", "history"}
-        }
-        if _contains_marker(filtered, marker, _depth=_depth + 1):
-            return True
-    if not isinstance(value, Mock):
-        for attr in (
-            "answer",
-            "reasoning",
-            "code",
-            "trajectory",
-            "repl_history",
-            "history",
-        ):
-            try:
-                attr_value = getattr(value, attr)
-            except Exception:
-                continue
-            if _contains_marker(attr_value, marker, _depth=_depth + 1):
-                return True
-    return False
 
 
 def metadata_summary(
