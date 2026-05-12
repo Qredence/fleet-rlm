@@ -515,7 +515,7 @@ def test_build_stream_event_dict_serializes_core_fields() -> None:
     assert event_dict["kind"] == "status"
     assert event_dict["text"] == "hello"
     assert event_dict["payload"] == {"ok": True}
-    assert event_dict["version"] == 2
+    assert event_dict["version"] == 3
     assert isinstance(event_dict["event_id"], str) and event_dict["event_id"]
 
 

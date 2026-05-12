@@ -63,9 +63,7 @@ def extract_runtime_context(payload: dict[str, Any]) -> RuntimeEventContext | No
         workspace_path=_as_str(source.get("workspace_path")),
         repo_url=_as_str(source.get("repo_url")),
         repo_ref=_as_str(source.get("repo_ref")),
-        document_path=_as_str(
-            source.get("document_path") or source.get("loaded_path") or source.get("path")
-        ),
+        document_path=_as_str(source.get("document_path") or source.get("loaded_path") or source.get("path")),
         depth=_as_int(source.get("depth")),
         max_depth=_as_int(source.get("max_depth")),
         actor_kind=_as_str(source.get("actor_kind")),
