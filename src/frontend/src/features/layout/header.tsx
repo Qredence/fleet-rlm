@@ -15,8 +15,7 @@ const PANEL_BUTTONS: { id: CanvasPanel; label: string; icon: typeof Terminal }[]
 ];
 
 export function LayoutHeader() {
-  const { activeNav, isCanvasOpen, canvasPanel, openCanvasPanel } =
-    useNavigationStore();
+  const { activeNav, isCanvasOpen, canvasPanel, openCanvasPanel } = useNavigationStore();
   const isMobile = useIsMobile();
 
   const titleMap: Record<string, string> = {
@@ -57,10 +56,7 @@ export function LayoutHeader() {
                 variant={isCanvasOpen && canvasPanel === id ? "secondary" : "ghost"}
                 aria-label={label}
                 aria-pressed={isCanvasOpen && canvasPanel === id}
-                className={cn(
-                  "rounded-lg",
-                  isMobile ? "size-9" : "size-8",
-                )}
+                className={cn("rounded-lg", isMobile ? "size-9" : "size-8")}
                 onClick={() => handlePanelButton(id)}
               >
                 <Icon className="size-4" />

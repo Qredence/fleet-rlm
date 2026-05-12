@@ -82,7 +82,9 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardDescription>Branch points</CardDescription>
-            <CardTitle className="typo-h3 font-semibold text-foreground">{branchingParents}</CardTitle>
+            <CardTitle className="typo-h3 font-semibold text-foreground">
+              {branchingParents}
+            </CardTitle>
           </CardHeader>
         </Card>
       </div>

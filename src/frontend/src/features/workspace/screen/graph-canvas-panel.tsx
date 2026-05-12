@@ -7,10 +7,7 @@ import {
   hasMeaningfulGraph,
 } from "@/features/workspace/inspection/tabs/graph-inspector-content";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
-import {
-  useChatStore,
-  useWorkspaceUiStore,
-} from "@/features/workspace/use-workspace";
+import { useChatStore, useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import type { ExecutionStep } from "@/features/workspace/use-workspace";
 
 export function GraphCanvasPanel() {
