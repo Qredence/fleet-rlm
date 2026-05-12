@@ -14,6 +14,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
+@import "../components/agent-elements/agent-ui.css";
 
 @source "../**/*.{ts,tsx}";
 @source "../node_modules/streamdown/dist/index.js";

@@ -62,6 +62,7 @@ describe("useChatStore — state management", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   // ── initial state ──────────────────────────────────────────────────────────
@@ -352,6 +353,37 @@ describe("useChatStore — streamMessage", () => {
     await useChatStore.getState().streamMessage("hello", frameSpy);
     expect(frameSpy).toHaveBeenCalledTimes(2);
     expect(frameSpy).toHaveBeenCalledWith(fakeFrame);
+  });
+
+  it("flushes streamed frames before completion when animation frames stall", async () => {
+    vi.useFakeTimers();
+
+    const fakeFrame = {
+      type: "event" as const,
+      data: { kind: "assistant_token" as const, text: "Hi!" },
+    };
+
+    const frameSpy = vi.fn();
+    const requestAnimationFrameSpy = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation(() => 1);
+    const cancelAnimationFrameSpy = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+
+    let callbackSeenBeforeResolve = false;
+    vi.mocked(streamChatOverWs).mockImplementation(async (_payload, opts) => {
+      opts.onFrame(fakeFrame);
+      await vi.advanceTimersByTimeAsync(40);
+      callbackSeenBeforeResolve = frameSpy.mock.calls.length > 0;
+    });
+
+    await useChatStore.getState().streamMessage("hello", frameSpy);
+
+    expect(callbackSeenBeforeResolve).toBe(true);
+    expect(frameSpy).toHaveBeenCalledWith(fakeFrame);
+    expect(requestAnimationFrameSpy).toHaveBeenCalledOnce();
+    expect(cancelAnimationFrameSpy).toHaveBeenCalledOnce();
   });
 
   it("sets error in state and re-throws when streamChatOverWs rejects", async () => {

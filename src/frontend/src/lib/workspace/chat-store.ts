@@ -8,6 +8,7 @@ import type { ChatMessage, ExecutionStep } from "@/lib/workspace/workspace-types
 import type { WsExecutionMode, WsRuntimeMode } from "@/lib/rlm-api/ws-types";
 
 const DAYTONA_FIRST_FRAME_TIMEOUT_MS = 60_000;
+const STREAM_FRAME_FLUSH_FALLBACK_MS = 32;
 
 interface StreamMessageOptions {
   traceEnabled?: boolean;
@@ -146,11 +147,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     // Collect frames arriving within the same animation frame and apply them in one
     // Zustand update, reducing React reconciliations during high-throughput streaming.
+    // Fall back to a short timer so streaming still paints while the page is throttled.
     // oxlint-disable-next-line prefer-const -- array is mutated via splice
     let pendingFrames: WsServerMessage[] = [];
     let rafScheduled = false;
+    let scheduledFrameId: number | null = null;
+    let scheduledFlushTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearScheduledFlush = () => {
+      if (scheduledFrameId != null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(scheduledFrameId);
+        scheduledFrameId = null;
+      }
+      if (scheduledFlushTimeout != null) {
+        clearTimeout(scheduledFlushTimeout);
+        scheduledFlushTimeout = null;
+      }
+    };
 
     const flushFrames = () => {
+      clearScheduledFlush();
       rafScheduled = false;
       const frames = pendingFrames.splice(0);
       if (frames.length === 0) return;
@@ -165,16 +181,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }
     };
 
+    const scheduleFrameFlush = () => {
+      if (rafScheduled) return;
+      rafScheduled = true;
+
+      if (typeof requestAnimationFrame === "function") {
+        scheduledFrameId = requestAnimationFrame(() => {
+          scheduledFrameId = null;
+          flushFrames();
+        });
+        scheduledFlushTimeout = setTimeout(flushFrames, STREAM_FRAME_FLUSH_FALLBACK_MS);
+        return;
+      }
+
+      scheduledFlushTimeout = setTimeout(flushFrames, 0);
+    };
+
     try {
       await streamChatOverWs(request as unknown as Parameters<typeof streamChatOverWs>[0], {
         signal: controller.signal,
         firstFrameTimeoutMs,
         onFrame: (frame) => {
           pendingFrames.push(frame);
-          if (!rafScheduled) {
-            rafScheduled = true;
-            requestAnimationFrame(flushFrames);
-          }
+          scheduleFrameFlush();
         },
       });
     } catch (error) {

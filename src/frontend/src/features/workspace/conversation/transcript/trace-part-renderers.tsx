@@ -26,6 +26,10 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import { BashTool } from "@/components/agent-elements/tools/bash-tool";
+import { EditTool } from "@/components/agent-elements/tools/edit-tool";
+import { SearchTool } from "@/components/agent-elements/tools/search-tool";
+import { ThinkingTool } from "@/components/agent-elements/tools/thinking-tool";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Streamdown } from "@/components/ui/streamdown";
@@ -67,14 +71,6 @@ import {
   QueueSectionContent,
   QueueSectionLabel,
   QueueSectionTrigger,
-  Sandbox,
-  SandboxContent,
-  SandboxHeader,
-  SandboxTabContent,
-  SandboxTabs,
-  SandboxTabsBar,
-  SandboxTabsList,
-  SandboxTabsTrigger,
 } from "@/features/workspace/conversation/render-primitives";
 import { RuntimeContextBadge } from "@/features/workspace/conversation/assistant-content/model";
 import type {
@@ -86,6 +82,11 @@ import type {
 import { cn } from "@/lib/utils";
 import { mapConfirmationState, mapTaskStatus, mapToolState } from "@/lib/utils/prompt-kit-state";
 import type { ToolSessionItem, TraceDisplayItem } from "@/lib/workspace/chat-display-items";
+import {
+  resolveAgentElementsTool,
+  toolPartToAgentElements,
+  sandboxPartToAgentElements,
+} from "@/features/workspace/conversation/agent-elements-adapter";
 
 type ToolSessionDisplayItem = Extract<TraceDisplayItem, { kind: "tool_session" }>;
 
@@ -520,6 +521,21 @@ export function WorkspaceTracePart({ part, partKey }: { part: ChatRenderPart; pa
         </Task>
       );
     case "tool": {
+      const agentTool = resolveAgentElementsTool(part);
+      if (agentTool) {
+        const aePart = toolPartToAgentElements(part, partKey);
+        switch (agentTool) {
+          case "Bash":
+            return <BashTool part={aePart} />;
+          case "Edit":
+            return <EditTool part={aePart} />;
+          case "Search":
+            return <SearchTool part={aePart} />;
+          case "Thinking":
+            return <ThinkingTool part={aePart} />;
+        }
+      }
+      // Fallback to ai-elements Tool for unrecognized tool types
       const outputText = stringifyValue(part.output);
       return (
         <Tool defaultOpen={shouldOpenToolRow(part.state)}>
@@ -548,46 +564,8 @@ export function WorkspaceTracePart({ part, partKey }: { part: ChatRenderPart; pa
       );
     }
     case "sandbox": {
-      const code = part.code ?? "";
-      const output = part.output ?? "";
-      return (
-        <Sandbox defaultOpen={shouldOpenToolRow(part.state)}>
-          <SandboxHeader title={part.title} state={mapToolState(part.state)} />
-          <SandboxContent>
-            <div className="px-2.5 py-1.5">
-              <RuntimeContextBadge ctx={part.runtimeContext} />
-            </div>
-            <SandboxTabs defaultValue="output">
-              <SandboxTabsBar>
-                <SandboxTabsList>
-                  <SandboxTabsTrigger value="output">Output</SandboxTabsTrigger>
-                  <SandboxTabsTrigger value="code">Code</SandboxTabsTrigger>
-                </SandboxTabsList>
-              </SandboxTabsBar>
-              <SandboxTabContent value="output">
-                {part.errorText ? (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 typo-label-regular text-destructive">
-                    {part.errorText}
-                  </div>
-                ) : output ? (
-                  <Streamdown content={output} streaming={false} />
-                ) : (
-                  <div className="typo-label-regular text-muted-foreground">No output yet</div>
-                )}
-              </SandboxTabContent>
-              <SandboxTabContent value="code">
-                {code ? (
-                  <CodeBlock className="border-subtle bg-muted/30">
-                    <CodeBlockCode code={code} language="python" />
-                  </CodeBlock>
-                ) : (
-                  <div className="typo-label-regular text-muted-foreground">No code captured</div>
-                )}
-              </SandboxTabContent>
-            </SandboxTabs>
-          </SandboxContent>
-        </Sandbox>
-      );
+      const aePart = sandboxPartToAgentElements(part, partKey);
+      return <BashTool part={aePart} />;
     }
     case "environment_variables":
       return (

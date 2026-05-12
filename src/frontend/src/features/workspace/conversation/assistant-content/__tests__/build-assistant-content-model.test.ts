@@ -204,4 +204,78 @@ describe("buildAssistantContentModel", () => {
     });
     expect(model.trajectory.displayMode).toBe("timeline");
   });
+
+  it("keeps a single running tool session visible in pending assistant turns", () => {
+    const item = makeAssistantTurn({
+      message: undefined,
+      isPendingShell: true,
+      attachedToolSessions: [
+        {
+          kind: "tool_session",
+          key: "tool-session-1",
+          items: [
+            {
+              key: "tool-item-1",
+              traceSource: "live",
+              eventKind: "tool_call",
+              toolName: "list_files",
+              stepIndex: 0,
+              runtimeContext,
+              part: {
+                kind: "tool",
+                title: "list_files",
+                toolType: "list_files",
+                state: "running",
+                input: { path: "." },
+                stepIndex: 0,
+                runtimeContext,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const model = buildAssistantContentModel(item);
+
+    expect(model.answer.showStreamingShell).toBe(true);
+    expect(model.execution.hasChatHighlights).toBe(true);
+    expect(model.execution.highlights).toHaveLength(1);
+    expect(model.execution.highlights[0]).toMatchObject({
+      label: "List files",
+      status: "running",
+      summary: "Running List files",
+    });
+    expect(model.execution.sections).toHaveLength(1);
+    expect(model.execution.sections[0]?.kind).toBe("tool_session");
+  });
+
+  it("surfaces neutral status notes as running highlights for pending turns", () => {
+    const item = makeAssistantTurn({
+      message: undefined,
+      isPendingShell: true,
+      attachedTraceParts: [
+        {
+          key: "status-1",
+          message: makeTraceMessage("status-message"),
+          part: {
+            kind: "status_note",
+            text: "Starting turn...",
+            tone: "neutral",
+          },
+        },
+      ],
+    });
+
+    const model = buildAssistantContentModel(item);
+
+    expect(model.answer.showStreamingShell).toBe(true);
+    expect(model.execution.hasChatHighlights).toBe(true);
+    expect(model.execution.highlights).toHaveLength(1);
+    expect(model.execution.highlights[0]).toMatchObject({
+      label: "Status",
+      status: "running",
+      summary: "Starting turn...",
+    });
+  });
 });

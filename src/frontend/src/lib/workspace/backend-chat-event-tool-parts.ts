@@ -66,23 +66,75 @@ function payloadLooksErrored(payload?: Record<string, unknown>): boolean {
   return false;
 }
 
+function payloadLooksSuccessful(payload?: Record<string, unknown>): boolean {
+  if (!payload) return false;
+
+  const directStatus = asOptionalText(payload.status)?.toLowerCase();
+  if (directStatus && ["ok", "success", "completed", "finished", "done"].includes(directStatus)) {
+    return true;
+  }
+  if (payload.success === true || payload.ok === true) {
+    return true;
+  }
+
+  const objectCandidates = [
+    asRecord(payload.tool_output),
+    asRecord(payload.output),
+    asRecord(payload.observation),
+    asRecord(payload.result),
+  ];
+  for (const candidate of objectCandidates) {
+    if (!candidate) continue;
+    const status = asOptionalText(candidate.status)?.toLowerCase();
+    if (status && ["ok", "success", "completed", "finished", "done"].includes(status)) {
+      return true;
+    }
+    if (candidate.success === true || candidate.ok === true) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function textLooksErrored(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  if (
+    normalized.startsWith("execution error") ||
+    normalized.startsWith("tool result: execution error") ||
+    normalized.startsWith("tool result: error") ||
+    normalized.startsWith("tool result: failed") ||
+    normalized.startsWith("error:") ||
+    normalized.startsWith("failed:") ||
+    normalized.startsWith("exception") ||
+    normalized.startsWith("traceback")
+  ) {
+    return true;
+  }
+  return normalized.length <= 160 && /\b(error|failed|failure|rejected|cancelled)\b/.test(normalized);
+}
+
 export function inferToolState(
   kind: "tool_call" | "tool_result",
   text: string,
   payload?: Record<string, unknown>,
 ): ChatRenderToolState {
   if (kind === "tool_call") return "running";
-  return payloadLooksErrored(payload) || /error|failed/i.test(text)
-    ? "output-error"
-    : "output-available";
+  if (payloadLooksErrored(payload)) return "output-error";
+  if (payloadLooksSuccessful(payload)) return "output-available";
+  return textLooksErrored(text) ? "output-error" : "output-available";
 }
 
 export function inferStatusTone(
   text: string,
   payload?: Record<string, unknown>,
 ): Extract<ChatRenderPart, { kind: "status_note" }>["tone"] {
-  if (payloadLooksErrored(payload) || /error|failed|failure/i.test(text)) {
+  if (payloadLooksErrored(payload) || (!payloadLooksSuccessful(payload) && textLooksErrored(text))) {
     return "error";
+  }
+  if (payloadLooksSuccessful(payload)) {
+    return "success";
   }
   if (/warn|warning|caution/i.test(text)) {
     return "warning";
