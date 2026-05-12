@@ -347,13 +347,18 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
 
   switch (kind) {
     case "assistant_token":
+    case "text":
       appendIntoLlmStep({ bucket: "tokens", text, timestamp: epoch });
       return;
     case "reasoning_step":
+    case "reasoning":
       markLiveTraceSeen();
       appendIntoLlmStep({ bucket: "reasoning", text, timestamp: epoch });
       return;
+    case "turn_started":
     case "status":
+    case "sandbox_exec":
+    case "rlm_delegate":
     case "warning":
       markLiveTraceSeen();
       appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
@@ -368,7 +373,8 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
         addTrajectoryStep(text, payload, epoch);
       }
       return;
-    case "final": {
+    case "final":
+    case "turn_completed": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
       addOutputStep("Final output", text, payload, epoch, parentId);
       liveTraceSeenForTurn = false;
@@ -380,6 +386,7 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       liveTraceSeenForTurn = false;
       return;
     }
+    case "turn_failed":
     case "error": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
       addOutputStep("Execution error", text || "Server error", payload, epoch, parentId);
