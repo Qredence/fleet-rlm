@@ -9,7 +9,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -23,32 +23,10 @@ from .bootstrap import (
 )
 from .config import ServerRuntimeConfig
 from .middleware import add_middlewares
-from .routers import (
-    auth,
-    health,
-    memory,
-    optimization,
-    runs,
-    runtime,
-    sandboxes,
-    sessions,
-    traces,
-    ws,
-)
+from .routers import health
+from .routers._composition import build_api_router
 
 logger = logging.getLogger(__name__)
-
-_CANONICAL_API_ROUTERS = (
-    auth.router,
-    ws.router,
-    sessions.router,
-    runtime.router,
-    sandboxes.router,
-    runs.router,
-    memory.router,
-    optimization.router,
-    traces.router,
-)
 
 
 _VALIDATION_ERROR_PROPERTY_DESCRIPTIONS: dict[str, str] = {
@@ -86,11 +64,7 @@ def _register_api_routes(app: FastAPI) -> None:
     shadow API or docs paths.
     """
     app.include_router(health.router)
-
-    api_router = APIRouter(prefix="/api/v1")
-    for route_group in _CANONICAL_API_ROUTERS:
-        api_router.include_router(route_group)
-    app.include_router(api_router)
+    app.include_router(build_api_router())
 
 
 def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]:
