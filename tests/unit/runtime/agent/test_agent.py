@@ -33,6 +33,63 @@ def _make_fake_react(records: list[dict[str, Any]]):
     return _FakeReAct
 
 
+def _make_finish_aware_fake_react(
+    steps: list[SimpleNamespace],
+    *,
+    final_response: str,
+):
+    """Return a fake dspy.ReAct class with the upstream extract phase shape."""
+
+    class _FakeReAct:
+        def __init__(self, *, signature, tools, max_iters, **kwargs):
+            self.signature = signature
+            self._max_iters = max_iters
+            self.react = object()
+            self.extract = object()
+            self.extract_calls = 0
+            self._steps = list(steps)
+            self.tools = {getattr(tool, "__name__", str(tool)): tool for tool in tools}
+            self.tools["finish"] = lambda: "Completed."
+
+        def _call_with_potential_trajectory_truncation(self, module, trajectory, **kwargs):
+            if module is self.react:
+                if not self._steps:
+                    raise AssertionError("No scripted ReAct step remaining")
+                return self._steps.pop(0)
+            if module is self.extract:
+                self.extract_calls += 1
+                return {"response": final_response}
+            raise AssertionError(f"Unexpected module call: {module!r}")
+
+        def __call__(self, **kwargs):
+            return self.forward(**kwargs)
+
+        def forward(self, **input_args):
+            trajectory = {}
+            max_iters = input_args.pop("max_iters", self._max_iters)
+            for idx in range(max_iters):
+                pred = self._call_with_potential_trajectory_truncation(
+                    self.react,
+                    trajectory,
+                    **input_args,
+                )
+                trajectory[f"thought_{idx}"] = pred.next_thought
+                trajectory[f"tool_name_{idx}"] = pred.next_tool_name
+                trajectory[f"tool_args_{idx}"] = pred.next_tool_args
+                trajectory[f"observation_{idx}"] = self.tools[pred.next_tool_name](**pred.next_tool_args)
+                if pred.next_tool_name == "finish":
+                    break
+
+            extract = self._call_with_potential_trajectory_truncation(
+                self.extract,
+                trajectory,
+                **input_args,
+            )
+            return dspy.Prediction(trajectory=trajectory, **extract)
+
+    return _FakeReAct
+
+
 @pytest.fixture()
 def react_records(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Monkeypatch dspy.ReAct inside agent.py and capture construction args."""
@@ -84,6 +141,117 @@ def test_fleet_agent_forward_prediction_has_response_field(react_records):
     result = agent.forward(chat_history=history, user_message="hello")
     assert hasattr(result, "response")
     assert result.response == "fake_response"
+
+
+def test_fleet_agent_finish_only_trajectory_skips_extract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FleetAgent reuses the initial thought when the first ReAct step is finish."""
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.dspy.ReAct",
+        _make_finish_aware_fake_react(
+            [
+                SimpleNamespace(
+                    next_thought="Hello from the first thought",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                )
+            ],
+            final_response="should not be used",
+        ),
+    )
+
+    agent = FleetAgent(tools=[])
+    history = dspy.History(messages=[])
+
+    result = agent.forward(chat_history=history, user_message="hello")
+
+    assert result.response == "Hello from the first thought"
+    assert result.trajectory["tool_name_0"] == "finish"
+    assert agent.react.extract_calls == 0
+
+
+def test_fleet_agent_tool_trajectory_still_uses_extract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FleetAgent still uses the extract stage once a real tool was called."""
+
+    def lookup(x: str) -> str:
+        return f"observed:{x}"
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.dspy.ReAct",
+        _make_finish_aware_fake_react(
+            [
+                SimpleNamespace(
+                    next_thought="Need the lookup tool",
+                    next_tool_name="lookup",
+                    next_tool_args={"x": "value"},
+                ),
+                SimpleNamespace(
+                    next_thought="Now I can finish",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                ),
+            ],
+            final_response="extracted answer",
+        ),
+    )
+
+    agent = FleetAgent(tools=[lookup])
+    history = dspy.History(messages=[])
+
+    result = agent.forward(chat_history=history, user_message="hello")
+
+    assert result.response == "extracted answer"
+    assert result.trajectory["tool_name_0"] == "lookup"
+    assert result.trajectory["observation_0"] == "observed:value"
+    assert agent.react.extract_calls == 1
+
+
+def test_fleet_agent_patches_finish_only_prompt_instruction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FleetAgent replaces the default ReAct prompt with a compact tool catalog."""
+
+    def lookup(query: str, limit: int = 3) -> str:
+        return f"{query}:{limit}"
+
+    class _FakeReAct:
+        def __init__(self, *, signature, tools, max_iters, **kwargs):
+            self.signature = signature
+            self.tools = {
+                "lookup": SimpleNamespace(
+                    name="lookup",
+                    desc="Look up a value for the user.",
+                    args={
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "default": 3},
+                    },
+                ),
+                "finish": SimpleNamespace(name="finish", desc="Verbose finish text.", args={}),
+            }
+            self.react = SimpleNamespace(signature=SimpleNamespace(instructions="Base instructions"))
+            self.extract = object()
+
+        def __call__(self, **kwargs):
+            return dspy.Prediction(response="ok")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.dspy.ReAct",
+        _FakeReAct,
+    )
+
+    agent = FleetAgent(tools=[lookup])
+    instructions = agent.react.react.signature.instructions
+
+    assert (
+        "If you choose finish on the first step without using any tool, write "
+        "next_thought as the exact final response to send to the user." in instructions
+    )
+    assert "- lookup(query:string, limit:integer=3): Look up a value for the user." in instructions
+    assert "- finish(): Stop and return the final response." in instructions
+    assert "It takes arguments" not in instructions
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,10 @@ def _tool_names(tools: list[Any]) -> set[str]:
     return {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
 
 
+def _normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
 # ---------------------------------------------------------------------------
 # VAL-TOOLS-001: discover_tools() returns a list of callables
 # VAL-TOOLS-010: Stable ordering across calls
@@ -171,6 +175,28 @@ def test_discovered_tools_valid_for_react() -> None:
     # dspy.ReAct construction must not raise
     react = dspy.ReAct(FleetAgentSignature, tools=tools, max_iters=1)
     assert react is not None
+
+
+def test_high_risk_tool_descriptions_preserve_routing_guidance() -> None:
+    """High-risk tool descriptions stay concise while keeping selection guidance."""
+    from fleet_rlm.runtime.tools import discover_tools
+
+    tools = {getattr(tool, "name", getattr(tool, "__name__", "")): tool for tool in discover_tools()}
+
+    assert _normalize_whitespace(tools["delegate_to_rlm"].desc or "") == (
+        "Run a single child query in a Daytona RLM sandbox. For multiple independent tasks use "
+        "delegate_to_rlm_batched. Pass document_url to auto-inject a remote document into the "
+        "RLM context before execution."
+    )
+    assert _normalize_whitespace(tools["delegate_to_rlm_batched"].desc or "") == (
+        "Fan out independent child RLM queries concurrently. Prefer over sequential "
+        "delegate_to_rlm calls. Use execute_code with llm_query_batched() when work is already "
+        "inside one Daytona sandbox."
+    )
+    assert _normalize_whitespace(tools["execute_code"].desc or "") == (
+        "Execute Python code in the Daytona sandbox. Use llm_query_batched() inside the code for "
+        "many lightweight semantic prompts, sub_rlm_batched() for recursive child tasks."
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -313,20 +313,7 @@ def build_filesystem_tools(agent: Any) -> list[Any]:
 
 @tool_fn
 def list_files(path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
-    """List files on the host filesystem matching a glob pattern.
-
-    Results are capped at 100 entries.  When called from the default root
-    (``"."``), listing is scoped to ``src/``, ``tests/``, ``docs/``, and
-    ``scripts/`` directories if they exist.
-
-    Args:
-        path: Directory path to list.  Defaults to the current directory.
-        pattern: Glob pattern to filter files.  Defaults to ``"**/*"``.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``files``, ``count``, and
-        ``total_bytes``.
-    """
+    """List host files matching a glob pattern."""
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
     return _list_files_impl(_ctx, path=path, pattern=pattern)
 
@@ -337,33 +324,13 @@ def read_file_slice(
     start_line: int = 1,
     num_lines: int = 100,
 ) -> dict[str, Any]:
-    """Read a range of lines from a host file without loading the full document.
-
-    Args:
-        path: Path to the file to read.
-        start_line: 1-based line number to start from. Defaults to 1.
-        num_lines: Maximum number of lines to return. Defaults to 100.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``lines``, ``returned_count``,
-        and ``total_lines``.
-    """
+    """Read a line range from a host file."""
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
     return _read_file_slice_impl(_ctx, path=path, start_line=start_line, num_lines=num_lines)
 
 
 @tool_fn
 def find_files(pattern: str, path: str = ".", include: str = "") -> dict[str, Any]:
-    """Search file contents on the host using a regex pattern (ripgrep).
-
-    Args:
-        pattern: Regex pattern to search for.
-        path: Directory to search in. Defaults to the current directory.
-        include: Optional glob pattern to restrict searched file types
-            (e.g. ``"*.py"``).
-
-    Returns:
-        Dictionary with ``status``, ``pattern``, ``count``, and ``hits``.
-    """
+    """Search host file contents with a regex pattern."""
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
     return _find_files_impl(_ctx, pattern=pattern, path=path, include=include)

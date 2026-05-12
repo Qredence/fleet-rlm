@@ -40,42 +40,8 @@ def delegate_to_rlm(
     *,
     interpreter: Any | None = None,
 ) -> dict[str, Any]:
-    """Delegate a query to a recursive dspy.RLM running in a Daytona sandbox.
-
-    Creates or reuses an existing Daytona sandbox session, constructs a
-    ``dspy.RLM`` with the provided interpreter, executes the query, and returns
-    a structured result dict with ``status`` and ``answer``.
-
-    Use this for one child task. For multiple independent child tasks, prefer
-    ``delegate_to_rlm_batched`` so siblings can run concurrently. When work is
-    already inside one Daytona sandbox, prefer ``execute_code`` with
-    ``llm_query_batched()`` or ``sub_rlm_batched()`` so Python can batch and
-    aggregate inside the RLM loop.
-
-    When ``document_url`` is provided, the document is fetched and extracted on
-    the host before the RLM runs.  The full text is injected into the RLM
-    context so sandbox code can access it without a separate download step.
-    This is the correct way to analyse remote documents: pass the URL here
-    rather than using ``load_document`` first (which only stores to the host
-    document cache, not the sandbox).
-
-    Args:
-        query: The query to execute in the recursive RLM.
-        context: Optional additional context string for the query.
-        document_url: Optional HTTP(S) URL of a document to fetch and inject
-            into the RLM context before execution.
-        interpreter: Daytona interpreter instance.  Must be provided as a
-            keyword argument.
-
-    Returns:
-        A dict with:
-        - ``status``: ``"ok"`` on success, ``"error"`` on failure.
-        - ``answer``: The RLM result string (present when ``status == "ok"``).
-        - ``error``: Error message string (present when ``status == "error"``).
-
-    Raises:
-        RuntimeError: When called without a bound interpreter.
-    """
+    """Run a single child query in a Daytona RLM sandbox. For multiple independent tasks use delegate_to_rlm_batched.
+    Pass document_url to auto-inject a remote document into the RLM context before execution."""
     if interpreter is None:
         raise RuntimeError(
             "delegate_to_rlm requires a Daytona interpreter. Pass the interpreter as a keyword argument."
@@ -106,32 +72,8 @@ def delegate_to_rlm_batched(
     *,
     interpreter: Any | None = None,
 ) -> dict[str, Any]:
-    """Delegate independent child RLM tasks concurrently.
-
-    Use this when the top-level agent has already identified independent
-    analyses (for example Child A, Child B, Child C) and should fan them out
-    directly instead of making several sequential ``delegate_to_rlm`` calls.
-
-    Prefer sandbox-side batching when the work is already inside one Daytona
-    RLM: use ``execute_code`` with ``llm_query_batched()`` for lightweight
-    semantic prompts over sandbox data, or ``sub_rlm_batched()`` for multiple
-    recursive child RLM tasks from generated Python code.
-
-    Args:
-        queries: Ordered list of independent child RLM prompts.
-        context: Shared context supplied to every child.
-        document_url: Optional HTTP(S) document to stage for each child.
-        interpreter: Daytona interpreter instance.  Must be provided as a
-            keyword argument.
-
-    Returns:
-        A dict with ``status`` and ordered successful ``results``. When one or
-        more children fail, ``status`` is ``"error"`` and ``errors`` contains
-        per-query diagnostics while successful siblings remain in ``results``.
-
-    Raises:
-        RuntimeError: When called without a bound interpreter.
-    """
+    """Fan out independent child RLM queries concurrently. Prefer over sequential delegate_to_rlm calls.
+    Use execute_code with llm_query_batched() when work is already inside one Daytona sandbox."""
     if interpreter is None:
         raise RuntimeError(
             "delegate_to_rlm_batched requires a Daytona interpreter. Pass the interpreter as a keyword argument."
@@ -662,20 +604,18 @@ def _snapshot_terms(text: str) -> set[str]:
         }
     }
     if "rlm" in text.lower() or "recursive" in text.lower():
-        terms.update(
-            {
-                "rlm",
-                "recursive",
-                "delegate",
-                "sub_rlm",
-                "budget",
-                "sandbox",
-                "interpreter",
-                "session",
-                "persistence",
-                "restore",
-            }
-        )
+        terms.update({
+            "rlm",
+            "recursive",
+            "delegate",
+            "sub_rlm",
+            "budget",
+            "sandbox",
+            "interpreter",
+            "session",
+            "persistence",
+            "restore",
+        })
     return terms
 
 
