@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
-from .events import BackendEvent, RuntimeEventContext
+from .events import BackendEvent, BackendEventKind, ExecutionActorKind, RuntimeEventContext
+
+_BACKEND_EVENT_KIND_VALUES = frozenset(
+    {
+        "turn_started",
+        "status",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "sandbox_exec",
+        "rlm_delegate",
+        "warning",
+        "clarification",
+        "text",
+        "turn_completed",
+        "turn_failed",
+    }
+)
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -18,6 +35,22 @@ def _as_str(value: Any) -> str | None:
     if isinstance(value, str):
         trimmed = value.strip()
         return trimmed or None
+    return None
+
+
+def _as_actor_kind(value: Any) -> ExecutionActorKind | None:
+    text = _as_str(value)
+    if text is None:
+        return None
+    lowered = text.lower()
+    if lowered in {"root", "root_rlm", "root-rlm", "root agent"}:
+        return "root_rlm"
+    if lowered in {"sub_agent", "sub-agent", "subagent"}:
+        return "sub_agent"
+    if lowered in {"delegate", "rlm_delegate", "rlm-delegate"}:
+        return "delegate"
+    if lowered == "unknown":
+        return "unknown"
     return None
 
 
@@ -35,7 +68,7 @@ def _event_timestamp(raw_timestamp: Any) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _derive_backend_kind(kind: str, payload: dict[str, Any]) -> str:
+def _derive_backend_kind(kind: str, payload: dict[str, Any]) -> BackendEventKind:
     if kind == "done":
         return "turn_completed"
     if kind == "error":
@@ -46,7 +79,9 @@ def _derive_backend_kind(kind: str, payload: dict[str, Any]) -> str:
             return "sandbox_exec"
         if phase == "delegate" or payload.get("delegate") is True:
             return "rlm_delegate"
-    return kind
+    if kind in _BACKEND_EVENT_KIND_VALUES:
+        return cast(BackendEventKind, kind)
+    return "text"
 
 
 def extract_runtime_context(payload: dict[str, Any]) -> RuntimeEventContext | None:
@@ -66,7 +101,7 @@ def extract_runtime_context(payload: dict[str, Any]) -> RuntimeEventContext | No
         document_path=_as_str(source.get("document_path") or source.get("loaded_path") or source.get("path")),
         depth=_as_int(source.get("depth")),
         max_depth=_as_int(source.get("max_depth")),
-        actor_kind=_as_str(source.get("actor_kind")),
+        actor_kind=_as_actor_kind(source.get("actor_kind")),
         actor_id=_as_str(source.get("actor_id")),
         parent_id=_as_str(source.get("parent_id")),
         lane_key=_as_str(source.get("lane_key")),
