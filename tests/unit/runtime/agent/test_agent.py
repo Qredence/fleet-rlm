@@ -209,6 +209,34 @@ def test_fleet_agent_tool_trajectory_still_uses_extract(
     assert agent.react.extract_calls == 1
 
 
+def test_fleet_agent_finish_only_streaming_mode_uses_extract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FleetAgent can force the extract stage during streamed finish-only turns."""
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.dspy.ReAct",
+        _make_finish_aware_fake_react(
+            [
+                SimpleNamespace(
+                    next_thought="Hello from the first thought",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                )
+            ],
+            final_response="streamed extract response",
+        ),
+    )
+
+    agent = FleetAgent(tools=[])
+    agent.react._force_extract_streaming = True
+    history = dspy.History(messages=[])
+
+    result = agent.forward(chat_history=history, user_message="hello")
+
+    assert result.response == "streamed extract response"
+    assert agent.react.extract_calls == 1
+
+
 def test_fleet_agent_patches_finish_only_prompt_instruction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

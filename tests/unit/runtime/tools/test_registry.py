@@ -76,12 +76,19 @@ def test_discover_tools_uses_explicit_module_list(
         module.__dict__[tool_name] = tool_fn(_explicit_tool)
         return module
 
+    # Clear the tool-discovery cache so the monkeypatched import_module is
+    # exercised rather than a previously cached result.
+    registry.discover_tools.cache_clear()
+
     monkeypatch.setattr(registry.importlib, "import_module", _fake_import_module)
 
     tools = registry.discover_tools()
 
     assert imported == [f"fleet_rlm.runtime.tools.{module_name}" for module_name in registry.TOOL_MODULE_NAMES]
     assert _tool_names(tools) == {f"{module_name}_tool" for module_name in registry.TOOL_MODULE_NAMES}
+
+    # Clear the cache so later tests see real modules, not the fake ones.
+    registry.discover_tools.cache_clear()
 
 
 def test_discover_tools_stable_ordering() -> None:

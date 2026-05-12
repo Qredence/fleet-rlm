@@ -142,7 +142,7 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
         assert prepared is not None
         # Turn setup should carry the requested mode without eagerly mutating the agent.
         assert agent.execution_mode == "auto"
-        assert persist_calls == [{"include_volume_save": True, "latest_user_message": "hello"}]
+        assert persist_calls == [{"include_volume_save": False, "latest_user_message": "hello"}]
         assert session.cancel_flag["cancelled"] is False
         assert session.lifecycle is lifecycle
         assert session.active_run_db_id == active_run_db_id
