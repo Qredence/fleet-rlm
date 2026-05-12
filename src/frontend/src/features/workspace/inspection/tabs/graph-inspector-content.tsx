@@ -70,19 +70,19 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardDescription>Steps</CardDescription>
-            <CardTitle className="text-xl font-semibold text-foreground">{steps.length}</CardTitle>
+            <CardTitle className="typo-h3 font-semibold text-foreground">{steps.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardDescription>Execution lanes</CardDescription>
-            <CardTitle className="text-xl font-semibold text-foreground">{laneCount}</CardTitle>
+            <CardTitle className="typo-h3 font-semibold text-foreground">{laneCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
             <CardDescription>Branch points</CardDescription>
-            <CardTitle className="text-xl font-semibold text-foreground">{branchingParents}</CardTitle>
+            <CardTitle className="typo-h3 font-semibold text-foreground">{branchingParents}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -91,7 +91,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
         <CardHeader className={inspectorStyles.card.header}>
           <div className="flex items-center gap-2">
             <GitBranch className="size-4 text-accent" />
-            <CardTitle className="text-sm font-medium text-foreground">Relationships</CardTitle>
+            <CardTitle className="typo-label font-medium text-foreground">Relationships</CardTitle>
           </div>
           <CardDescription>
             Parent-child lineage, actor lanes, and delegated branches for this turn.
@@ -116,7 +116,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
               </MorphingDialogTrigger>
 
               <MorphingDialogContainer>
-                <MorphingDialogContent className="relative flex h-modal w-[80vw] max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
+                <MorphingDialogContent className="relative flex h-modal max-w-4/5 flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
                   <ArtifactGraph
                     steps={steps}
                     activeStepId={activeStepId}
@@ -130,6 +130,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
                       animate: { opacity: 1, scale: 1 },
                       exit: { opacity: 0, scale: 0.8 },
                     }}
+                    aria-label="Close"
                   >
                     <X className="size-3.5" />
                   </MorphingDialogClose>
@@ -143,7 +144,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
       {selectedStep ? (
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
-            <CardTitle className="text-sm font-medium text-foreground">Selected node</CardTitle>
+            <CardTitle className="typo-label font-medium text-foreground">Selected node</CardTitle>
             <CardDescription>{selectedStep.label}</CardDescription>
           </CardHeader>
           <CardContent className={inspectorStyles.card.contentStack}>

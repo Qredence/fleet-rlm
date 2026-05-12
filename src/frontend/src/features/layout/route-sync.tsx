@@ -40,7 +40,9 @@ function RouteSync() {
       openCanvasPanel("volumes");
     } else if (section === "workspace") {
       setCanvasPanel("workspace");
-    } else if (prevSection === "volumes") {
+    }
+
+    if (prevSection === "volumes" && section !== "volumes") {
       clearSelectedFile();
     }
   }, [location.pathname]); // oxlint-disable-line react-hooks/exhaustive-deps
