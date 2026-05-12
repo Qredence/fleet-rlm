@@ -47,14 +47,9 @@ preview-commands:
       #!/bin/bash
       set -e
 
+      # Ensure uv and other tools are in PATH
       export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.local/share/pnpm:$PATH"
 
-      # Ensure we run from the repository root
-      cd "$(dirname "$0")"
-
-      export APP_ENV=local
-      export AUTH_MODE=dev
-      export AUTH_REQUIRED=false
-
-      uv run fleet web
+      # Start the fleet web server
+      uv run fleet web --host 0.0.0.0 --port 8000
 preview-port: 8000
