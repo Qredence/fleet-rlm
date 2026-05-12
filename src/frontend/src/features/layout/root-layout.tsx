@@ -26,7 +26,6 @@ import { CommandPalette } from "./command-palette";
 import { LayoutHeader } from "./header";
 import { LoginDialog } from "./login-dialog";
 import { MobileTabBar } from "./mobile-tab-bar";
-import { getLayoutPanelMeta } from "./panel-meta";
 import { RouteSync } from "./route-sync";
 import { LayoutRouteOutlet } from "./route-outlet";
 import { SettingsDialog } from "./settings-dialog";
@@ -51,8 +50,7 @@ function AppLayout() {
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
-  const panelMeta = getLayoutPanelMeta(activeNav);
+  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
 
   useEffect(() => {
     registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
@@ -218,8 +216,8 @@ function AppLayout() {
             className="h-sheet-md gap-0 rounded-t-3xl border-x-0 border-b-0 p-0 sm:max-w-none"
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>{panelMeta.title}</SheetTitle>
-              <SheetDescription>{panelMeta.description}</SheetDescription>
+              <SheetTitle>Side panel</SheetTitle>
+              <SheetDescription>Inspect workspace turns or preview volume files.</SheetDescription>
             </SheetHeader>
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex items-center justify-center py-3">

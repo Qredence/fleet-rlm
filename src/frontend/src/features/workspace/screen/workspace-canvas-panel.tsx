@@ -12,6 +12,7 @@ import {
 import { executionSectionState } from "@/features/workspace/inspection/inspector-ui";
 import { ExecutionInspectorTab } from "@/features/workspace/inspection/tabs/execution-inspector-tab";
 import { GraphInspectorTab } from "@/features/workspace/inspection/tabs/graph-inspector-tab";
+import { hasMeaningfulGraph } from "@/features/workspace/inspection/tabs/graph-inspector-content";
 import { MessageInspectorTab } from "@/features/workspace/inspection/tabs/message-inspector-tab";
 import { RunWorkbench } from "@/features/workspace/workbench/run-workbench";
 import {
@@ -19,7 +20,7 @@ import {
   useRunWorkbenchStore,
   useWorkspaceUiStore,
 } from "@/features/workspace/use-workspace";
-import type { ExecutionStep, InspectorTab } from "@/features/workspace/use-workspace";
+import type { InspectorTab } from "@/features/workspace/use-workspace";
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 import { cn } from "@/lib/utils";
 
@@ -28,29 +29,6 @@ import { cn } from "@/lib/utils";
 /* ------------------------------------------------------------------ */
 
 type TabOption = { id: InspectorTab; label: string };
-
-function hasMeaningfulGraph(steps: ExecutionStep[]) {
-  if (steps.length < 2) return false;
-
-  const lanes = new Set(
-    steps
-      .map((step) => step.lane_key ?? `${step.actor_kind ?? "unknown"}:${step.actor_id ?? ""}`)
-      .filter(Boolean),
-  );
-  if (lanes.size > 1) return true;
-
-  if (steps.some((step) => step.actor_kind === "delegate" || step.actor_kind === "sub_agent")) {
-    return true;
-  }
-
-  const childCounts = new Map<string, number>();
-  for (const step of steps) {
-    if (!step.parent_id) continue;
-    childCounts.set(step.parent_id, (childCounts.get(step.parent_id) ?? 0) + 1);
-  }
-
-  return [...childCounts.values()].some((count) => count > 1);
-}
 
 function selectedTurnStatus(
   model: AssistantContentModel,
@@ -454,3 +432,5 @@ export function WorkspaceCanvasUnavailablePanel() {
     />
   );
 }
+
+export { GraphCanvasPanel } from "./graph-canvas-panel";

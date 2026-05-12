@@ -42,7 +42,7 @@ export function VolumesScreen() {
 }
 
 export function VolumesBrowser() {
-  const openCanvas = useNavigationStore((state) => state.openCanvas);
+  const openCanvasPanel = useNavigationStore((state) => state.openCanvasPanel);
   const selectFile = useVolumesSelectionStore((state) => state.selectFile);
   const isMobile = useIsMobile();
   const prefersReduced = useReducedMotion();
@@ -78,9 +78,9 @@ export function VolumesBrowser() {
   const handleSelectFile = useCallback(
     (node: FsNode) => {
       selectFile(node);
-      openCanvas();
+      openCanvasPanel("volumes");
     },
-    [openCanvas, selectFile],
+    [openCanvasPanel, selectFile],
   );
 
   const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);

@@ -5,15 +5,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ShellSidepanel } from "@/features/layout/sidepanel";
 
-const fileDetailState = {
-  activeNav: "volumes" as const,
-};
-
 vi.mock("@/stores/navigation-store", () => ({
-  useNavigationStore: (selector?: (state: { activeNav: "volumes" }) => unknown) =>
-    selector
-      ? selector({ activeNav: fileDetailState.activeNav })
-      : { activeNav: fileDetailState.activeNav },
+  useNavigationStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      canvasPanel: "volumes",
+      closeCanvas: vi.fn(),
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock("@/hooks/use-app-navigate", () => ({
@@ -43,6 +42,10 @@ vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
+vi.mock("@/features/workspace/screen/graph-canvas-panel", () => ({
+  GraphCanvasPanel: () => <div>GraphCanvas</div>,
+}));
+
 vi.mock("@/lib/rlm-api", () => ({
   isRlmCoreEnabled: () => true,
   isSectionSupported: () => true,
@@ -58,9 +61,8 @@ describe("ShellSidepanel file detail mode", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Preview");
+    expect(html).toContain("Volumes");
     expect(html).toContain("VolumeFileDetail:README.md");
-    expect(html).not.toContain("No active panel");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

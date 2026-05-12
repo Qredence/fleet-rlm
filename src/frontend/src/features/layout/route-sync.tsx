@@ -19,7 +19,7 @@ import { useNavigationStore } from "@/stores/navigation-store";
 function RouteSync() {
   const routerState = useRouterState();
   const location = routerState.location;
-  const { setActiveNav, openCanvas, closeCanvas, activeNav } = useNavigationStore();
+  const { setActiveNav, openCanvasPanel, setCanvasPanel, activeNav } = useNavigationStore();
   const { clearSelectedFile } = useVolumesLayoutSelection();
 
   const prevSectionRef = useRef("");
@@ -36,10 +36,12 @@ function RouteSync() {
     }
 
     if (section === "volumes") {
-      openCanvas();
-    } else if (section === "settings" || section === "optimization" || section === "history") {
-      closeCanvas();
-    } else if (prevSection === "volumes") {
+      openCanvasPanel("volumes");
+    } else if (section === "workspace") {
+      setCanvasPanel("workspace");
+    }
+
+    if (prevSection === "volumes" && section !== "volumes") {
       clearSelectedFile();
     }
   }, [location.pathname]); // oxlint-disable-line react-hooks/exhaustive-deps

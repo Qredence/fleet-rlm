@@ -30,6 +30,10 @@ vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
+vi.mock("@/features/workspace/screen/graph-canvas-panel", () => ({
+  GraphCanvasPanel: () => <div>GraphCanvas</div>,
+}));
+
 vi.mock("@/features/volumes/volumes-canvas-panel", () => ({
   VolumesCanvasPanel: () => <div>VolumeCanvas</div>,
 }));
@@ -44,6 +48,7 @@ describe("ShellSidepanel workspace inspector", () => {
   it("keeps the builder panel shell scrollable", () => {
     useNavigationStore.setState({
       activeNav: "workspace",
+      canvasPanel: "workspace",
       isCanvasOpen: false,
     });
     workspaceCanvas.mockReturnValueOnce(<div>MessageInspectorPanel</div>);
@@ -73,6 +78,7 @@ describe("ShellSidepanel workspace inspector", () => {
   it("shows the message inspector header", () => {
     useNavigationStore.setState({
       activeNav: "workspace",
+      canvasPanel: "workspace",
       isCanvasOpen: false,
     });
     workspaceCanvas.mockReturnValueOnce(<div>MessageInspectorPanel</div>);
@@ -83,7 +89,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Workspace");
+    expect(html).toContain("Workbench");
     expect(html).toContain("MessageInspectorPanel");
     expect(html).not.toContain("Support rail");
   });
@@ -91,6 +97,7 @@ describe("ShellSidepanel workspace inspector", () => {
   it("renders the Daytona workbench when Daytona runtime mode is active", () => {
     useNavigationStore.setState({
       activeNav: "workspace",
+      canvasPanel: "workspace",
       isCanvasOpen: false,
     });
     workspaceCanvas.mockReturnValueOnce(<div>RunWorkbench</div>);
@@ -101,7 +108,7 @@ describe("ShellSidepanel workspace inspector", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Workspace");
+    expect(html).toContain("Workbench");
     expect(html).toContain("RunWorkbench");
     expect(html).not.toContain("Support rail");
     expect(html).not.toContain("MessageInspectorPanel");

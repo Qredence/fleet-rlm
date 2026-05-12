@@ -33,4 +33,13 @@ describe("useNavigationStore", () => {
     expect(close).not.toHaveBeenCalled();
     expect(useNavigationStore.getState().isCanvasOpen).toBe(true);
   });
+
+  it("opens the canvas with an explicit panel selection", async () => {
+    const { useNavigationStore } = await import("@/stores/navigation-store");
+
+    useNavigationStore.getState().openCanvasPanel("volumes");
+
+    expect(useNavigationStore.getState().isCanvasOpen).toBe(true);
+    expect(useNavigationStore.getState().canvasPanel).toBe("volumes");
+  });
 });

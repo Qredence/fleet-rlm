@@ -562,9 +562,7 @@ function applyEvent(
     case "sandbox_exec":
     case "rlm_delegate": {
       const normalizedPayload =
-        kind === "turn_started"
-          ? { ...(payload ?? {}), phase: payload?.phase ?? "startup" }
-          : payload;
+        kind === "turn_started" ? { ...payload, phase: payload?.phase ?? "startup" } : payload;
       const sandboxPart = sandboxProgressPartFromStatus(normalizedPayload);
       if (sandboxPart) {
         return {
