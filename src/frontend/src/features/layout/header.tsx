@@ -5,7 +5,6 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { cn } from "@/lib/utils";
-import { getLayoutPanelMeta } from "./panel-meta";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 export function LayoutHeader() {
@@ -17,13 +16,10 @@ export function LayoutHeader() {
     volumes: "Volumes",
     optimization: "Optimization",
     settings: "Settings",
+    history: "History",
   };
   const title = titleMap[activeNav] || "Dashboard";
-  const panelMeta = getLayoutPanelMeta(activeNav);
-  const canvasActionLabel = isCanvasOpen
-    ? `Hide ${panelMeta.toggleLabel}`
-    : `Show ${panelMeta.toggleLabel}`;
-  const showCanvasToggle = activeNav !== "settings" && activeNav !== "optimization";
+  const canvasActionLabel = isCanvasOpen ? "Hide panel" : "Show panel";
 
   return (
     <header
@@ -37,40 +33,27 @@ export function LayoutHeader() {
         <div className="min-w-0 truncate text-sm font-medium text-foreground">{title}</div>
       </div>
 
-      {showCanvasToggle ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size={isMobile ? "icon" : "sm"}
-              variant={isCanvasOpen ? "secondary" : "outline"}
-              aria-label={canvasActionLabel}
-              className={cn(
-                isMobile
-                  ? "rounded-xl"
-                  : "h-11 flex-shrink justify-start gap-3 rounded-2xl border-border-subtle/80 bg-background px-2 text-foreground/82 shadow-xs",
-              )}
-              onClick={toggleCanvas}
-            >
-              <PanelRight />
-              {!isMobile ? (
-                <span className="text-xs font-medium text-foreground/90">
-                  {panelMeta.toggleLabel}
-                </span>
-              ) : null}
-              <span className="sr-only">{canvasActionLabel}</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <div className="flex flex-col gap-1">
-              <p className="text-xs font-medium">{canvasActionLabel}</p>
-              <p className="max-w-56 typo-body-xs leading-5 text-muted-foreground">
-                {panelMeta.toggleDescription}
-              </p>
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            size="icon"
+            variant={isCanvasOpen ? "secondary" : "outline"}
+            aria-label={canvasActionLabel}
+            className={cn(
+              "rounded-xl border-border-subtle/80",
+              isMobile ? "size-9" : "size-8",
+            )}
+            onClick={toggleCanvas}
+          >
+            <PanelRight className="size-4" />
+            <span className="sr-only">{canvasActionLabel}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {canvasActionLabel}
+        </TooltipContent>
+      </Tooltip>
     </header>
   );
 }

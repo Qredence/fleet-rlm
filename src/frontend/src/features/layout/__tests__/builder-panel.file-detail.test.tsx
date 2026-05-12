@@ -6,14 +6,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ShellSidepanel } from "@/features/layout/sidepanel";
 
 const fileDetailState = {
-  activeNav: "volumes" as const,
+  canvasPanel: "volumes" as const,
+  closeCanvas: () => {},
+  setCanvasPanel: () => {},
 };
 
 vi.mock("@/stores/navigation-store", () => ({
-  useNavigationStore: (selector?: (state: { activeNav: "volumes" }) => unknown) =>
-    selector
-      ? selector({ activeNav: fileDetailState.activeNav })
-      : { activeNav: fileDetailState.activeNav },
+  useNavigationStore: (selector?: (state: typeof fileDetailState) => unknown) =>
+    selector ? selector(fileDetailState) : fileDetailState,
 }));
 
 vi.mock("@/hooks/use-app-navigate", () => ({
@@ -58,9 +58,8 @@ describe("ShellSidepanel file detail mode", () => {
       </QueryClientProvider>,
     );
 
-    expect(html).toContain("Preview");
+    expect(html).toContain("Volumes");
     expect(html).toContain("VolumeFileDetail:README.md");
-    expect(html).not.toContain("No active panel");
     expect(html).not.toContain("MessageInspectorPanel");
   });
 });

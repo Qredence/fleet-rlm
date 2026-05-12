@@ -7,7 +7,7 @@
  * - Consistent with other stores
  */
 import { create } from "zustand";
-import type { NavItem } from "@/stores/navigation-types";
+import type { CanvasPanel, NavItem } from "@/stores/navigation-types";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -32,6 +32,10 @@ interface NavigationState {
   closeCanvas: () => void;
   toggleCanvas: () => void;
   registerCanvasHandlers: (handlers: CanvasHandlers) => void;
+
+  // Canvas panel type
+  canvasPanel: CanvasPanel;
+  setCanvasPanel: (panel: CanvasPanel) => void;
 
   // Command palette
   openCommandPalette: () => void;
@@ -65,6 +69,10 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // Canvas
   isCanvasOpen: false,
   setIsCanvasOpen: (open) => set({ isCanvasOpen: open }),
+
+  // Canvas panel type
+  canvasPanel: "workspace",
+  setCanvasPanel: (canvasPanel) => set({ canvasPanel }),
   openCanvas: () => canvasHandlers.open(),
   closeCanvas: () => canvasHandlers.close(),
   toggleCanvas: () => {
@@ -92,3 +100,4 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
 export const useActiveNav = () => useNavigationStore((s) => s.activeNav);
 export const useIsCanvasOpen = () => useNavigationStore((s) => s.isCanvasOpen);
+export const useCanvasPanel = () => useNavigationStore((s) => s.canvasPanel);
