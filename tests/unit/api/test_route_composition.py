@@ -64,9 +64,7 @@ class TestCanonicalRouterGroups:
     def test_route_exists(self, app, label, expected_path):
         paths = _route_paths(app)
         # Some paths may include dynamic segments; check prefix match
-        match = expected_path in paths or any(
-            p.startswith(expected_path) for p in paths
-        )
+        match = expected_path in paths or any(p.startswith(expected_path) for p in paths)
         assert match, (
             f"Expected route '{expected_path}' ({label}) not found. "
             f"Available /api/v1 paths: {sorted(p for p in paths if '/api/v1' in p)}"

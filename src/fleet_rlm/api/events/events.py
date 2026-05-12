@@ -10,10 +10,11 @@ import asyncio
 import logging
 from asyncio import Lock as AsyncLock
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import WebSocket
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .sanitizer import sanitize_event_payload, summarize_code_for_event
 
@@ -24,11 +25,57 @@ if TYPE_CHECKING:
 
 ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
 ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
+BackendEventKind = Literal[
+    "turn_started",
+    "status",
+    "reasoning",
+    "tool_call",
+    "tool_result",
+    "sandbox_exec",
+    "rlm_delegate",
+    "warning",
+    "clarification",
+    "text",
+    "turn_completed",
+    "turn_failed",
+]
 ExecutionEventType = Literal[
     "execution_started",
     "execution_step",
     "execution_completed",
 ]
+
+
+class RuntimeEventContext(BaseModel):
+    """Stable runtime context attached to backend-emitted events."""
+
+    runtime_mode: str | None = None
+    execution_mode: str | None = None
+    execution_profile: str | None = None
+    sandbox_id: str | None = None
+    child_sandbox_id: str | None = None
+    volume_name: str | None = None
+    workspace_path: str | None = None
+    repo_url: str | None = None
+    repo_ref: str | None = None
+    document_path: str | None = None
+    depth: int | None = None
+    max_depth: int | None = None
+    actor_kind: ExecutionActorKind | None = None
+    actor_id: str | None = None
+    parent_id: str | None = None
+    lane_key: str | None = None
+    llm_call_budget: int | None = None
+
+
+class BackendEvent(BaseModel):
+    """Canonical backend event before projection to chat or workbench streams."""
+
+    kind: BackendEventKind
+    text: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    runtime: RuntimeEventContext | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ExecutionStep(BaseModel):
@@ -201,6 +248,8 @@ class ExecutionEventEmitter:
 from .step_builder import ExecutionStepBuilder  # noqa: E402
 
 __all__ = [
+    "BackendEvent",
+    "BackendEventKind",
     "ExecutionEvent",
     "ExecutionEventEmitter",
     "ExecutionActorKind",
@@ -209,6 +258,7 @@ __all__ = [
     "ExecutionStepBuilder",
     "ExecutionStepType",
     "ExecutionSubscription",
+    "RuntimeEventContext",
     "sanitize_event_payload",
     "summarize_code_for_event",
 ]

@@ -248,9 +248,13 @@ function appendReasoningEvent(
   label = "reasoning",
 ): ChatMessage[] {
   if (text.length === 0) return messages;
-  const runtimeContext = parseRuntimeContext(payload);
+  const runtimePayload = asRecord(payload?.runtime);
+  const runtimeContext = parseRuntimeContext(runtimePayload ?? payload);
   const resolvedLabel = asOptionalText(
-    payload?.reasoning_label ?? payload?.reasoningLabel ?? payload?.label,
+    payload?.reasoning_label ??
+      payload?.reasoningLabel ??
+      payload?.label ??
+      runtimePayload?.actor_kind,
   );
   return appendTracePart(
     messages,
@@ -553,8 +557,15 @@ function applyEvent(
         errored: false,
       };
     }
-    case "status": {
-      const sandboxPart = sandboxProgressPartFromStatus(payload);
+    case "turn_started":
+    case "status":
+    case "sandbox_exec":
+    case "rlm_delegate": {
+      const normalizedPayload =
+        kind === "turn_started"
+          ? { ...(payload ?? {}), phase: payload?.phase ?? "startup" }
+          : payload;
+      const sandboxPart = sandboxProgressPartFromStatus(normalizedPayload);
       if (sandboxPart) {
         return {
           messages: appendTracePart(messages, sandboxPart, text),
@@ -563,7 +574,12 @@ function applyEvent(
         };
       }
       return {
-        messages: appendStatusTrace(messages, text, inferStatusTone(text, payload), payload),
+        messages: appendStatusTrace(
+          messages,
+          text,
+          inferStatusTone(text, normalizedPayload),
+          normalizedPayload,
+        ),
         terminal: false,
         errored: false,
       };
@@ -821,7 +837,8 @@ function applyEvent(
       };
     }
     case "final":
-    case "done": {
+    case "done":
+    case "turn_completed": {
       // A "done" event with payload["cancelled"]=True marks a cancelled turn.
       if (payload && payload["cancelled"] === true) {
         let next = finishReasoning(messages);
@@ -856,6 +873,7 @@ function applyEvent(
       next = appendSystem(next, text || "Request cancelled.");
       return { messages: next, terminal: true, errored: false };
     }
+    case "turn_failed":
     case "error": {
       let next = finishReasoning(messages);
       next = finalizeTraceParts(next);

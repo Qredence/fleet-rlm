@@ -75,14 +75,13 @@ export const WorkspaceChatMessageItem = memo(function WorkspaceChatMessageItem({
                 partKey={`${message.id}-${part.kind}-${index}`}
               />
             ))}
-            {message.type === "assistant" && message.content ? (
+            {message.type === "assistant" && (message.content || message.streaming) ? (
               <div className="max-w-content rounded-bubble px-4 py-3.5 transition-colors md:px-5 md:py-4">
-                <MessageResponse>{message.content}</MessageResponse>
-              </div>
-            ) : null}
-            {message.type === "assistant" && message.streaming && !message.content ? (
-              <div className="max-w-content rounded-bubble border border-border-subtle/60 bg-card/60 px-4 py-3.5 md:px-5 md:py-4">
-                <ChatMessageLoadingState />
+                {message.content ? (
+                  <MessageResponse streaming={message.streaming}>{message.content}</MessageResponse>
+                ) : (
+                  <ChatMessageLoadingState />
+                )}
               </div>
             ) : null}
           </MessageContent>
