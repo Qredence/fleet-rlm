@@ -29,6 +29,7 @@ interface NavigationState {
   isCanvasOpen: boolean;
   setIsCanvasOpen: (open: boolean) => void;
   openCanvas: () => void;
+  openCanvasPanel: (panel: CanvasPanel) => void;
   closeCanvas: () => void;
   toggleCanvas: () => void;
   registerCanvasHandlers: (handlers: CanvasHandlers) => void;
@@ -74,6 +75,10 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   canvasPanel: "workspace",
   setCanvasPanel: (canvasPanel) => set({ canvasPanel }),
   openCanvas: () => canvasHandlers.open(),
+  openCanvasPanel: (canvasPanel) => {
+    set({ canvasPanel });
+    canvasHandlers.open();
+  },
   closeCanvas: () => canvasHandlers.close(),
   toggleCanvas: () => {
     if (get().isCanvasOpen) {

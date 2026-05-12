@@ -56,7 +56,7 @@ export interface WorkspaceUiState {
 }
 
 function openShellCanvas() {
-  useNavigationStore.getState().openCanvas();
+  useNavigationStore.getState().openCanvasPanel("workspace");
 }
 
 let _nextMemoryId = 0;

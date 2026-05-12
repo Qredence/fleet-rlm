@@ -15,7 +15,7 @@ const PANEL_BUTTONS: { id: CanvasPanel; label: string; icon: typeof Terminal }[]
 ];
 
 export function LayoutHeader() {
-  const { activeNav, isCanvasOpen, canvasPanel, setCanvasPanel, openCanvas } =
+  const { activeNav, isCanvasOpen, canvasPanel, openCanvasPanel } =
     useNavigationStore();
   const isMobile = useIsMobile();
 
@@ -32,10 +32,7 @@ export function LayoutHeader() {
     if (isCanvasOpen && canvasPanel === id) {
       return; // already showing this panel
     }
-    setCanvasPanel(id);
-    if (!isCanvasOpen) {
-      openCanvas();
-    }
+    openCanvasPanel(id);
   };
 
   return (

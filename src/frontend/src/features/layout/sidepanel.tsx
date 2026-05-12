@@ -7,8 +7,8 @@ import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { useNavigationStore } from "@/stores/navigation-store";
 import type { CanvasPanel } from "@/stores/navigation-types";
 import { VolumesCanvasPanel } from "@/features/volumes/volumes-canvas-panel";
-import { GraphCanvasPanel } from "@/features/workspace/screen/graph-canvas-panel";
 import {
+  GraphCanvasPanel,
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
 } from "@/features/workspace/screen/workspace-canvas-panel";
