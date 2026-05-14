@@ -282,8 +282,11 @@ def flush_mlflow_traces(*, terminate: bool = False) -> None:
     mlflow = _import_mlflow()
     if mlflow is None:
         return
+    flush_trace_async_logging = getattr(mlflow, "flush_trace_async_logging", None)
+    if not callable(flush_trace_async_logging):
+        return
     try:
-        mlflow.flush_trace_async_logging(terminate=terminate)
+        flush_trace_async_logging(terminate=terminate)
     except Exception:
         logger.warning("Failed to flush MLflow traces.", exc_info=True)
 

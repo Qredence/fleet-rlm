@@ -437,13 +437,9 @@ def _uses_local_host_checkout(child: Any) -> bool:
     repo_url = str(getattr(child, "repo_url", "") or "").strip()
     if repo_url:
         return False
-    volume_name = str(getattr(child, "volume_name", "") or "").strip()
-    if volume_name:
-        return False
-    session = getattr(child, "_session", None)
+    session = getattr(child, "_session", None) or getattr(child, "session", None)
     session_repo_url = str(getattr(session, "repo_url", "") or "").strip()
-    session_volume_name = str(getattr(session, "volume_name", "") or "").strip()
-    return not session_repo_url and not session_volume_name
+    return not session_repo_url
 
 
 def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:

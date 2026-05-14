@@ -312,11 +312,13 @@ def test_mlflow_request_context_finalizes_trace_state_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
+    flush_calls: list[bool] = []
     fake_mlflow = SimpleNamespace(
         get_current_active_span=object,
         get_active_trace_id=lambda: "trace-123",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-123",
+        flush_trace_async_logging=lambda terminate=False: flush_calls.append(terminate),
     )
 
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
@@ -328,17 +330,20 @@ def test_mlflow_request_context_finalizes_trace_state_on_success(
         pass
 
     assert calls[-1] == {"state": "OK", "tags": None}
+    assert flush_calls == [False]
 
 
 def test_mlflow_request_context_finalizes_trace_state_on_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
+    flush_calls: list[bool] = []
     fake_mlflow = SimpleNamespace(
         get_current_active_span=object,
         get_active_trace_id=lambda: "trace-123",
         update_current_trace=lambda **kwargs: calls.append(kwargs),
         get_last_active_trace_id=lambda thread_local=True: "trace-123",
+        flush_trace_async_logging=lambda terminate=False: flush_calls.append(terminate),
     )
 
     mlflow_integration._ACTIVE_CONFIG = MlflowConfig(enabled=True)
@@ -351,6 +356,7 @@ def test_mlflow_request_context_finalizes_trace_state_on_error(
             raise RuntimeError("boom")
 
     assert calls[-1] == {"state": "ERROR", "tags": None}
+    assert flush_calls == [False]
 
 
 def test_trace_result_metadata_recovers_trace_id_captured_on_worker_thread(

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import dspy
 from dspy.streaming import StreamListener, StreamResponse
@@ -613,11 +613,14 @@ class AgentRuntime:
                 extract_prediction = dspy.Prediction(response=fast_response)
             else:
                 t_extract_start = _time.monotonic()
-                stream_extract = dspy.streamify(
-                    react_program.extract.predict,
-                    stream_listeners=[StreamListener(signature_field_name="response")],
-                    include_final_prediction_in_output_stream=True,
-                    async_streaming=True,
+                stream_extract = cast(
+                    Callable[..., AsyncIterator[Any]],
+                    dspy.streamify(
+                        react_program.extract.predict,
+                        stream_listeners=[StreamListener(signature_field_name="response")],
+                        include_final_prediction_in_output_stream=True,
+                        async_streaming=True,
+                    ),
                 )
                 async for chunk in stream_extract(
                     **input_args,

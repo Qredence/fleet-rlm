@@ -592,11 +592,13 @@ class TestHistoryAccumulationAcrossTurns:
         runtime: AgentRuntime,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        tool = _FakeAsyncTool({
-            "status": "clarification_needed",
-            "question": "Which repository?",
-            "options": ["frontend", "backend"],
-        })
+        tool = _FakeAsyncTool(
+            {
+                "status": "clarification_needed",
+                "question": "Which repository?",
+                "options": ["frontend", "backend"],
+            }
+        )
         fake_react_program = _FakeStreamableReactProgram(
             planner_predictions=[
                 dspy.Prediction(

@@ -17,6 +17,18 @@ from fleet_rlm.runtime.agent.signatures import (
 from fleet_rlm.runtime.modules.evidence import EvidenceSink
 from fleet_rlm.runtime.modules.factory import create_runtime_rlm
 
+_MISSING_SOURCE_FAILURE_MARKERS = (
+    "codebase not available",
+    "codebase is not available",
+    "empty workspace",
+    "no source code available",
+    "not present in the sandbox",
+    "repository files are not present",
+    "repository is not present",
+    "repository is not cloned",
+    "source code is not available",
+    "workspace is empty",
+)
 _SUBQUERY_FAILURE_MARKERS = (
     "adapterparseerror",
     "broker server failed",
@@ -36,6 +48,7 @@ _SUBQUERY_FAILURE_MARKERS = (
     "unverified",
     "expected to find output fields",
     "verification blocked",
+    *_MISSING_SOURCE_FAILURE_MARKERS,
 )
 _SUBQUERY_FAILURE_REASONS = {
     "broker_unavailable",
@@ -210,6 +223,17 @@ class RecursiveWorkspaceModule(dspy.Module):
                     rationale=str(getattr(verification, "verification_rationale", "")),
                 ),
             )
+            if self._is_missing_source_failure(
+                user_request=user_request,
+                context=assembled_context,
+                failure_signals=failure_signals,
+            ):
+                return dspy.Prediction(
+                    answer=self._append_failure_signals(verified_summary, failure_signals),
+                    passes=pass_idx + 1,
+                    status="needs_human_review",
+                    missing=["current_source_evidence"],
+                )
             if failure_signals and status == "sufficient":
                 status = "needs_repair" if repair_count < self.max_repair_attempts else "needs_more_recursion"
                 verified_summary = self._append_failure_signals(verified_summary, failure_signals)
@@ -330,6 +354,34 @@ class RecursiveWorkspaceModule(dspy.Module):
         if len(stripped) >= 1_000 and "\n" in stripped:
             return True
         return False
+
+    def _is_source_analysis_request(self, *, user_request: str, context: str) -> bool:
+        """Return whether the request needs current repository/source evidence."""
+        text = f"{user_request}\n{context}".lower()
+        source_terms = (
+            "architecture",
+            "codebase",
+            "dependency graph",
+            "implementation",
+            "module organization",
+            "repository",
+            "source code",
+            "src/",
+            "tests/",
+        )
+        return any(term in text for term in source_terms)
+
+    def _is_missing_source_failure(
+        self,
+        *,
+        user_request: str,
+        context: str,
+        failure_signals: list[str],
+    ) -> bool:
+        """Return whether source-analysis should stop for human review."""
+        if not self._is_source_analysis_request(user_request=user_request, context=context):
+            return False
+        return any(marker in signal for signal in failure_signals for marker in _MISSING_SOURCE_FAILURE_MARKERS)
 
     def _call_with_fallback(self, module: dspy.Module, **kwargs) -> dspy.Prediction:
         """Call a sub-module, retrying with ChatAdapter if JSONAdapter fails to parse."""
@@ -518,6 +570,7 @@ class RecursiveWorkspaceModule(dspy.Module):
 
 __all__ = [
     "RecursiveWorkspaceModule",
+    "_MISSING_SOURCE_FAILURE_MARKERS",
     "_NON_SUFFICIENT_FAILURE_STATUSES",
     "_SUBQUERY_FAILURE_MARKERS",
     "_SUBQUERY_FAILURE_REASONS",
