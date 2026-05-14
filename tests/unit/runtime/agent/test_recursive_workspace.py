@@ -207,6 +207,58 @@ class TestForwardLoop:
         assert result.status == "needs_human_review"
         module._reflector.assert_called_once()
 
+    def test_degraded_child_answer_stops_for_human_review_without_repair(self) -> None:
+        module = _build_module(max_passes=3, max_repair_attempts=2)
+
+        module._assembler = MagicMock(
+            return_value=_mock_prediction(
+                assembled_context_summary="context with enough detail",
+                selected_memory_handles=[],
+                selected_evidence_ids=[],
+                omission_rationale="",
+            )
+        )
+        module._planner = MagicMock(
+            return_value=_mock_prediction(
+                subqueries=["q1"],
+                decomposition_mode="single_pass",
+                aggregation_plan="concat",
+                batching_strategy="serial",
+                decomposition_rationale="",
+            )
+        )
+        module._verifier = MagicMock(
+            return_value=_mock_prediction(
+                verification_status="sufficient",
+                verified_summary="verified summary",
+                missing_evidence=[],
+                contradictions=[],
+                verification_rationale="",
+            )
+        )
+        module._reflector = MagicMock()
+        module._repairer = MagicMock()
+        degraded_answer = json.dumps(
+            {
+                "status": "needs_human_review",
+                "answer": "usable but degraded",
+                "degraded": True,
+                "reason": "broker_unavailable",
+                "error": "Daytona broker unavailable during child RLM execution.",
+            }
+        )
+
+        with (
+            patch.object(module, "_execute_subqueries", return_value=[degraded_answer]),
+            patch.object(module, "_store_pass_evidence"),
+        ):
+            result = module(user_request="test question")
+
+        assert result.status == "needs_human_review"
+        assert "usable but degraded" in result.answer
+        module._reflector.assert_not_called()
+        module._repairer.assert_not_called()
+
     def test_needs_human_review_cannot_be_finalized_by_reflection(self) -> None:
         module = _build_module(max_passes=1, max_repair_attempts=0)
 
@@ -638,15 +690,17 @@ class TestHelpers:
         assert len(outputs) == 2
         assert all(o == "result" for o in outputs)
 
-    def test_execute_subqueries_serial_preserves_degraded_success(self) -> None:
+    def test_execute_subqueries_serial_preserves_degraded_answer_for_review(self) -> None:
         module = _build_module()
 
         with patch(
             "fleet_rlm.runtime.tools.rlm_delegate.delegate_to_rlm",
             return_value={
-                "status": "ok",
+                "status": "needs_human_review",
                 "answer": "usable answer",
                 "degraded": True,
+                "reason": "broker_unavailable",
+                "error": "Daytona broker unavailable during child RLM execution.",
                 "degradation_reason": "broker_unavailable",
                 "degradation_error": "Daytona broker unavailable during child RLM execution.",
             },
@@ -656,7 +710,7 @@ class TestHelpers:
         assert len(outputs) == 1
         payload = json.loads(outputs[0])
         assert payload == {
-            "status": "ok",
+            "status": "needs_human_review",
             "answer": "usable answer",
             "degraded": True,
             "reason": "broker_unavailable",
@@ -664,7 +718,9 @@ class TestHelpers:
         }
         assert module._classify_subquery_failures(outputs) == [
             "output[0]:broker_unavailable",
+            "output[0]:needs_human_review",
             "output[0]:reason=broker_unavailable",
+            "output[0]:status=needs_human_review",
         ]
 
     def test_execute_subqueries_fan_out(self) -> None:
@@ -684,31 +740,38 @@ class TestHelpers:
 
         assert outputs == ["a1", "a2"]
 
-    def test_execute_subqueries_fan_out_preserves_degraded_success(self) -> None:
+    def test_execute_subqueries_fan_out_preserves_degraded_answer_for_review(self) -> None:
         module = _build_module()
 
         with patch(
             "fleet_rlm.runtime.tools.rlm_delegate.delegate_to_rlm_batched",
             return_value={
-                "status": "ok",
+                "status": "needs_human_review",
                 "results": [
+                    {"answer": "clean answer"},
+                ],
+                "reviews": [
                     {
                         "answer": "usable answer",
                         "degraded": True,
+                        "status": "needs_human_review",
+                        "reason": "broker_unavailable",
+                        "error": "Daytona broker unavailable during child RLM execution.",
                         "degradation_reason": "broker_unavailable",
                         "degradation_error": "Daytona broker unavailable during child RLM execution.",
                     },
-                    {"answer": "clean answer"},
                 ],
             },
         ):
             outputs = module._execute_subqueries(["q1", "q2"], "ctx", "fan_out")
 
-        assert json.loads(outputs[0])["reason"] == "broker_unavailable"
-        assert outputs[1] == "clean answer"
+        assert outputs[0] == "clean answer"
+        assert json.loads(outputs[1])["reason"] == "broker_unavailable"
         assert module._classify_subquery_failures(outputs) == [
-            "output[0]:broker_unavailable",
-            "output[0]:reason=broker_unavailable",
+            "output[1]:broker_unavailable",
+            "output[1]:needs_human_review",
+            "output[1]:reason=broker_unavailable",
+            "output[1]:status=needs_human_review",
         ]
 
     def test_execute_subqueries_fan_out_preserves_structured_errors(self) -> None:

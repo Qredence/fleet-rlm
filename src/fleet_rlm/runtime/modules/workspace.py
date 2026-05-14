@@ -234,6 +234,18 @@ class RecursiveWorkspaceModule(dspy.Module):
                     status="needs_human_review",
                     missing=["current_source_evidence"],
                 )
+            if self._requires_human_review_for_failures(failure_signals):
+                review_summary = (
+                    latest_result
+                    if self._requires_human_review_for_subquery(failure_signals) and latest_result
+                    else verified_summary
+                )
+                return dspy.Prediction(
+                    answer=self._append_failure_signals(review_summary, failure_signals),
+                    passes=pass_idx + 1,
+                    status="needs_human_review",
+                    missing=list(getattr(verification, "missing_evidence", [])),
+                )
             if failure_signals and status == "sufficient":
                 status = "needs_repair" if repair_count < self.max_repair_attempts else "needs_more_recursion"
                 verified_summary = self._append_failure_signals(verified_summary, failure_signals)
@@ -407,15 +419,26 @@ class RecursiveWorkspaceModule(dspy.Module):
 
         if mode == "fan_out" and len(subqueries) > 1:
             result = delegate_to_rlm_batched(queries=subqueries, context=context, interpreter=self.interpreter)
-            if result.get("status") == "ok":
-                return [self._format_successful_subquery_output(r) for r in result.get("results", [])]
+            if result.get("status") in {"ok", "needs_human_review"}:
+                outputs = [self._format_successful_subquery_output(r) for r in result.get("results", [])]
+                outputs.extend(
+                    self._format_successful_subquery_output(
+                        {"status": "needs_human_review", "degraded": True, **r}
+                    )
+                    for r in result.get("reviews", [])
+                    if isinstance(r, dict)
+                )
+                return outputs
+            payload = {
+                "status": result.get("status", "error"),
+                "results": result.get("results", []),
+                "errors": result.get("errors", "execution failed"),
+            }
+            if result.get("reviews"):
+                payload["reviews"] = result.get("reviews", [])
             return [
                 json.dumps(
-                    {
-                        "status": result.get("status", "error"),
-                        "results": result.get("results", []),
-                        "errors": result.get("errors", "execution failed"),
-                    },
+                    payload,
                     ensure_ascii=False,
                     sort_keys=True,
                 )
@@ -424,7 +447,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         outputs: list[str] = []
         for query in subqueries:
             result = delegate_to_rlm(query=query, context=context, interpreter=self.interpreter)
-            if result.get("status") == "ok":
+            if result.get("status") in {"ok", "needs_human_review"}:
                 outputs.append(self._format_successful_subquery_output(result))
             else:
                 outputs.append(
@@ -448,11 +471,11 @@ class RecursiveWorkspaceModule(dspy.Module):
             return answer
         return json.dumps(
             {
-                "status": "ok",
+                "status": str(result.get("status", "ok")),
                 "answer": answer,
                 "degraded": True,
-                "reason": str(result.get("degradation_reason", "degraded")),
-                "error": str(result.get("degradation_error", "")),
+                "reason": str(result.get("reason", result.get("degradation_reason", "degraded"))),
+                "error": str(result.get("error", result.get("degradation_error", ""))),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -469,8 +492,8 @@ class RecursiveWorkspaceModule(dspy.Module):
             parsed = self._parse_subquery_output_json(text)
             if isinstance(parsed, dict):
                 status = str(parsed.get("status", "")).lower()
-                if status == "error":
-                    signals.append(f"output[{index}]:status=error")
+                if status == "error" or status in _NON_SUFFICIENT_FAILURE_STATUSES:
+                    signals.append(f"output[{index}]:status={status}")
                 if "error" in parsed and not status:
                     signals.append(f"output[{index}]:error")
                 self._collect_failure_reasons(parsed, index, signals)
@@ -497,11 +520,11 @@ class RecursiveWorkspaceModule(dspy.Module):
             if reason in _SUBQUERY_FAILURE_REASONS:
                 signals.append(f"output[{output_index}]:reason={reason}")
             status = str(value.get("status", "")).lower()
-            if status == "error":
-                signals.append(f"output[{output_index}]:status=error")
+            if status == "error" or status in _NON_SUFFICIENT_FAILURE_STATUSES:
+                signals.append(f"output[{output_index}]:status={status}")
             if "error" in value and not reason and status != "ok":
                 signals.append(f"output[{output_index}]:error")
-            for key in ("errors", "results"):
+            for key in ("errors", "results", "reviews"):
                 self._collect_failure_reasons(value.get(key), output_index, signals)
             return
         if isinstance(value, list):
@@ -530,6 +553,15 @@ class RecursiveWorkspaceModule(dspy.Module):
 
     def _merge_failure_signals(self, first: list[str], second: list[str]) -> list[str]:
         return sorted(dict.fromkeys([*first, *second]))
+
+    def _requires_human_review_for_failures(self, failure_signals: list[str]) -> bool:
+        return any("status=needs_human_review" in signal for signal in failure_signals)
+
+    def _requires_human_review_for_subquery(self, failure_signals: list[str]) -> bool:
+        return any(
+            signal.startswith("output[") and "status=needs_human_review" in signal
+            for signal in failure_signals
+        )
 
     def _append_failure_signals(self, summary: str, signals: list[str]) -> str:
         joined = ", ".join(signals)

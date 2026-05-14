@@ -587,6 +587,65 @@ class TestHistoryAccumulationAcrossTurns:
         assert tool.calls == [{"query": "test"}]
 
     @pytest.mark.asyncio
+    async def test_stream_turn_marks_degraded_delegate_result_for_human_review(
+        self,
+        runtime: AgentRuntime,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        tool = _FakeAsyncTool(
+            {
+                "status": "needs_human_review",
+                "answer": "Usable but degraded answer",
+                "degraded": True,
+                "reason": "broker_unavailable",
+                "error": "Daytona broker unavailable during child RLM execution.",
+                "degradation_reason": "broker_unavailable",
+                "degradation_error": "Daytona broker unavailable during child RLM execution.",
+                "duration_ms": 123,
+            }
+        )
+        fake_react_program = _FakeStreamableReactProgram(
+            planner_predictions=[
+                dspy.Prediction(
+                    next_thought="I should delegate this task.",
+                    next_tool_name="delegate_to_rlm",
+                    next_tool_args={"query": "test"},
+                ),
+                dspy.Prediction(
+                    next_thought="I have a degraded delegated result.",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                ),
+            ],
+            tools={"delegate_to_rlm": tool},
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
+            lambda _program: fake_react_program,
+        )
+
+        def _fake_streamify(*args: Any, **kwargs: Any):
+            _ = args, kwargs
+
+            async def _runner(**input_args: Any):
+                _ = input_args
+                yield StreamResponse("predict_response", "response", "Done", True)
+                yield dspy.Prediction(response="Done", reasoning="")
+
+            return _runner
+
+        monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.dspy.streamify", _fake_streamify)
+
+        events = [event async for event in runtime.aiter_chat_turn_stream("delegate this")]
+
+        done_payload = events[-1].payload
+        assert done_payload["human_review"]["required"] is True
+        assert done_payload["human_review"]["repair_mode"] == "needs_human_review"
+        assert done_payload["runtime_degraded"] is True
+        assert done_payload["runtime_failure_category"] == "recursive_child_degraded"
+        assert done_payload["runtime_failure_phase"] == "delegate_to_rlm"
+
+    @pytest.mark.asyncio
     async def test_stream_turn_preserves_clarification_events_from_final_trajectory(
         self,
         runtime: AgentRuntime,

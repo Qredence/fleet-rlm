@@ -8,7 +8,9 @@ This module provides:
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, cast
@@ -72,6 +74,52 @@ def _get_streamable_react_program(program: Any) -> Any | None:
 
 def _normalize_tool_args(tool_args: Any) -> dict[str, Any]:
     return dict(tool_args) if isinstance(tool_args, dict) else {}
+
+
+def _observation_record(observation: Any) -> dict[str, Any]:
+    if isinstance(observation, dict):
+        return observation
+    if not isinstance(observation, str):
+        return {}
+    stripped = observation.strip()
+    if not stripped:
+        return {}
+    for loader in (json.loads, ast.literal_eval):
+        try:
+            parsed = loader(stripped)
+        except (SyntaxError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _recursive_child_review_payload(tool_name: str, observation: Any) -> dict[str, Any] | None:
+    if tool_name not in {"delegate_to_rlm", "delegate_to_rlm_batched"}:
+        return None
+
+    record = _observation_record(observation)
+    if not record:
+        return None
+
+    status = str(record.get("status", "")).lower()
+    degraded = bool(record.get("degraded"))
+    reviews = record.get("reviews")
+    if status != "needs_human_review" and not degraded and not reviews:
+        return None
+
+    reason = (
+        str(record.get("reason") or record.get("degradation_reason") or "recursive_child_degraded")
+        .strip()
+        .replace("_", " ")
+    )
+    return {
+        "required": True,
+        "reason": f"Recursive child result needs review: {reason}.",
+        "repair_mode": "needs_human_review",
+        "repair_target": "Review degraded recursive child output before accepting the run.",
+        "repair_steps": ["Inspect the preserved child answer and degradation metadata."],
+    }
 
 
 async def _call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
@@ -530,6 +578,7 @@ class AgentRuntime:
         response_streamed = False
         final_reasoning = ""
         response = ""
+        recursive_child_review: dict[str, Any] | None = None
 
         try:
             max_iters = int(getattr(react_program, "max_iters", 1) or 1)
@@ -585,6 +634,8 @@ class AgentRuntime:
                     observation = f"Execution error in {tool_name}: {err}"
 
                 trajectory_raw[f"observation_{step_index}"] = observation
+                if recursive_child_review is None:
+                    recursive_child_review = _recursive_child_review_payload(tool_name, observation)
                 yield _build_tool_result_event(
                     tool_name=tool_name,
                     observation=observation,
@@ -680,6 +731,15 @@ class AgentRuntime:
             "trajectory": {"steps": trajectory},
             "history_turns": self.history_turns(),
         }
+        if recursive_child_review is not None:
+            done_payload.update(
+                {
+                    "human_review": recursive_child_review,
+                    "runtime_degraded": True,
+                    "runtime_failure_category": "recursive_child_degraded",
+                    "runtime_failure_phase": "delegate_to_rlm",
+                }
+            )
         if final_reasoning:
             done_payload["final_reasoning"] = final_reasoning
 

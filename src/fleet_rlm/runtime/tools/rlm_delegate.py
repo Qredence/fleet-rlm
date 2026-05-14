@@ -123,6 +123,7 @@ def delegate_to_rlm_batched(
 
     result_by_index: dict[int, dict[str, Any]] = {}
     error_by_index: dict[int, dict[str, Any]] = {}
+    review_by_index: dict[int, dict[str, Any]] = {}
 
     future_to_index = {
         _DELEGATE_EXECUTOR.submit(
@@ -150,16 +151,22 @@ def delegate_to_rlm_batched(
             child_result = {"status": "error", "error": str(exc)}
         child_result = cast(dict[str, Any], child_result)
 
-        if child_result.get("status") == "ok":
+        if child_result.get("status") == "ok" and not child_result.get("degraded"):
             success: dict[str, Any] = {
                 "query": query,
                 "answer": str(child_result.get("answer", "")),
             }
-            if child_result.get("degraded"):
-                success["degraded"] = True
-                success["degradation_reason"] = str(child_result.get("degradation_reason", ""))
-                success["degradation_error"] = str(child_result.get("degradation_error", ""))
             result_by_index[index] = success
+            continue
+
+        if child_result.get("status") == "needs_human_review" or child_result.get("degraded"):
+            review_by_index[index] = {
+                "index": index,
+                "query": query,
+                "answer": str(child_result.get("answer", "")),
+                "reason": str(child_result.get("reason", child_result.get("degradation_reason", "needs_human_review"))),
+                "error": str(child_result.get("error", child_result.get("degradation_error", ""))),
+            }
             continue
 
         error_by_index[index] = {
@@ -171,8 +178,14 @@ def delegate_to_rlm_batched(
 
     results = [result_by_index[index] for index in range(len(normalized_queries)) if index in result_by_index]
     errors = [error_by_index[index] for index in range(len(normalized_queries)) if index in error_by_index]
+    reviews = [review_by_index[index] for index in range(len(normalized_queries)) if index in review_by_index]
     if errors:
-        return {"status": "error", "results": results, "errors": errors}
+        payload: dict[str, Any] = {"status": "error", "results": results, "errors": errors}
+        if reviews:
+            payload["reviews"] = reviews
+        return payload
+    if reviews:
+        return {"status": "needs_human_review", "results": results, "reviews": reviews}
     return {"status": "ok", "results": results}
 
 
@@ -230,6 +243,12 @@ def _run_delegate_child(
             prediction,
             started_at,
         )
+        duration_ms = int((time.time() - started_at) * 1000)
+        metadata = getattr(child, "child_isolation_metadata", None)
+        if isinstance(metadata, dict):
+            metadata["child_duration_ms"] = duration_ms
+            metadata["max_iterations"] = max_iterations
+            metadata["iteration_pressure"] = max_iterations >= llm_budget
     except Exception as exc:
         logger.warning("delegate_to_rlm execution failed: %s", exc)
         return {"status": "error", "error": str(exc)}
@@ -250,17 +269,21 @@ def _run_delegate_child(
 
     failure = _delegate_failure(prediction=prediction, raw_answer=raw_answer)
     if failure is not None:
+        duration_ms = int((time.time() - started_at) * 1000)
         metadata = getattr(child, "child_isolation_metadata", None)
         if isinstance(metadata, dict):
             metadata["error_reason"] = failure["reason"]
         logger.warning("delegate_to_rlm: child failure detected: %s", failure)
         if failure["reason"] == "broker_unavailable" and answer.strip():
             return {
-                "status": "ok",
+                "status": "needs_human_review",
                 "answer": answer,
                 "degraded": True,
+                "reason": failure["reason"],
+                "error": failure["error"],
                 "degradation_reason": failure["reason"],
                 "degradation_error": failure["error"],
+                "duration_ms": duration_ms,
             }
         return {"status": "error", **failure}
 
