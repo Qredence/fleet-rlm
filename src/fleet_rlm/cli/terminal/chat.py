@@ -27,7 +27,7 @@ from fleet_rlm.runtime.config import (
 from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.runtime.schemas import TraceMode
 
-from .commands import _normalize_trace_mode, handle_slash_command
+from .commands import _normalize_trace_mode, _split_slash_command, handle_slash_command
 from .session_actions import (
     authorize_command as _authorize_command_impl,
 )
@@ -176,6 +176,18 @@ _COMMAND_SPECS: tuple[SlashCommandSpec, ...] = (
         help_text="Usage: /theme <dark|light|auto>\n\nSwitches the terminal color theme.\n  dark: bright text on dark background (default)\n  light: dark text on light background\n  auto: detect from COLORFGBG env variable",
     ),
     SlashCommandSpec("/?", "Show keyboard shortcuts", "core"),
+    SlashCommandSpec(
+        "/retry",
+        "Re-execute last message or command",
+        "core",
+        help_text="Usage: /retry\n\nRe-sends the last chat message or re-runs the last slash command.",
+    ),
+    SlashCommandSpec(
+        "/undo",
+        "Revert last reversible operation",
+        "core",
+        help_text="Usage: /undo\n\nReverts the last /trace or /theme change.\nOnly operations that push to the undo stack can be reverted.",
+    ),
 )
 
 _COMMAND_TEMPLATES: dict[str, str] = {
@@ -196,8 +208,8 @@ def run_terminal_chat(*, config: AppConfig, options: TerminalChatOptions) -> Non
 
 
 def _build_completer() -> _FleetCompleter:
-    """Build a fleet completer with command specs."""
-    specs = [(spec.name, spec.summary) for spec in _COMMAND_SPECS]
+    """Build a fleet completer with command specs including categories."""
+    specs = [(spec.name, spec.summary, spec.category) for spec in _COMMAND_SPECS]
     dispatch_names = list(COMMAND_DISPATCH.keys())
     return _FleetCompleter(command_specs=specs, command_dispatch_names=dispatch_names)
 
@@ -235,6 +247,9 @@ class _TerminalChatSession:
         self.command_permissions: dict[str, str] = {}
         self._live = None  # Set during streaming when Rich Live is active
         self._scroll_offset = 0  # Transcript scroll position (0 = tail)
+        self._last_user_message: str | None = None
+        self._last_command: tuple[str, str] | None = None
+        self._undo_stack: list[tuple[str, dict]] = []
 
         # Hydrate from persistent preferences
         self._preferences = load_preferences()
@@ -281,6 +296,10 @@ class _TerminalChatSession:
                 {
                     "prompt": "ansicyan bold",
                     "trace": "ansibrightblack",
+                    "completion-menu": "bg:#1a1a2e #e0e0e0",
+                    "completion-menu.completion.current": "bg:#2d7ff9 #ffffff",
+                    "completion-menu.meta": "bg:#1a1a2e #888888 italic",
+                    "completion-menu.meta.current": "bg:#2d7ff9 #cccccc italic",
                 }
             ),
         )
@@ -293,6 +312,11 @@ class _TerminalChatSession:
 
     def run(self) -> None:
         """Run the interactive prompt loop."""
+        import signal
+
+        if hasattr(signal, "SIGWINCH"):
+            signal.signal(signal.SIGWINCH, lambda *_: self._render_shell())
+
         planner_lm = get_planner_lm_from_env(model_name=self.config.agent.model)
         delegate_lm = get_delegate_lm_from_env(
             model_name=self.config.agent.delegate_model,
@@ -338,6 +362,9 @@ class _TerminalChatSession:
                 if not line:
                     continue
                 if line.startswith("/"):
+                    cmd, arg = _split_slash_command(line)
+                    if cmd not in ("/retry", "/undo"):
+                        self._last_command = (cmd, arg)
                     should_exit = handle_slash_command(self, agent, line)
                     if should_exit:
                         return
@@ -349,6 +376,7 @@ class _TerminalChatSession:
                     self._print_error("Planner LM not configured. Run /settings first.")
                     continue
 
+                self._last_user_message = line
                 try:
                     asyncio.run(self._run_chat_turn(agent, line))
                 except KeyboardInterrupt:
@@ -372,6 +400,8 @@ class _TerminalChatSession:
         self.last_status = "thinking..."
         token_since_render = 0
 
+        import os
+
         def _layout(draft: str = "") -> Any:
             return build_shell_layout(
                 session_id=self.session_id,
@@ -381,6 +411,9 @@ class _TerminalChatSession:
                 transcript=self.transcript,
                 is_processing=self.is_processing,
                 draft_assistant=draft,
+                console_width=self.console.size.width,
+                console_height=self.console.size.height,
+                in_tmux=bool(os.environ.get("TMUX")),
             )
 
         try:

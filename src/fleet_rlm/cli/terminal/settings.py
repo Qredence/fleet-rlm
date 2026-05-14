@@ -49,20 +49,155 @@ def run_settings(session: Any, section: str) -> None:
 
 
 def settings_llm(session: Any, *, model_only: bool) -> None:
-    """Configure LLM settings.
+    """Configure LLM settings via inline form with sequential fallback.
+
+    Attempts to display a prompt_toolkit Application-based form where all
+    fields are visible at once.  If that fails (e.g. non-interactive
+    environment), falls back to the sequential prompt flow.
 
     Args:
         session: The terminal chat session instance.
         model_only: If True, only configure the model name.
     """
     env_path = _resolve_env_path()
+    current_values = {
+        "DSPY_LM_MODEL": os.environ.get("DSPY_LM_MODEL", ""),
+        "DSPY_LLM_API_KEY": os.environ.get("DSPY_LLM_API_KEY", ""),
+        "DSPY_LM_API_BASE": os.environ.get("DSPY_LM_API_BASE", ""),
+        "DSPY_LM_MAX_TOKENS": os.environ.get("DSPY_LM_MAX_TOKENS", ""),
+    }
+
+    try:
+        updates = _build_settings_form(
+            current_values=current_values,
+            model_only=model_only,
+        )
+    except Exception:
+        updates = _sequential_settings_llm(
+            session,
+            current_values=current_values,
+            model_only=model_only,
+        )
+
+    if not updates:
+        session._print_warning("No changes made.")
+        return
+
+    from .commands import _confirm
+
+    if not _confirm(f"Write {len(updates)} update(s) to {env_path}?"):
+        session._print_warning("Settings update cancelled.")
+        return
+
+    _write_env_updates(env_path=env_path, updates=updates)
+    session.console.print(f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]")
+
+
+def _build_settings_form(
+    *,
+    current_values: dict[str, str],
+    model_only: bool,
+) -> dict[str, str] | None:
+    """Display an inline settings form using a prompt_toolkit Application.
+
+    All editable fields are shown at once.  The user can Tab between them,
+    press Ctrl+S to save, or Escape to cancel.
+
+    Args:
+        current_values: Current environment values to pre-fill.
+        model_only: If True, only show the model field.
+
+    Returns:
+        Dictionary of updated (non-empty) values, or ``None`` if cancelled.
+    """
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout.containers import HSplit, Window
+    from prompt_toolkit.layout.layout import Layout as PTLayout
+    from prompt_toolkit.widgets import Frame, Label, TextArea
+
+    fields: dict[str, TextArea] = {}
+
+    fields["DSPY_LM_MODEL"] = TextArea(
+        text=current_values.get("DSPY_LM_MODEL", ""),
+        height=1,
+        multiline=False,
+    )
+
+    if not model_only:
+        fields["DSPY_LLM_API_KEY"] = TextArea(
+            text="",  # Never pre-fill secrets
+            height=1,
+            multiline=False,
+        )
+        fields["DSPY_LM_API_BASE"] = TextArea(
+            text=current_values.get("DSPY_LM_API_BASE", ""),
+            height=1,
+            multiline=False,
+        )
+        fields["DSPY_LM_MAX_TOKENS"] = TextArea(
+            text=current_values.get("DSPY_LM_MAX_TOKENS", ""),
+            height=1,
+            multiline=False,
+        )
+
+    kb = KeyBindings()
+
+    @kb.add("escape")
+    def _cancel(event: Any) -> None:
+        event.app.exit(result=None)
+
+    @kb.add("c-s")
+    def _save(event: Any) -> None:
+        event.app.exit(result="save")
+
+    rows: list[HSplit | Window | Label] = []
+    for key, field in fields.items():
+        label_text = "API Key (hidden): " if "API_KEY" in key else f"{key}: "
+        rows.append(HSplit([Label(f" {label_text}"), field]))
+    rows.append(Window(height=1))
+    rows.append(Label(" Tab=next field  Ctrl+S=save  Esc=cancel"))
+
+    body = Frame(HSplit(rows), title="LLM Settings")
+
+    app: Application[str | None] = Application(
+        layout=PTLayout(body),
+        key_bindings=kb,
+        full_screen=False,
+    )
+
+    outcome = app.run()
+    if outcome == "save":
+        return {key: field.text.strip() for key, field in fields.items() if field.text.strip()}
+    return None
+
+
+def _sequential_settings_llm(
+    session: Any,
+    *,
+    current_values: dict[str, str],
+    model_only: bool,
+) -> dict[str, str] | None:
+    """Fallback: prompt for each value sequentially.
+
+    Used when the prompt_toolkit Application form cannot run (e.g. in a
+    non-interactive or headless environment).
+
+    Args:
+        session: The terminal chat session instance.
+        current_values: Current environment values to show as defaults.
+        model_only: If True, only prompt for the model name.
+
+    Returns:
+        Dictionary of updated (non-empty) values, or ``None`` if no changes.
+    """
     updates: dict[str, str] = {}
 
     session.console.print(Panel("Update LLM configuration in local .env", title="settings"))
 
     model_value = _prompt_value(
         key="DSPY_LM_MODEL",
-        default=os.environ.get("DSPY_LM_MODEL", ""),
+        default=current_values.get("DSPY_LM_MODEL", ""),
         secret=False,
     )
     if model_value:
@@ -79,7 +214,7 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
 
         api_base = _prompt_value(
             key="DSPY_LM_API_BASE",
-            default=os.environ.get("DSPY_LM_API_BASE", ""),
+            default=current_values.get("DSPY_LM_API_BASE", ""),
             secret=False,
         )
         if api_base:
@@ -87,24 +222,13 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
 
         max_tokens = _prompt_value(
             key="DSPY_LM_MAX_TOKENS",
-            default=os.environ.get("DSPY_LM_MAX_TOKENS", ""),
+            default=current_values.get("DSPY_LM_MAX_TOKENS", ""),
             secret=False,
         )
         if max_tokens:
             updates["DSPY_LM_MAX_TOKENS"] = max_tokens
 
-    if not updates:
-        session._print_warning("No changes made.")
-        return
-
-    from .commands import _confirm
-
-    if not _confirm(f"Write {len(updates)} update(s) to {env_path}?"):
-        session._print_warning("Settings update cancelled.")
-        return
-
-    _write_env_updates(env_path=env_path, updates=updates)
-    session.console.print(f"[green]Updated[/] {', '.join(sorted(updates))} in [bold]{env_path}[/]")
+    return updates or None
 
 
 def run_long_context(session: Any, arg_text: str) -> None:

@@ -32,6 +32,9 @@ class _FakeSession:
         self.trace_mode = "compact"
         self.command_permissions: dict[str, str] = {}
         self._preferences = _FakePreferences()
+        self._last_user_message: str | None = None
+        self._last_command: tuple[str, str] | None = None
+        self._undo_stack: list[tuple[str, dict]] = []
 
     def _print_banner(self, *, planner_ready: bool) -> None:
         self.events.append(("banner", planner_ready))
@@ -66,6 +69,9 @@ class _FakeSession:
 
     def _save_preferences(self) -> None:
         self.events.append(("save_preferences", None))
+
+    async def _run_chat_turn(self, agent, message):
+        self.events.append(("chat_turn", message))
 
 
 class _FakeAgent:

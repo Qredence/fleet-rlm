@@ -82,37 +82,35 @@ def render_shell(session: Any, *, draft_assistant: str = "") -> None:
     If the session has an active Live instance (_live), uses differential
     updates for flicker-free rendering. Otherwise falls back to clear+print.
     """
+    import os
+
     from .ui import build_shell_layout, get_theme
 
     prefs = getattr(session, "_preferences", None)
     theme = get_theme(prefs.theme) if prefs is not None else None
 
     scroll_offset = getattr(session, "_scroll_offset", 0)
+    console = session.console
+    width, height = console.size.width, console.size.height
+    in_tmux = bool(os.environ.get("TMUX"))
+
+    layout_kwargs = dict(
+        session_id=session.session_id,
+        model=session.config.agent.model,
+        trace_mode=session.trace_mode,
+        last_status=session.last_status,
+        transcript=session.transcript,
+        is_processing=session.is_processing,
+        draft_assistant=draft_assistant,
+        console_width=width,
+        console_height=height,
+        scroll_offset=scroll_offset,
+        in_tmux=in_tmux,
+        theme=theme,
+    )
 
     live = getattr(session, "_live", None)
     if live is not None and live.is_started:
-        layout = build_shell_layout(
-            session_id=session.session_id,
-            model=session.config.agent.model,
-            trace_mode=session.trace_mode,
-            last_status=session.last_status,
-            transcript=session.transcript,
-            is_processing=session.is_processing,
-            draft_assistant=draft_assistant,
-            scroll_offset=scroll_offset,
-            theme=theme,
-        )
-        live.update(layout)
+        live.update(build_shell_layout(**layout_kwargs))
     else:
-        _render_shell(
-            console=session.console,
-            session_id=session.session_id,
-            model=session.config.agent.model,
-            trace_mode=session.trace_mode,
-            last_status=session.last_status,
-            transcript=session.transcript,
-            is_processing=session.is_processing,
-            draft_assistant=draft_assistant,
-            scroll_offset=scroll_offset,
-            theme=theme,
-        )
+        _render_shell(console=console, **layout_kwargs)

@@ -149,6 +149,14 @@ def _show_help(session: Any, command_specs: Any, arg: str = "") -> None:
     session.console.print("\n[dim]Use /help <command> for detailed usage.[/]")
 
 
+def _push_undo(session: Any, operation: str, snapshot: dict) -> None:
+    """Push a reversible operation to the undo stack."""
+    stack = getattr(session, "_undo_stack", [])
+    stack.append((operation, snapshot))
+    if len(stack) > 10:
+        stack[:] = stack[-10:]
+
+
 def _run_session_action(
     action: str,
     session: Any,
@@ -185,6 +193,7 @@ def _run_session_action(
         if mode not in trace_modes:
             session._print_error("usage: /trace <compact|verbose|off>")
             return False
+        _push_undo(session, "trace", {"trace_mode": session.trace_mode})
         session.trace_mode = _normalize_trace_mode(mode)
         session._save_preferences()
         session.console.print(f"[green]Trace mode set to {session.trace_mode}[/]")
@@ -215,6 +224,7 @@ def _run_session_action(
         if theme_name not in valid_themes:
             session._print_error(f"usage: /theme <{'|'.join(valid_themes)}>")
             return False
+        _push_undo(session, "theme", {"theme": session._preferences.theme})
         if theme_name == "auto":
             from .ui import detect_terminal_theme
 
@@ -222,6 +232,38 @@ def _run_session_action(
         session._preferences.theme = theme_name
         session._save_preferences()
         session.console.print(f"[green]Theme set to {theme_name}[/]")
+        return False
+    if action == "retry":
+        last_msg = getattr(session, "_last_user_message", None)
+        last_cmd = getattr(session, "_last_command", None)
+        if last_msg:
+            session._append_transcript("status", f"Retrying: {last_msg[:60]}...")
+            try:
+                asyncio.run(session._run_chat_turn(agent, last_msg))
+            except Exception as exc:
+                session._print_error(str(exc))
+        elif last_cmd:
+            cmd, args = last_cmd
+            return handle_slash_command(session, agent, f"{cmd} {args}".strip())
+        else:
+            session._print_warning("Nothing to retry.")
+        return False
+    if action == "undo":
+        stack = getattr(session, "_undo_stack", [])
+        if not stack:
+            session._print_warning("Nothing to undo.")
+            return False
+        operation, snapshot = stack.pop()
+        if operation == "trace":
+            session.trace_mode = snapshot["trace_mode"]
+            session._save_preferences()
+            session.console.print(f"[green]Undone: trace mode restored to {session.trace_mode}[/]")
+        elif operation == "theme":
+            session._preferences.theme = snapshot["theme"]
+            session._save_preferences()
+            session.console.print(f"[green]Undone: theme restored to {snapshot['theme']}[/]")
+        else:
+            session._print_warning(f"Cannot undo '{operation}' — not reversible.")
         return False
     raise ValueError(f"Unknown session action: {action}")
 
@@ -330,6 +372,8 @@ _SESSION_COMMAND_ACTIONS: dict[str, str] = {
     "/permissions-reset": "permissions-reset",
     "/run-long-context": "run-long-context",
     "/theme": "theme",
+    "/retry": "retry",
+    "/undo": "undo",
 }
 
 

@@ -24,26 +24,32 @@ from rich.text import Text
 class _FleetCompleter(Completer):
     """Slash + file mention completer used by the chat composer.
 
-    This completer provides autocomplete for slash commands and file mentions
-    (using @ prefix) in the terminal chat interface.
+    Provides inline filter-as-you-type palette for slash commands and
+    file mentions (using @ prefix).
     """
 
     def __init__(
         self,
-        command_specs: list[tuple[str, str]],
+        command_specs: list[tuple[str, str]] | list[tuple[str, str, str]],
         command_dispatch_names: list[str] | None = None,
     ) -> None:
         """Initialize the completer.
 
         Args:
-            command_specs: List of (command_name, summary) tuples.
+            command_specs: List of (name, summary) or (name, summary, category) tuples.
             command_dispatch_names: List of command dispatch names for tool commands.
         """
         dispatch_names = command_dispatch_names or []
-        self._slash_entries: list[tuple[str, str]] = sorted(
-            command_specs + [(f"/{name}", "tool command") for name in sorted(dispatch_names)],
-            key=lambda item: item[0],
-        )
+        # Normalize to 3-tuples (name, summary, category)
+        normalized: list[tuple[str, str, str]] = []
+        for spec in command_specs:
+            if len(spec) == 3:
+                normalized.append((spec[0], spec[1], spec[2]))
+            else:
+                normalized.append((spec[0], spec[1], ""))
+        for name in sorted(dispatch_names):
+            normalized.append((f"/{name}", "tool command", "tools"))
+        self._slash_entries: list[tuple[str, str, str]] = sorted(normalized, key=lambda item: item[0])
 
     def get_completions(self, document: Any, complete_event: Any):
         """Generate completions for the current input."""
@@ -51,13 +57,15 @@ class _FleetCompleter(Completer):
 
         if text.startswith("/"):
             token = text.split(maxsplit=1)[0]
-            for command, summary in self._slash_entries:
-                if command.startswith(token):
+            for command, summary, category in self._slash_entries:
+                # Show ALL commands when token is just "/" (inline palette)
+                if token == "/" or command.startswith(token):
+                    meta = f"{summary}  [{category}]" if category else summary
                     yield Completion(
                         command,
                         start_position=-len(token),
                         display=command,
-                        display_meta=summary,
+                        display_meta=meta,
                     )
             if text.startswith("/settings "):
                 sub = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""
@@ -365,6 +373,56 @@ def _dialog_style() -> Style:
     )
 
 
+def _build_header(
+    *,
+    session_id: str,
+    model: str,
+    trace_mode: str,
+    last_status: str,
+    width: int,
+    styles: dict[str, str],
+) -> Panel | None:
+    """Build adaptive header panel based on terminal width."""
+    if width < 60:
+        return None
+    border = styles.get("header_border", "cyan")
+    if width < 80:
+        text = Text.from_markup(f"[bold]fleet[/]  [dim]model[/]={model}  [dim]status[/]={last_status}")
+    elif width < 100:
+        text = Text.from_markup(
+            f"[bold]fleet[/]  [dim]model[/]={model}  [dim]trace[/]={trace_mode}  [dim]status[/]={last_status}"
+        )
+    else:
+        text = Text.from_markup(
+            f"[bold]fleet[/]  [dim]session[/]={session_id}  "
+            f"[dim]model[/]={model}  [dim]trace[/]={trace_mode}  "
+            f"[dim]status[/]={last_status}"
+        )
+    return Panel(text, border_style=border, padding=(0, 1))
+
+
+def _build_footer(*, width: int, styles: dict[str, str]) -> Panel | None:
+    """Build adaptive footer panel based on terminal width."""
+    if width < 60:
+        return None
+    border = styles.get("panel_border", "bright_black")
+    if width < 80:
+        hint = "/ cmds  ? help  ^C stop"
+    else:
+        hint = "Enter=send • Shift+Enter=newline • /=command palette • Ctrl+C=interrupt • /help=commands"
+    return Panel(Text(hint, style=styles.get("hint", "dim")), border_style=border)
+
+
+def _header_size(width: int) -> int:
+    """Return header layout size (0 when hidden)."""
+    return 0 if width < 60 else 3
+
+
+def _footer_size(width: int) -> int:
+    """Return footer layout size (0 when hidden)."""
+    return 0 if width < 60 else 3
+
+
 def build_shell_layout(
     *,
     session_id: str,
@@ -374,36 +432,39 @@ def build_shell_layout(
     transcript: list[tuple[str, str]],
     is_processing: bool,
     draft_assistant: str = "",
-    viewport_height: int = 30,
+    console_width: int = 120,
+    console_height: int = 40,
     scroll_offset: int = 0,
+    in_tmux: bool = False,
     theme: dict[str, str] | None = None,
 ) -> Layout:
     """Build the shell UI layout as a renderable (no side effects).
 
-    Returns a Layout that can be passed to Live.update() for flicker-free rendering.
-
-    Args:
-        viewport_height: Number of transcript entries to show.
-        scroll_offset: How many entries back from the tail to scroll (0 = latest).
-        theme: Style mapping from :func:`get_theme`.  Falls back to the dark
-            theme when *None*.
+    Adapts header, footer, and viewport height based on terminal dimensions.
     """
     styles = theme or THEMES["dark"]
 
-    header = Panel(
-        Text.from_markup(
-            f"[bold]fleet[/]  "
-            f"[dim]session[/]={session_id}  "
-            f"[dim]model[/]={model}  "
-            f"[dim]trace[/]={trace_mode}  "
-            f"[dim]status[/]={last_status}"
-        ),
-        border_style=styles.get("header_border", "cyan"),
-        padding=(0, 1),
-    )
+    # Compute dynamic viewport height
+    h_size = _header_size(console_width)
+    f_size = _footer_size(console_width)
+    reserved = h_size + f_size + 2  # borders/margins
+    if in_tmux:
+        reserved += 2
+    viewport_height = max(5, console_height - reserved)
 
+    # Build adaptive header/footer
+    header = _build_header(
+        session_id=session_id,
+        model=model,
+        trace_mode=trace_mode,
+        last_status=last_status,
+        width=console_width,
+        styles=styles,
+    )
+    footer = _build_footer(width=console_width, styles=styles)
+
+    # Build transcript body
     body_text = Text()
-    # Apply scroll offset for transcript windowing
     if scroll_offset > 0:
         end_idx = len(transcript) - scroll_offset
         start_idx = max(0, end_idx - viewport_height)
@@ -430,15 +491,16 @@ def build_shell_layout(
         title="chat",
     )
 
-    hint = "Enter=send • Shift+Enter=newline • /=command palette • Ctrl+C=interrupt • /help=commands"
-    footer = Panel(Text(hint, style=styles.get("hint", "dim")), border_style=styles.get("panel_border", "bright_black"))
+    # Assemble layout dynamically
+    children = []
+    if header is not None:
+        children.append(Layout(header, size=3))
+    children.append(Layout(transcript_panel, ratio=1))
+    if footer is not None:
+        children.append(Layout(footer, size=3))
 
     layout = Layout()
-    layout.split_column(
-        Layout(header, size=3),
-        Layout(transcript_panel, ratio=1),
-        Layout(footer, size=3),
-    )
+    layout.split_column(*children)
     return layout
 
 
@@ -452,7 +514,10 @@ def _render_shell(
     transcript: list[tuple[str, str]],
     is_processing: bool,
     draft_assistant: str = "",
+    console_width: int = 120,
+    console_height: int = 40,
     scroll_offset: int = 0,
+    in_tmux: bool = False,
     theme: dict[str, str] | None = None,
 ) -> None:
     """Legacy render: clear + print. Used when Live is not active."""
@@ -464,7 +529,10 @@ def _render_shell(
         transcript=transcript,
         is_processing=is_processing,
         draft_assistant=draft_assistant,
+        console_width=console_width,
+        console_height=console_height,
         scroll_offset=scroll_offset,
+        in_tmux=in_tmux,
         theme=theme,
     )
     console.clear()
