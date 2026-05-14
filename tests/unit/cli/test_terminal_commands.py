@@ -18,12 +18,20 @@ class _FakeConsole:
         self._events.append(("console.clear", None))
 
 
+class _FakePreferences:
+    def __init__(self) -> None:
+        self.theme = "dark"
+        self.trace_mode = "compact"
+        self.command_permissions: dict[str, str] = {}
+
+
 class _FakeSession:
     def __init__(self) -> None:
         self.events: list[tuple[str, object]] = []
         self.console = _FakeConsole(self.events)
         self.trace_mode = "compact"
         self.command_permissions: dict[str, str] = {}
+        self._preferences = _FakePreferences()
 
     def _print_banner(self, *, planner_ready: bool) -> None:
         self.events.append(("banner", planner_ready))
@@ -55,6 +63,9 @@ class _FakeSession:
 
     def _print_result(self, result: object, *, title: str) -> None:
         self.events.append(("result", title))
+
+    def _save_preferences(self) -> None:
+        self.events.append(("save_preferences", None))
 
 
 class _FakeAgent:
@@ -91,9 +102,14 @@ def test_handle_slash_command_routes_session_registry_commands(monkeypatch):
     assert commands.handle_slash_command(session, agent, "/permissions") is False
     assert commands.handle_slash_command(session, agent, "/permissions-reset") is False
     assert commands.handle_slash_command(session, agent, "/run-long-context docs") is False
-    assert len(palette_calls) == 3
-    assert ("transcript", "status") in session.events
-    assert ("render", None) in session.events
+    # /help now uses _show_help instead of the palette; only / and /commands trigger it
+    assert len(palette_calls) == 2
+    # /? now prints a Rich Table via console.print instead of appending to transcript
+    from rich.table import Table
+
+    # /help renders a Rich Table (command reference) via console.print
+    help_tables = [val for key, val in session.events if key == "console.print" and isinstance(val, Table)]
+    assert len(help_tables) >= 2  # at least one from /help and one from /?
     assert ("console.print", "[dim]bye[/dim]") in session.events
     assert ("console.clear", None) in session.events
     assert ("banner", True) in session.events
@@ -202,3 +218,41 @@ def test_handle_slash_command_reports_unknown_command():
         "error",
         "Unknown command: /does-not-exist. Type /help for commands.",
     )
+
+
+def test_theme_command_sets_dark():
+    session = _FakeSession()
+    agent = _FakeAgent()
+
+    assert commands.handle_slash_command(session, agent, "/theme dark") is False
+    assert session._preferences.theme == "dark"
+    assert ("save_preferences", None) in session.events
+    assert ("console.print", "[green]Theme set to dark[/]") in session.events
+
+
+def test_theme_command_sets_light():
+    session = _FakeSession()
+    agent = _FakeAgent()
+
+    assert commands.handle_slash_command(session, agent, "/theme light") is False
+    assert session._preferences.theme == "light"
+    assert ("save_preferences", None) in session.events
+    assert ("console.print", "[green]Theme set to light[/]") in session.events
+
+
+def test_theme_command_auto_detects(monkeypatch):
+    session = _FakeSession()
+    agent = _FakeAgent()
+
+    monkeypatch.setenv("COLORFGBG", "0;15")
+    assert commands.handle_slash_command(session, agent, "/theme auto") is False
+    assert session._preferences.theme == "light"
+    assert ("save_preferences", None) in session.events
+
+
+def test_theme_command_invalid_shows_error():
+    session = _FakeSession()
+    agent = _FakeAgent()
+
+    assert commands.handle_slash_command(session, agent, "/theme neon") is False
+    assert ("error", "usage: /theme <dark|light|auto>") in session.events

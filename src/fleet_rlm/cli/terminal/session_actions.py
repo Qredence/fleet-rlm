@@ -120,8 +120,20 @@ def authorize_command(session: Any, *, command: str) -> bool:
 
 
 def show_shortcuts(session: Any) -> None:
-    session._append_transcript(
-        "status",
-        ("Shortcuts: / opens command palette - @ mentions files - Ctrl+C interrupts - /trace compact|verbose|off"),
-    )
-    session._render_shell()
+    """Display keyboard shortcuts as a formatted table."""
+    table = Table(title="Keyboard Shortcuts", border_style="dim", show_header=True, header_style="bold")
+    table.add_column("Key", style="bold cyan", width=14)
+    table.add_column("Action", style="white")
+
+    table.add_row("Enter", "Send message")
+    table.add_row("Ctrl+C", "Cancel current operation")
+    table.add_row("Ctrl+D", "Exit session")
+    table.add_row("Ctrl+L", "Clear screen")
+    table.add_row("PgUp / PgDn", "Scroll transcript history")
+    table.add_row("End", "Jump to latest messages")
+    table.add_row("/", "Command palette (autocomplete)")
+    table.add_row("@", "File mention (autocomplete)")
+    table.add_row("?", "Show this shortcuts table")
+    table.add_row("/exit", "Quit the session")
+
+    session.console.print(table)
