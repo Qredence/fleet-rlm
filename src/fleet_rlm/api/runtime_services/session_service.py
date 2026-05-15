@@ -89,6 +89,8 @@ async def _resolve_session_title(
                 title=derived_title,
             )
         except Exception:
+            # Best-effort title backfill: ignore persistence failures so title
+            # derivation does not fail the main request path.
             pass
     return derived_title
 
