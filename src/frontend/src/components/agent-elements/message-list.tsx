@@ -306,7 +306,7 @@ export const MessageList = memo(function MessageList({
     }
     if (el) {
       el.style.setProperty("--chat-container-height", `${el.clientHeight}px`);
-      const observer = new ResizeObserver((entries) => {
+      const observer = new window.ResizeObserver((entries) => {
         const height = entries[0]?.contentRect.height ?? 0;
         el.style.setProperty("--chat-container-height", `${height}px`);
       });
