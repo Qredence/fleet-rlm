@@ -42,7 +42,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     cfg.validate_startup_or_raise()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state = build_server_state(cfg)
         attach_server_state(app, state)
         try:
