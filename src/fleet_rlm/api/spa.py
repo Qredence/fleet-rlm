@@ -71,9 +71,9 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
     mount time.
     """
     # Safety: catching a misordered call early, before it masks real bugs.
-    assert any(getattr(r, "path", "").startswith("/api/") for r in app.routes), (
-        "mount_spa must be called after API routes are registered"
-    )
+    if not any(getattr(r, "path", "").startswith("/api/") for r in app.routes):
+        msg = "mount_spa must be called after API routes are registered"
+        raise RuntimeError(msg)
 
     assets_dir = ui_dir / "assets"
     if assets_dir.exists():

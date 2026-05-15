@@ -40,8 +40,16 @@ def _restore_dspy_callbacks(callbacks: list[Any]) -> None:
             raise
 
         settings_module = import_module("dspy.dsp.utils.settings")
-        with dspy.settings.lock:
-            settings_module.main_thread_config["callbacks"] = list(callbacks)
+        settings_lock = getattr(dspy.settings, "lock", None)
+        main_thread_config = getattr(settings_module, "main_thread_config", None)
+        if settings_lock is None or not isinstance(main_thread_config, dict):
+            msg = (
+                "Unable to restore DSPy callbacks after thread-owner RuntimeError; "
+                "dspy.dsp.utils.settings.main_thread_config is unavailable."
+            )
+            raise RuntimeError(msg) from exc
+        with settings_lock:
+            main_thread_config["callbacks"] = list(callbacks)
 
 
 def _enabled_config(*, optimization: bool = False) -> PostHogConfig:

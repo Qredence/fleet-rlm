@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
@@ -336,7 +338,8 @@ async def recover_stale_optimization_runs(state: ServerState) -> None:
                 recover_stale_optimization_runs as recover_local_stale_runs,
             )
 
-            recovered = await recover_local_stale_runs()
+            recovered_result = recover_local_stale_runs()
+            recovered = await recovered_result if inspect.isawaitable(recovered_result) else recovered_result
         if recovered:
             logger.info("Recovered %d stale optimization run(s) on startup", recovered)
     except Exception:

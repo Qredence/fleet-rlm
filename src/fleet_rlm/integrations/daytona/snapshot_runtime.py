@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import re
+import shlex
 from typing import Any
 
 from .async_compat import _await_if_needed, _run_async_compat
@@ -34,6 +36,7 @@ DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
 DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
+_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
 
 def _snapshot_summary(snapshot: Any) -> dict[str, Any]:
@@ -57,9 +60,15 @@ def build_base_snapshot_image(
         raise _daytona_import_error(exc) from exc
 
     packages_to_install = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
+    for package in packages_to_install:
+        if not package or not _PACKAGE_SPEC_PATTERN.fullmatch(package):
+            msg = f"Invalid package spec for snapshot image install: {package!r}"
+            raise ValueError(msg)
+
     image = DaytonaImage.base(base_image).run_commands("pip install uv")
     if packages_to_install:
-        image = image.run_commands(f"uv pip install --system {' '.join(packages_to_install)}")
+        install_command = shlex.join(["uv", "pip", "install", "--system", *packages_to_install])
+        image = image.run_commands(install_command)
     return image
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -58,3 +59,13 @@ def test_mount_spa_serves_client_routes_without_shadowing_api(tmp_path) -> None:
     assert static_file_response.status_code == 200
     assert static_file_response.text == "User-agent: *\n"
     assert missing_api_response.status_code == 404
+
+
+def test_mount_spa_requires_api_routes_registered(tmp_path) -> None:
+    ui_dir = tmp_path / "dist"
+    ui_dir.mkdir()
+    (ui_dir / "index.html").write_text("<html>fleet ui</html>", encoding="utf-8")
+
+    app = FastAPI()
+    with pytest.raises(RuntimeError, match="after API routes are registered"):
+        mount_spa(app, ui_dir)

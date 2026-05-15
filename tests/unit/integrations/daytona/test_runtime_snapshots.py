@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
 from fleet_rlm.integrations.daytona.snapshot_runtime import (
     abootstrap_snapshot,
@@ -134,6 +136,11 @@ def test_build_base_snapshot_image_accepts_custom_packages() -> None:
     assert "FROM python:3.13-slim" in dockerfile
     assert "requests" in dockerfile
     assert "dspy-ai" not in dockerfile
+
+
+def test_build_base_snapshot_image_rejects_unsafe_package_specs() -> None:
+    with pytest.raises(ValueError, match="Invalid package spec"):
+        build_base_snapshot_image(packages=["requests; echo hacked"])
 
 
 def test_fallback_to_declarative_image_uses_shared_builder() -> None:

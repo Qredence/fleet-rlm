@@ -24,6 +24,11 @@ from typing import Any, Callable, cast
 
 import typer
 
+from fleet_rlm.integrations.daytona.snapshot_runtime import (
+    DEFAULT_SNAPSHOT_BASE_IMAGE,
+    DEFAULT_SNAPSHOT_NAME,
+)
+
 from .commands import (
     optimize_command,
     serve_api_command,
@@ -147,12 +152,12 @@ def daytona_smoke(
 @app.command("daytona-snapshot")
 def daytona_snapshot(
     name: str = typer.Option(
-        "fleet-rlm-base",
+        DEFAULT_SNAPSHOT_NAME,
         "--name",
         help="Name of the reusable Daytona base snapshot to bootstrap.",
     ),
     base_image: str = typer.Option(
-        "python:3.12-slim",
+        DEFAULT_SNAPSHOT_BASE_IMAGE,
         "--base-image",
         help="Base OCI image used when creating or refreshing the snapshot.",
     ),
