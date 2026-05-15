@@ -2,6 +2,8 @@
 
 This project supports both automated and manual release workflows.
 
+The maintained helper-script inventory lives in [`../../scripts/README.md`](../../scripts/README.md). Release-specific validation helpers in that inventory are part of the supported workflow; removed scripts under `scripts/` are not.
+
 ## Automated Release (Recommended)
 
 Use the GitHub Actions workflow for a fully automated release:
@@ -38,7 +40,7 @@ Configure GitHub environments and OIDC trusted publishing:
    - Configure OIDC trusted publisher at https://pypi.org/manage/account/publishing/
    - Set workflow: `release.yml`, environment: `pypi`
 
-OIDC eliminates the need for API tokens - GitHub uses temporary credentials via OpenID Connect.
+OIDC eliminates the need for API tokens. GitHub uses temporary credentials via OpenID Connect.
 
 ## Manual Release
 
@@ -60,8 +62,7 @@ For the single-command local path, run:
 make release-check
 ```
 
-That target already runs the full validation lane, rebuilds and syncs packaged UI
-assets, builds the wheel/sdist, validates the packaged frontend, and runs `twine check`.
+That target already runs the full validation lane, rebuilds and syncs packaged UI assets, builds the wheel/sdist, validates the packaged frontend, and runs `twine check`.
 
 If you need to run the phases manually instead of using `make release-check`:
 
@@ -110,12 +111,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/fleet-rlm/json
 make release-artifacts
 ```
 
-`make release-artifacts` is the canonical manual packaging path. It rebuilds the
-frontend with `pnpm`, syncs packaged UI assets into `src/fleet_rlm/ui/dist`,
-builds the wheel/sdist, validates wheel asset integrity, and runs `twine check`.
-In source checkouts, `uv build` also triggers the frontend packaging hook from
-`setup.py`, but `make release-artifacts` remains the explicit end-to-end manual
-path because it synchronizes assets and validates the resulting artifacts.
+`make release-artifacts` is the canonical manual packaging path. It rebuilds the frontend with `pnpm`, syncs packaged UI assets into `src/fleet_rlm/ui/dist`, builds the wheel/sdist, validates wheel asset integrity, and runs `twine check`.
 
 Expected outputs:
 
@@ -187,9 +183,7 @@ uvx twine upload dist/*
 
 ## 6) Tag and document release
 
-Finalize `CHANGELOG.md` and any docs release-notes page before tagging or
-running the automated workflow. The GitHub release body is generated directly
-from the changelog section for the version being published.
+Finalize `CHANGELOG.md` and any docs release-notes page before tagging or running the automated workflow. The GitHub release body is generated directly from the changelog section for the version being published.
 
 ```bash
 # from repo root

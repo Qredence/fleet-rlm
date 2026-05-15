@@ -100,8 +100,13 @@ Sign and verify JWT tokens using the `DEV_JWT_SECRET`:
 
 **Example request:**
 ```bash
-# Generate a dev token (using python-jose or similar)
-TOKEN=$(python -c "import jwt; print(jwt.encode({'tid': 'tenant-123', 'oid': 'user-456'}, 'change-me', algorithm='HS256'))")
+# Generate a dev token from the maintained helper script
+TOKEN=$(uv run python scripts/dev_issue_token.py \
+  --tid tenant-123 \
+  --oid user-456 \
+  --email alice@example.com \
+  --name "Alice Smith" \
+  --secret change-me)
 
 curl -H "Authorization: Bearer $TOKEN" \
      http://localhost:8000/api/v1/auth/me

@@ -16,7 +16,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
 import {
   useWorkspaceLayoutHistory,
-  type Conversation,
 } from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
 import { parseIsoTimestamp } from "@/lib/date";
@@ -27,6 +26,7 @@ import {
   type SessionListItem,
   type SessionListParams,
 } from "@/lib/rlm-api/sessions";
+import { shouldPreferLocalHistory, sortConversationsByUpdatedAt } from "./history-source";
 import type { HistorySelection } from "./history-screen";
 
 const PAGE_SIZE = 20;
@@ -100,12 +100,6 @@ interface SessionListProps {
   onSelect: (session: HistorySelection | null) => void;
 }
 
-function sortConversations(conversations: Conversation[]) {
-  return [...conversations].sort(
-    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-  );
-}
-
 function sessionErrorDetail(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unknown error";
@@ -137,13 +131,17 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
   useResetOffset(deferredSearch, statusFilter, setOffset);
 
   const normalizedSearch = deferredSearch.trim().toLowerCase();
-  const localItems = sortConversations(localConversations).filter((conversation) => {
+  const localItems = sortConversationsByUpdatedAt(localConversations).filter((conversation) => {
     if (normalizedSearch && !conversation.title.toLowerCase().includes(normalizedSearch)) {
       return false;
     }
     return statusFilter !== "archived";
   });
+  const apiItems = sessionsQuery.data?.items ?? [];
+  const preferLocalHistory = shouldPreferLocalHistory(apiItems, localItems);
   const shouldUseLocalFallback =
+    preferLocalHistory ||
+    (sessionsQuery.isLoading && localItems.length > 0) ||
     (!sessionsQuery.data?.items.length && localItems.length > 0) ||
     (sessionsQuery.isError &&
       localItems.length > 0 &&

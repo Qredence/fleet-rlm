@@ -28,6 +28,13 @@ export interface paths {
      */
     get: operations["get_me_api_v1_auth_me_get"];
   };
+  "/api/v1/info": {
+    /**
+     * Service information
+     * @description Return a stable snapshot of build metadata and active feature flags for the running instance. Useful for operator introspection and client capability negotiation without tailing server logs.
+     */
+    get: operations["get_service_info_api_v1_info_get"];
+  };
   "/api/v1/sessions/state": {
     /**
      * List Session State
@@ -1573,6 +1580,74 @@ export interface components {
       total_pages?: number;
     };
     /**
+     * ServiceInfoResponse
+     * @description Service capability and configuration surface returned by ``GET /api/v1/info``.
+     *
+     * Provides a single, stable snapshot of build metadata and active feature
+     * flags so clients and operators can inspect the running instance without
+     * tailing logs or querying multiple endpoints.
+     */
+    ServiceInfoResponse: {
+      /**
+       * Version
+       * @description Package version currently serving the API.
+       * @default 0.5.3
+       */
+      version?: string;
+      /**
+       * App Env
+       * @description Active deployment environment.
+       * @enum {string}
+       */
+      app_env: "local" | "staging" | "production";
+      /**
+       * Auth Mode
+       * @description Authentication mode the server is running under.
+       * @enum {string}
+       */
+      auth_mode: "dev" | "entra";
+      /**
+       * Auth Required
+       * @description Whether authentication is enforced for all API requests.
+       */
+      auth_required: boolean;
+      /**
+       * Sandbox Provider
+       * @description Active sandbox backend selected for runtime execution.
+       */
+      sandbox_provider: string;
+      /**
+       * Database Enabled
+       * @description Whether a durable database backend is configured.
+       */
+      database_enabled: boolean;
+      /**
+       * Serve Ui
+       * @description Whether the bundled React frontend is being served by this instance.
+       */
+      serve_ui: boolean;
+      /**
+       * Expose Docs
+       * @description Whether the OpenAPI documentation UI (/docs, /redoc) is enabled.
+       */
+      expose_docs: boolean;
+      /**
+       * Agent Model
+       * @description Primary planner LM identifier when configured.
+       */
+      agent_model?: string | null;
+      /**
+       * Rlm Max Depth
+       * @description Maximum recursive RLM child delegation depth.
+       */
+      rlm_max_depth: number;
+      /**
+       * Rlm Max Iterations
+       * @description Maximum ReAct iterations per top-level run.
+       */
+      rlm_max_iterations: number;
+    };
+    /**
      * SessionDeleteResponse
      * @description Result payload after archiving a session.
      */
@@ -2291,6 +2366,28 @@ export interface operations {
         content: never;
       };
       /** @description Authentication or repository services are not configured yet. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Service information
+   * @description Return a stable snapshot of build metadata and active feature flags for the running instance. Useful for operator introspection and client capability negotiation without tailing server logs.
+   */
+  get_service_info_api_v1_info_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ServiceInfoResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Service configuration is unavailable because server startup is incomplete. */
       503: {
         content: never;
       };

@@ -9,7 +9,7 @@ let plugins: Plugins = { cjk, code, math };
 const listeners = new Set<() => void>();
 
 // Kick off mermaid load immediately — non-blocking, splits it from the main chunk.
-// All MessageResponse/ReasoningContent instances re-render once when it resolves.
+// Streamdown-based surfaces re-render once when it resolves.
 import("@streamdown/mermaid").then(({ mermaid }) => {
   plugins = { ...plugins, mermaid };
   listeners.forEach((fn) => fn());

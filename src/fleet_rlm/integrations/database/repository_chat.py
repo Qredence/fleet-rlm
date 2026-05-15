@@ -6,10 +6,12 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
+
+from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 from .models_enums import (
     ArtifactKind,
@@ -37,6 +39,14 @@ from .repository_shared import (
     _count_from_stmt,
     _utc_now,
 )
+
+
+def _session_external_id(metadata: object) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    metadata_dict = cast(dict[str, object], metadata)
+    value = metadata_dict.get("external_session_id")
+    return value if isinstance(value, str) and value else None
 
 
 @dataclass(frozen=True)
@@ -251,6 +261,11 @@ class ChatRepository(RepositoryContextMixin):
             session_row.monotonic_turn_counter = next_turn_index + 1
             session_row.last_activity_at = _utc_now()
             session_row.updated_at = _utc_now()
+            if next_turn_index == 0 and is_placeholder_session_title(
+                session_row.title,
+                external_session_id=_session_external_id(session_row.metadata_json),
+            ):
+                session_row.title = derive_session_title(request.user_message)
 
             stmt = (
                 insert(ChatTurn)

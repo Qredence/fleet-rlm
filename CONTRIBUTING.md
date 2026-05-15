@@ -36,7 +36,7 @@ This project adheres to a code of conduct that all contributors are expected to 
 - `uv` package manager (see [UV Docs](https://docs.astral.sh/uv/))
 - `pnpm` (for frontend development, see [pnpm Docs](https://pnpm.io/))
 - Git
-- A Modal account (for sandbox execution)
+- A Daytona account (for sandbox execution)
 
 ### Initial Setup
 
@@ -157,7 +157,7 @@ def my_function(param1: str, param2: int) -> dict[str, str]:
 - **Package Structure**: All source code under `src/fleet_rlm/`
 - **Testing**: Tests in `tests/` mirroring the source structure
 - **Environment Config**: Use `.env` for local development, never commit it
-- **Secrets**: Use Modal secrets for API keys, never hardcode them
+- **Secrets**: Use local `.env` files or your deployment secret manager for API keys, never hardcode them
 
 ---
 
@@ -223,6 +223,7 @@ def test_env_loading_with_quotes(monkeypatch):
 - Update docs in the same PR when behavior changes
 - Keep `docs/index.md` and Diataxis section indexes aligned with active docs
 - Historical docs are preserved under `plans/archive/docs-legacy/` and are not active runbooks
+- Keep `scripts/README.md` aligned with the retained helper-script surface
 
 ---
 
@@ -383,7 +384,7 @@ export DAYTONA_API_URL="https://app.daytona.io/api"
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 ```
 
-For package publication workflow (TestPyPI then PyPI), see [RELEASING.md](scripts/RELEASING.md).
+For package publication workflow (TestPyPI then PyPI), see [Releasing](docs/how-to-guides/releasing.md).
 
 ---
 

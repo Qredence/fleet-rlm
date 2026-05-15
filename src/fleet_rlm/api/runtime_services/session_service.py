@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
+from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 from ..schemas.optimization import DatasetResponse
 from ..schemas.sessions import (
@@ -51,6 +52,45 @@ def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
         assistant_message=turn.assistant_message,
         created_at=turn.created_at.isoformat(),
     )
+
+
+async def _resolve_session_title(
+    *,
+    persistence: Any,
+    session: Any,
+    persisted_identity: IdentityUpsertResult,
+) -> str:
+    title = optional_string(getattr(session, "title", None))
+    external_id = session_external_id(getattr(session, "metadata_json", None))
+    fallback = title or external_id or str(getattr(session, "id", "unknown"))
+    if title and not is_placeholder_session_title(title, external_session_id=external_id):
+        return title
+
+    turns, _turn_count = await persistence.list_chat_turns(
+        tenant_id=persisted_identity.tenant_id,
+        session_id=session.id,
+        user_id=persisted_identity.user_id,
+        workspace_id=persisted_identity.workspace_id,
+        limit=1,
+        offset=0,
+    )
+    first_turn = turns[0] if turns else None
+    if first_turn is None:
+        return fallback
+
+    derived_title = derive_session_title(first_turn.user_message, fallback=fallback)
+    if title != derived_title and is_placeholder_session_title(title, external_session_id=external_id):
+        try:
+            await persistence.update_chat_session(
+                tenant_id=persisted_identity.tenant_id,
+                session_id=session.id,
+                user_id=persisted_identity.user_id,
+                workspace_id=persisted_identity.workspace_id,
+                title=derived_title,
+            )
+        except Exception:
+            pass
+    return derived_title
 
 
 async def _load_turns_for_export(
@@ -188,18 +228,28 @@ class SessionService:
             limit=limit,
             offset=offset,
         )
+        resolved_titles = await asyncio.gather(
+            *[
+                _resolve_session_title(
+                    persistence=self._persistence,
+                    session=session,
+                    persisted_identity=persisted_identity,
+                )
+                for session in items
+            ]
+        )
         return SessionListResponse(
             items=[
                 SessionListItem(
                     id=str(s.id),
-                    title=s.title,
+                    title=resolved_titles[index],
                     status=s.status.value if hasattr(s.status, "value") else str(s.status),
                     model_name=s.model_name,
                     external_session_id=session_external_id(getattr(s, "metadata_json", None)),
                     created_at=s.created_at.isoformat(),
                     updated_at=s.updated_at.isoformat(),
                 )
-                for s in items
+                for index, s in enumerate(items)
             ],
             total=total,
             offset=offset,
@@ -232,9 +282,14 @@ class SessionService:
             limit=_TURN_COUNT_QUERY_LIMIT,
             offset=0,
         )
+        resolved_title = await _resolve_session_title(
+            persistence=self._persistence,
+            session=session,
+            persisted_identity=persisted_identity,
+        )
         return SessionDetailResponse(
             id=str(session.id),
-            title=session.title,
+            title=resolved_title,
             status=session.status.value if hasattr(session.status, "value") else str(session.status),
             model_name=session.model_name,
             external_session_id=session_external_id(getattr(session, "metadata_json", None)),

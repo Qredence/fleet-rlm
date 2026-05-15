@@ -9,7 +9,7 @@ tenant + workspace scoped, and all new primary keys are generated with `app.uuid
 | Component | Location |
 | --- | --- |
 | Engine and session lifecycle | `src/fleet_rlm/integrations/database/engine.py` |
-| Repository boundary | `src/fleet_rlm/integrations/database/repository.py` |
+| Repository boundary | `src/fleet_rlm/integrations/database/fleet_repository.py` |
 | Shared repository context helpers | `src/fleet_rlm/integrations/database/repository_shared.py` |
 | SQLAlchemy models | `src/fleet_rlm/integrations/database/models_*.py` |
 | Typed request DTOs | `src/fleet_rlm/integrations/database/types.py` |
@@ -107,6 +107,12 @@ auto-resolve a default workspace when callers provide only `tenant_id`.
 # Apply migrations
 DATABASE_ADMIN_URL=postgresql://... uv run alembic upgrade head
 
+# Apply migrations through the maintained helper script
+DATABASE_ADMIN_URL=postgresql://... uv run python scripts/db_init.py
+
+# Run a repository-level Postgres smoke workflow against a disposable database
+DATABASE_URL=postgresql://... uv run python scripts/db_smoke.py
+
 # Generate/validate OpenAPI after persistence-facing API changes
 uv run python scripts/openapi_tools.py generate
 uv run python scripts/openapi_tools.py validate
@@ -120,3 +126,4 @@ uv run pytest -q tests/integration/test_db_migrations.py tests/integration/test_
 - SQLite sidecar persistence remains available only for local legacy/import workflows; Postgres is the source of truth for durable product state.
 - Large file bytes remain in Daytona volumes/object storage; Postgres stores metadata and linkable indexes.
 - Neon guidance for this repo is: pooled URL for runtime traffic, direct non-pooler URL for migrations/admin work, and disposable branches for destructive validation before touching long-lived branches.
+- The maintained helper-script inventory for DB and operator workflows lives in [`../../scripts/README.md`](../../scripts/README.md).

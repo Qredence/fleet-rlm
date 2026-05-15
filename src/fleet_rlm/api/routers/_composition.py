@@ -20,6 +20,7 @@ def build_api_router() -> APIRouter:
     """
     from . import (
         auth,
+        info,
         memory,
         optimization,
         runs,
@@ -34,6 +35,7 @@ def build_api_router() -> APIRouter:
 
     for route_group in (
         auth.router,
+        info.router,
         ws.router,
         sessions.router,
         runtime.router,

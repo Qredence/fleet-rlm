@@ -10,6 +10,7 @@ Task-oriented guides for operating `fleet-rlm` in day-to-day usage.
 - [Testing Strategy](testing-strategy.md) - Pytest markers, test organization, and commands
 - [Runtime Settings](runtime-settings.md)
 - [MLflow Tracing, Feedback, Eval, and Optimization](mlflow-workflows.md)
+- [Releasing to PyPI](releasing.md) - Automated and manual package publication workflow
 
 ## DSPy Integration
 

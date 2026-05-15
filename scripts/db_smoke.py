@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -35,10 +37,46 @@ from fleet_rlm.integrations.database.repository_memory import (
 )
 
 
-async def _run() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run a repository-level Postgres smoke workflow")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help="Optional dotenv file to load before resolving database settings",
+    )
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="Optional explicit database URL override. Defaults to DATABASE_URL then DATABASE_ADMIN_URL.",
+    )
+    parser.add_argument(
+        "--tenant-claim",
+        default=os.getenv("SMOKE_TID", "00000000-0000-0000-0000-000000000123"),
+        help="Tenant claim used for the synthetic identity row",
+    )
+    parser.add_argument(
+        "--user-claim",
+        default=os.getenv("SMOKE_OID", "00000000-0000-0000-0000-000000000456"),
+        help="User claim used for the synthetic identity row",
+    )
+    parser.add_argument(
+        "--email",
+        default="smoke@example.com",
+        help="Email recorded on the synthetic identity row",
+    )
+    parser.add_argument(
+        "--full-name",
+        default="Smoke User",
+        help="Full name recorded on the synthetic identity row",
+    )
+    return parser
+
+
+async def _run(args: argparse.Namespace) -> None:
     # Match the server's runtime contract: use the pooled runtime URL first and
     # only fall back to the admin URL when a dedicated runtime URL is unavailable.
-    database_url = select_database_url(
+    database_url = args.database_url or select_database_url(
         runtime_url=os.getenv("DATABASE_URL"),
         admin_url=os.getenv("DATABASE_ADMIN_URL"),
     )
@@ -48,14 +86,11 @@ async def _run() -> None:
     db = DatabaseManager(database_url)
     repo = FleetRepository(db)
 
-    tenant_claim = os.getenv("SMOKE_TID", "00000000-0000-0000-0000-000000000123")
-    user_claim = os.getenv("SMOKE_OID", "00000000-0000-0000-0000-000000000456")
-
     identity = await repo.upsert_identity(
-        entra_tenant_id=tenant_claim,
-        entra_user_id=user_claim,
-        email="smoke@example.com",
-        full_name="Smoke User",
+        entra_tenant_id=args.tenant_claim,
+        entra_user_id=args.user_claim,
+        email=args.email,
+        full_name=args.full_name,
     )
 
     external_run_id = f"smoke:{uuid.uuid4()}"
@@ -143,10 +178,15 @@ async def _run() -> None:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     repo_root = Path(__file__).resolve().parents[1]
-    load_dotenv(repo_root / ".env", override=False)
-    asyncio.run(_run())
+    load_dotenv(args.env_file or repo_root / ".env", override=False)
+    try:
+        asyncio.run(_run(args))
+    except Exception as exc:
+        print(f"DB smoke failed: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
