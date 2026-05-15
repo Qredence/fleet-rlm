@@ -6,10 +6,12 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
+
+from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 from .models_enums import (
     ArtifactKind,
@@ -37,6 +39,14 @@ from .repository_shared import (
     _count_from_stmt,
     _utc_now,
 )
+
+
+def _session_external_id(metadata: object) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    metadata_dict = cast(dict[str, object], metadata)
+    value = metadata_dict.get("external_session_id")
+    return value if isinstance(value, str) and value else None
 
 
 @dataclass(frozen=True)
@@ -251,6 +261,11 @@ class ChatRepository(RepositoryContextMixin):
             session_row.monotonic_turn_counter = next_turn_index + 1
             session_row.last_activity_at = _utc_now()
             session_row.updated_at = _utc_now()
+            if next_turn_index == 0 and is_placeholder_session_title(
+                session_row.title,
+                external_session_id=_session_external_id(session_row.metadata_json),
+            ):
+                session_row.title = derive_session_title(request.user_message)
 
             stmt = (
                 insert(ChatTurn)
@@ -374,6 +389,40 @@ class ChatRepository(RepositoryContextMixin):
                 items_stmt = items_stmt.limit(limit)
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
+
+    async def list_first_chat_turn_messages_for_sessions(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_ids: Sequence[uuid.UUID],
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> dict[uuid.UUID, str]:
+        """Return the first user message for each requested session in one query."""
+        if not session_ids:
+            return {}
+
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            ranked_turns = select(
+                ChatTurn.session_id.label("session_id"),
+                ChatTurn.user_message.label("user_message"),
+                func.row_number()
+                .over(partition_by=ChatTurn.session_id, order_by=ChatTurn.turn_index.asc())
+                .label("turn_rank"),
+            ).where(
+                and_(
+                    ChatTurn.tenant_id == tenant_id,
+                    ChatTurn.session_id.in_(session_ids),
+                )
+            )
+            if workspace_id is not None:
+                ranked_turns = ranked_turns.where(ChatTurn.workspace_id == workspace_id)
+
+            first_turns = ranked_turns.subquery()
+            stmt = select(first_turns.c.session_id, first_turns.c.user_message).where(first_turns.c.turn_rank == 1)
+            rows = await session.execute(stmt)
+            return {session_id: user_message for session_id, user_message in rows.all()}
 
     async def update_chat_session(
         self,

@@ -255,6 +255,13 @@ When backend request/response shapes or OpenAPI-facing metadata change:
 2. Sync frontend artifacts: `cd src/frontend && pnpm run api:sync`
 3. Verify no drift: `pnpm run api:check`
 
+## Script Support Boundary
+
+- `scripts/README.md` is the canonical inventory of retained helper scripts.
+- Keep common daily workflows on `make`, `fleet`, and `fleet-rlm` instead of adding wrapper scripts.
+- Retained Python helpers must support `uv run python scripts/<name>.py --help` without performing work.
+- If a helper is not tied to current code, tests, CI, docs, or `scripts/README.md`, delete it instead of preserving it as historical drift.
+
 ## Runtime Contract
 
 The shared backend/frontend runtime contract is **Daytona-only**:

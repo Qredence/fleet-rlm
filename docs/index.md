@@ -21,6 +21,7 @@ Read these after you've seen the product:
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Frontend Simplification Design](specs/frontend-simplification-design.md)**
+- **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow
 
 ## Current Product Surfaces
 

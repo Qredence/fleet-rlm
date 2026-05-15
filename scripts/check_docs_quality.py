@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import functools
 import re
 import subprocess
@@ -189,9 +190,33 @@ def run_checks(repo_root: Path, *, include_contract_checks: bool = True) -> list
     return errors
 
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parents[1]
-    errors = run_checks(repo_root, include_contract_checks=True)
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for docs quality checks.
+
+    Returns an ArgumentParser with no required parameters that validates
+    documentation links, orphan detection, and contract sanity. Supports
+    --repo-root for custom repository location and --skip-contract-checks
+    to skip CLI/OpenAPI validation.
+    """
+    parser = argparse.ArgumentParser(description="Run quality checks against active docs/")
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="Repository root containing docs/ and generated contracts",
+    )
+    parser.add_argument(
+        "--skip-contract-checks",
+        action="store_true",
+        help="Skip CLI/OpenAPI contract checks and only validate docs graph and links",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    repo_root = args.repo_root.resolve()
+    errors = run_checks(repo_root, include_contract_checks=not args.skip_contract_checks)
 
     if errors:
         print("ERROR: docs quality checks failed:")

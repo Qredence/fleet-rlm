@@ -55,6 +55,7 @@ from fleet_rlm.quality.module_registry import (
     ModuleOptimizationSpec,
     register_module,
 )
+from fleet_rlm.utils.session_titles import derive_session_title
 
 pytestmark = pytest.mark.db
 
@@ -229,6 +230,125 @@ async def test_repository_chat_session_and_turn_flow(repository: FleetRepository
             persisted = await session.get(type(chat_session), chat_session.id)
     assert persisted is not None
     assert persisted.monotonic_turn_counter == 2
+
+
+@pytest.mark.asyncio
+async def test_repository_chat_turn_derives_human_title_from_first_message(repository: FleetRepository) -> None:
+    """Verify a chat session title is derived from the first user message."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{uuid.uuid4()}",
+        entra_user_id=f"user-{uuid.uuid4()}",
+        email="history-title@example.com",
+        full_name="History Title User",
+    )
+    assert identity.workspace_id is not None
+
+    external_session_id = str(uuid.uuid4())
+    chat_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=external_session_id,
+            active_manifest_path="meta/workspaces/default/history-title.json",
+            metadata_json={"external_session_id": external_session_id},
+        )
+    )
+
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=chat_session.id,
+            user_id=identity.user_id,
+            user_message="Please investigate why the history screen shows session UUIDs instead of conversations",
+            assistant_message="I will investigate that.",
+        )
+    )
+
+    updated_session = await repository.get_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=chat_session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+
+    assert updated_session is not None
+    assert updated_session.title == derive_session_title(
+        "Please investigate why the history screen shows session UUIDs instead of conversations"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_lists_first_chat_turn_messages_for_sessions(repository: FleetRepository) -> None:
+    """Verify first-turn lookup returns one opening prompt per requested session."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{uuid.uuid4()}",
+        entra_user_id=f"user-{uuid.uuid4()}",
+        email="history-batch@example.com",
+        full_name="History Batch User",
+    )
+    assert identity.workspace_id is not None
+
+    first_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title="Chat session",
+        )
+    )
+    second_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title="Chat session",
+        )
+    )
+
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=first_session.id,
+            user_id=identity.user_id,
+            user_message="First session opening prompt",
+            assistant_message="A",
+        )
+    )
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=first_session.id,
+            user_id=identity.user_id,
+            user_message="First session follow-up prompt",
+            assistant_message="B",
+        )
+    )
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=second_session.id,
+            user_id=identity.user_id,
+            user_message="Second session opening prompt",
+            assistant_message="C",
+        )
+    )
+
+    first_turn_messages = await repository.list_first_chat_turn_messages_for_sessions(
+        tenant_id=identity.tenant_id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        session_ids=[first_session.id, second_session.id],
+    )
+
+    assert first_turn_messages == {
+        first_session.id: "First session opening prompt",
+        second_session.id: "Second session opening prompt",
+    }
 
 
 @pytest.mark.asyncio

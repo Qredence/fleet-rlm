@@ -248,6 +248,17 @@ uv run python scripts/openapi_tools.py generate
 cd src/frontend && pnpm run api:check
 ```
 
+### Inspect the Maintained Helper Scripts
+
+The supported helper-script inventory lives in [`../scripts/README.md`](../../scripts/README.md).
+Use that file as the source of truth for ad hoc build, release, DB, auth, and tracing helpers; anything not listed there is not a supported workflow.
+
+For a quick local environment sanity pass:
+
+```bash
+uv run python scripts/validate_env.py daytona --repo https://github.com/qredence/fleet-rlm.git --ref main
+```
+
 ### Start Development Server
 
 ```bash

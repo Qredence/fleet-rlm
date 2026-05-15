@@ -13,6 +13,7 @@ export {
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
 export { traceEndpoints } from "@/lib/rlm-api/traces";
+export { infoEndpoints } from "@/lib/rlm-api/info";
 export type {
   WsTraceMode,
   WsRuntimeMode,
@@ -36,4 +37,5 @@ export type {
   RuntimeSettingsSnapshot,
   RuntimeSettingsUpdateResponse,
   RuntimeStatusResponse,
+  ServiceInfoResponse,
 } from "@/lib/rlm-api/types";

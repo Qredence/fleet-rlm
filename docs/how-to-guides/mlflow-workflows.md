@@ -250,3 +250,14 @@ uv run --with "mlflow[mcp]>=3.10.0" mlflow mcp run
 ```
 
 Document the client-specific config in your local editor setup, but do not commit `.cursor/mcp.json`, `.vscode/mcp.json`, or other editor-local MCP files into this repository.
+
+## 10. Run the Live Trace Validation Harness
+
+When you need an end-to-end proof that websocket execution, persisted run state, and MLflow/DB trace plumbing still work together, use the maintained trace harness:
+
+```bash
+uv run python scripts/validate_rlm_e2e_trace.py \
+  --server-url http://127.0.0.1:8000
+```
+
+This requires a running API server plus working database, auth, and runtime configuration. The harness writes captured payloads and validation artifacts under `output/phase-04/qre-301/` by default.

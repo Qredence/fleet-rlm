@@ -205,6 +205,8 @@ uv sync --all-extras
 uv run fleet web
 ```
 
+For the maintained helper-script surface, see [`scripts/README.md`](scripts/README.md). Common day-to-day flows should still go through `make`, `fleet`, or `fleet-rlm`.
+
 Frontend contributors should use `pnpm` inside `src/frontend`:
 
 ```bash

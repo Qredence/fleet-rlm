@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, Bot, Cpu, Moon, Paintbrush, Sparkles, Sun } from "lucide-react";
+import { Bell, Bot, Cpu, Info, Moon, Paintbrush, Sparkles, Sun } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ import { telemetryClient } from "@/lib/telemetry/client";
 import { OptimizationForm } from "@/features/optimization/optimization-form";
 import { RuntimeForm } from "./runtime-form";
 import { LiteLlmForm } from "./litellm-form";
+import { ServiceInfoPanel } from "./service-info-panel";
 
 export const settingsSections = [
   { key: "appearance", label: "Appearance", icon: Paintbrush },
@@ -33,6 +34,7 @@ export const settingsSections = [
   { key: "litellm", label: "LiteLLM Integration", icon: Bot },
   { key: "runtime", label: "Runtime", icon: Cpu },
   { key: "optimization", label: "Optimization", icon: Sparkles },
+  { key: "about", label: "About", icon: Info },
 ] as const;
 
 export type SettingsSection = (typeof settingsSections)[number]["key"];
@@ -44,6 +46,7 @@ export const sectionDescriptions: Record<SettingsSection, string> = {
   runtime: "Manage runtime credentials and connectivity checks.",
   optimization:
     "Configure GEPA prompt optimization. Use the Optimization surface for datasets, runs, and comparisons.",
+  about: "Build metadata and active feature flags for this instance.",
 };
 
 const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
@@ -111,6 +114,7 @@ export function SettingsSectionContent({
 }: SettingsSectionContentProps) {
   if (section === "runtime") return <RuntimeForm />;
   if (section === "optimization") return <OptimizationForm />;
+  if (section === "about") return <AboutPane />;
   return <GroupedSettingsPane isDark={isDark} onToggleTheme={onToggleTheme} section={section} />;
 }
 
@@ -274,6 +278,24 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
       {showSection("runtime") ? <RuntimeForm /> : null}
 
       {showSection("optimization") ? <OptimizationForm /> : null}
+
+      {showSection("about") ? <AboutPane /> : null}
     </div>
+  );
+}
+
+function AboutPane() {
+  return (
+    <FieldSet className="max-w-content gap-4">
+      <div className="flex flex-col gap-1">
+        <FieldLegend variant="label" className="mb-0 text-sm font-semibold">
+          About this instance
+        </FieldLegend>
+        <FieldDescription>{sectionDescriptions.about}</FieldDescription>
+      </div>
+      <FieldGroup className="gap-0">
+        <ServiceInfoPanel />
+      </FieldGroup>
+    </FieldSet>
   );
 }

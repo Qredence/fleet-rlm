@@ -63,6 +63,29 @@ paths:
           description: Authentication or repository services are not configured yet.
       security:
       - HTTPBearer: []
+  /api/v1/info:
+    get:
+      tags:
+      - info
+      summary: Service information
+      description: Return a stable snapshot of build metadata and active feature flags
+        for the running instance. Useful for operator introspection and client capability
+        negotiation without tailing server logs.
+      operationId: get_service_info_api_v1_info_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfoResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Service configuration is unavailable because server startup
+            is incomplete.
+      security:
+      - HTTPBearer: []
   /api/v1/sessions/state:
     get:
       tags:
@@ -2989,6 +3012,84 @@ components:
       - total
       title: SandboxListResponse
       description: Response for the sandbox list endpoint.
+    ServiceInfoResponse:
+      properties:
+        version:
+          type: string
+          title: Version
+          description: Package version currently serving the API.
+          default: 0.5.3
+        app_env:
+          type: string
+          enum:
+          - local
+          - staging
+          - production
+          title: App Env
+          description: Active deployment environment.
+        auth_mode:
+          type: string
+          enum:
+          - dev
+          - entra
+          title: Auth Mode
+          description: Authentication mode the server is running under.
+        auth_required:
+          type: boolean
+          title: Auth Required
+          description: Whether authentication is enforced for all API requests.
+        sandbox_provider:
+          type: string
+          title: Sandbox Provider
+          description: Active sandbox backend selected for runtime execution.
+        database_enabled:
+          type: boolean
+          title: Database Enabled
+          description: Whether a durable database backend is configured.
+        serve_ui:
+          type: boolean
+          title: Serve Ui
+          description: Whether the bundled React frontend is being served by this
+            instance.
+        expose_docs:
+          type: boolean
+          title: Expose Docs
+          description: Whether the OpenAPI documentation UI (/docs, /redoc) is enabled.
+        agent_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Model
+          description: Primary planner LM identifier when configured.
+        rlm_max_depth:
+          type: integer
+          title: Rlm Max Depth
+          description: Maximum recursive RLM child delegation depth.
+        rlm_max_iterations:
+          type: integer
+          title: Rlm Max Iterations
+          description: Maximum ReAct iterations per top-level run.
+      type: object
+      required:
+      - app_env
+      - auth_mode
+      - auth_required
+      - sandbox_provider
+      - database_enabled
+      - serve_ui
+      - expose_docs
+      - rlm_max_depth
+      - rlm_max_iterations
+      title: ServiceInfoResponse
+      description: 'Service capability and configuration surface returned by ``GET
+        /api/v1/info``.
+
+
+        Provides a single, stable snapshot of build metadata and active feature
+
+        flags so clients and operators can inspect the running instance without
+
+        tailing logs or querying multiple endpoints.'
     SessionDeleteResponse:
       properties:
         ok:

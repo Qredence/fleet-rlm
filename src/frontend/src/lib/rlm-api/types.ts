@@ -9,3 +9,4 @@ export type RuntimeSettingsUpdateResponse = components["schemas"]["RuntimeSettin
 export type RuntimeConnectivityTestResponse =
   components["schemas"]["RuntimeConnectivityTestResponse"];
 export type RuntimeStatusResponse = components["schemas"]["RuntimeStatusResponse"];
+export type ServiceInfoResponse = components["schemas"]["ServiceInfoResponse"];

@@ -13,6 +13,7 @@ This ensures AGENTS.md documentation remains accurate as the codebase evolves.
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -356,9 +357,26 @@ class AgentsMdValidator:
                 )
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for validating AGENTS.md freshness.
+
+    Returns an ArgumentParser configured to check AGENTS.md files for broken links,
+    missing paths, invalid Makefile targets, and cross-references.
+    """
+    parser = argparse.ArgumentParser(description="Validate AGENTS.md freshness against the live repository")
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="Repository root containing AGENTS.md files to validate",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
     """Run AGENTS.md freshness validation."""
-    repo_root = Path(__file__).resolve().parents[1]
+    args = build_parser().parse_args(argv)
+    repo_root = args.repo_root.resolve()
 
     print("Validating AGENTS.md freshness...")
 

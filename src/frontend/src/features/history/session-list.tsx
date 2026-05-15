@@ -14,10 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
-import {
-  useWorkspaceLayoutHistory,
-  type Conversation,
-} from "@/features/workspace/workspace-layout-contract";
+import { useWorkspaceLayoutHistory } from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
 import { parseIsoTimestamp } from "@/lib/date";
 import { cn } from "@/lib/utils";
@@ -27,6 +24,7 @@ import {
   type SessionListItem,
   type SessionListParams,
 } from "@/lib/rlm-api/sessions";
+import { shouldPreferLocalHistory, sortConversationsByUpdatedAt } from "./history-source";
 import type { HistorySelection } from "./history-screen";
 
 const PAGE_SIZE = 20;
@@ -100,12 +98,6 @@ interface SessionListProps {
   onSelect: (session: HistorySelection | null) => void;
 }
 
-function sortConversations(conversations: Conversation[]) {
-  return [...conversations].sort(
-    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-  );
-}
-
 function sessionErrorDetail(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unknown error";
@@ -137,13 +129,17 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
   useResetOffset(deferredSearch, statusFilter, setOffset);
 
   const normalizedSearch = deferredSearch.trim().toLowerCase();
-  const localItems = sortConversations(localConversations).filter((conversation) => {
+  const localItems = sortConversationsByUpdatedAt(localConversations).filter((conversation) => {
     if (normalizedSearch && !conversation.title.toLowerCase().includes(normalizedSearch)) {
       return false;
     }
     return statusFilter !== "archived";
   });
+  const apiItems = sessionsQuery.data?.items ?? [];
+  const preferLocalHistory = shouldPreferLocalHistory(apiItems, localItems, offset);
   const shouldUseLocalFallback =
+    preferLocalHistory ||
+    (sessionsQuery.isLoading && localItems.length > 0) ||
     (!sessionsQuery.data?.items.length && localItems.length > 0) ||
     (sessionsQuery.isError &&
       localItems.length > 0 &&
@@ -179,58 +175,6 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
     </div>
   );
 
-  if (sessionsQuery.isLoading) {
-    return (
-      <div className="flex flex-col gap-2">
-        {toolbar}
-        <Skeleton className="h-16 w-full rounded-lg" />
-        <Skeleton className="h-16 w-full rounded-lg" />
-        <Skeleton className="h-16 w-full rounded-lg" />
-      </div>
-    );
-  }
-
-  if (sessionsQuery.isError) {
-    if (shouldUseLocalFallback) {
-      return (
-        <div className="flex flex-col gap-2">
-          {toolbar}
-          {localItems.map((conversation) => {
-            const isSelected =
-              selectedSession?.source === "local" &&
-              selectedSession.conversationId === conversation.id;
-            return (
-              <SessionRow
-                key={conversation.id}
-                session={{
-                  id: `local:${conversation.id}`,
-                  title: conversation.title,
-                  status: "local",
-                  model_name: null,
-                  external_session_id: null,
-                  created_at: conversation.createdAt,
-                  updated_at: conversation.updatedAt,
-                }}
-                isSelected={isSelected}
-                onSelect={() =>
-                  onSelect(isSelected ? null : { source: "local", conversationId: conversation.id })
-                }
-              />
-            );
-          })}
-        </div>
-      );
-    }
-    return (
-      <div>
-        {toolbar}
-        <p className="py-4 text-sm text-destructive">
-          Failed to load sessions: {sessionErrorDetail(sessionsQuery.error)}
-        </p>
-      </div>
-    );
-  }
-
   if (shouldUseLocalFallback) {
     return (
       <div className="flex flex-col gap-2">
@@ -258,6 +202,28 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
             />
           );
         })}
+      </div>
+    );
+  }
+
+  if (sessionsQuery.isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {toolbar}
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <Skeleton className="h-16 w-full rounded-lg" />
+      </div>
+    );
+  }
+
+  if (sessionsQuery.isError) {
+    return (
+      <div>
+        {toolbar}
+        <p className="py-4 text-sm text-destructive">
+          Failed to load sessions: {sessionErrorDetail(sessionsQuery.error)}
+        </p>
       </div>
     );
   }

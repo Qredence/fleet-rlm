@@ -55,3 +55,30 @@ class AuthMeResponse(BaseModel):
         default=None,
         description="Persisted control-plane user identifier for admitted Entra users.",
     )
+
+
+class ServiceInfoResponse(BaseModel):
+    """Service capability and configuration surface returned by ``GET /api/v1/info``.
+
+    Provides a single, stable snapshot of build metadata and active feature
+    flags so clients and operators can inspect the running instance without
+    tailing logs or querying multiple endpoints.
+    """
+
+    version: str = Field(
+        default=__version__,
+        description="Package version currently serving the API.",
+    )
+    app_env: Literal["local", "staging", "production"] = Field(description="Active deployment environment.")
+    auth_mode: Literal["dev", "entra"] = Field(description="Authentication mode the server is running under.")
+    auth_required: bool = Field(description="Whether authentication is enforced for all API requests.")
+    sandbox_provider: str = Field(description="Active sandbox backend selected for runtime execution.")
+    database_enabled: bool = Field(description="Whether a durable database backend is configured.")
+    serve_ui: bool = Field(description="Whether the bundled React frontend is being served by this instance.")
+    expose_docs: bool = Field(description="Whether the OpenAPI documentation UI (/docs, /redoc) is enabled.")
+    agent_model: str | None = Field(
+        default=None,
+        description="Primary planner LM identifier when configured.",
+    )
+    rlm_max_depth: int = Field(description="Maximum recursive RLM child delegation depth.")
+    rlm_max_iterations: int = Field(description="Maximum ReAct iterations per top-level run.")

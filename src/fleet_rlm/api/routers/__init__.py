@@ -5,6 +5,7 @@ from __future__ import annotations
 __all__ = [
     "health",
     "auth",
+    "info",
     "ws",
     "sessions",
     "runtime",
@@ -19,6 +20,7 @@ __all__ = [
 _IMPORT_MAP: dict[str, str] = {
     "health": "fleet_rlm.api.routers.health",
     "auth": "fleet_rlm.api.routers.auth",
+    "info": "fleet_rlm.api.routers.info",
     "ws": "fleet_rlm.api.routers.ws",
     "sessions": "fleet_rlm.api.routers.sessions",
     "runtime": "fleet_rlm.api.routers.runtime",
