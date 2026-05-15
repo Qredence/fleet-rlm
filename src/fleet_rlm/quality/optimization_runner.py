@@ -130,8 +130,8 @@ def _reflection_lm_provenance(reflection_lm: Any) -> dict[str, str]:
 def _capture_prompt_snapshots(module: Any, prompt_type: str) -> list[dict[str, str]]:
     """Extract prompt instructions from all named predictors in a DSPy module.
 
-    Uses stable DSPy 3.1.3 API: ``module.named_predictors()`` returns
-    ``(name, predictor)`` pairs.  Each predictor has
+    Uses DSPy's stable predictor inspection API: ``module.named_predictors()``
+    returns ``(name, predictor)`` pairs. Each predictor has
     ``predictor.signature.instructions``.
 
     Best-effort: returns an empty list on any failure so the optimization

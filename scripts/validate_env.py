@@ -249,14 +249,10 @@ def do_daytona(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Fleet RLM environment and agent validation"
-    )
+    parser = argparse.ArgumentParser(description="Fleet RLM environment and agent validation")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser_agents = subparsers.add_parser(
-        "agents", help="Validate .claude/agents/*.md files"
-    )
+    parser_agents = subparsers.add_parser("agents", help="Validate .claude/agents/*.md files")
     parser_agents.set_defaults(func=do_agents)
 
     parser_daytona = subparsers.add_parser(

@@ -209,7 +209,7 @@ class WorkspaceManager:
         self._session = self._attach_execution_callback(session)
         self._session_source_key = source_key
         await self._areset_execution_state()
-        self._persist_session_snapshot()
+        self._persist_session_state()
         self._last_sandbox_transition = transition
         self._last_workspace_reconfigured = workspace_reconfigured
         return session
@@ -398,7 +398,7 @@ class WorkspaceManager:
             self._started = False
             return
 
-        self._persist_session_snapshot(active_session)
+        self._persist_session_state(active_session)
         await self._aclose_bridge()
         try:
             if delete:
@@ -622,7 +622,7 @@ class WorkspaceManager:
         )
 
     def export_session_state(self) -> dict[str, Any]:
-        self._persist_session_snapshot()
+        self._persist_session_state()
         context_sources = (
             list(self._session.context_sources) if self._session is not None else list(self._persisted_context_sources)
         )
@@ -654,7 +654,7 @@ class WorkspaceManager:
         await self._adetach_session(delete=False)
         self._apply_imported_session_state(state)
 
-    def _persist_session_snapshot(self, session: DaytonaSandboxSession | None = None) -> None:
+    def _persist_session_state(self, session: DaytonaSandboxSession | None = None) -> None:
         active_session = session or self._session
         if active_session is None:
             return

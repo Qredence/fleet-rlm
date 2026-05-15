@@ -43,7 +43,7 @@ def do_generate(args: argparse.Namespace) -> int:
 
 
 def do_validate(args: argparse.Namespace) -> int:
-    with open("openapi.yaml", "r", encoding="utf-8") as f:
+    with open("openapi.yaml", encoding="utf-8") as f:
         schema = yaml.safe_load(f)
 
     paths = schema.get("paths", {})
@@ -55,9 +55,7 @@ def do_validate(args: argparse.Namespace) -> int:
             op_id = operation.get("operationId", f"{method} {path}")
 
             if not operation.get("summary") and not operation.get("description"):
-                violations.append(
-                    f"Route '{op_id}' is missing a docstring (summary/description)"
-                )
+                violations.append(f"Route '{op_id}' is missing a docstring (summary/description)")
 
             responses = operation.get("responses", {})
             has_success = False
@@ -69,24 +67,16 @@ def do_validate(args: argparse.Namespace) -> int:
                     has_error = True
 
             if not has_success:
-                violations.append(
-                    f"Route '{op_id}' is missing a success response model (2xx with content)"
-                )
+                violations.append(f"Route '{op_id}' is missing a success response model (2xx with content)")
             if not has_error:
-                violations.append(
-                    f"Route '{op_id}' is missing an explicit error response model (4xx/5xx)"
-                )
+                violations.append(f"Route '{op_id}' is missing an explicit error response model (4xx/5xx)")
 
             for param in operation.get("parameters", []):
                 if "$ref" not in param and not param.get("description"):
-                    violations.append(
-                        f"Route '{op_id}' parameter '{param.get('name')}' is missing a description"
-                    )
+                    violations.append(f"Route '{op_id}' parameter '{param.get('name')}' is missing a description")
 
             if "operationId" not in operation:
-                violations.append(
-                    f"Route '{method} {path}' is missing an explicit operationId"
-                )
+                violations.append(f"Route '{method} {path}' is missing an explicit operationId")
 
     for model_name, model in components.items():
         properties = model.get("properties", {})
@@ -112,14 +102,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Fleet RLM OpenAPI Tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser_gen = subparsers.add_parser(
-        "generate", help="Generate openapi.yaml from FastAPI app"
-    )
+    parser_gen = subparsers.add_parser("generate", help="Generate openapi.yaml from FastAPI app")
     parser_gen.set_defaults(func=do_generate)
 
-    parser_val = subparsers.add_parser(
-        "validate", help="Validate openapi.yaml against Anthropic best practices"
-    )
+    parser_val = subparsers.add_parser("validate", help="Validate openapi.yaml against Anthropic best practices")
     parser_val.set_defaults(func=do_validate)
 
     args = parser.parse_args()

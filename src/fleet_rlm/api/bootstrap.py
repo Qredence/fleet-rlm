@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
@@ -127,6 +128,17 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     state.persistence_deps = persistence_deps
     state.diagnostics_deps = diagnostics_deps
     return state
+
+
+def attach_server_state(app: FastAPI, state: ServerState) -> None:
+    """Attach server state and focused dependency slices to a FastAPI app."""
+    app.state.server_state = state
+    app.state.config_deps = state.config_deps
+    app.state.lm_deps = state.lm_deps
+    app.state.auth_deps = state.auth_deps
+    app.state.session_cache_deps = state.session_cache_deps
+    app.state.persistence_deps = state.persistence_deps
+    app.state.diagnostics_deps = state.diagnostics_deps
 
 
 async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig) -> None:
@@ -313,6 +325,26 @@ async def startup_server_state(state: ServerState) -> None:
 
     await initialize_persistence(state.persistence_deps, cfg)
     schedule_optional_runtime_startup(state)
+
+
+async def recover_stale_optimization_runs(state: ServerState) -> None:
+    """Mark optimization runs orphaned by a prior server restart as stale."""
+    try:
+        if state.persistence_deps.repository is not None:
+            recovered = await state.persistence_deps.repository.recover_stale_optimization_runs()
+        else:
+            from fleet_rlm.integrations.local_store import (
+                recover_stale_optimization_runs as recover_local_stale_runs,
+            )
+
+            recovered = recover_local_stale_runs()
+        if recovered:
+            logger.info("Recovered %d stale optimization run(s) on startup", recovered)
+    except Exception:
+        logger.warning(
+            "Stale optimization run recovery failed; some runs may remain in 'running' state",
+            exc_info=True,
+        )
 
 
 async def shutdown_server_state(state: ServerState) -> None:

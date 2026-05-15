@@ -39,7 +39,7 @@ def test_cli_help_lists_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     help_text = _normalized_help_text(result.stdout)
-    for command in ("serve-api", "chat", "daytona-smoke"):
+    for command in ("serve-api", "chat", "daytona-smoke", "daytona-snapshot"):
         assert command in help_text
 
 
@@ -49,6 +49,15 @@ def test_daytona_smoke_help_exposes_repo_and_ref_options():
     help_text = _normalized_help_text(result.stdout)
     assert "--repo" in help_text
     assert "--ref" in help_text
+
+
+def test_daytona_snapshot_help_exposes_bootstrap_options():
+    result = runner.invoke(app, ["daytona-snapshot", "--help"])
+    assert result.exit_code == 0
+    help_text = _normalized_help_text(result.stdout)
+    assert "--name" in help_text
+    assert "--base-image" in help_text
+    assert "--refresh" in help_text
 
 
 def test_optimize_list_does_not_require_dataset():

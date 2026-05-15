@@ -23,7 +23,7 @@ from .config import (
 )
 from .diagnostics import DaytonaDiagnosticError
 from .sandbox_spec import SandboxSpec
-from .snapshot_runtime import aresolve_snapshot, fallback_to_declarative_image
+from .snapshot_runtime import aresolve_sandbox_spec_snapshot
 from .volume_runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
 )
@@ -636,17 +636,10 @@ async def acreate_sandbox(
     """Create a sandbox, falling back from inactive snapshots when needed."""
     try:
         resolved_spec = spec or runtime.build_sandbox_spec(volume_name=volume_name)
-        if resolved_spec.snapshot and not resolved_spec.uses_declarative_image:
-            active_snapshot = await aresolve_snapshot(
-                resolved_spec.snapshot,
-                config=runtime._resolved_config,
-            )
-            if active_snapshot is None:
-                logger.info(
-                    "Snapshot '%s' not active; falling back to declarative image",
-                    resolved_spec.snapshot,
-                )
-                resolved_spec = fallback_to_declarative_image(resolved_spec)
+        resolved_spec = await aresolve_sandbox_spec_snapshot(
+            resolved_spec,
+            config=runtime._resolved_config,
+        )
         return await acreate_sandbox_from_spec(runtime=runtime, spec=resolved_spec)
     except Exception as exc:
         raise DaytonaDiagnosticError(

@@ -82,28 +82,20 @@ def _patch_dspy_rlm() -> None:
 
         def _safe_append(self, *args, **kwargs):
             if len(args) > 3:
-                raise TypeError(
-                    f"REPLHistory.append accepts at most 3 positional values, got {len(args)}"
-                )
+                raise TypeError(f"REPLHistory.append accepts at most 3 positional values, got {len(args)}")
             names = ("reasoning", "code", "output")
             merged = dict(kwargs)
             for name, value in zip(names, args):
                 merged.setdefault(name, value)
             return original_append(
                 self,
-                reasoning=merged["reasoning"]
-                if isinstance(merged.get("reasoning"), str)
-                else "",
+                reasoning=merged["reasoning"] if isinstance(merged.get("reasoning"), str) else "",
                 code=merged["code"] if isinstance(merged.get("code"), str) else "",
-                output=merged["output"]
-                if isinstance(merged.get("output"), str)
-                else "",
+                output=merged["output"] if isinstance(merged.get("output"), str) else "",
             )
 
         _repl_types.REPLHistory.append = _safe_append
-        logger.info(
-            "Patched dspy.primitives.repl_types.REPLHistory.append for None safety"
-        )
+        logger.info("Patched dspy.primitives.repl_types.REPLHistory.append for None safety")
     except Exception as exc:
         logger.warning("Failed to patch dspy.primitives.repl_types: %s", exc)
 
@@ -133,12 +125,7 @@ def _synth_attempt_answer_parse(answer: str) -> tuple[str, str]:
     candidate_answer = candidate_answer.replace("[", "")
     candidate_answer = candidate_answer.replace("]", "")
     parse_confidence = "med"
-    if (
-        "User:" in answer
-        or "Answer:" in answer
-        or "Date:" in answer
-        or "Label" in answer
-    ):
+    if "User:" in answer or "Answer:" in answer or "Date:" in answer or "Label" in answer:
         parse_confidence = "high"
     if len(candidate_answer) < 20:
         parse_confidence = "vhigh"
@@ -317,11 +304,7 @@ def evaluate(
     interpreter.execute("SUBMIT(status='warm')")
     logger.info("Warm-up complete in %.1fs", time.time() - warm_start)
 
-    context_column = (
-        "context_window_text_with_labels"
-        if subset == "synth_with_labels"
-        else "context_window_text"
-    )
+    context_column = "context_window_text_with_labels" if subset == "synth_with_labels" else "context_window_text"
 
     results: list[dict[str, Any]] = []
     for idx in range(n):
@@ -392,12 +375,8 @@ def evaluate(
         "near_miss": sum(1 for r in results if 0.5 <= r["score"] < 0.99),
         "failures": sum(1 for r in results if r["score"] < 0.5),
         "by_dataset": {k: round(_avg(v), 4) for k, v in sorted(by_dataset.items())},
-        "by_context_len": {
-            k: round(_avg(v), 4) for k, v in sorted(by_context_len.items())
-        },
-        "by_answer_type": {
-            k: round(_avg(v), 4) for k, v in sorted(by_answer_type.items())
-        },
+        "by_context_len": {k: round(_avg(v), 4) for k, v in sorted(by_context_len.items())},
+        "by_answer_type": {k: round(_avg(v), 4) for k, v in sorted(by_answer_type.items())},
         "generated_at": datetime.now(UTC).isoformat(),
     }
 
@@ -418,9 +397,7 @@ def evaluate(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Evaluate fleet-rlm against the official OOLONG benchmark."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate fleet-rlm against the official OOLONG benchmark.")
     parser.add_argument(
         "--subset",
         choices=["synth", "synth_with_labels", "real"],
@@ -478,11 +455,7 @@ def main() -> None:
         print(f"Context length filter: {summary['context_len']}")
     print(f"Tasks evaluated: {summary['tasks_total']}")
     print(f"Avg score: {summary['avg_score']:.4f} (paper RLM(GPT-5): 0.565)")
-    print(
-        f"Perfect: {summary['perfect_scores']}, "
-        f"Near-miss: {summary['near_miss']}, "
-        f"Failures: {summary['failures']}"
-    )
+    print(f"Perfect: {summary['perfect_scores']}, Near-miss: {summary['near_miss']}, Failures: {summary['failures']}")
     if summary.get("by_dataset"):
         print("\nBy dataset:")
         for k, v in summary["by_dataset"].items():

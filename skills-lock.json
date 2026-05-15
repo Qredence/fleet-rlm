@@ -11,7 +11,7 @@
       "source": "daytona/skills",
       "sourceType": "github",
       "skillPath": "skills/daytona/SKILL.md",
-      "computedHash": "98681f5bdcf41b60e7150f2ddb68711f416ae67c27982742b40f4e0d4b5f5f04"
+      "computedHash": "b4bee34e0ffb8c5cd0a70cefb3f92372c86db1d0ce311f2c0ad68bd0cce2b713"
     },
     "shadcn": {
       "source": "shadcn/ui",

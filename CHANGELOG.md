@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- No unreleased changes yet.
+### Changed
+
+- **Change:** Aligned dependency floors, Python support metadata, and docs with the
+  upgraded runtime stack (Daytona 0.176.0, DSPy 3.2.1, Pydantic 2.13.4,
+  SQLModel 0.0.38, Psycopg 3.3.4, Typer 0.25.1, and Uvicorn 0.47.0).
+  **Outcome:** Published metadata, contributor docs, and health-check examples
+  now match the tested dependency set and supported Python versions.
 
 ## [0.5.3] - 2026-05-06
 

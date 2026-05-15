@@ -106,8 +106,7 @@ def _fmt_oolong(summary: dict[str, Any]) -> list[str]:
         "## OOLONG Benchmark (Aggregation)",
         "",
         f"- **Tasks**: {summary['tasks_total']}",
-        f"- **Avg score**: {_fmt_score(summary['avg_score'])} "
-        f"(paper metric: 0.75^|y−ŷ|)",
+        f"- **Avg score**: {_fmt_score(summary['avg_score'])} (paper metric: 0.75^|y−ŷ|)",
         f"- **Perfect (≥0.99)**: {summary.get('perfect_scores', 0)}",
         f"- **Near-miss (0.5–0.99)**: {summary.get('near_miss', 0)}",
         f"- **Failures (<0.5)**: {summary.get('failures', 0)}",
@@ -130,8 +129,7 @@ def _fmt_oolong_official(summary: dict[str, Any]) -> list[str]:
         "## OOLONG Benchmark — Official Prime Intellect Environment",
         "",
         f"- **Tasks**: {summary['tasks_total']}",
-        f"- **Avg score**: {_fmt_score(summary['avg_score'])} "
-        f"(paper RLM(GPT-5): {_fmt_baseline('oolong')})",
+        f"- **Avg score**: {_fmt_score(summary['avg_score'])} (paper RLM(GPT-5): {_fmt_baseline('oolong')})",
         f"- **Dataset**: {summary.get('dataset_name') or 'all'}",
         f"- **Context length**: {summary.get('context_len') or 'mixed'}",
         f"- **Perfect (≥0.99)**: {summary.get('perfect_scores', 0)}",
@@ -156,12 +154,9 @@ def _fmt_workspace(summary: dict[str, Any]) -> list[str]:
         "## Workspace Benchmark (L4 Recursive Orchestrator)",
         "",
         f"- **Tasks**: {summary.get('total_tasks', 0)}",
-        f"- **Single-pass avg coverage**: "
-        f"{_fmt_percent(summary.get('single_pass_avg_coverage', 0.0))}",
-        f"- **Multi-pass avg coverage**: "
-        f"{_fmt_percent(summary.get('multi_pass_avg_coverage', 0.0))}",
-        f"- **Multi-pass wins**: "
-        f"{summary.get('multi_pass_wins', 0)}/{summary.get('total_tasks', 0)}",
+        f"- **Single-pass avg coverage**: {_fmt_percent(summary.get('single_pass_avg_coverage', 0.0))}",
+        f"- **Multi-pass avg coverage**: {_fmt_percent(summary.get('multi_pass_avg_coverage', 0.0))}",
+        f"- **Multi-pass wins**: {summary.get('multi_pass_wins', 0)}/{summary.get('total_tasks', 0)}",
     ]
 
     hard = summary.get("hard_tasks", {})
@@ -280,14 +275,9 @@ def build_report(input_dir: Path) -> str:
     if sniah:
         sections.append(f"| S-NIAH | (solved) | {_fmt_percent(sniah['accuracy'])} |")
     if oolong_official:
-        sections.append(
-            f"| OOLONG-Official | {_fmt_baseline('oolong')} | "
-            f"{_fmt_score(oolong_official['avg_score'])} |"
-        )
+        sections.append(f"| OOLONG-Official | {_fmt_baseline('oolong')} | {_fmt_score(oolong_official['avg_score'])} |")
     if oolong:
-        sections.append(
-            f"| OOLONG (synthetic) | — | {_fmt_score(oolong['avg_score'])} |"
-        )
+        sections.append(f"| OOLONG (synthetic) | — | {_fmt_score(oolong['avg_score'])} |")
 
     return "\n".join(sections) + "\n"
 
@@ -295,9 +285,7 @@ def build_report(input_dir: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Consolidate RLM benchmark results")
     parser.add_argument("--input-dir", default=str(DEFAULT_INPUT))
-    parser.add_argument(
-        "--output", default=None, help="Output path (default: <input-dir>/RESULTS.md)"
-    )
+    parser.add_argument("--output", default=None, help="Output path (default: <input-dir>/RESULTS.md)")
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)

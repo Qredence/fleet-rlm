@@ -4,7 +4,7 @@ This guide covers installation and setup for `fleet-rlm`.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - [uv](https://docs.astral.sh/uv/) package manager
 - [pnpm](https://pnpm.io/) (for frontend development from source)
 - Daytona credentials (for sandbox execution)

@@ -20,10 +20,10 @@ Retired `taxonomy`, `skills`, `memory`, and `analytics` routes are intentionally
 
 ### Backend
 
-- **Language**: Python >= 3.10 (3.10, 3.11, 3.12, 3.13 supported)
+- **Language**: Python >= 3.11 (3.11, 3.12, 3.13 supported)
 - **Package manager**: `uv`
-- **Web framework**: FastAPI 0.135.3 with WebSocket support
-- **Runtime core**: DSPy 3.1.3 + recursive ReAct / `dspy.RLM` workbench agent
+- **Web framework**: FastAPI 0.136.1 with WebSocket support
+- **Runtime core**: DSPy 3.2.1 + recursive ReAct / `dspy.RLM` workbench agent
 - **Sandbox provider**: Daytona (only supported runtime substrate)
 - **Persistence**: SQLModel + SQLAlchemy with asyncpg/psycopg; SQLite sidecar for local sessions
 - **Auth**: `dev` mode or Entra (Azure AD) bearer-token validation

@@ -23,9 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-DEFAULT_OUTPUT = (
-    Path(__file__).resolve().parents[2] / ".data/datasets/oolong-benchmark.json"
-)
+DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / ".data/datasets/oolong-benchmark.json"
 DEFAULT_COUNT = 30
 
 PRODUCT_CATEGORIES = [
@@ -101,9 +99,7 @@ SERVICE_NAMES = [
 def _random_product_name() -> str:
     adjectives = ["Premium", "Basic", "Pro", "Lite", "Ultra", "Mini", "Max", "Eco"]
     nouns = ["Widget", "Gadget", "Module", "Unit", "Pack", "Set", "Kit", "Box"]
-    return (
-        f"{random.choice(adjectives)} {random.choice(nouns)} {random.randint(100, 999)}"
-    )
+    return f"{random.choice(adjectives)} {random.choice(nouns)} {random.randint(100, 999)}"
 
 
 def generate_counting_task(index: int) -> dict[str, Any]:
@@ -142,9 +138,7 @@ def generate_counting_task(index: int) -> dict[str, Any]:
 
 
 def _generate_review(sentiment: str) -> str:
-    words = random.sample(
-        SENTIMENT_WORDS[sentiment], min(3, len(SENTIMENT_WORDS[sentiment]))
-    )
+    words = random.sample(SENTIMENT_WORDS[sentiment], min(3, len(SENTIMENT_WORDS[sentiment])))
     filler = random.choice(
         [
             "The product was",
@@ -164,9 +158,7 @@ def generate_classification_task(index: int) -> dict[str, Any]:
     counts = {"positive": 0, "negative": 0, "neutral": 0}
 
     for _ in range(review_count):
-        sentiment = random.choices(
-            ["positive", "negative", "neutral"], weights=[0.4, 0.3, 0.3]
-        )[0]
+        sentiment = random.choices(["positive", "negative", "neutral"], weights=[0.4, 0.3, 0.3])[0]
         reviews.append({"text": _generate_review(sentiment), "label": sentiment})
         counts[sentiment] += 1
 
@@ -315,9 +307,7 @@ def aggregate_oolong_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def generate_oolong_dataset(
-    count: int = DEFAULT_COUNT, seed: int = 42
-) -> list[dict[str, Any]]:
+def generate_oolong_dataset(count: int = DEFAULT_COUNT, seed: int = 42) -> list[dict[str, Any]]:
     random.seed(seed)
     counting_n = count // 3
     classify_n = count // 3
@@ -344,9 +334,7 @@ def generate_oolong_dataset(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="OOLONG-style aggregation benchmark generator"
-    )
+    parser = argparse.ArgumentParser(description="OOLONG-style aggregation benchmark generator")
     parser.add_argument("--generate", action="store_true", help="Generate dataset")
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
     parser.add_argument("--seed", type=int, default=42)
@@ -361,9 +349,7 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     tasks = generate_oolong_dataset(count=args.count, seed=args.seed)
-    output.write_text(
-        json.dumps(tasks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     types = {}
     for t in tasks:

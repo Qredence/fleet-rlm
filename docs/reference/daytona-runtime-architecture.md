@@ -81,6 +81,13 @@ The current implementation treats these Daytona docs as the normative baseline:
   - owned `AsyncDaytona` clients should be closed when an interpreter/runtime is discarded to avoid leaking HTTP sessions
   - sync helper methods remain only as public compatibility shims over the async implementation
   - internal Daytona interpreter flow assumes the canonical async provider contract and does not probe for older sync-only runtime/session shapes
+- Sandbox creation prefers the reusable `fleet-rlm-base` Daytona snapshot. That
+  snapshot is an environment template built from a declarative image containing
+  fleet-rlm's default Python runtime packages (`dspy-ai`, `numpy`, `pandas`,
+  `httpx`, and `pydantic`). If the snapshot is missing or not active, sandbox
+  creation falls back to the same declarative image build so startup still has
+  the expected dependencies. Operators can bootstrap or refresh the template
+  with `uv run fleet-rlm daytona-snapshot`.
 - Shared runtime control is intentionally split across three paths:
   - `AgentRuntime` for ordinary user-facing interaction
   - recursive `dspy.RLM` child execution for deeper delegated work
@@ -178,8 +185,14 @@ In practice the provider is intentionally hybrid:
 
 ## Persistent Memory Model
 
-There are two distinct persistence layers in the Daytona runtime:
+The Daytona runtime separates the reusable environment template from its two
+persistence layers:
 
+- Reusable environment template:
+  - `fleet-rlm-base` is a Daytona snapshot used only to speed up sandbox
+    creation by pre-baking the default runtime packages
+  - it is not a chat/session persistence mechanism, and it does not capture the
+    live filesystem state of an active Fleet session
 - Volatile execution-context state:
   - Python globals, imports, helper functions, and in-memory objects live inside the Daytona code-interpreter context
   - this state persists across multiple `run_code(...)` calls while that context remains alive

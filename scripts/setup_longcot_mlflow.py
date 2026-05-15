@@ -21,12 +21,7 @@ EXPERIMENT_ID = "4"
 
 # Source artifact paths from existing runs
 DIRECT_SUMMARY_PATH = (
-    ROOT
-    / "mlartifacts"
-    / "4"
-    / "8d35d20bb017451c8879097e09ffa56f"
-    / "artifacts"
-    / "longcot-summary.json"
+    ROOT / "mlartifacts" / "4" / "8d35d20bb017451c8879097e09ffa56f" / "artifacts" / "longcot-summary.json"
 )
 DIRECT_JSONL_PATH = (
     ROOT
@@ -37,12 +32,7 @@ DIRECT_JSONL_PATH = (
     / "longcot_or_deepseek_v4_flash_all_longcot-mini_MERGED_100.jsonl"
 )
 RLM_SUMMARY_PATH = (
-    ROOT
-    / "mlartifacts"
-    / "4"
-    / "8b345cf31cbc4373a3f3a3a38cc0578e"
-    / "artifacts"
-    / "longcot-summary.json"
+    ROOT / "mlartifacts" / "4" / "8b345cf31cbc4373a3f3a3a38cc0578e" / "artifacts" / "longcot-summary.json"
 )
 RLM_JSONL_PATH = (
     ROOT
@@ -57,7 +47,7 @@ STRATIFIED_PATH = ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100
 
 def _create_dataset() -> mlflow.data.Dataset:
     """Create an MLflow dataset from the stratified slice file."""
-    with open(STRATIFIED_PATH, "r") as f:
+    with open(STRATIFIED_PATH) as f:
         slice_data = json.load(f)
 
     rows = []
@@ -83,7 +73,7 @@ def _log_eval_run(
     dataset: mlflow.data.Dataset,
 ) -> str:
     """Create an MLflow run for a benchmark mode and return the run ID."""
-    with open(summary_path, "r") as f:
+    with open(summary_path) as f:
         summary = json.load(f)
 
     by_domain = summary.get("by_domain", {})
@@ -173,10 +163,7 @@ def _verify_run(run_id: str) -> dict:
         "params": dict(run.data.params),
         "tags": {k: v for k, v in run.data.tags.items() if not k.startswith("mlflow.")},
         "artifacts": artifact_names,
-        "dataset_inputs": [
-            {"dataset_name": inp.dataset.name}
-            for inp in (run.inputs.dataset_inputs or [])
-        ],
+        "dataset_inputs": [{"dataset_name": inp.dataset.name} for inp in (run.inputs.dataset_inputs or [])],
     }
 
 
@@ -190,9 +177,7 @@ def main() -> int:
     print(f"Created dataset: {dataset.name} (digest={dataset.digest})")
 
     # Create Direct run
-    direct_run_id = _log_eval_run(
-        "direct", DIRECT_SUMMARY_PATH, DIRECT_JSONL_PATH, dataset
-    )
+    direct_run_id = _log_eval_run("direct", DIRECT_SUMMARY_PATH, DIRECT_JSONL_PATH, dataset)
 
     # Create RLM run
     rlm_run_id = _log_eval_run("rlm", RLM_SUMMARY_PATH, RLM_JSONL_PATH, dataset)

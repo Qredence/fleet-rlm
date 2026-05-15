@@ -8,7 +8,7 @@
 
 import asyncio
 import logging
-from typing import Any
+from dataclasses import dataclass
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -21,6 +21,7 @@ from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import NormalizedIdentity
 from ...dependencies import (
+    AuthDeps,
     ConfigDeps,
     DiagnosticsDeps,
     LmDeps,
@@ -111,6 +112,42 @@ async def _prepare_chat_runtime(
 _EXECUTION_STARTUP_STATUS_DELAY_SECONDS = 0.25
 
 
+@dataclass(slots=True)
+class _WebSocketCoreDeps:
+    config: ConfigDeps
+    auth: AuthDeps
+    diagnostics: DiagnosticsDeps
+
+
+@dataclass(slots=True)
+class _ExecutionWebSocketDeps(_WebSocketCoreDeps):
+    lm: LmDeps
+    persistence: PersistenceDeps
+    session_cache: SessionCacheDeps
+
+
+def _resolve_websocket_core_deps(websocket: WebSocket) -> _WebSocketCoreDeps:
+    """Resolve dependency slices shared by all websocket endpoints."""
+    return _WebSocketCoreDeps(
+        config=get_config_deps_from_websocket(websocket),
+        auth=get_auth_deps_from_websocket(websocket),
+        diagnostics=get_diagnostics_deps_from_websocket(websocket),
+    )
+
+
+def _resolve_execution_websocket_deps(websocket: WebSocket) -> _ExecutionWebSocketDeps:
+    """Resolve the full dependency set needed by the conversational websocket."""
+    core = _resolve_websocket_core_deps(websocket)
+    return _ExecutionWebSocketDeps(
+        config=core.config,
+        auth=core.auth,
+        diagnostics=core.diagnostics,
+        lm=get_lm_deps_from_websocket(websocket),
+        persistence=get_persistence_deps_from_websocket(websocket),
+        session_cache=get_session_cache_deps_from_websocket(websocket),
+    )
+
+
 async def _reject_unsupported_identity_query_params(
     websocket: WebSocket,
     *,
@@ -171,7 +208,7 @@ class _ExecutionWebSocketConnection:
         persistence_deps: PersistenceDeps,
         diagnostics_deps: DiagnosticsDeps,
         session_cache: SessionCacheDeps,
-        identity: Any,
+        identity: NormalizedIdentity,
     ) -> None:
         self.websocket = websocket
         self.config_deps = config_deps
@@ -274,7 +311,7 @@ async def _run_execution_subscription_stream(
     *,
     websocket: WebSocket,
     diagnostics_deps: DiagnosticsDeps,
-    identity,
+    identity: NormalizedIdentity,
     session_id: str,
 ) -> None:
     subscription = ExecutionSubscription(
@@ -324,23 +361,18 @@ async def execution_stream(
     if await _reject_execution_query_session_id(websocket, session_id=session_id):
         return
 
-    config_deps = get_config_deps_from_websocket(websocket)
-    auth_deps = get_auth_deps_from_websocket(websocket)
-    lm_deps = get_lm_deps_from_websocket(websocket)
-    persistence_deps = get_persistence_deps_from_websocket(websocket)
-    diagnostics_deps = get_diagnostics_deps_from_websocket(websocket)
-    session_cache = get_session_cache_deps_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, config_deps, auth_deps)
+    deps = _resolve_execution_websocket_deps(websocket)
+    identity = await _authenticate_websocket(websocket, deps.config, deps.auth)
     if identity is None:
         return
 
     connection = _ExecutionWebSocketConnection(
         websocket=websocket,
-        config_deps=config_deps,
-        lm_deps=lm_deps,
-        persistence_deps=persistence_deps,
-        diagnostics_deps=diagnostics_deps,
-        session_cache=session_cache,
+        config_deps=deps.config,
+        lm_deps=deps.lm,
+        persistence_deps=deps.persistence,
+        diagnostics_deps=deps.diagnostics,
+        session_cache=deps.session_cache,
         identity=identity,
     )
     await connection.run()
@@ -361,16 +393,14 @@ async def execution_events_stream(
     ):
         return
 
-    config_deps = get_config_deps_from_websocket(websocket)
-    auth_deps = get_auth_deps_from_websocket(websocket)
-    diagnostics_deps = get_diagnostics_deps_from_websocket(websocket)
-    identity = await _authenticate_websocket(websocket, config_deps, auth_deps)
+    deps = _resolve_websocket_core_deps(websocket)
+    identity = await _authenticate_websocket(websocket, deps.config, deps.auth)
     if identity is None:
         return
 
     await _run_execution_subscription_stream(
         websocket=websocket,
-        diagnostics_deps=diagnostics_deps,
+        diagnostics_deps=deps.diagnostics,
         identity=identity,
         session_id=str(session_id or "").strip(),
     )
