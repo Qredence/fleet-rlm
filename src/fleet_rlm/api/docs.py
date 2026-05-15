@@ -18,7 +18,7 @@ def mount_scalar_docs(app: FastAPI) -> None:
         get_scalar_api_reference = scalar_fastapi.get_scalar_api_reference
 
         @app.get("/scalar", include_in_schema=False)
-        def scalar_docs():
+        def scalar_docs() -> Any:
             return get_scalar_api_reference(
                 openapi_url=app.openapi_url,
                 title=app.title,

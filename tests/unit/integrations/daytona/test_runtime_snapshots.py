@@ -23,14 +23,14 @@ class _FakeSnapshotService:
     def __init__(self, items: list[SimpleNamespace] | None = None) -> None:
         self._items = items or []
         self.create_calls: list[object] = []
-        self.delete_calls: list[str] = []
+        self.delete_calls: list[SimpleNamespace] = []
 
     def list(self):
         return SimpleNamespace(items=self._items)
 
     def get(self, name: str):
         for s in self._items:
-            if s.name == name:
+            if s.name == name or s.id == name:
                 return s
         raise RuntimeError(f"snapshot {name!r} not found")
 
@@ -42,9 +42,9 @@ class _FakeSnapshotService:
         self._items.append(snapshot)
         return snapshot
 
-    def delete(self, name: str) -> None:
-        self.delete_calls.append(name)
-        self._items = [s for s in self._items if s.name != name and s.id != name]
+    def delete(self, snapshot: SimpleNamespace) -> None:
+        self.delete_calls.append(snapshot)
+        self._items = [s for s in self._items if s.name != snapshot.name and s.id != snapshot.id]
 
 
 class _FakeClient:
@@ -222,5 +222,5 @@ def test_abootstrap_snapshot_refreshes_existing_snapshot(monkeypatch) -> None:
     assert result["id"] == "created-snap"
     assert result["created"] is True
     assert result["refreshed"] is True
-    assert fake_client.snapshot.delete_calls == ["old-snap"]
+    assert [snapshot.id for snapshot in fake_client.snapshot.delete_calls] == ["old-snap"]
     assert len(fake_client.snapshot.create_calls) == 1

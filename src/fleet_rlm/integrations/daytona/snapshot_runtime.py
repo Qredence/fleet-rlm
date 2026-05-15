@@ -146,7 +146,8 @@ async def adelete_snapshot(
     cfg = config or resolve_daytona_config()
     client = _build_daytona_client(cfg)
     try:
-        await _await_if_needed(client.snapshot.delete(name))
+        snapshot = await _await_if_needed(client.snapshot.get(name))
+        await _await_if_needed(client.snapshot.delete(snapshot))
     finally:
         await _await_if_needed(client.close())
 
@@ -169,7 +170,7 @@ async def abootstrap_snapshot(
     if existing is not None and not refresh:
         return {**existing, "created": False, "refreshed": False}
     if existing is not None:
-        await adelete_snapshot(str(existing.get("id") or name), config=cfg)
+        await adelete_snapshot(str(existing.get("name") or name), config=cfg)
 
     created = await acreate_snapshot(
         name=name,
