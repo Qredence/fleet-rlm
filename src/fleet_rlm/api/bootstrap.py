@@ -130,7 +130,7 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     return state
 
 
-def attach_server_state(app: Any, state: ServerState) -> None:
+def attach_server_state(app: FastAPI, state: ServerState) -> None:
     """Attach server state and focused dependency slices to a FastAPI app."""
     app.state.server_state = state
     app.state.config_deps = state.config_deps
