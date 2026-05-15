@@ -7,7 +7,6 @@ import contextlib
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
 
