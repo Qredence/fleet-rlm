@@ -3,12 +3,16 @@ function arePartsEqual(prev: any, next: any): boolean {
   if (prev.type !== next.type) return false;
   if (prev.state !== next.state) return false;
 
-  if (prev.input !== next.input) {
-    if (JSON.stringify(prev.input || {}) !== JSON.stringify(next.input || {})) return false;
-  }
-  if (prev.output !== next.output) {
-    if (JSON.stringify(prev.output || {}) !== JSON.stringify(next.output || {})) return false;
-  }
+  if (
+    prev.input !== next.input &&
+    JSON.stringify(prev.input || {}) !== JSON.stringify(next.input || {})
+  )
+    return false;
+  if (
+    prev.output !== next.output &&
+    JSON.stringify(prev.output || {}) !== JSON.stringify(next.output || {})
+  )
+    return false;
 
   return true;
 }

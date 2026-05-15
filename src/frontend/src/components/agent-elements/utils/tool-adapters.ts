@@ -1,5 +1,8 @@
 import type { TimelineStep, StepState } from "../types/timeline";
 
+/** Duration (ms) for the completion animation after a tool finishes. */
+const TOOL_COMPLETION_ANIMATION_MS = 300;
+
 function calculateDiffStatsFromPatch(patches: Array<{ lines?: string[] }>): string | undefined {
   let addedLines = 0;
   let removedLines = 0;
@@ -104,7 +107,7 @@ export function mapToolInvocationToStep(
     type: "tool-call",
     toolName: displayToolName,
     toolDetail: detail,
-    duration: toolInvocation.state === "result" ? 300 : 0,
+    duration: toolInvocation.state === "result" ? TOOL_COMPLETION_ANIMATION_MS : 0,
     toolVariant: mapToolNameToVariant(toolName),
   };
 
