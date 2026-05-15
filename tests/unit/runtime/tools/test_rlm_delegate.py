@@ -348,10 +348,10 @@ def test_delegate_to_rlm_empty_string_answer_is_allowed(
     assert result["answer"] == ""
 
 
-def test_delegate_to_rlm_returns_degraded_ok_with_answer_and_broker_marker(
+def test_delegate_to_rlm_returns_human_review_with_answer_and_broker_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Usable child answers survive broker markers as degraded successes."""
+    """Usable child answers survive broker markers but cannot count as success."""
     import dspy
 
     child = _FakeChildInterpreter(started=True, verbose=False)
@@ -367,11 +367,24 @@ def test_delegate_to_rlm_returns_degraded_ok_with_answer_and_broker_marker(
 
     result = rlm_delegate_mod.delegate_to_rlm("broker failure query", interpreter=interpreter)
 
-    assert result["status"] == "ok"
+    assert set(result) == {
+        "status",
+        "answer",
+        "degraded",
+        "reason",
+        "error",
+        "degradation_reason",
+        "degradation_error",
+        "duration_ms",
+    }
+    assert result["status"] == "needs_human_review"
     assert result["answer"] == "usable answer"
     assert result["degraded"] is True
+    assert result["reason"] == "broker_unavailable"
+    assert "Daytona broker unavailable" in result["error"]
     assert result["degradation_reason"] == "broker_unavailable"
     assert "Daytona broker unavailable" in result["degradation_error"]
+    assert result["duration_ms"] >= 0
 
 
 def test_delegate_to_rlm_detects_fatal_broker_error_without_answer(
@@ -477,6 +490,44 @@ def test_delegate_to_rlm_batched_reports_partial_failures(
         }
     ]
     assert [child.shutdown_calls for child in children] == [1, 1, 1]
+
+
+def test_delegate_to_rlm_batched_reports_review_needed_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review-needed children are separated from clean successes."""
+    import dspy
+
+    children = [_FakeChildInterpreter(started=True) for _ in range(3)]
+    interpreter = _FakeParentInterpreter(children, remaining=6)
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            prediction = dspy.Prediction(answer=f"ok:{kw['prompt']}")
+            if kw["prompt"] == "review":
+                prediction.trajectory = [{"output": "[Error] Broker server failed to start within timeout"}]
+            return prediction
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    result = rlm_delegate_mod.delegate_to_rlm_batched(["good", "review", "later"], interpreter=interpreter)
+
+    assert result["status"] == "needs_human_review"
+    assert result["results"] == [
+        {"query": "good", "answer": "ok:good"},
+        {"query": "later", "answer": "ok:later"},
+    ]
+    assert result["reviews"] == [
+        {
+            "index": 1,
+            "query": "review",
+            "answer": "ok:review",
+            "reason": "broker_unavailable",
+            "error": "Daytona broker unavailable during child RLM execution.",
+        }
+    ]
 
 
 def test_delegate_to_rlm_batched_overlaps_child_execution(
@@ -689,11 +740,11 @@ def test_delegate_to_rlm_skips_local_workspace_snapshot_for_repo_children(
     assert "local_workspace_snapshot.txt" not in seen_contexts[0]
 
 
-def test_delegate_to_rlm_skips_local_workspace_snapshot_for_volume_children(
+def test_delegate_to_rlm_stages_local_workspace_snapshot_for_volume_children_without_repo(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Volume-backed child sandboxes already have mounted workspace context."""
+    """A durable volume alone does not prove repo source is present."""
     import dspy
 
     (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n")
@@ -714,6 +765,50 @@ def test_delegate_to_rlm_skips_local_workspace_snapshot_for_volume_children(
         def _module(**kw: Any) -> dspy.Prediction:
             seen_contexts.append(str(kw.get("context", "")))
             return dspy.Prediction(answer="volume-backed answer")
+
+        return _module
+
+    monkeypatch.setattr(rlm_delegate_mod, "build_recursive_subquery_rlm", _mock_build)
+
+    result = rlm_delegate_mod.delegate_to_rlm(
+        "Inspect the codebase implementation for sandbox budget session restore",
+        interpreter=interpreter,
+    )
+
+    assert result["status"] == "ok"
+    assert child.session.write_calls
+    snapshot_path, snapshot = child.session.write_calls[0]
+    assert snapshot_path == "artifacts/rlm-inputs/local_workspace_snapshot.txt"
+    assert "--- FILE: src/demo/runtime.py ---" in snapshot
+    assert "local_workspace_snapshot.txt" in seen_contexts[0]
+
+
+def test_delegate_to_rlm_skips_local_workspace_snapshot_for_session_repo_children(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A repo-backed child session already has target repository source."""
+    import dspy
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='demo'\n")
+    src_dir = tmp_path / "src" / "demo"
+    src_dir.mkdir(parents=True)
+    (src_dir / "runtime.py").write_text(
+        "def build_delegate_child():\n    return 'sandbox budget session'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    child = _FakeChildInterpreter(started=True, verbose=False)
+    child.session.repo_url = "https://github.com/example/repo.git"
+    child.volume_name = "workspace-volume"
+    interpreter = _FakeParentInterpreter(child)
+    seen_contexts: list[str] = []
+
+    def _mock_build(**kwargs: Any) -> Any:
+        def _module(**kw: Any) -> dspy.Prediction:
+            seen_contexts.append(str(kw.get("context", "")))
+            return dspy.Prediction(answer="repo-backed answer")
 
         return _module
 

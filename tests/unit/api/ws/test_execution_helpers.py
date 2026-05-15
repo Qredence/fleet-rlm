@@ -855,6 +855,38 @@ def test_build_execution_completion_summary_marks_tool_error_final_as_error() ->
     assert summary["final_artifact"]["value"]["summary"] == "claimed success"
 
 
+def test_build_execution_completion_summary_marks_degraded_child_as_human_review() -> None:
+    event = WorkspaceEvent(
+        kind="done",
+        text="usable but degraded",
+        payload={
+            "human_review": {
+                "required": True,
+                "reason": "Recursive child result needs review: broker unavailable.",
+                "repair_mode": "needs_human_review",
+                "repair_target": "Review degraded recursive child output before accepting the run.",
+                "repair_steps": ["Inspect the preserved child answer and degradation metadata."],
+            },
+            "runtime_degraded": True,
+            "runtime_failure_category": "recursive_child_degraded",
+            "runtime_failure_phase": "delegate_to_rlm",
+        },
+        timestamp=ts(),
+        terminal=True,
+    )
+
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message="please delegate",
+        run_id="run-degraded-child",
+    )
+
+    assert summary["status"] == "needs_human_review"
+    assert summary["termination_reason"] == "needs_human_review"
+    assert summary["human_review"]["repair_mode"] == "needs_human_review"
+    assert summary["summary"]["human_review"]["reason"] == "Recursive child result needs review: broker unavailable."
+
+
 def test_build_execution_completion_summary_surfaces_human_review_terminal_state() -> None:
     event = WorkspaceEvent(
         kind="done",

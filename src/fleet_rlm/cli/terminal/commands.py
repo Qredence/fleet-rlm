@@ -108,6 +108,55 @@ def _dispatch_session_command(
     return _run_session_action(action, session, agent, arg_text, trace_modes)
 
 
+def _show_help(session: Any, command_specs: Any, arg: str = "") -> None:
+    """Show help reference - grouped table or per-command detail."""
+    from rich.table import Table
+
+    if arg:
+        # Per-command help
+        target = arg if arg.startswith("/") else f"/{arg}"
+        for spec in command_specs:
+            if spec.name == target:
+                if spec.help_text:
+                    session.console.print(f"\n[bold cyan]{spec.name}[/] — {spec.summary}\n")
+                    session.console.print(spec.help_text)
+                else:
+                    session.console.print(f"\n[bold cyan]{spec.name}[/] — {spec.summary}\n")
+                    session.console.print("[dim]No detailed help available for this command.[/]")
+                return
+        session._print_error(f"Unknown command: {target}")
+        return
+
+    # Grouped table
+    table = Table(title="Command Reference", border_style="dim", show_header=True, header_style="bold")
+    table.add_column("Command", style="bold cyan", width=20)
+    table.add_column("Description", style="white")
+    table.add_column("Category", style="dim", width=12)
+
+    # Group by category
+    categories: dict[str, list[Any]] = {}
+    for spec in command_specs:
+        categories.setdefault(spec.category, []).append(spec)
+
+    for category in ["core", "documents", "buffers", "runners", "security", "settings"]:
+        specs = categories.get(category, [])
+        for spec in specs:
+            table.add_row(spec.name, spec.summary, spec.category)
+        if specs and category != "settings":
+            table.add_section()
+
+    session.console.print(table)
+    session.console.print("\n[dim]Use /help <command> for detailed usage.[/]")
+
+
+def _push_undo(session: Any, operation: str, snapshot: dict) -> None:
+    """Push a reversible operation to the undo stack."""
+    stack = getattr(session, "_undo_stack", [])
+    stack.append((operation, snapshot))
+    if len(stack) > 10:
+        stack[:] = stack[-10:]
+
+
 def _run_session_action(
     action: str,
     session: Any,
@@ -115,6 +164,11 @@ def _run_session_action(
     arg_text: str,
     trace_modes: set[str],
 ) -> bool:
+    if action == "help":
+        from .chat import _COMMAND_SPECS
+
+        _show_help(session, _COMMAND_SPECS, arg_text.strip())
+        return False
     if action == "palette":
         return print_command_palette(session, agent)
     if action == "shortcuts":
@@ -139,7 +193,9 @@ def _run_session_action(
         if mode not in trace_modes:
             session._print_error("usage: /trace <compact|verbose|off>")
             return False
+        _push_undo(session, "trace", {"trace_mode": session.trace_mode})
         session.trace_mode = _normalize_trace_mode(mode)
+        session._save_preferences()
         session.console.print(f"[green]Trace mode set to {session.trace_mode}[/]")
         return False
     if action == "status":
@@ -156,10 +212,58 @@ def _run_session_action(
         return False
     if action == "permissions-reset":
         session.command_permissions.clear()
+        session._save_preferences()
         session._print_warning("Permission policy reset.")
         return False
     if action == "run-long-context":
         session._run_long_context(arg_text)
+        return False
+    if action == "theme":
+        theme_name = arg_text.strip().lower()
+        valid_themes = ("dark", "light", "auto")
+        if theme_name not in valid_themes:
+            session._print_error(f"usage: /theme <{'|'.join(valid_themes)}>")
+            return False
+        _push_undo(session, "theme", {"theme": session._preferences.theme})
+        if theme_name == "auto":
+            from .ui import detect_terminal_theme
+
+            theme_name = detect_terminal_theme()
+        session._preferences.theme = theme_name
+        session._save_preferences()
+        session.console.print(f"[green]Theme set to {theme_name}[/]")
+        return False
+    if action == "retry":
+        last_msg = getattr(session, "_last_user_message", None)
+        last_cmd = getattr(session, "_last_command", None)
+        if last_msg:
+            session._append_transcript("status", f"Retrying: {last_msg[:60]}...")
+            try:
+                asyncio.run(session._run_chat_turn(agent, last_msg))
+            except Exception as exc:
+                session._print_error(str(exc))
+        elif last_cmd:
+            cmd, args = last_cmd
+            return handle_slash_command(session, agent, f"{cmd} {args}".strip())
+        else:
+            session._print_warning("Nothing to retry.")
+        return False
+    if action == "undo":
+        stack = getattr(session, "_undo_stack", [])
+        if not stack:
+            session._print_warning("Nothing to undo.")
+            return False
+        operation, snapshot = stack.pop()
+        if operation == "trace":
+            session.trace_mode = snapshot["trace_mode"]
+            session._save_preferences()
+            session.console.print(f"[green]Undone: trace mode restored to {session.trace_mode}[/]")
+        elif operation == "theme":
+            session._preferences.theme = snapshot["theme"]
+            session._save_preferences()
+            session.console.print(f"[green]Undone: theme restored to {snapshot['theme']}[/]")
+        else:
+            session._print_warning(f"Cannot undo '{operation}' — not reversible.")
         return False
     raise ValueError(f"Unknown session action: {action}")
 
@@ -253,7 +357,7 @@ def _make_clear_buffer_payload_builder(*, usage: str) -> _AliasPayloadBuilder:
 
 _SESSION_COMMAND_ACTIONS: dict[str, str] = {
     "/": "palette",
-    "/help": "palette",
+    "/help": "help",
     "/commands": "palette",
     "/?": "shortcuts",
     "/exit": "exit",
@@ -267,6 +371,9 @@ _SESSION_COMMAND_ACTIONS: dict[str, str] = {
     "/permissions": "permissions",
     "/permissions-reset": "permissions-reset",
     "/run-long-context": "run-long-context",
+    "/theme": "theme",
+    "/retry": "retry",
+    "/undo": "undo",
 }
 
 
@@ -451,9 +558,11 @@ def _authorize_command(session: Any, *, command: str) -> bool:
         return True
     if choice == "allow for session":
         session.command_permissions[command] = "allow"
+        session._save_preferences()
         return True
     if choice == "deny":
         session.command_permissions[command] = "deny"
+        session._save_preferences()
         session._print_warning(f"Denied command: {command}")
         return False
     return False
@@ -484,11 +593,22 @@ def _show_shortcuts(session: Any) -> None:
     Args:
         session: The terminal chat session instance.
     """
-    session._append_transcript(
-        "status",
-        ("Shortcuts: / opens command palette - @ mentions files - Ctrl+C interrupts - /trace compact|verbose|off"),
-    )
-    session._render_shell()
+    from rich.table import Table
+
+    table = Table(title="Keyboard Shortcuts", border_style="dim", show_header=True, header_style="bold")
+    table.add_column("Key", style="bold cyan", width=14)
+    table.add_column("Action", style="white")
+
+    table.add_row("Enter", "Send message")
+    table.add_row("Ctrl+C", "Cancel current operation")
+    table.add_row("Ctrl+D", "Exit session")
+    table.add_row("Ctrl+L", "Clear screen")
+    table.add_row("/", "Command palette (autocomplete)")
+    table.add_row("@", "File mention (autocomplete)")
+    table.add_row("?", "Show this shortcuts table")
+    table.add_row("/exit", "Quit the session")
+
+    session.console.print(table)
 
 
 def _confirmation_message(*, command: str, args: dict[str, Any]) -> str | None:

@@ -30,9 +30,20 @@ def print_banner(session: Any, *, planner_ready: bool) -> None:
     )
 
 
-def bottom_toolbar(session: Any) -> HTML:
+def bottom_toolbar(
+    session: Any,
+    *,
+    model: str = "",
+    docs_count: int = 0,
+    trace_mode: str = "compact",
+) -> HTML:
     """Return the bottom toolbar HTML."""
-    return _bottom_toolbar(is_processing=session.is_processing)
+    return _bottom_toolbar(
+        is_processing=session.is_processing,
+        model=model,
+        docs_count=docs_count,
+        trace_mode=trace_mode,
+    )
 
 
 def print_warning(session: Any, message: str) -> None:
@@ -42,9 +53,12 @@ def print_warning(session: Any, message: str) -> None:
     render_shell(session)
 
 
-def print_error(session: Any, message: str) -> None:
-    """Print an error message."""
-    append_transcript(session, "error", message)
+def print_error(session: Any, message: str, *, hint: str | None = None) -> None:
+    """Print an error message with an optional recovery hint."""
+    display = message
+    if hint:
+        display = f"{message}\nhint: {hint}"
+    append_transcript(session, "error", display)
     session.last_status = "error"
     render_shell(session)
 
@@ -57,17 +71,60 @@ def append_transcript(session: Any, role: str, content: str) -> None:
     session.transcript.append((role, text))
     if len(session.transcript) > 200:
         session.transcript = session.transcript[-200:]
+    # Auto-scroll to bottom on new content
+    if hasattr(session, "_scroll_offset"):
+        session._scroll_offset = 0
 
 
 def render_shell(session: Any, *, draft_assistant: str = "") -> None:
-    """Render the shell UI layout."""
-    _render_shell(
-        console=session.console,
-        session_id=session.session_id,
-        model=session.config.agent.model,
-        trace_mode=session.trace_mode,
-        last_status=session.last_status,
-        transcript=session.transcript,
-        is_processing=session.is_processing,
-        draft_assistant=draft_assistant,
-    )
+    """Render the shell UI layout.
+
+    If the session has an active Live instance (_live), uses differential
+    updates for flicker-free rendering. Otherwise falls back to clear+print.
+    """
+    import os
+
+    from .ui import build_shell_layout, get_theme
+
+    prefs = getattr(session, "_preferences", None)
+    theme = get_theme(prefs.theme) if prefs is not None else None
+
+    scroll_offset = getattr(session, "_scroll_offset", 0)
+    console = session.console
+    width, height = console.size.width, console.size.height
+    in_tmux = bool(os.environ.get("TMUX"))
+
+    live = getattr(session, "_live", None)
+    if live is not None and live.is_started:
+        live.update(
+            build_shell_layout(
+                session_id=session.session_id,
+                model=session.config.agent.model,
+                trace_mode=session.trace_mode,
+                last_status=session.last_status,
+                transcript=session.transcript,
+                is_processing=session.is_processing,
+                draft_assistant=draft_assistant,
+                console_width=width,
+                console_height=height,
+                scroll_offset=scroll_offset,
+                in_tmux=in_tmux,
+                theme=theme,
+            )
+        )
+    else:
+        _render_shell(
+            console=console,
+            session_id=session.session_id,
+            model=session.config.agent.model,
+            trace_mode=session.trace_mode,
+            last_status=session.last_status,
+            transcript=session.transcript,
+            is_processing=session.is_processing,
+            draft_assistant=draft_assistant,
+            console_width=width,
+            console_height=height,
+            scroll_offset=scroll_offset,
+            in_tmux=in_tmux,
+            theme=theme,
+        )

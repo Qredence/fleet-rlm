@@ -1,8 +1,7 @@
 import { Code2, FileSearch, GitBranch, Lightbulb, Terminal, type LucideIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
-import { ConversationEmptyState } from "@/components/ai-elements/conversation";
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import { Suggestions } from "@/components/agent-elements/input/suggestions";
 import { StateNotice } from "@/components/product";
 import { cn } from "@/lib/utils";
 
@@ -61,10 +60,9 @@ export function WorkspaceChatEmptyState({
   const prefersReduced = useReducedMotion();
 
   return (
-    <ConversationEmptyState
-      icon={null}
+    <div
       className={cn(
-        "h-full w-full items-center justify-center gap-0 px-0 pb-2 text-center",
+        "flex h-full w-full items-center justify-center gap-0 px-0 pb-2 text-center",
         isMobile ? "pt-6" : "pt-0",
       )}
     >
@@ -82,72 +80,23 @@ export function WorkspaceChatEmptyState({
           titleClassName="text-5xl font-medium leading-tight tracking-tighter-custom"
         />
 
-        <Suggestions
-          wrap
-          className="w-full justify-center"
-          aria-live="polite"
-          aria-label="Quick start suggestions"
-        >
-          {suggestions.map((suggestion, index) => (
-            <AnimatedSuggestion
-              key={`${suggestion.label}-${index}`}
-              suggestion={suggestion}
-              index={index}
-              prefersReduced={!!prefersReduced}
-              onClick={onSuggestionClick}
-            />
-          ))}
-        </Suggestions>
+        <div aria-live="polite" aria-label="Quick start suggestions" className="w-full">
+          <Suggestions
+            items={suggestions.map((suggestion, index) => ({
+              id: `${suggestion.label}-${index}`,
+              label: suggestion.label,
+              value: suggestion.prompt,
+              icon: suggestion.Icon ? (
+                <suggestion.Icon className={cn("size-4", suggestion.accentClassName)} />
+              ) : undefined,
+              className: suggestion.description ? "items-start" : undefined,
+            }))}
+            onSelect={(item) => onSuggestionClick(item.value ?? item.label)}
+            className="w-full justify-center"
+            itemClassName="h-auto rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal hover:bg-card"
+          />
+        </div>
       </motion.div>
-    </ConversationEmptyState>
-  );
-}
-
-interface AnimatedSuggestionProps {
-  suggestion: (typeof suggestions)[number];
-  index: number;
-  prefersReduced: boolean;
-  onClick: (text: string) => void;
-}
-
-function AnimatedSuggestion({
-  suggestion,
-  index,
-  prefersReduced,
-  onClick,
-}: AnimatedSuggestionProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: prefersReduced ? 0 : 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={
-        prefersReduced
-          ? { duration: 0.01 }
-          : { delay: 0.1 + index * 0.05, duration: 0.25, ease: "easeOut" }
-      }
-    >
-      <Suggestion
-        suggestion={suggestion.prompt}
-        onClick={onClick}
-        size="default"
-        className={cn(
-          "group inline-flex h-auto flex-col items-start gap-0.5 rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal transition-all duration-200",
-          "hover:border-border hover:bg-card hover:shadow-sm",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        )}
-      >
-        <span className="flex items-center gap-2">
-          {suggestion.Icon ? (
-            <suggestion.Icon
-              className={cn("size-4 shrink-0 transition-colors", suggestion.accentClassName)}
-            />
-          ) : null}
-          <span className="text-sm font-medium text-foreground">{suggestion.label}</span>
-        </span>
-        {suggestion.description && (
-          <span className="text-xs text-muted-foreground pl-6">{suggestion.description}</span>
-        )}
-      </Suggestion>
-    </motion.div>
+    </div>
   );
 }

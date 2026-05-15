@@ -15,6 +15,10 @@ def _tool_names(tools: list[Any]) -> set[str]:
     return {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
 
 
+def _normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
 # ---------------------------------------------------------------------------
 # VAL-TOOLS-001: discover_tools() returns a list of callables
 # VAL-TOOLS-010: Stable ordering across calls
@@ -72,12 +76,19 @@ def test_discover_tools_uses_explicit_module_list(
         module.__dict__[tool_name] = tool_fn(_explicit_tool)
         return module
 
+    # Clear the tool-discovery cache so the monkeypatched import_module is
+    # exercised rather than a previously cached result.
+    registry.discover_tools.cache_clear()
+
     monkeypatch.setattr(registry.importlib, "import_module", _fake_import_module)
 
     tools = registry.discover_tools()
 
     assert imported == [f"fleet_rlm.runtime.tools.{module_name}" for module_name in registry.TOOL_MODULE_NAMES]
     assert _tool_names(tools) == {f"{module_name}_tool" for module_name in registry.TOOL_MODULE_NAMES}
+
+    # Clear the cache so later tests see real modules, not the fake ones.
+    registry.discover_tools.cache_clear()
 
 
 def test_discover_tools_stable_ordering() -> None:
@@ -171,6 +182,28 @@ def test_discovered_tools_valid_for_react() -> None:
     # dspy.ReAct construction must not raise
     react = dspy.ReAct(FleetAgentSignature, tools=tools, max_iters=1)
     assert react is not None
+
+
+def test_high_risk_tool_descriptions_preserve_routing_guidance() -> None:
+    """High-risk tool descriptions stay concise while keeping selection guidance."""
+    from fleet_rlm.runtime.tools import discover_tools
+
+    tools = {getattr(tool, "name", getattr(tool, "__name__", "")): tool for tool in discover_tools()}
+
+    assert _normalize_whitespace(tools["delegate_to_rlm"].desc or "") == (
+        "Run a single child query in a Daytona RLM sandbox. For multiple independent tasks use "
+        "delegate_to_rlm_batched. Pass document_url to auto-inject a remote document into the "
+        "RLM context before execution."
+    )
+    assert _normalize_whitespace(tools["delegate_to_rlm_batched"].desc or "") == (
+        "Fan out independent child RLM queries concurrently. Prefer over sequential "
+        "delegate_to_rlm calls. Use execute_code with llm_query_batched() when work is already "
+        "inside one Daytona sandbox."
+    )
+    assert _normalize_whitespace(tools["execute_code"].desc or "") == (
+        "Execute Python code in the Daytona sandbox. Use llm_query_batched() inside the code for "
+        "many lightweight semantic prompts, sub_rlm_batched() for recursive child tasks."
+    )
 
 
 # ---------------------------------------------------------------------------

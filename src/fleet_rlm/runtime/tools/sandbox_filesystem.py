@@ -340,146 +340,70 @@ def _sandbox_get_file_info_impl(ctx: _SandboxFilesystemToolContext, path: str) -
 
 @tool_fn
 def sandbox_list_files(path: str = ".") -> dict[str, Any]:
-    """List files and directories in the Daytona sandbox.
-
-    Args:
-        path: Directory path to list. Defaults to the current workspace directory.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``directories``, ``files``, and ``total``.
-    """
+    """List files and directories in the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_list_files_impl(ctx, path=path)
 
 
 @tool_fn
 def sandbox_read_file(path: str) -> dict[str, Any]:
-    """Read a text file from the Daytona sandbox.
-
-    Args:
-        path: Path to the file to read.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``content``, and ``size``.
-    """
+    """Read a text file from the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_read_file_impl(ctx, path=path)
 
 
 @tool_fn
 def sandbox_write_file(path: str, content: str) -> dict[str, Any]:
-    """Write a text file to the Daytona sandbox.
-
-    Args:
-        path: Destination path in the sandbox.
-        content: Text content to write.
-
-    Returns:
-        Dictionary with ``status``, ``path``, and ``bytes_written``.
-    """
+    """Write a text file to the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_write_file_impl(ctx, path=path, content=content)
 
 
 @tool_fn
 def sandbox_create_directory(path: str) -> dict[str, Any]:
-    """Create a directory in the Daytona sandbox.
-
-    Args:
-        path: Directory path to create.
-
-    Returns:
-        Dictionary with ``status`` and ``path``.
-    """
+    """Create a directory in the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_create_directory_impl(ctx, path=path)
 
 
 @tool_fn
 def sandbox_delete_file(path: str) -> dict[str, Any]:
-    """Delete a file or directory from the Daytona sandbox.
-
-    Args:
-        path: Path to delete.
-
-    Returns:
-        Dictionary with ``status``, ``path``, and ``deleted``.
-    """
+    """Delete a file or directory from the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_delete_file_impl(ctx, path=path)
 
 
 @tool_fn
 def sandbox_move_file(source: str, destination: str) -> dict[str, Any]:
-    """Move or rename a file or directory in the Daytona sandbox.
-
-    Args:
-        source: Source path.
-        destination: Destination path.
-
-    Returns:
-        Dictionary with ``status``, ``source``, and ``destination``.
-    """
+    """Move or rename a file or directory in the Daytona sandbox."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_move_file_impl(ctx, source=source, destination=destination)
 
 
 @tool_fn
 def sandbox_search_files(path: str, pattern: str) -> dict[str, Any]:
-    """Search files by name pattern (glob) in the Daytona sandbox.
-
-    Args:
-        path: Root directory to search.
-        pattern: Glob pattern (e.g. ``"*.py"``).
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``pattern``, ``count``, and ``files``.
-    """
+    """Find sandbox files by glob pattern."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_search_files_impl(ctx, path=path, pattern=pattern)
 
 
 @tool_fn
 def sandbox_find_in_files(path: str, pattern: str) -> dict[str, Any]:
-    """Search file contents by text pattern (grep-like) in the Daytona sandbox.
-
-    Args:
-        path: Root directory to search.
-        pattern: Text pattern to find.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``pattern``, ``count``, and ``hits``.
-    """
+    """Search sandbox file contents for a text pattern."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_find_in_files_impl(ctx, path=path, pattern=pattern)
 
 
 @tool_fn
 def sandbox_replace_in_files(files: list[str], pattern: str, replacement: str) -> dict[str, Any]:
-    """Replace text in multiple files in the Daytona sandbox.
-
-    Args:
-        files: List of file paths to process.
-        pattern: Text to search for.
-        replacement: Replacement text.
-
-    Returns:
-        Dictionary with ``status``, ``files``, ``pattern``, and ``result``.
-    """
+    """Replace text across multiple sandbox files."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_replace_in_files_impl(ctx, files=files, pattern=pattern, replacement=replacement)
 
 
 @tool_fn
 def sandbox_get_file_info(path: str) -> dict[str, Any]:
-    """Get metadata for a file or directory in the Daytona sandbox.
-
-    Args:
-        path: Path to inspect.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``name``, ``size``, ``mode``, ``is_dir``, and ``mod_time``.
-    """
+    """Inspect metadata for a sandbox file or directory."""
     ctx = _SandboxFilesystemToolContext(interpreter=None)
     return _sandbox_get_file_info_impl(ctx, path=path)
 

@@ -222,7 +222,7 @@ export function useWorkspace(): ChatRuntime {
 
   const handleSubmit = useCallback(
     async (options?: ChatSubmitOptions) => {
-      const text = inputValue.trim();
+      const text = (options?.text ?? inputValue).trim();
       if (!text || isTyping || isStreaming) return;
 
       if ((options?.attachments?.length ?? 0) > 0) {

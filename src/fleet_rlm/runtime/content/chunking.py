@@ -19,6 +19,11 @@ from __future__ import annotations
 import json
 import re
 
+# Pre-compiled regexes for default chunking patterns to avoid recompilation
+# on every function call.
+_DEFAULT_HEADER_PATTERN = re.compile(r"^#{1,3} ", re.MULTILINE)
+_DEFAULT_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]", re.MULTILINE)
+
 # ═══════════════════════════════════════════════════════════════════════
 # Fixed-size chunking
 # ═══════════════════════════════════════════════════════════════════════
@@ -72,7 +77,7 @@ def chunk_by_size(
 
 def chunk_by_headers(
     text: str,
-    pattern: str = r"^#{1,3} ",
+    pattern: str | re.Pattern[str] | None = None,
     flags: int = re.MULTILINE,
 ) -> list[dict]:
     """Split text by header boundaries (markdown-style).
@@ -83,8 +88,8 @@ def chunk_by_headers(
 
     Args:
         text: The text to split.
-        pattern: Regex pattern matching header lines.
-            Default: ``r"^#{1,3} "`` (markdown H1-H3).
+        pattern: Regex pattern matching header lines. Accepts a pre-compiled
+            ``re.Pattern`` or a string. Default: ``r"^#{1,3} "`` (markdown H1-H3).
         flags: Regex flags. Default: ``re.MULTILINE``.
 
     Returns:
@@ -102,7 +107,12 @@ def chunk_by_headers(
     if not text:
         return []
 
-    compiled = re.compile(pattern, flags)
+    if isinstance(pattern, re.Pattern):
+        compiled = pattern
+    elif pattern is None:
+        compiled = _DEFAULT_HEADER_PATTERN
+    else:
+        compiled = re.compile(pattern, flags)
     matches = list(compiled.finditer(text))
 
     if not matches:
@@ -139,7 +149,7 @@ def chunk_by_headers(
 
 def chunk_by_timestamps(
     text: str,
-    pattern: str = r"^\d{4}-\d{2}-\d{2}[T ]",
+    pattern: str | re.Pattern[str] | None = None,
     flags: int = re.MULTILINE,
 ) -> list[dict]:
     """Split log-style text by timestamp boundaries.
@@ -149,8 +159,8 @@ def chunk_by_timestamps(
 
     Args:
         text: The log text to split.
-        pattern: Regex pattern matching timestamp line starts.
-            Default: ISO-8601 style ``r"^\\d{4}-\\d{2}-\\d{2}[T ]"``.
+        pattern: Regex pattern matching timestamp line starts. Accepts a
+            pre-compiled ``re.Pattern`` or a string. Default: ISO-8601 style.
         flags: Regex flags. Default: ``re.MULTILINE``.
 
     Returns:
@@ -168,7 +178,12 @@ def chunk_by_timestamps(
     if not text:
         return []
 
-    compiled = re.compile(pattern, flags)
+    if isinstance(pattern, re.Pattern):
+        compiled = pattern
+    elif pattern is None:
+        compiled = _DEFAULT_TIMESTAMP_PATTERN
+    else:
+        compiled = re.compile(pattern, flags)
     matches = list(compiled.finditer(text))
 
     if not matches:

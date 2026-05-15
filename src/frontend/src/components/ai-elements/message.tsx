@@ -274,7 +274,6 @@ export const MessageResponse = memo(function MessageResponse({
   const streamdownPlugins = useStreamdownPlugins();
   return (
     <Streamdown
-      key={typeof children === "string" ? children : undefined}
       className={cn(
         "space-y-4 whitespace-normal text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         // Body text

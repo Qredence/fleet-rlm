@@ -78,7 +78,9 @@ export const WorkspaceChatMessageItem = memo(function WorkspaceChatMessageItem({
             {message.type === "assistant" && (message.content || message.streaming) ? (
               <div className="max-w-content rounded-bubble px-4 py-3.5 transition-colors md:px-5 md:py-4">
                 {message.content ? (
-                  <MessageResponse streaming={message.streaming}>{message.content}</MessageResponse>
+                  <MessageResponse mode={message.streaming ? "streaming" : "static"}>
+                    {message.content}
+                  </MessageResponse>
                 ) : (
                   <ChatMessageLoadingState />
                 )}

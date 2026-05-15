@@ -149,14 +149,17 @@ def _download_url(url: str) -> Path:
         try:
             try:
                 downloaded = 0
-                while True:
-                    chunk = response.read(64 * 1024)
-                    if not chunk:
-                        break
-                    downloaded += len(chunk)
-                    if downloaded > _MAX_DOWNLOAD_BYTES:
-                        raise ValueError(f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit.")
-                    os.write(fd, chunk)
+                # Use a buffered file writer instead of raw os.write to
+                # batch system calls and improve I/O throughput.
+                with os.fdopen(fd, "wb", closefd=False) as handle:
+                    while True:
+                        chunk = response.read(64 * 1024)
+                        if not chunk:
+                            break
+                        downloaded += len(chunk)
+                        if downloaded > _MAX_DOWNLOAD_BYTES:
+                            raise ValueError(f"Download from {url} exceeds {_MAX_DOWNLOAD_BYTES} byte limit.")
+                        handle.write(chunk)
             except Exception:
                 cleanup_tmp = True
                 raise
@@ -170,21 +173,7 @@ def _download_url(url: str) -> Path:
 
 @tool_fn
 def load_document(path: str, alias: str = "active") -> dict[str, Any]:
-    """Load a text document from the host filesystem or a public URL.
-
-    When *path* is a local directory, returns a recursive file listing
-    instead of loading file content.  For agent-managed document caching
-    and Daytona workspace path resolution, use the agent-bound version
-    provided by ``AgentRuntime``.
-
-    Args:
-        path: Absolute or relative file path, directory path, or HTTP(S) URL.
-        alias: Alias to store the document under. Defaults to ``"active"``.
-
-    Returns:
-        Dictionary with ``status``, ``path``, ``char_count``, and ``line_count``
-        for files; ``status``, ``path``, and ``files`` for directories.
-    """
+    """Load a local file, directory listing, or public URL into document context."""
     from fleet_rlm.runtime.content.ingestion import (
         read_document_content as _read_document_content,
     )
@@ -235,18 +224,7 @@ def load_document(path: str, alias: str = "active") -> dict[str, Any]:
 
 @tool_fn
 def set_active_document(alias: str) -> dict[str, Any]:
-    """Report that standalone document alias activation is unsupported.
-
-    The agent-bound version provided by ``AgentRuntime`` updates the agent's
-    document cache. The standalone tool has no cache state to mutate, so it
-    fails explicitly instead of reporting a false-positive active alias.
-
-    Args:
-        alias: The document alias to set as active.
-
-    Returns:
-        Dictionary with ``status`` and an explanatory ``error``.
-    """
+    """Set the active document alias in the agent-managed document cache."""
     return {
         "status": "error",
         "active_alias": alias,
@@ -256,14 +234,7 @@ def set_active_document(alias: str) -> dict[str, Any]:
 
 @tool_fn
 def list_documents() -> dict[str, Any]:
-    """List loaded document aliases and metadata.
-
-    This standalone version always returns an empty cache.  The agent-bound
-    version provided by ``AgentRuntime`` queries the agent's document cache.
-
-    Returns:
-        Dictionary with ``documents``, ``active_alias``, and ``cache_size``.
-    """
+    """List loaded document aliases and active-document metadata."""
     return {
         "documents": [],
         "active_alias": "active",

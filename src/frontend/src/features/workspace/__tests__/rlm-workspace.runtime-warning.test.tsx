@@ -86,11 +86,27 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", () => ({
-  WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
-}));
-
-vi.mock("@/features/workspace/composer/workspace-composer", () => ({
-  WorkspaceComposer: () => <div>WorkspaceComposer</div>,
+  WorkspaceMessageList: ({
+    runtimeWarning,
+  }: {
+    runtimeWarning?: {
+      title: string;
+      guidance: string[];
+    };
+  }) => (
+    <div>
+      <span>WorkspaceMessageList</span>
+      {runtimeWarning ? (
+        <div data-slot="alert">
+          <span>{runtimeWarning.title}</span>
+          {runtimeWarning.guidance.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+          <button type="button">Open Runtime Settings</button>
+        </div>
+      ) : null}
+    </div>
+  ),
 }));
 
 describe("WorkspaceScreen runtime warning", () => {

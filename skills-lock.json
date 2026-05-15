@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agent-elements": {
+      "source": "21st-dev/agent-elements",
+      "sourceType": "github",
+      "skillPath": "skills/agent-elements/SKILL.md",
+      "computedHash": "899ff281733653460fc7c0864daaa602fb9d32b176f3653178791fae657d9277"
+    },
     "daytona": {
       "source": "daytona/skills",
       "sourceType": "github",

@@ -10,10 +10,12 @@ Covers VAL-AGENT-007 through VAL-AGENT-010 from the validation contract:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import dspy
 import pytest
+from dspy.streaming import StreamResponse
 
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.tools.binding import INTERPRETER_TOOL_NAMES
@@ -78,6 +80,45 @@ class _FakeInterpreter:
 
     def start(self) -> None:
         self._started = True
+
+
+class _FakeAsyncTool:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.calls: list[dict[str, Any]] = []
+
+    async def acall(self, **kwargs: Any) -> Any:
+        self.calls.append(dict(kwargs))
+        return self.result
+
+
+class _FakeStreamableReactProgram:
+    def __init__(
+        self,
+        *,
+        planner_predictions: list[dspy.Prediction],
+        tools: dict[str, Any] | None = None,
+    ) -> None:
+        self.react = object()
+        self.extract = SimpleNamespace(predict=object())
+        self.max_iters = len(planner_predictions)
+        self.tools = dict(tools or {})
+        self._planner_predictions = list(planner_predictions)
+        self.formatted_trajectories: list[dict[str, Any]] = []
+
+    def _format_trajectory(self, trajectory: dict[str, Any]) -> str:
+        self.formatted_trajectories.append(dict(trajectory))
+        return str(trajectory)
+
+    async def _async_call_with_potential_trajectory_truncation(
+        self,
+        module: Any,
+        trajectory: dict[str, Any],
+        **input_args: Any,
+    ) -> dspy.Prediction:
+        _ = trajectory, input_args
+        assert module is self.react
+        return self._planner_predictions.pop(0)
 
 
 @pytest.fixture()
@@ -450,6 +491,211 @@ class TestHistoryAccumulationAcrossTurns:
         assert events[-1].text == "[cancelled]"
         assert events[-1].payload == {"cancelled": True, "history_turns": 0}
         assert runtime.history_turns() == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_emits_streamed_response_tokens(
+        self,
+        runtime: AgentRuntime,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_react_program = _FakeStreamableReactProgram(
+            planner_predictions=[
+                dspy.Prediction(
+                    next_thought="I can answer directly.",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                )
+            ]
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
+            lambda _program: fake_react_program,
+        )
+
+        # For finish-only trajectories the fast path skips the extract LLM
+        # call and emits the planner thought as the response directly.
+        events = [event async for event in runtime.aiter_chat_turn_stream("hello")]
+
+        assert [event.kind for event in events] == ["status", "reasoning", "text", "done"]
+        assert events[1].text == "I can answer directly."
+        # Response is the thought itself (no extract call)
+        assert events[2].text == "I can answer directly."
+        assert events[-1].text == "I can answer directly."
+        assert runtime.history_turns() == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_emits_live_tool_events_from_status_messages(
+        self,
+        runtime: AgentRuntime,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        tool = _FakeAsyncTool({"status": "ok", "answer": "Delegated answer"})
+        fake_react_program = _FakeStreamableReactProgram(
+            planner_predictions=[
+                dspy.Prediction(
+                    next_thought="I should delegate this task.",
+                    next_tool_name="delegate_to_rlm",
+                    next_tool_args={"query": "test"},
+                ),
+                dspy.Prediction(
+                    next_thought="I have the delegated result.",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                ),
+            ],
+            tools={"delegate_to_rlm": tool},
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
+            lambda _program: fake_react_program,
+        )
+
+        def _fake_streamify(*args: Any, **kwargs: Any):
+            _ = args, kwargs
+
+            async def _runner(**input_args: Any):
+                _ = input_args
+                yield StreamResponse("predict_response", "response", "Done", True)
+                yield dspy.Prediction(response="Done", reasoning="")
+
+            return _runner
+
+        monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.dspy.streamify", _fake_streamify)
+
+        events = [event async for event in runtime.aiter_chat_turn_stream("delegate this")]
+
+        assert [event.kind for event in events] == [
+            "status",
+            "reasoning",
+            "tool_call",
+            "tool_result",
+            "reasoning",
+            "text",
+            "done",
+        ]
+        assert events[2].payload == {
+            "tool_name": "delegate_to_rlm",
+            "tool_input": "{'query': 'test'}",
+            "tool_args": {"query": "test"},
+            "step_index": 0,
+        }
+        assert events[3].payload == {
+            "tool_name": "delegate_to_rlm",
+            "tool_output": "{'status': 'ok', 'answer': 'Delegated answer'}",
+            "step_index": 0,
+        }
+        assert tool.calls == [{"query": "test"}]
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_marks_degraded_delegate_result_for_human_review(
+        self,
+        runtime: AgentRuntime,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        tool = _FakeAsyncTool(
+            {
+                "status": "needs_human_review",
+                "answer": "Usable but degraded answer",
+                "degraded": True,
+                "reason": "broker_unavailable",
+                "error": "Daytona broker unavailable during child RLM execution.",
+                "degradation_reason": "broker_unavailable",
+                "degradation_error": "Daytona broker unavailable during child RLM execution.",
+                "duration_ms": 123,
+            }
+        )
+        fake_react_program = _FakeStreamableReactProgram(
+            planner_predictions=[
+                dspy.Prediction(
+                    next_thought="I should delegate this task.",
+                    next_tool_name="delegate_to_rlm",
+                    next_tool_args={"query": "test"},
+                ),
+                dspy.Prediction(
+                    next_thought="I have a degraded delegated result.",
+                    next_tool_name="finish",
+                    next_tool_args={},
+                ),
+            ],
+            tools={"delegate_to_rlm": tool},
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
+            lambda _program: fake_react_program,
+        )
+
+        def _fake_streamify(*args: Any, **kwargs: Any):
+            _ = args, kwargs
+
+            async def _runner(**input_args: Any):
+                _ = input_args
+                yield StreamResponse("predict_response", "response", "Done", True)
+                yield dspy.Prediction(response="Done", reasoning="")
+
+            return _runner
+
+        monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.dspy.streamify", _fake_streamify)
+
+        events = [event async for event in runtime.aiter_chat_turn_stream("delegate this")]
+
+        done_payload = events[-1].payload
+        assert done_payload["human_review"]["required"] is True
+        assert done_payload["human_review"]["repair_mode"] == "needs_human_review"
+        assert done_payload["runtime_degraded"] is True
+        assert done_payload["runtime_failure_category"] == "recursive_child_degraded"
+        assert done_payload["runtime_failure_phase"] == "delegate_to_rlm"
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_preserves_clarification_events_from_final_trajectory(
+        self,
+        runtime: AgentRuntime,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        tool = _FakeAsyncTool(
+            {
+                "status": "clarification_needed",
+                "question": "Which repository?",
+                "options": ["frontend", "backend"],
+            }
+        )
+        fake_react_program = _FakeStreamableReactProgram(
+            planner_predictions=[
+                dspy.Prediction(
+                    next_thought="I need clarification.",
+                    next_tool_name="clarification_questions",
+                    next_tool_args={},
+                )
+            ],
+            tools={"clarification_questions": tool},
+        )
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
+            lambda _program: fake_react_program,
+        )
+
+        def _fake_streamify(*args: Any, **kwargs: Any):
+            _ = args, kwargs
+
+            async def _runner(**input_args: Any):
+                _ = input_args
+                yield dspy.Prediction(response="", reasoning="")
+
+            return _runner
+
+        monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.dspy.streamify", _fake_streamify)
+
+        events = [event async for event in runtime.aiter_chat_turn_stream("need clarification")]
+
+        assert [event.kind for event in events] == [
+            "status",
+            "reasoning",
+            "tool_call",
+            "tool_result",
+            "clarification",
+            "done",
+        ]
+        assert events[4].text == "Which repository?"
+        assert events[4].payload["options"] == ["frontend", "backend"]
 
 
 # ---------------------------------------------------------------------------

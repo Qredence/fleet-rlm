@@ -18,6 +18,9 @@ from dspy.streaming.messages import StatusMessageProvider
 from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.schemas import StreamEvent
 
+# Pre-compiled regexes for hot-path status parsing
+_CALLING_TOOL_RE = re.compile(r"^Calling tool:\s*(.+)$")
+
 # Soft content cap for trajectory step outputs crossing the websocket boundary.
 # Individual steps can carry multi-KB observations (grep hits, long file reads)
 # that bloat chat payloads without improving UX. See DSPy 3.2.0 PR #9282.
@@ -46,14 +49,14 @@ ToolEventKind = Literal["tool_call"]
 
 
 def parse_tool_call_status(message: str) -> str | None:
-    match = re.match(r"^Calling tool:\s*(.+)$", message.strip())
+    match = _CALLING_TOOL_RE.match(message.strip())
     if not match:
         return None
     return f"tool call: {match.group(1).strip()}"
 
 
 def parse_tool_call_payload(message: str) -> dict[str, Any] | None:
-    match = re.match(r"^Calling tool:\s*(.+)$", message.strip())
+    match = _CALLING_TOOL_RE.match(message.strip())
     if not match:
         return None
 
@@ -175,9 +178,16 @@ _ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https"})
 def _extract_step_indices(raw: dict[str, Any]) -> list[int]:
     indices: set[int] = set()
     for key in raw:
-        parts = key.rsplit("_", 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            indices.add(int(parts[1]))
+        # Fast path: skip keys that are too short to contain an underscore + digit
+        if len(key) < 3:
+            continue
+        # Slightly faster than rsplit: find last underscore manually
+        idx = key.rfind("_")
+        if idx == -1 or idx == len(key) - 1:
+            continue
+        suffix = key[idx + 1 :]
+        if suffix.isdigit():
+            indices.add(int(suffix))
     return sorted(indices)
 
 
@@ -370,16 +380,16 @@ def _merge_citation_candidates(
 
 def _dedupe_normalized_citations(merged: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
+    seen_keys: set[tuple[str, str, str, str]] = set()
     for idx, item in enumerate(merged):
         normalized_item = _normalize_citation_entry(item, index=idx)
         if not normalized_item:
             continue
-        dedupe_key = (
-            f"{normalized_item.get('source_id', '')}"
-            f"|{normalized_item.get('anchor_id', '')}"
-            f"|{normalized_item.get('url', '')}"
-            f"|{normalized_item.get('quote', '')}"
+        dedupe_key: tuple[str, str, str, str] = (
+            str(normalized_item.get("source_id", "")),
+            str(normalized_item.get("anchor_id", "")),
+            str(normalized_item.get("url", "")),
+            str(normalized_item.get("quote", "")),
         )
         if dedupe_key in seen_keys:
             continue

@@ -73,6 +73,7 @@ def mlflow_request_context(context: MlflowTraceRequestContext):
     finally:
         finalize_current_mlflow_trace(state=trace_state)
         capture_last_active_trace_id()
+        _runtime_module().flush_mlflow_traces()
         with _TRACE_ID_LOCK:
             _TRACE_IDS_BY_CLIENT_REQUEST_ID.pop(context.client_request_id, None)
         _CURRENT_TRACE_ID.reset(trace_token)

@@ -49,6 +49,7 @@ from fleet_rlm.runtime.modules.variable_mode import (
     build_variable_mode_rlm,
 )
 from fleet_rlm.runtime.modules.workspace import (
+    _MISSING_SOURCE_FAILURE_MARKERS,
     _NON_SUFFICIENT_FAILURE_STATUSES,
     _SUBQUERY_FAILURE_MARKERS,
     _SUBQUERY_FAILURE_REASONS,
@@ -88,6 +89,7 @@ __all__ = [
     "build_variable_mode_rlm",
     # Workspace
     "RecursiveWorkspaceModule",
+    "_MISSING_SOURCE_FAILURE_MARKERS",
     "_NON_SUFFICIENT_FAILURE_STATUSES",
     "_SUBQUERY_FAILURE_MARKERS",
     "_SUBQUERY_FAILURE_REASONS",

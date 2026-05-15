@@ -202,8 +202,8 @@ function executionSectionState(section: ExecutionSection): ExecutionHighlight["s
 
   if (section.kind === "status_note") {
     if (section.part.tone === "error") return "failed";
-    if (section.part.tone === "warning") return "running";
-    return "completed";
+    if (section.part.tone === "success") return "completed";
+    return "running";
   }
 
   if ("errorText" in section.part && section.part.errorText) return "failed";
@@ -242,6 +242,13 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
 
   const candidates: Candidate[] = [];
 
+  const toolSummary = (name: string, status: ExecutionHighlight["status"]) => {
+    if (status === "failed") return `${name} failed`;
+    if (status === "running") return `Running ${name}`;
+    if (status === "pending") return `Pending ${name}`;
+    return `Completed ${name}`;
+  };
+
   for (const section of sections) {
     const status = executionSectionState(section);
     const runtimeBadges = section.runtimeBadges;
@@ -274,21 +281,19 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         });
         break;
       case "status_note":
-        if (section.part.tone !== "neutral") {
-          candidates.push({
-            id: section.id,
-            label:
-              section.part.tone === "warning"
-                ? "Warning"
-                : section.part.tone === "error"
-                  ? "Error"
-                  : "Status",
-            summary: section.summary,
-            status,
-            runtimeBadges,
-            groupable: false,
-          });
-        }
+        candidates.push({
+          id: section.id,
+          label:
+            section.part.tone === "warning"
+              ? "Warning"
+              : section.part.tone === "error"
+                ? "Error"
+                : "Status",
+          summary: section.summary,
+          status,
+          runtimeBadges,
+          groupable: false,
+        });
         break;
       case "environment_variables":
         break;
@@ -297,7 +302,7 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         candidates.push({
           id: section.id,
           label: name,
-          summary: status === "failed" ? `${name} failed` : `Completed ${name}`,
+          summary: toolSummary(name, status),
           status,
           runtimeBadges,
           groupKey: normalizeToolKey(name),
@@ -310,7 +315,7 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         candidates.push({
           id: section.id,
           label: name,
-          summary: status === "failed" ? `${name} failed` : `Completed ${name}`,
+          summary: toolSummary(name, status),
           status,
           runtimeBadges,
           groupKey: normalizeToolKey(name),
@@ -352,6 +357,8 @@ function buildExecutionHighlights(sections: ExecutionSection[]) {
         runtimeBadges: uniqueStrings(grouped.flatMap((item) => item.runtimeBadges)),
         count: grouped.length,
       });
+    } else {
+      highlights.push(candidate);
     }
 
     index = cursor;

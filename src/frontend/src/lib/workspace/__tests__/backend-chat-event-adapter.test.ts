@@ -572,6 +572,30 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("does not treat successful search hits mentioning failed as a tool failure", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent(
+        "tool_result",
+        "Tool result: {'status': 'ok', 'hits': [{'text': 'Backend stream failed'}]}",
+        {
+          tool_name: "find_files",
+          tool_output: {
+            status: "ok",
+            hits: [{ text: "Backend stream failed" }],
+          },
+        },
+      ),
+    );
+
+    const tool = findFirstPart(messages, (part) => part.kind === "tool");
+    expect(tool).toBeDefined();
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-available");
+      expect(tool.errorText).toBeUndefined();
+    }
+  });
+
   it("keeps trajectory fallback reasoning and later live tool result as separate rows", () => {
     let messages = applyWsFrameToMessages(
       [],

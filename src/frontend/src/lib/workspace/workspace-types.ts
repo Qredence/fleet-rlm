@@ -252,6 +252,7 @@ export interface ChatSubmitAttachment {
 }
 
 export interface ChatSubmitOptions {
+  text?: string;
   traceEnabled?: boolean;
   executionMode?: WsExecutionMode;
   runtimeMode?: WsRuntimeMode;

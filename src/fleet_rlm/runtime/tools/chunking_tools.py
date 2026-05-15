@@ -77,29 +77,7 @@ def chunk_document(
     overlap: int = 0,
     pattern: str = "",
 ) -> dict[str, Any]:
-    """Split a text document into chunks using the specified strategy.
-
-    Supported strategies:
-
-    * ``size`` — fixed character-count windows with optional overlap.
-    * ``headers`` — split on Markdown heading patterns.
-    * ``timestamps`` — split on ISO-8601 timestamp prefixes.
-    * ``json_keys`` — split a JSON document on top-level keys.
-
-    Args:
-        text: The source text to chunk.
-        strategy: Chunking strategy name. Defaults to ``"size"``.
-        size: Chunk size in characters for the ``size`` strategy. Defaults
-            to 200 000.
-        overlap: Overlap in characters between adjacent chunks for the
-            ``size`` strategy. Defaults to 0.
-        pattern: Custom regex delimiter for ``headers`` or ``timestamps``
-            strategies.  Ignored for other strategies.
-
-    Returns:
-        Dictionary with ``status``, ``strategy``, ``chunk_count``, and a
-        ``preview`` of the first chunk.
-    """
+    """Split document text into chunks for downstream processing."""
     if _looks_like_document_alias(text):
         return {
             "status": "warning",

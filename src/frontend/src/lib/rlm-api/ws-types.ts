@@ -50,6 +50,11 @@ export type WsEventKind =
   | "warning"
   | "error"
   | "done"
+  | "turn_started"
+  | "turn_completed"
+  | "turn_failed"
+  | "sandbox_exec"
+  | "rlm_delegate"
   // Legacy kinds (retained for backward compatibility)
   | "assistant_token"
   | "reasoning_step"
