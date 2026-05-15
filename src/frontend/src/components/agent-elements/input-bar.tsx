@@ -19,9 +19,16 @@ const DEFAULT_INPUT_CONFIG: InputConfig = {
 import {
   IconChevronDown,
   IconChevronUp,
+  IconFileText,
   IconMessageCircleQuestion,
+  IconPlugConnected,
   IconX,
 } from "@tabler/icons-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { SendButton } from "./input/send-button";
 import { AttachmentButton } from "./input/attachment-button";
 import { FileAttachment } from "./input/file-attachment";
@@ -152,6 +159,7 @@ export const InputBar = memo(function InputBar({
   const [dismissedQuestionId, setDismissedQuestionId] = useState<string | null>(
     null,
   );
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [questionBarIndex, setQuestionBarIndex] = useState(1);
   const isControlled = controlledValue !== undefined;
   const input = isControlled ? controlledValue : internalInput;
@@ -418,6 +426,39 @@ export const InputBar = memo(function InputBar({
     ? undefined
     : suggestions?.itemClassName;
 
+  const attachButtonNode = showAttach && onAttach ? (
+    <Popover open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
+      <PopoverTrigger asChild>
+        <AttachmentButton />
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="top"
+        className="w-46 rounded-[8px] border-border/80 bg-an-input-background p-1 text-an-foreground shadow-lg"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setIsAttachMenuOpen(false);
+            onAttach();
+          }}
+          className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 transition-colors hover:bg-foreground/6"
+        >
+          <IconFileText className="size-3.5 shrink-0" />
+          <span className="font-medium">Add document</span>
+        </button>
+        <button
+          type="button"
+          disabled
+          className="flex w-full cursor-not-allowed items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 text-foreground/35"
+        >
+          <IconPlugConnected className="size-3.5 shrink-0" />
+          <span className="font-medium">Connectors</span>
+        </button>
+      </PopoverContent>
+    </Popover>
+  ) : null;
+
   return (
     <div className={cn("shrink-0 px-3 pb-3", className)}>
       <div className="mx-auto max-w-an">
@@ -433,7 +474,8 @@ export const InputBar = memo(function InputBar({
           {questionBarNode}
           <div
             className={cn(
-              "relative cursor-text rounded-an-input-border-radius bg-an-input-background shadow-2xs ring-1 ring-foreground/10",
+              "relative cursor-text rounded-an-input-border-radius bg-an-input-background shadow-2xs ring-1 ring-foreground/10 transition-[box-shadow] duration-75 ease-in-out",
+              "focus-within:ring-2 focus-within:ring-an-primary-color/60",
               isDragOver && "ring-2 ring-an-primary-color",
             )}
             onClick={handleContainerClick}
@@ -526,18 +568,17 @@ export const InputBar = memo(function InputBar({
             {/* Toolbar */}
             <div className="flex items-center justify-between gap-3 px-2 pt-1 pb-2">
               <div className="flex items-center gap-1 min-w-0">
-                {!attachRight && showAttach && onAttach && (
-                  <AttachmentButton onClick={onAttach} />
-                )}
+                {!attachRight && attachButtonNode}
                 {leftActions}
               </div>
               <div className="flex items-center gap-1">
                 {rightActions}
-                {attachRight && showAttach && onAttach && (
-                  <AttachmentButton onClick={onAttach} />
-                )}
+                {attachRight && attachButtonNode}
                 {/* Send / Stop button */}
-                <div
+                <button
+                  type="button"
+                  aria-label={isStreaming ? "Stop response" : "Send message"}
+                  disabled={!isStreaming && (!hasInput || Boolean(disabled))}
                   onClick={() => {
                     if (isStreaming) {
                       onStop();
@@ -545,7 +586,7 @@ export const InputBar = memo(function InputBar({
                       handleSubmit();
                     }
                   }}
-                  className="cursor-pointer"
+                  className="rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-an-primary-color/60 disabled:cursor-default active:not-disabled:scale-95"
                 >
                   <SendButton
                     state={
@@ -556,7 +597,7 @@ export const InputBar = memo(function InputBar({
                           : "idle"
                     }
                   />
-                </div>
+                </button>
               </div>
             </div>
           </div>

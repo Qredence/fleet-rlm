@@ -100,11 +100,28 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", () => ({
-  WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
-}));
-
-vi.mock("@/features/workspace/composer/workspace-composer", () => ({
-  WorkspaceComposer: () => <div>WorkspaceComposer</div>,
+  WorkspaceMessageList: ({
+    showEmptyState,
+    runtimeWarning,
+  }: {
+    showEmptyState?: boolean;
+    runtimeWarning?: { title: string; guidance: string[] };
+  }) => (
+    <div data-slot="workspace-agent-chat">
+      <div>WorkspaceMessageList</div>
+      <div>AgentChat</div>
+      {showEmptyState ? <div>Start a conversation</div> : null}
+      {runtimeWarning ? (
+        <div data-slot="alert">
+          <div>{runtimeWarning.title}</div>
+          {runtimeWarning.guidance.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+          <button type="button">Settings</button>
+        </div>
+      ) : null}
+    </div>
+  ),
 }));
 
 describe("WorkspaceScreen empty-state layout", () => {
@@ -135,21 +152,16 @@ describe("WorkspaceScreen empty-state layout", () => {
     };
   });
 
-  it("renders the desktop landing stack with hero copy and inline composer", () => {
+  it("renders the desktop empty AgentChat state", () => {
     const html = renderScreen();
 
-    expect(html).toContain('data-slot="workspace-landing-state"');
+    expect(html).toContain('data-slot="workspace-agent-chat"');
     expect(html).toContain("Start a conversation");
-    // Suggestion action buttons for Daytona-aligned execution tasks
-    expect(html).toContain("Build a feature");
-    expect(html).toContain("Debug an issue");
-    expect(html).toContain("Review changes");
-    expect(html).toContain("Explore ideas");
-    expect(html).toContain("WorkspaceComposer");
-    expect(html).not.toContain("WorkspaceMessageList");
+    expect(html).toContain("WorkspaceMessageList");
+    expect(html).toContain("AgentChat");
   });
 
-  it("renders the runtime warning inside the desktop landing stack above the composer", () => {
+  it("passes runtime warning into the AgentChat input area", () => {
     runtimeStatusMock = {
       data: {
         ready: false,
@@ -163,14 +175,11 @@ describe("WorkspaceScreen empty-state layout", () => {
 
     const html = renderScreen();
 
-    const titleIndex = html.indexOf("Start a conversation");
     const warningIndex = html.indexOf("Runtime configuration required");
-    const composerIndex = html.indexOf("WorkspaceComposer");
 
-    expect(titleIndex).toBeGreaterThanOrEqual(0);
-    expect(warningIndex).toBeGreaterThan(titleIndex);
-    expect(composerIndex).toBeGreaterThan(warningIndex);
-    expect(html).toContain("Open Runtime Settings");
+    expect(warningIndex).toBeGreaterThanOrEqual(0);
+    expect(html).toContain("Run Runtime tests from Settings");
+    expect(html).toContain('data-slot="alert"');
   });
 
   it("falls back to the conversation layout as soon as the first turn is in flight", () => {
@@ -179,8 +188,8 @@ describe("WorkspaceScreen empty-state layout", () => {
     const html = renderScreen();
 
     expect(html).toContain("WorkspaceMessageList");
-    expect(html).toContain("WorkspaceComposer");
-    expect(html).not.toContain('data-slot="workspace-landing-state"');
+    expect(html).toContain("AgentChat");
+    expect(html).toContain('data-slot="workspace-agent-chat"');
     expect(html).not.toContain("Start a conversation");
   });
 
@@ -190,8 +199,7 @@ describe("WorkspaceScreen empty-state layout", () => {
     const html = renderScreen();
 
     expect(html).toContain("WorkspaceMessageList");
-    expect(html).toContain("WorkspaceComposer");
-    expect(html).not.toContain('data-slot="workspace-landing-state"');
-    expect(html).not.toContain("Start a conversation");
+    expect(html).toContain("AgentChat");
+    expect(html).toContain("Start a conversation");
   });
 });

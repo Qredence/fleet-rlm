@@ -22,7 +22,7 @@ const backendRuntimeState = {
   loadConversation: vi.fn(),
 };
 
-let capturedOnSend: ((attachments: never[]) => void) | null = null;
+let capturedOnSend: ((content: string) => void) | null = null;
 
 vi.mock("@/features/workspace/use-workspace", async () => {
   const actual = await vi.importActual<typeof import("@/features/workspace/use-workspace")>(
@@ -74,7 +74,26 @@ vi.mock("@/lib/rlm-api", () => ({
 }));
 
 vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", () => ({
-  WorkspaceMessageList: () => <div data-testid="chat-message-list">WorkspaceMessageList</div>,
+  WorkspaceMessageList: ({
+    value,
+    canSubmit,
+    onSend,
+  }: {
+    value: string;
+    canSubmit?: boolean;
+    onSend: (content: string) => void;
+  }) => {
+    capturedOnSend = onSend;
+    return (
+      <div data-testid="chat-message-list">
+        <span>WorkspaceMessageList</span>
+        <span>{value}</span>
+        <button type="button" disabled={!canSubmit} onClick={() => onSend(value)}>
+          Send
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/features/workspace/composer/workspace-composer", () => ({
@@ -87,7 +106,6 @@ vi.mock("@/features/workspace/composer/workspace-composer", () => ({
     canSubmit?: boolean;
     onSend: (attachments: never[]) => void;
   }) => {
-    capturedOnSend = onSend;
     return (
       <div data-testid="chat-input">
         <span>{value}</span>
@@ -145,7 +163,7 @@ describe("WorkspaceScreen run workbench mode", () => {
     renderScreen();
     expect(capturedOnSend).not.toBeNull();
 
-    capturedOnSend?.([]);
+    capturedOnSend?.(backendRuntimeState.inputValue);
 
     expect(backendRuntimeState.handleSubmit).toHaveBeenCalledWith(
       expect.objectContaining({

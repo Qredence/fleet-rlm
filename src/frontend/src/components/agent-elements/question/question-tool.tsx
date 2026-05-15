@@ -66,9 +66,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
   useEffect(() => {
     setLocalAnswers({});
     setLocalIndex(part.input?.questionIndex ?? 1);
-  }, [part.toolCallId]);
-
-  if (!question) return null;
+  }, [part.input?.questionIndex, part.toolCallId]);
 
   const outputAnswer = part.output?.answer;
   const answeredCount = Object.keys(localAnswers).length;
@@ -101,6 +99,8 @@ export function QuestionTool({ part }: QuestionToolProps) {
       return formatAnswer(localAnswers[clampedIndex]);
     return "Pending";
   }, [isComplete, summaryAnswers, outputAnswer, localAnswers, clampedIndex]);
+
+  if (!question) return null;
 
   const goPrev = () => {
     if (!canGoPrev) return;

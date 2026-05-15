@@ -4,8 +4,56 @@ import type { LottieRefCurrentProps } from "lottie-react";
 import { cn } from "./utils/cn";
 import { spiralFastData, spiralSlowData } from "./spiral-loader-data";
 
-const LottieReact = lazy(() => import("lottie-react"));
-const Lottie = LottieReact as unknown as ComponentType<any>;
+type LottieModuleShape = {
+  default?: unknown;
+  "module.exports"?: unknown;
+};
+
+function isComponent(value: unknown): value is ComponentType<any> {
+  return typeof value === "function";
+}
+
+function unwrapComponent(value: unknown): ComponentType<any> | null {
+  if (isComponent(value)) return value;
+  if (value && typeof value === "object" && "default" in value) {
+    const nestedDefault = (value as { default?: unknown }).default;
+    if (isComponent(nestedDefault)) return nestedDefault;
+  }
+  return null;
+}
+
+function getModuleExport(
+  module: LottieModuleShape,
+  exportName: keyof LottieModuleShape,
+): unknown {
+  try {
+    return module[exportName];
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveLottieComponent(module: LottieModuleShape): ComponentType<any> {
+  const defaultExport = getModuleExport(module, "default");
+  const moduleExports = getModuleExport(module, "module.exports");
+  const candidates = [
+    defaultExport,
+    unwrapComponent(defaultExport),
+    moduleExports,
+    unwrapComponent(moduleExports),
+  ];
+  const component = candidates.find(isComponent);
+  if (!component) {
+    throw new Error("Unable to resolve lottie-react component export.");
+  }
+  return component;
+}
+
+const Lottie = lazy(() =>
+  import("lottie-react").then((module) => ({
+    default: resolveLottieComponent(module as LottieModuleShape),
+  })),
+);
 
 const FAST_REPEATS = 4;
 const SLOW_REPEATS = 2;

@@ -102,6 +102,12 @@ export const toolRegistry: Record<string, ToolMeta> = {
     },
     variant: "simple",
   },
+  "tool-Status": {
+    icon: LogOut,
+    title: () => "Status",
+    subtitle: (part) => part.output?.message || part.input?.message || "",
+    variant: "simple",
+  },
   "tool-Skill": {
     icon: Sparkles,
     title: () => "Skill",

@@ -157,6 +157,9 @@ export type AgentChatProps = {
 
   suggestions?: InputSuggestions;
 
+  value?: string;
+  onChange?: (value: string) => void;
+
   emptyStatePosition?: "default" | "center";
   emptySuggestionsPlacement?: "input" | "empty" | "both";
   emptySuggestionsPosition?: "top" | "bottom";

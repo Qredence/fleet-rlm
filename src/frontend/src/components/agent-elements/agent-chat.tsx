@@ -21,6 +21,8 @@ export function AgentChat({
   initialScrollBehavior,
   enableImagePreview,
   suggestions,
+  value,
+  onChange,
   emptyStatePosition = "default",
   emptySuggestionsPlacement = "input",
   emptySuggestionsPosition = "top",
@@ -29,7 +31,9 @@ export function AgentChat({
   style,
 }: AgentChatProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState("");
+  const [internalDraft, setInternalDraft] = useState("");
+  const draft = value ?? internalDraft;
+  const setDraft = onChange ?? setInternalDraft;
 
   const ResolvedInputBar = slots?.InputBar ?? InputBar;
   const isEmpty = !error && messages.length === 0;

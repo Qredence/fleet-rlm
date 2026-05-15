@@ -1,7 +1,7 @@
-import { defineConfig } from "vite-plus";
+import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -122,9 +122,11 @@ export default defineConfig({
         files: [
           "src/components/ui/**/*.{ts,tsx}",
           "src/components/ai-elements/**/*.{ts,tsx}",
+          "src/components/agent-elements/**/*.{ts,tsx}",
           "src/components/patterns/**/*.{ts,tsx}",
         ],
         rules: {
+          "@typescript-eslint/no-explicit-any": "off",
           "no-restricted-imports": [
             "error",
             {
@@ -193,7 +195,13 @@ export default defineConfig({
     ],
     options: {},
   },
-  plugins: [TanStackRouterVite(), react(), tailwindcss()],
+  plugins: [
+    tanstackStart({
+      vite: { installDevServerMiddleware: true },
+    }),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     // Prevent duplicate package instances in the client bundle.
     dedupe: [

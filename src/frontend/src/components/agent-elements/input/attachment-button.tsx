@@ -1,10 +1,14 @@
-import { memo, type ReactNode } from "react";
+import { memo, type ButtonHTMLAttributes, type ReactNode, type Ref } from "react";
 import { IconPaperclip, IconPlus } from "@tabler/icons-react";
+
+import { cn } from "../utils/cn";
 
 export type AttachmentButtonIcon = "plus" | "paperclip";
 
-export type AttachmentButtonProps = {
-  onClick?: () => void;
+export type AttachmentButtonProps = Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "children"
+> & {
   /**
    * Icon to render inside the button.
    * - "plus" (default): a `+` glyph, matches the generic "add something" affordance.
@@ -14,6 +18,7 @@ export type AttachmentButtonProps = {
    *   styling is only applied to the built-in presets.
    */
   icon?: AttachmentButtonIcon | ReactNode;
+  ref?: Ref<HTMLButtonElement>;
 };
 
 function isIconName(value: unknown): value is AttachmentButtonIcon {
@@ -21,8 +26,10 @@ function isIconName(value: unknown): value is AttachmentButtonIcon {
 }
 
 export const AttachmentButton = memo(function AttachmentButton({
-  onClick,
   icon = "plus",
+  className,
+  ref,
+  ...props
 }: AttachmentButtonProps) {
   const iconClassName = "w-4 h-4 text-neutral-400 dark:text-neutral-600";
   let iconNode: ReactNode;
@@ -40,9 +47,13 @@ export const AttachmentButton = memo(function AttachmentButton({
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="size-7 rounded-full flex items-center justify-center hover:bg-muted transition-colors cursor-pointer"
+      className={cn(
+        "size-7 rounded-full flex items-center justify-center hover:bg-muted transition-colors cursor-pointer",
+        className,
+      )}
       aria-label="Attach"
+      ref={ref}
+      {...props}
     >
       {iconNode}
     </button>

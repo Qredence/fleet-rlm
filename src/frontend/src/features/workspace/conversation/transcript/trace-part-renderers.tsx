@@ -26,6 +26,7 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import { ToolRenderer as AgentElementsToolRenderer } from "@/components/agent-elements/tools/tool-renderer";
 import { BashTool } from "@/components/agent-elements/tools/bash-tool";
 import { EditTool } from "@/components/agent-elements/tools/edit-tool";
 import { SearchTool } from "@/components/agent-elements/tools/search-tool";
@@ -522,8 +523,8 @@ export function WorkspaceTracePart({ part, partKey }: { part: ChatRenderPart; pa
       );
     case "tool": {
       const agentTool = resolveAgentElementsTool(part);
+      const aePart = toolPartToAgentElements(part, partKey);
       if (agentTool) {
-        const aePart = toolPartToAgentElements(part, partKey);
         switch (agentTool) {
           case "Bash":
             return <BashTool part={aePart} />;
@@ -535,33 +536,7 @@ export function WorkspaceTracePart({ part, partKey }: { part: ChatRenderPart; pa
             return <ThinkingTool part={aePart} />;
         }
       }
-      // Fallback to ai-elements Tool for unrecognized tool types
-      const outputText = stringifyValue(part.output);
-      return (
-        <Tool defaultOpen={shouldOpenToolRow(part.state)}>
-          <ToolHeader
-            type={`tool-${part.toolType}`}
-            state={mapToolState(part.state)}
-            title={part.title || part.toolType}
-          />
-          <ToolContent>
-            <RuntimeContextBadge ctx={part.runtimeContext} />
-            {part.input != null ? <ToolInput input={part.input} /> : null}
-            <ToolOutput
-              errorText={part.errorText}
-              output={
-                part.errorText ? undefined : outputText ? (
-                  <div className="w-full">
-                    <Streamdown content={outputText} streaming={false} />
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">No output</span>
-                )
-              }
-            />
-          </ToolContent>
-        </Tool>
-      );
+      return <AgentElementsToolRenderer part={aePart} />;
     }
     case "sandbox": {
       const aePart = sandboxPartToAgentElements(part, partKey);

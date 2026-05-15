@@ -57,7 +57,7 @@ export const ToolRenderer = memo(function ToolRenderer({
     case "tool-Question":
       return <QuestionTool part={part} chatStatus={chatStatus} />;
     case "tool-Task":
-    case "tool-Agent":
+    case "tool-Agent": {
       const labelBase = part.type === "tool-Agent" ? "Agent" : "Task";
       return (
         <ToolGroup
@@ -70,6 +70,7 @@ export const ToolRenderer = memo(function ToolRenderer({
           defaultOpen={false}
         />
       );
+    }
     case "tool-Thinking":
       return <ThinkingTool part={part} />;
   }

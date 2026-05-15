@@ -66,7 +66,7 @@
   --an-user-message-bg: #1a1a1a;
   --an-user-message-text: #fafafa;
 
-  --an-input-background: #0a0a0a;
+  --an-input-background: oklab(0.2 0 0);
   --an-input-border-color: #2a2a2a;
   --an-input-color: #fafafa;
   --an-input-placeholder-color: #71717a;
