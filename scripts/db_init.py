@@ -17,6 +17,14 @@ from fleet_rlm.integrations.database.engine import DatabaseManager, select_datab
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for database initialization.
+
+    Creates a parser that validates DB connectivity and applies Alembic migrations.
+    Accepts --env-file (path to dotenv) and --database-url (override DB URL).
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for db_init workflow.
+    """
     parser = argparse.ArgumentParser(description="Validate database connectivity and apply Alembic migrations")
     parser.add_argument(
         "--env-file",

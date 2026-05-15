@@ -15,6 +15,11 @@ def _repo_root() -> Path:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for frontend build workflow.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for building and syncing UI assets.
+    """
     repo_root = _repo_root()
     parser = argparse.ArgumentParser(description="Build the frontend and sync packaged UI assets")
     parser.add_argument(
@@ -38,6 +43,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Build the frontend UI and sync assets to the packaged location.
+
+    Args:
+        argv: Command-line arguments (list[str] | None). Defaults to sys.argv.
+
+    Returns:
+        int: Exit code (0 for success, non-zero for failure).
+    """
     args = build_parser().parse_args(argv)
     frontend_dir = args.frontend_dir.resolve()
     target_ui_dir = args.target_ui_dir.resolve()

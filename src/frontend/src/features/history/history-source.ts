@@ -19,7 +19,7 @@ export function isPlaceholderSessionTitle(
   if (UUID_PATTERN.test(raw)) return true;
   if (!raw.startsWith("Session ")) return false;
   const suffix = raw.slice("Session ".length).trim();
-  return suffix.length > 0 && (suffix === String(Number(suffix)) || UUID_PATTERN.test(suffix));
+  return suffix.length > 0 && (/^\d+$/.test(suffix) || UUID_PATTERN.test(suffix));
 }
 
 export function shouldPreferLocalHistory(

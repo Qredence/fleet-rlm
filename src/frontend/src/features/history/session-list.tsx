@@ -175,58 +175,6 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
     </div>
   );
 
-  if (sessionsQuery.isLoading) {
-    return (
-      <div className="flex flex-col gap-2">
-        {toolbar}
-        <Skeleton className="h-16 w-full rounded-lg" />
-        <Skeleton className="h-16 w-full rounded-lg" />
-        <Skeleton className="h-16 w-full rounded-lg" />
-      </div>
-    );
-  }
-
-  if (sessionsQuery.isError) {
-    if (shouldUseLocalFallback) {
-      return (
-        <div className="flex flex-col gap-2">
-          {toolbar}
-          {localItems.map((conversation) => {
-            const isSelected =
-              selectedSession?.source === "local" &&
-              selectedSession.conversationId === conversation.id;
-            return (
-              <SessionRow
-                key={conversation.id}
-                session={{
-                  id: `local:${conversation.id}`,
-                  title: conversation.title,
-                  status: "local",
-                  model_name: null,
-                  external_session_id: null,
-                  created_at: conversation.createdAt,
-                  updated_at: conversation.updatedAt,
-                }}
-                isSelected={isSelected}
-                onSelect={() =>
-                  onSelect(isSelected ? null : { source: "local", conversationId: conversation.id })
-                }
-              />
-            );
-          })}
-        </div>
-      );
-    }
-    return (
-      <div>
-        {toolbar}
-        <p className="py-4 text-sm text-destructive">
-          Failed to load sessions: {sessionErrorDetail(sessionsQuery.error)}
-        </p>
-      </div>
-    );
-  }
-
   if (shouldUseLocalFallback) {
     return (
       <div className="flex flex-col gap-2">
@@ -254,6 +202,28 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
             />
           );
         })}
+      </div>
+    );
+  }
+
+  if (sessionsQuery.isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {toolbar}
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <Skeleton className="h-16 w-full rounded-lg" />
+      </div>
+    );
+  }
+
+  if (sessionsQuery.isError) {
+    return (
+      <div>
+        {toolbar}
+        <p className="py-4 text-sm text-destructive">
+          Failed to load sessions: {sessionErrorDetail(sessionsQuery.error)}
+        </p>
       </div>
     );
   }

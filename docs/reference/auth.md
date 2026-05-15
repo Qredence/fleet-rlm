@@ -106,7 +106,7 @@ TOKEN=$(uv run python scripts/dev_issue_token.py \
   --oid user-456 \
   --email alice@example.com \
   --name "Alice Smith" \
-  --secret change-me)
+  --secret "$DEV_JWT_SECRET")
 
 curl -H "Authorization: Bearer $TOKEN" \
      http://localhost:8000/api/v1/auth/me

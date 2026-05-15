@@ -191,6 +191,13 @@ def run_checks(repo_root: Path, *, include_contract_checks: bool = True) -> list
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for docs quality checks.
+
+    Returns an ArgumentParser with no required parameters that validates
+    documentation links, orphan detection, and contract sanity. Supports
+    --repo-root for custom repository location and --skip-contract-checks
+    to skip CLI/OpenAPI validation.
+    """
     parser = argparse.ArgumentParser(description="Run quality checks against active docs/")
     parser.add_argument(
         "--repo-root",

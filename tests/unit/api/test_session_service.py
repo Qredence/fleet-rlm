@@ -1,12 +1,17 @@
+"""Unit tests for SessionService behavior and edge cases."""
+
 from __future__ import annotations
 
 import uuid
+from typing import Any, List, Tuple
 from types import SimpleNamespace
 
 import pytest
 
 from fleet_rlm.api.runtime_services.session_service import SessionService
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+
+pytestmark = pytest.mark.unit
 
 
 def _identity() -> IdentityUpsertResult:
@@ -21,6 +26,7 @@ def _identity() -> IdentityUpsertResult:
 
 @pytest.mark.asyncio
 async def test_list_sessions_uses_first_turn_title_for_placeholder_session_titles() -> None:
+    """Verify list_sessions replaces placeholder titles with first turn user message."""
     identity = _identity()
     session_id = uuid.uuid4()
     created_at = SimpleNamespace(isoformat=lambda: "2026-05-15T00:00:00+00:00")
@@ -28,7 +34,7 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
     calls: list[tuple[str, object]] = []
 
     class Persistence:
-        async def list_chat_sessions(self, **kwargs):
+        async def list_chat_sessions(self, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
             return (
                 [
                     SimpleNamespace(
@@ -44,11 +50,11 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
                 1,
             )
 
-        async def list_chat_turns(self, **kwargs):
-            calls.append(("list_chat_turns", kwargs["session_id"]))
+        async def list_chat_turns(self, session_id: Any, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
+            calls.append(("list_chat_turns", kwargs.get("session_id", session_id)))
             return ([SimpleNamespace(user_message="Show me the prior auth debugging conversation")], 1)
 
-        async def update_chat_session(self, **kwargs):
+        async def update_chat_session(self, **kwargs: Any) -> None:
             calls.append(("update_chat_session", kwargs["title"]))
             return None
 
@@ -63,13 +69,14 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
 
 @pytest.mark.asyncio
 async def test_get_session_detail_preserves_explicit_human_title() -> None:
+    """Verify get_session_detail preserves explicit human-assigned session titles."""
     identity = _identity()
     session_id = uuid.uuid4()
     created_at = SimpleNamespace(isoformat=lambda: "2026-05-15T00:00:00+00:00")
     updated_at = SimpleNamespace(isoformat=lambda: "2026-05-15T01:00:00+00:00")
 
     class Persistence:
-        async def get_chat_session(self, **kwargs):
+        async def get_chat_session(self, **kwargs: Any) -> SimpleNamespace:
             return SimpleNamespace(
                 id=session_id,
                 title="Investigate auth cache invalidation",
@@ -81,7 +88,7 @@ async def test_get_session_detail_preserves_explicit_human_title() -> None:
                 updated_at=updated_at,
             )
 
-        async def list_chat_turns(self, **kwargs):
+        async def list_chat_turns(self, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
             return ([SimpleNamespace(user_message="ignored")], 1)
 
     detail = await SessionService(Persistence()).get_session_detail(

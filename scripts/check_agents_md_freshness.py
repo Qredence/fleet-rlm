@@ -358,6 +358,11 @@ class AgentsMdValidator:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for validating AGENTS.md freshness.
+
+    Returns an ArgumentParser configured to check AGENTS.md files for broken links,
+    missing paths, invalid Makefile targets, and cross-references.
+    """
     parser = argparse.ArgumentParser(description="Validate AGENTS.md freshness against the live repository")
     parser.add_argument(
         "--repo-root",

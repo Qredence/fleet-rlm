@@ -38,6 +38,15 @@ from fleet_rlm.integrations.database.repository_memory import (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return an ArgumentParser for the Postgres smoke workflow.
+
+    Creates and configures a parser for testing database repository operations.
+    Supports --env-file, --database-url, --tenant-claim, --user-claim, --email,
+    and --full-name options for smoke test identity configuration.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for db_smoke workflow.
+    """
     parser = argparse.ArgumentParser(description="Run a repository-level Postgres smoke workflow")
     parser.add_argument(
         "--env-file",

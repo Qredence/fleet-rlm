@@ -233,7 +233,8 @@ async def test_repository_chat_session_and_turn_flow(repository: FleetRepository
 
 
 @pytest.mark.asyncio
-async def test_repository_chat_turn_derives_human_title_from_first_message(repository: FleetRepository):
+async def test_repository_chat_turn_derives_human_title_from_first_message(repository: FleetRepository) -> None:
+    """Verify a chat session title is derived from the first user message."""
     identity = await repository.upsert_identity(
         entra_tenant_id=f"tenant-{uuid.uuid4()}",
         entra_user_id=f"user-{uuid.uuid4()}",
