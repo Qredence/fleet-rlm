@@ -36,7 +36,7 @@ DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
 DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
-_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
+_VALID_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
 
 def _snapshot_summary(snapshot: Any) -> dict[str, Any]:
@@ -61,7 +61,7 @@ def build_base_snapshot_image(
 
     packages_to_install = packages if packages is not None else DEFAULT_SNAPSHOT_PACKAGES
     for package in packages_to_install:
-        if not package or not _PACKAGE_SPEC_PATTERN.fullmatch(package):
+        if not package or not _VALID_PACKAGE_SPEC_PATTERN.fullmatch(package):
             msg = f"Invalid package spec for snapshot image install: {package!r}"
             raise ValueError(msg)
 
