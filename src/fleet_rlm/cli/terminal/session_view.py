@@ -94,23 +94,37 @@ def render_shell(session: Any, *, draft_assistant: str = "") -> None:
     width, height = console.size.width, console.size.height
     in_tmux = bool(os.environ.get("TMUX"))
 
-    layout_kwargs = dict(
-        session_id=session.session_id,
-        model=session.config.agent.model,
-        trace_mode=session.trace_mode,
-        last_status=session.last_status,
-        transcript=session.transcript,
-        is_processing=session.is_processing,
-        draft_assistant=draft_assistant,
-        console_width=width,
-        console_height=height,
-        scroll_offset=scroll_offset,
-        in_tmux=in_tmux,
-        theme=theme,
-    )
-
     live = getattr(session, "_live", None)
     if live is not None and live.is_started:
-        live.update(build_shell_layout(**layout_kwargs))
+        live.update(
+            build_shell_layout(
+                session_id=session.session_id,
+                model=session.config.agent.model,
+                trace_mode=session.trace_mode,
+                last_status=session.last_status,
+                transcript=session.transcript,
+                is_processing=session.is_processing,
+                draft_assistant=draft_assistant,
+                console_width=width,
+                console_height=height,
+                scroll_offset=scroll_offset,
+                in_tmux=in_tmux,
+                theme=theme,
+            )
+        )
     else:
-        _render_shell(console=console, **layout_kwargs)
+        _render_shell(
+            console=console,
+            session_id=session.session_id,
+            model=session.config.agent.model,
+            trace_mode=session.trace_mode,
+            last_status=session.last_status,
+            transcript=session.transcript,
+            is_processing=session.is_processing,
+            draft_assistant=draft_assistant,
+            console_width=width,
+            console_height=height,
+            scroll_offset=scroll_offset,
+            in_tmux=in_tmux,
+            theme=theme,
+        )

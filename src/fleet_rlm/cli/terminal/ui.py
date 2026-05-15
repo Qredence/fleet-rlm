@@ -46,10 +46,11 @@ class _FleetCompleter(Completer):
         # Normalize to 3-tuples (name, summary, category)
         normalized: list[tuple[str, str, str]] = []
         for spec in command_specs:
-            if len(spec) == 3:
-                normalized.append((spec[0], spec[1], spec[2]))
-            else:
-                normalized.append((spec[0], spec[1], ""))
+            match spec:
+                case (name, summary, category):
+                    normalized.append((name, summary, category))
+                case (name, summary):
+                    normalized.append((name, summary, ""))
         for name in sorted(dispatch_names):
             normalized.append((f"/{name}", "tool command", "tools"))
         self._slash_entries: list[tuple[str, str, str]] = sorted(normalized, key=lambda item: item[0])
