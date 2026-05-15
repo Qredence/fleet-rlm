@@ -136,7 +136,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
     return statusFilter !== "archived";
   });
   const apiItems = sessionsQuery.data?.items ?? [];
-  const preferLocalHistory = shouldPreferLocalHistory(apiItems, localItems);
+  const preferLocalHistory = shouldPreferLocalHistory(apiItems, localItems, offset);
   const shouldUseLocalFallback =
     preferLocalHistory ||
     (sessionsQuery.isLoading && localItems.length > 0) ||

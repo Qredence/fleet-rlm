@@ -390,6 +390,40 @@ class ChatRepository(RepositoryContextMixin):
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
+    async def list_first_chat_turn_messages_for_sessions(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_ids: Sequence[uuid.UUID],
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> dict[uuid.UUID, str]:
+        """Return the first user message for each requested session in one query."""
+        if not session_ids:
+            return {}
+
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            ranked_turns = select(
+                ChatTurn.session_id.label("session_id"),
+                ChatTurn.user_message.label("user_message"),
+                func.row_number()
+                .over(partition_by=ChatTurn.session_id, order_by=ChatTurn.turn_index.asc())
+                .label("turn_rank"),
+            ).where(
+                and_(
+                    ChatTurn.tenant_id == tenant_id,
+                    ChatTurn.session_id.in_(session_ids),
+                )
+            )
+            if workspace_id is not None:
+                ranked_turns = ranked_turns.where(ChatTurn.workspace_id == workspace_id)
+
+            first_turns = ranked_turns.subquery()
+            stmt = select(first_turns.c.session_id, first_turns.c.user_message).where(first_turns.c.turn_rank == 1)
+            rows = await session.execute(stmt)
+            return {session_id: user_message for session_id, user_message in rows.all()}
+
     async def update_chat_session(
         self,
         *,

@@ -1,5 +1,6 @@
-import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { HistoryScreen } from "@/features/history/history-screen";
 
 export const Route = createFileRoute("/app/history")({
-  component: lazyRouteComponent(() => import("@/features/history/history-screen"), "HistoryScreen"),
+  component: HistoryScreen,
 });

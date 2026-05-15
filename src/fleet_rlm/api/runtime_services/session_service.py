@@ -216,16 +216,35 @@ class SessionService:
             limit=limit,
             offset=offset,
         )
-        resolved_titles = await asyncio.gather(
-            *[
-                _resolve_session_title(
-                    persistence=self._persistence,
-                    session=session,
-                    persisted_identity=persisted_identity,
-                )
-                for session in items
-            ]
-        )
+        placeholder_session_ids = [
+            session.id
+            for session in items
+            if is_placeholder_session_title(
+                optional_string(getattr(session, "title", None)),
+                external_session_id=session_external_id(getattr(session, "metadata_json", None)),
+            )
+        ]
+        first_turn_messages: dict[uuid.UUID, str] = {}
+        if placeholder_session_ids:
+            first_turn_messages = await self._persistence.list_first_chat_turn_messages_for_sessions(
+                tenant_id=persisted_identity.tenant_id,
+                session_ids=placeholder_session_ids,
+                user_id=persisted_identity.user_id,
+                workspace_id=persisted_identity.workspace_id,
+            )
+        resolved_titles: list[str] = []
+        for session in items:
+            title = optional_string(getattr(session, "title", None))
+            external_id = session_external_id(getattr(session, "metadata_json", None))
+            fallback = title or external_id or str(getattr(session, "id", "unknown"))
+            if title and not is_placeholder_session_title(title, external_session_id=external_id):
+                resolved_titles.append(title)
+                continue
+            first_turn_message = first_turn_messages.get(session.id)
+            if first_turn_message is None:
+                resolved_titles.append(fallback)
+                continue
+            resolved_titles.append(derive_session_title(first_turn_message, fallback=fallback))
         return SessionListResponse(
             items=[
                 SessionListItem(

@@ -69,6 +69,7 @@ describe("history-source", () => {
     ];
 
     expect(shouldPreferLocalHistory(apiSessions, localConversations)).toBe(true);
+    expect(shouldPreferLocalHistory(apiSessions, localConversations, 20)).toBe(false);
     expect(
       shouldPreferLocalHistory([buildSession("Actual chat title", null)], localConversations),
     ).toBe(false);

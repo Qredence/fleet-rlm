@@ -28,7 +28,8 @@ def _identity() -> IdentityUpsertResult:
 async def test_list_sessions_uses_first_turn_title_for_placeholder_session_titles() -> None:
     """Verify list_sessions replaces placeholder titles with first turn user message."""
     identity = _identity()
-    session_id = uuid.uuid4()
+    placeholder_session_id = uuid.uuid4()
+    titled_session_id = uuid.uuid4()
     created_at = SimpleNamespace(isoformat=lambda: "2026-05-15T00:00:00+00:00")
     updated_at = SimpleNamespace(isoformat=lambda: "2026-05-15T01:00:00+00:00")
     calls: list[tuple[str, object]] = []
@@ -38,26 +39,46 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
             return (
                 [
                     SimpleNamespace(
-                        id=session_id,
-                        title=str(session_id),
+                        id=placeholder_session_id,
+                        title=str(placeholder_session_id),
                         status=SimpleNamespace(value="active"),
                         model_name="gpt-test",
-                        metadata_json={"external_session_id": str(session_id)},
+                        metadata_json={"external_session_id": str(placeholder_session_id)},
                         created_at=created_at,
                         updated_at=updated_at,
-                    )
+                    ),
+                    SimpleNamespace(
+                        id=titled_session_id,
+                        title="Investigate history list",
+                        status=SimpleNamespace(value="active"),
+                        model_name="gpt-test",
+                        metadata_json={"external_session_id": str(titled_session_id)},
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    ),
                 ],
-                1,
+                2,
             )
 
-        async def list_chat_turns(self, session_id: Any, **kwargs: Any) -> tuple[list[SimpleNamespace], int]:
-            calls.append(("list_chat_turns", kwargs.get("session_id", session_id)))
-            return ([SimpleNamespace(user_message="Show me the prior auth debugging conversation")], 1)
+        async def list_first_chat_turn_messages_for_sessions(
+            self,
+            *,
+            session_ids: list[uuid.UUID],
+            **kwargs: Any,
+        ) -> dict[uuid.UUID, str]:
+            calls.append(("list_first_chat_turn_messages_for_sessions", tuple(session_ids)))
+            return {placeholder_session_id: "Show me the prior auth debugging conversation"}
 
     response = await SessionService(Persistence()).list_sessions(persisted_identity=identity)
 
     assert response.items[0].title == "Show me the prior auth debugging conversation"
-    assert calls == [("list_chat_turns", session_id)]
+    assert response.items[1].title == "Investigate history list"
+    assert calls == [
+        (
+            "list_first_chat_turn_messages_for_sessions",
+            (placeholder_session_id,),
+        )
+    ]
 
 
 @pytest.mark.asyncio

@@ -25,8 +25,10 @@ export function isPlaceholderSessionTitle(
 export function shouldPreferLocalHistory(
   apiSessions: SessionListItem[],
   localConversations: Conversation[],
+  offset = 0,
 ): boolean {
   return (
+    offset === 0 &&
     localConversations.length > 0 &&
     apiSessions.length > 0 &&
     apiSessions.every((session) =>

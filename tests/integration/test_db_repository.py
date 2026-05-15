@@ -280,6 +280,78 @@ async def test_repository_chat_turn_derives_human_title_from_first_message(repos
 
 
 @pytest.mark.asyncio
+async def test_repository_lists_first_chat_turn_messages_for_sessions(repository: FleetRepository) -> None:
+    """Verify first-turn lookup returns one opening prompt per requested session."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{uuid.uuid4()}",
+        entra_user_id=f"user-{uuid.uuid4()}",
+        email="history-batch@example.com",
+        full_name="History Batch User",
+    )
+    assert identity.workspace_id is not None
+
+    first_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title="Chat session",
+        )
+    )
+    second_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title="Chat session",
+        )
+    )
+
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=first_session.id,
+            user_id=identity.user_id,
+            user_message="First session opening prompt",
+            assistant_message="A",
+        )
+    )
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=first_session.id,
+            user_id=identity.user_id,
+            user_message="First session follow-up prompt",
+            assistant_message="B",
+        )
+    )
+    await repository.append_chat_turn(
+        ChatTurnCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            session_id=second_session.id,
+            user_id=identity.user_id,
+            user_message="Second session opening prompt",
+            assistant_message="C",
+        )
+    )
+
+    first_turn_messages = await repository.list_first_chat_turn_messages_for_sessions(
+        tenant_id=identity.tenant_id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        session_ids=[first_session.id, second_session.id],
+    )
+
+    assert first_turn_messages == {
+        first_session.id: "First session opening prompt",
+        second_session.id: "Second session opening prompt",
+    }
+
+
+@pytest.mark.asyncio
 async def test_repository_chat_turn_rejects_cross_tenant_session(
     repository: FleetRepository,
 ):
