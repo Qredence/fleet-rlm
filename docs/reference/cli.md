@@ -23,6 +23,7 @@ Commands:
   optimize    Run DSPy optimization workflows.
   chat        Start standalone in-process interactive terminal chat.
   daytona-smoke  Run a native Daytona smoke validation without invoking an LM.
+  daytona-snapshot  Create or refresh the reusable Daytona base snapshot.
 ```
 
 ### `fleet-rlm optimize`
@@ -135,6 +136,40 @@ Options:
 ```bash
 # Validate the experimental Daytona setup against a repository
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
+```
+
+### `fleet-rlm daytona-snapshot`
+
+Create or refresh the reusable Daytona base snapshot used by fleet-rlm.
+
+The default snapshot name is `fleet-rlm-base`. Normal sandbox creation prefers
+this snapshot for faster startup and falls back to a declarative image build when
+the snapshot is absent or not active.
+
+```text
+Usage: fleet-rlm daytona-snapshot [OPTIONS]
+
+Options:
+  --name TEXT        Name of the reusable Daytona base snapshot to bootstrap.
+                    [default: fleet-rlm-base]
+  --base-image TEXT  Base OCI image used when creating or refreshing the
+                    snapshot. [default: python:3.12-slim]
+  --refresh          Delete an existing snapshot with this name/id before
+                    recreating it.
+  --help             Show this message and exit.
+```
+
+**Examples:**
+
+```bash
+# Ensure the default reusable Daytona base snapshot exists
+uv run fleet-rlm daytona-snapshot
+
+# Rebuild the default base snapshot from the configured default image
+uv run fleet-rlm daytona-snapshot --refresh
+
+# Bootstrap a custom snapshot name
+uv run fleet-rlm daytona-snapshot --name fleet-rlm-base-experimental
 ```
 
 ## `fleet` Launcher

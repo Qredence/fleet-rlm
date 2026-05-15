@@ -29,9 +29,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDOR_DATA_DIR = REPO_ROOT / "vendor" / "longcot" / "src" / "data"
-STRATIFIED_SLICE_PATH = (
-    REPO_ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json"
-)
+STRATIFIED_SLICE_PATH = REPO_ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json"
 
 DOMAINS = ["logic", "cs", "chemistry", "chess", "math"]
 DIFFICULTIES = ["easy", "medium", "hard"]
@@ -80,9 +78,7 @@ def _load_stratified_slice() -> dict[str, list[str]] | None:
     return data.get("domains")
 
 
-def _load_questions_for_domain(
-    domain: str, difficulties: list[str]
-) -> list[dict[str, Any]]:
+def _load_questions_for_domain(domain: str, difficulties: list[str]) -> list[dict[str, Any]]:
     """Load all questions for *domain* across the given *difficulties*."""
     questions: list[dict[str, Any]] = []
     for diff in difficulties:
@@ -144,22 +140,18 @@ def generate_dataset(
 
     for domain in domains:
         stratified_qids = stratified.get(domain) if stratified else None
-        selected = _select_questions(
-            domain, difficulties, per_domain, seed, stratified_qids
-        )
+        selected = _select_questions(domain, difficulties, per_domain, seed, stratified_qids)
 
         if not selected:
             print(
-                f"Warning: no valid questions for domain '{domain}' — "
-                f"the domain will be omitted from the dataset.",
+                f"Warning: no valid questions for domain '{domain}' — the domain will be omitted from the dataset.",
                 file=sys.stderr,
             )
             continue
 
         if len(selected) < per_domain:
             print(
-                f"Warning: domain '{domain}' only has {len(selected)} valid questions "
-                f"(requested {per_domain}).",
+                f"Warning: domain '{domain}' only has {len(selected)} valid questions (requested {per_domain}).",
                 file=sys.stderr,
             )
 
@@ -167,8 +159,7 @@ def generate_dataset(
             question = _normalize_question(q.get("prompt"))
             if not question:
                 print(
-                    f"  Warning: {domain}/{q.get('_difficulty')} {q.get('question_id')} "
-                    "has empty prompt — skipping",
+                    f"  Warning: {domain}/{q.get('_difficulty')} {q.get('question_id')} has empty prompt — skipping",
                     file=sys.stderr,
                 )
                 continue
@@ -194,9 +185,7 @@ def write_jsonl(rows: list[dict[str, Any]], output_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate a GEPA-compatible JSONL dataset from LongCoT vendor data."
-    )
+    parser = argparse.ArgumentParser(description="Generate a GEPA-compatible JSONL dataset from LongCoT vendor data.")
     parser.add_argument(
         "--output",
         type=Path,

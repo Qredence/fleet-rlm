@@ -26,9 +26,7 @@ def main() -> int:
     # Run pnpm install
     print("Running 'pnpm install --frozen-lockfile'...")
     try:
-        subprocess.run(
-            ["pnpm", "install", "--frozen-lockfile"], cwd=frontend_dir, check=True
-        )
+        subprocess.run(["pnpm", "install", "--frozen-lockfile"], cwd=frontend_dir, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Error running 'pnpm install': {e}", file=sys.stderr)
         return 1

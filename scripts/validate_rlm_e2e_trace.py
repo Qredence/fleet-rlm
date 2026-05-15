@@ -38,9 +38,7 @@ _DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 _DEFAULT_WORKSPACE_ID = "default"
 _DEFAULT_USER_ID = "alice"
 _DEFAULT_DOCS_PATH = str(Path(__file__).resolve().parent.parent / "AGENTS.md")
-_DEFAULT_OUTPUT_DIR = str(
-    Path(__file__).resolve().parent.parent / "output/phase-04/qre-301"
-)
+_DEFAULT_OUTPUT_DIR = str(Path(__file__).resolve().parent.parent / "output/phase-04/qre-301")
 _DEFAULT_TIMEOUT_SECONDS = 240
 _DEFAULT_PROMPT = (
     "Analyze this repository architecture and summarize key execution flows, "
@@ -63,9 +61,7 @@ class ValidationResult:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run QRE-301 live end-to-end tracing validation."
-    )
+    parser = argparse.ArgumentParser(description="Run QRE-301 live end-to-end tracing validation.")
     parser.add_argument("--server-url", default=_DEFAULT_SERVER_URL)
     parser.add_argument("--workspace-id", default=_DEFAULT_WORKSPACE_ID)
     parser.add_argument("--user-id", default=_DEFAULT_USER_ID)
@@ -99,9 +95,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
-async def _assert_ready_and_runtime_status(
-    client: httpx.AsyncClient, output_dir: Path
-) -> dict[str, Any]:
+async def _assert_ready_and_runtime_status(client: httpx.AsyncClient, output_dir: Path) -> dict[str, Any]:
     ready_resp = await client.get("/ready")
     ready_resp.raise_for_status()
     ready = ready_resp.json()
@@ -140,9 +134,7 @@ async def _collect_chat_until_terminal(
     raise TimeoutError("Timed out waiting for terminal chat event")
 
 
-async def _collect_execution_until_completed(
-    execution_ws: Any, timeout_seconds: int
-) -> list[dict[str, Any]]:
+async def _collect_execution_until_completed(execution_ws: Any, timeout_seconds: int) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while asyncio.get_running_loop().time() < deadline:
@@ -167,8 +159,7 @@ async def _persist_artifact_via_command(
         "type": "command",
         "command": "write_to_file",
         "args": {
-            "path": f"/data/workspaces/{workspace_id}/users/{user_id}/artifacts/"
-            f"{session_id}-qre301.txt",
+            "path": f"/data/workspaces/{workspace_id}/users/{user_id}/artifacts/{session_id}-qre301.txt",
             "content": "QRE-301 artifact persistence probe",
             "append": False,
         },
@@ -218,14 +209,10 @@ async def _fetch_session_summary(
             and session.get("session_id") == session_id
         ):
             if int(session.get("history_turns", 0)) < 1:
-                raise RuntimeError(
-                    "Session summary found but history_turns < 1; expected persisted chat turn."
-                )
+                raise RuntimeError("Session summary found but history_turns < 1; expected persisted chat turn.")
             return session
 
-    raise RuntimeError(
-        "Target session not found in /api/v1/sessions/state for QRE-301 validation."
-    )
+    raise RuntimeError("Target session not found in /api/v1/sessions/state for QRE-301 validation.")
 
 
 async def _verify_db_persistence(
@@ -272,15 +259,11 @@ async def _verify_db_persistence(
                     )
                 ).scalar_one_or_none()
                 if run is None:
-                    raise RuntimeError(
-                        f"Run not found in DB for external_run_id={run_id!r}."
-                    )
+                    raise RuntimeError(f"Run not found in DB for external_run_id={run_id!r}.")
                 verification["run_found"] = True
                 verification["run_status"] = run.status.value
                 if run.status != RunStatus.COMPLETED:
-                    raise RuntimeError(
-                        f"Run status is {run.status.value!r}, expected 'completed'."
-                    )
+                    raise RuntimeError(f"Run status is {run.status.value!r}, expected 'completed'.")
 
                 run_step_count = (
                     await session.execute(
@@ -312,9 +295,7 @@ async def _verify_db_persistence(
                 ).scalar_one()
                 verification["artifact_count"] = int(artifact_count or 0)
                 if verification["artifact_count"] <= 0:
-                    raise RuntimeError(
-                        "No artifacts persisted for validated run after write_to_file."
-                    )
+                    raise RuntimeError("No artifacts persisted for validated run after write_to_file.")
     finally:
         await db.dispose()
 
@@ -329,9 +310,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         prefer_admin=True,
     )
     if not database_url:
-        raise RuntimeError(
-            "DATABASE_ADMIN_URL or DATABASE_URL must be set for DB persistence verification."
-        )
+        raise RuntimeError("DATABASE_ADMIN_URL or DATABASE_URL must be set for DB persistence verification.")
 
     session_id = args.session_id or f"qre301-{uuid.uuid4().hex[:10]}"
     timestamp_str = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -353,10 +332,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         execution_ws_url = _make_ws_url(
             args.server_url,
             "/api/v1/ws/execution",
-            query=(
-                f"workspace_id={args.workspace_id}&user_id={args.user_id}"
-                f"&session_id={session_id}"
-            ),
+            query=(f"workspace_id={args.workspace_id}&user_id={args.user_id}&session_id={session_id}"),
         )
 
         async with websockets.connect(
@@ -383,50 +359,32 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
                     )
                 )
 
-                chat_task = asyncio.create_task(
-                    _collect_chat_until_terminal(chat_ws, args.timeout_seconds)
-                )
+                chat_task = asyncio.create_task(_collect_chat_until_terminal(chat_ws, args.timeout_seconds))
                 execution_task = asyncio.create_task(
-                    _collect_execution_until_completed(
-                        execution_ws, args.timeout_seconds
-                    )
+                    _collect_execution_until_completed(execution_ws, args.timeout_seconds)
                 )
-                chat_events_with_terminal, execution_events = await asyncio.gather(
-                    chat_task, execution_task
-                )
+                chat_events_with_terminal, execution_events = await asyncio.gather(chat_task, execution_task)
                 chat_events, terminal_chat_payload = chat_events_with_terminal
 
                 _write_jsonl(output_dir / "chat-events.jsonl", chat_events)
                 _write_jsonl(output_dir / "execution-events.jsonl", execution_events)
 
                 execution_started = next(
-                    (
-                        event
-                        for event in execution_events
-                        if event.get("type") == "execution_started"
-                    ),
+                    (event for event in execution_events if event.get("type") == "execution_started"),
                     None,
                 )
                 if execution_started is None:
                     raise RuntimeError("execution_started event missing from stream.")
                 run_id = str(execution_started.get("run_id", "")).strip()
                 if not run_id:
-                    raise RuntimeError(
-                        "execution_started event did not include run_id."
-                    )
+                    raise RuntimeError("execution_started event did not include run_id.")
 
-                step_events = [
-                    event
-                    for event in execution_events
-                    if event.get("type") == "execution_step"
-                ]
+                step_events = [event for event in execution_events if event.get("type") == "execution_step"]
                 if not step_events:
                     raise RuntimeError("No execution_step events captured.")
 
                 if any(event.get("run_id") != run_id for event in execution_events):
-                    raise RuntimeError(
-                        "Execution stream contains inconsistent run_id values."
-                    )
+                    raise RuntimeError("Execution stream contains inconsistent run_id values.")
 
                 for event in execution_events:
                     if event.get("workspace_id") != args.workspace_id:
@@ -438,9 +396,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
 
                 terminal_kind = terminal_chat_payload.get("data", {}).get("kind")
                 if terminal_kind != "final":
-                    raise RuntimeError(
-                        f"Terminal chat event kind is {terminal_kind!r}; expected 'final'."
-                    )
+                    raise RuntimeError(f"Terminal chat event kind is {terminal_kind!r}; expected 'final'.")
 
                 await _persist_artifact_via_command(
                     chat_ws,

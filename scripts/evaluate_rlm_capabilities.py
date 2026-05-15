@@ -48,8 +48,7 @@ logger = logging.getLogger("rlm_eval")
 def load_benchmark(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         raise FileNotFoundError(
-            f"Benchmark dataset not found: {path}. "
-            "Provide --dataset with a valid JSON benchmark file."
+            f"Benchmark dataset not found: {path}. Provide --dataset with a valid JSON benchmark file."
         )
     if not path.is_file():
         raise ValueError(f"Benchmark dataset path is not a file: {path}")
@@ -67,9 +66,7 @@ def load_benchmark(path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def coverage_score(
-    answer: str, expected_contains: list[str]
-) -> tuple[float, list[str], list[str]]:
+def coverage_score(answer: str, expected_contains: list[str]) -> tuple[float, list[str], list[str]]:
     """Score based on how many expected keywords appear in the answer."""
     if not expected_contains:
         return 1.0, [], []
@@ -184,9 +181,7 @@ def evaluate_task(
     expected = task.get("expected_answer_contains", [])
     difficulty = task.get("difficulty", "unknown")
 
-    logger.info(
-        "Evaluating task %s (%s, difficulty=%s)", task_id, task["task"], difficulty
-    )
+    logger.info("Evaluating task %s (%s, difficulty=%s)", task_id, task["task"], difficulty)
 
     result: dict[str, Any] = {
         "task_id": task_id,
@@ -197,9 +192,7 @@ def evaluate_task(
 
     if run_single:
         single = run_single_pass(task, interpreter)
-        single_coverage, single_found, single_missing = coverage_score(
-            single["answer"], expected
-        )
+        single_coverage, single_found, single_missing = coverage_score(single["answer"], expected)
         single["coverage_score"] = single_coverage
         single["found_keywords"] = single_found
         single["missing_keywords"] = single_missing
@@ -216,9 +209,7 @@ def evaluate_task(
     if run_multi:
         module = workspace_module or build_workspace_module(interpreter)
         multi = run_multi_pass(task, module)
-        multi_coverage, multi_found, multi_missing = coverage_score(
-            multi["answer"], expected
-        )
+        multi_coverage, multi_found, multi_missing = coverage_score(multi["answer"], expected)
         multi["coverage_score"] = multi_coverage
         multi["found_keywords"] = multi_found
         multi["missing_keywords"] = multi_missing
@@ -234,26 +225,16 @@ def evaluate_task(
         )
 
     if "single_pass" in result and "multi_pass" in result:
-        result["coverage_delta"] = (
-            result["multi_pass"]["coverage_score"]
-            - result["single_pass"]["coverage_score"]
-        )
-        result["multi_pass_better"] = (
-            result["multi_pass"]["coverage_score"]
-            > result["single_pass"]["coverage_score"]
-        )
+        result["coverage_delta"] = result["multi_pass"]["coverage_score"] - result["single_pass"]["coverage_score"]
+        result["multi_pass_better"] = result["multi_pass"]["coverage_score"] > result["single_pass"]["coverage_score"]
 
     return result
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute aggregate statistics across all evaluated tasks."""
-    single_scores = [
-        r["single_pass"]["coverage_score"] for r in results if "single_pass" in r
-    ]
-    multi_scores = [
-        r["multi_pass"]["coverage_score"] for r in results if "multi_pass" in r
-    ]
+    single_scores = [r["single_pass"]["coverage_score"] for r in results if "single_pass" in r]
+    multi_scores = [r["multi_pass"]["coverage_score"] for r in results if "multi_pass" in r]
 
     hard_tasks = [r for r in results if r.get("requires_multi_pass")]
     easy_tasks = [r for r in results if not r.get("requires_multi_pass")]
@@ -270,44 +251,16 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "multi_pass_wins": sum(1 for r in results if r.get("multi_pass_better", False)),
         "hard_tasks": {
             "count": len(hard_tasks),
-            "single_avg": _avg(
-                [
-                    r["single_pass"]["coverage_score"]
-                    for r in hard_tasks
-                    if "single_pass" in r
-                ]
-            ),
-            "multi_avg": _avg(
-                [
-                    r["multi_pass"]["coverage_score"]
-                    for r in hard_tasks
-                    if "multi_pass" in r
-                ]
-            ),
+            "single_avg": _avg([r["single_pass"]["coverage_score"] for r in hard_tasks if "single_pass" in r]),
+            "multi_avg": _avg([r["multi_pass"]["coverage_score"] for r in hard_tasks if "multi_pass" in r]),
         },
         "easy_tasks": {
             "count": len(easy_tasks),
-            "single_avg": _avg(
-                [
-                    r["single_pass"]["coverage_score"]
-                    for r in easy_tasks
-                    if "single_pass" in r
-                ]
-            ),
-            "multi_avg": _avg(
-                [
-                    r["multi_pass"]["coverage_score"]
-                    for r in easy_tasks
-                    if "multi_pass" in r
-                ]
-            ),
+            "single_avg": _avg([r["single_pass"]["coverage_score"] for r in easy_tasks if "single_pass" in r]),
+            "multi_avg": _avg([r["multi_pass"]["coverage_score"] for r in easy_tasks if "multi_pass" in r]),
         },
-        "total_single_elapsed_ms": sum(
-            r["single_pass"]["elapsed_ms"] for r in results if "single_pass" in r
-        ),
-        "total_multi_elapsed_ms": sum(
-            r["multi_pass"]["elapsed_ms"] for r in results if "multi_pass" in r
-        ),
+        "total_single_elapsed_ms": sum(r["single_pass"]["elapsed_ms"] for r in results if "single_pass" in r),
+        "total_multi_elapsed_ms": sum(r["multi_pass"]["elapsed_ms"] for r in results if "multi_pass" in r),
     }
     return summary
 
@@ -342,9 +295,7 @@ def log_to_mlflow(
         experiment_name = f"{config.experiment}/rlm-capabilities-eval"
         mlflow.set_experiment(experiment_name)
 
-        with mlflow.start_run(
-            run_name=f"rlm-eval-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
-        ):
+        with mlflow.start_run(run_name=f"rlm-eval-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"):
             mlflow.log_params(
                 {
                     "total_tasks": summary["total_tasks"],
@@ -383,9 +334,7 @@ def log_to_mlflow(
 # ---------------------------------------------------------------------------
 
 
-def _run_rlm_on_interpreter(
-    interpreter: Any, prompt: str, context: str
-) -> dict[str, Any]:
+def _run_rlm_on_interpreter(interpreter: Any, prompt: str, context: str) -> dict[str, Any]:
     """Execute a single dspy.RLM query directly on the parent interpreter.
 
     This matches the paper's evaluation setup (depth=1, no child sandbox).
@@ -455,9 +404,7 @@ def run_sniah_benchmark(
                 "expected": task["expected_answer"],
                 "needle_depth": task["needle_depth"],
                 "needle_type": task["needle_type"],
-                "haystack_target_chars": task.get(
-                    "haystack_target_chars", task["haystack_chars"]
-                ),
+                "haystack_target_chars": task.get("haystack_target_chars", task["haystack_chars"]),
                 "haystack_chars": task["haystack_chars"],
                 "elapsed_ms": elapsed_ms,
                 "status": result.get("status", "error"),
@@ -560,9 +507,7 @@ def run_oolong_benchmark(
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Evaluate RLM capabilities: single-pass vs multi-pass."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate RLM capabilities: single-pass vs multi-pass.")
     parser.add_argument(
         "--benchmark",
         choices=["workspace", "sniah", "oolong", "all"],
@@ -637,9 +582,7 @@ def _init_interpreter() -> Any:
     return interpreter
 
 
-def _run_workspace_benchmark(
-    args: argparse.Namespace, interpreter: Any, output_dir: Path
-) -> None:
+def _run_workspace_benchmark(args: argparse.Namespace, interpreter: Any, output_dir: Path) -> None:
     """Run the workspace (L4 orchestrator) benchmark."""
     dataset_path = Path(args.dataset)
     try:

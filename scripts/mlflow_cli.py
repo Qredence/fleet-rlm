@@ -70,19 +70,13 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Export
-    px = subparsers.add_parser(
-        "export", help="Export annotated MLflow traces into a JSON dataset"
-    )
-    px.add_argument(
-        "--output", type=Path, default=Path("artifacts/mlflow/annotated-traces.json")
-    )
+    px = subparsers.add_parser("export", help="Export annotated MLflow traces into a JSON dataset")
+    px.add_argument("--output", type=Path, default=Path("artifacts/mlflow/annotated-traces.json"))
     px.add_argument("--max-results", type=int, default=5000)
     px.set_defaults(func=do_export)
 
     # Evaluate
-    pe = subparsers.add_parser(
-        "evaluate", help="Evaluate MLflow traces with MLflow GenAI scorers"
-    )
+    pe = subparsers.add_parser("evaluate", help="Evaluate MLflow traces with MLflow GenAI scorers")
     pe.add_argument("--input", type=Path, default=None)
     pe.add_argument(
         "--export-output",
@@ -105,9 +99,7 @@ def main() -> int:
     po.add_argument("--program", required=True)
     po.add_argument("--input-key", action="append", default=[])
     po.add_argument("--output-key", default="answer")
-    po.add_argument(
-        "--output", type=Path, default=Path("artifacts/mlflow/optimized-program.json")
-    )
+    po.add_argument("--output", type=Path, default=Path("artifacts/mlflow/optimized-program.json"))
     po.add_argument("--train-ratio", type=float, default=0.8)
     po.add_argument("--auto", default="light")
     po.add_argument("--run-name", default=None)

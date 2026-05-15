@@ -159,9 +159,7 @@ class AgentsMdValidator:
             # Find the package root - the parent of the directory containing AGENTS.md
             # that contains a pyproject.toml or is a known package
             candidate = agents_file.parent
-            if (candidate / "__init__.py").exists() or (
-                candidate / "pyproject.toml"
-            ).exists():
+            if (candidate / "__init__.py").exists() or (candidate / "pyproject.toml").exists():
                 package_root = candidate
             elif (candidate.parent / "pyproject.toml").exists():
                 # Python src layout case (e.g., src/fleet_rlm/)

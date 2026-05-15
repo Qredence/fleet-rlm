@@ -7,6 +7,7 @@ Core commands:
     - chat: Standalone in-process interactive terminal chat
     - serve-api: Optional FastAPI server surface
     - daytona-smoke: Native Daytona runtime smoke validation
+    - daytona-snapshot: Bootstrap the reusable Daytona base snapshot
 
 Usage:
     # Use Hydra syntax for configuration overrides
@@ -141,6 +142,40 @@ def daytona_smoke(
         typer.echo(payload, err=True)
         raise typer.Exit(code=1)
     typer.echo(payload)
+
+
+@app.command("daytona-snapshot")
+def daytona_snapshot(
+    name: str = typer.Option(
+        "fleet-rlm-base",
+        "--name",
+        help="Name of the reusable Daytona base snapshot to bootstrap.",
+    ),
+    base_image: str = typer.Option(
+        "python:3.12-slim",
+        "--base-image",
+        help="Base OCI image used when creating or refreshing the snapshot.",
+    ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Delete an existing snapshot with this name/id before recreating it.",
+    ),
+) -> None:
+    """Create or refresh the reusable Daytona base snapshot used by fleet-rlm."""
+    try:
+        from fleet_rlm.integrations.daytona import bootstrap_snapshot
+
+        result = bootstrap_snapshot(
+            name=name,
+            base_image=base_image,
+            refresh=refresh,
+        )
+    except Exception as exc:
+        _handle_error(exc)
+        return
+
+    typer.echo(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def main() -> None:

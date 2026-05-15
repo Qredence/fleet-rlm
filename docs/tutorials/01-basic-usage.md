@@ -6,7 +6,7 @@ Get Fleet-RLM running in minutes. This guide covers installation, basic configur
 
 Before you begin, ensure you have:
 
-- **Python 3.10 or later** — Fleet-RLM requires Python 3.10+
+- **Python 3.11 or later** — Fleet-RLM requires Python 3.11+
 - **uv package manager** — Recommended for installation. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
 - **Daytona API access** — Required for sandbox execution. Configure `DAYTONA_API_KEY` and, if needed, `DAYTONA_API_URL`.
 
@@ -182,7 +182,7 @@ uv run fleet-rlm serve-api --port 8001
 
 ### Python Version Mismatch
 
-**Solution:** Fleet-RLM requires Python 3.10 or later. Check your version:
+**Solution:** Fleet-RLM requires Python 3.11 or later. Check your version:
 
 ```bash
 python3 --version

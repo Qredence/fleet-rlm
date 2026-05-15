@@ -131,8 +131,7 @@ def _observability_links(args: argparse.Namespace) -> list[SummaryLink]:
         ),
         (
             "PostHog dashboard",
-            _clean(os.getenv("DEPLOYMENT_POSTHOG_DASHBOARD_URL"))
-            or _clean(os.getenv("POSTHOG_HOST")),
+            _clean(os.getenv("DEPLOYMENT_POSTHOG_DASHBOARD_URL")) or _clean(os.getenv("POSTHOG_HOST")),
             "Product analytics and deploy marker stream",
         ),
         (
@@ -234,24 +233,14 @@ def build_summary(
 
     release_links = _release_links(args)
     if release_links:
-        lines.extend(
-            [
-                f"- [{link.label}]({link.url}) — {link.description}"
-                for link in release_links
-            ]
-        )
+        lines.extend([f"- [{link.label}]({link.url}) — {link.description}" for link in release_links])
     else:
         lines.append("- No release links were available for this run.")
 
     lines.extend(["", "### Where to watch deploy impact"])
     observability_links = _observability_links(args)
     if observability_links:
-        lines.extend(
-            [
-                f"- [{link.label}]({link.url}) — {link.description}"
-                for link in observability_links
-            ]
-        )
+        lines.extend([f"- [{link.label}]({link.url}) — {link.description}" for link in observability_links])
     else:
         lines.extend(
             [
@@ -266,10 +255,7 @@ def build_summary(
     if posthog_result is None:
         lines.append("- PostHog deploy marker was not requested for this run.")
     else:
-        lines.append(
-            f"- PostHog deploy marker: **{posthog_result.status}** — "
-            f"{posthog_result.detail}"
-        )
+        lines.append(f"- PostHog deploy marker: **{posthog_result.status}** — {posthog_result.detail}")
 
     if args.smoke_checks:
         lines.extend(["", "### Smoke checks"])
@@ -279,9 +265,7 @@ def build_summary(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Publish deployment observability links and annotations for releases."
-    )
+    parser = argparse.ArgumentParser(description="Publish deployment observability links and annotations for releases.")
     parser.add_argument("--environment", required=True)
     parser.add_argument("--package-name", default="fleet-rlm")
     parser.add_argument("--package-url")

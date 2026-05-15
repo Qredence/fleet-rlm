@@ -20,9 +20,7 @@ import string
 import sys
 from pathlib import Path
 
-DEFAULT_OUTPUT = (
-    Path(__file__).resolve().parents[2] / ".data/datasets/sniah-benchmark.json"
-)
+DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / ".data/datasets/sniah-benchmark.json"
 DEFAULT_COUNT = 50
 
 FILLER_VOCABULARY = [
@@ -175,17 +173,13 @@ FILLER_VOCABULARY = [
 NEEDLE_TEMPLATES = {
     "code": {
         "values": lambda: (
-            "".join(random.choices(string.ascii_uppercase, k=5))
-            + "-"
-            + "".join(random.choices(string.digits, k=4))
+            "".join(random.choices(string.ascii_uppercase, k=5)) + "-" + "".join(random.choices(string.digits, k=4))
         ),
         "sentence": "The secret access code is {val}.",
         "question": "What is the secret access code mentioned in the text?",
     },
     "date": {
-        "values": lambda: (
-            f"{random.randint(2025, 2030)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
-        ),
+        "values": lambda: f"{random.randint(2025, 2030)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
         "sentence": "The critical deadline is {val}.",
         "question": "What is the critical deadline mentioned in the text?",
     },
@@ -260,13 +254,7 @@ def generate_sniah_dataset(count: int = DEFAULT_COUNT, seed: int = 42) -> list[d
         needle_sentence, question, expected = generate_needle(needle_type)
 
         insert_pos = int(len(haystack) * depth)
-        full_text = (
-            haystack[:insert_pos]
-            + "\n\n"
-            + needle_sentence
-            + "\n\n"
-            + haystack[insert_pos:]
-        )
+        full_text = haystack[:insert_pos] + "\n\n" + needle_sentence + "\n\n" + haystack[insert_pos:]
 
         tasks.append(
             {
@@ -341,9 +329,7 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     tasks = generate_sniah_dataset(count=args.count, seed=args.seed)
-    output.write_text(
-        json.dumps(tasks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    output.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"Generated {len(tasks)} S-NIAH tasks → {output}")
     sizes = set(t["haystack_target_chars"] for t in tasks)

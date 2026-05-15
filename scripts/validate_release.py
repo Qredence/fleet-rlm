@@ -27,9 +27,7 @@ CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 OPENAPI_PATH = REPO_ROOT / "openapi.yaml"
 FRONTEND_ROOT = REPO_ROOT / "src" / "frontend"
 FRONTEND_OPENAPI_SNAPSHOT_PATH = FRONTEND_ROOT / "openapi" / "fleet-rlm.openapi.yaml"
-FRONTEND_OPENAPI_TYPES_PATH = (
-    FRONTEND_ROOT / "src" / "lib" / "rlm-api" / "generated" / "openapi.ts"
-)
+FRONTEND_OPENAPI_TYPES_PATH = FRONTEND_ROOT / "src" / "lib" / "rlm-api" / "generated" / "openapi.ts"
 
 ENV_EXAMPLE_SUFFIXES = (".env.example",)
 ENV_ALLOWED_EXACT = {".env.example", "src/frontend/.env.example"}
@@ -51,8 +49,7 @@ def _git_ls_files() -> list[str]:
     proc = subprocess.run(
         ["git", "ls-files", "-z"],
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     out = proc.stdout.decode("utf-8", errors="replace")
     return [path for path in out.split("\0") if path]
@@ -125,23 +122,19 @@ def _check_openapi_contract(pyproject_version: str) -> tuple[bool, str]:
     if FRONTEND_ROOT.exists() and not FRONTEND_OPENAPI_SNAPSHOT_PATH.exists():
         return (
             False,
-            "ERROR: Missing frontend OpenAPI snapshot at "
-            "src/frontend/openapi/fleet-rlm.openapi.yaml",
+            "ERROR: Missing frontend OpenAPI snapshot at src/frontend/openapi/fleet-rlm.openapi.yaml",
         )
 
     try:
         root_openapi = _load_openapi_document(OPENAPI_PATH)
-        root_version = _extract_openapi_version(
-            root_openapi, source_name="root openapi.yaml"
-        )
+        root_version = _extract_openapi_version(root_openapi, source_name="root openapi.yaml")
     except ValueError as exc:
         return False, f"ERROR: {exc}"
 
     if root_version != pyproject_version:
         return (
             False,
-            "ERROR: OpenAPI version mismatch: "
-            f"openapi.yaml={root_version} vs pyproject.toml={pyproject_version}",
+            f"ERROR: OpenAPI version mismatch: openapi.yaml={root_version} vs pyproject.toml={pyproject_version}",
         )
 
     if not FRONTEND_ROOT.exists():
@@ -150,15 +143,12 @@ def _check_openapi_contract(pyproject_version: str) -> tuple[bool, str]:
     if not FRONTEND_OPENAPI_TYPES_PATH.exists():
         return (
             False,
-            "ERROR: Missing generated frontend OpenAPI types at "
-            "src/frontend/src/lib/rlm-api/generated/openapi.ts",
+            "ERROR: Missing generated frontend OpenAPI types at src/frontend/src/lib/rlm-api/generated/openapi.ts",
         )
 
     try:
         frontend_openapi = _load_openapi_document(FRONTEND_OPENAPI_SNAPSHOT_PATH)
-        frontend_version = _extract_openapi_version(
-            frontend_openapi, source_name="frontend OpenAPI snapshot"
-        )
+        frontend_version = _extract_openapi_version(frontend_openapi, source_name="frontend OpenAPI snapshot")
     except ValueError as exc:
         return False, f"ERROR: {exc}"
 
@@ -208,11 +198,7 @@ def _collect_local_frontend(frontend_dist: Path) -> dict[str, str]:
 def _collect_wheel_frontend(wheel_path: Path) -> tuple[dict[str, str], list[str]]:
     with zipfile.ZipFile(wheel_path) as wheel:
         names = wheel.namelist()
-        stray_frontend = [
-            name
-            for name in names
-            if name.startswith("frontend/") and not name.endswith("/")
-        ]
+        stray_frontend = [name for name in names if name.startswith("frontend/") and not name.endswith("/")]
         ui_hashes: dict[str, str] = {}
         for name in names:
             if not name.startswith(WHEEL_UI_PREFIX) or name.endswith("/"):
@@ -226,17 +212,11 @@ def do_hygiene(args: argparse.Namespace) -> int:
     _ = args
     tracked = _git_ls_files()
     forbidden_env = [
-        path
-        for path in tracked
-        if FORBIDDEN_TRACKED_ENV_PATTERN.search(path)
-        and not _is_allowed_env_example(path)
+        path for path in tracked if FORBIDDEN_TRACKED_ENV_PATTERN.search(path) and not _is_allowed_env_example(path)
     ]
     forbidden_tmp = [path for path in tracked if _is_forbidden_tmp_path(path)]
     forbidden_mjs = [
-        path
-        for path in tracked
-        if FORBIDDEN_TRACKED_MJS_PATTERN.search(path)
-        and path not in ALLOWED_TRACKED_MJS_EXACT
+        path for path in tracked if FORBIDDEN_TRACKED_MJS_PATTERN.search(path) and path not in ALLOWED_TRACKED_MJS_EXACT
     ]
 
     has_errors = False
@@ -281,10 +261,7 @@ def do_metadata(args: argparse.Namespace) -> int:
     init_version = _read_init_version()
 
     if pyproject_version != init_version:
-        print(
-            "ERROR: Version mismatch: "
-            f"pyproject.toml={pyproject_version} vs __init__.py={init_version}"
-        )
+        print(f"ERROR: Version mismatch: pyproject.toml={pyproject_version} vs __init__.py={init_version}")
         return 1
 
     if not _changelog_has_version(pyproject_version):
@@ -296,10 +273,7 @@ def do_metadata(args: argparse.Namespace) -> int:
     if not openapi_ok:
         return 1
 
-    print(
-        "OK: Release metadata is consistent "
-        f"(version={pyproject_version}, changelog header present)."
-    )
+    print(f"OK: Release metadata is consistent (version={pyproject_version}, changelog header present).")
     return 0
 
 
@@ -342,11 +316,7 @@ def do_wheel(args: argparse.Namespace) -> int:
     wheel_set = set(wheel_hashes)
     missing_in_wheel = sorted(local_set - wheel_set)
     extra_in_wheel = sorted(wheel_set - local_set)
-    mismatched_hashes = sorted(
-        path
-        for path in local_set & wheel_set
-        if local_hashes[path] != wheel_hashes[path]
-    )
+    mismatched_hashes = sorted(path for path in local_set & wheel_set if local_hashes[path] != wheel_hashes[path])
 
     if missing_in_wheel or extra_in_wheel or mismatched_hashes:
         print(
@@ -367,10 +337,7 @@ def do_wheel(args: argparse.Namespace) -> int:
                 print(f"  - {path}", file=sys.stderr)
         return 1
 
-    print(
-        "OK: Wheel frontend assets are present, clean, and synchronized with "
-        "src/frontend/dist."
-    )
+    print("OK: Wheel frontend assets are present, clean, and synchronized with src/frontend/dist.")
     print(f"Checked wheel: {wheel_path}")
     print(f"Asset count: {len(wheel_hashes)}")
     return 0
@@ -380,19 +347,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Fleet RLM release validation")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser_hygiene = subparsers.add_parser(
-        "hygiene", help="Check release hygiene (.env/.tmp/.mjs policies)"
-    )
+    parser_hygiene = subparsers.add_parser("hygiene", help="Check release hygiene (.env/.tmp/.mjs policies)")
     parser_hygiene.set_defaults(func=do_hygiene)
 
-    parser_metadata = subparsers.add_parser(
-        "metadata", help="Check release metadata and OpenAPI consistency"
-    )
+    parser_metadata = subparsers.add_parser("metadata", help="Check release metadata and OpenAPI consistency")
     parser_metadata.set_defaults(func=do_metadata)
 
-    parser_wheel = subparsers.add_parser(
-        "wheel", help="Check wheel frontend assets against local dist"
-    )
+    parser_wheel = subparsers.add_parser("wheel", help="Check wheel frontend assets against local dist")
     parser_wheel.add_argument(
         "--wheel",
         type=Path,

@@ -310,18 +310,12 @@ def _create_target_schema() -> None:
 
 def _apply_rls(table_name: str, *, include_workspace_scope: bool) -> None:
     policy_name = f"tenant_scope_{table_name}"
-    tenant_condition = (
-        "tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid"
-    )
+    tenant_condition = "tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid"
     workspace_condition = (
         "(nullif(current_setting('app.workspace_id', true), '') IS NULL "
         "OR workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid)"
     )
-    condition = (
-        f"{tenant_condition} AND {workspace_condition}"
-        if include_workspace_scope
-        else tenant_condition
-    )
+    condition = f"{tenant_condition} AND {workspace_condition}" if include_workspace_scope else tenant_condition
 
     op.execute(f"ALTER TABLE public.{table_name} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE public.{table_name} FORCE ROW LEVEL SECURITY")
@@ -379,8 +373,7 @@ def upgrade() -> None:
     )
     if table_names:
         total_rows = sum(
-            bind.execute(text(f"SELECT COUNT(*) FROM public.{name}")).scalar() or 0
-            for name in table_names
+            bind.execute(text(f"SELECT COUNT(*) FROM public.{name}")).scalar() or 0 for name in table_names
         )
         if total_rows > 0:
             raise RuntimeError(

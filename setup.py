@@ -27,9 +27,7 @@ def _maybe_build_frontend_ui() -> None:
 
     if not _BUILD_UI_SCRIPT.exists():
         if (_REPO_ROOT / ".git").exists():
-            raise RuntimeError(
-                f"Missing frontend build helper script: {_BUILD_UI_SCRIPT}"
-            )
+            raise RuntimeError(f"Missing frontend build helper script: {_BUILD_UI_SCRIPT}")
         print("Skipping frontend UI build: scripts/build_ui.py not present.")
         return
 
@@ -38,16 +36,16 @@ def _maybe_build_frontend_ui() -> None:
     os.environ[_BUILD_SENTINEL_ENV] = "1"
 
 
-class build_py(_build_py):
+class BuildPy(_build_py):
     def run(self) -> None:
         _maybe_build_frontend_ui()
         super().run()
 
 
-class sdist(_sdist):
+class Sdist(_sdist):
     def run(self) -> None:
         _maybe_build_frontend_ui()
         super().run()
 
 
-setup(cmdclass={"build_py": build_py, "sdist": sdist})
+setup(cmdclass={"build_py": BuildPy, "sdist": Sdist})

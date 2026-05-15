@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         DaytonaSandboxSession,
     )
     from .sandbox_spec import SandboxSpec
+    from .snapshot_runtime import bootstrap_snapshot
 
 __all__ = [
     "ContextSource",
@@ -41,6 +42,7 @@ __all__ = [
     "SandboxLmRuntimeConfig",
     "SandboxSpec",
     "VolumeNotReadyError",
+    "bootstrap_snapshot",
     "resolve_daytona_config",
     "run_daytona_smoke",
 ]
@@ -87,6 +89,10 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "VolumeNotReadyError": (
         "fleet_rlm.integrations.daytona.diagnostics",
         "VolumeNotReadyError",
+    ),
+    "bootstrap_snapshot": (
+        "fleet_rlm.integrations.daytona.snapshot_runtime",
+        "bootstrap_snapshot",
     ),
     "resolve_daytona_config": (
         "fleet_rlm.integrations.daytona.config",

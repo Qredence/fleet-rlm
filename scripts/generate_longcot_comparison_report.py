@@ -81,9 +81,7 @@ def generate_report(output_dir: Path) -> Path:
                 "failed": 0,
                 "total": 0,
             }
-        direct_by_domain[dom][d.get("status", "failed")] = (
-            direct_by_domain[dom].get(d.get("status", "failed"), 0) + 1
-        )
+        direct_by_domain[dom][d.get("status", "failed")] = direct_by_domain[dom].get(d.get("status", "failed"), 0) + 1
         direct_by_domain[dom]["total"] += 1
 
     rlm_by_domain: dict[str, dict[str, int]] = {}
@@ -91,9 +89,7 @@ def generate_report(output_dir: Path) -> Path:
         dom = d.get("domain", "unknown")
         if dom not in rlm_by_domain:
             rlm_by_domain[dom] = {"correct": 0, "incorrect": 0, "failed": 0, "total": 0}
-        rlm_by_domain[dom][d.get("status", "failed")] = (
-            rlm_by_domain[dom].get(d.get("status", "failed"), 0) + 1
-        )
+        rlm_by_domain[dom][d.get("status", "failed")] = rlm_by_domain[dom].get(d.get("status", "failed"), 0) + 1
         rlm_by_domain[dom]["total"] += 1
 
     # Transport rates
@@ -201,10 +197,7 @@ def generate_report(output_dir: Path) -> Path:
         ]
     )
 
-    report_path = (
-        output_dir
-        / f"comparison-report-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.md"
-    )
+    report_path = output_dir / f"comparison-report-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.md"
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Comparison report written to: {report_path}")
     return report_path

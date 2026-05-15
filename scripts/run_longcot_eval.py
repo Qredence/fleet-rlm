@@ -173,15 +173,12 @@ class _LocalEvidenceSink:
 
     def list_items(self, *, scope: str = "run", limit: int = 50) -> dict[str, Any]:
         items = [
-            {"id": v["id"], "scope_id": v["scope_id"], "kind": v["kind"]}
-            for v in list(self._items.values())[-limit:]
+            {"id": v["id"], "scope_id": v["scope_id"], "kind": v["kind"]} for v in list(self._items.values())[-limit:]
         ]
         return {"status": "ok", "items": items}
 
 
-def _extract_balanced_list_after(
-    text: str, label: str, *, start_at: int = 0
-) -> str | None:
+def _extract_balanced_list_after(text: str, label: str, *, start_at: int = 0) -> str | None:
     label_index = text.find(label, start_at)
     if label_index == -1:
         return None
@@ -205,12 +202,8 @@ def _parse_blocks_world_prompt(prompt: str) -> dict[str, Any] | None:
     puzzle_start = prompt.find("Puzzle instance:")
     if puzzle_start == -1:
         puzzle_start = 0
-    initial_literal = _extract_balanced_list_after(
-        prompt, "Initial state:", start_at=puzzle_start
-    )
-    goal_literal = _extract_balanced_list_after(
-        prompt, "Goal state:", start_at=puzzle_start
-    )
+    initial_literal = _extract_balanced_list_after(prompt, "Initial state:", start_at=puzzle_start)
+    goal_literal = _extract_balanced_list_after(prompt, "Goal state:", start_at=puzzle_start)
     if initial_literal is None or goal_literal is None:
         return None
     try:
@@ -231,10 +224,7 @@ def _parse_blocks_world_prompt(prompt: str) -> dict[str, Any] | None:
 
 def _is_state(value: Any) -> bool:
     return isinstance(value, list) and all(
-        isinstance(stack, list)
-        and all(
-            isinstance(block, int) and not isinstance(block, bool) for block in stack
-        )
+        isinstance(stack, list) and all(isinstance(block, int) and not isinstance(block, bool) for block in stack)
         for stack in value
     )
 
@@ -282,10 +272,7 @@ def _validate_blocksworld_solution(prompt: str, candidate: str) -> tuple[bool, s
             return False, f"Move {index} moves from an empty stack."
         top = state[from_stack][-1]
         if top != block:
-            return False, (
-                f"Move {index} claims block {block}, but top of stack "
-                f"{from_stack} is {top}."
-            )
+            return False, (f"Move {index} claims block {block}, but top of stack {from_stack} is {top}.")
         state[from_stack].pop()
         state[to_stack].append(block)
 
@@ -321,9 +308,7 @@ def _evaluate_rlm_answer(prompt: str, raw_answer: str) -> tuple[str, str, str | 
 def _ensure_longcot():
     if not VENDOR_LONGCOT.exists():
         print(f"ERROR: LongCoT not found at {VENDOR_LONGCOT}")
-        print(
-            "Run: git clone https://github.com/LongHorizonReasoning/longcot.git vendor/longcot"
-        )
+        print("Run: git clone https://github.com/LongHorizonReasoning/longcot.git vendor/longcot")
         sys.exit(1)
     if not (VENDOR_LONGCOT / ".venv").exists():
         print(f"ERROR: LongCoT venv not found. Run: cd {VENDOR_LONGCOT} && uv sync")
@@ -342,9 +327,7 @@ def _ensure_api_key() -> str:
 def _load_vendor_run_inference_module() -> ModuleType:
     """Dynamically load and cache LongCoT's inference runner for config/provider helpers."""
     script = VENDOR_LONGCOT / "run_inference.py"
-    spec = importlib.util.spec_from_file_location(
-        "vendor_longcot_run_inference", script
-    )
+    spec = importlib.util.spec_from_file_location("vendor_longcot_run_inference", script)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to load LongCoT inference module from {script}")
 
@@ -415,9 +398,7 @@ def _select_questions_for_slice(
     for domain_name in _SLICE_DOMAIN_ORDER:
         ids = domains.get(domain_name, [])
         if not isinstance(ids, list):
-            raise ValueError(
-                f"Slice manifest domain '{domain_name}' must map to a list of question IDs."
-            )
+            raise ValueError(f"Slice manifest domain '{domain_name}' must map to a list of question IDs.")
         for question_id in ids:
             question = question_by_id.get(str(question_id))
             if question is None:
@@ -426,10 +407,7 @@ def _select_questions_for_slice(
             selected.append(question)
 
     if missing:
-        raise ValueError(
-            "Slice manifest referenced unknown question IDs: "
-            + ", ".join(sorted(missing))
-        )
+        raise ValueError("Slice manifest referenced unknown question IDs: " + ", ".join(sorted(missing)))
     return selected
 
 
@@ -441,16 +419,12 @@ def _load_tips_text(tips_file: Path | None) -> str | None:
     return text or None
 
 
-def _build_rlm_prompt(
-    prompt: str, tips_text: str | None, domain: str | None = None
-) -> str:
+def _build_rlm_prompt(prompt: str, tips_text: str | None, domain: str | None = None) -> str:
     """Append benchmark-specific steering and output requirements."""
     parts = [prompt.rstrip()]
     if tips_text:
         parts.append(f"\n\nRLM EXECUTION TIPS:\n{tips_text}")
-    format_reminder = _LONGCOT_DOMAIN_FORMAT_REMINDERS.get(
-        domain or "", _LONGCOT_FORMAT_REMINDER_GENERIC
-    )
+    format_reminder = _LONGCOT_DOMAIN_FORMAT_REMINDERS.get(domain or "", _LONGCOT_FORMAT_REMINDER_GENERIC)
     parts.append(format_reminder)
     return "".join(parts)
 
@@ -485,9 +459,7 @@ def run_direct(
     output_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
     domain_label = domain or "all"
-    output_file = (
-        output_dir / f"longcot_{config}_{domain_label}_{difficulty}_{ts}.jsonl"
-    )
+    output_file = output_dir / f"longcot_{config}_{domain_label}_{difficulty}_{ts}.jsonl"
 
     print("Running LongCoT inference (direct mode)")
     print(f"  Config:     {config}")
@@ -549,9 +521,7 @@ def run_eval(
         cmd.append("--no-fallback")
 
     print(f"\nRunning LongCoT evaluation on {responses_path.name}")
-    result = subprocess.run(
-        cmd, env=env, cwd=str(VENDOR_LONGCOT), capture_output=True, text=True
-    )
+    result = subprocess.run(cmd, env=env, cwd=str(VENDOR_LONGCOT), capture_output=True, text=True)
 
     if result.returncode != 0:
         print(f"Evaluation failed: {result.stderr}")
@@ -561,9 +531,7 @@ def run_eval(
 
     results_dir = VENDOR_LONGCOT / "results"
     if results_dir.exists():
-        result_files = sorted(
-            results_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        result_files = sorted(results_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if result_files:
             latest = result_files[0]
             eval_data = json.loads(latest.read_text(encoding="utf-8"))
@@ -573,9 +541,7 @@ def run_eval(
 
             # Enrich with model/difficulty from the JSONL responses
             resp_rows = [
-                json.loads(line)
-                for line in responses_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
+                json.loads(line) for line in responses_path.read_text(encoding="utf-8").splitlines() if line.strip()
             ]
             first = resp_rows[0] if resp_rows else {}
             model_name = first.get("model", "unknown")
@@ -586,9 +552,7 @@ def run_eval(
                 dom = d.get("domain", "unknown")
                 if dom not in by_domain:
                     by_domain[dom] = {"correct": 0, "incorrect": 0, "failed": 0}
-                by_domain[dom][d.get("status", "failed")] = (
-                    by_domain[dom].get(d.get("status", "failed"), 0) + 1
-                )
+                by_domain[dom][d.get("status", "failed")] = by_domain[dom].get(d.get("status", "failed"), 0) + 1
 
             summary = {
                 "benchmark": "longcot",
@@ -661,9 +625,7 @@ def _configure_rlm_lm(config: str) -> str:
 
     if provider == "bedrock":
         # Use Bedrock bearer token (ANTHROPIC_OAUTH_KEY) — works for all Bedrock models
-        bearer_token = os.environ.get("ANTHROPIC_OAUTH_KEY") or os.environ.get(
-            "ANTHROPIC_API_KEY"
-        )
+        bearer_token = os.environ.get("ANTHROPIC_OAUTH_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         if not bearer_token:
             print("ERROR: ANTHROPIC_OAUTH_KEY not set in .env")
             sys.exit(1)
@@ -686,16 +648,12 @@ def _configure_rlm_lm(config: str) -> str:
         return f"bedrock/{model}"
 
     if provider == "openrouter":
-        api_key = str(
-            cfg.get("api_key") or os.environ.get("OPENROUTER_API_KEY") or ""
-        ).strip()
+        api_key = str(cfg.get("api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
         if not api_key:
             print("ERROR: OPENROUTER_API_KEY not set in environment or config")
             sys.exit(1)
 
-        api_base = (
-            os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1"
-        ).strip()
+        api_base = (os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1").strip()
         dspy_model = model if model.startswith("openrouter/") else f"openrouter/{model}"
         os.environ["OPENROUTER_API_KEY"] = api_key
         os.environ.setdefault("OPENROUTER_API_BASE", api_base)
@@ -775,9 +733,8 @@ def run_rlm(
     else:
         print("MLflow not configured — traces will not be recorded")
 
-    from fleet_rlm.integrations.daytona.types import SandboxSpec
-
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+    from fleet_rlm.integrations.daytona.types import SandboxSpec
     from fleet_rlm.runtime.modules import RecursiveWorkspaceModule
 
     # Each thread gets its own interpreter + module to avoid shared state issues.
@@ -787,9 +744,7 @@ def run_rlm(
         if not hasattr(_thread_local, "module"):
             try:
                 interp = DaytonaInterpreter(
-                    sandbox_spec=SandboxSpec(
-                        disk=1
-                    ),  # 1 GiB to stay under 30 GiB quota
+                    sandbox_spec=SandboxSpec(disk=1),  # 1 GiB to stay under 30 GiB quota
                 )
             except Exception as exc:
                 raise RuntimeError(f"Daytona interpreter unavailable: {exc}") from exc
@@ -925,9 +880,7 @@ def run_rlm(
         elapsed_ms = int((time.time() - started) * 1000)
         with print_lock:
             completed_count += 1
-            print(
-                f"  [{completed_count}/{total}] {qid} ({domain_name})... {transport_status} ({elapsed_ms}ms)"
-            )
+            print(f"  [{completed_count}/{total}] {qid} ({domain_name})... {transport_status} ({elapsed_ms}ms)")
         result = {
             "question_id": qid,
             "domain": domain_name,
@@ -953,14 +906,10 @@ def run_rlm(
     results: list[dict[str, Any]] = []
     with open(output_file, "w", encoding="utf-8") as out_f:
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [
-                executor.submit(_run_one, (i, q)) for i, q in enumerate(questions, 1)
-            ]
+            futures = [executor.submit(_run_one, (i, q)) for i, q in enumerate(questions, 1)]
             in_flight = set(futures)
             while in_flight:
-                done, in_flight = wait(
-                    in_flight, timeout=1.0, return_when=FIRST_COMPLETED
-                )
+                done, in_flight = wait(in_flight, timeout=1.0, return_when=FIRST_COMPLETED)
                 for fut in done:
                     r = fut.result()
                     results.append(r)
@@ -969,9 +918,7 @@ def run_rlm(
     flush_mlflow_traces()
 
     succeeded = sum(1 for r in results if r["successful"])
-    print(
-        f"\nRLM mode complete: {succeeded}/{len(results)} transport-successful responses"
-    )
+    print(f"\nRLM mode complete: {succeeded}/{len(results)} transport-successful responses")
     print(f"Results: {output_file}")
 
     summary = _build_summary(
@@ -1027,9 +974,7 @@ def _build_summary(
         "by_domain": {
             dom: {
                 **counts,
-                "success_rate": counts["successful"] / counts["total"]
-                if counts["total"]
-                else 0.0,
+                "success_rate": counts["successful"] / counts["total"] if counts["total"] else 0.0,
             }
             for dom, counts in by_domain.items()
         },
@@ -1125,9 +1070,7 @@ def log_to_mlflow(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run LongCoT benchmark for fleet-rlm evaluation"
-    )
+    parser = argparse.ArgumentParser(description="Run LongCoT benchmark for fleet-rlm evaluation")
     parser.add_argument(
         "--mode",
         choices=["direct", "rlm"],
@@ -1149,12 +1092,8 @@ def main():
         default="longcot-mini",
         help="Difficulty level (default: longcot-mini = easy subset, ~500 questions)",
     )
-    parser.add_argument(
-        "--domain", choices=["logic", "cs", "chemistry", "chess", "math"]
-    )
-    parser.add_argument(
-        "--max-questions", type=int, help="Cap number of questions (direct mode)"
-    )
+    parser.add_argument("--domain", choices=["logic", "cs", "chemistry", "chess", "math"])
+    parser.add_argument("--max-questions", type=int, help="Cap number of questions (direct mode)")
     parser.add_argument("--max-tasks", type=int, help="Cap number of tasks (rlm mode)")
     parser.add_argument(
         "--num-workers",
@@ -1198,9 +1137,7 @@ def main():
         action="store_true",
         help="Skip Gemini math/chemistry fallback judges in eval (avoids needing GEMINI_API_KEY)",
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would run without calling API"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Show what would run without calling API")
     parser.add_argument(
         "--slice-file",
         help="Optional JSON manifest listing a deterministic subset of question IDs.",
@@ -1209,9 +1146,7 @@ def main():
         "--tips-file",
         help="Optional benchmark-only steering text injected into Fleet-RLM prompts.",
     )
-    parser.add_argument(
-        "--eval-only", help="Skip inference, evaluate existing JSONL file"
-    )
+    parser.add_argument("--eval-only", help="Skip inference, evaluate existing JSONL file")
 
     args = parser.parse_args()
     output_dir = Path(args.output_dir)

@@ -37,7 +37,7 @@ EXPERIMENT_ID = os.getenv("MLFLOW_EXPERIMENT_ID", "4")
 
 def _load_or_create_dataset(dataset_path: Path) -> mlflow.data.Dataset:
     """Create an MLflow dataset from a stratified slice file."""
-    with open(dataset_path, "r") as f:
+    with open(dataset_path) as f:
         slice_data = json.load(f)
 
     rows = []
@@ -64,7 +64,7 @@ def _log_run(
     rlm_max_repair_attempts: int | None = None,
 ) -> str:
     """Create an MLflow run for a benchmark mode and return the run ID."""
-    with open(eval_json_path, "r") as f:
+    with open(eval_json_path) as f:
         summary = json.load(f)
 
     by_domain = summary.get("by_domain", {})
@@ -89,12 +89,8 @@ def _log_run(
         params["num_workers"] = str(num_workers) if num_workers is not None else "8"
     elif mode == "rlm":
         params["num_workers"] = str(num_workers) if num_workers is not None else "4"
-        params["rlm_max_passes"] = (
-            str(rlm_max_passes) if rlm_max_passes is not None else "1"
-        )
-        params["rlm_max_repair_attempts"] = (
-            str(rlm_max_repair_attempts) if rlm_max_repair_attempts is not None else "0"
-        )
+        params["rlm_max_passes"] = str(rlm_max_passes) if rlm_max_passes is not None else "1"
+        params["rlm_max_repair_attempts"] = str(rlm_max_repair_attempts) if rlm_max_repair_attempts is not None else "0"
 
     run_name = f"longcot-{mode}-{model_tag}-{summary.get('difficulty', 'unknown')}-{summary.get('tasks_total', 0)}"
 
@@ -132,37 +128,23 @@ def _log_run(
         mlflow.log_input(dataset, context="evaluation")
 
         print(f"Created {mode} run: {run_id}")
-        print(
-            f"  View at: {MLFLOW_TRACKING_URI}/#/experiments/{EXPERIMENT_ID}/runs/{run_id}"
-        )
+        print(f"  View at: {MLFLOW_TRACKING_URI}/#/experiments/{EXPERIMENT_ID}/runs/{run_id}")
         return run_id
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Log a LongCoT benchmark run to MLflow"
-    )
-    parser.add_argument(
-        "--mode", required=True, choices=["direct", "rlm"], help="Benchmark mode"
-    )
-    parser.add_argument(
-        "--eval-json", required=True, type=Path, help="Path to evaluation summary JSON"
-    )
-    parser.add_argument(
-        "--jsonl", required=True, type=Path, help="Path to merged results JSONL"
-    )
+    parser = argparse.ArgumentParser(description="Log a LongCoT benchmark run to MLflow")
+    parser.add_argument("--mode", required=True, choices=["direct", "rlm"], help="Benchmark mode")
+    parser.add_argument("--eval-json", required=True, type=Path, help="Path to evaluation summary JSON")
+    parser.add_argument("--jsonl", required=True, type=Path, help="Path to merged results JSONL")
     parser.add_argument(
         "--dataset-path",
         type=Path,
         default=ROOT / "scripts" / "benchmarks" / "longcot_mini_stratified_100.json",
         help="Path to stratified slice JSON used as dataset source",
     )
-    parser.add_argument(
-        "--num-workers", type=int, help="Number of workers (default: 8 direct, 4 rlm)"
-    )
-    parser.add_argument(
-        "--rlm-max-passes", type=int, help="RLM max passes (default: 1)"
-    )
+    parser.add_argument("--num-workers", type=int, help="Number of workers (default: 8 direct, 4 rlm)")
+    parser.add_argument("--rlm-max-passes", type=int, help="RLM max passes (default: 1)")
     parser.add_argument(
         "--rlm-max-repair-attempts",
         type=int,

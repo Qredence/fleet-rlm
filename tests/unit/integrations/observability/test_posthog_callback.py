@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 import dspy
@@ -25,6 +26,22 @@ class _FakeClient:
 
 class _FakeLM:
     model = "openai/gpt-4o-mini"
+
+
+_DSPY_OWNER_THREAD_ERROR = "dspy.settings can only be changed by the thread"
+
+
+def _restore_dspy_callbacks(callbacks: list[Any]) -> None:
+    """Restore DSPy callbacks even when earlier tests configured DSPy in a worker thread."""
+    try:
+        dspy.configure(callbacks=callbacks)
+    except RuntimeError as exc:
+        if _DSPY_OWNER_THREAD_ERROR not in str(exc):
+            raise
+
+        settings_module = import_module("dspy.dsp.utils.settings")
+        with dspy.settings.lock:
+            settings_module.main_thread_config["callbacks"] = list(callbacks)
 
 
 def _enabled_config(*, optimization: bool = False) -> PostHogConfig:
@@ -197,4 +214,4 @@ def test_configure_analytics_is_idempotent(monkeypatch) -> None:
         callbacks = [cb for cb in (getattr(dspy.settings, "callbacks", []) or []) if isinstance(cb, PostHogLLMCallback)]
         assert len(callbacks) == 1
     finally:
-        dspy.configure(callbacks=old_callbacks)
+        _restore_dspy_callbacks(old_callbacks)

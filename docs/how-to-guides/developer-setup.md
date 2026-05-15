@@ -6,7 +6,7 @@ This guide walks through setting up a complete local development environment for
 
 | Requirement   | Version | Purpose                           |
 | ------------- | ------- | --------------------------------- |
-| Python        | 3.10+   | Runtime and development           |
+| Python        | 3.11+   | Runtime and development           |
 | uv            | Latest  | Package and dependency management |
 | pnpm          | Latest  | Frontend development              |
 | Git           | 2.x     | Version control                   |
@@ -14,7 +14,7 @@ This guide walks through setting up a complete local development environment for
 
 ## 1. Install Python
 
-fleet-rlm requires Python 3.10 or higher. The project officially supports Python 3.10, 3.11, and 3.12.
+fleet-rlm requires Python 3.11 or higher. The project officially supports Python 3.11, 3.12, and 3.13.
 
 ### Check Your Python Version
 
@@ -22,7 +22,7 @@ fleet-rlm requires Python 3.10 or higher. The project officially supports Python
 python3 --version
 ```
 
-Expected output: `Python 3.10.x` or higher.
+Expected output: `Python 3.11.x` or higher.
 
 ### Install Python (if needed)
 

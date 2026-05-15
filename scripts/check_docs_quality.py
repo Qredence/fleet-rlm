@@ -39,10 +39,7 @@ def iter_docs_files(docs_root: Path) -> list[Path]:
     return sorted(
         p
         for p in docs_root.rglob("*.md")
-        if p.is_file()
-        and not any(
-            part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts
-        )
+        if p.is_file() and not any(part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts)
     )
 
 
@@ -155,8 +152,7 @@ def check_contract_sanity(repo_root: Path) -> list[str]:
                 command,
                 cwd=repo_root,
                 check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
                 timeout=60,
             )
@@ -167,9 +163,7 @@ def check_contract_sanity(repo_root: Path) -> list[str]:
         if proc.returncode != 0:
             snippet = (proc.stderr or proc.stdout).strip().splitlines()
             tail = snippet[-1] if snippet else "no output"
-            errors.append(
-                f"command failed ({proc.returncode}): {' '.join(command)} :: {tail}"
-            )
+            errors.append(f"command failed ({proc.returncode}): {' '.join(command)} :: {tail}")
 
     return errors
 
