@@ -54,17 +54,10 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
             calls.append(("list_chat_turns", kwargs.get("session_id", session_id)))
             return ([SimpleNamespace(user_message="Show me the prior auth debugging conversation")], 1)
 
-        async def update_chat_session(self, **kwargs: Any) -> None:
-            calls.append(("update_chat_session", kwargs["title"]))
-            return None
-
     response = await SessionService(Persistence()).list_sessions(persisted_identity=identity)
 
     assert response.items[0].title == "Show me the prior auth debugging conversation"
-    assert calls == [
-        ("list_chat_turns", session_id),
-        ("update_chat_session", "Show me the prior auth debugging conversation"),
-    ]
+    assert calls == [("list_chat_turns", session_id)]
 
 
 @pytest.mark.asyncio

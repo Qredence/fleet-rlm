@@ -78,21 +78,7 @@ async def _resolve_session_title(
     if first_turn is None:
         return fallback
 
-    derived_title = derive_session_title(first_turn.user_message, fallback=fallback)
-    if title != derived_title and is_placeholder_session_title(title, external_session_id=external_id):
-        try:
-            await persistence.update_chat_session(
-                tenant_id=persisted_identity.tenant_id,
-                session_id=session.id,
-                user_id=persisted_identity.user_id,
-                workspace_id=persisted_identity.workspace_id,
-                title=derived_title,
-            )
-        except Exception:
-            # Best-effort title backfill: ignore persistence failures so title
-            # derivation does not fail the main request path.
-            pass
-    return derived_title
+    return derive_session_title(first_turn.user_message, fallback=fallback)
 
 
 async def _load_turns_for_export(
