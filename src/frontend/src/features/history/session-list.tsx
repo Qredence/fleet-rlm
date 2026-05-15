@@ -14,9 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
-import {
-  useWorkspaceLayoutHistory,
-} from "@/features/workspace/workspace-layout-contract";
+import { useWorkspaceLayoutHistory } from "@/features/workspace/workspace-layout-contract";
 import { RlmApiError } from "@/lib/rlm-api/client";
 import { parseIsoTimestamp } from "@/lib/date";
 import { cn } from "@/lib/utils";

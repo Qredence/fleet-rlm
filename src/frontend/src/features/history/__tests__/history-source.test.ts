@@ -61,12 +61,16 @@ describe("history-source", () => {
       buildSession("d6c03c3b-33df-4145-ad00-df0ca03de083", "d6c03c3b-33df-4145-ad00-df0ca03de083"),
     ];
     const localConversations = [
-      buildConversation("conv-1", "Use the available workspace tools to inspect the project", "2026-05-15T18:00:00.000Z"),
+      buildConversation(
+        "conv-1",
+        "Use the available workspace tools to inspect the project",
+        "2026-05-15T18:00:00.000Z",
+      ),
     ];
 
     expect(shouldPreferLocalHistory(apiSessions, localConversations)).toBe(true);
-    expect(shouldPreferLocalHistory([buildSession("Actual chat title", null)], localConversations)).toBe(
-      false,
-    );
+    expect(
+      shouldPreferLocalHistory([buildSession("Actual chat title", null)], localConversations),
+    ).toBe(false);
   });
 });
