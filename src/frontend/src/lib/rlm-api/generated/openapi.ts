@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+
 export interface paths {
   "/health": {
     /**
@@ -373,8 +374,8 @@ export interface components {
        * @description First rows from the dataset as preview.
        */
       sample_rows: {
-        [key: string]: unknown;
-      }[];
+          [key: string]: unknown;
+        }[];
       /**
        * Uri
        * @description Filesystem path to the dataset file.
@@ -1495,8 +1496,8 @@ export interface components {
        * @description Detailed volume mounts.
        */
       volumes?: {
-        [key: string]: unknown;
-      }[];
+          [key: string]: unknown;
+        }[];
     };
     /**
      * SandboxListItem
@@ -2306,6 +2307,7 @@ export type $defs = Record<string, never>;
 export type external = Record<string, never>;
 
 export interface operations {
+
   /**
    * Health
    * @description Report a lightweight server health signal and package version.

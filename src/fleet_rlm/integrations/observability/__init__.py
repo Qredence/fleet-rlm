@@ -100,5 +100,29 @@ def configure_analytics(
             return callback
 
     callback = PostHogLLMCallback(config, distinct_id=distinct_id)
-    dspy.configure(callbacks=[*callbacks, callback])
+    desired_callbacks = [*callbacks, callback]
+    try:
+        dspy.configure(callbacks=desired_callbacks)
+    except RuntimeError as exc:
+        if "dspy.settings can only be changed by the thread" not in str(exc):
+            raise
+
+        settings_lock = getattr(dspy.settings, "lock", None)
+        if settings_lock is None:
+            msg = (
+                "Unable to configure DSPy callbacks after thread-owner RuntimeError; dspy.settings.lock is unavailable."
+            )
+            raise RuntimeError(msg) from exc
+
+        settings_module = import_module("dspy.dsp.utils.settings")
+        main_thread_config = getattr(settings_module, "main_thread_config", None)
+        if not isinstance(main_thread_config, dict):
+            msg = (
+                "Unable to configure DSPy callbacks after thread-owner RuntimeError; "
+                "dspy.dsp.utils.settings.main_thread_config is unavailable."
+            )
+            raise RuntimeError(msg) from exc
+
+        with settings_lock:
+            main_thread_config["callbacks"] = list(desired_callbacks)
     return callback
