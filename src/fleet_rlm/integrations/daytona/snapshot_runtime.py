@@ -36,6 +36,7 @@ DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
 DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
+# Allowlist package specs to avoid shell metacharacters in generated install command.
 _VALID_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
 

@@ -138,7 +138,10 @@ def test_build_base_snapshot_image_accepts_custom_packages() -> None:
     assert "dspy-ai" not in dockerfile
 
 
-@pytest.mark.parametrize("unsafe_spec", ["requests; echo hacked", "requests|cat", "requests`id`", "$(id)"])
+@pytest.mark.parametrize(
+    "unsafe_spec",
+    ["", " requests", "-requests", "requests; echo hacked", "requests|cat", "requests`id`", "$(id)"],
+)
 def test_build_base_snapshot_image_rejects_unsafe_package_specs(unsafe_spec: str) -> None:
     with pytest.raises(ValueError, match="Invalid package spec"):
         build_base_snapshot_image(packages=[unsafe_spec])
