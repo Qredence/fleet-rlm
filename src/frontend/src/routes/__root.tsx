@@ -1,6 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { lazy, Suspense, type ReactNode } from "react";
+import { Fragment, lazy, Suspense } from "react";
 
 const Agentation = import.meta.env.DEV
   ? lazy(() => import("agentation").then((m) => ({ default: m.Agentation })))
@@ -33,28 +33,16 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <RootDocument>
+    <Fragment>
+      <HeadContent />
       <Outlet />
       {import.meta.env.DEV && import.meta.env.VITE_E2E !== "1" && <TanStackRouterDevtools />}
-    </RootDocument>
-  );
-}
-
-function RootDocument({ children }: { children: ReactNode }) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <HeadContent />
-      </head>
-      <body className="isolate">
-        {children}
-        {import.meta.env.DEV ? (
-          <Suspense fallback={null}>
-            <Agentation endpoint={agentationEndpoint} />
-          </Suspense>
-        ) : null}
-        <Scripts />
-      </body>
-    </html>
+      {import.meta.env.DEV ? (
+        <Suspense fallback={null}>
+          <Agentation endpoint={agentationEndpoint} />
+        </Suspense>
+      ) : null}
+      <Scripts />
+    </Fragment>
   );
 }
