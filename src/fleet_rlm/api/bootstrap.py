@@ -337,7 +337,7 @@ async def recover_stale_optimization_runs(state: ServerState) -> None:
                 recover_stale_optimization_runs as recover_local_stale_runs,
             )
 
-            recovered = recover_local_stale_runs()
+            recovered = await recover_local_stale_runs()
         if recovered:
             logger.info("Recovered %d stale optimization run(s) on startup", recovered)
     except Exception:
