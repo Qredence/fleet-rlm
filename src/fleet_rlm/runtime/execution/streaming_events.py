@@ -20,7 +20,6 @@ from fleet_rlm.runtime.schemas import StreamEvent
 
 # Pre-compiled regexes for hot-path status parsing
 _CALLING_TOOL_RE = re.compile(r"^Calling tool:\s*(.+)$")
-_TOOL_RESULT_RE = re.compile(r"^Tool result:\s*(.*)$")
 
 # Soft content cap for trajectory step outputs crossing the websocket boundary.
 # Individual steps can carry multi-KB observations (grep hits, long file reads)
