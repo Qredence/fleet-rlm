@@ -42,12 +42,10 @@ export function AgentChat({
   const pendingQuestion = findPendingQuestion(messages, questionTool);
   const suggestionConfig = resolveSuggestions(suggestions);
   const showInputSuggestions =
-    emptySuggestionsPlacement === "input" ||
-    emptySuggestionsPlacement === "both";
+    emptySuggestionsPlacement === "input" || emptySuggestionsPlacement === "both";
   const showEmptySuggestions =
     isCenteredEmptyState &&
-    (emptySuggestionsPlacement === "empty" ||
-      emptySuggestionsPlacement === "both") &&
+    (emptySuggestionsPlacement === "empty" || emptySuggestionsPlacement === "both") &&
     suggestionConfig.items.length > 0;
 
   const handleEmptySuggestionSelect = (item: SuggestionItem) => {
@@ -102,9 +100,7 @@ export function AgentChat({
                   toolCallId: pendingQuestion.toolCallId,
                   question:
                     pendingQuestion.questions[
-                      pendingQuestion.questionIndex
-                        ? pendingQuestion.questionIndex - 1
-                        : 0
+                      pendingQuestion.questionIndex ? pendingQuestion.questionIndex - 1 : 0
                     ]!,
                   answer,
                 });
@@ -118,11 +114,7 @@ export function AgentChat({
   return (
     <div
       ref={rootRef}
-      className={cn(
-        "flex flex-col h-full min-h-0",
-        classNames?.root,
-        className,
-      )}
+      className={cn("flex flex-col h-full min-h-0", classNames?.root, className)}
       style={style}
     >
       {isCenteredEmptyState ? (
@@ -130,9 +122,7 @@ export function AgentChat({
           <div className="w-full max-w-an">
             {emptySuggestionsPosition === "top" ? emptySuggestionsNode : null}
             {inputBarNode}
-            {emptySuggestionsPosition === "bottom"
-              ? emptySuggestionsNode
-              : null}
+            {emptySuggestionsPosition === "bottom" ? emptySuggestionsNode : null}
           </div>
         </div>
       ) : (
@@ -225,8 +215,7 @@ function findPendingQuestion(
         question: firstQuestion,
         questionIndex: input?.questionIndex,
         totalQuestions:
-          input?.totalQuestions ??
-          (questions.length > 0 ? questions.length : undefined),
+          input?.totalQuestions ?? (questions.length > 0 ? questions.length : undefined),
         onPreviousQuestion: input?.onPreviousQuestion,
         onNextQuestion: input?.onNextQuestion,
         submitLabel: questionTool?.submitLabel ?? input?.submitLabel,

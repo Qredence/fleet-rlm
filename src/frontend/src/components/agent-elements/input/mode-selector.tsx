@@ -4,11 +4,7 @@ import { memo, useCallback, useState } from "react";
 import type { ComponentType } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { cn } from "../utils/cn";
 
@@ -94,18 +90,12 @@ export const ModeSelector = memo(function ModeSelector({
             >
               {Icon && <Icon className="mt-0.5 size-3.5 shrink-0" />}
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">
-                  {mode.label}
-                </span>
+                <span className="block truncate font-medium">{mode.label}</span>
                 {mode.description ? (
-                  <span className="block truncate text-foreground/40">
-                    {mode.description}
-                  </span>
+                  <span className="block truncate text-foreground/40">{mode.description}</span>
                 ) : null}
               </span>
-              {isActive && (
-                <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />
-              )}
+              {isActive && <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />}
             </button>
           );
         })}

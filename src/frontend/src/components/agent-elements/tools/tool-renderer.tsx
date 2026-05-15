@@ -20,10 +20,7 @@ export type ToolRendererProps = {
   toolRenderers?: Record<string, React.ComponentType<CustomToolRendererProps>>;
 };
 
-function deriveToolStatus(
-  part: any,
-  chatStatus?: string,
-): CustomToolRendererProps["status"] {
+function deriveToolStatus(part: any, chatStatus?: string): CustomToolRendererProps["status"] {
   if (part.state === "input-streaming") return "streaming";
   if (part.state === "output-available") return "success";
   if (part.state === "output-error") return "error";

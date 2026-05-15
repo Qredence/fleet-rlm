@@ -44,9 +44,7 @@ export function Suggestions({
             item.className,
           )}
         >
-          {item.icon && (
-            <span className="inline-flex shrink-0">{item.icon}</span>
-          )}
+          {item.icon && <span className="inline-flex shrink-0">{item.icon}</span>}
           {item.label}
         </button>
       ))}

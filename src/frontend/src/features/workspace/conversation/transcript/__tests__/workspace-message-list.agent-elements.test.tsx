@@ -14,7 +14,10 @@ vi.mock("lottie-react", () => ({
 import { WorkspaceMessageList } from "@/features/workspace/conversation/transcript/workspace-message-list";
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 
-function mount(messages: ChatMessage[], options?: Partial<Parameters<typeof WorkspaceMessageList>[0]>) {
+function mount(
+  messages: ChatMessage[],
+  options?: Partial<Parameters<typeof WorkspaceMessageList>[0]>,
+) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -100,8 +103,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       { onResolveHitl },
     );
 
-    const approveButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Approve"),
+    const approveButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Approve"),
     );
     expect(approveButton).toBeTruthy();
 
@@ -109,8 +112,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       approveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Send"),
+    const sendButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Send"),
     );
     expect(sendButton).toBeTruthy();
 
@@ -190,11 +193,11 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       attachButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const addDocumentButton = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Add document"),
+    const addDocumentButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Add document"),
     );
-    const connectorsButton = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Connectors"),
+    const connectorsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Connectors"),
     );
     expect(addDocumentButton).toBeTruthy();
     expect(connectorsButton).toBeTruthy();
@@ -221,10 +224,9 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
   });
 
   it("renders the pending planning loader without a lazy component crash", async () => {
-    const { container, root } = mount(
-      [{ id: "u1", type: "user", content: "start working" }],
-      { isTyping: true },
-    );
+    const { container, root } = mount([{ id: "u1", type: "user", content: "start working" }], {
+      isTyping: true,
+    });
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

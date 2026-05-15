@@ -19,8 +19,7 @@ function parseStructuredJson(value: unknown): unknown {
 
 export function normalizeToolPart(part: unknown): unknown {
   if (!isRecord(part)) return part;
-  if (typeof part.type !== "string" || !part.type.startsWith("tool-"))
-    return part;
+  if (typeof part.type !== "string" || !part.type.startsWith("tool-")) return part;
 
   const normalizedInput = parseStructuredJson(part.input);
   const normalizedOutput = parseStructuredJson(part.output);

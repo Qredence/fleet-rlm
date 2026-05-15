@@ -1,9 +1,5 @@
 import { memo, useState } from "react";
-import {
-  IconChevronsDown,
-  IconChevronsUp,
-  IconFileDescription,
-} from "@tabler/icons-react";
+import { IconChevronsDown, IconChevronsUp, IconFileDescription } from "@tabler/icons-react";
 import { Markdown } from "../markdown";
 import { IconSpinner } from "../icons";
 import { areToolPropsEqual, getToolStatus } from "../utils/format-tool";
@@ -37,10 +33,7 @@ function getPlanFileName(plan: Plan) {
   return `plan-${rawId}.md`;
 }
 
-export const PlanTool = memo(function PlanTool({
-  part,
-  chatStatus,
-}: PlanToolProps) {
+export const PlanTool = memo(function PlanTool({ part, chatStatus }: PlanToolProps) {
   const { isPending } = getToolStatus(part, chatStatus);
   const plan = part.input?.plan;
   const [isExpanded, setIsExpanded] = useState(false);
@@ -73,9 +66,7 @@ export const PlanTool = memo(function PlanTool({
           ) : (
             <IconFileDescription className="w-3.5 h-3.5 text-an-tool-color-muted shrink-0" />
           )}
-          <span className="text-xs text-an-tool-color-muted truncate">
-            {fileName}
-          </span>
+          <span className="text-xs text-an-tool-color-muted truncate">{fileName}</span>
         </div>
         <button
           type="button"
@@ -132,9 +123,7 @@ export const PlanTool = memo(function PlanTool({
               )}
             </div>
           ) : (
-            <div className="text-xs text-an-tool-color-muted">
-              No plan summary provided.
-            </div>
+            <div className="text-xs text-an-tool-color-muted">No plan summary provided.</div>
           )}
         </div>
 

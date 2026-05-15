@@ -1,6 +1,9 @@
 import type { UIMessage } from "ai";
 
-import type { QuestionAnswer, QuestionConfig } from "@/components/agent-elements/question/question-prompt";
+import type {
+  QuestionAnswer,
+  QuestionConfig,
+} from "@/components/agent-elements/question/question-prompt";
 import type {
   ChatMessage,
   ChatRenderPart,
@@ -47,10 +50,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeToolInput(
-  toolType: string,
-  input: unknown,
-): Record<string, unknown> {
+function normalizeToolInput(toolType: string, input: unknown): Record<string, unknown> {
   const base = isRecord(input) ? { ...input } : {};
   const normalized = toolType.toLowerCase();
 
@@ -115,9 +115,7 @@ function stableToolCallId(messageId: string, kind: string, index: number, stepIn
 
 function toolPartType(toolType: string): string {
   const normalized = toolType.toLowerCase();
-  if (
-    /(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(normalized)
-  ) {
+  if (/(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(normalized)) {
     return "tool-Bash";
   }
   if (
@@ -174,11 +172,7 @@ function outputRecord(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }
   return output ? { result: output } : undefined;
 }
 
-function tracePartToAgentParts(
-  part: ChatRenderPart,
-  messageId: string,
-  index: number,
-): unknown[] {
+function tracePartToAgentParts(part: ChatRenderPart, messageId: string, index: number): unknown[] {
   if (part.kind === "reasoning") {
     const text = part.parts.map((item) => item.text).join("\n");
     if (!text.trim()) return [];
@@ -217,10 +211,10 @@ function tracePartToAgentParts(
     const toolType = part.kind === "sandbox" ? "sandbox" : part.toolType;
     return [
       {
-    type: toolPartType(toolType),
-    toolCallId: stableToolCallId(messageId, toolType, index, part.stepIndex),
-    state: mapToolState(part.state),
-    input: commandInput(part),
+        type: toolPartType(toolType),
+        toolCallId: stableToolCallId(messageId, toolType, index, part.stepIndex),
+        state: mapToolState(part.state),
+        input: commandInput(part),
         output: outputRecord(part),
       } satisfies AgentToolPart,
     ];
@@ -231,7 +225,12 @@ function tracePartToAgentParts(
       {
         type: "tool-TodoWrite",
         toolCallId: stableToolCallId(messageId, "task", index),
-        state: part.status === "in_progress" ? "call" : part.status === "error" ? "output-error" : "output-available",
+        state:
+          part.status === "in_progress"
+            ? "call"
+            : part.status === "error"
+              ? "output-error"
+              : "output-available",
         input: {
           action: "update",
           title: part.title,
@@ -460,10 +459,7 @@ function clarificationToQuestionPart(
   };
 }
 
-function messageToParts(
-  message: ChatMessage,
-  options: AgentChatMessageAdapterOptions,
-): unknown[] {
+function messageToParts(message: ChatMessage, options: AgentChatMessageAdapterOptions): unknown[] {
   const parts: unknown[] = [];
   for (const [index, part] of (message.renderParts ?? []).entries()) {
     parts.push(...tracePartToAgentParts(part, message.id, index));
@@ -491,7 +487,11 @@ function messageToParts(
     const questionPart = clarificationToQuestionPart(message, options.onResolveClarification);
     if (questionPart) return [questionPart];
   }
-  if (message.type === "plan_update" || message.type === "rlm_executing" || message.type === "memory_update") {
+  if (
+    message.type === "plan_update" ||
+    message.type === "rlm_executing" ||
+    message.type === "memory_update"
+  ) {
     parts.push({
       type: message.type === "plan_update" ? "tool-PlanWrite" : "tool-Status",
       toolCallId: message.id,

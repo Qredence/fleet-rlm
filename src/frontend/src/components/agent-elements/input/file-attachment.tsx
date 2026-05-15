@@ -124,11 +124,7 @@ export function FileAttachment({
           )}
           onClick={canPreview ? openLightbox : undefined}
         >
-          <img
-            src={url}
-            alt={filename}
-            className="w-full h-full object-cover"
-          />
+          <img src={url} alt={filename} className="w-full h-full object-cover" />
         </div>
       ) : (
         <>
@@ -140,11 +136,7 @@ export function FileAttachment({
               )}
               onClick={canPreview ? openLightbox : undefined}
             >
-              <img
-                src={url}
-                alt={filename}
-                className="w-full h-full object-cover aspect-square"
-              />
+              <img src={url} alt={filename} className="w-full h-full object-cover aspect-square" />
             </div>
           ) : (
             <div className="flex items-center justify-center w-8 self-stretch bg-muted shrink-0 rounded-[calc(var(--an-input-border-radius)-var(--an-context-padding)-2px)]">
@@ -153,16 +145,11 @@ export function FileAttachment({
           )}
 
           <div className="flex flex-col min-w-0">
-            <span
-              className="text-sm font-medium text-foreground truncate"
-              title={filename}
-            >
+            <span className="text-sm font-medium text-foreground truncate" title={filename}>
               {filename}
             </span>
             {size !== undefined && (
-              <span className="text-[10px] text-muted-foreground">
-                {formatFileSize(size)}
-              </span>
+              <span className="text-[10px] text-muted-foreground">{formatFileSize(size)}</span>
             )}
           </div>
         </>

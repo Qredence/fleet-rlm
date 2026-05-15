@@ -20,9 +20,7 @@ export interface AgentElementsToolPart {
 type ToolPart = Extract<ChatRenderPart, { kind: "tool" }>;
 type SandboxPart = Extract<ChatRenderPart, { kind: "sandbox" }>;
 
-function mapState(
-  state: ChatRenderToolState,
-): AgentElementsToolPart["state"] {
+function mapState(state: ChatRenderToolState): AgentElementsToolPart["state"] {
   switch (state) {
     case "input-streaming":
       return "input-streaming";
@@ -75,9 +73,10 @@ export function toolPartToAgentElements(part: ToolPart, key: string): AgentEleme
     toolCallId: key,
     type: `tool-${resolveAgentElementsTool(part) ?? part.toolType}`,
     state: mapState(part.state),
-    input: (typeof part.input === "object" && part.input !== null
-      ? part.input
-      : {}) as Record<string, unknown>,
+    input: (typeof part.input === "object" && part.input !== null ? part.input : {}) as Record<
+      string,
+      unknown
+    >,
     output: part.errorText
       ? { error: part.errorText }
       : typeof part.output === "object" && part.output !== null
@@ -89,10 +88,7 @@ export function toolPartToAgentElements(part: ToolPart, key: string): AgentEleme
 }
 
 /** Convert a sandbox ChatRenderPart to agent-elements BashTool part shape. */
-export function sandboxPartToAgentElements(
-  part: SandboxPart,
-  key: string,
-): AgentElementsToolPart {
+export function sandboxPartToAgentElements(part: SandboxPart, key: string): AgentElementsToolPart {
   return {
     toolCallId: key,
     type: "tool-Bash",

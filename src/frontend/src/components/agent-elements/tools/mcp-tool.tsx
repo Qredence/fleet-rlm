@@ -86,11 +86,7 @@ function getCompletedTitle(info: McpToolInfo): string {
   const verb = words[0];
   const rest = words.slice(1).join(" ");
   const completed = verb ? COMPLETED_VERBS[verb] : undefined;
-  return completed
-    ? rest
-      ? `${completed} ${rest}`
-      : completed
-    : info.displayName;
+  return completed ? (rest ? `${completed} ${rest}` : completed) : info.displayName;
 }
 
 function formatMcpArgs(input: any): string {
@@ -158,9 +154,7 @@ export function unwrapMcpOutput(output: any): any {
 function formatOutputForDisplay(output: any): string {
   const unwrapped = unwrapMcpOutput(output);
   if (typeof unwrapped === "string") {
-    return unwrapped.length > 3000
-      ? unwrapped.slice(0, 3000) + "\n..."
-      : unwrapped;
+    return unwrapped.length > 3000 ? unwrapped.slice(0, 3000) + "\n..." : unwrapped;
   }
   const text = JSON.stringify(unwrapped, null, 2);
   return text.length > 3000 ? text.slice(0, 3000) + "\n..." : text;
@@ -179,8 +173,7 @@ export const McpTool = memo(function McpTool({
   const { isPending, isInterrupted } = getToolStatus(part, chatStatus);
 
   const title = useMemo(() => {
-    if (part.state === "input-streaming")
-      return `Preparing ${mcpInfo.displayName}`;
+    if (part.state === "input-streaming") return `Preparing ${mcpInfo.displayName}`;
     if (isPending) return getActiveTitle(mcpInfo);
     return getCompletedTitle(mcpInfo);
   }, [part.state, isPending, mcpInfo]);
@@ -199,8 +192,7 @@ export const McpTool = memo(function McpTool({
     if (!displayOutput) return null;
     const trimmed = displayOutput.trim();
     if (!trimmed) return null;
-    const language =
-      trimmed.startsWith("{") || trimmed.startsWith("[") ? "json" : "text";
+    const language = trimmed.startsWith("{") || trimmed.startsWith("[") ? "json" : "text";
     return `\`\`\`${language}\n${displayOutput}\n\`\`\``;
   }, [displayOutput]);
 
@@ -208,9 +200,7 @@ export const McpTool = memo(function McpTool({
 
   if (isInterrupted && !part.output) {
     return (
-      <span className="text-sm text-an-tool-color-muted">
-        {mcpInfo.displayName} interrupted
-      </span>
+      <span className="text-sm text-an-tool-color-muted">{mcpInfo.displayName} interrupted</span>
     );
   }
 

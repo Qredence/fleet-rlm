@@ -29,10 +29,7 @@ export type DetectedChanges = {
   items: TodoChange[];
 };
 
-function detectChanges(
-  oldTodos: TodoItem[],
-  newTodos: TodoItem[],
-): DetectedChanges {
+function detectChanges(oldTodos: TodoItem[], newTodos: TodoItem[]): DetectedChanges {
   if (!oldTodos || oldTodos.length === 0) {
     return {
       type: "creation",
@@ -123,10 +120,7 @@ const TodoListItem = memo(function TodoListItem({
   );
 });
 
-export const TodoTool = memo(function TodoTool({
-  part,
-  chatStatus,
-}: TodoToolProps) {
+export const TodoTool = memo(function TodoTool({ part, chatStatus }: TodoToolProps) {
   const { isPending } = getToolStatus(part, chatStatus);
 
   const isStreaming = part.state === "input-streaming";
@@ -134,10 +128,7 @@ export const TodoTool = memo(function TodoTool({
   const newTodos: TodoItem[] = part.input?.todos || part.output?.newTodos || [];
 
   const isCreation = oldTodos.length === 0;
-  const changes = useMemo(
-    () => detectChanges(oldTodos, newTodos),
-    [oldTodos, newTodos],
-  );
+  const changes = useMemo(() => detectChanges(oldTodos, newTodos), [oldTodos, newTodos]);
 
   // Streaming placeholder — always shimmer while in this transient state.
   if (isStreaming || newTodos.length === 0) {

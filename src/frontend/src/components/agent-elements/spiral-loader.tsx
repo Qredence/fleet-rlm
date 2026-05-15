@@ -22,10 +22,7 @@ function unwrapComponent(value: unknown): ComponentType<any> | null {
   return null;
 }
 
-function getModuleExport(
-  module: LottieModuleShape,
-  exportName: keyof LottieModuleShape,
-): unknown {
+function getModuleExport(module: LottieModuleShape, exportName: keyof LottieModuleShape): unknown {
   try {
     return module[exportName];
   } catch {
@@ -69,7 +66,10 @@ export function SpiralLoader({ size = 16, className }: SpiralLoaderProps) {
   const repeatCountRef = useRef(0);
   const fastRef = useRef<LottieRefCurrentProps | null>(null);
   const slowRef = useRef<LottieRefCurrentProps | null>(null);
-  const resolvedTheme = typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
+  const resolvedTheme =
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+      ? "dark"
+      : "light";
 
   useEffect(() => {
     setIsMounted(true);
@@ -111,10 +111,7 @@ export function SpiralLoader({ size = 16, className }: SpiralLoaderProps) {
   const needsInvert = resolvedTheme !== "dark";
 
   return (
-    <div
-      className={cn("relative shrink-0", className)}
-      style={{ width: size, height: size }}
-    >
+    <div className={cn("relative shrink-0", className)} style={{ width: size, height: size }}>
       <div
         className={cn(
           "absolute inset-0 transition-opacity duration-75",

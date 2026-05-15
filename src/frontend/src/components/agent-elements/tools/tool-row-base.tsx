@@ -43,11 +43,7 @@ export function ToolRowBase({
       )}
     >
       <div className="flex items-center gap-2 min-w-0 text-sm text-muted-foreground">
-        {icon && (
-          <span className="flex items-center justify-center size-3 shrink-0">
-            {icon}
-          </span>
-        )}
+        {icon && <span className="flex items-center justify-center size-3 shrink-0">{icon}</span>}
         <span className="font-[450] whitespace-nowrap shrink-0">
           {isAnimating && shimmerLabel ? (
             <TextShimmer
@@ -87,17 +83,11 @@ export function ToolRowBase({
   }
 
   const rootProps =
-    expanded === undefined
-      ? { defaultOpen }
-      : { open: expanded, onOpenChange: onToggleExpand };
+    expanded === undefined ? { defaultOpen } : { open: expanded, onOpenChange: onToggleExpand };
 
   return (
     <Collapsible.Root className="flex flex-col gap-2 w-full" {...rootProps}>
-      <Collapsible.Trigger
-        className="group flex"
-        disabled={!canToggle}
-        aria-disabled={!canToggle}
-      >
+      <Collapsible.Trigger className="group flex" disabled={!canToggle} aria-disabled={!canToggle}>
         {row}
       </Collapsible.Trigger>
       <Collapsible.Panel

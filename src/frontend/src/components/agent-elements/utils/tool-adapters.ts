@@ -1,8 +1,6 @@
 import type { TimelineStep, StepState } from "../types/timeline";
 
-function calculateDiffStatsFromPatch(
-  patches: Array<{ lines?: string[] }>,
-): string | undefined {
+function calculateDiffStatsFromPatch(patches: Array<{ lines?: string[] }>): string | undefined {
   let addedLines = 0;
   let removedLines = 0;
 
@@ -43,9 +41,7 @@ function getDiffLinesFromPatch(
   return result;
 }
 
-export function mapToolStateToStepState(
-  aiState: "partial-call" | "call" | "result",
-): StepState {
+export function mapToolStateToStepState(aiState: "partial-call" | "call" | "result"): StepState {
   return aiState === "result" ? "complete" : "animating";
 }
 
@@ -66,19 +62,14 @@ export function mapToolNameToVariant(
   return undefined;
 }
 
-function extractToolDetail(
-  toolName: string,
-  args: Record<string, any>,
-): string {
+function extractToolDetail(toolName: string, args: Record<string, any>): string {
   switch (toolName) {
     case "Bash":
       return args?.command ? String(args.command).slice(0, 80) : "";
     case "Edit":
     case "Write":
     case "Read":
-      return args?.file_path
-        ? (String(args.file_path).split("/").pop() ?? "")
-        : "";
+      return args?.file_path ? (String(args.file_path).split("/").pop() ?? "") : "";
     case "Grep":
       return args?.pattern ? String(args.pattern) : "";
     case "Glob":
@@ -105,11 +96,7 @@ export function mapToolInvocationToStep(
 ): Extract<TimelineStep, { type: "tool-call" }> {
   const { toolName, args = {}, result } = toolInvocation;
   const displayToolName =
-    toolName === "PlanWrite"
-      ? "Plan"
-      : toolName === "TodoWrite"
-        ? "Todo"
-        : toolName;
+    toolName === "PlanWrite" ? "Plan" : toolName === "TodoWrite" ? "Todo" : toolName;
   const detail = extractToolDetail(toolName, args);
 
   const step: Extract<TimelineStep, { type: "tool-call" }> = {
@@ -135,9 +122,7 @@ export function mapToolInvocationToStep(
               ? result.output
               : "";
         const stderr = typeof result?.stderr === "string" ? result.stderr : "";
-        step.bashOutput = [stdout, stderr]
-          .filter(Boolean)
-          .join(stdout && stderr ? "\n" : "");
+        step.bashOutput = [stdout, stderr].filter(Boolean).join(stdout && stderr ? "\n" : "");
         const exitCode = result?.exitCode ?? result?.exit_code;
         step.bashSuccess = exitCode === undefined ? true : exitCode === 0;
       } else {
@@ -181,17 +166,11 @@ export function mapToolInvocationToStep(
     toolName === "Glob"
   ) {
     step.searchQuery =
-      (args?.query ?? args?.pattern)
-        ? String(args?.query ?? args?.pattern)
-        : undefined;
-    step.searchSource =
-      toolName === "WebSearch" || toolName === "web_search" ? "web" : "code";
+      (args?.query ?? args?.pattern) ? String(args?.query ?? args?.pattern) : undefined;
+    step.searchSource = toolName === "WebSearch" || toolName === "web_search" ? "web" : "code";
   }
 
-  if (
-    toolName.toLowerCase() === "thinking" ||
-    toolName.toLowerCase() === "reasoning"
-  ) {
+  if (toolName.toLowerCase() === "thinking" || toolName.toLowerCase() === "reasoning") {
     step.thoughtContent =
       typeof args?.thought === "string"
         ? args.thought

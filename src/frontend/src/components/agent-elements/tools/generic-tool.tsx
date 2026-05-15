@@ -9,11 +9,7 @@ export type GenericToolRowProps = {
   onComplete: () => void;
 };
 
-export function GenericToolRow({
-  step,
-  state,
-  onComplete,
-}: GenericToolRowProps) {
+export function GenericToolRow({ step, state, onComplete }: GenericToolRowProps) {
   useToolComplete(state === "animating", step.duration, onComplete);
   const isPending = state === "animating";
 
@@ -45,11 +41,7 @@ export const GenericTool = memo(function GenericTool({
 
   return (
     <ToolRowBase
-      icon={
-        Icon ? (
-          <Icon className="w-full h-full shrink-0 text-muted-foreground" />
-        ) : undefined
-      }
+      icon={Icon ? <Icon className="w-full h-full shrink-0 text-muted-foreground" /> : undefined}
       shimmerLabel={title}
       completeLabel={title}
       isAnimating={isPending}

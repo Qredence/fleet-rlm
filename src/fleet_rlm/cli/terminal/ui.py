@@ -10,7 +10,7 @@ import getpass
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
@@ -19,6 +19,9 @@ from prompt_toolkit.styles import Style
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich.console import Console
 
 
 class _FleetCompleter(Completer):

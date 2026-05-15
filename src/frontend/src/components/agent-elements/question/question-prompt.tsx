@@ -74,8 +74,7 @@ export function QuestionPrompt({
   const clampedIndex = Math.max(1, Math.min(questionIndex, resolvedTotal));
   const activeQuestion = questions[clampedIndex - 1];
   const customEnabled = activeQuestion?.allowCustom ?? false;
-  const showNav =
-    resolvedTotal > 1 && (!!onPreviousQuestion || !!onNextQuestion);
+  const showNav = resolvedTotal > 1 && (!!onPreviousQuestion || !!onNextQuestion);
   const canGoPrev = clampedIndex > 1;
   const canGoNext = clampedIndex < resolvedTotal;
   const isLastQuestion = clampedIndex >= resolvedTotal;
@@ -116,9 +115,7 @@ export function QuestionPrompt({
   const canSubmit = useMemo(() => {
     if (activeQuestion?.kind === "text") return textValue.trim().length > 0;
 
-    const selectedNonCustom = selectedIds.filter(
-      (id) => id !== QUESTION_CUSTOM_ID,
-    ).length;
+    const selectedNonCustom = selectedIds.filter((id) => id !== QUESTION_CUSTOM_ID).length;
     const hasCustomText = customText.trim().length > 0;
     const total = selectedNonCustom + (hasCustomText ? 1 : 0);
 
@@ -141,9 +138,7 @@ export function QuestionPrompt({
   ]);
 
   const toggleMulti = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   const handleSingleSelect = (id: string) => {
@@ -176,9 +171,7 @@ export function QuestionPrompt({
       return;
     }
 
-    const selectedNonCustom = selectedIds.filter(
-      (id) => id !== QUESTION_CUSTOM_ID,
-    );
+    const selectedNonCustom = selectedIds.filter((id) => id !== QUESTION_CUSTOM_ID);
     const answerText = customText.trim() || undefined;
     onSubmit({
       kind: activeQuestion.kind,
@@ -208,74 +201,66 @@ export function QuestionPrompt({
         </div>
       </div>
 
-      {activeQuestion.kind !== "text" &&
-        (activeQuestion.options?.length ?? 0) > 0 && (
-          <div className="space-y-px">
-            {activeQuestion.options!.map((option, idx) => {
-              const checked = selectedIds.includes(option.id);
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => {
-                    if (activeQuestion.kind === "single") {
-                      handleSingleSelect(option.id);
-                      if (customEnabled) setCustomText("");
-                    } else {
-                      toggleMulti(option.id);
-                    }
-                  }}
-                  className="w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 hover:bg-an-background-secondary -mx-2"
-                >
-                  <span
-                    className={cn(
-                      "h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium border",
-                      checked
-                        ? "bg-an-primary-color text-an-send-button-color border-an-primary-color"
-                        : "bg-transparent text-an-tool-color-muted border-border",
-                    )}
-                  >
-                    {optionBadge(idx)}
-                  </span>
-                  <span className="text-sm text-an-tool-color">
-                    {option.label}
-                    {option.description && (
-                      <span className="text-an-tool-color-muted">
-                        {" "}
-                        {option.description}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-
-            {customEnabled && (
-              <div className="pt-1 flex items-center gap-2">
+      {activeQuestion.kind !== "text" && (activeQuestion.options?.length ?? 0) > 0 && (
+        <div className="space-y-px">
+          {activeQuestion.options!.map((option, idx) => {
+            const checked = selectedIds.includes(option.id);
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => {
+                  if (activeQuestion.kind === "single") {
+                    handleSingleSelect(option.id);
+                    if (customEnabled) setCustomText("");
+                  } else {
+                    toggleMulti(option.id);
+                  }
+                }}
+                className="w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 hover:bg-an-background-secondary -mx-2"
+              >
                 <span
                   className={cn(
                     "h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium border",
-                    selectedIds.includes(QUESTION_CUSTOM_ID)
+                    checked
                       ? "bg-an-primary-color text-an-send-button-color border-an-primary-color"
                       : "bg-transparent text-an-tool-color-muted border-border",
                   )}
                 >
-                  {optionBadge(activeQuestion.options!.length)}
+                  {optionBadge(idx)}
                 </span>
-                <input
-                  value={customText}
-                  onChange={(event) =>
-                    handleCustomTextChange(event.target.value)
-                  }
-                  placeholder={
-                    activeQuestion.customPlaceholder ?? "Type your answer"
-                  }
-                  className="w-full h-7 rounded-md border border-border bg-background px-2 text-sm text-an-tool-color"
-                />
-              </div>
-            )}
-          </div>
-        )}
+                <span className="text-sm text-an-tool-color">
+                  {option.label}
+                  {option.description && (
+                    <span className="text-an-tool-color-muted"> {option.description}</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+
+          {customEnabled && (
+            <div className="pt-1 flex items-center gap-2">
+              <span
+                className={cn(
+                  "h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium border",
+                  selectedIds.includes(QUESTION_CUSTOM_ID)
+                    ? "bg-an-primary-color text-an-send-button-color border-an-primary-color"
+                    : "bg-transparent text-an-tool-color-muted border-border",
+                )}
+              >
+                {optionBadge(activeQuestion.options!.length)}
+              </span>
+              <input
+                value={customText}
+                onChange={(event) => handleCustomTextChange(event.target.value)}
+                placeholder={activeQuestion.customPlaceholder ?? "Type your answer"}
+                className="w-full h-7 rounded-md border border-border bg-background px-2 text-sm text-an-tool-color"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {activeQuestion.kind === "text" && (
         <textarea
@@ -287,12 +272,7 @@ export function QuestionPrompt({
         />
       )}
 
-      <div
-        className={cn(
-          "flex items-center gap-1.5",
-          showNav ? "justify-between" : "justify-end",
-        )}
-      >
+      <div className={cn("flex items-center gap-1.5", showNav ? "justify-between" : "justify-end")}>
         {showNav && (
           <div className="flex items-center gap-1.5">
             {onPreviousQuestion && (

@@ -21,17 +21,13 @@ export function SendButton({ state }: SendButtonProps) {
     <div
       className={cn(
         "size-7 rounded-full flex items-center justify-center",
-        isTyping
-          ? "bg-an-send-button-bg cursor-pointer"
-          : "bg-muted cursor-default",
+        isTyping ? "bg-an-send-button-bg cursor-pointer" : "bg-muted cursor-default",
       )}
     >
       <IconArrowUp
         className={cn(
           "size-4",
-          isTyping
-            ? "text-an-send-button-color"
-            : "text-neutral-400 dark:text-neutral-600",
+          isTyping ? "text-an-send-button-color" : "text-neutral-400 dark:text-neutral-600",
         )}
       />
     </div>

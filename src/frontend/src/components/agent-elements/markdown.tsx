@@ -48,9 +48,7 @@ const code = createCodePlugin({
 });
 
 export function Markdown({ content, className }: MarkdownProps) {
-  const safeContent = normalizeCodeFenceLanguages(
-    fixNumberedListBreaks(content),
-  );
+  const safeContent = normalizeCodeFenceLanguages(fixNumberedListBreaks(content));
   const components: Components = {
     h1: ({ children, ...props }) => (
       <h1 className="an-md-h1 text-base font-semibold mt-3 mb-1.5" {...props}>
@@ -73,10 +71,7 @@ export function Markdown({ content, className }: MarkdownProps) {
       </h4>
     ),
     p: ({ children, ...props }) => (
-      <p
-        className="an-md-p text-sm leading-relaxed text-an-foreground/80"
-        {...props}
-      >
+      <p className="an-md-p text-sm leading-relaxed text-an-foreground/80" {...props}>
         {children}
       </p>
     ),
@@ -129,9 +124,7 @@ export function Markdown({ content, className }: MarkdownProps) {
         {children}
       </blockquote>
     ),
-    hr: ({ ...props }) => (
-      <hr className="an-md-hr my-4 border-an-border-color" {...props} />
-    ),
+    hr: ({ ...props }) => <hr className="an-md-hr my-4 border-an-border-color" {...props} />,
     table: ({ children, ...props }) => (
       <div className="overflow-x-auto my-3 border border-an-border-color rounded-an-tool-border-radius">
         <table
@@ -143,18 +136,12 @@ export function Markdown({ content, className }: MarkdownProps) {
       </div>
     ),
     th: ({ children, ...props }) => (
-      <th
-        className="text-left font-medium px-3 py-2 bg-an-background-secondary"
-        {...props}
-      >
+      <th className="text-left font-medium px-3 py-2 bg-an-background-secondary" {...props}>
         {children}
       </th>
     ),
     td: ({ children, ...props }) => (
-      <td
-        className="px-3 py-2 border-t border-an-border-color text-an-foreground/80"
-        {...props}
-      >
+      <td className="px-3 py-2 border-t border-an-border-color text-an-foreground/80" {...props}>
         {children}
       </td>
     ),

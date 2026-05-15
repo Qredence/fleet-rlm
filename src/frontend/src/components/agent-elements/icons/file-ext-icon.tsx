@@ -1,10 +1,4 @@
-export function FileExtIcon({
-  filename,
-  className,
-}: {
-  filename: string;
-  className?: string;
-}) {
+export function FileExtIcon({ filename, className }: { filename: string; className?: string }) {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const cls = className ?? "w-2.5 h-2.5 shrink-0";
 

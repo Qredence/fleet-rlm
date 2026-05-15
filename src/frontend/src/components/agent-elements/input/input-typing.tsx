@@ -27,18 +27,10 @@ export function useInputTyping(
 
     timers.push(setTimeout(() => setShowImage(true), imageDelay));
     for (let i = 0; i < text.length; i++) {
-      timers.push(
-        setTimeout(
-          () => setVisibleChars(i + 1),
-          typingStart + charInterval * i,
-        ),
-      );
+      timers.push(setTimeout(() => setVisibleChars(i + 1), typingStart + charInterval * i));
     }
     timers.push(
-      setTimeout(
-        () => onCompleteRef.current(),
-        typingStart + typingDuration + sendDelay,
-      ),
+      setTimeout(() => onCompleteRef.current(), typingStart + typingDuration + sendDelay),
     );
 
     return () => timers.forEach(clearTimeout);

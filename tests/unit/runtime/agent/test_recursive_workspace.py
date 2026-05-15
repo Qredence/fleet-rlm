@@ -349,8 +349,7 @@ class TestForwardLoop:
         ):
             result = module(
                 user_request=(
-                    "Analyze the complete codebase architecture under src/ and tests/ "
-                    "and identify module organization."
+                    "Analyze the complete codebase architecture under src/ and tests/ and identify module organization."
                 )
             )
 
@@ -839,10 +838,7 @@ class TestHelpers:
         module = _build_module()
 
         outputs = [
-            (
-                "CODEBASE NOT AVAILABLE: the repository is not cloned, "
-                "no source code available, workspace is empty."
-            )
+            ("CODEBASE NOT AVAILABLE: the repository is not cloned, no source code available, workspace is empty.")
         ]
 
         signals = module._classify_subquery_failures(outputs)

@@ -5,10 +5,7 @@ import type { TimelineStep, StepState } from "../types/timeline";
 import { useToolComplete } from "../hooks/use-tool-complete";
 import { IconChevronDown } from "@tabler/icons-react";
 import { FileExtIcon } from "../icons/file-ext-icon";
-import {
-  mapToolInvocationToStep,
-  mapToolStateToStepState,
-} from "../utils/tool-adapters";
+import { mapToolInvocationToStep, mapToolStateToStepState } from "../utils/tool-adapters";
 import { ToolApprovalFooter, type ToolApproval } from "./tool-approval-footer";
 
 export type EditToolDiffCardProps = {
@@ -63,18 +60,12 @@ export function EditToolDiffCard({
 
   const diffFiles = React.useMemo(() => {
     const fileLabel = fileName || "file";
-    const oldFromOutput =
-      typeof output?.old_content === "string" ? output.old_content : undefined;
-    const newFromOutput =
-      typeof output?.content === "string" ? output.content : undefined;
+    const oldFromOutput = typeof output?.old_content === "string" ? output.old_content : undefined;
+    const newFromOutput = typeof output?.content === "string" ? output.content : undefined;
     const oldFromInput =
-      !oldFromOutput && typeof input?.old_string === "string"
-        ? input.old_string
-        : undefined;
+      !oldFromOutput && typeof input?.old_string === "string" ? input.old_string : undefined;
     const newFromInput =
-      !newFromOutput && typeof input?.new_string === "string"
-        ? input.new_string
-        : undefined;
+      !newFromOutput && typeof input?.new_string === "string" ? input.new_string : undefined;
 
     const fallbackOld = step.diffLines
       ?.filter((line) => line.type !== "add")
@@ -147,15 +138,11 @@ export function EditToolDiffCard({
           // contrast in dark mode — the wrapper forces `dark:bg-black` for the
           // diff body, which would otherwise bleed into the header.
           "flex items-center justify-between px-2.5 py-0 h-7 bg-an-tool-background " +
-          (isPending && !diffFiles
-            ? ""
-            : "border-b border-an-tool-border-color")
+          (isPending && !diffFiles ? "" : "border-b border-an-tool-border-color")
         }
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          {hasFileName && (
-            <FileExtIcon filename={fileName} className="w-3 h-3 shrink-0" />
-          )}
+          {hasFileName && <FileExtIcon filename={fileName} className="w-3 h-3 shrink-0" />}
           {isPending && !diffFiles ? (
             <TextShimmer as="span" duration={1.2} className="text-xs">
               Generating...
@@ -191,15 +178,9 @@ export function EditToolDiffCard({
       </div>
       {diffFiles ? (
         <div className={`${diffClassName} text-[12px]`} style={diffCssVars}>
-          <div
-            className={isCollapsible ? "group/edit-diff relative" : "relative"}
-          >
+          <div className={isCollapsible ? "group/edit-diff relative" : "relative"}>
             <div
-              className={
-                isCollapsible && !isExpanded
-                  ? "max-h-[260px] overflow-hidden"
-                  : undefined
-              }
+              className={isCollapsible && !isExpanded ? "max-h-[260px] overflow-hidden" : undefined}
             >
               <MultiFileDiff
                 key={themeType}
@@ -251,13 +232,8 @@ export type EditToolProps = {
   isCollapsible?: boolean;
 };
 
-export const EditTool = memo(function EditTool({
-  part,
-  isCollapsible = false,
-}: EditToolProps) {
-  const approval = (part.input?.approval ?? part.args?.approval) as
-    | ToolApproval
-    | undefined;
+export const EditTool = memo(function EditTool({ part, isCollapsible = false }: EditToolProps) {
+  const approval = (part.input?.approval ?? part.args?.approval) as ToolApproval | undefined;
   const toolName = (part.type as string)?.replace("tool-", "") || "Edit";
   const step = mapToolInvocationToStep(part.toolCallId ?? part.id ?? "edit", {
     toolName,

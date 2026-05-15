@@ -34,12 +34,7 @@ function formatCount(value: number, label: string): string {
 function summarizeNestedTools(nestedTools: any[]): string {
   if (nestedTools.length === 0) return "";
   const fileTypes = new Set(["tool-Read", "tool-Edit", "tool-Write"]);
-  const searchTypes = new Set([
-    "tool-Search",
-    "tool-Grep",
-    "tool-Glob",
-    "tool-WebSearch",
-  ]);
+  const searchTypes = new Set(["tool-Search", "tool-Grep", "tool-Glob", "tool-WebSearch"]);
   const commandTypes = new Set(["tool-Bash"]);
 
   let fileCount = 0;
@@ -54,8 +49,7 @@ function summarizeNestedTools(nestedTools: any[]): string {
 
   const parts: string[] = [];
   if (fileCount > 0) parts.push(formatCount(fileCount, "file"));
-  if (searchCount > 0)
-    parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
+  if (searchCount > 0) parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
   if (commandCount > 0) parts.push(formatCount(commandCount, "command"));
 
   if (parts.length === 0) return "";
@@ -66,12 +60,7 @@ function summarizeNestedTools(nestedTools: any[]): string {
 
 function getNestedCounts(nestedTools: any[]) {
   const fileTypes = new Set(["tool-Read", "tool-Edit", "tool-Write"]);
-  const searchTypes = new Set([
-    "tool-Search",
-    "tool-Grep",
-    "tool-Glob",
-    "tool-WebSearch",
-  ]);
+  const searchTypes = new Set(["tool-Search", "tool-Grep", "tool-Glob", "tool-WebSearch"]);
   let fileCount = 0;
   let searchCount = 0;
 
@@ -86,8 +75,7 @@ function getNestedCounts(nestedTools: any[]) {
 function formatStreamCounts(fileCount: number, searchCount: number): string {
   const parts: string[] = [];
   if (fileCount > 0) parts.push(formatCount(fileCount, "file"));
-  if (searchCount > 0)
-    parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
+  if (searchCount > 0) parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
   return parts.join(", ");
 }
 
@@ -113,21 +101,15 @@ export const ToolGroup = memo(function ToolGroup({
   const hasNestedTools = nestedTools.length > 0;
   const streamKey = part.toolCallId ?? part.id ?? "";
   const outputDuration =
-    part.output?.totalDurationMs ||
-    part.output?.duration ||
-    part.output?.duration_ms;
+    part.output?.totalDurationMs || part.output?.duration || part.output?.duration_ms;
   const maskThreshold = 4;
   const streamHeight = Math.max(1, maxVisibleTools) * 28;
-  const visibleToolCount = isPending
-    ? Math.max(visibleCount, 0)
-    : nestedTools.length;
+  const visibleToolCount = isPending ? Math.max(visibleCount, 0) : nestedTools.length;
   const wasPendingRef = useRef(isPending);
   const userToggledRef = useRef(false);
   const openTimerRef = useRef<number | null>(null);
   const { fileCount, searchCount } = useMemo(() => {
-    const visibleTools = isPending
-      ? nestedTools.slice(0, Math.max(visibleCount, 0))
-      : nestedTools;
+    const visibleTools = isPending ? nestedTools.slice(0, Math.max(visibleCount, 0)) : nestedTools;
     return getNestedCounts(visibleTools);
   }, [isPending, nestedTools, visibleCount]);
   const streamCounts = formatStreamCounts(fileCount, searchCount);
@@ -201,9 +183,7 @@ export const ToolGroup = memo(function ToolGroup({
     }
 
     if (!description) return "";
-    return description.length > 60
-      ? `${description.slice(0, 57)}...`
-      : description;
+    return description.length > 60 ? `${description.slice(0, 57)}...` : description;
   })();
   const elapsedTimeDisplay = formatElapsedTime(
     !isPending && outputDuration ? outputDuration : elapsedMs,
@@ -241,10 +221,7 @@ export const ToolGroup = memo(function ToolGroup({
           ref={listRef}
           className={cn(
             nestedTools.length > 1 ? "space-y-2" : "space-y-0",
-            isPending &&
-              expanded &&
-              visibleToolCount > maskThreshold &&
-              "overflow-y-auto",
+            isPending && expanded && visibleToolCount > maskThreshold && "overflow-y-auto",
           )}
           style={
             isPending && expanded && visibleToolCount > maskThreshold
@@ -252,34 +229,32 @@ export const ToolGroup = memo(function ToolGroup({
               : undefined
           }
         >
-          {(isPending
-            ? nestedTools.slice(0, Math.max(visibleCount, 0))
-            : nestedTools
-          ).map((nestedPart, idx) => {
-            const derivedPart = isPending
-              ? {
-                  ...nestedPart,
-                  state:
-                    idx === visibleCount - 1
-                      ? "input-streaming"
-                      : "output-available",
-                }
-              : nestedPart;
-            const nestedMeta = toolRegistry[derivedPart.type];
-            if (!nestedMeta) return null;
-            const { isPending: nestedIsPending, isError: nestedIsError } =
-              getToolStatus(derivedPart, chatStatus);
-            return (
-              <GenericTool
-                key={idx}
-                icon={nestedMeta.icon}
-                title={nestedMeta.title(derivedPart)}
-                subtitle={nestedMeta.subtitle?.(derivedPart)}
-                isPending={nestedIsPending}
-                isError={nestedIsError}
-              />
-            );
-          })}
+          {(isPending ? nestedTools.slice(0, Math.max(visibleCount, 0)) : nestedTools).map(
+            (nestedPart, idx) => {
+              const derivedPart = isPending
+                ? {
+                    ...nestedPart,
+                    state: idx === visibleCount - 1 ? "input-streaming" : "output-available",
+                  }
+                : nestedPart;
+              const nestedMeta = toolRegistry[derivedPart.type];
+              if (!nestedMeta) return null;
+              const { isPending: nestedIsPending, isError: nestedIsError } = getToolStatus(
+                derivedPart,
+                chatStatus,
+              );
+              return (
+                <GenericTool
+                  key={idx}
+                  icon={nestedMeta.icon}
+                  title={nestedMeta.title(derivedPart)}
+                  subtitle={nestedMeta.subtitle?.(derivedPart)}
+                  isPending={nestedIsPending}
+                  isError={nestedIsError}
+                />
+              );
+            },
+          )}
         </div>
       </div>
     </ToolRowBase>

@@ -1,10 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export function useToolComplete(
-  isAnimating: boolean,
-  duration: number,
-  onComplete: () => void,
-) {
+export function useToolComplete(isAnimating: boolean, duration: number, onComplete: () => void) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 

@@ -1,9 +1,6 @@
 import type React from "react";
 import type { UIMessage, ChatStatus } from "ai";
-import type {
-  QuestionAnswer,
-  QuestionConfig,
-} from "./question/question-prompt";
+import type { QuestionAnswer, QuestionConfig } from "./question/question-prompt";
 import type { SuggestionItem } from "./input/suggestions";
 
 export type InputSuggestions =
@@ -99,10 +96,7 @@ export type ChatSlots = {
       result?: unknown;
     }[];
     chatStatus?: string;
-    toolRenderers?: Record<
-      string,
-      React.ComponentType<CustomToolRendererProps>
-    >;
+    toolRenderers?: Record<string, React.ComponentType<CustomToolRendererProps>>;
   }>;
 };
 

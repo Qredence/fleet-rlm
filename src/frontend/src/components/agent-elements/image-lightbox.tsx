@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  IconChevronLeft,
-  IconChevronRight,
-  IconX,
-} from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
 import { cn } from "./utils/cn";
 
 export type LightboxImage = {
@@ -35,12 +31,7 @@ export type ImageLightboxProps = {
  * 21st-private-1 desktop chat — without copy/save (those are
  * desktop-API-specific).
  */
-export function ImageLightbox({
-  open,
-  onClose,
-  images,
-  initialIndex = 0,
-}: ImageLightboxProps) {
+export function ImageLightbox({ open, onClose, images, initialIndex = 0 }: ImageLightboxProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const hasMultipleImages = images.length > 1;
 
@@ -85,8 +76,7 @@ export function ImageLightbox({
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
-    return () =>
-      window.removeEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [open, hasMultipleImages, onClose, goToPrevious, goToNext]);
 
   // Lock body scroll while open so the page underneath doesn't move.
@@ -164,9 +154,7 @@ export function ImageLightbox({
                 aria-label={`Go to image ${idx + 1}`}
                 className={cn(
                   "size-2 rounded-full transition-all",
-                  idx === currentIndex
-                    ? "bg-white scale-125"
-                    : "bg-white/40 hover:bg-white/60",
+                  idx === currentIndex ? "bg-white scale-125" : "bg-white/40 hover:bg-white/60",
                 )}
               />
             ))}

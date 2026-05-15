@@ -2,10 +2,7 @@ import { memo } from "react";
 import { TextShimmer } from "../text-shimmer";
 import type { TimelineStep, StepState } from "../types/timeline";
 import { useToolComplete } from "../hooks/use-tool-complete";
-import {
-  mapToolInvocationToStep,
-  mapToolStateToStepState,
-} from "../utils/tool-adapters";
+import { mapToolInvocationToStep, mapToolStateToStepState } from "../utils/tool-adapters";
 import { ToolApprovalFooter, type ToolApproval } from "./tool-approval-footer";
 
 function extractCommandSummary(cmd: string): string {
@@ -48,9 +45,7 @@ export function BashToolTerminalCard({
               Running command: {summary}
             </TextShimmer>
           ) : (
-            <span className="text-xs text-muted-foreground truncate">
-              Ran command: {summary}
-            </span>
+            <span className="text-xs text-muted-foreground truncate">Ran command: {summary}</span>
           )}
         </div>
         {isPending && (
@@ -74,9 +69,7 @@ export function BashToolTerminalCard({
       </div>
       <div className="border-t border-border px-2.5 py-1.5 font-mono text-[12px] leading-[16px] overflow-hidden bg-background">
         <div className="break-all">
-          <span className="text-amber-600 dark:text-amber-400 select-none">
-            ${" "}
-          </span>
+          <span className="text-amber-600 dark:text-amber-400 select-none">$ </span>
           <span className="text-foreground">{command}</span>
         </div>
         {!isPending && step.bashOutput && (
@@ -95,9 +88,7 @@ export type BashToolProps = {
 };
 
 export const BashTool = memo(function BashTool({ part }: BashToolProps) {
-  const approval = (part.input?.approval ?? part.args?.approval) as
-    | ToolApproval
-    | undefined;
+  const approval = (part.input?.approval ?? part.args?.approval) as ToolApproval | undefined;
   const step = mapToolInvocationToStep(part.toolCallId ?? part.id ?? "bash", {
     toolName: "Bash",
     args: part.input ?? part.args ?? {},
@@ -119,11 +110,6 @@ export const BashTool = memo(function BashTool({ part }: BashToolProps) {
   const noop = () => {};
 
   return (
-    <BashToolTerminalCard
-      step={step}
-      state={stepState}
-      onComplete={noop}
-      approval={approval}
-    />
+    <BashToolTerminalCard step={step} state={stepState} onComplete={noop} approval={approval} />
   );
 });

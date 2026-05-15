@@ -21,10 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isTextPart(part: MessagePart): part is { type: "text"; text: string } {
-  return (
-    part.type === "text" &&
-    typeof (part as { text?: unknown }).text === "string"
-  );
+  return part.type === "text" && typeof (part as { text?: unknown }).text === "string";
 }
 
 function getImageUrlFromPart(part: unknown): string | null {
@@ -69,8 +66,7 @@ function getFileFromPart(part: unknown) {
   if (!isRecord(part)) return null;
   if (part.type !== "file") return null;
   const filePart = part as FilePart;
-  const filename =
-    filePart.filename || filePart.name || filePart.fileName || "Attachment";
+  const filename = filePart.filename || filePart.name || filePart.fileName || "Attachment";
   const isImage = filePart.mimeType?.startsWith("image/") ?? false;
   if (isImage) return null;
   return {
@@ -125,9 +121,7 @@ export const UserMessage = memo(function UserMessage({
               "max-w-[200px] p-1.5 bg-an-foreground/4 rounded-an-message",
               enableImagePreview && "cursor-pointer",
             )}
-            onClick={
-              enableImagePreview ? () => setLightboxIndex(i) : undefined
-            }
+            onClick={enableImagePreview ? () => setLightboxIndex(i) : undefined}
           >
             <img
               src={url}
@@ -159,9 +153,7 @@ export const UserMessage = memo(function UserMessage({
       {text && (
         <div className="max-w-[calc(95%-40px)] ms-[70px]">
           <div className="px-3.5 py-1.5 text-sm transition-colors rounded-an-message bg-an-user-message-bg text-an-user-message-text">
-            <p className="leading-5 whitespace-pre-wrap wrap-break-word">
-              {text}
-            </p>
+            <p className="leading-5 whitespace-pre-wrap wrap-break-word">{text}</p>
           </div>
         </div>
       )}

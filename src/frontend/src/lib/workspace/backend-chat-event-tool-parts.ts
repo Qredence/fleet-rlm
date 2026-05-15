@@ -112,7 +112,9 @@ function textLooksErrored(text: string): boolean {
   ) {
     return true;
   }
-  return normalized.length <= 160 && /\b(error|failed|failure|rejected|cancelled)\b/.test(normalized);
+  return (
+    normalized.length <= 160 && /\b(error|failed|failure|rejected|cancelled)\b/.test(normalized)
+  );
 }
 
 export function inferToolState(
@@ -130,7 +132,10 @@ export function inferStatusTone(
   text: string,
   payload?: Record<string, unknown>,
 ): Extract<ChatRenderPart, { kind: "status_note" }>["tone"] {
-  if (payloadLooksErrored(payload) || (!payloadLooksSuccessful(payload) && textLooksErrored(text))) {
+  if (
+    payloadLooksErrored(payload) ||
+    (!payloadLooksSuccessful(payload) && textLooksErrored(text))
+  ) {
     return "error";
   }
   if (payloadLooksSuccessful(payload)) {

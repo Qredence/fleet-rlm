@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { useCallback, useRef, useState, type ChangeEvent } from "react";
 import { Brain, Settings2, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 
 import {
@@ -81,23 +76,20 @@ export function WorkspaceAgentInputBar({
     fileInputRef.current?.click();
   }, [onAttach]);
 
-  const handleDocumentInputChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.currentTarget.files ?? []);
-      if (files.length > 0) {
-        setStagedDocuments((current) => [
-          ...current,
-          ...files.map((file) => ({
-            id: `document-${createAttachmentId()}`,
-            filename: file.name,
-            size: file.size,
-          })),
-        ]);
-      }
-      event.currentTarget.value = "";
-    },
-    [],
-  );
+  const handleDocumentInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    if (files.length > 0) {
+      setStagedDocuments((current) => [
+        ...current,
+        ...files.map((file) => ({
+          id: `document-${createAttachmentId()}`,
+          filename: file.name,
+          size: file.size,
+        })),
+      ]);
+    }
+    event.currentTarget.value = "";
+  }, []);
 
   const handleRemoveFile = useCallback(
     (id: string) => {

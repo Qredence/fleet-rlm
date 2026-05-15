@@ -422,9 +422,7 @@ class RecursiveWorkspaceModule(dspy.Module):
             if result.get("status") in {"ok", "needs_human_review"}:
                 outputs = [self._format_successful_subquery_output(r) for r in result.get("results", [])]
                 outputs.extend(
-                    self._format_successful_subquery_output(
-                        {"status": "needs_human_review", "degraded": True, **r}
-                    )
+                    self._format_successful_subquery_output({"status": "needs_human_review", "degraded": True, **r})
                     for r in result.get("reviews", [])
                     if isinstance(r, dict)
                 )
@@ -558,10 +556,7 @@ class RecursiveWorkspaceModule(dspy.Module):
         return any("status=needs_human_review" in signal for signal in failure_signals)
 
     def _requires_human_review_for_subquery(self, failure_signals: list[str]) -> bool:
-        return any(
-            signal.startswith("output[") and "status=needs_human_review" in signal
-            for signal in failure_signals
-        )
+        return any(signal.startswith("output[") and "status=needs_human_review" in signal for signal in failure_signals)
 
     def _append_failure_signals(self, summary: str, signals: list[str]) -> str:
         joined = ", ".join(signals)

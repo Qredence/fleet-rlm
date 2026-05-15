@@ -4,10 +4,7 @@ import type { SourceType } from "../icons/source-icons";
 import { IconFileText } from "@tabler/icons-react";
 import { ToolRowBase } from "./tool-row-base";
 import { useToolComplete } from "../hooks/use-tool-complete";
-import {
-  mapToolInvocationToStep,
-  mapToolStateToStepState,
-} from "../utils/tool-adapters";
+import { mapToolInvocationToStep, mapToolStateToStepState } from "../utils/tool-adapters";
 import { cn } from "../utils/cn";
 
 export type SearchResult = { source: SourceType; title: string; date: string };
@@ -28,8 +25,7 @@ export function SearchGroupRich({
   defaultOpen,
 }: SearchGroupRichProps) {
   const anyAnimating = toolSteps.some((s) => stepStates[s.id] === "animating");
-  const searchQuery =
-    toolSteps.find((s) => s.searchQuery)?.searchQuery ?? "searching...";
+  const searchQuery = toolSteps.find((s) => s.searchQuery)?.searchQuery ?? "searching...";
   const totalResults = results.length;
   // Only expose the expand affordance once there is something useful to show.
   // While the search is still streaming we have no results yet and the panel
@@ -37,11 +33,7 @@ export function SearchGroupRich({
   // label. Once results arrive the panel becomes meaningful.
   const hasExpandableContent = totalResults > 0;
 
-  function CompleteTracker({
-    step,
-  }: {
-    step: Extract<TimelineStep, { type: "tool-call" }>;
-  }) {
+  function CompleteTracker({ step }: { step: Extract<TimelineStep, { type: "tool-call" }> }) {
     useToolComplete(stepStates[step.id] === "animating", step.duration, () =>
       onStepComplete(step.id),
     );
@@ -63,9 +55,7 @@ export function SearchGroupRich({
         <div className="rounded-an-tool-border-radius overflow-hidden bg-an-tool-background border border-border">
           <div className="flex items-center px-2.5 py-0 border-b border-an-tool-border-color h-7 text-xs gap-1">
             <span className="text-foreground font-medium">Searched for</span>{" "}
-            <span className="text-muted-foreground truncate">
-              &ldquo;{searchQuery}&rdquo;
-            </span>
+            <span className="text-muted-foreground truncate">&ldquo;{searchQuery}&rdquo;</span>
           </div>
           <div className="max-h-[200px] overflow-y-auto bg-background">
             <div className="flex flex-col gap-1 p-1">
@@ -119,11 +109,7 @@ function normalizeResults(value: unknown): SearchResult[] | undefined {
       const source = (item as { source?: unknown }).source;
       const title = (item as { title?: unknown }).title;
       const date = (item as { date?: unknown }).date;
-      if (
-        typeof source !== "string" ||
-        typeof title !== "string" ||
-        typeof date !== "string"
-      ) {
+      if (typeof source !== "string" || typeof title !== "string" || typeof date !== "string") {
         return null;
       }
       return { source: source as SourceType, title, date };
@@ -164,9 +150,7 @@ export const SearchTool = memo(function SearchTool({
       stepStates={stepStates}
       onStepComplete={noop}
       results={
-        results ??
-        normalizeResults(part.output?.results) ??
-        normalizeResults(part.result?.results)
+        results ?? normalizeResults(part.output?.results) ?? normalizeResults(part.result?.results)
       }
       defaultOpen={defaultOpen}
     />

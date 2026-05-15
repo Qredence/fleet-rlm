@@ -18,14 +18,10 @@ export const ToolApprovalFooter = memo(function ToolApprovalFooter({
   onApprove,
   onReject,
 }: ToolApprovalFooterProps) {
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(
-    null,
-  );
+  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
 
-  const approveText =
-    decision === "approved" ? "Approved" : (approveLabel ?? "Next");
-  const rejectText =
-    decision === "rejected" ? "Skipped" : (rejectLabel ?? "Skip");
+  const approveText = decision === "approved" ? "Approved" : (approveLabel ?? "Next");
+  const rejectText = decision === "rejected" ? "Skipped" : (rejectLabel ?? "Skip");
 
   const handleApprove = () => {
     if (decision) return;

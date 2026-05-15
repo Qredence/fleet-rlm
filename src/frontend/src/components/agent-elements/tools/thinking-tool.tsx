@@ -2,10 +2,7 @@ import { memo } from "react";
 import type { TimelineStep, StepState } from "../types/timeline";
 import { useToolComplete } from "../hooks/use-tool-complete";
 import { ToolRowBase } from "./tool-row-base";
-import {
-  mapToolInvocationToStep,
-  mapToolStateToStepState,
-} from "../utils/tool-adapters";
+import { mapToolInvocationToStep, mapToolStateToStepState } from "../utils/tool-adapters";
 
 export type ThinkingCollapsedProps = {
   step: Extract<TimelineStep, { type: "tool-call" }>;
@@ -37,9 +34,7 @@ export function ThinkingCollapsed({
       onToggleExpand={onToggleExpand}
     >
       <div className="max-h-[175px] overflow-y-auto">
-        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-          {step.thoughtContent}
-        </p>
+        <p className="text-sm text-muted-foreground whitespace-pre-wrap">{step.thoughtContent}</p>
       </div>
     </ToolRowBase>
   );

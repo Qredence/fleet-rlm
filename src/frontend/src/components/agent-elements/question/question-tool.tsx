@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  IconChevronDown,
-  IconChevronUp,
-  IconMessageCircleQuestion,
-} from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconMessageCircleQuestion } from "@tabler/icons-react";
 import { QuestionPrompt } from "./question-prompt";
 import type { QuestionAnswer, QuestionConfig } from "./question-prompt";
 
@@ -53,9 +49,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
       : (part.input?.questionIndex ?? 1);
   const clampedIndex = Math.max(1, Math.min(questionIndex, totalQuestions));
   const question = questions[clampedIndex - 1];
-  const [localAnswers, setLocalAnswers] = useState<
-    Record<number, QuestionAnswer>
-  >({});
+  const [localAnswers, setLocalAnswers] = useState<Record<number, QuestionAnswer>>({});
 
   useEffect(() => {
     if (typeof part.input?.questionIndex === "number") {
@@ -88,15 +82,11 @@ export function QuestionTool({ part }: QuestionToolProps) {
     if (!isComplete) return "";
     if (summaryAnswers.length > 0) {
       return summaryAnswers
-        .map(
-          (item) =>
-            `${item.index}: ${item.answer ? formatAnswer(item.answer) : "Pending"}`,
-        )
+        .map((item) => `${item.index}: ${item.answer ? formatAnswer(item.answer) : "Pending"}`)
         .join(" • ");
     }
     if (outputAnswer) return formatAnswer(outputAnswer);
-    if (localAnswers[clampedIndex])
-      return formatAnswer(localAnswers[clampedIndex]);
+    if (localAnswers[clampedIndex]) return formatAnswer(localAnswers[clampedIndex]);
     return "Pending";
   }, [isComplete, summaryAnswers, outputAnswer, localAnswers, clampedIndex]);
 
