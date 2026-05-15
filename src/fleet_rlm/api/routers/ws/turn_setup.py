@@ -195,7 +195,7 @@ def _build_prepare_stream(
             docs_path=msg.docs_path,
         )
         t_ws_prep_ms = (_time.monotonic() - t_ws_prep) * 1000
-        logger.info("turn_setup: prepare_daytona_workspace completed in %.0fms", t_ws_prep_ms)
+        logger.debug("turn_setup: prepare_daytona_workspace completed in %.0fms", t_ws_prep_ms)
 
     return daytona_request, _prepare_stream
 
@@ -290,7 +290,7 @@ async def prepare_chat_message_turn(
     t_persist_start = _time.monotonic()
     await local_persist(include_volume_save=False, latest_user_message=message)
     t_persist_ms = (_time.monotonic() - t_persist_start) * 1000
-    logger.info("turn_setup: local_persist completed in %.0fms", t_persist_ms)
+    logger.debug("turn_setup: local_persist completed in %.0fms", t_persist_ms)
 
     session.cancel_flag["cancelled"] = False
     turn_index = agent.history_turns() + 1
@@ -312,7 +312,7 @@ async def prepare_chat_message_turn(
         sandbox_provider=sandbox_provider,
     )
     t_lifecycle_ms = (_time.monotonic() - t_lifecycle_start) * 1000
-    logger.info("turn_setup: lifecycle init completed in %.0fms", t_lifecycle_ms)
+    logger.debug("turn_setup: lifecycle init completed in %.0fms", t_lifecycle_ms)
 
     trace_context = _build_trace_context(
         runtime=runtime,
@@ -332,7 +332,7 @@ async def prepare_chat_message_turn(
     )
 
     t_setup_total_ms = (_time.monotonic() - t_setup_start) * 1000
-    logger.info("turn_setup: total prepare_chat_message_turn completed in %.0fms", t_setup_total_ms)
+    logger.debug("turn_setup: total prepare_chat_message_turn completed in %.0fms", t_setup_total_ms)
 
     return PreparedStreamingTurn(
         message=message,

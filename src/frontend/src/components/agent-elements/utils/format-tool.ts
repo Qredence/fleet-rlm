@@ -1,51 +1,16 @@
-type CachedToolState = {
-  state: string | undefined;
-  inputJson: string;
-  outputJson: string;
-};
-
-const toolStateCache = new Map<string, CachedToolState>();
-
-function getToolStateSnapshot(part: any): CachedToolState {
-  return {
-    state: part.state,
-    inputJson: JSON.stringify(part.input || {}),
-    outputJson: JSON.stringify(part.output || {}),
-  };
-}
-
-function hasToolStateChanged(toolCallId: string, part: any): boolean {
-  const cached = toolStateCache.get(toolCallId);
-  const current = getToolStateSnapshot(part);
-
-  if (!cached) {
-    toolStateCache.set(toolCallId, current);
-    return true;
-  }
-
-  const changed =
-    cached.state !== current.state ||
-    cached.inputJson !== current.inputJson ||
-    cached.outputJson !== current.outputJson;
-
-  if (changed) {
-    toolStateCache.set(toolCallId, current);
-  }
-
-  return changed;
-}
-
 function arePartsEqual(prev: any, next: any): boolean {
   if (prev.toolCallId !== next.toolCallId) return false;
   if (prev.type !== next.type) return false;
+  if (prev.state !== next.state) return false;
 
-  const toolCallId = next.toolCallId;
-  if (!toolCallId) {
-    return prev.state === next.state;
+  if (prev.input !== next.input) {
+    if (JSON.stringify(prev.input || {}) !== JSON.stringify(next.input || {})) return false;
+  }
+  if (prev.output !== next.output) {
+    if (JSON.stringify(prev.output || {}) !== JSON.stringify(next.output || {})) return false;
   }
 
-  const changed = hasToolStateChanged(toolCallId, next);
-  return !changed;
+  return true;
 }
 
 function isToolCompleted(part: any): boolean {

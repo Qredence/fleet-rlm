@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
 
-# Shared ThreadPoolExecutor for batched LLM queries to avoid creating
-# a new pool on every llm_query_batched / sub_rlm_batched call.
+# Separate executors for llm_query_batched and sub_rlm_batched to avoid
+# deadlocks under nested usage: sub_rlm children may call llm_query_batched
+# from within sub_rlm_batched threads, so they must not share the same pool.
 _LLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm_batch")
+_SUB_RLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sub_rlm_batch")
 
 
 class LLMQueryMixin:
@@ -287,7 +289,7 @@ class LLMQueryMixin:
         errors: list[tuple[int, Exception]] = []
 
         future_to_idx = {
-            _LLM_BATCH_EXECUTOR.submit(
+            _SUB_RLM_BATCH_EXECUTOR.submit(
                 contextvars.copy_context().run,
                 self._execute_sub_rlm,
                 p,

@@ -104,7 +104,7 @@ export function mapToolInvocationToStep(
     type: "tool-call",
     toolName: displayToolName,
     toolDetail: detail,
-    duration: Number.MAX_SAFE_INTEGER,
+    duration: toolInvocation.state === "result" ? 300 : 0,
     toolVariant: mapToolNameToVariant(toolName),
   };
 
