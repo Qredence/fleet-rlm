@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, List, Tuple
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -34,7 +34,7 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
     calls: list[tuple[str, object]] = []
 
     class Persistence:
-        async def list_chat_sessions(self, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
+        async def list_chat_sessions(self, **kwargs: Any) -> tuple[list[SimpleNamespace], int]:
             return (
                 [
                     SimpleNamespace(
@@ -50,7 +50,7 @@ async def test_list_sessions_uses_first_turn_title_for_placeholder_session_title
                 1,
             )
 
-        async def list_chat_turns(self, session_id: Any, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
+        async def list_chat_turns(self, session_id: Any, **kwargs: Any) -> tuple[list[SimpleNamespace], int]:
             calls.append(("list_chat_turns", kwargs.get("session_id", session_id)))
             return ([SimpleNamespace(user_message="Show me the prior auth debugging conversation")], 1)
 
@@ -88,7 +88,7 @@ async def test_get_session_detail_preserves_explicit_human_title() -> None:
                 updated_at=updated_at,
             )
 
-        async def list_chat_turns(self, **kwargs: Any) -> Tuple[List[SimpleNamespace], int]:
+        async def list_chat_turns(self, **kwargs: Any) -> tuple[list[SimpleNamespace], int]:
             return ([SimpleNamespace(user_message="ignored")], 1)
 
     detail = await SessionService(Persistence()).get_session_detail(
