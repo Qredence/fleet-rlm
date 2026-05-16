@@ -99,7 +99,7 @@ evaluation = [
     "jedi==0.19.2",
     "jupyter-client==8.8.0",
     "jupyter-core==5.9.1",
-    "matplotlib-inline==0.2.1",
+    "matplotlib-inline==0.2.2",
     "nest-asyncio==1.6.0",
     "parso==0.8.6",
     "pexpect==4.9.0",
