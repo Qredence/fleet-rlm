@@ -77,6 +77,20 @@ def test_resolve_ui_dist_dir_prefers_nested_client_layout(tmp_path: Path) -> Non
     assert spa._resolve_ui_web_root(dist_root) == client_root.resolve()
 
 
+def test_resolve_ui_dist_dir_uses_ui_package_root_for_packaged_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Packaged fallback resolution is anchored on the `fleet_rlm.ui` package root."""
+    ui_package_root = tmp_path / "site-packages" / "fleet_rlm" / "ui"
+    dist_root = ui_package_root / "dist"
+    dist_root.mkdir(parents=True)
+    (dist_root / "index.html").write_text("<!doctype html><html>fleet ui</html>", encoding="utf-8")
+
+    monkeypatch.setattr(spa, "_fleet_ui_package_root", lambda: ui_package_root)
+
+    assert spa.resolve_ui_dist_dir() == dist_root.resolve()
+
+
 def test_mount_spa_requires_api_routes_registered(tmp_path) -> None:
     """SPA mounting fails fast when called before API routes are registered."""
     ui_dir = tmp_path / "dist"

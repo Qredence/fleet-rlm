@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,15 @@ def _resolve_ui_web_root(candidate: Path) -> Path | None:
     return None
 
 
+def _fleet_ui_package_root() -> Path | None:
+    """Return the installed/source `fleet_rlm.ui` package directory when available."""
+    module = import_module("fleet_rlm.ui")
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return None
+    return Path(module_file).resolve().parent
+
+
 def resolve_ui_dist_dir() -> Path | None:
     """Return the frontend build directory that contains the served SPA files.
 
@@ -29,11 +39,15 @@ def resolve_ui_dist_dir() -> Path | None:
     latest local frontend build. For installed packages, fall back to in-package
     assets at `fleet_rlm/ui/dist`.
     """
-    repo_root = Path(__file__).resolve().parents[3]
-    candidates = [
-        repo_root / "src" / "frontend" / "dist",  # current repo layout
-        Path(__file__).parent.parent / "ui" / "dist",  # packaged fallback
-    ]
+    candidates: list[Path] = []
+    ui_package_root = _fleet_ui_package_root()
+    if ui_package_root is not None:
+        candidates.extend(
+            [
+                ui_package_root.parents[2] / "frontend" / "dist",  # source checkout
+                ui_package_root / "dist",  # installed/source package assets
+            ]
+        )
     for candidate in candidates:
         resolved = _resolve_ui_web_root(candidate)
         if resolved is not None:
