@@ -305,7 +305,7 @@ jobs:
             cat "$ROOT_BODY"
             exit 1
           }
-          grep -qi "<!doctype html" "$ROOT_BODY" || {
+          grep -Eqi "^(<!doctype html|<meta charset=)" "$ROOT_BODY" || {
             cat "$ROOT_BODY"
             exit 1
           }
