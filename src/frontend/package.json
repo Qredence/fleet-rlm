@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vp build",
     "preview": "vite preview",
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",

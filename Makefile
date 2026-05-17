@@ -162,7 +162,7 @@ sync-ui:
 	cp -R src/frontend/dist src/fleet_rlm/ui/dist
 
 build-ui:
-	cd src/frontend && pnpm install --frozen-lockfile && pnpm run build
+	cd src/frontend && pnpm install --frozen-lockfile && ./node_modules/.bin/vp build
 	$(MAKE) sync-ui
 
 build-release: build-ui

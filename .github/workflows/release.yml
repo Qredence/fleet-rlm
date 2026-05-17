@@ -165,7 +165,7 @@ jobs:
         run: |
           cd src/frontend
           pnpm install --frozen-lockfile
-          pnpm run build
+          ./node_modules/.bin/vp build
           cd ../..
           rm -rf src/fleet_rlm/ui/dist
           mkdir -p src/fleet_rlm/ui
@@ -175,6 +175,8 @@ jobs:
         run: rm -rf dist build
 
       - name: Build distributions
+        env:
+          FLEET_RLM_UI_BUILD_DONE: "1"
         run: uv build
 
       - name: Verify packaged frontend assets

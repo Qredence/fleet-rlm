@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -76,11 +77,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error running 'pnpm install': {exc}", file=sys.stderr)
             return 1
 
-    print("Running 'pnpm run build'...")
+    vp_executable = frontend_dir / "node_modules" / ".bin" / ("vp.cmd" if os.name == "nt" else "vp")
+    build_cmd = [str(vp_executable), "build"] if vp_executable.exists() else ["pnpm", "exec", "vp", "build"]
+
+    print(f"Running '{' '.join(build_cmd)}'...")
     try:
-        subprocess.run(["pnpm", "run", "build"], cwd=frontend_dir, check=True)
+        subprocess.run(build_cmd, cwd=frontend_dir, check=True)
     except subprocess.CalledProcessError as exc:
-        print(f"Error running 'pnpm run build': {exc}", file=sys.stderr)
+        print(f"Error running frontend build: {exc}", file=sys.stderr)
         return 1
 
     source_dist = frontend_dir / "dist"
