@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api import spa
 from fleet_rlm.api.spa import mount_api_only_root, mount_frontend_routes, mount_spa
 
 
@@ -64,6 +65,16 @@ def test_mount_spa_serves_client_routes_without_shadowing_api(tmp_path: Path) ->
     assert static_file_response.status_code == 200
     assert static_file_response.text == "User-agent: *\n"
     assert missing_api_response.status_code == 404
+
+
+def test_resolve_ui_dist_dir_prefers_nested_client_layout(tmp_path: Path) -> None:
+    """UI resolver returns the nested client root when the frontend build uses it."""
+    dist_root = tmp_path / "dist"
+    client_root = dist_root / "client"
+    client_root.mkdir(parents=True)
+    (client_root / "index.html").write_text("<!doctype html><html>fleet ui</html>", encoding="utf-8")
+
+    assert spa._resolve_ui_web_root(dist_root) == client_root.resolve()
 
 
 def test_mount_spa_requires_api_routes_registered(tmp_path) -> None:

@@ -11,8 +11,19 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 
+def _resolve_ui_web_root(candidate: Path) -> Path | None:
+    """Return the directory that contains the served SPA entrypoint, if any."""
+    candidate = candidate.resolve()
+    nested_client_root = candidate / "client"
+    if (nested_client_root / "index.html").is_file():
+        return nested_client_root
+    if (candidate / "index.html").is_file():
+        return candidate
+    return None
+
+
 def resolve_ui_dist_dir() -> Path | None:
-    """Return the frontend build directory if one exists.
+    """Return the frontend build directory that contains the served SPA files.
 
     In source checkouts, prefer `src/frontend/dist` so `fleet web` reflects the
     latest local frontend build. For installed packages, fall back to in-package
@@ -24,8 +35,9 @@ def resolve_ui_dist_dir() -> Path | None:
         Path(__file__).parent.parent / "ui" / "dist",  # packaged fallback
     ]
     for candidate in candidates:
-        if candidate.exists():
-            return candidate
+        resolved = _resolve_ui_web_root(candidate)
+        if resolved is not None:
+            return resolved
     return None
 
 
