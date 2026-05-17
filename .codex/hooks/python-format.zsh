@@ -41,7 +41,7 @@ fi
 [[ "$file_path" == *.py ]] || exit 0
 [[ -f "$file_path" ]] || exit 0
 
-uv run ruff format "$file_path" >/dev/null
+uv run ruff format "$file_path" >/dev/null || true
 uv run ruff check --fix --quiet "$file_path" >/dev/null || true
 
 exit 0

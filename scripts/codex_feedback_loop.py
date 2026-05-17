@@ -71,14 +71,36 @@ class HttpProbe:
 def run_command(name: str, command: list[str], repo_root: Path) -> CommandResult:
     """Run a command and keep bounded output for the report."""
     start = time.monotonic()
-    result = subprocess.run(
-        command,
-        cwd=repo_root,
-        text=True,
-        capture_output=True,
-        timeout=180,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            timeout=180,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        return CommandResult(
+            name=name,
+            command=command,
+            returncode=124,
+            duration_seconds=round(time.monotonic() - start, 2),
+            stdout_tail=tail(stdout),
+            stderr_tail=tail(f"command timed out after {exc.timeout} seconds"),
+        )
+    except OSError as exc:
+        return CommandResult(
+            name=name,
+            command=command,
+            returncode=127,
+            duration_seconds=round(time.monotonic() - start, 2),
+            stdout_tail="",
+            stderr_tail=tail(str(exc)),
+        )
     return CommandResult(
         name=name,
         command=command,

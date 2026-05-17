@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
-import re
 import subprocess
 import sys
 import tomllib
@@ -154,15 +154,19 @@ class HarnessChecker:
 
     def _check_script_help(self, script: Path) -> None:
         rel_path = script.relative_to(self.repo_root).as_posix()
-        result = subprocess.run(
-            [sys.executable, str(script), "--help"],
-            cwd=self.repo_root,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, str(script), "--help"],
+                cwd=self.repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            self._error(rel_path, f"--help timed out after {exc.timeout} seconds")
+            return
         if result.returncode != 0:
             stderr = result.stderr.strip().splitlines()
             detail = stderr[-1] if stderr else f"exited with {result.returncode}"
@@ -214,8 +218,15 @@ class HarnessChecker:
     def _extract_import_roots(self, path: Path) -> set[str]:
         content = path.read_text(encoding="utf-8", errors="ignore")
         roots: set[str] = set()
-        for match in re.finditer(r"^\s*(?:from|import)\s+([a-zA-Z_][\w.]*)", content, re.MULTILINE):
-            roots.add(match.group(1).split(".")[0])
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return roots
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".")[0])
         return roots
 
     def _error(self, path: str, detail: str) -> None:

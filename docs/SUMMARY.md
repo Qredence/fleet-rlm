@@ -3,14 +3,6 @@
 * [Documentation Home](index.md)
 * [fleet-rlm Documentation](README.md)
 
-## Agent Harness
-
-* [Agent Harness](agent-harness/README.md)
-  * [Local Codex Feedback Loop](agent-harness/feedback-loop.md)
-  * [Architecture Invariants](agent-harness/architecture-invariants.md)
-  * [Harness Quality Score](agent-harness/quality-score.md)
-  * [Drift Control](agent-harness/drift-control.md)
-
 ## Tutorials
 
 * [Tutorials](tutorials/index.md)
@@ -44,6 +36,14 @@
   * [Component UML](explanation/component-uml.md)
   * [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
   * [Wiring Analysis](explanation/wiring-analysis.md)
+
+## Agent Harness
+
+* [Agent Harness](agent-harness/README.md)
+  * [Local Codex Feedback Loop](agent-harness/feedback-loop.md)
+  * [Architecture Invariants](agent-harness/architecture-invariants.md)
+  * [Harness Quality Score](agent-harness/quality-score.md)
+  * [Drift Control](agent-harness/drift-control.md)
 
 ## Specs
 
