@@ -14,8 +14,11 @@ All notable changes to this project are documented in this file.
   degraded child execution metadata.
 - Expanded observability with richer MLflow tracing metadata and optional
   auto-assessment wiring.
-- Refined Workbench UI ergonomics (sidepanel controls, event display, and
-  composer prompt overhead).
+- Migrated the Workbench chat/composer experience toward the Agent Elements
+  component stack while refining sidepanel controls, event display, and prompt
+  overhead.
+- Added operator-facing service information and improved History title/source
+  handling for persisted sessions.
 - Remediated dependency/security alerts via targeted overrides and patches.
 
 ### Added
@@ -31,6 +34,10 @@ All notable changes to this project are documented in this file.
   tests for route mounting and SPA behavior.
   **Outcome:** Route registration is easier to reason about and regressions are
   caught by focused unit tests.
+- **Change:** Added `/api/v1/info` service metadata and a Settings UI service
+  information panel.
+  **Outcome:** Operators can inspect build/runtime feature flags without
+  scraping server logs or health-check internals.
 
 ### Changed
 
@@ -48,6 +55,15 @@ All notable changes to this project are documented in this file.
   SQLModel 0.0.38, Psycopg 3.3.4, Typer 0.25.1, and Uvicorn 0.47.0).
   **Outcome:** Published metadata, contributor docs, and health-check examples
   now match the tested dependency set and supported Python versions.
+- **Change:** Migrated Workbench message rendering and composer plumbing toward
+  Agent Elements components while preserving backend websocket event adapters.
+  **Outcome:** The chat surface has a clearer component boundary for tool/event
+  rendering without changing the public websocket contract.
+- **Change:** Consolidated release guidance and script documentation while
+  trimming obsolete ad hoc LongCoT helper scripts and generated benchmark
+  fixtures from the supported script surface.
+  **Outcome:** Maintainers have a smaller, documented set of release/evaluation
+  entrypoints to validate.
 
 ### Fixed
 
@@ -55,6 +71,10 @@ All notable changes to this project are documented in this file.
   context, degraded child execution metadata, and chunk-document alias handling.
   **Outcome:** Recursive runs avoid stale document evidence, surface degraded
   child results for repair/review, and keep short plain text chunkable.
+- **Change:** Improved persisted session title derivation and History source
+  selection when backend rows still contain placeholder titles.
+  **Outcome:** History falls back to better local conversation labels instead of
+  showing UUID-like or generic session names.
 - **Change:** Made PostHog callback registration resilient to DSPy settings
   thread ownership constraints.
   **Outcome:** Analytics initialization no longer fails in environments where
