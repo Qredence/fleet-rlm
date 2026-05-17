@@ -198,6 +198,11 @@ export default defineConfig({
   plugins: [
     tanstackStart({
       vite: { installDevServerMiddleware: true },
+      pages: [{ path: "/" }],
+      prerender: {
+        enabled: true,
+        crawlLinks: false,
+      },
     }),
     react(),
     tailwindcss(),

@@ -43,6 +43,7 @@ ALLOWED_TRACKED_MJS_EXACT = {
     "src/frontend/scripts/check-api-sync.mjs",
 }
 WHEEL_UI_PREFIX = "fleet_rlm/ui/dist/"
+UI_ENTRYPOINT_CANDIDATES = ("index.html", "client/index.html")
 
 
 def _git_ls_files() -> list[str]:
@@ -208,6 +209,10 @@ def _collect_wheel_frontend(wheel_path: Path) -> tuple[dict[str, str], list[str]
         return ui_hashes, stray_frontend
 
 
+def _has_ui_entrypoint(asset_paths: set[str]) -> bool:
+    return any(path in asset_paths for path in UI_ENTRYPOINT_CANDIDATES)
+
+
 def do_hygiene(args: argparse.Namespace) -> int:
     _ = args
     tracked = _git_ls_files()
@@ -303,6 +308,23 @@ def do_wheel(args: argparse.Namespace) -> int:
         )
         return 1
 
+    local_set = set(local_hashes)
+    wheel_set = set(wheel_hashes)
+
+    if not _has_ui_entrypoint(local_set):
+        print(
+            f"ERROR: Frontend dist is missing a served HTML entrypoint ({', '.join(UI_ENTRYPOINT_CANDIDATES)}).",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not _has_ui_entrypoint(wheel_set):
+        print(
+            f"ERROR: Wheel is missing a served HTML entrypoint ({', '.join(UI_ENTRYPOINT_CANDIDATES)}).",
+            file=sys.stderr,
+        )
+        return 1
+
     if stray_frontend_paths:
         print(
             "ERROR: Wheel contains unexpected frontend package payload paths:",
@@ -312,8 +334,6 @@ def do_wheel(args: argparse.Namespace) -> int:
             print(f"  - {path}", file=sys.stderr)
         return 1
 
-    local_set = set(local_hashes)
-    wheel_set = set(wheel_hashes)
     missing_in_wheel = sorted(local_set - wheel_set)
     extra_in_wheel = sorted(wheel_set - local_set)
     mismatched_hashes = sorted(path for path in local_set & wheel_set if local_hashes[path] != wheel_hashes[path])
