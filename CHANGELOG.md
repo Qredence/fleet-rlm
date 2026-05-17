@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.5.31] - 2026-05-17
+
+### Added
+
+- **Change:** Added a repo-local Codex focus pack with grouped environment
+  actions, bootstrap wiring, hooks, and focused subagent roles.
+  **Outcome:** Codex can bootstrap the workspace, run practical repo commands,
+  block direct `.env` edits, auto-format edited Python files, and surface
+  generated-artifact drift without relying on user-level configuration.
+- **Change:** Adopted a harness engineering documentation hub with a compact
+  root `AGENTS.md`, local feedback-loop guide, architecture invariants, quality
+  score, and drift-control guide.
+  **Outcome:** Agent instructions now point to durable docs while keeping the
+  repo operating model easier to scan and mechanically validate.
+- **Change:** Added harness engineering checks and a safe local Codex feedback
+  loop script.
+  **Outcome:** Docs, `.codex` config, script inventory, generated-artifact
+  controls, and structural boundaries are now checked by local commands and
+  `make check-docs`.
+
+### Changed
+
+- **Change:** Bumped package, OpenAPI, generated frontend API, and documentation
+  release metadata to `0.5.31`.
+  **Outcome:** Runtime health metadata, generated contracts, package metadata,
+  and release docs agree on the release being prepared.
+
 ## [0.5.3] - 2026-05-16
 
 ### Highlights (User Impact)
@@ -1001,6 +1028,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31
 [0.5.3]: https://github.com/Qredence/fleet-rlm/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Qredence/fleet-rlm/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Qredence/fleet-rlm/compare/v0.5.0...v0.5.1

@@ -722,7 +722,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.5.3
+       * @default 0.5.31
        */
       version?: string;
     };
@@ -1591,7 +1591,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.5.3
+       * @default 0.5.31
        */
       version?: string;
       /**

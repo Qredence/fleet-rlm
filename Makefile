@@ -34,7 +34,7 @@ help:
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
-	@echo "  make check-docs       - Run docs quality checks"
+	@echo "  make check-docs       - Run docs quality and harness engineering checks"
 	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd (requires frontend pnpm install)"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
@@ -112,6 +112,7 @@ check-release:
 
 check-docs:
 	uv run python scripts/check_docs_quality.py
+	uv run python scripts/check_harness_engineering.py
 
 check-duplicates:
 	./scripts/run_duplicate_check.zsh
