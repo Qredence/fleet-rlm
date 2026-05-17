@@ -4,15 +4,40 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-### Changed
+## [0.5.3] - 2026-05-16
 
-- **Change:** Aligned dependency floors, Python support metadata, and docs with the
-  upgraded runtime stack (Daytona 0.176.0, DSPy 3.2.1, Pydantic 2.13.4,
-  SQLModel 0.0.38, Psycopg 3.3.4, Typer 0.25.1, and Uvicorn 0.47.0).
-  **Outcome:** Published metadata, contributor docs, and health-check examples
-  now match the tested dependency set and supported Python versions.
+### Highlights (User Impact)
 
-## [0.5.3] - 2026-05-06
+- Clarified backend ownership boundaries while preserving the public Workbench
+  websocket/runtime contract.
+- Improved recursive delegation reliability for remote document context and
+  degraded child execution metadata.
+- Expanded observability with richer MLflow tracing metadata and optional
+  auto-assessment wiring.
+- Migrated the Workbench chat/composer experience toward the Agent Elements
+  component stack while refining sidepanel controls, event display, and prompt
+  overhead.
+- Added operator-facing service information and improved History title/source
+  handling for persisted sessions.
+- Remediated dependency/security alerts via targeted overrides and patches.
+
+### Added
+
+- **Change:** Added backend-driven runtime settings with rich key metadata.
+  **Outcome:** The Settings surface can render typed runtime options and
+  diagnostics directly from backend-provided descriptors.
+- **Change:** Added MLflow span processors and auto-assessment configuration
+  wiring for scorer schedules.
+  **Outcome:** Traces carry consistent workspace/session metadata and can opt
+  into automated assessment loops where supported.
+- **Change:** Implemented central API router composition and added contract
+  tests for route mounting and SPA behavior.
+  **Outcome:** Route registration is easier to reason about and regressions are
+  caught by focused unit tests.
+- **Change:** Added `/api/v1/info` service metadata and a Settings UI service
+  information panel.
+  **Outcome:** Operators can inspect build/runtime feature flags without
+  scraping server logs or health-check internals.
 
 ### Changed
 
@@ -21,6 +46,24 @@ All notable changes to this project are documented in this file.
   runtime modules.
   **Outcome:** Backend ownership boundaries are clearer while preserving the
   public Workbench runtime contract.
+- **Change:** Extracted SPA/docs/OpenAPI helpers from `api/main.py` into
+  dedicated modules.
+  **Outcome:** App startup is more composable and avoids import-time side
+  effects in transport wiring.
+- **Change:** Aligned dependency floors, Python support metadata, and docs with
+  the upgraded runtime stack (Daytona 0.176.0, DSPy 3.2.1, Pydantic 2.13.4,
+  SQLModel 0.0.38, Psycopg 3.3.4, Typer 0.25.1, and Uvicorn 0.47.0).
+  **Outcome:** Published metadata, contributor docs, and health-check examples
+  now match the tested dependency set and supported Python versions.
+- **Change:** Migrated Workbench message rendering and composer plumbing toward
+  Agent Elements components while preserving backend websocket event adapters.
+  **Outcome:** The chat surface has a clearer component boundary for tool/event
+  rendering without changing the public websocket contract.
+- **Change:** Consolidated release guidance and script documentation while
+  trimming obsolete ad hoc LongCoT helper scripts and generated benchmark
+  fixtures from the supported script surface.
+  **Outcome:** Maintainers have a smaller, documented set of release/evaluation
+  entrypoints to validate.
 
 ### Fixed
 
@@ -28,6 +71,14 @@ All notable changes to this project are documented in this file.
   context, degraded child execution metadata, and chunk-document alias handling.
   **Outcome:** Recursive runs avoid stale document evidence, surface degraded
   child results for repair/review, and keep short plain text chunkable.
+- **Change:** Improved persisted session title derivation and History source
+  selection when backend rows still contain placeholder titles.
+  **Outcome:** History falls back to better local conversation labels instead of
+  showing UUID-like or generic session names.
+- **Change:** Made PostHog callback registration resilient to DSPy settings
+  thread ownership constraints.
+  **Outcome:** Analytics initialization no longer fails in environments where
+  DSPy was configured from a worker thread.
 
 ## [0.5.2] - 2026-04-29
 
@@ -950,6 +1001,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.3]: https://github.com/Qredence/fleet-rlm/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Qredence/fleet-rlm/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Qredence/fleet-rlm/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Qredence/fleet-rlm/compare/v0.4.99...v0.5.0
