@@ -114,7 +114,15 @@ def configure_analytics(
             )
             raise RuntimeError(msg) from exc
 
-        settings_module = import_module("dspy.dsp.utils.settings")
+        try:
+            settings_module = import_module("dspy.dsp.utils.settings")
+        except ImportError as imp_exc:
+            msg = (
+                "Unable to configure DSPy callbacks after thread-owner RuntimeError; "
+                "dspy.dsp.utils.settings is unavailable."
+            )
+            raise RuntimeError(msg) from imp_exc
+
         main_thread_config = getattr(settings_module, "main_thread_config", None)
         if not isinstance(main_thread_config, dict):
             msg = (
@@ -124,9 +132,24 @@ def configure_analytics(
             raise RuntimeError(msg) from exc
 
         with settings_lock:
+            thread_local_overrides = getattr(settings_module, "thread_local_overrides", None)
             main_thread_callbacks = list(main_thread_config.get("callbacks", []) or [])
+            registered_callback = callback
             for existing_callback in main_thread_callbacks:
                 if isinstance(existing_callback, PostHogLLMCallback):
-                    return existing_callback
-            main_thread_config["callbacks"] = [*main_thread_callbacks, callback]
+                    registered_callback = existing_callback
+                    break
+            else:
+                main_thread_config["callbacks"] = [*main_thread_callbacks, callback]
+
+            if thread_local_overrides is not None:
+                active_overrides = thread_local_overrides.get()
+                if "callbacks" in active_overrides:
+                    active_callbacks = list(active_overrides.get("callbacks", []) or [])
+                    if not any(
+                        isinstance(existing_callback, PostHogLLMCallback)
+                        for existing_callback in active_callbacks
+                    ):
+                        active_overrides["callbacks"] = [*active_callbacks, registered_callback]
+            return registered_callback
     return callback
