@@ -239,7 +239,7 @@ Response:
 ```json
 {
   "ok": true,
-  "version": "0.5.3"
+  "version": "0.5.31"
 }
 ```
 
@@ -369,7 +369,7 @@ FastAPI Cloud reads `[tool.fastapi].entrypoint`, installs from `pyproject.toml` 
 
 ```bash
 curl https://<assigned-host>/health
-# => {"ok": true, "version": "0.5.3"}
+# => {"ok": true, "version": "0.5.31"}
 
 curl https://<assigned-host>/ready
 # => {"ready": true, "planner": "ready", "database": "ready", ...}

@@ -1362,7 +1362,7 @@ wheels = [
 
 [[package]]
 name = "fleet-rlm"
-version = "0.5.3"
+version = "0.5.31"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
