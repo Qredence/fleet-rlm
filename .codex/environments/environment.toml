@@ -1,0 +1,271 @@
+version = 1
+name = "fleet-rlm"
+
+[setup]
+script = ".codex/workspace-bootstrap.zsh"
+
+[[actions]]
+name = "Setup: Bootstrap Workspace"
+icon = "run"
+command = '''
+zsh .codex/workspace-bootstrap.zsh
+'''
+
+[[actions]]
+name = "App: Run Web UI + API"
+icon = "run"
+command = '''
+uv run fleet web
+'''
+
+[[actions]]
+name = "App: Serve API on 8000"
+icon = "run"
+command = '''
+uv run fleet-rlm serve-api --port 8000
+'''
+
+[[actions]]
+name = "App: Terminal Chat"
+icon = "run"
+command = '''
+uv run fleet-rlm chat --trace-mode compact
+'''
+
+[[actions]]
+name = "Backend: Format"
+icon = "check"
+command = '''
+make format
+'''
+
+[[actions]]
+name = "Backend: Format Check"
+icon = "check"
+command = '''
+make format-check
+'''
+
+[[actions]]
+name = "Backend: Lint"
+icon = "check"
+command = '''
+make lint
+'''
+
+[[actions]]
+name = "Backend: Typecheck"
+icon = "check"
+command = '''
+make typecheck
+'''
+
+[[actions]]
+name = "Backend: Test"
+icon = "test"
+command = '''
+make test
+'''
+
+[[actions]]
+name = "Backend: Unit Tests"
+icon = "test"
+command = '''
+make test-unit
+'''
+
+[[actions]]
+name = "Backend: Integration Tests"
+icon = "test"
+command = '''
+make test-integration
+'''
+
+[[actions]]
+name = "Repo: Quality Gate"
+icon = "check"
+command = '''
+make quality-gate
+'''
+
+[[actions]]
+name = "Repo: Release Hygiene"
+icon = "check"
+command = '''
+make check-release
+'''
+
+[[actions]]
+name = "Repo: Docs Check"
+icon = "docs"
+command = '''
+make check-docs
+'''
+
+[[actions]]
+name = "Repo: Codex Feedback Loop"
+icon = "check"
+command = '''
+uv run python scripts/codex_feedback_loop.py --profile safe
+'''
+
+[[actions]]
+name = "Repo: Security Check"
+icon = "shield"
+command = '''
+make check-security
+'''
+
+[[actions]]
+name = "Repo: Dependency Check"
+icon = "check"
+command = '''
+make check-deps
+'''
+
+[[actions]]
+name = "Repo: Clean"
+icon = "clean"
+command = '''
+make clean
+'''
+
+[[actions]]
+name = "OpenAPI: Check"
+icon = "check"
+command = '''
+make api-check
+'''
+
+[[actions]]
+name = "OpenAPI: Sync"
+icon = "sync"
+command = '''
+make api-sync
+'''
+
+[[actions]]
+name = "Frontend: Install"
+icon = "run"
+command = '''
+cd src/frontend
+pnpm install --frozen-lockfile
+'''
+
+[[actions]]
+name = "Frontend: Dev Server"
+icon = "run"
+command = '''
+cd src/frontend
+pnpm run dev
+'''
+
+[[actions]]
+name = "Frontend: Typecheck"
+icon = "check"
+command = '''
+cd src/frontend
+pnpm run type-check
+'''
+
+[[actions]]
+name = "Frontend: Lint"
+icon = "check"
+command = '''
+cd src/frontend
+pnpm run lint:robustness
+'''
+
+[[actions]]
+name = "Frontend: Unit Tests"
+icon = "test"
+command = '''
+cd src/frontend
+pnpm run test:unit
+'''
+
+[[actions]]
+name = "Frontend: Build"
+icon = "build"
+command = '''
+cd src/frontend
+pnpm run build
+'''
+
+[[actions]]
+name = "Frontend: E2E Tests"
+icon = "test"
+command = '''
+cd src/frontend
+pnpm run test:e2e
+'''
+
+[[actions]]
+name = "Frontend: Full Check"
+icon = "check"
+command = '''
+make check-frontend
+'''
+
+[[actions]]
+name = "Release: Build UI"
+icon = "build"
+command = '''
+make build-ui
+'''
+
+[[actions]]
+name = "Release: Build Artifacts"
+icon = "build"
+command = '''
+make build-release
+'''
+
+[[actions]]
+name = "Release: Full Release Check"
+icon = "check"
+command = '''
+make release-check
+'''
+
+[[actions]]
+name = "Runtime: Daytona Diagnostics"
+icon = "check"
+command = '''
+uv run python scripts/validate_env.py daytona --skip-smoke
+'''
+
+[[actions]]
+name = "Runtime: Daytona Smoke"
+icon = "test"
+command = '''
+uv run fleet-rlm daytona-smoke
+'''
+
+[[actions]]
+name = "Runtime: MLflow Server"
+icon = "run"
+command = '''
+make mlflow
+'''
+
+[[actions]]
+name = "Benchmarks: RLM Capabilities"
+icon = "test"
+command = '''
+uv run python scripts/evaluate_rlm_capabilities.py --benchmark all
+'''
+
+[[actions]]
+name = "Cloud: FastAPI Preflight"
+icon = "check"
+command = '''
+make cloud-preflight
+'''
+
+[[actions]]
+name = "CLI: Help"
+icon = "docs"
+command = '''
+make cli-help
+'''

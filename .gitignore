@@ -68,7 +68,16 @@ src/frontend/.tmp-*.mjs
 # Agent/tooling state
 .claude/
 .agents/
-.codex/
+.codex/*
+!.codex/environments/
+!.codex/environments/environment.toml
+!.codex/workspace-bootstrap.zsh
+!.codex/config.toml
+!.codex/hooks.json
+!.codex/hooks/
+!.codex/hooks/*.zsh
+!.codex/agents/
+!.codex/agents/*.toml
 .letta/
 .opencode/
 .junie/

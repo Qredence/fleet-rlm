@@ -26,6 +26,8 @@ Then open `http://localhost:8000`.
 - [Optimization Page Spec](specs/optimization-page.md)
 - [Wiring Analysis](explanation/wiring-analysis.md)
 - [Runtime Settings](how-to-guides/runtime-settings.md)
+- [Codex Local Environment](how-to-guides/codex-environment.md)
+- [Agent Harness](agent-harness/README.md)
 - [Deploying the API Server](how-to-guides/deploying-server.md)
 - [Frontend/Backend Integration](reference/frontend-backend-integration.md)
 
@@ -54,6 +56,7 @@ Then open `http://localhost:8000`.
 ## Understand the System
 
 - [Architecture overview](architecture.md)
+- [Agent Harness](agent-harness/README.md)
 - [Concepts](explanation/concepts.md)
 - [User interaction flows](explanation/user-flows.md)
 - [Component UML](explanation/component-uml.md)
@@ -65,6 +68,7 @@ Then open `http://localhost:8000`.
 - [Reference](reference/index.md)
 - [Explanation](explanation/index.md)
 - [Complete table of contents](SUMMARY.md)
+- [Agent Harness](agent-harness/README.md)
 
 ## Source of Truth
 

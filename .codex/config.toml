@@ -1,0 +1,48 @@
+[features]
+hooks = true
+multi_agent = true
+
+[agents]
+max_threads = 8
+max_depth = 1
+job_max_runtime_seconds = 3600
+
+[agents.backend-runtime]
+description = "FastAPI, websocket, Daytona-backed runtime, DSPy ReAct, and recursive RLM implementation work."
+config_file = "agents/backend-runtime.toml"
+nickname_candidates = ["Runtime", "Backend"]
+
+[agents.frontend-ui]
+description = "React 19, TanStack Router/Start, Vite+, Tailwind, shadcn/Base UI, and Agent Elements frontend work."
+config_file = "agents/frontend-ui.toml"
+nickname_candidates = ["Frontend", "UI"]
+
+[agents.api-contract]
+description = "OpenAPI schema, backend/frontend contract, generated API artifacts, and websocket payload review."
+config_file = "agents/api-contract.toml"
+nickname_candidates = ["Contract", "OpenAPI"]
+
+[agents.testing-strategist]
+description = "Chooses and audits the smallest meaningful validation lane for backend, frontend, integration, and release work."
+config_file = "agents/testing-strategist.toml"
+nickname_candidates = ["Tests", "Validation"]
+
+[agents.security-reviewer]
+description = "Focused auth, token, middleware, settings, dependency, and secret-handling security reviewer."
+config_file = "agents/security-reviewer.toml"
+nickname_candidates = ["Security", "Reviewer"]
+
+[agents.release-manager]
+description = "Release hygiene, packaging, bundled UI assets, metadata, docs, and publish readiness."
+config_file = "agents/release-manager.toml"
+nickname_candidates = ["Release", "Packager"]
+
+[agents.daytona-runtime]
+description = "Daytona SDK integration, sandbox lifecycle, volumes, child isolation, context staging, and runtime diagnostics."
+config_file = "agents/daytona-runtime.toml"
+nickname_candidates = ["Daytona", "Sandbox"]
+
+[agents.docs-maintainer]
+description = "AGENTS.md, PLANS.md, docs, README, and durable workflow documentation consistency."
+config_file = "agents/docs-maintainer.toml"
+nickname_candidates = ["Docs", "Maintainer"]

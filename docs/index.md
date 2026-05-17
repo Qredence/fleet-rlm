@@ -5,8 +5,9 @@
 ## Start Here (User Path)
 
 1. **[Tutorials](tutorials/index.md)** — learn by doing: basic usage, document analysis, interactive chat.
-2. **[How-to Guides](how-to-guides/index.md)** — solve specific problems: installation, deployment, DSPy integration, troubleshooting, MLflow workflows.
+2. **[How-to Guides](how-to-guides/index.md)** — solve specific problems: installation, Codex local setup, deployment, DSPy integration, troubleshooting, MLflow workflows.
 3. **[Explanation](explanation/index.md)** — understand the product: spec, concepts, user flows.
+4. **[Agent Harness](agent-harness/README.md)** — Codex operating model, local feedback loop, architecture invariants, and drift control.
 
 ## Reference
 
@@ -19,6 +20,7 @@
 Read these after you've seen the product:
 
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
+- **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Frontend Simplification Design](specs/frontend-simplification-design.md)**
 - **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow

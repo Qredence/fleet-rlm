@@ -3,6 +3,14 @@
 * [Documentation Home](index.md)
 * [fleet-rlm Documentation](README.md)
 
+## Agent Harness
+
+* [Agent Harness](agent-harness/README.md)
+  * [Local Codex Feedback Loop](agent-harness/feedback-loop.md)
+  * [Architecture Invariants](agent-harness/architecture-invariants.md)
+  * [Harness Quality Score](agent-harness/quality-score.md)
+  * [Drift Control](agent-harness/drift-control.md)
+
 ## Tutorials
 
 * [Tutorials](tutorials/index.md)
@@ -15,6 +23,7 @@
 * [How-to Guides](how-to-guides/index.md)
   * [Installation Guide](how-to-guides/installation.md)
   * [Developer Setup](how-to-guides/developer-setup.md)
+  * [Codex Local Environment](how-to-guides/codex-environment.md)
   * [Frontend Development](how-to-guides/frontend-development.md)
   * [Testing Strategy](how-to-guides/testing-strategy.md)
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
