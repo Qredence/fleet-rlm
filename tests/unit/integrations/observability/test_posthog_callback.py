@@ -298,6 +298,38 @@ def test_configure_analytics_uses_settings_lock_on_thread_owner_error(
     assert any(isinstance(cb, PostHogLLMCallback) for cb in main_thread_config["callbacks"])
 
 
+def test_configure_analytics_fallback_preserves_main_thread_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback registration should append to the owner-thread callback list instead of
+    copying worker-thread callbacks into global DSPy settings."""
+    _posthog_monkeypatches(monkeypatch)
+
+    local_callback = object()
+    owner_thread_callback = object()
+    lock = threading.Lock()
+    main_thread_config: dict[str, Any] = {"callbacks": [owner_thread_callback]}
+    fake_settings_mod = _make_fake_settings_module(main_thread_config)
+
+    monkeypatch.setattr(dspy, "settings", _SettingsStub(callbacks=[local_callback], lock=lock))
+
+    def _raising_configure(**_kw: Any) -> None:
+        raise RuntimeError(_DSPY_OWNER_THREAD_ERROR)
+
+    monkeypatch.setattr(dspy, "configure", _raising_configure)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.import_module",
+        lambda name, package=None: fake_settings_mod,
+    )
+
+    result = configure_analytics()
+
+    assert result is not None
+    assert main_thread_config["callbacks"][0] is owner_thread_callback
+    assert local_callback not in main_thread_config["callbacks"]
+    assert any(isinstance(cb, PostHogLLMCallback) for cb in main_thread_config["callbacks"])
+
+
 def test_configure_analytics_raises_when_settings_lock_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

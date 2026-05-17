@@ -124,5 +124,9 @@ def configure_analytics(
             raise RuntimeError(msg) from exc
 
         with settings_lock:
-            main_thread_config["callbacks"] = list(desired_callbacks)
+            main_thread_callbacks = list(main_thread_config.get("callbacks", []) or [])
+            for existing_callback in main_thread_callbacks:
+                if isinstance(existing_callback, PostHogLLMCallback):
+                    return existing_callback
+            main_thread_config["callbacks"] = [*main_thread_callbacks, callback]
     return callback
