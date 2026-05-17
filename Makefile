@@ -164,6 +164,7 @@ sync-ui:
 
 build-ui:
 	cd src/frontend && pnpm install --frozen-lockfile && ./node_modules/.bin/vp build
+	uv run python scripts/ensure_frontend_entrypoint.py
 	$(MAKE) sync-ui
 
 build-release: build-ui
