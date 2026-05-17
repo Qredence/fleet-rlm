@@ -147,8 +147,7 @@ def configure_analytics(
                 if "callbacks" in active_overrides:
                     active_callbacks = list(active_overrides.get("callbacks", []) or [])
                     if not any(
-                        isinstance(existing_callback, PostHogLLMCallback)
-                        for existing_callback in active_callbacks
+                        isinstance(existing_callback, PostHogLLMCallback) for existing_callback in active_callbacks
                     ):
                         active_overrides["callbacks"] = [*active_callbacks, registered_callback]
             return registered_callback
