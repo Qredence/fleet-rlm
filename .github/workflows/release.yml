@@ -180,6 +180,8 @@ jobs:
         run: uv build
 
       - name: Verify packaged frontend assets
+        env:
+          FLEET_RLM_UI_BUILD_DONE: "1"
         run: uv run python scripts/validate_release.py wheel
 
       - name: Verify distributions
