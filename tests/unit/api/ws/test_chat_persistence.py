@@ -619,7 +619,7 @@ def test_cancel_task_handles_already_completed() -> None:
             return None
 
         task = asyncio.create_task(done())
-        await task
+        _ = await task
         await cancel_task(cast(asyncio.Task[object], task))
 
     asyncio.run(scenario())

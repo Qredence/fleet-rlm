@@ -580,7 +580,7 @@ class DaytonaToolBridge:
                 if not task.done():
                     continue
                 inflight.pop(call_id, None)
-                await task
+                _ = await task
                 callback_count += 1
 
             if code_task.done():

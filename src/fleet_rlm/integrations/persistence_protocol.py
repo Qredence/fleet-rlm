@@ -64,7 +64,7 @@ class PersistenceProtocol(Protocol):
         full_name: str | None = None,
     ) -> IdentityUpsertResult:
         """Upsert tenant/user identity and return resolved IDs."""
-        ...
+        pass
 
     async def resolve_workspace_id(
         self,
@@ -74,7 +74,7 @@ class PersistenceProtocol(Protocol):
         workspace_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Resolve the effective workspace ID for the given tenant/user."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Session CRUD
@@ -96,7 +96,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[ChatSession], int]:
         """Return paginated chat sessions with total count."""
-        ...
+        pass
 
     async def get_chat_session(
         self,
@@ -107,7 +107,7 @@ class PersistenceProtocol(Protocol):
         workspace_id: uuid.UUID | None = None,
     ) -> ChatSession | None:
         """Return a single chat session or None if not found."""
-        ...
+        pass
 
     async def list_chat_turns(
         self,
@@ -120,7 +120,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[ChatTurn], int]:
         """Return paginated chat turns for a session."""
-        ...
+        pass
 
     async def update_chat_session(
         self,
@@ -133,7 +133,7 @@ class PersistenceProtocol(Protocol):
         metadata_json: dict[str, Any] | None = None,
     ) -> ChatSession | None:
         """Update session metadata and return the updated row."""
-        ...
+        pass
 
     async def archive_chat_session(
         self,
@@ -144,7 +144,7 @@ class PersistenceProtocol(Protocol):
         workspace_id: uuid.UUID | None = None,
     ) -> bool:
         """Soft-delete a session. Returns True if found and archived."""
-        ...
+        pass
 
     async def restore_chat_session(
         self,
@@ -155,7 +155,7 @@ class PersistenceProtocol(Protocol):
         workspace_id: uuid.UUID | None = None,
     ) -> bool:
         """Restore an archived session. Returns True if found and restored."""
-        ...
+        pass
 
     async def get_session_stats(
         self,
@@ -166,7 +166,7 @@ class PersistenceProtocol(Protocol):
         workspace_id: uuid.UUID | None = None,
     ) -> dict[str, object] | None:
         """Return aggregated usage stats for a session."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Runs / Steps
@@ -174,7 +174,7 @@ class PersistenceProtocol(Protocol):
 
     async def create_run(self, request: RunCreateRequest) -> Run:
         """Create or upsert a run record."""
-        ...
+        pass
 
     async def get_run(
         self,
@@ -185,7 +185,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> Run | None:
         """Return a single run or None if not found."""
-        ...
+        pass
 
     async def get_run_steps_paginated(
         self,
@@ -198,11 +198,11 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[RunStep], int]:
         """Return paginated run steps with total count."""
-        ...
+        pass
 
     async def append_step(self, request: RunStepCreateRequest) -> RunStep:
         """Append a step to a run."""
-        ...
+        pass
 
     async def update_run_status(
         self,
@@ -213,11 +213,11 @@ class PersistenceProtocol(Protocol):
         error_json: dict | None = None,
     ) -> Run | None:
         """Update run status and return the updated row."""
-        ...
+        pass
 
     async def store_artifact(self, request: ArtifactCreateRequest) -> Artifact:
         """Persist an artifact record."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Memory
@@ -225,7 +225,7 @@ class PersistenceProtocol(Protocol):
 
     async def store_memory_item(self, request: MemoryItemCreateRequest) -> MemoryItem:
         """Persist a memory item."""
-        ...
+        pass
 
     async def list_memory_items_paginated(
         self,
@@ -239,7 +239,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[MemoryItem], int]:
         """Return paginated memory items with total count."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Traces
@@ -263,7 +263,7 @@ class PersistenceProtocol(Protocol):
         metadata_json: dict[str, Any] | None = None,
     ) -> uuid.UUID:
         """Persist human feedback for an external trace."""
-        ...
+        pass
 
     async def store_rlm_trace(
         self,
@@ -278,7 +278,7 @@ class PersistenceProtocol(Protocol):
         latency_ms: int | None = None,
     ) -> uuid.UUID:
         """Persist an RLM child trajectory trace."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Datasets
@@ -291,7 +291,7 @@ class PersistenceProtocol(Protocol):
         examples: Sequence[dict[str, Any]] | None = None,
     ) -> Dataset:
         """Create a dataset record with optional examples."""
-        ...
+        pass
 
     async def list_datasets(
         self,
@@ -304,7 +304,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[Dataset], int]:
         """Return paginated datasets with total count."""
-        ...
+        pass
 
     async def get_dataset(
         self,
@@ -315,7 +315,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> Dataset | None:
         """Return a single dataset or None if not found."""
-        ...
+        pass
 
     async def list_dataset_examples(
         self,
@@ -328,7 +328,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[DatasetExample], int]:
         """Return paginated dataset examples with total count."""
-        ...
+        pass
 
     # ------------------------------------------------------------------
     # Optimization runs
@@ -339,7 +339,7 @@ class PersistenceProtocol(Protocol):
         request: OptimizationRunCreateRequest,
     ) -> OptimizationRun:
         """Create an optimization run record."""
-        ...
+        pass
 
     async def list_optimization_runs(
         self,
@@ -352,7 +352,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> list[OptimizationRun]:
         """Return optimization runs ordered by most-recent first."""
-        ...
+        pass
 
     async def get_optimization_run(
         self,
@@ -363,7 +363,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
         """Return a single optimization run or None if not found."""
-        ...
+        pass
 
     async def update_optimization_run_phase(
         self,
@@ -375,7 +375,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
         """Update the phase of a running optimization run."""
-        ...
+        pass
 
     async def complete_optimization_run(
         self,
@@ -392,7 +392,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
         """Mark an optimization run as completed."""
-        ...
+        pass
 
     async def fail_optimization_run(
         self,
@@ -404,11 +404,11 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> OptimizationRun | None:
         """Mark an optimization run as failed."""
-        ...
+        pass
 
     async def recover_stale_optimization_runs(self) -> int:
         """Mark any running optimization runs as failed. Returns count."""
-        ...
+        pass
 
     async def save_evaluation_results(
         self,
@@ -420,7 +420,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> list[EvaluationResult]:
         """Bulk save per-example evaluation results."""
-        ...
+        pass
 
     async def get_evaluation_results(
         self,
@@ -433,7 +433,7 @@ class PersistenceProtocol(Protocol):
         offset: int = 0,
     ) -> tuple[list[EvaluationResult], int]:
         """Return paginated evaluation results with total count."""
-        ...
+        pass
 
     async def save_prompt_snapshots(
         self,
@@ -445,7 +445,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> list[PromptSnapshot]:
         """Bulk save before/after prompt snapshots."""
-        ...
+        pass
 
     async def get_prompt_snapshots(
         self,
@@ -456,7 +456,7 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> list[PromptSnapshot]:
         """Return all prompt snapshots for a run."""
-        ...
+        pass
 
 
 __all__ = ["PersistenceProtocol"]

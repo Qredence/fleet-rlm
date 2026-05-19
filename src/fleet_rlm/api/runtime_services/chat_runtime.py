@@ -75,7 +75,8 @@ class StreamEventLike(Protocol):
         raise NotImplementedError
 
     @property
-    def text(self) -> str: ...
+    def text(self) -> str:
+        pass
 
     @property
     def payload(self) -> dict[str, Any]:
@@ -100,9 +101,11 @@ class MaintenanceInterpreterProtocol(Protocol):
         code: str,
         variables: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> object: ...
+    ) -> object:
+        pass
 
-    def execution_profile(self, profile: object) -> AbstractContextManager[object]: ...
+    def execution_profile(self, profile: object) -> AbstractContextManager[object]:
+        pass
 
 
 class ChatAgentProtocol(Protocol):
@@ -113,18 +116,22 @@ class ChatAgentProtocol(Protocol):
     _repository: Any | None
     _identity_rows: Any | None
 
-    async def __aenter__(self) -> ChatAgentProtocol: ...
+    async def __aenter__(self) -> ChatAgentProtocol:
+        pass
 
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: object | None,
-    ) -> bool: ...
+    ) -> bool:
+        pass
 
-    def history_turns(self) -> int: ...
+    def history_turns(self) -> int:
+        pass
 
-    def set_execution_mode(self, execution_mode: str) -> None: ...
+    def set_execution_mode(self, execution_mode: str) -> None:
+        pass
 
     def aiter_chat_turn_stream(
         self,
@@ -138,21 +145,29 @@ class ChatAgentProtocol(Protocol):
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
-    ) -> AsyncIterator[object]: ...
+    ) -> AsyncIterator[object]:
+        pass
 
-    def load_document(self, path: str, alias: str = "active") -> None: ...
+    def load_document(self, path: str, alias: str = "active") -> None:
+        pass
 
-    def export_session_state(self) -> dict[str, Any]: ...
+    def export_session_state(self) -> dict[str, Any]:
+        pass
 
-    def import_session_state(self, state: dict[str, Any]) -> object: ...
+    def import_session_state(self, state: dict[str, Any]) -> object:
+        pass
 
-    async def aimport_session_state(self, state: dict[str, Any]) -> object: ...
+    async def aimport_session_state(self, state: dict[str, Any]) -> object:
+        pass
 
-    def reset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+    def reset(self, *, clear_sandbox_buffers: bool = True) -> object:
+        pass
 
-    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object: ...
+    async def areset(self, *, clear_sandbox_buffers: bool = True) -> object:
+        pass
 
-    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any] | object: ...
+    async def execute_command(self, command: str, args: dict[str, Any]) -> dict[str, Any] | object:
+        pass
 
 
 def set_interpreter_default_profile(interpreter: object | None, cfg: ServerRuntimeConfig) -> None:
