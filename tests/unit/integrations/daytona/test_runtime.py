@@ -461,12 +461,12 @@ def test_daytona_runtime_get_client_builds_client_once_under_concurrent_access(m
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     results: list[_FakeClient] = []
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def _get_client() -> None:
         try:
             results.append(runtime._get_client())
-        except BaseException as exc:  # pragma: no cover - diagnostic capture
+        except Exception as exc:  # pragma: no cover - diagnostic capture
             errors.append(exc)
 
     first = threading.Thread(target=_get_client)
