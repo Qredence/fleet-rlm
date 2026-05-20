@@ -332,7 +332,7 @@ async def run_daytona_connection_test(
                 close = getattr(client, "close", None)
                 if callable(close):
                     with suppress(Exception):
-                        close()
+                        await asyncio.to_thread(close)
 
     return await run_connectivity_test(
         diagnostics=diagnostics_deps,

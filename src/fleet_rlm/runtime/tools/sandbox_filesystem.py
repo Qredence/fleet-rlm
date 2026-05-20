@@ -286,7 +286,13 @@ def _sandbox_replace_in_files_impl(
     replacement: str,
 ) -> dict[str, Any]:
     """Replace text in multiple files in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
+    session = _get_sandbox_session(ctx)
+    rebind = getattr(session, "_rebind_sandbox_if_needed", None)
+    if callable(rebind):
+        rebind()
+    fs = getattr(getattr(session, "sandbox", None), "fs", None)
+    if fs is None:
+        raise RuntimeError("No Daytona filesystem available.")
     resolved_files = [_resolve_sandbox_path(ctx, f) for f in files]
     result = fs.replace_in_files(resolved_files, pattern, replacement)
     return {
@@ -299,9 +305,8 @@ def _sandbox_replace_in_files_impl(
 
 def _sandbox_get_file_info_impl(ctx: _SandboxFilesystemToolContext, path: str) -> dict[str, Any]:
     """Get metadata for a file or directory in the Daytona sandbox."""
-    fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    info = fs.get_file_info(resolved)
+    info = _run_session_fs_call(ctx, path, "get_file_info")
     if isinstance(info, dict):
         return {"status": "ok", "path": resolved, **info}
     mod_time = getattr(info, "mod_time", None)
