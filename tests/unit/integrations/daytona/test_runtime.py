@@ -1177,6 +1177,92 @@ def test_daytona_session_awrite_file_resolves_async_sdk_upload() -> None:
     assert uploads == [(b"hello", "/workspace/repo/notes.txt")]
 
 
+def test_run_admin_code_resolves_async_sdk_code_run() -> None:
+    from fleet_rlm.integrations.daytona.session_runtime import _run_admin_code
+
+    code_run_calls: list[str] = []
+
+    class _AsyncProcess:
+        async def code_run(self, code: str, params=None, timeout=None):
+            _ = params, timeout
+            code_run_calls.append(code)
+            return _FakeProcessExecResult(stdout="done")
+
+    sandbox = SimpleNamespace(process=_AsyncProcess())
+
+    result = _run_admin_code(
+        sandbox=sandbox,
+        code="print('hello')",
+        phase="sandbox_admin",
+        error_prefix="admin code failed",
+    )
+
+    assert result == "done"
+    assert code_run_calls == ["print('hello')"]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs", "expected_calls"),
+    [
+        ("aarchive", {}, [("archive", None)]),
+        ("arecover", {"timeout": 12.0}, [("recover", 12.0)]),
+        ("arefresh_activity", {}, [("refresh_activity", None)]),
+        ("aresize", {"cpu": 4, "memory": 8, "disk": 20}, [("resize", (4, 8, 20))]),
+        ("adelete", {}, [("stop", 10), ("delete", None)]),
+    ],
+)
+def test_session_async_lifecycle_mutators_resolve_async_sdk_methods(
+    method_name: str,
+    kwargs: dict[str, object],
+    expected_calls: list[tuple[str, object | None]],
+) -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    async_calls: list[tuple[str, object | None]] = []
+
+    class _AsyncLifecycleSandbox(_FakeSandbox):
+        async def archive(self) -> None:
+            async_calls.append(("archive", None))
+
+        async def recover(self, *, timeout: float = 60.0) -> None:
+            async_calls.append(("recover", timeout))
+
+        async def refresh_activity(self) -> None:
+            async_calls.append(("refresh_activity", None))
+
+        async def resize(self, resources: object, timeout: float | None = 60) -> None:
+            _ = timeout
+            async_calls.append(
+                (
+                    "resize",
+                    (
+                        getattr(resources, "cpu", None),
+                        getattr(resources, "memory", None),
+                        getattr(resources, "disk", None),
+                    ),
+                )
+            )
+
+        async def stop(self, timeout: float = 10) -> None:
+            async_calls.append(("stop", timeout))
+
+        async def delete(self) -> None:
+            async_calls.append(("delete", None))
+
+    session = DaytonaSandboxSession(
+        sandbox=_AsyncLifecycleSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+
+    asyncio.run(getattr(session, method_name)(**kwargs))
+
+    assert async_calls == expected_calls
+
+
 def test_runtime_fork_sandbox_creates_session() -> None:
     """``fork_sandbox`` clones the sandbox and returns a new session."""
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession

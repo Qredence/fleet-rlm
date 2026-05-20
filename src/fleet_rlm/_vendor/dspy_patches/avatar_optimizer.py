@@ -168,8 +168,17 @@ class AvatarOptimizer(Teleprompter):
 
         return avg_score, pos_inputs, neg_inputs
 
-    def compile(self, student, *, trainset):
-        best_actor = deepcopy(student)
+    def compile(
+        self,
+        student: Module,
+        *,
+        trainset: list[Example],
+        teacher: Module | None = None,
+        valset: list[Example] | None = None,
+        **kwargs: Any,
+    ) -> Module:
+        _ = teacher, valset, kwargs
+        best_actor: Any = deepcopy(student)
         best_score = -999 if self.optimize_for == "max" else 999
 
         for i in range(self.max_iters):

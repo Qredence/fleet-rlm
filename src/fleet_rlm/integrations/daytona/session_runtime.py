@@ -30,7 +30,11 @@ def _run_admin_code(
     try:
         from daytona.common.process import CodeRunParams
 
-        result = sandbox.process.code_run(code, params=CodeRunParams())
+        result = _run_async_compat(
+            sandbox.process.code_run,
+            code,
+            params=CodeRunParams(),
+        )
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"{error_prefix}: {exc}",
@@ -271,9 +275,9 @@ class DaytonaSandboxSession:
         self.delete_context()
         # Graceful stop before delete lets sandbox processes flush if possible.
         with suppress(Exception):
-            self.sandbox.stop(timeout=10)
+            _run_async_compat(self.sandbox.stop, timeout=10)
         with suppress(Exception):
-            self.sandbox.delete()
+            _run_async_compat(self.sandbox.delete)
         self._driver_started = False
 
     async def adelete(self) -> None:
@@ -281,14 +285,14 @@ class DaytonaSandboxSession:
 
     def archive(self) -> None:
         self._rebind_sandbox_if_needed()
-        self.sandbox.archive()
+        _run_async_compat(self.sandbox.archive)
 
     async def aarchive(self) -> None:
         await _run_sync_in_thread(self.archive)
 
     def recover(self, *, timeout: float = 60.0) -> None:
         self._rebind_sandbox_if_needed()
-        self.sandbox.recover(timeout=timeout)
+        _run_async_compat(self.sandbox.recover, timeout=timeout)
 
     async def arecover(self, *, timeout: float = 60.0) -> None:
         await _run_sync_in_thread(self.recover, timeout=timeout)
@@ -296,7 +300,7 @@ class DaytonaSandboxSession:
     def refresh_activity(self) -> None:
         self._rebind_sandbox_if_needed()
         with suppress(Exception):
-            self.sandbox.refresh_activity()
+            _run_async_compat(self.sandbox.refresh_activity)
 
     async def arefresh_activity(self) -> None:
         await _run_sync_in_thread(self.refresh_activity)
@@ -305,7 +309,10 @@ class DaytonaSandboxSession:
         from daytona import Resources
 
         self._rebind_sandbox_if_needed()
-        self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
+        _run_async_compat(
+            self.sandbox.resize,
+            Resources(cpu=cpu, memory=memory, disk=disk),
+        )
 
     async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:
         await _run_sync_in_thread(self.resize, cpu=cpu, memory=memory, disk=disk)
