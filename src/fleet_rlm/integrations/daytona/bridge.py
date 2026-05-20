@@ -418,7 +418,7 @@ class DaytonaToolBridge:
         # Run code execution in a background thread so the main thread can
         # poll for tool callbacks concurrently.
         execution_result: list[Any] = []
-        execution_error: list[BaseException] = []
+        execution_error: list[Exception] = []
         execution_done = False
 
         def _run_code() -> None:
@@ -432,7 +432,7 @@ class DaytonaToolBridge:
                     timeout=timeout,
                 )
                 execution_result.append(result)
-            except BaseException as exc:
+            except Exception as exc:
                 execution_error.append(exc)
             finally:
                 execution_done = True
