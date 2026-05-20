@@ -7,12 +7,22 @@ from typing import Any, Callable, Final, TypeVar
 
 from dspy.primitives import FinalOutput
 
-from .diagnostic_models import DaytonaSmokeResult
+from .errors import DaytonaDiagnosticError, DaytonaRunCancelled, DaytonaSmokeResult, VolumeNotReadyError
+
+__all__ = [
+    "DaytonaDiagnosticError",
+    "DaytonaRunCancelled",
+    "DaytonaSmokeResult",
+    "VolumeNotReadyError",
+    "as_diagnostic_error",
+    "category_for_phase",
+    "run_daytona_smoke",
+]
 
 _T = TypeVar("_T")
 
 # ---------------------------------------------------------------------------
-# Diagnostic constants and error types
+# Diagnostic constants
 # ---------------------------------------------------------------------------
 
 SMOKE_PHASES: Final[tuple[str, ...]] = (
@@ -34,41 +44,6 @@ PHASE_TO_ERROR_CATEGORY: Final[dict[str, str]] = {
     "exec_step_2": "driver_execution_error",
     "cleanup": "cleanup_error",
 }
-
-
-class DaytonaDiagnosticError(RuntimeError):
-    """Structured Daytona pilot runtime error with a stable category and phase."""
-
-    def __init__(self, message: str, *, category: str, phase: str) -> None:
-        super().__init__(message)
-        self.category = category
-        self.phase = phase
-
-
-class VolumeNotReadyError(DaytonaDiagnosticError):
-    """Raised when a Daytona volume does not reach ``ready`` state in time."""
-
-    def __init__(
-        self,
-        *,
-        volume_name: str,
-        volume_state: str,
-        timeout_seconds: float,
-        raw_volume_state: str | None = None,
-    ) -> None:
-        self.volume_name = volume_name
-        self.volume_state = volume_state
-        self.raw_volume_state = raw_volume_state or volume_state
-        self.timeout_seconds = timeout_seconds
-        state_description = f"'{volume_state}'"
-        if self.raw_volume_state and self.raw_volume_state.strip() and self.raw_volume_state != volume_state:
-            state_description = f"normalized='{volume_state}' (raw='{self.raw_volume_state}')"
-        super().__init__(
-            f"Volume '{volume_name}' is in state {state_description} "
-            f"after {timeout_seconds}s. Check Daytona dashboard.",
-            category="sandbox_create_clone_error",
-            phase="sandbox_create",
-        )
 
 
 def category_for_phase(phase: str) -> str:

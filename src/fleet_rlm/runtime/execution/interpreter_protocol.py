@@ -8,7 +8,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from fleet_rlm.integrations.daytona.workspace_config import ReconfigureOutcome
+    from fleet_rlm.integrations.daytona.models import ReconfigureOutcome
 
 from dspy.primitives import FinalOutput
 

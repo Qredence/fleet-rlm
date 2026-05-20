@@ -405,11 +405,7 @@ class AgentRuntime:
                 ashutdown = getattr(self.interpreter, "ashutdown", None)
                 if callable(ashutdown):
                     try:
-                        from fleet_rlm.integrations.daytona.async_compat import (
-                            _run_async_compat,
-                        )
-
-                        _run_async_compat(ashutdown)
+                        ashutdown()
                     except Exception:
                         pass
 

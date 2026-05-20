@@ -211,7 +211,7 @@ def _bound_runtime_tool_factories(
         max_passes: int = 3,
     ) -> dict[str, Any]:
         """Run a multi-pass recursive analysis with decomposition and verification."""
-        from fleet_rlm.integrations.daytona.evidence_bridge import DaytonaEvidenceSink
+        from fleet_rlm.integrations.daytona.isolation import DaytonaEvidenceSink
         from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
         module = RecursiveWorkspaceModule(

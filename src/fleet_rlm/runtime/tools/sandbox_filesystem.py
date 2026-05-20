@@ -11,10 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fleet_rlm.integrations.daytona.async_compat import (
-    _await_if_needed,
-    _run_async_compat,
-)
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 # ---------------------------------------------------------------------------
@@ -42,7 +38,7 @@ def _get_sandbox_fs(ctx: _SandboxFilesystemToolContext) -> Any:
     if session is None:
         aget = getattr(ctx.interpreter, "aget_session", None)
         if callable(aget):
-            session = _run_async_compat(aget)
+            session = aget()
     if session is None:
         raise RuntimeError("No Daytona sandbox session available.")
     sandbox = getattr(session, "sandbox", None)
@@ -62,7 +58,7 @@ def _get_sandbox_session(ctx: _SandboxFilesystemToolContext) -> Any:
     if session is None:
         aget = getattr(ctx.interpreter, "aget_session", None)
         if callable(aget):
-            session = _run_async_compat(aget)
+            session = aget()
     if session is None:
         raise RuntimeError("No Daytona sandbox session available.")
     return session
@@ -76,7 +72,7 @@ def _resolve_sandbox_path(ctx: _SandboxFilesystemToolContext, path: str) -> str:
     if session is None:
         aget = getattr(ctx.interpreter, "aget_session", None)
         if callable(aget):
-            session = _run_async_compat(aget)
+            session = aget()
     if session is not None and hasattr(session, "_resolve_sandbox_path"):
         return session._resolve_sandbox_path(path)
     return path
@@ -88,29 +84,19 @@ def _run_session_fs_call(
     method_name: str,
     *args: Any,
 ) -> Any:
-    """Run a sandbox filesystem call after rebinding stale SDK handles.
-
-    Daytona async SDK objects are event-loop-bound.  ReAct tool calls often run
-    from worker threads, so using the raw ``sandbox.fs`` handle can raise
-    "Future attached to a different loop".  The session knows how to refresh the
-    sandbox handle for the current loop; call through it before touching ``fs``.
-    """
+    """Run a sandbox filesystem call after rebinding stale SDK handles."""
     session = _get_sandbox_session(ctx)
-
-    async def _invoke() -> Any:
-        rebind = getattr(session, "_arebind_sandbox_if_needed", None)
-        if callable(rebind):
-            await rebind()
-        sandbox = getattr(session, "sandbox", None)
-        fs = getattr(sandbox, "fs", None)
-        if fs is None:
-            raise RuntimeError("No Daytona filesystem available.")
-        resolve = getattr(session, "_resolve_sandbox_path", None)
-        resolved = resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
-        method = getattr(fs, method_name)
-        return await _await_if_needed(method(resolved, *args))
-
-    return _run_async_compat(_invoke)
+    rebind = getattr(session, "_rebind_sandbox_if_needed", None)
+    if callable(rebind):
+        rebind()
+    sandbox = getattr(session, "sandbox", None)
+    fs = getattr(sandbox, "fs", None)
+    if fs is None:
+        raise RuntimeError("No Daytona filesystem available.")
+    resolve = getattr(session, "_resolve_sandbox_path", None)
+    resolved = resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
+    method = getattr(fs, method_name)
+    return method(resolved, *args)
 
 
 # ---------------------------------------------------------------------------
@@ -174,18 +160,15 @@ def _sandbox_write_file_impl(ctx: _SandboxFilesystemToolContext, path: str, cont
     payload = content.encode("utf-8")
     session = _get_sandbox_session(ctx)
 
-    async def _upload() -> Any:
-        rebind = getattr(session, "_arebind_sandbox_if_needed", None)
-        if callable(rebind):
-            await rebind()
-        fs = getattr(getattr(session, "sandbox", None), "fs", None)
-        if fs is None:
-            raise RuntimeError("No Daytona filesystem available.")
-        resolve = getattr(session, "_resolve_sandbox_path", None)
-        upload_path = resolve(path) if callable(resolve) else resolved
-        return await _await_if_needed(fs.upload_file(payload, upload_path))
-
-    _run_async_compat(_upload)
+    rebind = getattr(session, "_rebind_sandbox_if_needed", None)
+    if callable(rebind):
+        rebind()
+    fs = getattr(getattr(session, "sandbox", None), "fs", None)
+    if fs is None:
+        raise RuntimeError("No Daytona filesystem available.")
+    resolve = getattr(session, "_resolve_sandbox_path", None)
+    upload_path = resolve(path) if callable(resolve) else resolved
+    fs.upload_file(payload, upload_path)
     return {
         "status": "ok",
         "path": resolved,
@@ -302,7 +285,7 @@ def _sandbox_replace_in_files_impl(
     """Replace text in multiple files in the Daytona sandbox."""
     fs = _get_sandbox_fs(ctx)
     resolved_files = [_resolve_sandbox_path(ctx, f) for f in files]
-    result = _run_async_compat(lambda: _await_if_needed(fs.replace_in_files(resolved_files, pattern, replacement)))
+    result = fs.replace_in_files(resolved_files, pattern, replacement)
     return {
         "status": "ok",
         "files": resolved_files,
@@ -315,7 +298,7 @@ def _sandbox_get_file_info_impl(ctx: _SandboxFilesystemToolContext, path: str) -
     """Get metadata for a file or directory in the Daytona sandbox."""
     fs = _get_sandbox_fs(ctx)
     resolved = _resolve_sandbox_path(ctx, path)
-    info = _run_async_compat(lambda: _await_if_needed(fs.get_file_info(resolved)))
+    info = fs.get_file_info(resolved)
     if isinstance(info, dict):
         return {"status": "ok", "path": resolved, **info}
     mod_time = getattr(info, "mod_time", None)

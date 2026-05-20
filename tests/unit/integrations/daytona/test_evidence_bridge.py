@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fleet_rlm.integrations.daytona.evidence_bridge import (
+from fleet_rlm.integrations.daytona.isolation import (
     fetch_evidence,
     list_evidence,
     store_evidence,
@@ -107,7 +107,7 @@ class TestStoreEvidence:
             return mock_item
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
             side_effect=_fake_run,
         ):
             result = store_evidence(
@@ -130,7 +130,7 @@ class TestStoreEvidence:
         interp = _interpreter(repository=mock_repo, identity=identity)
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
             side_effect=RuntimeError("db connection failed"),
         ):
             result = store_evidence(interp, key="k", content="v")
@@ -154,7 +154,7 @@ class TestFetchEvidence:
         interp = _interpreter(repository=mock_repo, identity=identity)
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
             return_value=[mock_item],
         ):
             result = fetch_evidence(interp, scope="run", scope_id="child_result")
@@ -178,7 +178,7 @@ class TestListEvidence:
         interp = _interpreter(repository=MagicMock(), identity=identity)
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
             return_value=[mock_item],
         ):
             result = list_evidence(interp, scope="run")
@@ -213,7 +213,7 @@ class TestBridgeRegistration:
         interp = _interpreter()
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.store_evidence",
+            "fleet_rlm.integrations.daytona.isolation.store_evidence",
             return_value={"status": "skipped", "reason": "no_repository"},
         ):
             result = invoke_tool(interp, "store_evidence", ["key", "content"], {})
@@ -226,7 +226,7 @@ class TestBridgeRegistration:
         interp = _interpreter()
 
         with patch(
-            "fleet_rlm.integrations.daytona.evidence_bridge.fetch_evidence",
+            "fleet_rlm.integrations.daytona.isolation.fetch_evidence",
             return_value={"status": "skipped", "items": []},
         ):
             result = invoke_tool(interp, "fetch_evidence", [], {"scope": "run"})
@@ -241,7 +241,7 @@ class TestBridgeRegistration:
 
 class TestHostAttributePropagation:
     def test_propagate_parent_recursion_state_copies_host_refs(self) -> None:
-        from fleet_rlm.integrations.daytona.child_isolation import (
+        from fleet_rlm.integrations.daytona.isolation import (
             propagate_parent_recursion_state,
         )
 
@@ -269,7 +269,7 @@ class TestHostAttributePropagation:
         assert child._host_run_id is run_id
 
     def test_propagation_skips_when_parent_has_no_host_refs(self) -> None:
-        from fleet_rlm.integrations.daytona.child_isolation import (
+        from fleet_rlm.integrations.daytona.isolation import (
             propagate_parent_recursion_state,
         )
 

@@ -22,7 +22,12 @@ from fleet_rlm.runtime.execution.interpreter_support import (
     summarize_code,
 )
 
-from .async_compat import _await_if_needed, _run_async_compat
+from ._sandbox_constants import (
+    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
+    _FINAL_OUTPUT_MARKER,
+    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
+)
+from .async_compat import _run_sync_in_thread
 from .bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from .bridge_callbacks import (
     bridge_tools,
@@ -30,15 +35,300 @@ from .bridge_callbacks import (
     reject_unsupported_recursive_callbacks,
     requires_bridge,
 )
-from .interpreter_assets import (
-    _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
-    _FINAL_OUTPUT_MARKER,
-    _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
-    _base_setup_code,
-    _generic_submit_code,
-    _typed_submit_code,
-)
 from .session_runtime import DaytonaSandboxSession
+
+
+def _generic_submit_code() -> str:
+    return """
+def SUBMIT(**kwargs):
+    print(f"{_FINAL_OUTPUT_MARKER}{_json.dumps(kwargs, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}")
+    raise _FleetFinalOutput(kwargs)
+""".strip()
+
+
+def _base_setup_code(*, workspace_path: str, volume_mount_path: str) -> str:
+    return f"""
+import ast as _ast
+import glob as _glob
+import json as _json
+import os as _os
+import pathlib as _pathlib
+import re as _re
+import subprocess as _subprocess
+import fcntl as _fcntl
+from contextlib import contextmanager as _contextmanager
+
+REPO_PATH = {workspace_path!r}
+MEMORY_ROOT = _pathlib.Path({volume_mount_path!r})
+_FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
+_buffers = globals().get("_buffers", {{}})
+_os.makedirs(REPO_PATH, exist_ok=True)
+_os.chdir(REPO_PATH)
+
+def resolve_path(path: str) -> str:
+    candidate = _pathlib.Path(str(path or "").strip() or ".")
+    if candidate.is_absolute():
+        return str(candidate)
+    return str(_pathlib.Path(REPO_PATH) / candidate)
+
+def _resolve_workspace_path(path: str) -> tuple[str | None, str | None]:
+    raw = str(path or "").strip()
+    if not raw:
+        return None, "[error: workspace path cannot be empty]"
+    candidate = _pathlib.Path(raw)
+    if candidate.is_absolute():
+        return None, f"[error: invalid workspace path: {{raw}}]"
+    repo_real = _pathlib.Path(_os.path.realpath(REPO_PATH))
+    resolved = _pathlib.Path(
+        _os.path.realpath(_os.path.normpath(str(repo_real / candidate)))
+    )
+    if resolved != repo_real and not str(resolved).startswith(str(repo_real) + _os.sep):
+        return None, f"[error: invalid workspace path: {{raw}}]"
+    return str(resolved), None
+
+def run(command: str, cwd: str | None = None) -> dict[str, object]:
+    completed = _subprocess.run(
+        command,
+        shell=True,
+        cwd=resolve_path(cwd) if cwd else REPO_PATH,
+        capture_output=True,
+        text=True,
+    )
+    return {{
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "ok": completed.returncode == 0,
+    }}
+
+def read_file(path: str) -> str:
+    with open(resolve_path(path), "r", encoding="utf-8", errors="replace") as handle:
+        return handle.read()
+
+def list_files(path: str = ".") -> list[str]:
+    target = _pathlib.Path(resolve_path(path))
+    if not target.exists():
+        return []
+    return sorted(str(item) for item in target.iterdir())
+
+def find_files(path: str = ".", pattern: str = "*") -> list[str]:
+    target = _pathlib.Path(resolve_path(path))
+    if not target.exists():
+        return []
+    return sorted(_glob.glob(str(target / pattern), recursive=True))
+
+def peek(text: str, start: int = 0, length: int = 2000) -> str:
+    source = str(text or "")
+    start_idx = max(0, int(start))
+    window = max(0, int(length))
+    return source[start_idx : start_idx + window]
+
+def grep(text: str, pattern: str, *, context: int = 0) -> list[str]:
+    if not text:
+        return []
+    compiled = _re.compile(pattern)
+    lines = str(text).splitlines()
+    radius = max(0, int(context))
+    results: list[str] = []
+    for index, line in enumerate(lines):
+        if not compiled.search(line):
+            continue
+        start_idx = max(0, index - radius)
+        end_idx = min(len(lines), index + radius + 1)
+        results.append("\\n".join(lines[start_idx:end_idx]))
+    return results
+
+def extract_python_ast(path: str) -> str:
+    target = _pathlib.Path(resolve_path(path))
+    if not target.exists():
+        return "File not found."
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        source = f.read()
+    try:
+        tree = _ast.parse(source)
+    except Exception as e:
+        return f"AST Parse Error: {{e}}"
+    results = []
+    for node in tree.body:
+        if isinstance(node, _ast.ClassDef):
+            methods = [m.name for m in node.body if isinstance(m, _ast.FunctionDef)]
+            doc = _ast.get_docstring(node) or ""
+            results.append({{"type": "Class", "name": node.name, "methods": methods, "doc": doc[:200]}})
+        elif isinstance(node, _ast.FunctionDef):
+            doc = _ast.get_docstring(node) or ""
+            results.append({{"type": "Function", "name": node.name, "doc": doc[:200]}})
+    return _json.dumps(results, indent=2)
+
+_processes = globals().get("_processes", {{}})
+
+def start_background_process(process_id: str, command: str) -> str:
+    if process_id in _processes:
+        return f"Process {{process_id}} is already running."
+    import threading as _threading
+    import collections as _collections
+    proc = _subprocess.Popen(
+        command, shell=True, cwd=REPO_PATH,
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True
+    )
+    log_buffer = _collections.deque(maxlen=1000)
+    def _read_output():
+        for line in proc.stdout:
+            log_buffer.append(line)
+    t = _threading.Thread(target=_read_output, daemon=True)
+    t.start()
+    _processes[process_id] = {{"proc": proc, "logs": log_buffer}}
+    return f"Started process {{process_id}} (PID {{proc.pid}})"
+
+def read_process_logs(process_id: str, tail: int = 50) -> str:
+    if process_id not in _processes:
+        return f"Process {{process_id}} is not running."
+    pinfo = _processes[process_id]
+    proc = pinfo["proc"]
+    logs = pinfo["logs"]
+    status = "RUNNING" if proc.poll() is None else f"EXITED({{proc.returncode}})"
+    lines = list(logs)[-tail:]
+    return f"Status: {{status}}\\nLogs:\\n" + "".join(lines)
+
+def kill_process(process_id: str) -> str:
+    if process_id not in _processes:
+        return f"Process {{process_id}} is not running."
+    proc = _processes.pop(process_id)["proc"]
+    if proc.poll() is None:
+        proc.terminate()
+        return f"Terminated process {{process_id}}."
+    return f"Process {{process_id}} was already exited."
+
+
+def add_buffer(name: str, item: object) -> dict[str, object]:
+    key = str(name or "").strip() or "default"
+    items = _buffers.setdefault(key, [])
+    items.append(item)
+    return {{"status": "ok", "name": key, "count": len(items)}}
+
+def get_buffer(name: str) -> list[object]:
+    key = str(name or "").strip() or "default"
+    return list(_buffers.get(key, []))
+
+def clear_buffer(name: str | None = None) -> dict[str, object]:
+    key = str(name or "").strip()
+    if key:
+        _buffers.pop(key, None)
+        return {{"status": "ok", "scope": "single", "name": key}}
+    _buffers.clear()
+    return {{"status": "ok", "scope": "all"}}
+
+def _resolve_persistent_path(path: str, *, default_root: _pathlib.Path) -> tuple[str | None, str | None]:
+    raw = str(path or "").strip()
+    if not raw:
+        return None, f"[error: volume path cannot be empty]"
+    if not MEMORY_ROOT.exists():
+        return None, f"[error: no volume mounted at {{MEMORY_ROOT}}]"
+    candidate = _pathlib.Path(raw)
+    if candidate.is_absolute():
+        resolved = _pathlib.Path(_os.path.realpath(_os.path.normpath(str(candidate))))
+    else:
+        resolved = _pathlib.Path(_os.path.realpath(_os.path.normpath(str(default_root / candidate))))
+    memory_real = _pathlib.Path(_os.path.realpath(str(MEMORY_ROOT)))
+    if resolved != memory_real and not str(resolved).startswith(str(memory_real) + _os.sep):
+        return None, f"[error: invalid volume path: {{raw}}]"
+    return str(resolved), None
+
+def save_to_volume(path: str, content: str) -> str:
+    full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
+    if path_error is not None or full is None:
+        return path_error or "[error: invalid volume path]"
+    lock_path = full + ".lock"
+    _os.makedirs(_os.path.dirname(full) or str(MEMORY_ROOT), exist_ok=True)
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
+    return full
+
+def load_from_volume(path: str) -> str:
+    full, path_error = _resolve_persistent_path(path, default_root=MEMORY_ROOT)
+    if path_error is not None or full is None:
+        return path_error or "[error: invalid volume path]"
+    if not _os.path.isfile(full):
+        return f"[error: file not found: {{full}}]"
+    with open(full, "r", encoding="utf-8", errors="replace") as handle:
+        return handle.read()
+
+def workspace_write(path: str, content: str) -> str:
+    full, path_error = _resolve_workspace_path(path)
+    if path_error is not None or full is None:
+        return path_error or "[error: invalid workspace path]"
+    lock_path = full + ".lock"
+    _os.makedirs(_os.path.dirname(full) or REPO_PATH, exist_ok=True)
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
+    return full
+
+def workspace_read(path: str) -> str:
+    full, path_error = _resolve_workspace_path(path)
+    if path_error is not None or full is None:
+        return path_error or "[error: invalid workspace path]"
+    if not _os.path.isfile(full):
+        return f"[error: file not found: {{full}}]"
+    with open(full, "r", encoding="utf-8", errors="replace") as handle:
+        return handle.read()
+
+def workspace_append(path: str, content: str) -> str:
+    full, path_error = _resolve_workspace_path(path)
+    if path_error is not None or full is None:
+        return path_error or "[error: invalid workspace path]"
+    lock_path = full + ".lock"
+    _os.makedirs(_os.path.dirname(full) or REPO_PATH, exist_ok=True)
+    fd = _os.open(lock_path, _os.O_CREAT | _os.O_RDWR)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX)
+        with open(full, "a", encoding="utf-8") as handle:
+            handle.write(str(content))
+    finally:
+        _fcntl.flock(fd, _fcntl.LOCK_UN)
+        _os.close(fd)
+    return full
+
+class _FleetFinalOutput(Exception):
+    def __init__(self, value):
+        self.value = value
+        super().__init__("Final output submitted")
+
+{_generic_submit_code()}
+""".strip()
+
+
+def _typed_submit_code(output_fields: list[dict[str, Any]]) -> str:
+    sig_parts: list[str] = []
+    dict_parts: list[str] = []
+    for field in output_fields:
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        part = name
+        type_hint = str(field.get("type") or "").strip()
+        if type_hint:
+            part += f": {type_hint}"
+        sig_parts.append(part)
+        dict_parts.append(f'"{name}": {name}')
+    signature = ", ".join(sig_parts)
+    payload = ", ".join(dict_parts)
+    return f"""
+def SUBMIT({signature}):
+    result = {{{payload}}}
+    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(result, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
+    raise _FleetFinalOutput(result)
+""".strip()
 
 
 @dataclass(slots=True)
@@ -87,10 +377,10 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     _reject_unsupported_recursive_callbacks: Callable[..., None]
     _requires_bridge: Callable[..., bool]
 
-    async def _aclose_bridge(self: Any) -> None:
+    def _close_bridge(self: Any) -> None:
         pass
 
-    async def aensure_bridge(
+    def ensure_bridge(
         self: Any,
         *,
         session: DaytonaSandboxSession,
@@ -100,7 +390,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     ) -> DaytonaToolBridge:
         pass
 
-    async def aexecute_direct(
+    def execute_direct(
         self: Any,
         *,
         session: DaytonaSandboxSession,
@@ -122,7 +412,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
 class ExecutorWorkspace(Protocol):
     """Workspace/session surface needed by ``SandboxExecutor``."""
 
-    async def aensure_session(self) -> DaytonaSandboxSession:
+    def ensure_session(self) -> DaytonaSandboxSession:
         pass
 
 
@@ -193,7 +483,7 @@ def submit_signature(
     return tuple(normalized) or None
 
 
-async def aensure_setup(
+def ensure_setup(
     owner: DaytonaExecutionOwner,
     session: DaytonaSandboxSession,
     *,
@@ -202,16 +492,14 @@ async def aensure_setup(
     typed_submit_code: Callable[[list[dict[str, Any]]], str] = _typed_submit_code,
     submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None],
 ) -> Any:
-    context = await session.aensure_context()
+    context = session.ensure_context()
     if owner._setup_context_id != session.context_id or owner._setup_workspace_path != session.workspace_path:
-        result = await _await_if_needed(
-            session.sandbox.code_interpreter.run_code(
-                base_setup_code(
-                    workspace_path=session.workspace_path,
-                    volume_mount_path=owner.volume_mount_path,
-                ),
-                context=context,
-            )
+        result = session.sandbox.code_interpreter.run_code(
+            base_setup_code(
+                workspace_path=session.workspace_path,
+                volume_mount_path=owner.volume_mount_path,
+            ),
+            context=context,
         )
         if result.error:
             raise CodeInterpreterError(f"Failed to initialize Daytona sandbox helpers: {result.error.value}")
@@ -222,11 +510,9 @@ async def aensure_setup(
     current_submit_signature = submit_signature_fn()
     if current_submit_signature is None:
         if owner._submit_signature_key is not None:
-            result = await _await_if_needed(
-                session.sandbox.code_interpreter.run_code(
-                    generic_submit_code(),
-                    context=context,
-                )
+            result = session.sandbox.code_interpreter.run_code(
+                generic_submit_code(),
+                context=context,
             )
             if result.error:
                 raise CodeInterpreterError(f"Failed to restore generic SUBMIT: {result.error.value}")
@@ -234,11 +520,9 @@ async def aensure_setup(
         return context
 
     if current_submit_signature != owner._submit_signature_key:
-        result = await _await_if_needed(
-            session.sandbox.code_interpreter.run_code(
-                typed_submit_code(owner.output_fields or []),
-                context=context,
-            )
+        result = session.sandbox.code_interpreter.run_code(
+            typed_submit_code(owner.output_fields or []),
+            context=context,
         )
         if result.error:
             raise CodeInterpreterError(f"Failed to register typed SUBMIT: {result.error.value}")
@@ -246,7 +530,21 @@ async def aensure_setup(
     return context
 
 
-async def aensure_bridge(
+async def aensure_setup(
+    owner: DaytonaExecutionOwner,
+    session: DaytonaSandboxSession,
+    *,
+    submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None],
+) -> Any:
+    return await _run_sync_in_thread(
+        ensure_setup,
+        owner,
+        session,
+        submit_signature_fn=submit_signature_fn,
+    )
+
+
+def _ensure_bridge(
     owner: DaytonaExecutionOwner,
     *,
     session: DaytonaSandboxSession,
@@ -260,7 +558,7 @@ async def aensure_bridge(
     context_id = session.context_id
     bridge = owner._bridge
     if bridge is None or owner._bridge_sandbox_id != sandbox_id or owner._bridge_context_id != context_id:
-        await owner._aclose_bridge()
+        owner._close_bridge()
         bridge = bridge_cls(
             sandbox=session.sandbox,
             context=context,
@@ -270,8 +568,71 @@ async def aensure_bridge(
         owner._bridge_context_id = context_id
     else:
         bridge.bind_context(context)
-    await bridge.async_tools(tools)
+    bridge.sync_tools(tools)
     return bridge
+
+
+async def aensure_bridge(
+    owner: DaytonaExecutionOwner,
+    *,
+    session: DaytonaSandboxSession,
+    context: Any,
+    tools: dict[str, Callable[..., Any]],
+    bridge_cls: type[DaytonaToolBridge] | None = None,
+) -> DaytonaToolBridge:
+    return await _run_sync_in_thread(
+        _ensure_bridge,
+        owner,
+        session=session,
+        context=context,
+        tools=tools,
+        bridge_cls=bridge_cls,
+    )
+
+
+def execute_in_session(
+    owner: DaytonaExecutionOwner,
+    *,
+    session: DaytonaSandboxSession,
+    code: str,
+    variables: dict[str, Any],
+    envs: dict[str, str] | None = None,
+    bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
+    reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
+    requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
+    ensure_bridge_fn: Callable[..., Any] | None = None,
+    execute_direct_fn: Callable[..., Any] | None = None,
+    response_from_execution_fn: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse] | None = None,
+) -> DaytonaExecutionResponse:
+    callbacks = resolve_execution_callbacks(
+        owner,
+        bridge_tools_fn=bridge_tools_fn,
+        reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+        requires_bridge_fn=requires_bridge_fn,
+        ensure_bridge_fn=ensure_bridge_fn,
+        execute_direct_fn=execute_direct_fn,
+        response_from_execution_fn=response_from_execution_fn,
+    )
+    context = ensure_setup(
+        owner,
+        session,
+        submit_signature_fn=lambda: submit_signature(owner.output_fields),
+    )
+    prepared_code = prepare_execution_code(
+        owner,
+        code=code,
+        variables=variables,
+        reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
+    )
+    execution = run_prepared_execution(
+        owner,
+        session=session,
+        context=context,
+        code=prepared_code,
+        callbacks=callbacks,
+        envs=envs,
+    )
+    return callbacks.response_from_execution(execution)
 
 
 async def aexecute_in_session(
@@ -284,39 +645,24 @@ async def aexecute_in_session(
     bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
     reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
     requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
-    aensure_bridge_fn: Callable[..., Any] | None = None,
-    aexecute_direct_fn: Callable[..., Any] | None = None,
+    ensure_bridge_fn: Callable[..., Any] | None = None,
+    execute_direct_fn: Callable[..., Any] | None = None,
     response_from_execution_fn: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse] | None = None,
 ) -> DaytonaExecutionResponse:
-    callbacks = resolve_execution_callbacks(
+    return await _run_sync_in_thread(
+        execute_in_session,
         owner,
+        session=session,
+        code=code,
+        variables=variables,
+        envs=envs,
         bridge_tools_fn=bridge_tools_fn,
         reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
         requires_bridge_fn=requires_bridge_fn,
-        aensure_bridge_fn=aensure_bridge_fn,
-        aexecute_direct_fn=aexecute_direct_fn,
+        ensure_bridge_fn=ensure_bridge_fn,
+        execute_direct_fn=execute_direct_fn,
         response_from_execution_fn=response_from_execution_fn,
     )
-    context = await aensure_setup(
-        owner,
-        session,
-        submit_signature_fn=lambda: submit_signature(owner.output_fields),
-    )
-    prepared_code = prepare_execution_code(
-        owner,
-        code=code,
-        variables=variables,
-        reject_recursive_callbacks=callbacks.reject_recursive_callbacks,
-    )
-    execution = await arun_prepared_execution(
-        owner,
-        session=session,
-        context=context,
-        code=prepared_code,
-        callbacks=callbacks,
-        envs=envs,
-    )
-    return callbacks.response_from_execution(execution)
 
 
 def resolve_execution_callbacks(
@@ -325,8 +671,8 @@ def resolve_execution_callbacks(
     bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
     reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
     requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
-    aensure_bridge_fn: Callable[..., Any] | None = None,
-    aexecute_direct_fn: Callable[..., Any] | None = None,
+    ensure_bridge_fn: Callable[..., Any] | None = None,
+    execute_direct_fn: Callable[..., Any] | None = None,
     response_from_execution_fn: Callable[[DaytonaBridgeExecution], DaytonaExecutionResponse] | None = None,
 ) -> ExecutionCallbacks:
     return ExecutionCallbacks(
@@ -334,17 +680,17 @@ def resolve_execution_callbacks(
         reject_recursive_callbacks=reject_unsupported_recursive_callbacks_fn
         or owner._reject_unsupported_recursive_callbacks,
         requires_bridge=requires_bridge_fn or owner._requires_bridge,
-        ensure_bridge=aensure_bridge_fn
+        ensure_bridge=ensure_bridge_fn
         or (
-            lambda *, session, context, tools: owner.aensure_bridge(
+            lambda *, session, context, tools: owner.ensure_bridge(
                 session=session,
                 context=context,
                 tools=tools,
             )
         ),
-        execute_direct=aexecute_direct_fn
+        execute_direct=execute_direct_fn
         or (
-            lambda *, session, context, code, envs=None: owner.aexecute_direct(
+            lambda *, session, context, code, envs=None: owner.execute_direct(
                 session=session,
                 context=context,
                 code=code,
@@ -411,7 +757,7 @@ def structured_execution_error(*, reason: str, error: str) -> DaytonaExecutionRe
     return DaytonaExecutionResponse(error=payload)
 
 
-async def arun_prepared_execution(
+def run_prepared_execution(
     owner: DaytonaExecutionOwner,
     *,
     session: DaytonaSandboxSession,
@@ -422,17 +768,17 @@ async def arun_prepared_execution(
 ) -> DaytonaBridgeExecution:
     tools = callbacks.bridge_tools()
     if callbacks.requires_bridge(code, tools):
-        bridge = await callbacks.ensure_bridge(
+        bridge = callbacks.ensure_bridge(
             session=session,
             context=context,
             tools=tools,
         )
-        return await bridge.aexecute(
+        return bridge.execute(
             code=code,
             timeout=int(owner.execute_timeout or owner.timeout),
             tool_executor=lambda name, args, kwargs: owner._invoke_tool(name, args, kwargs),
         )
-    return await callbacks.execute_direct(
+    return callbacks.execute_direct(
         session=session,
         context=context,
         code=code,
@@ -440,7 +786,28 @@ async def arun_prepared_execution(
     )
 
 
-async def aexecute_direct(
+# Keep a-prefixed alias for backward compatibility
+async def arun_prepared_execution(
+    owner: DaytonaExecutionOwner,
+    *,
+    session: DaytonaSandboxSession,
+    context: Any,
+    code: str,
+    callbacks: ExecutionCallbacks,
+    envs: dict[str, str] | None = None,
+) -> DaytonaBridgeExecution:
+    return await _run_sync_in_thread(
+        run_prepared_execution,
+        owner,
+        session=session,
+        context=context,
+        code=code,
+        callbacks=callbacks,
+        envs=envs,
+    )
+
+
+def execute_direct(
     owner: DaytonaExecutionOwner,
     *,
     session: DaytonaSandboxSession,
@@ -458,21 +825,38 @@ async def aexecute_direct(
     def _on_stderr(message: Any) -> None:
         stderr_parts.append(str(getattr(message, "output", "") or ""))
 
-    result = await _await_if_needed(
-        session.sandbox.code_interpreter.run_code(
-            code,
-            context=context,
-            on_stdout=_on_stdout,
-            on_stderr=_on_stderr,
-            envs=envs,
-            timeout=int(owner.execute_timeout or owner.timeout),
-        )
+    result = session.sandbox.code_interpreter.run_code(
+        code,
+        context=context,
+        on_stdout=_on_stdout,
+        on_stderr=_on_stderr,
+        envs=envs,
+        timeout=int(owner.execute_timeout or owner.timeout),
     )
     return DaytonaBridgeExecution(
         result=result,
         stdout="".join(stdout_parts),
         stderr="".join(stderr_parts),
         callback_count=0,
+    )
+
+
+# Keep a-prefixed alias for backward compatibility
+async def aexecute_direct(
+    owner: DaytonaExecutionOwner,
+    *,
+    session: DaytonaSandboxSession,
+    context: Any,
+    code: str,
+    envs: dict[str, str] | None = None,
+) -> DaytonaBridgeExecution:
+    return await _run_sync_in_thread(
+        execute_direct,
+        owner,
+        session=session,
+        context=context,
+        code=code,
+        envs=envs,
     )
 
 
@@ -658,11 +1042,11 @@ def literal(value: Any) -> str:
 
 _DaytonaExecutionResponse = DaytonaExecutionResponse
 _ExecutionCallbacks = ExecutionCallbacks
-_aensure_bridge = aensure_bridge
-_aensure_setup = aensure_setup
-_aexecute_direct = aexecute_direct
-_aexecute_in_session = aexecute_in_session
-_arun_prepared_execution = arun_prepared_execution
+_ensure_bridge = _ensure_bridge
+_ensure_setup = ensure_setup
+_execute_direct = execute_direct
+_execute_in_session = execute_in_session
+_run_prepared_execution = run_prepared_execution
 _extract_final_artifact = extract_final_artifact
 _finalize_execution_result = finalize_execution_result
 _inject_variables = inject_variables
@@ -674,6 +1058,13 @@ _safe_variables = safe_variables
 _sanitize_execution_code = sanitize_execution_code
 _structured_execution_error = structured_execution_error
 _submit_signature = submit_signature
+
+# Keep old a-prefixed module-level aliases for backward compatibility
+_aensure_bridge = aensure_bridge
+_aensure_setup = aensure_setup
+_aexecute_direct = aexecute_direct
+_aexecute_in_session = aexecute_in_session
+_arun_prepared_execution = arun_prepared_execution
 
 
 class SandboxExecutor:
@@ -722,27 +1113,30 @@ class SandboxExecutor:
         self._callback_owner._tools = self._tools
 
     def reset(self) -> None:
-        _run_async_compat(self.areset)
-
-    async def areset(self) -> None:
-        await self.aclose_bridge()
+        self.close_bridge()
         self._setup_context_id = None
         self._setup_workspace_path = None
         self._submit_signature_key = None
 
-    def close_bridge(self) -> None:
-        _run_async_compat(self.aclose_bridge)
+    async def areset(self) -> None:
+        await _run_sync_in_thread(self.reset)
 
-    async def aclose_bridge(self) -> None:
+    def close_bridge(self) -> None:
         bridge = self._bridge
         self._bridge = None
         self._bridge_sandbox_id = None
         self._bridge_context_id = None
         if bridge is not None:
-            await bridge.aclose()
+            bridge.close()
+
+    async def aclose_bridge(self) -> None:
+        await _run_sync_in_thread(self.close_bridge)
+
+    def _close_bridge(self) -> None:
+        self.close_bridge()
 
     async def _aclose_bridge(self) -> None:
-        await self.aclose_bridge()
+        await _run_sync_in_thread(self._close_bridge)
 
     def _bridge_tools(self) -> dict[str, Callable[..., Any]]:
         self._callback_owner._tools = self._tools
@@ -768,24 +1162,10 @@ class SandboxExecutor:
         variables: dict[str, Any] | None = None,
         *,
         execution_profile: ExecutionProfile | None = None,
-    ) -> str | FinalOutput:
-        return _run_async_compat(
-            self.aexecute,
-            code,
-            variables,
-            execution_profile=execution_profile,
-        )
-
-    async def aexecute(
-        self,
-        code: str,
-        variables: dict[str, Any] | None = None,
-        *,
-        execution_profile: ExecutionProfile | None = None,
         envs: dict[str, str] | None = None,
     ) -> str | FinalOutput:
-        session = await self._workspace.aensure_session()
-        await session.astart_driver(timeout=float(self.execute_timeout or self.timeout))
+        session = self._workspace.ensure_session()
+        session.start_driver(timeout=float(self.execute_timeout or self.timeout))
         safe_vars = self.safe_variables(variables)
         profile = execution_profile or self.default_execution_profile
         profile_value = profile.value if hasattr(profile, "value") else str(profile)
@@ -800,7 +1180,7 @@ class SandboxExecutor:
             ),
         )
         try:
-            response = await self.aexecute_in_session(
+            response = self.execute_in_session(
                 session=session,
                 code=code,
                 variables=safe_vars,
@@ -829,11 +1209,40 @@ class SandboxExecutor:
             code_preview=code_preview,
         )
 
+    async def aexecute(
+        self,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        execution_profile: ExecutionProfile | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> str | FinalOutput:
+        return await _run_sync_in_thread(
+            self.execute,
+            code,
+            variables,
+            execution_profile=execution_profile,
+            envs=envs,
+        )
+
     def safe_variables(self: Any, variables: dict[str, Any] | None) -> dict[str, Any]:
         return _safe_variables(variables)
 
     def submit_signature(self: Any) -> tuple[tuple[str, str], ...] | None:
         return _submit_signature(self.output_fields)
+
+    def ensure_setup(
+        self: Any,
+        session: DaytonaSandboxSession,
+        *,
+        submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None] | None = None,
+    ) -> Any:
+        submit_signature_fn = submit_signature_fn or self.submit_signature
+        return _ensure_setup(
+            self,
+            session,
+            submit_signature_fn=submit_signature_fn,
+        )
 
     async def aensure_setup(
         self: Any,
@@ -841,14 +1250,13 @@ class SandboxExecutor:
         *,
         submit_signature_fn: Callable[[], tuple[tuple[str, str], ...] | None] | None = None,
     ) -> Any:
-        submit_signature_fn = submit_signature_fn or self.submit_signature
-        return await _aensure_setup(
-            self,
+        return await _run_sync_in_thread(
+            self.ensure_setup,
             session,
             submit_signature_fn=submit_signature_fn,
         )
 
-    async def aensure_bridge(
+    def ensure_bridge(
         self: Any,
         *,
         session: DaytonaSandboxSession,
@@ -859,7 +1267,7 @@ class SandboxExecutor:
         if bridge_cls is None:
             owner_module = sys.modules.get(type(self._callback_owner).__module__)
             bridge_cls = getattr(owner_module, "DaytonaToolBridge", DaytonaToolBridge)
-        return await _aensure_bridge(
+        return _ensure_bridge(
             self,
             session=session,
             context=context,
@@ -867,7 +1275,23 @@ class SandboxExecutor:
             bridge_cls=bridge_cls,
         )
 
-    async def aexecute_in_session(
+    async def aensure_bridge(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        tools: dict[str, Callable[..., Any]],
+        bridge_cls: type[DaytonaToolBridge] | None = None,
+    ) -> DaytonaToolBridge:
+        return await _run_sync_in_thread(
+            self.ensure_bridge,
+            session=session,
+            context=context,
+            tools=tools,
+            bridge_cls=bridge_cls,
+        )
+
+    def execute_in_session(
         self: Any,
         *,
         session: DaytonaSandboxSession,
@@ -877,11 +1301,11 @@ class SandboxExecutor:
         bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
         reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
         requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
-        aensure_bridge_fn: Callable[..., Any] | None = None,
-        aexecute_direct_fn: Callable[..., Any] | None = None,
+        ensure_bridge_fn: Callable[..., Any] | None = None,
+        execute_direct_fn: Callable[..., Any] | None = None,
         response_from_execution_fn: Callable[[DaytonaBridgeExecution], _DaytonaExecutionResponse] | None = None,
     ) -> _DaytonaExecutionResponse:
-        return await _aexecute_in_session(
+        return _execute_in_session(
             self,
             session=session,
             code=code,
@@ -890,8 +1314,36 @@ class SandboxExecutor:
             bridge_tools_fn=bridge_tools_fn,
             reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
             requires_bridge_fn=requires_bridge_fn,
-            aensure_bridge_fn=aensure_bridge_fn,
-            aexecute_direct_fn=aexecute_direct_fn,
+            ensure_bridge_fn=ensure_bridge_fn,
+            execute_direct_fn=execute_direct_fn,
+            response_from_execution_fn=response_from_execution_fn,
+        )
+
+    async def aexecute_in_session(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        code: str,
+        variables: dict[str, Any] | None = None,
+        envs: dict[str, str] | None = None,
+        bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
+        reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
+        requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
+        ensure_bridge_fn: Callable[..., Any] | None = None,
+        execute_direct_fn: Callable[..., Any] | None = None,
+        response_from_execution_fn: Callable[[DaytonaBridgeExecution], _DaytonaExecutionResponse] | None = None,
+    ) -> _DaytonaExecutionResponse:
+        return await _run_sync_in_thread(
+            self.execute_in_session,
+            session=session,
+            code=code,
+            variables=variables,
+            envs=envs,
+            bridge_tools_fn=bridge_tools_fn,
+            reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
+            requires_bridge_fn=requires_bridge_fn,
+            ensure_bridge_fn=ensure_bridge_fn,
+            execute_direct_fn=execute_direct_fn,
             response_from_execution_fn=response_from_execution_fn,
         )
 
@@ -901,8 +1353,8 @@ class SandboxExecutor:
         bridge_tools_fn: Callable[[], dict[str, Callable[..., Any]]] | None = None,
         reject_unsupported_recursive_callbacks_fn: Callable[[str], None] | None = None,
         requires_bridge_fn: Callable[[str, dict[str, Callable[..., Any]]], bool] | None = None,
-        aensure_bridge_fn: Callable[..., Any] | None = None,
-        aexecute_direct_fn: Callable[..., Any] | None = None,
+        ensure_bridge_fn: Callable[..., Any] | None = None,
+        execute_direct_fn: Callable[..., Any] | None = None,
         response_from_execution_fn: Callable[[DaytonaBridgeExecution], _DaytonaExecutionResponse] | None = None,
     ) -> _ExecutionCallbacks:
         return _resolve_execution_callbacks(
@@ -910,8 +1362,8 @@ class SandboxExecutor:
             bridge_tools_fn=bridge_tools_fn,
             reject_unsupported_recursive_callbacks_fn=reject_unsupported_recursive_callbacks_fn,
             requires_bridge_fn=requires_bridge_fn,
-            aensure_bridge_fn=aensure_bridge_fn,
-            aexecute_direct_fn=aexecute_direct_fn,
+            ensure_bridge_fn=ensure_bridge_fn,
+            execute_direct_fn=execute_direct_fn,
             response_from_execution_fn=response_from_execution_fn,
         )
 
@@ -937,6 +1389,24 @@ class SandboxExecutor:
     def _structured_execution_error(*, reason: str, error: str) -> _DaytonaExecutionResponse:
         return _structured_execution_error(reason=reason, error=error)
 
+    def _run_prepared_execution(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        code: str,
+        callbacks: _ExecutionCallbacks,
+        envs: dict[str, str] | None = None,
+    ) -> DaytonaBridgeExecution:
+        return _run_prepared_execution(
+            self,
+            session=session,
+            context=context,
+            code=code,
+            callbacks=callbacks,
+            envs=envs,
+        )
+
     async def _arun_prepared_execution(
         self: Any,
         *,
@@ -946,12 +1416,28 @@ class SandboxExecutor:
         callbacks: _ExecutionCallbacks,
         envs: dict[str, str] | None = None,
     ) -> DaytonaBridgeExecution:
-        return await _arun_prepared_execution(
-            self,
+        return await _run_sync_in_thread(
+            self._run_prepared_execution,
             session=session,
             context=context,
             code=code,
             callbacks=callbacks,
+            envs=envs,
+        )
+
+    def execute_direct(
+        self: Any,
+        *,
+        session: DaytonaSandboxSession,
+        context: Any,
+        code: str,
+        envs: dict[str, str] | None = None,
+    ) -> DaytonaBridgeExecution:
+        return _execute_direct(
+            self,
+            session=session,
+            context=context,
+            code=code,
             envs=envs,
         )
 
@@ -963,8 +1449,8 @@ class SandboxExecutor:
         code: str,
         envs: dict[str, str] | None = None,
     ) -> DaytonaBridgeExecution:
-        return await _aexecute_direct(
-            self,
+        return await _run_sync_in_thread(
+            self.execute_direct,
             session=session,
             context=context,
             code=code,

@@ -1,166 +1,71 @@
-"""Async/sync compatibility bridge for the Daytona integration.
-
-TODO(sdk-sync): If the Daytona SDK (>=0.171) adds native synchronous wrappers,
-this persistent-background-loop runner (~120 LOC) can be eliminated entirely.
-Monitor the SDK changelog for sync client support.
-"""
+"""Async/sync boundary helpers for Daytona integration code."""
 
 from __future__ import annotations
 
 import asyncio
-import atexit
 import inspect
 import threading
-from typing import Any, Awaitable, Callable, Coroutine, TypeVar, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar, cast, overload
 
-_T = TypeVar("_T")
-
-
-class _AsyncCompatRunner:
-    """Keep one background event loop alive for sync Daytona compatibility calls."""
-
-    def __init__(self) -> None:
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
-        self._thread_id: int | None = None
-        self._started = threading.Event()
-        self._lock = threading.Lock()
-
-    def _thread_main(self) -> None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        self._loop = loop
-        self._thread_id = threading.get_ident()
-        self._started.set()
-        try:
-            loop.run_forever()
-        finally:
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            loop.close()
-
-    def _ensure_started(self) -> asyncio.AbstractEventLoop:
-        loop = self._loop
-        thread = self._thread
-        if loop is not None and not loop.is_closed() and thread is not None and thread.is_alive():
-            return loop
-
-        with self._lock:
-            loop = self._loop
-            thread = self._thread
-            if loop is not None and not loop.is_closed() and thread is not None and thread.is_alive():
-                return loop
-
-            self._loop = None
-            self._thread_id = None
-            self._started.clear()
-            self._thread = threading.Thread(
-                target=self._thread_main,
-                name="daytona-async-compat",
-                daemon=True,
-            )
-            self._thread.start()
-
-        self._started.wait()
-        loop = self._loop
-        if loop is None or loop.is_closed():
-            raise RuntimeError("Async compatibility runner failed to start.")
-        return loop
-
-    def run(self, awaitable: Awaitable[_T]) -> _T:
-        loop = self._ensure_started()
-        if self._thread_id == threading.get_ident():
-            raise RuntimeError("Async compatibility runner cannot be called from its own loop thread.")
-        future = asyncio.run_coroutine_threadsafe(
-            cast(Coroutine[Any, Any, _T], awaitable),
-            loop,
-        )
-        return future.result()
-
-    def shutdown(self) -> None:
-        loop = self._loop
-        thread = self._thread
-        if loop is None or loop.is_closed() or thread is None:
-            return
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=1)
-        self._loop = None
-        self._thread = None
-        self._thread_id = None
+T = TypeVar("T")
 
 
-_ASYNC_COMPAT_RUNNER = _AsyncCompatRunner()
-atexit.register(_ASYNC_COMPAT_RUNNER.shutdown)
-
-
-def _run_async_compat(
-    async_fn: Callable[..., Awaitable[_T]],
-    /,
-    *args: Any,
-    **kwargs: Any,
-) -> _T:
-    """Run an async implementation from sync code on one persistent loop."""
-    return _ASYNC_COMPAT_RUNNER.run(async_fn(*args, **kwargs))
-
-
-async def _await_if_needed(value: _T | Awaitable[_T]) -> _T:
+async def _await_if_needed(value: T | Awaitable[T]) -> T:
+    """Await SDK values that are awaitable and pass through sync values."""
     if inspect.isawaitable(value):
-        awaited = await cast(Any, value)
-        return cast(_T, awaited)
-    return value
+        return await cast(Awaitable[T], value)
+    return cast(T, value)
 
 
-def _sync(method: Callable[..., Awaitable[_T]]) -> Callable[..., _T]:
-    """Create a sync shim that delegates to *method* via ``_run_async_compat``."""
-
-    def wrapper(self: Any, *args: Any, **kwargs: Any) -> _T:
-        return _run_async_compat(method, self, *args, **kwargs)
-
-    return wrapper
+async def _run_sync_in_thread(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run a blocking sync Daytona call without blocking the caller's event loop."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-def sync_mirror(
-    *,
-    overrides: dict[str, str] | None = None,
-    skip: set[str] | None = None,
-) -> Callable[[type], type]:
-    """Class decorator that auto-generates sync shims for async methods.
+@overload
+def _run_async_compat(fn: Callable[..., Awaitable[T]], /, *args: Any, **kwargs: Any) -> T: ...
 
-    For every method ``afoo`` that is not in *skip* and has no matching
-    sync method already defined, a sync method ``foo`` is generated that
-    delegates to ``_run_async_compat(self.afoo, *args, **kwargs)``.
 
-    *overrides* maps async method names to custom sync method names when
-    the default prefix-stripping rule does not apply.
+@overload
+def _run_async_compat(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T: ...
+
+
+def _run_async_compat(fn: Callable[..., T | Awaitable[T]], /, *args: Any, **kwargs: Any) -> T:
+    """Run an async Daytona compatibility wrapper from synchronous callers.
+
+    If no loop is running in this thread, use ``asyncio.run``. If a loop is
+    already running, execute the coroutine on a short-lived background thread
+    so sync compatibility APIs stay usable from notebook/websocket contexts.
     """
-    overrides = overrides or {}
-    skip = skip or set()
+    result = fn(*args, **kwargs)
+    if not inspect.isawaitable(result):
+        return cast(T, result)
 
-    def decorator(cls: type) -> type:
-        for name, method in list(cls.__dict__.items()):
-            if name in skip:
-                continue
-            if not inspect.iscoroutinefunction(method):
-                continue
-            sync_name = overrides.get(name)
-            if sync_name is None:
-                if name.startswith("a") and len(name) > 1:
-                    sync_name = name[1:]
-                else:
-                    continue
-            if sync_name in cls.__dict__:
-                continue
+    awaitable = cast(Awaitable[T], result)
 
-            def make_sync_method(am: Callable[..., Awaitable[_T]]) -> Callable[..., _T]:
-                def sync_method(self: Any, *args: Any, **kwargs: Any) -> _T:
-                    return _run_async_compat(am, self, *args, **kwargs)
+    async def _consume() -> T:
+        return await awaitable
 
-                return sync_method
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_consume())
 
-            setattr(cls, sync_name, make_sync_method(method))
-        return cls
+    box: dict[str, Any] = {}
 
-    return decorator
+    def _runner() -> None:
+        try:
+            box["value"] = asyncio.run(_consume())
+        except BaseException as exc:  # pragma: no cover - background boundary
+            box["error"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+__all__ = ["_await_if_needed", "_run_async_compat", "_run_sync_in_thread"]

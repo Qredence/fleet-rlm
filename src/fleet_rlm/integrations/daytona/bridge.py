@@ -3,6 +3,8 @@
 Includes embedded broker assets (server code, tool wrapper templates) that
 were previously in bridge_assets.py.
 
+Uses the synchronous Daytona SDK directly — no async compatibility layer.
+
 FUTURE: If the Daytona SDK introduces a native callback or event system for
 sandbox-to-host communication, this Flask-based broker (~300 LOC) could be
 replaced. Monitor the SDK roadmap for webhook/callback infrastructure.
@@ -10,7 +12,6 @@ replaced. Monitor the SDK roadmap for webhook/callback infrastructure.
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import keyword
@@ -19,12 +20,14 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from threading import Thread
 from typing import Any, Callable
 
 from dspy.primitives import CodeInterpreterError
 
-from .async_compat import _await_if_needed, _run_async_compat
+from .async_compat import _run_sync_in_thread
 
 # ---------------------------------------------------------------------------
 # Embedded broker assets
@@ -312,14 +315,12 @@ class DaytonaToolBridge:
     def bind_context(self, context: Any) -> None:
         self.context = context
 
-    async def aensure_started(self) -> None:
+    def ensure_started(self) -> None:
         if self._broker_url is not None:
             return
-        await _await_if_needed(
-            self.sandbox.fs.upload_file(
-                _BROKER_SERVER_CODE.encode("utf-8"),
-                _BROKER_SERVER_PATH,
-            )
+        self.sandbox.fs.upload_file(
+            _BROKER_SERVER_CODE.encode("utf-8"),
+            _BROKER_SERVER_PATH,
         )
         from daytona import SessionExecuteRequest
 
@@ -327,36 +328,34 @@ class DaytonaToolBridge:
         for attempt in range(self.broker_start_retries + 1):
             session_id = f"broker-{uuid.uuid4().hex[:8]}"
             try:
-                await _await_if_needed(self.sandbox.process.create_session(session_id))
-                await _await_if_needed(
-                    self.sandbox.process.execute_session_command(
-                        session_id,
-                        SessionExecuteRequest(
-                            command=_BROKER_SESSION_COMMAND,
-                            run_async=True,
-                        ),
-                    )
+                self.sandbox.process.create_session(session_id)
+                self.sandbox.process.execute_session_command(
+                    session_id,
+                    SessionExecuteRequest(
+                        command=_BROKER_SESSION_COMMAND,
+                        run_async=True,
+                    ),
                 )
-                preview = await _await_if_needed(self.sandbox.get_preview_link(_BROKER_PORT))
+                preview = self.sandbox.get_preview_link(_BROKER_PORT)
                 self._broker_session_id = session_id
                 self._broker_url = str(preview.url).rstrip("/")
                 self._broker_token = str(getattr(preview, "token", "") or "")
-                await self._await_health(timeout=self.broker_health_timeout)
+                self._wait_health(timeout=self.broker_health_timeout)
                 return
             except Exception as exc:
                 last_error = exc
                 # Clean up the failed session attempt and reset state so
-                # the next attempt (or the next aensure_started call) starts
+                # the next attempt (or the next ensure_started call) starts
                 # from scratch instead of caching a broken broker.
                 self._broker_url = None
                 self._broker_token = None
                 self._broker_session_id = None
                 try:
-                    await _await_if_needed(self.sandbox.process.delete_session(session_id))
+                    self.sandbox.process.delete_session(session_id)
                 except Exception:
                     pass  # Best-effort session cleanup
                 if attempt < self.broker_start_retries:
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    time.sleep(0.5 * (attempt + 1))
                 continue
         raise CodeInterpreterError(
             f"Broker server failed to start within timeout "
@@ -364,33 +363,34 @@ class DaytonaToolBridge:
             f"{last_error}"
         )
 
-    def ensure_started(self) -> None:
-        _run_async_compat(self.aensure_started)
+    async def aensure_started(self) -> None:
+        await _run_sync_in_thread(self.ensure_started)
 
-    async def async_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
+    def register_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
         if not tools:
             return
-        await self.aensure_started()
+        self.ensure_started()
         for tool_name, tool_func in tools.items():
             if tool_name in self._injected_tools:
                 continue
             if not tool_name.isidentifier() or keyword.iskeyword(tool_name):
                 raise CodeInterpreterError(f"Invalid tool name: '{tool_name}'")
             wrapper_code = self._generate_tool_wrapper(tool_name, tool_func)
-            result = await _await_if_needed(
-                self.sandbox.code_interpreter.run_code(
-                    wrapper_code,
-                    context=self.context,
-                )
+            result = self.sandbox.code_interpreter.run_code(
+                wrapper_code,
+                context=self.context,
             )
             if result.error:
                 raise CodeInterpreterError(f"Failed to inject tool '{tool_name}': {result.error.value}")
             self._injected_tools.add(tool_name)
 
-    def sync_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
-        _run_async_compat(self.async_tools, tools)
+    async def async_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
+        await _run_sync_in_thread(self.register_tools, tools)
 
-    async def aexecute(
+    # Keep legacy alias for public API compatibility
+    sync_tools = register_tools
+
+    def execute_tool_call(
         self,
         *,
         code: str,
@@ -399,7 +399,7 @@ class DaytonaToolBridge:
         on_stdout: Callable[[str], None] | None = None,
         on_stderr: Callable[[str], None] | None = None,
     ) -> DaytonaBridgeExecution:
-        await self.aensure_started()
+        self.ensure_started()
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
 
@@ -415,39 +415,53 @@ class DaytonaToolBridge:
             if on_stderr is not None and text:
                 on_stderr(text)
 
-        execution_task = asyncio.create_task(
-            _await_if_needed(
-                self.sandbox.code_interpreter.run_code(
+        # Run code execution in a background thread so the main thread can
+        # poll for tool callbacks concurrently.
+        execution_result: list[Any] = []
+        execution_error: list[BaseException] = []
+        execution_done = False
+
+        def _run_code() -> None:
+            nonlocal execution_done
+            try:
+                result = self.sandbox.code_interpreter.run_code(
                     code,
                     context=self.context,
                     on_stdout=_handle_stdout,
                     on_stderr=_handle_stderr,
                     timeout=timeout,
                 )
-            )
-        )
+                execution_result.append(result)
+            except BaseException as exc:
+                execution_error.append(exc)
+            finally:
+                execution_done = True
+
+        code_thread = Thread(target=_run_code, daemon=True)
+        code_thread.start()
+
         try:
-            callback_count = await self._apoll_and_execute_tools(
-                code_task=execution_task,
+            callback_count = self._poll_and_execute_tools(
+                is_done=lambda: execution_done,
                 tool_executor=tool_executor,
             )
-            result = await execution_task
         except Exception:
-            if not execution_task.done():
-                execution_task.cancel()
-                try:
-                    await execution_task
-                except asyncio.CancelledError:
-                    pass
+            code_thread.join(timeout=5)
             raise
+
+        code_thread.join()
+
+        if execution_error:
+            raise execution_error[0]
+
         return DaytonaBridgeExecution(
-            result=result,
+            result=execution_result[0] if execution_result else None,
             stdout="".join(stdout_parts),
             stderr="".join(stderr_parts),
             callback_count=callback_count,
         )
 
-    def execute(
+    async def aexecute(
         self,
         *,
         code: str,
@@ -456,8 +470,8 @@ class DaytonaToolBridge:
         on_stdout: Callable[[str], None] | None = None,
         on_stderr: Callable[[str], None] | None = None,
     ) -> DaytonaBridgeExecution:
-        return _run_async_compat(
-            self.aexecute,
+        return await _run_sync_in_thread(
+            self.execute_tool_call,
             code=code,
             timeout=timeout,
             tool_executor=tool_executor,
@@ -465,7 +479,10 @@ class DaytonaToolBridge:
             on_stderr=on_stderr,
         )
 
-    async def aclose(self) -> None:
+    # Keep legacy alias for public API compatibility
+    execute = execute_tool_call
+
+    def close(self) -> None:
         session_id = self._broker_session_id
         self._broker_url = None
         self._broker_token = None
@@ -474,24 +491,24 @@ class DaytonaToolBridge:
         if not session_id:
             return
         try:
-            await _await_if_needed(self.sandbox.process.delete_session(session_id))
+            self.sandbox.process.delete_session(session_id)
         except Exception:
             return
 
-    def close(self) -> None:
-        _run_async_compat(self.aclose)
+    async def aclose(self) -> None:
+        await _run_sync_in_thread(self.close)
 
-    async def _await_health(self, timeout: float = 30.0) -> None:
+    def _wait_health(self, timeout: float = 30.0) -> None:
         broker_url = self._broker_url
         if broker_url is None:
             raise CodeInterpreterError("Broker URL was not initialized.")
         started = time.time()
         while time.time() - started < timeout:
             try:
-                if await asyncio.to_thread(self._check_health, broker_url):
+                if self._check_health(broker_url):
                     return
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                await asyncio.sleep(0.1)
+                time.sleep(0.1)
                 continue
         raise CodeInterpreterError("Broker server failed to start within timeout")
 
@@ -517,10 +534,10 @@ class DaytonaToolBridge:
     ) -> str:
         return generate_tool_wrapper(tool_name=tool_name, tool_func=tool_func)
 
-    async def _apoll_and_execute_tools(
+    def _poll_and_execute_tools(
         self,
         *,
-        code_task: asyncio.Task[Any],
+        is_done: Callable[[], bool],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> int:
         broker_url = self._broker_url
@@ -528,7 +545,6 @@ class DaytonaToolBridge:
             return 0
 
         callback_count = 0
-        inflight: dict[str, asyncio.Task[None]] = {}
 
         def _fetch_pending(max_items: int) -> list[dict[str, Any]]:
             request = urllib.request.Request(
@@ -557,7 +573,7 @@ class DaytonaToolBridge:
             with urllib.request.urlopen(request, timeout=5):
                 return
 
-        async def _execute_one(pending: dict[str, Any]) -> None:
+        def _execute_one(pending: dict[str, Any]) -> None:
             call_id = str(pending["id"])
             tool_name = str(pending.get("tool_name") or "")
             args = pending.get("args")
@@ -566,46 +582,55 @@ class DaytonaToolBridge:
             safe_args = list(args) if isinstance(args, list) else []
             safe_kwargs = {str(key): value for key, value in kwargs.items()} if isinstance(kwargs, dict) else {}
             try:
-                result = await asyncio.to_thread(tool_executor, tool_name, safe_args, safe_kwargs)
+                result = tool_executor(tool_name, safe_args, safe_kwargs)
             except Exception as exc:  # pragma: no cover - host callback boundary
                 result = {"error": f"{type(exc).__name__}: {exc}"}
             try:
-                await asyncio.to_thread(_post_result, call_id, result, claim_token)
+                _post_result(call_id, result, claim_token)
             except urllib.error.HTTPError as exc:
                 if exc.code not in {404, 409}:
                     raise
 
-        while not code_task.done() or inflight:
-            for call_id, task in list(inflight.items()):
-                if not task.done():
+        with ThreadPoolExecutor(max_workers=self.max_concurrent_tool_calls) as pool:
+            inflight: dict[str, Any] = {}  # call_id -> Future
+
+            while not is_done() or inflight:
+                # Reap completed futures
+                done_ids = [cid for cid, fut in inflight.items() if fut.done()]
+                for cid in done_ids:
+                    fut = inflight.pop(cid)
+                    # Propagate any unexpected exceptions from the future
+                    exc = fut.exception()
+                    if exc is not None:
+                        raise exc
+                    callback_count += 1
+
+                if is_done() and not inflight:
+                    break
+
+                if is_done():
+                    # Code is done but we still have inflight tool calls — just wait
+                    time.sleep(0.005)
                     continue
-                inflight.pop(call_id, None)
-                _ = await task
-                callback_count += 1
 
-            if code_task.done():
-                if inflight:
-                    await asyncio.sleep(0.005)
-                continue
-
-            capacity = self.max_concurrent_tool_calls - len(inflight)
-            if capacity <= 0:
-                await asyncio.sleep(0.01)
-                continue
-
-            try:
-                pending_items = await asyncio.to_thread(_fetch_pending, capacity)
-            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                await asyncio.sleep(0.01)
-                continue
-
-            for pending in pending_items:
-                call_id = str(pending.get("id") or "")
-                if not call_id or call_id in inflight:
+                capacity = self.max_concurrent_tool_calls - len(inflight)
+                if capacity <= 0:
+                    time.sleep(0.01)
                     continue
-                inflight[call_id] = asyncio.create_task(_execute_one(pending))
 
-            await asyncio.sleep(0.01)
+                try:
+                    pending_items = _fetch_pending(capacity)
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                    time.sleep(0.01)
+                    continue
+
+                for pending in pending_items:
+                    call_id = str(pending.get("id") or "")
+                    if not call_id or call_id in inflight:
+                        continue
+                    inflight[call_id] = pool.submit(_execute_one, pending)
+
+                time.sleep(0.01)
 
         return callback_count
 

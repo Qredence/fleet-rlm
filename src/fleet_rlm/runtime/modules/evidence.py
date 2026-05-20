@@ -15,7 +15,7 @@ class EvidenceSink(Protocol):
     """Structural surface for storing and listing cross-pass evidence.
 
     Implementations satisfy this protocol by shape — no inheritance required.
-    See ``fleet_rlm.integrations.daytona.evidence_bridge.DaytonaEvidenceSink``
+    See ``fleet_rlm.integrations.daytona.isolation.DaytonaEvidenceSink``
     for the production adapter.
     """
 

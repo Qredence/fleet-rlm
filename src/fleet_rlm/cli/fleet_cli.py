@@ -24,7 +24,7 @@ from typing import Any, Callable, cast
 
 import typer
 
-from fleet_rlm.integrations.daytona.snapshot_runtime import (
+from fleet_rlm.integrations.daytona.sdk_ops import (
     DEFAULT_SNAPSHOT_BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
 )

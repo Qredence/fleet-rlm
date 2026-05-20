@@ -172,7 +172,7 @@ async def test_initialize_mlflow_runtime_service_surfaces_local_upgrade_guidance
         lambda config: False,
     )
 
-    await initialize_mlflow_runtime_service(state, app_env="local")
+    await initialize_mlflow_runtime_service(state.diagnostics_deps, app_env="local")
 
     assert state.optional_service_status["mlflow"] == "degraded"
     assert state.optional_service_errors["mlflow"] == (

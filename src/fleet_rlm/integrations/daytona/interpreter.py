@@ -40,13 +40,18 @@ from .bridge_callbacks import (
     reject_unsupported_recursive_callbacks,
     requires_bridge,
 )
-from .child_delegation import ChildDelegation, build_delegate_child
-from .child_isolation import (
+from .isolation import (
+    ChildDelegation,
     ChildForkFallback,
     ChildIsolationMode,
     RLMChildIsolationError,
+    build_delegate_child,
     normalize_child_fork_fallback,
     normalize_child_isolation_mode,
+)
+from .models import (
+    ReconfigureOutcome,
+    WorkspaceConfig,
 )
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
@@ -54,7 +59,6 @@ from .runtime import (
 )
 from .sandbox_executor import SandboxExecutor
 from .session_runtime import DaytonaSandboxSession
-from .workspace_config import ReconfigureOutcome, WorkspaceConfig
 from .workspace_manager import WorkspaceManager
 
 
@@ -66,7 +70,7 @@ class DaytonaInterpreter(
 
     # Host-mediated evidence bridge references (v0.5.1+). Populated by the
     # WebSocket stream layer once identity is resolved; read by
-    # ``integrations.daytona.evidence_bridge``. Declared at class level so
+    # ``integrations.daytona.isolation``. Declared at class level so
     # type-checkers can see them.
     _host_repository: Any | None = None
     _host_identity: Any | None = None

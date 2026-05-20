@@ -14,15 +14,19 @@ from ..dependencies import (
     HTTPIdentityDep,
     LmDepsDep,
 )
-from ..runtime_services import (
+from ..runtime_services.diagnostics import (
+    build_runtime_status_response,
+    run_daytona_connection_test,
+    run_lm_connection_test,
+)
+from ..runtime_services.settings import (
     apply_runtime_settings_patch,
     build_runtime_settings_snapshot,
-    build_runtime_status_response,
+)
+from ..runtime_services.volumes import (
     load_volume_file_content,
     load_volume_list,
     load_volume_tree,
-    run_daytona_connection_test,
-    run_lm_connection_test,
 )
 from ..schemas.runtime import (
     RuntimeConnectivityTestResponse,

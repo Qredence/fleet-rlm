@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-import asyncio
+import inspect
 import json
 import threading
 from types import SimpleNamespace
@@ -11,21 +11,39 @@ import pytest
 from dspy.primitives import FinalOutput
 from dspy.primitives.code_interpreter import CodeInterpreterError
 
-from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution
+from fleet_rlm.integrations.daytona.bridge import DaytonaBridgeExecution, DaytonaToolBridge
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 from fleet_rlm.integrations.daytona.interpreter import (
     DaytonaInterpreter,
     RLMChildIsolationError,
 )
+from fleet_rlm.integrations.daytona.models import SandboxSpec
 from fleet_rlm.integrations.daytona.runtime import (
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
+from fleet_rlm.integrations.daytona.sandbox_executor import SandboxExecutor
 from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL, sandbox_owner_labels
 
 _FINAL_OUTPUT_MARKER = "__DSPY_FINAL_OUTPUT__"
+
+
+def test_daytona_public_async_surfaces_remain_coroutines() -> None:
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.astart)
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.ashutdown)
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.aexecute)
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.aconfigure_workspace)
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.aimport_session_state)
+    assert inspect.iscoroutinefunction(DaytonaInterpreter.aget_session)
+    assert inspect.iscoroutinefunction(DaytonaSandboxSession.aread_file)
+    assert inspect.iscoroutinefunction(DaytonaSandboxSession.awrite_file)
+    assert inspect.iscoroutinefunction(DaytonaSandboxSession.adelete)
+    assert inspect.iscoroutinefunction(DaytonaSandboxRuntime.acreate_workspace_session)
+    assert inspect.iscoroutinefunction(DaytonaSandboxRuntime.aresume_workspace_session)
+    assert inspect.iscoroutinefunction(DaytonaSandboxRuntime.areconcile_workspace_session)
+    assert inspect.iscoroutinefunction(SandboxExecutor.aexecute)
+    assert inspect.iscoroutinefunction(DaytonaToolBridge.aexecute)
 
 
 class _FakeExecutionResult:
@@ -188,7 +206,10 @@ class _FakeRuntime:
         self.fail_next_fork: Exception | None = None
         self.last_spec: object | None = None
 
-    async def acreate_workspace_session(
+    def close(self) -> None:
+        pass
+
+    def create_workspace_session(
         self,
         *,
         repo_url: str | None,
@@ -203,13 +224,13 @@ class _FakeRuntime:
         self.session.ref = ref
         self.session.volume_name = volume_name
         self.session.owner_thread_id = threading.get_ident()
-        self.session.owner_loop_id = id(asyncio.get_running_loop())
+        self.session.owner_thread_id = threading.get_ident()
         workspace_name = str(repo_url or "").rstrip("/").rsplit("/", 1)[-1].removesuffix(".git") or "repo"
         self.session.workspace_path = f"/workspace/{workspace_name}"
         del context_paths
         return self.session
 
-    async def aresume_workspace_session(
+    def resume_workspace_session(
         self,
         *,
         sandbox_id: str,
@@ -230,11 +251,11 @@ class _FakeRuntime:
         self.session.volume_name = volume_name
         self.session.workspace_path = workspace_path
         self.session.owner_thread_id = threading.get_ident()
-        self.session.owner_loop_id = id(asyncio.get_running_loop())
+        self.session.owner_thread_id = threading.get_ident()
         del context_sources
         return self.session
 
-    async def areconcile_workspace_session(
+    def reconcile_workspace_session(
         self,
         session: DaytonaSandboxSession,
         *,
@@ -251,20 +272,10 @@ class _FakeRuntime:
         session.ref = ref
         session.context_sources = []
         session.owner_thread_id = threading.get_ident()
-        session.owner_loop_id = id(asyncio.get_running_loop())
+        session.owner_thread_id = threading.get_ident()
         if repo_url:
             session.workspace_path = "/workspace/reconfigured"
         return session
-
-    def reconcile_workspace_session(
-        self,
-        session: DaytonaSandboxSession,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-    ) -> DaytonaSandboxSession:
-        raise AssertionError("internal Daytona flow should use areconcile_workspace_session")
 
     def fork_sandbox(
         self,
@@ -362,10 +373,10 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
         def bind_context(self, context: Any) -> None:
             captured["bound_context"] = context
 
-        async def async_tools(self, tools: dict[str, Any]) -> None:
+        def sync_tools(self, tools: dict[str, Any]) -> None:
             captured["tools"] = dict(tools)
 
-        async def aexecute(
+        def execute(
             self,
             *,
             code: str,
@@ -386,7 +397,7 @@ def test_daytona_interpreter_uses_bridge_for_llm_queries(monkeypatch) -> None:
                 callback_count=1,
             )
 
-        async def aclose(self) -> None:
+        def close(self) -> None:
             captured["closed"] = True
 
     monkeypatch.setattr(
@@ -416,10 +427,10 @@ def test_daytona_interpreter_bridge_detection_uses_cleaned_code(monkeypatch) -> 
         def bind_context(self, context: Any) -> None:
             captured["bound_context"] = context
 
-        async def async_tools(self, tools: dict[str, Any]) -> None:
+        def sync_tools(self, tools: dict[str, Any]) -> None:
             captured["tools"] = dict(tools)
 
-        async def aexecute(
+        def execute(
             self,
             *,
             code: str,
@@ -439,7 +450,7 @@ def test_daytona_interpreter_bridge_detection_uses_cleaned_code(monkeypatch) -> 
                 callback_count=1,
             )
 
-        async def aclose(self) -> None:
+        def close(self) -> None:
             captured["closed"] = True
 
     monkeypatch.setattr(
@@ -468,11 +479,11 @@ def test_daytona_interpreter_bridge_injection_error_propagates(monkeypatch) -> N
         def bind_context(self, context: Any) -> None:
             del context
 
-        async def async_tools(self, tools: dict[str, Any]) -> None:
+        def sync_tools(self, tools: dict[str, Any]) -> None:
             del tools
             raise CodeInterpreterError("Failed to inject tool 'store_evidence': invalid syntax")
 
-        async def aclose(self) -> None:
+        def close(self) -> None:
             pass
 
     monkeypatch.setattr(
@@ -601,7 +612,7 @@ def test_daytona_interpreter_resumes_session_when_loop_owner_changes() -> None:
     interpreter.start()
 
     runtime.session.owner_thread_id = -1
-    runtime.session.owner_loop_id = -1
+    runtime.session.owner_thread_id = -1
 
     ensured = interpreter._ensure_session_sync()
 
@@ -894,10 +905,10 @@ def test_daytona_interpreter_shutdown_closes_owned_runtime() -> None:
     runtime = _FakeRuntime()
     runtime.closed = 0
 
-    async def _aclose() -> None:
+    def _close() -> None:
         runtime.closed += 1
 
-    runtime.aclose = _aclose  # type: ignore[attr-defined]
+    runtime.close = _close  # type: ignore[attr-defined]
 
     interpreter = DaytonaInterpreter(runtime=runtime, owns_runtime=True)
 
@@ -932,15 +943,15 @@ def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_san
     close_driver_calls = 0
     delete_calls = 0
 
-    async def _adelete_context() -> None:
+    def _delete_context() -> None:
         nonlocal delete_context_calls
         delete_context_calls += 1
 
-    async def _aclose_driver() -> None:
+    def _close_driver() -> None:
         nonlocal close_driver_calls
         close_driver_calls += 1
 
-    async def _adelete() -> None:
+    def _delete() -> None:
         nonlocal delete_calls
         delete_calls += 1
 
@@ -950,9 +961,9 @@ def test_daytona_interpreter_shutdown_deletes_child_context_without_deleting_san
         context_sources=[],
         context_id="ctx-child",
         volume_name=None,
-        adelete_context=_adelete_context,
-        aclose_driver=_aclose_driver,
-        adelete=_adelete,
+        delete_context=_delete_context,
+        close_driver=_close_driver,
+        delete=_delete,
     )
     interpreter._session = fake_session  # type: ignore[assignment]
 

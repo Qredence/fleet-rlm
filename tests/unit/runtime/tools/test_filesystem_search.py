@@ -39,7 +39,7 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
         def __init__(self, session: Any) -> None:
             self.session = session
 
-        async def find_files(self, path: str, pattern: str) -> list[dict[str, Any]]:
+        def find_files(self, path: str, pattern: str) -> list[dict[str, Any]]:
             assert self.session.rebound is True
             return [{"file": path, "line": 7, "content": pattern}]
 
@@ -49,8 +49,10 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
             self.sandbox = type("_Sandbox", (), {})()
             self.sandbox.fs = _Fs(self)
 
-        async def _arebind_sandbox_if_needed(self) -> None:
+        def _rebind_sandbox_if_needed(self) -> None:
             self.rebound = True
+
+        _arebind_sandbox_if_needed = _rebind_sandbox_if_needed
 
         def _resolve_sandbox_path(self, path: str) -> str:
             return f"/workspace/{path}"
