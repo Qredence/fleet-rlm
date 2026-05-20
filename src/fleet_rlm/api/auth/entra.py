@@ -167,6 +167,8 @@ class EntraAuthProvider:
             registry = JWTClaimsRegistry(
                 iss={"essential": True, "value": expected_issuer},
                 aud={"essential": True, "value": self.audience},
+                exp={"essential": True},
+                iat={"essential": True},
             )
 
             obj = jwt.decode(token, key_set)

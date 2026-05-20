@@ -61,17 +61,15 @@ class FleetAgent(dspy.Module):
             desc = getattr(tool, "desc", getattr(tool, "__doc__", "No description available."))
             tool_lines.append(f"- {name}: {desc}")
 
-        instructions = "\n".join(
-            [
-                f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
-                "At each step output next_thought, next_tool_name, and next_tool_args.",
-                "Tool observations are appended to trajectory.",
-                "next_tool_args must be a JSON object for the selected tool.",
-                "Available tools:",
-                *tool_lines,
-                "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
-            ]
-        )
+        instructions = "\n".join([
+            f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
+            "At each step output next_thought, next_tool_name, and next_tool_args.",
+            "Tool observations are appended to trajectory.",
+            "next_tool_args must be a JSON object for the selected tool.",
+            "Available tools:",
+            *tool_lines,
+            "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
+        ])
 
         signature_builder = cast(Any, dspy.Signature)
         self.react_signature = (
@@ -116,7 +114,7 @@ class FleetAgent(dspy.Module):
                     trajectory=self._format_trajectory(trajectory),
                 )
                 tool_name = getattr(prediction, "next_tool_name", "")
-                if tool_name not in self.tools:
+                if tool_name and tool_name not in self.tools:
                     raise ValueError(f"Agent failed to select a valid tool: {tool_name!r}")
                 return prediction
             except ContextWindowExceededError:
@@ -152,7 +150,7 @@ class FleetAgent(dspy.Module):
 
                 pred = sync_call(self.planner, trajectory, **input_args)
                 tool_name = getattr(pred, "next_tool_name", "")
-                if tool_name not in self.tools:
+                if tool_name and tool_name not in self.tools:
                     raise ValueError(f"Agent failed to select a valid tool: {tool_name!r}")
             except ValueError as err:
                 logger.warning(f"Ending the trajectory: {err}")

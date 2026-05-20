@@ -48,14 +48,12 @@ class DevAuthProvider:
         debug_tenant = normalized_headers.get("x-debug-tenant-id")
         debug_user = normalized_headers.get("x-debug-user-id")
         if self._allow_debug_auth and debug_tenant and debug_user:
-            return self._normalize_claims(
-                {
-                    "tid": debug_tenant,
-                    "oid": debug_user,
-                    "email": normalized_headers.get("x-debug-email"),
-                    "name": normalized_headers.get("x-debug-name"),
-                }
-            )
+            return self._normalize_claims({
+                "tid": debug_tenant,
+                "oid": debug_user,
+                "email": normalized_headers.get("x-debug-email"),
+                "name": normalized_headers.get("x-debug-name"),
+            })
 
         authorization = normalized_headers.get("authorization", "")
         if authorization.lower().startswith("bearer "):
@@ -68,14 +66,12 @@ class DevAuthProvider:
             debug_tenant = str(query_params.get("debug_tenant_id", "")).strip()
             debug_user = str(query_params.get("debug_user_id", "")).strip()
             if self._allow_debug_auth and debug_tenant and debug_user:
-                return self._normalize_claims(
-                    {
-                        "tid": debug_tenant,
-                        "oid": debug_user,
-                        "email": query_params.get("debug_email"),
-                        "name": query_params.get("debug_name"),
-                    }
-                )
+                return self._normalize_claims({
+                    "tid": debug_tenant,
+                    "oid": debug_user,
+                    "email": query_params.get("debug_email"),
+                    "name": query_params.get("debug_name"),
+                })
             access_token = str(query_params.get("access_token", "")).strip()
             if self._allow_query_auth_tokens and access_token:
                 return self._decode_token(access_token)
@@ -91,7 +87,7 @@ class DevAuthProvider:
     def _decode_token(self, token: str) -> NormalizedIdentity:
         try:
             key = OctKey.import_key(self._jwt_secret)
-            registry = JWTClaimsRegistry()
+            registry = JWTClaimsRegistry(exp={"essential": True})
             obj = jwt.decode(token, key)
             registry.validate(obj.claims)
             claims = obj.claims

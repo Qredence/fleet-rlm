@@ -21,7 +21,7 @@ def _make_fake_predict(records: list[dict[str, Any]]):
             return dspy.Prediction(next_thought="fake_thought", next_tool_name="finish", next_tool_args={})
 
         async def acall(self, **kwargs):
-            return self(**kwargs)
+            return self.__call__(**kwargs)
 
     return _FakePredict
 
@@ -36,7 +36,7 @@ def _make_fake_extract(records: list[dict[str, Any]]):
             return dspy.Prediction(response="fake_response")
 
         async def acall(self, **kwargs):
-            return self(**kwargs)
+            return self.__call__(**kwargs)
 
     return _FakeExtract
 
@@ -86,7 +86,7 @@ def test_build_chat_agent_threads_delegate_lm_into_interpreter(monkeypatch: pyte
     delegate_lm = object()
     interpreter = SimpleNamespace()
     _factory.build_chat_agent(planner_lm=object(), interpreter=interpreter, delegate_lm=delegate_lm)
-    assert getattr(interpreter, "sub_lm", None) is delegate_lm or True  # Accept if it's threaded
+    assert getattr(interpreter, "sub_lm", None) is delegate_lm
 
 
 def test_build_chat_agent_supports_sync_context_manager(monkeypatch: pytest.MonkeyPatch):

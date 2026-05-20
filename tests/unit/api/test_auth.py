@@ -60,14 +60,12 @@ class _FakeWebSocket:
 async def test_dev_auth_accepts_debug_headers():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
     identity = await provider.authenticate_http(
-        _FakeRequest(
-            {
-                "x-debug-tenant-id": "tenant-123",
-                "x-debug-user-id": "user-456",
-                "x-debug-email": "alice@example.com",
-                "x-debug-name": "Alice",
-            }
-        )
+        _FakeRequest({
+            "x-debug-tenant-id": "tenant-123",
+            "x-debug-user-id": "user-456",
+            "x-debug-email": "alice@example.com",
+            "x-debug-name": "Alice",
+        })
     )
 
     assert identity.tenant_claim == "tenant-123"
@@ -79,14 +77,12 @@ async def test_dev_auth_accepts_debug_headers():
 @pytest.mark.asyncio
 async def test_dev_auth_accepts_hs256_jwt():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
-    token = _make_dev_token(
-        {
-            "tid": "tenant-xyz",
-            "oid": "user-abc",
-            "email": "bob@example.com",
-            "name": "Bob",
-        }
-    )
+    token = _make_dev_token({
+        "tid": "tenant-xyz",
+        "oid": "user-abc",
+        "email": "bob@example.com",
+        "name": "Bob",
+    })
 
     identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
@@ -127,14 +123,12 @@ async def test_dev_auth_accepts_websocket_query_debug_identity():
 @pytest.mark.asyncio
 async def test_dev_auth_accepts_websocket_query_access_token():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
-    token = _make_dev_token(
-        {
-            "tid": "tenant-ws",
-            "oid": "user-ws",
-            "email": "ws@example.com",
-            "name": "WS User",
-        }
-    )
+    token = _make_dev_token({
+        "tid": "tenant-ws",
+        "oid": "user-ws",
+        "email": "ws@example.com",
+        "name": "WS User",
+    })
 
     identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
 
@@ -455,12 +449,10 @@ async def test_dev_auth_blocks_debug_identity_when_disabled():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET, allow_debug_auth=False)
     with pytest.raises(AuthError) as exc:
         await provider.authenticate_http(
-            _FakeRequest(
-                {
-                    "x-debug-tenant-id": "tenant-123",
-                    "x-debug-user-id": "user-456",
-                }
-            )
+            _FakeRequest({
+                "x-debug-tenant-id": "tenant-123",
+                "x-debug-user-id": "user-456",
+            })
         )
     assert exc.value.status_code == 401
 

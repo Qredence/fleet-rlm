@@ -1061,7 +1061,7 @@ class _ExecutionConnectionLoop:
         self.session = session
         self.local_persist = local_persist
         self.execution_emitter = get_execution_emitter(diagnostics_deps)
-        self.stream_task: asyncio.Task[str | None] | None = None
+        self.stream_task: asyncio.Task[str | None] | asyncio.Task[None] | None = None
         self.pending_receive_task: asyncio.Task[object] | None = None
         self.pending_message = initial_message
 
@@ -1129,7 +1129,7 @@ class _ExecutionConnectionLoop:
                 ):
                     continue
 
-                asyncio.create_task(  # noqa: RUF006
+                self.stream_task = asyncio.create_task(
                     _background_execution_task(
                         msg=msg,
                         runtime=self.runtime,
