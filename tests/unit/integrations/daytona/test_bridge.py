@@ -114,3 +114,66 @@ def test_daytona_bridge_resets_state_after_all_retries_fail(
     assert bridge._broker_token is None
     assert bridge._broker_session_id is None
     assert len(sandbox.process.deleted_sessions) == 2
+
+
+def test_daytona_bridge_reuses_tool_executor_pool_until_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_pools: list[object] = []
+
+    class _TrackingPool:
+        def __init__(self, *, max_workers: int, thread_name_prefix: str | None = None) -> None:
+            self.max_workers = max_workers
+            self.thread_name_prefix = thread_name_prefix
+            self.shutdown_calls: list[tuple[bool, bool]] = []
+            created_pools.append(self)
+
+        def submit(self, fn, *args, **kwargs):  # pragma: no cover - should stay idle here
+            raise AssertionError("submit should not be called in this test")
+
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+            self.shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.bridge.ThreadPoolExecutor", _TrackingPool)
+
+    bridge = DaytonaToolBridge(sandbox=_FakeSandbox(), context=object())
+    bridge._broker_url = "https://preview.daytona.test/3000"
+
+    assert bridge._poll_and_execute_tools(is_done=lambda: True, tool_executor=lambda *_args: None) == 0
+    assert bridge._poll_and_execute_tools(is_done=lambda: True, tool_executor=lambda *_args: None) == 0
+    assert len(created_pools) == 1
+
+    bridge.close()
+
+    assert created_pools[0].shutdown_calls == [(False, True)]
+
+
+def test_daytona_bridge_execute_tool_call_uses_bounded_join(monkeypatch: pytest.MonkeyPatch) -> None:
+    join_calls: list[float | None] = []
+
+    class _FakeThread:
+        def __init__(self, *, target=None, daemon: bool | None = None) -> None:
+            self._target = target
+            self._daemon = daemon
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout: float | None = None) -> None:
+            join_calls.append(timeout)
+
+        def is_alive(self) -> bool:
+            return False
+
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.bridge.Thread", _FakeThread)
+    monkeypatch.setattr(DaytonaToolBridge, "ensure_started", lambda self: None)
+    monkeypatch.setattr(DaytonaToolBridge, "_poll_and_execute_tools", lambda self, **kwargs: 0)
+
+    bridge = DaytonaToolBridge(sandbox=_FakeSandbox(), context=object())
+
+    result = bridge.execute_tool_call(
+        code="print('ok')",
+        timeout=3,
+        tool_executor=lambda *_args: None,
+    )
+
+    assert result.callback_count == 0
+    assert join_calls == [pytest.approx(3.0)]

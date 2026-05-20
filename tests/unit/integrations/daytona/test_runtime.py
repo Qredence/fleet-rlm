@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 import subprocess
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -135,12 +136,10 @@ class _FakeClient:
         on_snapshot_create_logs=None,
     ):
         self.created_requests.append(request)
-        self.create_call_kwargs.append(
-            {
-                "timeout": timeout,
-                "on_snapshot_create_logs": on_snapshot_create_logs,
-            }
-        )
+        self.create_call_kwargs.append({
+            "timeout": timeout,
+            "on_snapshot_create_logs": on_snapshot_create_logs,
+        })
         return self.sandbox
 
     def get(self, sandbox_id: str):
@@ -433,6 +432,56 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
     runtime.close()
 
     assert fake_client.close_calls == 1
+
+
+def test_daytona_runtime_get_client_builds_client_once_under_concurrent_access(monkeypatch) -> None:
+    build_started = threading.Event()
+    release_build = threading.Event()
+    build_calls = 0
+    created_clients: list[_FakeClient] = []
+
+    def _build_client(config):
+        nonlocal build_calls
+        _ = config
+        build_calls += 1
+        build_started.set()
+        assert release_build.wait(timeout=1.0) is True
+        client = _FakeClient()
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        _build_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
+    )
+    results: list[_FakeClient] = []
+    errors: list[BaseException] = []
+
+    def _get_client() -> None:
+        try:
+            results.append(runtime._get_client())
+        except BaseException as exc:  # pragma: no cover - diagnostic capture
+            errors.append(exc)
+
+    first = threading.Thread(target=_get_client)
+    second = threading.Thread(target=_get_client)
+
+    first.start()
+    assert build_started.wait(timeout=1.0) is True
+    second.start()
+    release_build.set()
+    first.join(timeout=1.0)
+    second.join(timeout=1.0)
+
+    assert errors == []
+    assert build_calls == 1
+    assert len(results) == 2
+    assert len(created_clients) == 1
+    assert results[0] is results[1] is created_clients[0]
 
 
 @pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
@@ -808,6 +857,143 @@ def test_session_delete_context_keeps_sandbox_alive() -> None:
     assert session.context_id is None
     assert stop_calls == 0
     assert sandbox_delete_calls == 0
+
+
+def test_session_delete_context_rebinds_before_deleting_stale_context() -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    stale_deletes: list[str] = []
+    rebound_deletes: list[str] = []
+    stale_context = SimpleNamespace(id="ctx-1")
+    rebound_context = SimpleNamespace(id="ctx-1")
+
+    class _ContextCodeInterpreter:
+        def __init__(self, contexts: list[object], delete_calls: list[str]) -> None:
+            self._contexts = contexts
+            self._delete_calls = delete_calls
+
+        def list_contexts(self) -> list[object]:
+            return list(self._contexts)
+
+        def delete_context(self, context: object) -> None:
+            self._delete_calls.append(str(getattr(context, "id", "")))
+            self._contexts.remove(context)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self, contexts: list[object], delete_calls: list[str]) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter(contexts, delete_calls)
+
+    rebound_sandbox = _ContextSandbox([rebound_context], rebound_deletes)
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    session = DaytonaSandboxSession(
+        sandbox=_ContextSandbox([stale_context], stale_deletes),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id="ctx-1",
+    )
+    session._context = stale_context
+    session._runtime_ref = _RuntimeRef()
+    session.owner_thread_id = -1
+
+    session.delete_context()
+
+    assert stale_deletes == []
+    assert rebound_deletes == ["ctx-1"]
+    assert session._runtime_ref.calls == [("sbx-123", False)]
+    assert session.context_id is None
+    assert session._context is None
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs", "expected_calls"),
+    [
+        ("archive", {}, [("archive", None)]),
+        ("recover", {"timeout": 12.0}, [("recover", 12.0)]),
+        ("refresh_activity", {}, [("refresh_activity", None)]),
+        ("resize", {"cpu": 4, "memory": 8, "disk": 20}, [("resize", (4, 8, 20))]),
+        ("delete", {}, [("stop", 10), ("delete", None)]),
+    ],
+)
+def test_session_lifecycle_mutators_rebind_stale_sandbox(
+    method_name: str,
+    kwargs: dict[str, object],
+    expected_calls: list[tuple[str, object | None]],
+) -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    stale_calls: list[tuple[str, object | None]] = []
+    rebound_calls: list[tuple[str, object | None]] = []
+
+    class _LifecycleSandbox(_FakeSandbox):
+        def __init__(self, calls: list[tuple[str, object | None]]) -> None:
+            super().__init__()
+            self._calls = calls
+
+        def archive(self) -> None:
+            self._calls.append(("archive", None))
+
+        def recover(self, *, timeout: float = 60.0) -> None:
+            self._calls.append(("recover", timeout))
+
+        def refresh_activity(self) -> None:
+            self._calls.append(("refresh_activity", None))
+
+        def resize(self, resources: object, timeout: float | None = 60) -> None:
+            _ = timeout
+            self._calls.append((
+                "resize",
+                (
+                    getattr(resources, "cpu", None),
+                    getattr(resources, "memory", None),
+                    getattr(resources, "disk", None),
+                ),
+            ))
+
+        def stop(self, timeout: float = 10) -> None:
+            self._calls.append(("stop", timeout))
+
+        def delete(self) -> None:
+            self._calls.append(("delete", None))
+
+    rebound_sandbox = _LifecycleSandbox(rebound_calls)
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    session = DaytonaSandboxSession(
+        sandbox=_LifecycleSandbox(stale_calls),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+    session._runtime_ref = _RuntimeRef()
+    session.owner_thread_id = -1
+
+    getattr(session, method_name)(**kwargs)
+
+    assert stale_calls == []
+    assert rebound_calls == expected_calls
+    assert session.sandbox is rebound_sandbox
+    assert session._runtime_ref.calls == [("sbx-123", False)]
 
 
 def test_session_create_lsp_server_delegates_to_sandbox() -> None:

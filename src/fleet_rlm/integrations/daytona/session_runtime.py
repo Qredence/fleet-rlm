@@ -158,8 +158,12 @@ class DaytonaSandboxSession:
         await _run_sync_in_thread(self.close_driver)
 
     def delete_context(self) -> None:
+        previous_sandbox = self.sandbox
+        self._rebind_sandbox_if_needed()
         context = self._context
         self._context = None
+        if self.sandbox is not previous_sandbox:
+            context = None
         if context is None and self.context_id:
             with suppress(Exception):
                 existing_contexts = self.sandbox.code_interpreter.list_contexts()
@@ -216,34 +220,30 @@ class DaytonaSandboxSession:
         payload = content.encode("utf-8")
         callback = getattr(self, "execution_event_callback", None)
         if callable(callback):
-            callback(
-                {
-                    "phase": "progress",
-                    "timestamp": time.time(),
-                    "execution_profile": "durable_write",
-                    "code_hash": "durable-write",
-                    "code_preview": "sandbox.fs.upload_file",
-                    "event_kind": "durable_write_started",
-                    "path": resolved_path,
-                    "bytes_total": len(payload),
-                    "bytes_written": 0,
-                }
-            )
+            callback({
+                "phase": "progress",
+                "timestamp": time.time(),
+                "execution_profile": "durable_write",
+                "code_hash": "durable-write",
+                "code_preview": "sandbox.fs.upload_file",
+                "event_kind": "durable_write_started",
+                "path": resolved_path,
+                "bytes_total": len(payload),
+                "bytes_written": 0,
+            })
         self.sandbox.fs.upload_file(payload, resolved_path)
         if callable(callback):
-            callback(
-                {
-                    "phase": "progress",
-                    "timestamp": time.time(),
-                    "execution_profile": "durable_write",
-                    "code_hash": "durable-write",
-                    "code_preview": "sandbox.fs.upload_file",
-                    "event_kind": "durable_write_completed",
-                    "path": resolved_path,
-                    "bytes_total": len(payload),
-                    "bytes_written": len(payload),
-                }
-            )
+            callback({
+                "phase": "progress",
+                "timestamp": time.time(),
+                "execution_profile": "durable_write",
+                "code_hash": "durable-write",
+                "code_preview": "sandbox.fs.upload_file",
+                "event_kind": "durable_write_completed",
+                "path": resolved_path,
+                "bytes_total": len(payload),
+                "bytes_written": len(payload),
+            })
         return resolved_path
 
     async def awrite_file(self, path: str, content: str) -> str:
@@ -270,18 +270,21 @@ class DaytonaSandboxSession:
         await _run_sync_in_thread(self.delete)
 
     def archive(self) -> None:
+        self._rebind_sandbox_if_needed()
         self.sandbox.archive()
 
     async def aarchive(self) -> None:
         await _run_sync_in_thread(self.archive)
 
     def recover(self, *, timeout: float = 60.0) -> None:
+        self._rebind_sandbox_if_needed()
         self.sandbox.recover(timeout=timeout)
 
     async def arecover(self, *, timeout: float = 60.0) -> None:
         await _run_sync_in_thread(self.recover, timeout=timeout)
 
     def refresh_activity(self) -> None:
+        self._rebind_sandbox_if_needed()
         with suppress(Exception):
             self.sandbox.refresh_activity()
 
@@ -291,6 +294,7 @@ class DaytonaSandboxSession:
     def resize(self, *, cpu: int, memory: int, disk: int) -> None:
         from daytona import Resources
 
+        self._rebind_sandbox_if_needed()
         self.sandbox.resize(Resources(cpu=cpu, memory=memory, disk=disk))
 
     async def aresize(self, *, cpu: int, memory: int, disk: int) -> None:

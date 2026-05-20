@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from .async_compat import _run_sync_in_thread
@@ -80,21 +81,24 @@ class DaytonaSandboxRuntime:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
         self._client: Any | None = None
+        self._client_lock = threading.Lock()
         self._closed = False
 
     def _get_client(self) -> Any:
         """Return the cached sync Daytona client, building one if needed."""
-        if self._closed:
-            raise RuntimeError("Daytona runtime client is closed")
-        if self._client is None:
-            self._client = _build_daytona_client(self._resolved_config)
-        return self._client
+        with self._client_lock:
+            if self._closed:
+                raise RuntimeError("Daytona runtime client is closed")
+            if self._client is None:
+                self._client = _build_daytona_client(self._resolved_config)
+            return self._client
 
     def close(self) -> None:
         """Close the runtime and release the underlying client."""
-        self._closed = True
-        client = self._client
-        self._client = None
+        with self._client_lock:
+            self._closed = True
+            client = self._client
+            self._client = None
         if client is None:
             return
         close = getattr(client, "close", None)

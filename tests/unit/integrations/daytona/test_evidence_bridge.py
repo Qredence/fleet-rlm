@@ -102,13 +102,9 @@ class TestStoreEvidence:
 
         interp = _interpreter(repository=mock_repo, identity=identity, run_id=run_id)
 
-        def _fake_run(coro):
-            coro.close()
-            return mock_item
-
         with patch(
-            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
-            side_effect=_fake_run,
+            "fleet_rlm.integrations.daytona.isolation._run_async_compat",
+            return_value=mock_item,
         ):
             result = store_evidence(
                 interp,
@@ -130,7 +126,7 @@ class TestStoreEvidence:
         interp = _interpreter(repository=mock_repo, identity=identity)
 
         with patch(
-            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation._run_async_compat",
             side_effect=RuntimeError("db connection failed"),
         ):
             result = store_evidence(interp, key="k", content="v")
@@ -154,7 +150,7 @@ class TestFetchEvidence:
         interp = _interpreter(repository=mock_repo, identity=identity)
 
         with patch(
-            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
+            "fleet_rlm.integrations.daytona.isolation._run_async_compat",
             return_value=[mock_item],
         ):
             result = fetch_evidence(interp, scope="run", scope_id="child_result")
@@ -175,13 +171,22 @@ class TestListEvidence:
         mock_item.kind.value = "context"
         mock_item.importance = 5
 
-        interp = _interpreter(repository=MagicMock(), identity=identity)
+        mock_repo = MagicMock()
+        mock_repo.list_memory_items = MagicMock(return_value=object())
+        interp = _interpreter(repository=mock_repo, identity=identity)
+
+        def _fake_run_async_compat(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            return [mock_item]
 
         with patch(
-            "fleet_rlm.integrations.daytona.isolation.asyncio.run",
-            return_value=[mock_item],
+            "fleet_rlm.integrations.daytona.isolation._run_async_compat",
+            side_effect=_fake_run_async_compat,
         ):
             result = list_evidence(interp, scope="run")
+
+        assert mock_repo.list_memory_items.call_args is not None
+        assert mock_repo.list_memory_items.call_args.kwargs["user_id"] == identity.user_id
 
         assert result["status"] == "ok"
         assert len(result["items"]) == 1

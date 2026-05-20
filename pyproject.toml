@@ -148,6 +148,7 @@ override-dependencies = [
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
+py-modules = ["sitecustomize"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

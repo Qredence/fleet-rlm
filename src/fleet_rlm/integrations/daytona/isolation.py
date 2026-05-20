@@ -9,8 +9,6 @@ Merges:
 
 from __future__ import annotations
 
-import asyncio
-
 # ---------------------------------------------------------------------------
 # Child isolation policy
 # ---------------------------------------------------------------------------
@@ -28,6 +26,7 @@ from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
 from fleet_rlm.utils.paths import is_local_path
 
+from .async_compat import _run_async_compat
 from .errors import DaytonaDiagnosticError
 from .models import ContextSource, SandboxSpec
 from .runtime import DaytonaSandboxRuntime
@@ -93,8 +92,8 @@ def build_child_interpreter(
     delete_session_on_shutdown: bool,
     delete_context_on_shutdown: bool = False,
     remaining_llm_budget: int,
-    volume_name: str | None | object = _UNSET,
-    volume_subpath: str | None | object = _UNSET,
+    volume_name: str | object | None = _UNSET,
+    volume_subpath: str | object | None = _UNSET,
 ) -> Any:
     """Build a child interpreter, preferring the concrete interpreter hook."""
     fn = getattr(interpreter, "_build_child_interpreter", None)
@@ -455,6 +454,9 @@ class ChildDelegation:
         self._executor = executor
         self._owner = cast(ChildDelegateOwner, callback_owner)
 
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._owner, name)
+
     @property
     def isolation_metadata(self) -> dict[str, Any] | None:
         return self._owner.child_isolation_metadata
@@ -473,8 +475,8 @@ class ChildDelegation:
         delete_session_on_shutdown: bool,
         delete_context_on_shutdown: bool = False,
         remaining_llm_budget: int,
-        volume_name: str | None | object = _UNSET,
-        volume_subpath: str | None | object = _UNSET,
+        volume_name: str | object | None = _UNSET,
+        volume_subpath: str | object | None = _UNSET,
     ) -> Any:
         owner = self._owner
         child_volume_name = owner.volume_name if volume_name is _UNSET else cast(str | None, volume_name)
@@ -551,7 +553,7 @@ class ChildDelegation:
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         return _build_delegate_child_policy(
-            self._owner,
+            self,
             remaining_llm_budget=remaining_llm_budget,
         )
 
@@ -622,21 +624,20 @@ def store_evidence(
     )
 
     try:
-        item = asyncio.run(
-            repository.store_memory_item(
-                MemoryItemCreateRequest(
-                    tenant_id=identity.tenant_id,
-                    workspace_id=identity.workspace_id,
-                    user_id=identity.user_id,
-                    run_id=run_id,
-                    scope=MemoryScope(scope),
-                    scope_id=str(key),
-                    kind=MemoryKind(kind),
-                    source=MemorySource.TOOL,
-                    content_text=str(content),
-                    tags=list(tags or []),
-                )
-            )
+        item = _run_async_compat(
+            repository.store_memory_item,
+            MemoryItemCreateRequest(
+                tenant_id=identity.tenant_id,
+                workspace_id=identity.workspace_id,
+                user_id=identity.user_id,
+                run_id=run_id,
+                scope=MemoryScope(scope),
+                scope_id=str(key),
+                kind=MemoryKind(kind),
+                source=MemorySource.TOOL,
+                content_text=str(content),
+                tags=list(tags or []),
+            ),
         )
     except Exception as exc:
         logger.warning("store_evidence failed: %s", exc)
@@ -658,15 +659,14 @@ def fetch_evidence(
     from fleet_rlm.integrations.database.models_enums import MemoryScope
 
     try:
-        items = asyncio.run(
-            repository.list_memory_items(
-                tenant_id=identity.tenant_id,
-                workspace_id=identity.workspace_id,
-                user_id=identity.user_id,
-                scope=MemoryScope(scope),
-                scope_id=scope_id,
-                limit=limit,
-            )
+        items = _run_async_compat(
+            repository.list_memory_items,
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            scope=MemoryScope(scope),
+            scope_id=scope_id,
+            limit=limit,
         )
     except Exception as exc:
         logger.warning("fetch_evidence failed: %s", exc)
@@ -698,13 +698,13 @@ def list_evidence(
     from fleet_rlm.integrations.database.models_enums import MemoryScope
 
     try:
-        items = asyncio.run(
-            repository.list_memory_items(
-                tenant_id=identity.tenant_id,
-                workspace_id=identity.workspace_id,
-                scope=MemoryScope(scope),
-                limit=limit,
-            )
+        items = _run_async_compat(
+            repository.list_memory_items,
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            scope=MemoryScope(scope),
+            limit=limit,
         )
     except Exception as exc:
         logger.warning("list_evidence failed: %s", exc)

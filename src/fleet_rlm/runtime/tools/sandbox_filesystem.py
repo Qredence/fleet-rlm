@@ -99,7 +99,7 @@ def _run_session_fs_call(
     resolve = getattr(session, "_resolve_sandbox_path", None)
     resolved = resolve(path) if callable(resolve) else _resolve_sandbox_path(ctx, path)
     method = getattr(fs, method_name)
-    return method(resolved, *args)
+    return _run_async_compat(method, resolved, *args)
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ def _sandbox_write_file_impl(ctx: _SandboxFilesystemToolContext, path: str, cont
         raise RuntimeError("No Daytona filesystem available.")
     resolve = getattr(session, "_resolve_sandbox_path", None)
     upload_path = resolve(path) if callable(resolve) else resolved
-    fs.upload_file(payload, upload_path)
+    _run_async_compat(fs.upload_file, payload, upload_path)
     return {
         "status": "ok",
         "path": resolved,
@@ -263,13 +263,11 @@ def _sandbox_find_in_files_impl(ctx: _SandboxFilesystemToolContext, path: str, p
         if isinstance(match, dict):
             hits.append(match)
         else:
-            hits.append(
-                {
-                    "file": getattr(match, "file", ""),
-                    "line": getattr(match, "line", None),
-                    "content": getattr(match, "content", ""),
-                }
-            )
+            hits.append({
+                "file": getattr(match, "file", ""),
+                "line": getattr(match, "line", None),
+                "content": getattr(match, "content", ""),
+            })
     return {
         "status": "ok",
         "path": resolved,
@@ -294,7 +292,7 @@ def _sandbox_replace_in_files_impl(
     if fs is None:
         raise RuntimeError("No Daytona filesystem available.")
     resolved_files = [_resolve_sandbox_path(ctx, f) for f in files]
-    result = fs.replace_in_files(resolved_files, pattern, replacement)
+    result = _run_async_compat(fs.replace_in_files, resolved_files, pattern, replacement)
     return {
         "status": "ok",
         "files": resolved_files,

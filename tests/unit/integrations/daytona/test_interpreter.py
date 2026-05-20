@@ -1021,6 +1021,32 @@ def test_daytona_interpreter_context_mode_reuses_parent_session() -> None:
     }
 
 
+def test_daytona_interpreter_build_delegate_child_uses_delegation_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeRuntime()
+    interpreter = DaytonaInterpreter(runtime=runtime)
+    captured: dict[str, Any] = {}
+
+    def _fake_policy(target: Any, *, remaining_llm_budget: int) -> str:
+        captured["target"] = target
+        captured["remaining_llm_budget"] = remaining_llm_budget
+        return "child"
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.isolation._build_delegate_child_policy",
+        _fake_policy,
+    )
+
+    result = interpreter.build_delegate_child(remaining_llm_budget=7)
+
+    assert result == "child"
+    assert captured == {
+        "target": interpreter._delegation,
+        "remaining_llm_budget": 7,
+    }
+
+
 def test_daytona_interpreter_auto_child_uses_clean_subpath_with_volume() -> None:
     runtime = _FakeRuntime()
     runtime.session.volume_name = "workspace-volume"

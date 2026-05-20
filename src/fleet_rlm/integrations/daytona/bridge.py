@@ -22,7 +22,7 @@ import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Callable
 
 from dspy.primitives import CodeInterpreterError
@@ -311,6 +311,8 @@ class DaytonaToolBridge:
         self._broker_token: str | None = None
         self._broker_session_id: str | None = None
         self._injected_tools: set[str] = set()
+        self._tool_executor_pool: ThreadPoolExecutor | None = None
+        self._tool_executor_lock = Lock()
 
     def bind_context(self, context: Any) -> None:
         self.context = context
@@ -439,6 +441,7 @@ class DaytonaToolBridge:
 
         code_thread = Thread(target=_run_code, daemon=True)
         code_thread.start()
+        join_timeout = self._code_thread_join_timeout(timeout)
 
         try:
             callback_count = self._poll_and_execute_tools(
@@ -446,10 +449,12 @@ class DaytonaToolBridge:
                 tool_executor=tool_executor,
             )
         except Exception:
-            code_thread.join(timeout=5)
+            code_thread.join(timeout=join_timeout)
             raise
 
-        code_thread.join()
+        code_thread.join(timeout=join_timeout)
+        if code_thread.is_alive():
+            raise CodeInterpreterError("Bridge code execution thread did not finish after callback polling completed")
 
         if execution_error:
             raise execution_error[0]
@@ -484,6 +489,7 @@ class DaytonaToolBridge:
 
     def close(self) -> None:
         session_id = self._broker_session_id
+        self._shutdown_tool_executor_pool()
         self._broker_url = None
         self._broker_token = None
         self._broker_session_id = None
@@ -533,6 +539,25 @@ class DaytonaToolBridge:
         tool_func: Callable[..., Any],
     ) -> str:
         return generate_tool_wrapper(tool_name=tool_name, tool_func=tool_func)
+
+    def _code_thread_join_timeout(self, timeout: int) -> float:
+        return min(max(float(timeout), 1.0), 5.0)
+
+    def _get_tool_executor_pool(self) -> ThreadPoolExecutor:
+        with self._tool_executor_lock:
+            if self._tool_executor_pool is None:
+                self._tool_executor_pool = ThreadPoolExecutor(
+                    max_workers=self.max_concurrent_tool_calls,
+                    thread_name_prefix="daytona-tool-bridge",
+                )
+            return self._tool_executor_pool
+
+    def _shutdown_tool_executor_pool(self) -> None:
+        with self._tool_executor_lock:
+            pool = self._tool_executor_pool
+            self._tool_executor_pool = None
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def _poll_and_execute_tools(
         self,
@@ -591,46 +616,46 @@ class DaytonaToolBridge:
                 if exc.code not in {404, 409}:
                     raise
 
-        with ThreadPoolExecutor(max_workers=self.max_concurrent_tool_calls) as pool:
-            inflight: dict[str, Any] = {}  # call_id -> Future
+        pool = self._get_tool_executor_pool()
+        inflight: dict[str, Any] = {}  # call_id -> Future
 
-            while not is_done() or inflight:
-                # Reap completed futures
-                done_ids = [cid for cid, fut in inflight.items() if fut.done()]
-                for cid in done_ids:
-                    fut = inflight.pop(cid)
-                    # Propagate any unexpected exceptions from the future
-                    exc = fut.exception()
-                    if exc is not None:
-                        raise exc
-                    callback_count += 1
+        while not is_done() or inflight:
+            # Reap completed futures
+            done_ids = [cid for cid, fut in inflight.items() if fut.done()]
+            for cid in done_ids:
+                fut = inflight.pop(cid)
+                # Propagate any unexpected exceptions from the future
+                exc = fut.exception()
+                if exc is not None:
+                    raise exc
+                callback_count += 1
 
-                if is_done() and not inflight:
-                    break
+            if is_done() and not inflight:
+                break
 
-                if is_done():
-                    # Code is done but we still have inflight tool calls — just wait
-                    time.sleep(0.005)
-                    continue
+            if is_done():
+                # Code is done but we still have inflight tool calls — just wait
+                time.sleep(0.005)
+                continue
 
-                capacity = self.max_concurrent_tool_calls - len(inflight)
-                if capacity <= 0:
-                    time.sleep(0.01)
-                    continue
-
-                try:
-                    pending_items = _fetch_pending(capacity)
-                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                    time.sleep(0.01)
-                    continue
-
-                for pending in pending_items:
-                    call_id = str(pending.get("id") or "")
-                    if not call_id or call_id in inflight:
-                        continue
-                    inflight[call_id] = pool.submit(_execute_one, pending)
-
+            capacity = self.max_concurrent_tool_calls - len(inflight)
+            if capacity <= 0:
                 time.sleep(0.01)
+                continue
+
+            try:
+                pending_items = _fetch_pending(capacity)
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                time.sleep(0.01)
+                continue
+
+            for pending in pending_items:
+                call_id = str(pending.get("id") or "")
+                if not call_id or call_id in inflight:
+                    continue
+                inflight[call_id] = pool.submit(_execute_one, pending)
+
+            time.sleep(0.01)
 
         return callback_count
 

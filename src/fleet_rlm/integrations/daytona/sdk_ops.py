@@ -32,6 +32,9 @@ from .config import (
     build_daytona_client as _build_daytona_client,
 )
 from .config import (
+    classify_daytona_sdk_error as _classify_daytona_sdk_error,
+)
+from .config import (
     daytona_import_error as _daytona_import_error,
 )
 from .config import format_daytona_sdk_error as _format_daytona_sdk_error
@@ -357,29 +360,25 @@ def list_daytona_volume_tree(
                     children = _walk(sandbox, child, depth + 1)
                 else:
                     truncated = True
-                nodes.append(
-                    {
-                        "id": stable_tree_id(child.display_path),
-                        "name": name,
-                        "path": child.display_path,
-                        "type": "directory",
-                        "children": children,
-                        "modified_at": modified_iso,
-                    }
-                )
-                continue
-
-            counters["files"] += 1
-            nodes.append(
-                {
+                nodes.append({
                     "id": stable_tree_id(child.display_path),
                     "name": name,
                     "path": child.display_path,
-                    "type": "file",
-                    "size": getattr(entry, "size", None),
+                    "type": "directory",
+                    "children": children,
                     "modified_at": modified_iso,
-                }
-            )
+                })
+                continue
+
+            counters["files"] += 1
+            nodes.append({
+                "id": stable_tree_id(child.display_path),
+                "name": name,
+                "path": child.display_path,
+                "type": "file",
+                "size": getattr(entry, "size", None),
+                "modified_at": modified_iso,
+            })
         return nodes
 
     with _mounted_daytona_volume(volume_name) as sandbox:
@@ -516,14 +515,65 @@ def get_snapshot(
     try:
         snapshot = client.snapshot.get(name)
         return _snapshot_summary(snapshot)
-    except Exception:
-        logger.debug("snapshot_lookup_failed", extra={"name": name}, exc_info=True)
-        return None
+    except Exception as exc:
+        if _snapshot_lookup_missing(exc):
+            logger.debug("snapshot_lookup_missing", extra={"name": name}, exc_info=True)
+            return None
+        raise DaytonaDiagnosticError(
+            f"Daytona snapshot lookup failure: {_format_daytona_sdk_error(exc)}",
+            category="sandbox_snapshot_error",
+            phase="snapshot_lookup",
+        ) from exc
     finally:
         client.close()
 
 
 aget_snapshot = get_snapshot
+
+
+def _snapshot_lookup_missing(exc: BaseException) -> bool:
+    classification = _classify_daytona_sdk_error(exc)
+    if classification.status_code == 404:
+        return True
+    lowered = classification.message.lower()
+    return "snapshot" in lowered and "not found" in lowered
+
+
+def _snapshot_create_conflict(exc: BaseException) -> bool:
+    classification = _classify_daytona_sdk_error(exc)
+    lowered = classification.message.lower()
+    return classification.status_code in {400, 409} and any(
+        token in lowered for token in ("already exists", "conflict", "duplicate")
+    )
+
+
+def _wait_for_snapshot_refresh_target(
+    name: str,
+    *,
+    previous_snapshot_id: str | None,
+    config: ResolvedDaytonaConfig,
+    timeout: float = 30.0,
+) -> dict[str, Any] | None:
+    """Wait for a refreshed snapshot name to disappear or be replaced."""
+
+    deadline = _time.monotonic() + timeout
+    interval = 0.1
+
+    while _time.monotonic() < deadline:
+        current = get_snapshot(name, config=config)
+        if current is None:
+            return None
+        current_id = str(current.get("id") or "") or None
+        if previous_snapshot_id is None or current_id != previous_snapshot_id:
+            return current
+        _time.sleep(interval)
+        interval = min(interval * 2, 1.0)
+
+    raise DaytonaDiagnosticError(
+        f"Timed out waiting for Daytona snapshot '{name}' to finish refreshing",
+        category="sandbox_snapshot_error",
+        phase="snapshot_refresh",
+    )
 
 
 def create_snapshot(
@@ -587,14 +637,29 @@ def bootstrap_snapshot(
     if existing is not None and not refresh:
         return {**existing, "created": False, "refreshed": False}
     if existing is not None:
-        delete_snapshot(str(existing.get("name") or name), config=cfg)
+        previous_snapshot_id = str(existing.get("id") or "") or None
+        delete_snapshot(previous_snapshot_id or str(existing.get("name") or name), config=cfg)
+        replacement = _wait_for_snapshot_refresh_target(
+            name,
+            previous_snapshot_id=previous_snapshot_id,
+            config=cfg,
+        )
+        if replacement is not None:
+            return {**replacement, "created": False, "refreshed": True}
 
-    created = create_snapshot(
-        name=name,
-        base_image=base_image,
-        config=cfg,
-        on_logs=on_logs,
-    )
+    try:
+        created = create_snapshot(
+            name=name,
+            base_image=base_image,
+            config=cfg,
+            on_logs=on_logs,
+        )
+    except Exception as exc:
+        if _snapshot_create_conflict(exc):
+            replacement = get_snapshot(name, config=cfg)
+            if replacement is not None:
+                return {**replacement, "created": False, "refreshed": existing is not None}
+        raise
     return {**created, "created": True, "refreshed": existing is not None}
 
 
