@@ -117,7 +117,7 @@ class ExecutionSubscription(BaseModel):
         return (
             self.workspace_id == event.workspace_id
             and self.user_id == event.user_id
-            and self.session_id == event.session_id
+            and (not self.session_id or self.session_id == event.session_id)
         )
 
 

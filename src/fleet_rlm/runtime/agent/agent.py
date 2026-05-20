@@ -61,15 +61,17 @@ class FleetAgent(dspy.Module):
             desc = getattr(tool, "desc", getattr(tool, "__doc__", "No description available."))
             tool_lines.append(f"- {name}: {desc}")
 
-        instructions = "\n".join([
-            f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
-            "At each step output next_thought, next_tool_name, and next_tool_args.",
-            "Tool observations are appended to trajectory.",
-            "next_tool_args must be a JSON object for the selected tool.",
-            "Available tools:",
-            *tool_lines,
-            "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
-        ])
+        instructions = "\n".join(
+            [
+                f"You are an agent. Use tools only when needed to produce {output_names} from {input_names}.",
+                "At each step output next_thought, next_tool_name, and next_tool_args.",
+                "Tool observations are appended to trajectory.",
+                "next_tool_args must be a JSON object for the selected tool.",
+                "Available tools:",
+                *tool_lines,
+                "If you choose finish on the first step without using any tool, write next_thought as the exact final response to send to the user.",
+            ]
+        )
 
         signature_builder = cast(Any, dspy.Signature)
         self.react_signature = (

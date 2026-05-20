@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Mapping
 
 from fastapi import Request, WebSocket
@@ -48,12 +50,14 @@ class DevAuthProvider:
         debug_tenant = normalized_headers.get("x-debug-tenant-id")
         debug_user = normalized_headers.get("x-debug-user-id")
         if self._allow_debug_auth and debug_tenant and debug_user:
-            return self._normalize_claims({
-                "tid": debug_tenant,
-                "oid": debug_user,
-                "email": normalized_headers.get("x-debug-email"),
-                "name": normalized_headers.get("x-debug-name"),
-            })
+            return self._normalize_claims(
+                {
+                    "tid": debug_tenant,
+                    "oid": debug_user,
+                    "email": normalized_headers.get("x-debug-email"),
+                    "name": normalized_headers.get("x-debug-name"),
+                }
+            )
 
         authorization = normalized_headers.get("authorization", "")
         if authorization.lower().startswith("bearer "):
@@ -66,12 +70,14 @@ class DevAuthProvider:
             debug_tenant = str(query_params.get("debug_tenant_id", "")).strip()
             debug_user = str(query_params.get("debug_user_id", "")).strip()
             if self._allow_debug_auth and debug_tenant and debug_user:
-                return self._normalize_claims({
-                    "tid": debug_tenant,
-                    "oid": debug_user,
-                    "email": query_params.get("debug_email"),
-                    "name": query_params.get("debug_name"),
-                })
+                return self._normalize_claims(
+                    {
+                        "tid": debug_tenant,
+                        "oid": debug_user,
+                        "email": query_params.get("debug_email"),
+                        "name": query_params.get("debug_name"),
+                    }
+                )
             access_token = str(query_params.get("access_token", "")).strip()
             if self._allow_query_auth_tokens and access_token:
                 return self._decode_token(access_token)
@@ -86,6 +92,9 @@ class DevAuthProvider:
 
     def _decode_token(self, token: str) -> NormalizedIdentity:
         try:
+            header = _decode_jwt_segment(token, 0)
+            if header.get("alg") != "HS256":
+                raise AuthError("Invalid dev JWT algorithm", status_code=401)
             key = OctKey.import_key(self._jwt_secret)
             registry = JWTClaimsRegistry(exp={"essential": True})
             obj = jwt.decode(token, key)
@@ -114,3 +123,18 @@ class DevAuthProvider:
             name=name,
             raw_claims=dict(claims),
         )
+
+
+def _decode_jwt_segment(token: str, segment_index: int) -> dict[str, object]:
+    parts = token.split(".")
+    if len(parts) <= segment_index:
+        raise AuthError("Malformed JWT", status_code=401)
+    try:
+        padded = parts[segment_index] + "=" * ((4 - len(parts[segment_index]) % 4) % 4)
+        payload_bytes = base64.urlsafe_b64decode(padded)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, TypeError) as exc:
+        raise AuthError(f"Malformed JWT: {exc}", status_code=401) from exc
+    if not isinstance(payload, dict):
+        raise AuthError("Malformed JWT", status_code=401)
+    return payload

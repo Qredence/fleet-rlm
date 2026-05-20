@@ -70,7 +70,6 @@ from .transport import (
     _try_send_json,
     chat_startup_error_payload,
     parse_ws_message_or_send_error,
-    resolve_session_identity,
 )
 
 router = APIRouter(tags=["websocket"])
@@ -289,16 +288,11 @@ class _ExecutionWebSocketConnection:
                     )
 
                     # Connect to Event Bus for decoupled execution events
-                    workspace_id, user_id, session_id = resolve_session_identity(
-                        msg=initial_msg,
-                        workspace_id=session.canonical_workspace_id,
-                        user_id=session.canonical_user_id,
-                    )
                     emitter = get_execution_emitter(self.diagnostics_deps)
                     subscription = ExecutionSubscription(
-                        workspace_id=workspace_id,
-                        user_id=user_id,
-                        session_id=session_id,
+                        workspace_id=session.canonical_workspace_id,
+                        user_id=session.canonical_user_id,
+                        session_id="",
                     )
                     await emitter.connect(self.websocket, subscription, accept=False)
 

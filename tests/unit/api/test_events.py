@@ -115,6 +115,39 @@ async def test_execution_event_emitter_filters_by_subscription():
 
 
 @pytest.mark.asyncio
+async def test_execution_event_emitter_allows_workspace_user_subscription():
+    emitter = ExecutionEventEmitter()
+    ws_match = _FakeWebSocket()
+    ws_other = _FakeWebSocket()
+
+    await emitter.connect(
+        ws_match,  # type: ignore[arg-type]
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id=""),
+    )
+    await emitter.connect(
+        ws_other,  # type: ignore[arg-type]
+        ExecutionSubscription(workspace_id="default", user_id="bob", session_id=""),
+    )
+
+    await emitter.emit(
+        ExecutionEvent(
+            type="execution_started",
+            run_id="default:alice:session-new:1",
+            workspace_id="default",
+            user_id="alice",
+            session_id="session-new",
+            step=None,
+        )
+    )
+    await asyncio.sleep(0.01)
+
+    assert len(ws_match.sent) == 1
+    assert ws_other.sent == []
+    await emitter.disconnect(ws_match)  # type: ignore[arg-type]
+    await emitter.disconnect(ws_other)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
 async def test_execution_event_emitter_removes_stale_connections():
     emitter = ExecutionEventEmitter()
     ws_stale = _FakeWebSocket(fail_on_send=True)

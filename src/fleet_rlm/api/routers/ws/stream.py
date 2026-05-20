@@ -32,6 +32,7 @@ from ...events.event_adapter import (
 )
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
+    build_local_persist_fn,
     build_workspace_task_request,
     cancelled_event_payload,
     classify_stream_failure,
@@ -99,13 +100,6 @@ class WorkspaceTaskRequest:
     workspace_id: str | None = None
     cancel_check: Callable[[], bool] | None = None
     prepare: Callable[[], Awaitable[None]] | None = None
-
-
-@dataclass(slots=True)
-class _ResolvedSessionTarget:
-    workspace_id: str
-    user_id: str
-    sess_id: str
 
 
 def merge_trace_result_metadata(
@@ -848,20 +842,51 @@ async def _await_message_while_streaming(
 
 
 async def _background_execution_task(
+    *,
     msg: WSMessage,
+    session_cache: SessionCacheDeps,
     runtime: _PreparedChatRuntime,
     session: _ChatSessionState,
-    local_persist: LocalPersistFn,
     workspace_id: str,
     user_id: str,
     sess_id: str,
     execution_emitter: ExecutionEventEmitter,
-) -> None:
+) -> str | None:
     """Run execution in the background with its own agent context."""
     agent_context = await build_chat_agent_context(runtime)
     async with agent_context as agent:
         interpreter = getattr(agent, "interpreter", None)
         set_interpreter_default_profile(interpreter, runtime.cfg)
+
+        async def _noop_persist(
+            *,
+            include_volume_save: bool = True,
+            latest_user_message: str = "",
+        ) -> None:
+            _ = include_volume_save, latest_user_message
+
+        (
+            session.active_key,
+            session.active_manifest_path,
+            session.session_record,
+            session.last_loaded_docs_path,
+            session.orchestration_session,
+        ) = await switch_session_if_needed(
+            session_cache=session_cache,
+            agent=agent,
+            interpreter=interpreter,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            sess_id=sess_id,
+            owner_tenant_claim=session.owner_tenant_claim,
+            owner_user_claim=session.owner_user_claim,
+            active_key=None,
+            session_record=session.session_record,
+            last_loaded_docs_path=session.last_loaded_docs_path,
+            local_persist=_noop_persist,
+            persistence=runtime.persistence,
+            identity_rows=runtime.identity_rows,
+        )
 
         agent._db_session_id = (session.session_record or {}).get("db_session_id")
         agent._identity_rows = runtime.identity_rows
@@ -869,9 +894,16 @@ async def _background_execution_task(
             agent.interpreter._host_repository = runtime.persistence
             agent.interpreter._host_identity = runtime.identity_rows
             agent.interpreter._host_run_id = None
+        local_persist = build_local_persist_fn(
+            session_cache=session_cache,
+            runtime=runtime,
+            agent=agent,
+            interpreter=interpreter,
+            session=session,
+        )
 
         # Execute
-        await _process_chat_message(
+        return await _process_chat_message(
             websocket=None,  # Decoupled
             msg=msg,
             agent=agent,
@@ -986,56 +1018,6 @@ async def _handle_idle_non_turn_message(
     return False
 
 
-async def _resolve_session_target(
-    *,
-    session_cache: SessionCacheDeps,
-    agent: ChatAgentProtocol,
-    runtime: _PreparedChatRuntime,
-    interpreter: object | None,
-    session: _ChatSessionState,
-    local_persist: LocalPersistFn,
-    msg: WSMessage,
-) -> _ResolvedSessionTarget:
-    workspace_id, user_id, sess_id = resolve_session_identity(
-        msg=msg,
-        workspace_id=session.canonical_workspace_id,
-        user_id=session.canonical_user_id,
-    )
-    (
-        session.active_key,
-        session.active_manifest_path,
-        session.session_record,
-        session.last_loaded_docs_path,
-        session.orchestration_session,
-    ) = await switch_session_if_needed(
-        session_cache=session_cache,
-        agent=agent,
-        interpreter=interpreter,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sess_id=sess_id,
-        owner_tenant_claim=session.owner_tenant_claim,
-        owner_user_claim=session.owner_user_claim,
-        active_key=session.active_key,
-        session_record=session.session_record,
-        last_loaded_docs_path=session.last_loaded_docs_path,
-        local_persist=local_persist,
-        persistence=runtime.persistence,
-        identity_rows=runtime.identity_rows,
-    )
-    agent._db_session_id = (session.session_record or {}).get("db_session_id")
-    agent._identity_rows = runtime.identity_rows
-    if agent.interpreter is not None:
-        agent.interpreter._host_repository = runtime.persistence
-        agent.interpreter._host_identity = runtime.identity_rows
-        agent.interpreter._host_run_id = None
-    return _ResolvedSessionTarget(
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sess_id=sess_id,
-    )
-
-
 class _ExecutionConnectionLoop:
     """Connection-scoped websocket message loop for one execution socket."""
 
@@ -1109,16 +1091,6 @@ class _ExecutionConnectionLoop:
                 if msg is None:
                     continue
 
-                target = await _resolve_session_target(
-                    session_cache=self.session_cache,
-                    agent=self.agent,
-                    runtime=self.runtime,
-                    interpreter=self.interpreter,
-                    local_persist=self.local_persist,
-                    session=self.session,
-                    msg=msg,
-                )
-
                 if await _handle_idle_non_turn_message(
                     websocket=self.websocket,
                     msg=msg,
@@ -1129,15 +1101,20 @@ class _ExecutionConnectionLoop:
                 ):
                     continue
 
+                workspace_id, user_id, sess_id = resolve_session_identity(
+                    msg=msg,
+                    workspace_id=self.session.canonical_workspace_id,
+                    user_id=self.session.canonical_user_id,
+                )
                 self.stream_task = asyncio.create_task(
                     _background_execution_task(
                         msg=msg,
+                        session_cache=self.session_cache,
                         runtime=self.runtime,
                         session=self.session,
-                        local_persist=self.local_persist,
-                        workspace_id=target.workspace_id,
-                        user_id=target.user_id,
-                        sess_id=target.sess_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        sess_id=sess_id,
                         execution_emitter=self.execution_emitter,
                     )
                 )

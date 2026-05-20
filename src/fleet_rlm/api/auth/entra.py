@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -141,16 +142,21 @@ class EntraAuthProvider:
         assert self.audience is not None
 
         try:
-            # Decode payload to extract 'tid' for issuer derivation
+            # Decode header/payload before verification to enforce local policy
+            # and extract 'tid' for issuer derivation.
             try:
                 parts = token.split(".")
                 if len(parts) < 2:
                     raise AuthError("Token missing payload", status_code=401)
-                import base64
 
+                header = _decode_jwt_segment(parts[0])
+                if header.get("alg") != "RS256":
+                    raise AuthError("Unsupported Entra token algorithm", status_code=401)
                 padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
                 payload_bytes = base64.urlsafe_b64decode(padded)
                 unverified_claims = json.loads(payload_bytes.decode("utf-8"))
+            except AuthError:
+                raise
             except Exception as exc:
                 raise AuthError(f"Malformed token: {exc}", status_code=401) from exc
 
@@ -256,3 +262,15 @@ class EntraAuthProvider:
             name=name,
             raw_claims=dict(claims),
         )
+
+
+def _decode_jwt_segment(segment: str) -> dict[str, object]:
+    try:
+        padded = segment + "=" * ((4 - len(segment) % 4) % 4)
+        payload_bytes = base64.urlsafe_b64decode(padded)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (TypeError, ValueError) as exc:
+        raise AuthError(f"Malformed token: {exc}", status_code=401) from exc
+    if not isinstance(payload, dict):
+        raise AuthError("Malformed token", status_code=401)
+    return payload
