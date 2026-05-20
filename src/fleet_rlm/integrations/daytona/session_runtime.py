@@ -119,17 +119,12 @@ class DaytonaSandboxSession:
         return self.owner_thread_id == threading.get_ident()
 
     def ensure_context(self) -> Any:
+        previous_sandbox = self.sandbox
+        self._rebind_sandbox_if_needed()
+        if self.sandbox is not previous_sandbox:
+            self._context = None
         if self._context is not None:
             return self._context
-        if not self.matches_current_async_owner() and self._runtime_ref is not None:
-            sandbox_id = self.sandbox_id
-            if sandbox_id:
-                with suppress(Exception):
-                    self.sandbox = self._runtime_ref._get_sandbox(
-                        sandbox_id,
-                        recover=False,
-                    )
-                    self.bind_current_async_owner()
         if self.context_id:
             existing_contexts: list[Any] | None = None
             with suppress(Exception):

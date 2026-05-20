@@ -4,8 +4,8 @@ This is a minimal source-compatible copy of DSPy 3.2.1's Avatar optimizer with
 only two behavior changes:
 
 1. It avoids deprecated ``prefix=`` arguments in signature field declarations.
-2. It imports ``ActionOutput`` directly from ``dspy.predict.avatar.models`` so
-   importing the optimizer no longer pulls in the deprecated avatar signatures.
+2. It defines a local ``ActionOutput`` model instead of importing avatar
+   signature models so importing the optimizer avoids deprecated field warnings.
 
 The Fleet codebase does not rely on ``AvatarOptimizer`` directly, but DSPy's
 package root imports this module eagerly, so keeping it warning-free removes the

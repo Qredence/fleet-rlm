@@ -918,6 +918,59 @@ def test_session_delete_context_rebinds_before_deleting_stale_context() -> None:
     assert session._context is None
 
 
+def test_session_ensure_context_rebinds_before_returning_cached_context() -> None:
+    stale_context = SimpleNamespace(id="ctx-1")
+    rebound_context = SimpleNamespace(id="ctx-1")
+
+    class _ContextCodeInterpreter:
+        def __init__(self, contexts: list[object]) -> None:
+            self._contexts = contexts
+            self.create_calls = 0
+
+        def list_contexts(self) -> list[object]:
+            return list(self._contexts)
+
+        def create_context(self, cwd: str) -> object:
+            self.create_calls += 1
+            return SimpleNamespace(id=f"created-{self.create_calls}", cwd=cwd)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self, contexts: list[object]) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter(contexts)
+
+    rebound_sandbox = _ContextSandbox([rebound_context])
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    runtime_ref = _RuntimeRef()
+    session = DaytonaSandboxSession(
+        sandbox=_ContextSandbox([stale_context]),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id="ctx-1",
+    )
+    session._context = stale_context
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+
+    context = session.ensure_context()
+
+    assert context is rebound_context
+    assert session._context is rebound_context
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert rebound_sandbox.code_interpreter.create_calls == 0
+
+
 @pytest.mark.parametrize(
     ("method_name", "kwargs", "expected_calls"),
     [

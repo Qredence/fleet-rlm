@@ -57,27 +57,35 @@ class _BackgroundAsyncRunner:
                     self._thread = None
 
     def ensure_loop(self) -> asyncio.AbstractEventLoop:
+        wait_ready: threading.Event
         with self._lock:
             loop = self._loop
             thread = self._thread
             if loop is not None and thread is not None and thread.is_alive() and not loop.is_closed():
                 return loop
-            ready = threading.Event()
-            thread = threading.Thread(
-                target=self._thread_main,
-                args=(ready,),
-                daemon=True,
-                name="daytona-async-compat",
-            )
-            self._ready = ready
-            self._thread = thread
-            self._loop = None
-            thread.start()
-        ready.wait()
+            ready = self._ready
+            if thread is not None and thread.is_alive() and not ready.is_set():
+                wait_ready = ready
+            else:
+                ready = threading.Event()
+                thread = threading.Thread(
+                    target=self._thread_main,
+                    args=(ready,),
+                    daemon=True,
+                    name="daytona-async-compat",
+                )
+                self._ready = ready
+                self._thread = thread
+                self._loop = None
+                thread.start()
+                wait_ready = ready
+        wait_ready.wait()
         with self._lock:
-            if self._loop is None:
+            loop = self._loop
+            thread = self._thread
+            if loop is None or thread is None or not thread.is_alive() or loop.is_closed():
                 raise RuntimeError("Failed to start async compatibility runner")
-            return self._loop
+            return loop
 
     def run(self, awaitable: Awaitable[T]) -> T:
         loop = self.ensure_loop()
