@@ -59,7 +59,7 @@ def _run_async_compat(fn: Callable[..., T | Awaitable[T]], /, *args: Any, **kwar
     def _runner() -> None:
         try:
             box["value"] = asyncio.run(_consume())
-        except BaseException as exc:  # pragma: no cover - background boundary
+        except Exception as exc:  # pragma: no cover - background boundary
             box["error"] = exc
 
     thread = threading.Thread(target=_runner, daemon=True)
