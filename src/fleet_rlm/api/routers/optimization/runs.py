@@ -158,7 +158,7 @@ def _resolve_blocking_output_path(output_path: str | None) -> Path | None:
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
     resolved_output = os.path.realpath(os.path.join(safe_root, output_path))
-    if not resolved_output.startswith(safe_root):
+    if resolved_output != base_root and not resolved_output.startswith(safe_root):
         raise HTTPException(
             status_code=400,
             detail="Path escapes the allowed data directory.",
