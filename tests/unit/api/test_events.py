@@ -196,6 +196,17 @@ def test_execution_step_builder_builds_deterministic_ids_and_parents():
     assert result_step.parent_id == call_step.id
 
 
+def test_execution_step_builder_converts_text_chunks_to_transient_llm_steps():
+    builder = ExecutionStepBuilder(run_id="run-1")
+
+    step = builder.from_stream_event(kind="text", text="hello", payload={}, timestamp=1.0)
+
+    assert step is not None
+    assert step.type == "llm"
+    assert step.label == "assistant_token"
+    assert step.output == {"text": "hello"}
+
+
 def test_execution_step_builder_annotates_delegate_actor_metadata():
     builder = ExecutionStepBuilder(run_id="run-actor")
 

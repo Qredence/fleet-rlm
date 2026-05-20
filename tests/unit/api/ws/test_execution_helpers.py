@@ -8,6 +8,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.dependencies import session_key
+from fleet_rlm.api.events import ExecutionStepBuilder
 from fleet_rlm.api.routers.ws.endpoint import _build_local_persist_fn
 from fleet_rlm.api.routers.ws.session import (
     switch_session_if_needed,
@@ -218,6 +219,27 @@ def test_emit_stream_event_persists_terminal_done_and_sends_after_complete_run(
 
         assert not websocket.sent  # We no longer send done events to ws directly
         assert persist_calls == [True]
+
+    asyncio.run(scenario())
+
+
+def test_emit_stream_event_emits_text_chunks_without_persisting_each_chunk() -> None:
+    async def scenario() -> None:
+        lifecycle = _RecordingLifecycle()
+
+        await _emit_stream_event(
+            websocket=None,
+            lifecycle=cast(Any, lifecycle),
+            step_builder=ExecutionStepBuilder(run_id="test-run"),
+            event=StreamEvent(kind="text", text="partial", timestamp=ts()),
+            persist_session_state=_noop_persist,
+            request_message="hello",
+            execution_emitter=cast(Any, SimpleNamespace()),
+        )
+
+        assert len(lifecycle.emitted_steps) == 1
+        assert lifecycle.emitted_steps[0].label == "assistant_token"
+        assert lifecycle.persisted_steps == []
 
     asyncio.run(scenario())
 

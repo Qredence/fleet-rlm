@@ -731,10 +731,13 @@ async def _emit_stream_event(
         timestamp=event_timestamp,
     )
     if step is not None:
-        await asyncio.gather(
-            lifecycle.emit_step(step),
-            lifecycle.persist_step(step),
-        )
+        if event.kind == "text":
+            await lifecycle.emit_step(step)
+        else:
+            await asyncio.gather(
+                lifecycle.emit_step(step),
+                lifecycle.persist_step(step),
+            )
         lifecycle.raise_if_persistence_error()
 
     if is_terminal_event:
@@ -1099,6 +1102,13 @@ class _ExecutionConnectionLoop:
                     session=self.session,
                     local_persist=self.local_persist,
                 ):
+                    continue
+
+                if not str(msg.content or "").strip():
+                    await _try_send_json(
+                        self.websocket,
+                        {"type": "error", "message": "Message content cannot be empty"},
+                    )
                     continue
 
                 workspace_id, user_id, sess_id = resolve_session_identity(

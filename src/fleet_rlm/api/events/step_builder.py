@@ -220,7 +220,15 @@ class ExecutionStepBuilder:
         stripped_text = (text or "").strip()
 
         if kind == "text":
-            return None
+            return self._build_step(
+                step_type="llm",
+                label="assistant_token",
+                input_payload={"event_kind": "text"},
+                output_payload={"text": text or ""},
+                timestamp=timestamp,
+                parent_id=self._resolve_parent(payload_obj),
+                raw_payload=payload_obj,
+            )
 
         if kind in {"status", "warning"}:
             return self._build_status_step(
