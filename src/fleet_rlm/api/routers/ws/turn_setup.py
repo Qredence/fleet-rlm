@@ -144,16 +144,17 @@ async def prepare_daytona_workspace_for_turn(
 
 
 async def _reject_empty_message(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     *,
     message: str,
 ) -> bool:
     if message:
         return False
-    await _try_send_json(
-        websocket,
-        {"type": "error", "message": "Message content cannot be empty"},
-    )
+    if websocket is not None:
+        await _try_send_json(
+            websocket,
+            {"type": "error", "message": "Message content cannot be empty"},
+        )
     return True
 
 
@@ -259,7 +260,7 @@ def _build_trace_context(
 
 async def prepare_chat_message_turn(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     msg: WSMessage,
     agent: ChatAgentProtocol,
     session: _ChatSessionState,

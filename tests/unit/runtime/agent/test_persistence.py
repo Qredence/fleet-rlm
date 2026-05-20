@@ -521,14 +521,10 @@ def _make_runtime(monkeypatch: Any, *, interpreter: Any | None = None) -> Any:
     """Construct a minimal AgentRuntime with mocked LLM components."""
     from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
-    class _FakeReAct:
-        def __init__(self, *, signature, tools, max_iters, **kwargs):
-            self.signature = signature
+    def fake_forward(self, chat_history, user_message, **kwargs):
+        return dspy.Prediction(response="fake")
 
-        def __call__(self, **kwargs):
-            return dspy.Prediction(response="fake")
-
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", _FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", fake_forward)
     monkeypatch.setattr(
         "fleet_rlm.runtime.agent.runtime.discover_tools",
         lambda: [],

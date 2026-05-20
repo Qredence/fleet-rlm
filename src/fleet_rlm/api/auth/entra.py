@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
+import time
+import urllib.request
 from collections.abc import Mapping
+from urllib.error import URLError
 
-import jwt
 from fastapi import Request, WebSocket
-from jwt import InvalidTokenError, PyJWKClient
+from joserfc import jwt
+from joserfc.errors import JoseError
+from joserfc.jwk import KeySet
+from joserfc.jwt import JWTClaimsRegistry
 
 from .base import AuthError
 from .types import NormalizedIdentity
@@ -35,7 +42,10 @@ class EntraAuthProvider:
         self.allowed_user_ids = allowed_user_ids or set()
         self.allowed_group_ids = allowed_group_ids or set()
         self._allow_query_auth_tokens = allow_query_auth_tokens
-        self._jwk_client = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=300) if jwks_url else None
+
+        self._cached_keyset: KeySet | None = None
+        self._last_jwks_fetch_time: float = 0.0
+        self._jwks_lifespan: int = 300
 
     async def authenticate_http(self, request: Request) -> NormalizedIdentity:
         return await self._authenticate(dict(request.headers))
@@ -109,44 +119,78 @@ class EntraAuthProvider:
                 "use ENTRA_ISSUER_URL for single-tenant mode.",
                 status_code=503,
             )
-        if self._jwk_client is None:
-            raise AuthError(
-                "AUTH_MODE=entra is configured without a JWKS client.",
-                status_code=503,
-            )
+
+    def _fetch_jwks(self) -> KeySet:
+        assert self.jwks_url is not None
+        now = time.time()
+        if self._cached_keyset and (now - self._last_jwks_fetch_time < self._jwks_lifespan):
+            return self._cached_keyset
+
+        try:
+            req = urllib.request.Request(self.jwks_url, headers={"User-Agent": "fleet-rlm"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read())
+                self._cached_keyset = KeySet.import_key_set(data)
+                self._last_jwks_fetch_time = now
+                return self._cached_keyset
+        except (URLError, ValueError) as exc:
+            if self._cached_keyset:
+                return self._cached_keyset
+            raise AuthError(f"Failed to fetch JWKS: {exc}", status_code=503) from exc
 
     async def _decode_token(self, token: str) -> NormalizedIdentity:
-        assert self._jwk_client is not None
         assert self.audience is not None
 
         try:
-            unverified_claims = jwt.decode(
-                token,
-                options={
-                    "verify_signature": False,
-                    "verify_exp": False,
-                    "verify_iat": False,
-                    "verify_aud": False,
-                    "verify_iss": False,
-                },
-            )
+            # Decode header/payload before verification to enforce local policy
+            # and extract 'tid' for issuer derivation.
+            try:
+                parts = token.split(".")
+                if len(parts) < 2:
+                    raise AuthError("Token missing payload", status_code=401)
+
+                header = _decode_jwt_segment(parts[0])
+                if header.get("alg") != "RS256":
+                    raise AuthError("Unsupported Entra token algorithm", status_code=401)
+                padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                payload_bytes = base64.urlsafe_b64decode(padded)
+                unverified_claims = json.loads(payload_bytes.decode("utf-8"))
+                if not isinstance(unverified_claims, dict):
+                    raise AuthError("Token payload must be a JSON object", status_code=401)
+            except AuthError:
+                raise
+            except Exception as exc:
+                raise AuthError(f"Malformed token: {exc}", status_code=401) from exc
+
             tenant_claim = str(unverified_claims.get("tid", "")).strip()
             if not tenant_claim:
                 raise AuthError("Missing tid claim", status_code=401)
+
             expected_issuer = self._resolve_expected_issuer(tenant_claim)
-            signing_key = await asyncio.to_thread(self._jwk_client.get_signing_key_from_jwt, token)
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=self.audience,
-                issuer=expected_issuer,
-                options={"require": ["exp", "iat", "tid"]},
+
+            # Fetch keys asynchronously to avoid blocking
+            key_set = await asyncio.to_thread(self._fetch_jwks)
+
+            # Validate the signature and standard claims using joserfc
+            registry = JWTClaimsRegistry(
+                iss={"essential": True, "value": expected_issuer},
+                aud={"essential": True, "value": self.audience},
+                exp={"essential": True},
+                iat={"essential": True},
             )
+
+            obj = jwt.decode(token, key_set)
+            registry.validate(obj.claims)
+            claims = obj.claims
+
+            # Ensure 'tid' is present in the final verified claims
+            if "tid" not in claims:
+                raise AuthError("Missing tid claim", status_code=401)
+
             self._enforce_access_allowlist(claims)
         except AuthError:
             raise
-        except InvalidTokenError as exc:
+        except JoseError as exc:
             raise AuthError(f"Invalid Entra token: {exc}", status_code=401) from exc
         except Exception as exc:  # pragma: no cover - network/JWKS edge cases
             logging.warning("Unexpected error during Entra token validation", exc_info=True)
@@ -220,3 +264,15 @@ class EntraAuthProvider:
             name=name,
             raw_claims=dict(claims),
         )
+
+
+def _decode_jwt_segment(segment: str) -> dict[str, object]:
+    try:
+        padded = segment + "=" * ((4 - len(segment) % 4) % 4)
+        payload_bytes = base64.urlsafe_b64decode(padded)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (TypeError, ValueError) as exc:
+        raise AuthError(f"Malformed token: {exc}", status_code=401) from exc
+    if not isinstance(payload, dict):
+        raise AuthError("Malformed token", status_code=401)
+    return payload

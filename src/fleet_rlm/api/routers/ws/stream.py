@@ -24,7 +24,12 @@ from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_even
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
-from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...events import (
+    ExecutionEventEmitter,
+    ExecutionStep,
+    ExecutionStepBuilder,
+    ExecutionSubscription,
+)
 from ...events.event_adapter import (
     adapt_stream_event,
     build_chat_event_payload,
@@ -32,6 +37,7 @@ from ...events.event_adapter import (
 )
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
+    build_local_persist_fn,
     build_workspace_task_request,
     cancelled_event_payload,
     classify_stream_failure,
@@ -45,6 +51,8 @@ from ...runtime_services.chat_runtime import (
     LocalPersistFn,
     SessionContext,
     StreamEventLike,
+    build_chat_agent_context,
+    set_interpreter_default_profile,
 )
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
@@ -97,13 +105,6 @@ class WorkspaceTaskRequest:
     workspace_id: str | None = None
     cancel_check: Callable[[], bool] | None = None
     prepare: Callable[[], Awaitable[None]] | None = None
-
-
-@dataclass(slots=True)
-class _ResolvedSessionTarget:
-    workspace_id: str
-    user_id: str
-    sess_id: str
 
 
 def merge_trace_result_metadata(
@@ -172,7 +173,7 @@ def _terminal_run_status(event: StreamEventLike) -> RunStatus:
 
 async def handle_terminal_stream_event(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     event: StreamEventLike,
     event_dict: dict[str, Any],
@@ -205,12 +206,7 @@ async def handle_terminal_stream_event(
             step=step,
             summary=summary,
         )
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
         return
-
-    if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-        raise WebSocketDisconnect(code=1001)
 
     try:
         await persist_session_state(include_volume_save=True)
@@ -449,7 +445,7 @@ def build_execution_completion_summary(
 
 async def handle_stream_error(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     exc: Exception,
@@ -466,14 +462,15 @@ async def handle_stream_error(
             "error_code": error_code,
         },
     )
-    await _try_send_json(
-        websocket,
-        _error_envelope(
-            code=error_code,
-            message=f"Streaming error: {exc}",
-            details={"error_type": type(exc).__name__},
-        ),
-    )
+    if websocket is not None:
+        await _try_send_json(
+            websocket,
+            _error_envelope(
+                code=error_code,
+                message=f"Streaming error: {exc}",
+                details={"error_type": type(exc).__name__},
+            ),
+        )
     if lifecycle.run_completed:
         return
 
@@ -571,13 +568,14 @@ async def stream_agent_turn(
 
 async def run_streaming_turn(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
     orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
+    execution_emitter: ExecutionEventEmitter,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -616,6 +614,7 @@ async def run_streaming_turn(
                 step_builder=step_builder,
                 analytics_enabled=prepared_turn.analytics_enabled,
                 persist_session_state=persist_session_state,
+                execution_emitter=execution_emitter,
             )
 
         await _run_prepared_stream(
@@ -655,7 +654,7 @@ async def _run_prepared_stream(
 
 async def _stream_agent_events(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
     orchestration_session: SessionContext | None,
@@ -665,6 +664,7 @@ async def _stream_agent_events(
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
+    execution_emitter: ExecutionEventEmitter,
 ) -> None:
     worker_request = build_workspace_task_request(
         agent=agent,
@@ -688,6 +688,7 @@ async def _stream_agent_events(
                     orchestration_session=orchestration_session,
                     persist_session_state=persist_session_state,
                     request_message=prepared_turn.message,
+                    execution_emitter=execution_emitter,
                 )
     finally:
         if hosted_repl_bridge is not None and bridge_started:
@@ -703,13 +704,14 @@ async def _stream_agent_events(
 
 async def _emit_stream_event(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
     orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
+    execution_emitter: ExecutionEventEmitter,
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
@@ -721,9 +723,10 @@ async def _emit_stream_event(
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = _is_terminal_transport_event(event)
-    if not is_terminal_event:
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
+
+    # We NO LONGER send raw event_dicts via the websocket directly.
+    # Instead, we rely entirely on the ExecutionEventEmitter (via lifecycle)
+    # which emits typed ExecutionEvent payloads.
 
     event_timestamp = event.timestamp.timestamp()
     step = step_builder.from_stream_event(
@@ -733,10 +736,13 @@ async def _emit_stream_event(
         timestamp=event_timestamp,
     )
     if step is not None:
-        await asyncio.gather(
-            lifecycle.emit_step(step),
-            lifecycle.persist_step(step),
-        )
+        if event.kind == "text":
+            await lifecycle.emit_step(step)
+        else:
+            await asyncio.gather(
+                lifecycle.emit_step(step),
+                lifecycle.persist_step(step),
+            )
         lifecycle.raise_if_persistence_error()
 
     if is_terminal_event:
@@ -750,12 +756,11 @@ async def _emit_stream_event(
             persist_session_state=persist_session_state,
             request_message=request_message,
         )
-        return
 
 
 async def _process_chat_message(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     msg: WSMessage,
     agent: ChatAgentProtocol,
     interpreter: object | None,
@@ -802,6 +807,7 @@ async def _process_chat_message(
         cancel_check=cancel_check,
         interpreter=interpreter,
         persist_session_state=local_persist,
+        execution_emitter=execution_emitter,
     )
 
 
@@ -841,6 +847,83 @@ async def _await_message_while_streaming(
         raw_payload=raw_payload,
     )
     return msg, stream_task, None
+
+
+async def _background_execution_task(
+    *,
+    msg: WSMessage,
+    session_cache: SessionCacheDeps,
+    runtime: _PreparedChatRuntime,
+    session: _ChatSessionState,
+    workspace_id: str,
+    user_id: str,
+    sess_id: str,
+    execution_emitter: ExecutionEventEmitter,
+) -> str | None:
+    """Run execution in the background with its own agent context."""
+    agent_context = await build_chat_agent_context(runtime)
+    async with agent_context as agent:
+        interpreter = getattr(agent, "interpreter", None)
+        set_interpreter_default_profile(interpreter, runtime.cfg)
+
+        async def _noop_persist(
+            *,
+            include_volume_save: bool = True,
+            latest_user_message: str = "",
+        ) -> None:
+            _ = include_volume_save, latest_user_message
+
+        (
+            session.active_key,
+            session.active_manifest_path,
+            session.session_record,
+            session.last_loaded_docs_path,
+            session.orchestration_session,
+        ) = await switch_session_if_needed(
+            session_cache=session_cache,
+            agent=agent,
+            interpreter=interpreter,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            sess_id=sess_id,
+            owner_tenant_claim=session.owner_tenant_claim,
+            owner_user_claim=session.owner_user_claim,
+            active_key=None,
+            session_record=session.session_record,
+            last_loaded_docs_path=session.last_loaded_docs_path,
+            local_persist=_noop_persist,
+            persistence=runtime.persistence,
+            identity_rows=runtime.identity_rows,
+        )
+
+        agent._db_session_id = (session.session_record or {}).get("db_session_id")
+        agent._identity_rows = runtime.identity_rows
+        if agent.interpreter is not None:
+            agent.interpreter._host_repository = runtime.persistence
+            agent.interpreter._host_identity = runtime.identity_rows
+            agent.interpreter._host_run_id = None
+        local_persist = build_local_persist_fn(
+            session_cache=session_cache,
+            runtime=runtime,
+            agent=agent,
+            interpreter=interpreter,
+            session=session,
+        )
+
+        # Execute
+        return await _process_chat_message(
+            websocket=None,  # Decoupled
+            msg=msg,
+            agent=agent,
+            interpreter=interpreter,
+            session=session,
+            local_persist=local_persist,
+            runtime=runtime,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            sess_id=sess_id,
+            execution_emitter=execution_emitter,
+        )
 
 
 async def _handle_message_while_streaming(
@@ -943,56 +1026,6 @@ async def _handle_idle_non_turn_message(
     return False
 
 
-async def _resolve_session_target(
-    *,
-    session_cache: SessionCacheDeps,
-    agent: ChatAgentProtocol,
-    runtime: _PreparedChatRuntime,
-    interpreter: object | None,
-    session: _ChatSessionState,
-    local_persist: LocalPersistFn,
-    msg: WSMessage,
-) -> _ResolvedSessionTarget:
-    workspace_id, user_id, sess_id = resolve_session_identity(
-        msg=msg,
-        workspace_id=session.canonical_workspace_id,
-        user_id=session.canonical_user_id,
-    )
-    (
-        session.active_key,
-        session.active_manifest_path,
-        session.session_record,
-        session.last_loaded_docs_path,
-        session.orchestration_session,
-    ) = await switch_session_if_needed(
-        session_cache=session_cache,
-        agent=agent,
-        interpreter=interpreter,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sess_id=sess_id,
-        owner_tenant_claim=session.owner_tenant_claim,
-        owner_user_claim=session.owner_user_claim,
-        active_key=session.active_key,
-        session_record=session.session_record,
-        last_loaded_docs_path=session.last_loaded_docs_path,
-        local_persist=local_persist,
-        persistence=runtime.persistence,
-        identity_rows=runtime.identity_rows,
-    )
-    agent._db_session_id = (session.session_record or {}).get("db_session_id")
-    agent._identity_rows = runtime.identity_rows
-    if agent.interpreter is not None:
-        agent.interpreter._host_repository = runtime.persistence
-        agent.interpreter._host_identity = runtime.identity_rows
-        agent.interpreter._host_run_id = None
-    return _ResolvedSessionTarget(
-        workspace_id=workspace_id,
-        user_id=user_id,
-        sess_id=sess_id,
-    )
-
-
 class _ExecutionConnectionLoop:
     """Connection-scoped websocket message loop for one execution socket."""
 
@@ -1018,7 +1051,7 @@ class _ExecutionConnectionLoop:
         self.session = session
         self.local_persist = local_persist
         self.execution_emitter = get_execution_emitter(diagnostics_deps)
-        self.stream_task: asyncio.Task[str | None] | None = None
+        self.stream_task: asyncio.Task[str | None] | asyncio.Task[None] | None = None
         self.pending_receive_task: asyncio.Task[object] | None = None
         self.pending_message = initial_message
 
@@ -1066,16 +1099,6 @@ class _ExecutionConnectionLoop:
                 if msg is None:
                     continue
 
-                target = await _resolve_session_target(
-                    session_cache=self.session_cache,
-                    agent=self.agent,
-                    runtime=self.runtime,
-                    interpreter=self.interpreter,
-                    local_persist=self.local_persist,
-                    session=self.session,
-                    msg=msg,
-                )
-
                 if await _handle_idle_non_turn_message(
                     websocket=self.websocket,
                     msg=msg,
@@ -1086,18 +1109,35 @@ class _ExecutionConnectionLoop:
                 ):
                     continue
 
+                if not str(msg.content or "").strip():
+                    await _try_send_json(
+                        self.websocket,
+                        {"type": "error", "message": "Message content cannot be empty"},
+                    )
+                    continue
+
+                workspace_id, user_id, sess_id = resolve_session_identity(
+                    msg=msg,
+                    workspace_id=self.session.canonical_workspace_id,
+                    user_id=self.session.canonical_user_id,
+                )
+                await self.execution_emitter.update_subscription(
+                    self.websocket,
+                    ExecutionSubscription(
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        session_id=sess_id,
+                    ),
+                )
                 self.stream_task = asyncio.create_task(
-                    _process_chat_message(
-                        websocket=self.websocket,
+                    _background_execution_task(
                         msg=msg,
-                        agent=self.agent,
-                        interpreter=self.interpreter,
-                        session=self.session,
-                        local_persist=self.local_persist,
+                        session_cache=self.session_cache,
                         runtime=self.runtime,
-                        workspace_id=target.workspace_id,
-                        user_id=target.user_id,
-                        sess_id=target.sess_id,
+                        session=self.session,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        sess_id=sess_id,
                         execution_emitter=self.execution_emitter,
                     )
                 )

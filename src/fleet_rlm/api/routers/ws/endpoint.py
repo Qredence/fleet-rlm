@@ -286,17 +286,30 @@ class _ExecutionWebSocketConnection:
                         interpreter=interpreter,
                         session=session,
                     )
-                    await _chat_message_loop(
-                        websocket=self.websocket,
-                        session_cache=self.session_cache,
-                        diagnostics_deps=self.diagnostics_deps,
-                        runtime=runtime,
-                        agent=agent,
-                        interpreter=interpreter,
-                        session=session,
-                        local_persist=local_persist,
-                        initial_message=initial_msg,
+
+                    # Connect to Event Bus for decoupled execution events
+                    emitter = get_execution_emitter(self.diagnostics_deps)
+                    subscription = ExecutionSubscription(
+                        workspace_id=session.canonical_workspace_id,
+                        user_id=session.canonical_user_id,
+                        session_id="",
                     )
+                    await emitter.connect(self.websocket, subscription, accept=False)
+
+                    try:
+                        await _chat_message_loop(
+                            websocket=self.websocket,
+                            session_cache=self.session_cache,
+                            diagnostics_deps=self.diagnostics_deps,
+                            runtime=runtime,
+                            agent=agent,
+                            interpreter=interpreter,
+                            session=session,
+                            local_persist=local_persist,
+                            initial_message=initial_msg,
+                        )
+                    finally:
+                        await emitter.disconnect(self.websocket)
         except (asyncio.CancelledError, WebSocketDisconnect):
             await self._cancel_startup_status_task(startup_status_task)
             return

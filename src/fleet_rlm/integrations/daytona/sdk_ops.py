@@ -522,7 +522,8 @@ def list_snapshots(
         items = result.items if hasattr(result, "items") else result
         return [_snapshot_summary(snapshot) for snapshot in items]
     finally:
-        client.close()
+        with suppress(Exception):
+            client.close()
 
 
 alist_snapshots = list_snapshots
@@ -549,7 +550,8 @@ def get_snapshot(
             phase="snapshot_lookup",
         ) from exc
     finally:
-        client.close()
+        with suppress(Exception):
+            client.close()
 
 
 aget_snapshot = get_snapshot
@@ -623,7 +625,8 @@ def create_snapshot(
         logger.info("Snapshot '%s' created (id=%s)", snapshot.name, snapshot.id)
         return _snapshot_summary(snapshot)
     finally:
-        client.close()
+        with suppress(Exception):
+            client.close()
 
 
 acreate_snapshot = create_snapshot
@@ -641,7 +644,8 @@ def delete_snapshot(
         snapshot = client.snapshot.get(name)
         client.snapshot.delete(snapshot)
     finally:
-        client.close()
+        with suppress(Exception):
+            client.close()
 
 
 adelete_snapshot = delete_snapshot

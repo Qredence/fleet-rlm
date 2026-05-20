@@ -160,7 +160,9 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
 
   const kind = normalizeExecutionStepKind(step);
   const text = asText(
-    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind,
+    kind === "final"
+      ? (step.output ?? step.content ?? step.message ?? step.label ?? kind)
+      : (step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind),
   );
 
   return {

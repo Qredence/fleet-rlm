@@ -142,8 +142,15 @@ class ExecutionEventEmitter:
         self._connections: dict[WebSocket, ExecutionEventEmitter._ConnectionState] = {}
         self._lock = AsyncLock()
 
-    async def connect(self, websocket: WebSocket, subscription: ExecutionSubscription) -> None:
-        await websocket.accept()
+    async def connect(
+        self,
+        websocket: WebSocket,
+        subscription: ExecutionSubscription,
+        *,
+        accept: bool = True,
+    ) -> None:
+        if accept:
+            await websocket.accept()
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=self._max_queue)
         sender_task = asyncio.create_task(self._sender_loop(websocket))
         state = self._ConnectionState(
@@ -184,6 +191,17 @@ class ExecutionEventEmitter:
                 logger.exception(
                     "Unexpected error while awaiting sender_task during disconnect teardown",
                 )
+
+    async def update_subscription(
+        self,
+        websocket: WebSocket,
+        subscription: ExecutionSubscription,
+    ) -> None:
+        """Retarget an existing connection without restarting its sender queue."""
+        async with self._lock:
+            state = self._connections.get(websocket)
+            if state is not None:
+                state.subscription = subscription
 
     async def _sender_loop(self, websocket: WebSocket) -> None:
         state: ExecutionEventEmitter._ConnectionState | None = None

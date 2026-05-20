@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Mapping
 
-import jwt
 from fastapi import Request, WebSocket
-from jwt import InvalidTokenError
+from joserfc import jwt
+from joserfc.errors import JoseError
+from joserfc.jwk import OctKey
+from joserfc.jwt import JWTClaimsRegistry
 
 from .base import AuthError
 from .types import NormalizedIdentity
@@ -88,13 +92,15 @@ class DevAuthProvider:
 
     def _decode_token(self, token: str) -> NormalizedIdentity:
         try:
-            claims = jwt.decode(
-                token,
-                self._jwt_secret,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
-        except InvalidTokenError as exc:
+            header = _decode_jwt_segment(token, 0)
+            if header.get("alg") != "HS256":
+                raise AuthError("Invalid dev JWT algorithm", status_code=401)
+            key = OctKey.import_key(self._jwt_secret)
+            registry = JWTClaimsRegistry(exp={"essential": True})
+            obj = jwt.decode(token, key)
+            registry.validate(obj.claims)
+            claims = obj.claims
+        except JoseError as exc:
             raise AuthError(f"Invalid dev JWT: {exc}", status_code=401) from exc
         return self._normalize_claims(claims)
 
@@ -117,3 +123,18 @@ class DevAuthProvider:
             name=name,
             raw_claims=dict(claims),
         )
+
+
+def _decode_jwt_segment(token: str, segment_index: int) -> dict[str, object]:
+    parts = token.split(".")
+    if len(parts) <= segment_index:
+        raise AuthError("Malformed JWT", status_code=401)
+    try:
+        padded = parts[segment_index] + "=" * ((4 - len(parts[segment_index]) % 4) % 4)
+        payload_bytes = base64.urlsafe_b64decode(padded)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, TypeError) as exc:
+        raise AuthError(f"Malformed JWT: {exc}", status_code=401) from exc
+    if not isinstance(payload, dict):
+        raise AuthError("Malformed JWT", status_code=401)
+    return payload

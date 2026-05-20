@@ -34,42 +34,27 @@ from fleet_rlm.runtime.schemas import StreamEvent
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_react(response: str = "Test response"):
-    """Return a fake dspy.ReAct class that returns a fixed response without LLM calls."""
+def _make_fake_forward(response: str = "Test response"):
+    def fake_forward(self, chat_history: dspy.History, user_message: str, **kwargs):
+        return dspy.Prediction(response=response)
 
-    class _FakeReAct:
-        def __init__(self, *, signature, tools, max_iters, **kwargs):
-            self.signature = signature
-            self._tools = list(tools)
-            self._max_iters = max_iters
-            self._tool_calls: list[str] = []
-
-        def __call__(self, **kwargs):
-            return dspy.Prediction(response=response)
-
-    return _FakeReAct
+    return fake_forward
 
 
-def _make_fake_react_with_tool_call(tool_name: str, tool_response: str, final_response: str = "Done"):
-    """Return a fake dspy.ReAct that records a tool call in trajectory."""
+def _make_fake_forward_with_tool_call(tool_name: str, tool_response: str, final_response: str = "Done"):
+    """Return a fake forward that records a tool call in trajectory."""
 
-    class _FakeReActWithTool:
-        def __init__(self, *, signature, tools, max_iters, **kwargs):
-            self.signature = signature
-            self._tools = list(tools)
-            self._max_iters = max_iters
+    def fake_forward(self, chat_history: dspy.History, user_message: str, **kwargs):
+        return dspy.Prediction(
+            response=final_response,
+            trajectory={
+                "tool_name_0": tool_name,
+                "tool_args_0": {"query": "test query"},
+                "tool_result_0": tool_response,
+            },
+        )
 
-        def __call__(self, **kwargs):
-            return dspy.Prediction(
-                response=final_response,
-                trajectory={
-                    "tool_name_0": tool_name,
-                    "tool_args_0": {"query": "test query"},
-                    "tool_result_0": tool_response,
-                },
-            )
-
-    return _FakeReActWithTool
+    return fake_forward
 
 
 def _make_mock_interpreter(
@@ -113,8 +98,7 @@ def test_e2e_agent_chat_turn_produces_prediction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-001 (partial): AgentRuntime.chat_turn returns a dspy.Prediction with response."""
-    FakeReAct = _make_fake_react("Hello from agent")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("Hello from agent"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     runtime = AgentRuntime()
@@ -129,8 +113,7 @@ def test_e2e_agent_chat_turn_accumulates_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-001 (partial): History is updated after a chat turn."""
-    FakeReAct = _make_fake_react("Response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("Response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     runtime = AgentRuntime()
@@ -149,8 +132,7 @@ async def test_e2e_history_persisted_to_volume_after_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-001: After chat turn, history can be persisted to Daytona volume."""
-    FakeReAct = _make_fake_react("Persisted response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("Persisted response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -193,8 +175,7 @@ async def test_e2e_session_metadata_persisted_to_db(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-001: Session metadata upserted to DB after turn."""
-    FakeReAct = _make_fake_react("DB response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("DB response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -225,8 +206,7 @@ async def test_e2e_full_persist_and_restore_cycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-001: Full cycle: turn → persist history + metadata → restore."""
-    FakeReAct = _make_fake_react("Full cycle response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("Full cycle response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -291,19 +271,14 @@ def test_multi_turn_history_accumulates(monkeypatch: pytest.MonkeyPatch) -> None
     responses = ["First response", "Second response"]
     captured_histories: list[list[Any]] = []
 
-    class _FakeReActMultiTurn:
-        def __init__(self, *, signature, tools, max_iters, **kwargs):
-            self.signature = signature
+    def fake_forward(self, chat_history: dspy.History, user_message: str, **kwargs):
+        nonlocal call_count
+        captured_histories.append(list(getattr(chat_history, "messages", [])))
+        resp = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return dspy.Prediction(response=resp)
 
-        def __call__(self, **kwargs):
-            nonlocal call_count
-            history: dspy.History = kwargs.get("chat_history", dspy.History(messages=[]))
-            captured_histories.append(list(getattr(history, "messages", [])))
-            resp = responses[min(call_count, len(responses) - 1)]
-            call_count += 1
-            return dspy.Prediction(response=resp)
-
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", _FakeReActMultiTurn)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", fake_forward)
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     runtime = AgentRuntime()
@@ -330,8 +305,7 @@ async def test_multi_turn_session_restore_then_continue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-002: Export session, import to new runtime, run second turn — both turns in history."""
-    FakeReAct = _make_fake_react("Continued response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("Continued response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -393,8 +367,7 @@ async def test_multi_turn_session_restore_then_continue(
 @pytest.mark.integration
 def test_multi_turn_export_import_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     """VAL-CROSS-002: export_session / import_session preserves two turns with full history."""
-    FakeReAct = _make_fake_react("RT response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("RT response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -408,8 +381,7 @@ def test_multi_turn_export_import_round_trip(monkeypatch: pytest.MonkeyPatch) ->
     assert len(exported["turns"]) == 2
 
     # Import into fresh runtime
-    FakeReAct2 = _make_fake_react("After import response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct2)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("After import response"))
 
     runtime2 = AgentRuntime()
     assert len(list(runtime2.history.messages)) == 0
@@ -426,8 +398,7 @@ async def test_multi_turn_continuity_db_upserted_per_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-002: DB upsert is called after each turn (simulated two-turn flow)."""
-    FakeReAct = _make_fake_react("DB turn response")
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.FleetAgent.forward", _make_fake_forward("DB turn response"))
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())
@@ -460,12 +431,14 @@ def test_rlm_delegation_turn_has_tool_call_in_trajectory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-003: A turn triggering delegate_to_rlm records tool_call in trajectory."""
-    FakeReAct = _make_fake_react_with_tool_call(
-        "delegate_to_rlm",
-        '{"status": "ok", "answer": "Delegated answer"}',
-        "Done via delegation",
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.FleetAgent.forward",
+        _make_fake_forward_with_tool_call(
+            "delegate_to_rlm",
+            '{"status": "ok", "answer": "Delegated answer"}',
+            "Done via delegation",
+        ),
     )
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     runtime = AgentRuntime()
@@ -529,12 +502,14 @@ async def test_rlm_delegation_turn_persists_delegation_in_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-CROSS-003: After delegation turn, history includes the delegated question and response."""
-    FakeReAct = _make_fake_react_with_tool_call(
-        "delegate_to_rlm",
-        '{"status": "ok", "answer": "Subquery answer"}',
-        "Final answer after delegation",
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.agent.agent.FleetAgent.forward",
+        _make_fake_forward_with_tool_call(
+            "delegate_to_rlm",
+            '{"status": "ok", "answer": "Subquery answer"}',
+            "Final answer after delegation",
+        ),
     )
-    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.ReAct", FakeReAct)
     monkeypatch.setattr("fleet_rlm.runtime.agent.runtime.discover_tools", lambda: [])
 
     session_id = str(uuid.uuid4())

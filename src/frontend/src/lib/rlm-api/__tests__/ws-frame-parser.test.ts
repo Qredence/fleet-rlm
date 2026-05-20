@@ -113,4 +113,23 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.kind).toBe("tool_result");
     expect(frame.data.timestamp).toBe(1710849602);
   });
+
+  it("prioritizes step.output over step.label when kind is final", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_step",
+      timestamp: 1710849601,
+      step: {
+        id: "step-1",
+        type: "output",
+        label: "assistant_output",
+        output: { text: "This is the actual final response text!" },
+        timestamp: 1710849602,
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("final");
+    expect(frame.data.text).toBe("This is the actual final response text!");
+  });
 });
