@@ -556,12 +556,6 @@ class ChildDelegation:
         )
 
 
-# Re-export build_delegate_child as the public dispatcher (already defined above
-# in the isolation-policy section).  The delegation section adds ChildDelegation
-# awareness on top of the raw policy function.
-_isolation_build_delegate_child = build_delegate_child
-
-
 def build_delegate_child(  # type: ignore[no-redef]
     interpreter: Any,
     *,

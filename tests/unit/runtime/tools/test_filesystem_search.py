@@ -70,3 +70,40 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
         "count": 1,
         "hits": [{"file": "/workspace/src", "line": 7, "content": "budget"}],
     }
+
+
+def test_sandbox_read_file_runs_async_session_accessor() -> None:
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _sandbox_read_file_impl,
+        _SandboxFilesystemToolContext,
+    )
+
+    class _Fs:
+        def download_file(self, path: str) -> bytes:
+            assert path == "/workspace/notes.txt"
+            return b"hello"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.sandbox = type("_Sandbox", (), {})()
+            self.sandbox.fs = _Fs()
+
+        def _resolve_sandbox_path(self, path: str) -> str:
+            return f"/workspace/{path}"
+
+    class _Interpreter:
+        _session = None
+
+        async def aget_session(self) -> Any:
+            return _Session()
+
+    ctx = _SandboxFilesystemToolContext(interpreter=_Interpreter())
+
+    result = _sandbox_read_file_impl(ctx, "notes.txt")
+
+    assert result == {
+        "status": "ok",
+        "path": "/workspace/notes.txt",
+        "content": "hello",
+        "size": 5,
+    }

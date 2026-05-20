@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import dspy
 from dspy.streaming import StreamListener, StreamResponse
 
+from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.execution.streaming_events import (
     _normalize_trajectory,
 )
@@ -405,7 +406,7 @@ class AgentRuntime:
                 ashutdown = getattr(self.interpreter, "ashutdown", None)
                 if callable(ashutdown):
                     try:
-                        ashutdown()
+                        _run_async_compat(ashutdown)
                     except Exception:
                         pass
 

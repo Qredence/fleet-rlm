@@ -211,10 +211,6 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
         "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
         lambda *a, **kw: None,
     )
-    monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
-        lambda *a, **kw: None,
-    )
 
     context_file = tmp_path / "notes.md"
     context_file.write_text("# Notes\nHello\n", encoding="utf-8")

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 # ---------------------------------------------------------------------------
@@ -34,11 +35,7 @@ def _get_sandbox_fs(ctx: _SandboxFilesystemToolContext) -> Any:
     """Return the ``sandbox.fs`` object from the interpreter."""
     if ctx.interpreter is None:
         raise RuntimeError("sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter.")
-    session = getattr(ctx.interpreter, "_session", None)
-    if session is None:
-        aget = getattr(ctx.interpreter, "aget_session", None)
-        if callable(aget):
-            session = aget()
+    session = _resolve_interpreter_session(ctx.interpreter)
     if session is None:
         raise RuntimeError("No Daytona sandbox session available.")
     sandbox = getattr(session, "sandbox", None)
@@ -54,11 +51,7 @@ def _get_sandbox_session(ctx: _SandboxFilesystemToolContext) -> Any:
     """Return the active Daytona sandbox session from the interpreter."""
     if ctx.interpreter is None:
         raise RuntimeError("sandbox_filesystem tools require an active AgentRuntime with a Daytona interpreter.")
-    session = getattr(ctx.interpreter, "_session", None)
-    if session is None:
-        aget = getattr(ctx.interpreter, "aget_session", None)
-        if callable(aget):
-            session = aget()
+    session = _resolve_interpreter_session(ctx.interpreter)
     if session is None:
         raise RuntimeError("No Daytona sandbox session available.")
     return session
@@ -68,14 +61,24 @@ def _resolve_sandbox_path(ctx: _SandboxFilesystemToolContext, path: str) -> str:
     """Resolve *path* relative to the interpreter workspace path."""
     if ctx.interpreter is None:
         return path
-    session = getattr(ctx.interpreter, "_session", None)
-    if session is None:
-        aget = getattr(ctx.interpreter, "aget_session", None)
-        if callable(aget):
-            session = aget()
+    session = _resolve_interpreter_session(ctx.interpreter)
     if session is not None and hasattr(session, "_resolve_sandbox_path"):
         return session._resolve_sandbox_path(path)
     return path
+
+
+def _resolve_interpreter_session(interpreter: Any) -> Any | None:
+    """Resolve the active sandbox session without leaking coroutine objects."""
+    session = getattr(interpreter, "_session", None)
+    if session is not None:
+        return session
+    ensure_sync = getattr(interpreter, "_ensure_session_sync", None)
+    if callable(ensure_sync):
+        return ensure_sync()
+    aget = getattr(interpreter, "aget_session", None)
+    if callable(aget):
+        return _run_async_compat(aget)
+    return None
 
 
 def _run_session_fs_call(

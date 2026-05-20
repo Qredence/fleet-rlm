@@ -1042,7 +1042,6 @@ def literal(value: Any) -> str:
 
 _DaytonaExecutionResponse = DaytonaExecutionResponse
 _ExecutionCallbacks = ExecutionCallbacks
-_ensure_bridge = _ensure_bridge
 _ensure_setup = ensure_setup
 _execute_direct = execute_direct
 _execute_in_session = execute_in_session
@@ -1058,13 +1057,6 @@ _safe_variables = safe_variables
 _sanitize_execution_code = sanitize_execution_code
 _structured_execution_error = structured_execution_error
 _submit_signature = submit_signature
-
-# Keep old a-prefixed module-level aliases for backward compatibility
-_aensure_bridge = aensure_bridge
-_aensure_setup = aensure_setup
-_aexecute_direct = aexecute_direct
-_aexecute_in_session = aexecute_in_session
-_arun_prepared_execution = arun_prepared_execution
 
 
 class SandboxExecutor:

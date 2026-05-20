@@ -62,9 +62,6 @@ def _run_admin_code(
     )
 
 
-_arun_admin_code = _run_admin_code
-
-
 async def _arun_admin_code(
     *,
     sandbox: Any,

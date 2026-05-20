@@ -203,7 +203,7 @@ Daytona-specific boundaries:
 - Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`; public `a*` methods must stay awaitable while sync compatibility methods remain available for notebooks and tests.
 - Keep resume/fork diagnostics in `integrations/daytona/sdk_ops.py`; do not add new thin lifecycle wrappers for SDK methods that can be called directly from `DaytonaSandboxSession` or `DaytonaSandboxRuntime`.
 - Keep structured diagnostic errors and phase-to-category mapping in `integrations/daytona/diagnostics.py`
-- Keep the async/sync bridge (persistent background event loop runner) in `integrations/daytona/async_compat.py`
+- Keep the async/sync bridge helpers in `integrations/daytona/async_compat.py`; sync callers should use `asyncio.run` when no loop is active and a short-lived background thread bridge when one is already running
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.daytona import config as _daytona_config
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
+from fleet_rlm.integrations.daytona.async_compat import _run_sync_in_thread
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
     sandbox_has_owner_label,
@@ -155,11 +156,11 @@ async def _close_daytona_client(client: Any | None) -> None:
         return
     close = getattr(client, "close", None)
     if callable(close):
-        close()
+        await _run_sync_in_thread(close)
 
 
 async def _get_sandbox(client: Any, sandbox_id: str) -> Any:
-    return client.get(sandbox_id)
+    return await _run_sync_in_thread(client.get, sandbox_id)
 
 
 def _management_session(sandbox: Any) -> Any:
@@ -192,10 +193,15 @@ async def _list_sandboxes(
 ) -> Any:
     if labels_filter:
         try:
-            return client.list(labels=labels_filter, page=page, limit=limit)
+            return await _run_sync_in_thread(
+                client.list,
+                labels=labels_filter,
+                page=page,
+                limit=limit,
+            )
         except TypeError:
             pass
-    return client.list(page=page, limit=limit)
+    return await _run_sync_in_thread(client.list, page=page, limit=limit)
 
 
 def _sandbox_labels(sandbox: Any) -> dict[str, str]:

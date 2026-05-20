@@ -24,11 +24,13 @@ async def _run_sync_in_thread(fn: Callable[..., T], /, *args: Any, **kwargs: Any
 
 
 @overload
-def _run_async_compat(fn: Callable[..., Awaitable[T]], /, *args: Any, **kwargs: Any) -> T: ...
+def _run_async_compat(fn: Callable[..., Awaitable[T]], /, *args: Any, **kwargs: Any) -> T:
+    pass
 
 
 @overload
-def _run_async_compat(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T: ...
+def _run_async_compat(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    pass
 
 
 def _run_async_compat(fn: Callable[..., T | Awaitable[T]], /, *args: Any, **kwargs: Any) -> T:
