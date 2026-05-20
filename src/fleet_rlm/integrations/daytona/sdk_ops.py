@@ -360,25 +360,29 @@ def list_daytona_volume_tree(
                     children = _walk(sandbox, child, depth + 1)
                 else:
                     truncated = True
-                nodes.append({
-                    "id": stable_tree_id(child.display_path),
-                    "name": name,
-                    "path": child.display_path,
-                    "type": "directory",
-                    "children": children,
-                    "modified_at": modified_iso,
-                })
+                nodes.append(
+                    {
+                        "id": stable_tree_id(child.display_path),
+                        "name": name,
+                        "path": child.display_path,
+                        "type": "directory",
+                        "children": children,
+                        "modified_at": modified_iso,
+                    }
+                )
                 continue
 
             counters["files"] += 1
-            nodes.append({
-                "id": stable_tree_id(child.display_path),
-                "name": name,
-                "path": child.display_path,
-                "type": "file",
-                "size": getattr(entry, "size", None),
-                "modified_at": modified_iso,
-            })
+            nodes.append(
+                {
+                    "id": stable_tree_id(child.display_path),
+                    "name": name,
+                    "path": child.display_path,
+                    "type": "file",
+                    "size": getattr(entry, "size", None),
+                    "modified_at": modified_iso,
+                }
+            )
         return nodes
 
     with _mounted_daytona_volume(volume_name) as sandbox:
@@ -401,7 +405,17 @@ def list_daytona_volume_tree(
     }
 
 
-alist_daytona_volume_tree = list_daytona_volume_tree
+async def alist_daytona_volume_tree(
+    volume_name: str,
+    root_path: str = "/",
+    max_depth: int = 4,
+) -> dict[str, Any]:
+    return await _run_sync_in_thread(
+        list_daytona_volume_tree,
+        volume_name,
+        root_path,
+        max_depth,
+    )
 
 
 def read_daytona_volume_file_text(
@@ -434,7 +448,17 @@ def read_daytona_volume_file_text(
     }
 
 
-aread_daytona_volume_file_text = read_daytona_volume_file_text
+async def aread_daytona_volume_file_text(
+    volume_name: str,
+    path: str,
+    max_bytes: int = 200_000,
+) -> dict[str, Any]:
+    return await _run_sync_in_thread(
+        read_daytona_volume_file_text,
+        volume_name,
+        path,
+        max_bytes,
+    )
 
 
 # ---------------------------------------------------------------------------

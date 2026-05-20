@@ -263,11 +263,13 @@ def _sandbox_find_in_files_impl(ctx: _SandboxFilesystemToolContext, path: str, p
         if isinstance(match, dict):
             hits.append(match)
         else:
-            hits.append({
-                "file": getattr(match, "file", ""),
-                "line": getattr(match, "line", None),
-                "content": getattr(match, "content", ""),
-            })
+            hits.append(
+                {
+                    "file": getattr(match, "file", ""),
+                    "line": getattr(match, "line", None),
+                    "content": getattr(match, "content", ""),
+                }
+            )
     return {
         "status": "ok",
         "path": resolved,

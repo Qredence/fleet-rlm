@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from .async_compat import _run_sync_in_thread
+from .async_compat import _run_async_compat, _run_sync_in_thread
 from .diagnostics import DaytonaDiagnosticError
 from .models import ContextSource
 from .sdk_ops import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
@@ -204,7 +204,10 @@ class DaytonaSandboxSession:
 
     def read_file(self, path: str) -> str:
         self._rebind_sandbox_if_needed()
-        raw = self.sandbox.fs.download_file(self._resolve_sandbox_path(path))
+        raw = _run_async_compat(
+            self.sandbox.fs.download_file,
+            self._resolve_sandbox_path(path),
+        )
         if raw is None:
             return ""
         if isinstance(raw, str):
@@ -220,30 +223,34 @@ class DaytonaSandboxSession:
         payload = content.encode("utf-8")
         callback = getattr(self, "execution_event_callback", None)
         if callable(callback):
-            callback({
-                "phase": "progress",
-                "timestamp": time.time(),
-                "execution_profile": "durable_write",
-                "code_hash": "durable-write",
-                "code_preview": "sandbox.fs.upload_file",
-                "event_kind": "durable_write_started",
-                "path": resolved_path,
-                "bytes_total": len(payload),
-                "bytes_written": 0,
-            })
-        self.sandbox.fs.upload_file(payload, resolved_path)
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_started",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": 0,
+                }
+            )
+        _run_async_compat(self.sandbox.fs.upload_file, payload, resolved_path)
         if callable(callback):
-            callback({
-                "phase": "progress",
-                "timestamp": time.time(),
-                "execution_profile": "durable_write",
-                "code_hash": "durable-write",
-                "code_preview": "sandbox.fs.upload_file",
-                "event_kind": "durable_write_completed",
-                "path": resolved_path,
-                "bytes_total": len(payload),
-                "bytes_written": len(payload),
-            })
+            callback(
+                {
+                    "phase": "progress",
+                    "timestamp": time.time(),
+                    "execution_profile": "durable_write",
+                    "code_hash": "durable-write",
+                    "code_preview": "sandbox.fs.upload_file",
+                    "event_kind": "durable_write_completed",
+                    "path": resolved_path,
+                    "bytes_total": len(payload),
+                    "bytes_written": len(payload),
+                }
+            )
         return resolved_path
 
     async def awrite_file(self, path: str, content: str) -> str:
@@ -251,7 +258,10 @@ class DaytonaSandboxSession:
 
     def list_files(self, path: str) -> list[Any]:
         self._rebind_sandbox_if_needed()
-        entries = self.sandbox.fs.list_files(self._resolve_sandbox_path(path))
+        entries = _run_async_compat(
+            self.sandbox.fs.list_files,
+            self._resolve_sandbox_path(path),
+        )
         return list(entries)
 
     async def alist_files(self, path: str) -> list[Any]:

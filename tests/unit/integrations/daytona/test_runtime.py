@@ -136,10 +136,12 @@ class _FakeClient:
         on_snapshot_create_logs=None,
     ):
         self.created_requests.append(request)
-        self.create_call_kwargs.append({
-            "timeout": timeout,
-            "on_snapshot_create_logs": on_snapshot_create_logs,
-        })
+        self.create_call_kwargs.append(
+            {
+                "timeout": timeout,
+                "on_snapshot_create_logs": on_snapshot_create_logs,
+            }
+        )
         return self.sandbox
 
     def get(self, sandbox_id: str):
@@ -952,14 +954,16 @@ def test_session_lifecycle_mutators_rebind_stale_sandbox(
 
         def resize(self, resources: object, timeout: float | None = 60) -> None:
             _ = timeout
-            self._calls.append((
-                "resize",
+            self._calls.append(
                 (
-                    getattr(resources, "cpu", None),
-                    getattr(resources, "memory", None),
-                    getattr(resources, "disk", None),
-                ),
-            ))
+                    "resize",
+                    (
+                        getattr(resources, "cpu", None),
+                        getattr(resources, "memory", None),
+                        getattr(resources, "disk", None),
+                    ),
+                )
+            )
 
         def stop(self, timeout: float = 10) -> None:
             self._calls.append(("stop", timeout))
@@ -1147,6 +1151,30 @@ def test_daytona_session_write_file_emits_progress_events() -> None:
         "durable_write_completed",
     ]
     assert events[-1]["bytes_written"] == 5
+
+
+def test_daytona_session_awrite_file_resolves_async_sdk_upload() -> None:
+    uploads: list[tuple[bytes, str]] = []
+
+    class _AsyncFs(_FakeFs):
+        async def upload_file(self, data: bytes, path: str) -> None:
+            uploads.append((bytes(data), path))
+
+    sandbox = _FakeSandbox()
+    sandbox.fs = _AsyncFs()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+
+    written = asyncio.run(session.awrite_file("notes.txt", "hello"))
+
+    assert written == "/workspace/repo/notes.txt"
+    assert uploads == [(b"hello", "/workspace/repo/notes.txt")]
 
 
 def test_runtime_fork_sandbox_creates_session() -> None:

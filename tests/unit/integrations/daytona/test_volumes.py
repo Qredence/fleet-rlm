@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -12,11 +13,13 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     VolumeNotReadyError,
 )
 from fleet_rlm.integrations.daytona.sdk_ops import (
-    await_volume_ready as _await_volume_ready,
-)
-from fleet_rlm.integrations.daytona.sdk_ops import (
+    alist_daytona_volume_tree,
+    aread_daytona_volume_file_text,
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
+)
+from fleet_rlm.integrations.daytona.sdk_ops import (
+    await_volume_ready as _await_volume_ready,
 )
 
 
@@ -189,6 +192,70 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
 
     with pytest.raises(RuntimeError, match="Is a directory"):
         read_daytona_volume_file_text("tenant-a", "/artifacts/docs")
+
+
+def test_alist_daytona_volume_tree_runs_sync_impl_off_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_list_daytona_volume_tree(
+        volume_name: str,
+        root_path: str = "/",
+        max_depth: int = 4,
+    ) -> dict[str, object]:
+        calls.append((volume_name, root_path, max_depth))
+        return {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "nodes": [],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.list_daytona_volume_tree",
+        _fake_list_daytona_volume_tree,
+    )
+
+    payload = asyncio.run(alist_daytona_volume_tree("tenant-a", root_path="/docs", max_depth=2))
+
+    assert calls == [("tenant-a", "/docs", 2)]
+    assert payload["volume_name"] == "tenant-a"
+    assert payload["root_path"] == "/docs"
+
+
+def test_aread_daytona_volume_file_text_runs_sync_impl_off_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_read_daytona_volume_file_text(
+        volume_name: str,
+        path: str,
+        max_bytes: int = 200_000,
+    ) -> dict[str, object]:
+        calls.append((volume_name, path, max_bytes))
+        return {
+            "path": path,
+            "mime": "text/plain",
+            "size": 5,
+            "content": "hello",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.read_daytona_volume_file_text",
+        _fake_read_daytona_volume_file_text,
+    )
+
+    payload = asyncio.run(aread_daytona_volume_file_text("tenant-a", "/docs/readme.txt", max_bytes=5))
+
+    assert calls == [("tenant-a", "/docs/readme.txt", 5)]
+    assert payload == {
+        "path": "/docs/readme.txt",
+        "mime": "text/plain",
+        "size": 5,
+        "content": "hello",
+        "truncated": False,
+    }
 
 
 # ---------------------------------------------------------------------------
