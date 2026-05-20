@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from types import SimpleNamespace
 
-import jwt
 import pytest
+from joserfc import jwt as _joserfc_jwt
+from joserfc.jwk import OctKey
 
 from fleet_rlm.api.auth import (
     DevAuthProvider,
@@ -16,6 +19,26 @@ from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.integrations.database import TenantStatus
 
 TEST_SECRET = "0123456789abcdef0123456789abcdef"
+
+
+def _make_dev_token(claims: dict, secret: str = TEST_SECRET) -> str:
+    """Encode a signed HS256 token via joserfc for DevAuthProvider tests."""
+    key = OctKey.import_key(secret.encode())
+    return _joserfc_jwt.encode({"alg": "HS256"}, claims, key)
+
+
+def _make_fake_entra_token(claims: dict) -> str:
+    """Create a structurally-valid but unsigned Entra-style JWT for unit tests."""
+    header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.fakesig"
+
+
+class _FakeToken:
+    """Minimal stand-in for a joserfc Token returned by jwt.decode."""
+
+    def __init__(self, claims: dict) -> None:
+        self.claims = claims
 
 
 class _FakeRequest:
@@ -56,15 +79,13 @@ async def test_dev_auth_accepts_debug_headers():
 @pytest.mark.asyncio
 async def test_dev_auth_accepts_hs256_jwt():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
-    token = jwt.encode(
+    token = _make_dev_token(
         {
             "tid": "tenant-xyz",
             "oid": "user-abc",
             "email": "bob@example.com",
             "name": "Bob",
-        },
-        TEST_SECRET,
-        algorithm="HS256",
+        }
     )
 
     identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
@@ -106,15 +127,13 @@ async def test_dev_auth_accepts_websocket_query_debug_identity():
 @pytest.mark.asyncio
 async def test_dev_auth_accepts_websocket_query_access_token():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET)
-    token = jwt.encode(
+    token = _make_dev_token(
         {
             "tid": "tenant-ws",
             "oid": "user-ws",
             "email": "ws@example.com",
             "name": "WS User",
-        },
-        TEST_SECRET,
-        algorithm="HS256",
+        }
     )
 
     identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
@@ -143,42 +162,20 @@ async def test_entra_auth_accepts_single_tenant_issuer_url(
         issuer_url="https://login.microsoftonline.com/static-tenant/v2.0",
         audience="api://fleet-rlm",
     )
+    token = _make_fake_entra_token({"tid": "tenant-123"})
+    fake_claims = {
+        "tid": "tenant-123",
+        "oid": "user-456",
+        "preferred_username": "alice@example.com",
+        "name": "Alice Example",
+        "iss": "https://login.microsoftonline.com/static-tenant/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
-    def _fake_decode(
-        token,
-        key=None,
-        algorithms=None,
-        audience=None,
-        issuer=None,
-        options=None,
-    ):
-        assert token == "entra-token"
-        if key is None:
-            return {"tid": "tenant-123"}
-
-        assert key == "rsa-public-key"
-        assert algorithms == ["RS256"]
-        assert audience == "api://fleet-rlm"
-        assert issuer == "https://login.microsoftonline.com/static-tenant/v2.0"
-        assert options == {"require": ["exp", "iat", "tid"]}
-        return {
-            "tid": "tenant-123",
-            "oid": "user-456",
-            "preferred_username": "alice@example.com",
-            "name": "Alice Example",
-        }
-
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
-
-    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "user-456"
@@ -191,49 +188,20 @@ async def test_entra_auth_accepts_bearer_token(monkeypatch: pytest.MonkeyPatch):
         issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
         audience="api://fleet-rlm",
     )
+    token = _make_fake_entra_token({"tid": "tenant-123"})
+    fake_claims = {
+        "tid": "tenant-123",
+        "oid": "user-456",
+        "preferred_username": "alice@example.com",
+        "name": "Alice Example",
+        "iss": "https://login.microsoftonline.com/tenant-123/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
-    def _fake_decode(
-        token,
-        key=None,
-        algorithms=None,
-        audience=None,
-        issuer=None,
-        options=None,
-    ):
-        assert token == "entra-token"
-        if key is None:
-            assert options == {
-                "verify_signature": False,
-                "verify_exp": False,
-                "verify_iat": False,
-                "verify_aud": False,
-                "verify_iss": False,
-            }
-            return {"tid": "tenant-123"}
-
-        assert key == "rsa-public-key"
-        assert algorithms == ["RS256"]
-        assert audience == "api://fleet-rlm"
-        assert issuer == "https://login.microsoftonline.com/tenant-123/v2.0"
-        assert options == {"require": ["exp", "iat", "tid"]}
-        return {
-            "tid": "tenant-123",
-            "oid": "user-456",
-            "preferred_username": "alice@example.com",
-            "name": "Alice Example",
-        }
-
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
-
-    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "user-456"
@@ -250,31 +218,20 @@ async def test_entra_auth_accepts_websocket_query_access_token(
         issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
         audience="api://fleet-rlm",
     )
+    token = _make_fake_entra_token({"tid": "tenant-ws"})
+    fake_claims = {
+        "tid": "tenant-ws",
+        "sub": "user-ws",
+        "email": "ws@example.com",
+        "name": "WS User",
+        "iss": "https://login.microsoftonline.com/tenant-ws/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-    decode_calls = {"count": 0}
-
-    def _fake_decode(*args, **kwargs):
-        decode_calls["count"] += 1
-        if decode_calls["count"] == 1:
-            return {"tid": "tenant-ws"}
-        return {
-            "tid": "tenant-ws",
-            "sub": "user-ws",
-            "email": "ws@example.com",
-            "name": "WS User",
-        }
-
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
-
-    identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": "entra-token"}))
+    identity = await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
 
     assert identity.tenant_claim == "tenant-ws"
     assert identity.user_claim == "user-ws"
@@ -304,10 +261,11 @@ async def test_entra_auth_rejects_missing_tid_before_issuer_resolution(
         audience="api://fleet-rlm",
     )
 
-    monkeypatch.setattr(jwt, "decode", lambda *args, **kwargs: {})
+    # Token with no tid claim — decoding stops before jwt.decode is reached
+    token = _make_fake_entra_token({})
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+        await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert exc.value.status_code == 401
     assert "tid" in exc.value.message
@@ -323,32 +281,20 @@ async def test_entra_auth_rejects_non_allowlisted_user(
         audience="api://fleet-rlm",
         allowed_user_ids={"allowed-user"},
     )
+    token = _make_fake_entra_token({"tid": "tenant-123"})
+    fake_claims = {
+        "tid": "tenant-123",
+        "oid": "blocked-user",
+        "preferred_username": "alice@example.com",
+        "iss": "https://login.microsoftonline.com/static-tenant/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
-
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-
-    decode_calls = {"count": 0}
-
-    def _fake_decode(*args, **kwargs):
-        decode_calls["count"] += 1
-        if decode_calls["count"] == 1:
-            return {"tid": "tenant-123"}
-        return {
-            "tid": "tenant-123",
-            "oid": "blocked-user",
-            "preferred_username": "alice@example.com",
-        }
-
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+        await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert exc.value.status_code == 403
     assert "allowlisted" in exc.value.message
@@ -364,32 +310,20 @@ async def test_entra_auth_accepts_allowlisted_group(
         audience="api://fleet-rlm",
         allowed_group_ids={"beta-group"},
     )
+    token = _make_fake_entra_token({"tid": "tenant-123"})
+    fake_claims = {
+        "tid": "tenant-123",
+        "oid": "blocked-user",
+        "groups": ["beta-group"],
+        "preferred_username": "alice@example.com",
+        "iss": "https://login.microsoftonline.com/static-tenant/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-
-    decode_calls = {"count": 0}
-
-    def _fake_decode(*args, **kwargs):
-        decode_calls["count"] += 1
-        if decode_calls["count"] == 1:
-            return {"tid": "tenant-123"}
-        return {
-            "tid": "tenant-123",
-            "oid": "blocked-user",
-            "groups": ["beta-group"],
-            "preferred_username": "alice@example.com",
-        }
-
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
-
-    identity = await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+    identity = await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert identity.tenant_claim == "tenant-123"
     assert identity.user_claim == "blocked-user"
@@ -405,33 +339,21 @@ async def test_entra_auth_rejects_group_allowlist_when_groups_are_omitted_by_ove
         audience="api://fleet-rlm",
         allowed_group_ids={"beta-group"},
     )
+    token = _make_fake_entra_token({"tid": "tenant-123"})
+    fake_claims = {
+        "tid": "tenant-123",
+        "oid": "blocked-user",
+        "_claim_names": {"groups": "src1"},
+        "preferred_username": "alice@example.com",
+        "iss": "https://login.microsoftonline.com/static-tenant/v2.0",
+        "aud": "api://fleet-rlm",
+    }
 
-    class _FakeSigningKey:
-        key = "rsa-public-key"
-
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        lambda token: _FakeSigningKey(),
-    )
-
-    decode_calls = {"count": 0}
-
-    def _fake_decode(*args, **kwargs):
-        decode_calls["count"] += 1
-        if decode_calls["count"] == 1:
-            return {"tid": "tenant-123"}
-        return {
-            "tid": "tenant-123",
-            "oid": "blocked-user",
-            "_claim_names": {"groups": "src1"},
-            "preferred_username": "alice@example.com",
-        }
-
-    monkeypatch.setattr(jwt, "decode", _fake_decode)
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: None)
+    monkeypatch.setattr(_joserfc_jwt, "decode", lambda t, k: _FakeToken(fake_claims))
 
     with pytest.raises(AuthError) as exc:
-        await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+        await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert exc.value.status_code == 403
     assert "omitted groups due to overage" in exc.value.message
@@ -448,20 +370,16 @@ async def test_entra_auth_logs_unexpected_validation_errors(
         audience="api://fleet-rlm",
     )
 
-    monkeypatch.setattr(jwt, "decode", lambda *args, **kwargs: {"tid": "tenant-123"})
+    token = _make_fake_entra_token({"tid": "tenant-123"})
 
-    def _raise_jwks_unavailable(_: str):
+    def _raise_on_fetch():
         raise RuntimeError("jwks offline")
 
-    monkeypatch.setattr(
-        provider._jwk_client,
-        "get_signing_key_from_jwt",
-        _raise_jwks_unavailable,
-    )
+    monkeypatch.setattr(provider, "_fetch_jwks", _raise_on_fetch)
 
     with caplog.at_level("WARNING"):
         with pytest.raises(AuthError) as exc:
-            await provider.authenticate_http(_FakeRequest({"authorization": "Bearer entra-token"}))
+            await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
 
     assert exc.value.status_code == 503
     assert "Failed to validate Entra token" in exc.value.message
@@ -550,11 +468,7 @@ async def test_dev_auth_blocks_debug_identity_when_disabled():
 @pytest.mark.asyncio
 async def test_dev_auth_blocks_query_access_token_when_disabled():
     provider = DevAuthProvider(jwt_secret=TEST_SECRET, allow_query_auth_tokens=False)
-    token = jwt.encode(
-        {"tid": "tenant-ws", "oid": "user-ws"},
-        TEST_SECRET,
-        algorithm="HS256",
-    )
+    token = _make_dev_token({"tid": "tenant-ws", "oid": "user-ws"})
     with pytest.raises(AuthError) as exc:
         await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": token}))
     assert exc.value.status_code == 401

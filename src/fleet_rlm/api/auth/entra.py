@@ -147,6 +147,7 @@ class EntraAuthProvider:
                 if len(parts) < 2:
                     raise AuthError("Token missing payload", status_code=401)
                 import base64
+
                 padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
                 payload_bytes = base64.urlsafe_b64decode(padded)
                 unverified_claims = json.loads(payload_bytes.decode("utf-8"))
