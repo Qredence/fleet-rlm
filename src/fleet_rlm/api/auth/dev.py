@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-import jwt
 from fastapi import Request, WebSocket
-from jwt import InvalidTokenError
+from joserfc import jwt
+from joserfc.errors import JoseError
+from joserfc.jwk import OctKey
+from joserfc.jwt import JWTClaimsRegistry
 
 from .base import AuthError
 from .types import NormalizedIdentity
@@ -88,13 +90,12 @@ class DevAuthProvider:
 
     def _decode_token(self, token: str) -> NormalizedIdentity:
         try:
-            claims = jwt.decode(
-                token,
-                self._jwt_secret,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
-        except InvalidTokenError as exc:
+            key = OctKey.import_key(self._jwt_secret)
+            registry = JWTClaimsRegistry()
+            obj = jwt.decode(token, key)
+            registry.validate(obj.claims)
+            claims = obj.claims
+        except JoseError as exc:
             raise AuthError(f"Invalid dev JWT: {exc}", status_code=401) from exc
         return self._normalize_claims(claims)
 

@@ -99,7 +99,7 @@ class _FakeStreamableReactProgram:
         planner_predictions: list[dspy.Prediction],
         tools: dict[str, Any] | None = None,
     ) -> None:
-        self.react = object()
+        self.planner = object()
         self.extract = SimpleNamespace(predict=object())
         self.max_iters = len(planner_predictions)
         self.tools = dict(tools or {})
@@ -110,14 +110,12 @@ class _FakeStreamableReactProgram:
         self.formatted_trajectories.append(dict(trajectory))
         return str(trajectory)
 
-    async def _async_call_with_potential_trajectory_truncation(
+    async def async_planner_step(
         self,
-        module: Any,
         trajectory: dict[str, Any],
         **input_args: Any,
     ) -> dspy.Prediction:
         _ = trajectory, input_args
-        assert module is self.react
         return self._planner_predictions.pop(0)
 
 
@@ -418,8 +416,8 @@ class TestAgentInitWithDiscoveredTools:
             lambda: [],
         )
         rt = AgentRuntime(max_iters=25)
-        # FleetAgent stores max_iters on its react submodule
-        assert rt.agent.react._max_iters == 25
+        # FleetAgent stores max_iters directly now
+        assert rt.agent.max_iters == 25
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +499,7 @@ class TestHistoryAccumulationAcrossTurns:
             cancelled = True
             return dspy.Prediction(response="late response")
 
-        runtime.agent.forward = _fake_forward
+        runtime.agent = _fake_forward
 
         events = [
             event
@@ -531,19 +529,14 @@ class TestHistoryAccumulationAcrossTurns:
                 )
             ]
         )
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
-            lambda _program: fake_react_program,
-        )
+        runtime.agent = fake_react_program
 
         # For finish-only trajectories the fast path skips the extract LLM
         # call and emits the planner thought as the response directly.
         events = [event async for event in runtime.aiter_chat_turn_stream("hello")]
 
-        assert [event.kind for event in events] == ["status", "reasoning", "text", "done"]
+        assert [event.kind for event in events] == ["status", "text", "done"]
         assert events[1].text == "I can answer directly."
-        # Response is the thought itself (no extract call)
-        assert events[2].text == "I can answer directly."
         assert events[-1].text == "I can answer directly."
         assert runtime.history_turns() == 1
 
@@ -569,10 +562,7 @@ class TestHistoryAccumulationAcrossTurns:
             ],
             tools={"delegate_to_rlm": tool},
         )
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
-            lambda _program: fake_react_program,
-        )
+        runtime.agent = fake_react_program
 
         def _fake_streamify(*args: Any, **kwargs: Any):
             _ = args, kwargs
@@ -593,7 +583,6 @@ class TestHistoryAccumulationAcrossTurns:
             "reasoning",
             "tool_call",
             "tool_result",
-            "reasoning",
             "text",
             "done",
         ]
@@ -643,10 +632,7 @@ class TestHistoryAccumulationAcrossTurns:
             ],
             tools={"delegate_to_rlm": tool},
         )
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
-            lambda _program: fake_react_program,
-        )
+        runtime.agent = fake_react_program
 
         def _fake_streamify(*args: Any, **kwargs: Any):
             _ = args, kwargs
@@ -692,10 +678,7 @@ class TestHistoryAccumulationAcrossTurns:
             ],
             tools={"clarification_questions": tool},
         )
-        monkeypatch.setattr(
-            "fleet_rlm.runtime.agent.runtime._get_streamable_react_program",
-            lambda _program: fake_react_program,
-        )
+        runtime.agent = fake_react_program
 
         def _fake_streamify(*args: Any, **kwargs: Any):
             _ = args, kwargs

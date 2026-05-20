@@ -56,6 +56,11 @@ class _FakeClient:
         self.close_calls += 1
 
 
+class _FakeClientWithoutClose:
+    def __init__(self, snapshots: list[SimpleNamespace] | None = None) -> None:
+        self.snapshot = _FakeSnapshotService(snapshots)
+
+
 def _make_snapshot(name: str, *, state: str = "ACTIVE", snap_id: str = "snap-1") -> SimpleNamespace:
     return SimpleNamespace(name=name, id=snap_id, state=state, image_name="python:3.12-slim")
 
@@ -78,6 +83,25 @@ def test_alist_snapshots_returns_summaries(monkeypatch) -> None:
     assert len(result) == 2
     assert result[0]["name"] == "base"
     assert result[1]["id"] == "snap-2"
+
+
+def test_alist_snapshots_tolerates_client_without_close(monkeypatch) -> None:
+    fake_client = _FakeClientWithoutClose([_make_snapshot("base")])
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    result = alist_snapshots(config=SimpleNamespace(api_key="k", api_url="u", target=None))
+
+    assert result == [
+        {
+            "name": "base",
+            "id": "snap-1",
+            "state": "ACTIVE",
+            "image_name": "python:3.12-slim",
+        }
+    ]
 
 
 def test_aget_snapshot_found(monkeypatch) -> None:
@@ -128,6 +152,18 @@ def test_aresolve_snapshot_active(monkeypatch) -> None:
         lambda config: fake_client,
     )
     result = aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None))
+    assert result == "fleet-rlm-base"
+
+
+def test_aresolve_snapshot_active_tolerates_client_without_close(monkeypatch) -> None:
+    fake_client = _FakeClientWithoutClose([_make_snapshot("fleet-rlm-base", state="ACTIVE")])
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    result = aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None))
+
     assert result == "fleet-rlm-base"
 
 

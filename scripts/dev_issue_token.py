@@ -8,7 +8,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import jwt
+from joserfc import jwt
+from joserfc.jwk import OctKey
 from dotenv import load_dotenv
 
 
@@ -54,7 +55,8 @@ def main() -> int:
         "aud": "fleet-rlm",
     }
 
-    token = jwt.encode(payload, secret, algorithm="HS256")
+    key = OctKey.import_key(secret)
+    token = jwt.encode({"alg": "HS256"}, payload, key)
     print(token)
     return 0
 

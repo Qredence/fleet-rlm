@@ -229,12 +229,26 @@ def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list."""
     if not raw:
         return []
-    if "steps" in raw and isinstance(raw["steps"], list):
-        return raw["steps"]
-    if "trajectory" in raw and isinstance(raw["trajectory"], list):
-        return raw["trajectory"]
 
-    return [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
+    steps: list[dict[str, Any]] = []
+    if "steps" in raw and isinstance(raw["steps"], list):
+        steps = raw["steps"]
+    elif "trajectory" in raw and isinstance(raw["trajectory"], list):
+        steps = raw["trajectory"]
+    else:
+        steps = [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
+
+    result: list[dict[str, Any]] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        step_copy = dict(step)
+        tool_name = step_copy.get("tool_name")
+        is_terminal = (tool_name == "finish") or (not tool_name)
+        if is_terminal and "thought" in step_copy:
+            del step_copy["thought"]
+        result.append(step_copy)
+    return result
 
 
 def _as_text(value: Any) -> str | None:

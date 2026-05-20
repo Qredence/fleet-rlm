@@ -45,6 +45,8 @@ from ...runtime_services.chat_runtime import (
     LocalPersistFn,
     SessionContext,
     StreamEventLike,
+    build_chat_agent_context,
+    set_interpreter_default_profile,
 )
 from ...runtime_services.chat_runtime import (
     ChatSessionState as _ChatSessionState,
@@ -172,7 +174,7 @@ def _terminal_run_status(event: StreamEventLike) -> RunStatus:
 
 async def handle_terminal_stream_event(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     event: StreamEventLike,
     event_dict: dict[str, Any],
@@ -205,12 +207,7 @@ async def handle_terminal_stream_event(
             step=step,
             summary=summary,
         )
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
         return
-
-    if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-        raise WebSocketDisconnect(code=1001)
 
     try:
         await persist_session_state(include_volume_save=True)
@@ -449,7 +446,7 @@ def build_execution_completion_summary(
 
 async def handle_stream_error(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     exc: Exception,
@@ -466,14 +463,15 @@ async def handle_stream_error(
             "error_code": error_code,
         },
     )
-    await _try_send_json(
-        websocket,
-        _error_envelope(
-            code=error_code,
-            message=f"Streaming error: {exc}",
-            details={"error_type": type(exc).__name__},
-        ),
-    )
+    if websocket is not None:
+        await _try_send_json(
+            websocket,
+            _error_envelope(
+                code=error_code,
+                message=f"Streaming error: {exc}",
+                details={"error_type": type(exc).__name__},
+            ),
+        )
     if lifecycle.run_completed:
         return
 
@@ -571,13 +569,14 @@ async def stream_agent_turn(
 
 async def run_streaming_turn(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
     orchestration_session: SessionContext | None,
     cancel_check: Callable[[], bool],
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
+    execution_emitter: ExecutionEventEmitter,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
 
@@ -616,6 +615,7 @@ async def run_streaming_turn(
                 step_builder=step_builder,
                 analytics_enabled=prepared_turn.analytics_enabled,
                 persist_session_state=persist_session_state,
+                execution_emitter=execution_emitter,
             )
 
         await _run_prepared_stream(
@@ -655,7 +655,7 @@ async def _run_prepared_stream(
 
 async def _stream_agent_events(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     agent: ChatAgentProtocol,
     prepared_turn: PreparedStreamingTurn,
     orchestration_session: SessionContext | None,
@@ -665,6 +665,7 @@ async def _stream_agent_events(
     step_builder: ExecutionStepBuilder,
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
+    execution_emitter: ExecutionEventEmitter,
 ) -> None:
     worker_request = build_workspace_task_request(
         agent=agent,
@@ -688,6 +689,7 @@ async def _stream_agent_events(
                     orchestration_session=orchestration_session,
                     persist_session_state=persist_session_state,
                     request_message=prepared_turn.message,
+                    execution_emitter=execution_emitter,
                 )
     finally:
         if hosted_repl_bridge is not None and bridge_started:
@@ -703,13 +705,14 @@ async def _stream_agent_events(
 
 async def _emit_stream_event(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
     event: WorkspaceEvent | StreamEventLike,
     orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
+    execution_emitter: ExecutionEventEmitter,
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload
@@ -721,9 +724,10 @@ async def _emit_stream_event(
         )
     event_dict = build_stream_event_dict(event=event, payload=payload)
     is_terminal_event = _is_terminal_transport_event(event)
-    if not is_terminal_event:
-        if not await _try_send_json(websocket, {"type": "event", "data": event_dict}):
-            raise WebSocketDisconnect(code=1001)
+
+    # We NO LONGER send raw event_dicts via the websocket directly.
+    # Instead, we rely entirely on the ExecutionEventEmitter (via lifecycle)
+    # which emits typed ExecutionEvent payloads.
 
     event_timestamp = event.timestamp.timestamp()
     step = step_builder.from_stream_event(
@@ -750,12 +754,11 @@ async def _emit_stream_event(
             persist_session_state=persist_session_state,
             request_message=request_message,
         )
-        return
 
 
 async def _process_chat_message(
     *,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     msg: WSMessage,
     agent: ChatAgentProtocol,
     interpreter: object | None,
@@ -802,6 +805,7 @@ async def _process_chat_message(
         cancel_check=cancel_check,
         interpreter=interpreter,
         persist_session_state=local_persist,
+        execution_emitter=execution_emitter,
     )
 
 
@@ -841,6 +845,45 @@ async def _await_message_while_streaming(
         raw_payload=raw_payload,
     )
     return msg, stream_task, None
+
+
+async def _background_execution_task(
+    msg: WSMessage,
+    runtime: _PreparedChatRuntime,
+    session: _ChatSessionState,
+    local_persist: LocalPersistFn,
+    workspace_id: str,
+    user_id: str,
+    sess_id: str,
+    execution_emitter: ExecutionEventEmitter,
+) -> None:
+    """Run execution in the background with its own agent context."""
+    agent_context = await build_chat_agent_context(runtime)
+    async with agent_context as agent:
+        interpreter = getattr(agent, "interpreter", None)
+        set_interpreter_default_profile(interpreter, runtime.cfg)
+
+        agent._db_session_id = (session.session_record or {}).get("db_session_id")
+        agent._identity_rows = runtime.identity_rows
+        if agent.interpreter is not None:
+            agent.interpreter._host_repository = runtime.persistence
+            agent.interpreter._host_identity = runtime.identity_rows
+            agent.interpreter._host_run_id = None
+
+        # Execute
+        await _process_chat_message(
+            websocket=None,  # Decoupled
+            msg=msg,
+            agent=agent,
+            interpreter=interpreter,
+            session=session,
+            local_persist=local_persist,
+            runtime=runtime,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            sess_id=sess_id,
+            execution_emitter=execution_emitter,
+        )
 
 
 async def _handle_message_while_streaming(
@@ -1086,15 +1129,12 @@ class _ExecutionConnectionLoop:
                 ):
                     continue
 
-                self.stream_task = asyncio.create_task(
-                    _process_chat_message(
-                        websocket=self.websocket,
+                asyncio.create_task(  # noqa: RUF006
+                    _background_execution_task(
                         msg=msg,
-                        agent=self.agent,
-                        interpreter=self.interpreter,
+                        runtime=self.runtime,
                         session=self.session,
                         local_persist=self.local_persist,
-                        runtime=self.runtime,
                         workspace_id=target.workspace_id,
                         user_id=target.user_id,
                         sess_id=target.sess_id,

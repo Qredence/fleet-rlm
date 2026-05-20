@@ -29,8 +29,6 @@ from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_
 if TYPE_CHECKING:
     from .agent import FleetAgent
 
-from .agent import _is_finish_only_trajectory
-
 logger = logging.getLogger(__name__)
 
 
@@ -57,18 +55,15 @@ def _append_turn_to_history(
 
 
 def _get_streamable_react_program(program: Any) -> Any | None:
-    react_program = getattr(program, "react", None)
-    if react_program is None:
-        return None
+    react_program = getattr(program, "react", program)
 
-    planner = getattr(react_program, "react", None)
-    extract = getattr(getattr(react_program, "extract", None), "predict", None)
-    format_trajectory = getattr(react_program, "_format_trajectory", None)
-    async_call = getattr(react_program, "_async_call_with_potential_trajectory_truncation", None)
+    planner = getattr(react_program, "planner", None)
+    extract = getattr(react_program, "extract", None)
+    async_call = getattr(react_program, "async_planner_step", None)
 
     if planner is None or extract is None:
         return None
-    if not callable(format_trajectory) or not callable(async_call):
+    if not callable(async_call):
         return None
     return react_program
 
@@ -304,7 +299,9 @@ class AgentRuntime:
 
         for step in trajectory:
             thought = step.get("thought")
-            if thought:
+            tool_name = step.get("tool_name")
+            is_terminal = (tool_name == "finish") or (not tool_name)
+            if thought and not is_terminal:
                 yield StreamEvent(
                     kind="reasoning",
                     text=str(thought),
@@ -590,8 +587,7 @@ class AgentRuntime:
 
                 try:
                     t_planner_start = _time.monotonic()
-                    prediction = await react_program._async_call_with_potential_trajectory_truncation(
-                        react_program.react,
+                    prediction = await react_program.async_planner_step(
                         trajectory_raw,
                         **input_args,
                     )
@@ -608,12 +604,22 @@ class AgentRuntime:
                 trajectory_raw[f"tool_name_{step_index}"] = tool_name
                 trajectory_raw[f"tool_args_{step_index}"] = tool_args
 
+                is_terminal = (tool_name == "finish") or (not tool_name)
+
                 if thought:
-                    yield StreamEvent(
-                        kind="reasoning",
-                        text=thought,
-                        payload={"phase": "reasoning", "step_index": step_index},
-                    )
+                    if is_terminal:
+                        response = thought
+                        response_streamed = True
+                        yield StreamEvent(kind="text", text=thought)
+                    else:
+                        yield StreamEvent(
+                            kind="reasoning",
+                            text=thought,
+                            payload={"phase": "reasoning", "step_index": step_index},
+                        )
+                elif is_terminal:
+                    response = ""
+                    response_streamed = True
 
                 if not tool_name:
                     break
@@ -644,21 +650,15 @@ class AgentRuntime:
                     yield clarification_event
 
             # Fast path: skip the extract LLM call when the agent finished
-            # on the very first step without using any tool.  The planner
-            # thought already contains the final response, so we can emit
-            # it directly and avoid a full round-trip to the LM.
-            if _is_finish_only_trajectory(trajectory_raw):
+            # with a finish tool or no tool. The planner thought already
+            # contains the final response, which we yielded directly as text.
+            if response_streamed:
                 t_fast_ms = (_time.monotonic() - t_turn_start) * 1000
                 logger.info(
-                    "streaming: finish-only trajectory, skipping extract LLM call (%.0fms since turn start)",
+                    "streaming: terminal planner thought used as final response, skipping extract LLM call (%.0fms since turn start)",
                     t_fast_ms,
                 )
-                fast_response = str(trajectory_raw.get("thought_0", ""))
-                if fast_response:
-                    response = fast_response
-                    response_streamed = True
-                    yield StreamEvent(kind="text", text=fast_response)
-                extract_prediction = dspy.Prediction(response=fast_response)
+                extract_prediction = dspy.Prediction(response=response)
             else:
                 t_extract_start = _time.monotonic()
                 stream_extract = cast(
