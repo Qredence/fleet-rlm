@@ -39,7 +39,7 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
         def __init__(self, session: Any) -> None:
             self.session = session
 
-        async def find_files(self, path: str, pattern: str) -> list[dict[str, Any]]:
+        def find_files(self, path: str, pattern: str) -> list[dict[str, Any]]:
             assert self.session.rebound is True
             return [{"file": path, "line": 7, "content": pattern}]
 
@@ -49,8 +49,10 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
             self.sandbox = type("_Sandbox", (), {})()
             self.sandbox.fs = _Fs(self)
 
-        async def _arebind_sandbox_if_needed(self) -> None:
+        def _rebind_sandbox_if_needed(self) -> None:
             self.rebound = True
+
+        _arebind_sandbox_if_needed = _rebind_sandbox_if_needed
 
         def _resolve_sandbox_path(self, path: str) -> str:
             return f"/workspace/{path}"
@@ -67,4 +69,160 @@ def test_sandbox_find_in_files_rebinds_before_sdk_call() -> None:
         "pattern": "budget",
         "count": 1,
         "hits": [{"file": "/workspace/src", "line": 7, "content": "budget"}],
+    }
+
+
+def test_sandbox_read_file_runs_async_session_accessor() -> None:
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _sandbox_read_file_impl,
+        _SandboxFilesystemToolContext,
+    )
+
+    class _Fs:
+        def download_file(self, path: str) -> bytes:
+            assert path == "/workspace/notes.txt"
+            return b"hello"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.sandbox = type("_Sandbox", (), {})()
+            self.sandbox.fs = _Fs()
+
+        def _resolve_sandbox_path(self, path: str) -> str:
+            return f"/workspace/{path}"
+
+    class _Interpreter:
+        _session = None
+
+        async def aget_session(self) -> Any:
+            return _Session()
+
+    ctx = _SandboxFilesystemToolContext(interpreter=_Interpreter())
+
+    result = _sandbox_read_file_impl(ctx, "notes.txt")
+
+    assert result == {
+        "status": "ok",
+        "path": "/workspace/notes.txt",
+        "content": "hello",
+        "size": 5,
+    }
+
+
+def test_sandbox_read_file_resolves_async_sdk_download() -> None:
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _sandbox_read_file_impl,
+        _SandboxFilesystemToolContext,
+    )
+
+    class _Fs:
+        async def download_file(self, path: str) -> bytes:
+            assert path == "/workspace/notes.txt"
+            return b"hello async"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.sandbox = type("_Sandbox", (), {})()
+            self.sandbox.fs = _Fs()
+
+        def _resolve_sandbox_path(self, path: str) -> str:
+            return f"/workspace/{path}"
+
+    ctx = _SandboxFilesystemToolContext(interpreter=type("_Interpreter", (), {"_session": _Session()})())
+
+    result = _sandbox_read_file_impl(ctx, "notes.txt")
+
+    assert result == {
+        "status": "ok",
+        "path": "/workspace/notes.txt",
+        "content": "hello async",
+        "size": 11,
+    }
+
+
+def test_sandbox_write_file_resolves_async_sdk_upload() -> None:
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _sandbox_write_file_impl,
+        _SandboxFilesystemToolContext,
+    )
+
+    uploads: list[tuple[bytes, str]] = []
+
+    class _Fs:
+        async def upload_file(self, data: bytes, path: str) -> None:
+            uploads.append((data, path))
+
+    class _Session:
+        def __init__(self) -> None:
+            self.sandbox = type("_Sandbox", (), {})()
+            self.sandbox.fs = _Fs()
+
+        def _resolve_sandbox_path(self, path: str) -> str:
+            return f"/workspace/{path}"
+
+    ctx = _SandboxFilesystemToolContext(interpreter=type("_Interpreter", (), {"_session": _Session()})())
+
+    result = _sandbox_write_file_impl(ctx, "notes.txt", "hello")
+
+    assert uploads == [(b"hello", "/workspace/notes.txt")]
+    assert result == {
+        "status": "ok",
+        "path": "/workspace/notes.txt",
+        "bytes_written": 5,
+    }
+
+
+def test_sandbox_replace_in_files_resolves_async_sdk_result() -> None:
+    from fleet_rlm.runtime.tools.sandbox_filesystem import (
+        _sandbox_replace_in_files_impl,
+        _SandboxFilesystemToolContext,
+    )
+
+    calls: list[tuple[list[str], str, str]] = []
+
+    class _Fs:
+        async def replace_in_files(
+            self,
+            files: list[str],
+            pattern: str,
+            replacement: str,
+        ) -> dict[str, Any]:
+            calls.append((files, pattern, replacement))
+            return {"updated": len(files)}
+
+    class _Session:
+        def __init__(self) -> None:
+            self.sandbox = type("_Sandbox", (), {})()
+            self.sandbox.fs = _Fs()
+
+        def _resolve_sandbox_path(self, path: str) -> str:
+            return f"/workspace/{path}"
+
+        def _rebind_sandbox_if_needed(self) -> None:
+            return None
+
+    ctx = _SandboxFilesystemToolContext(interpreter=type("_Interpreter", (), {"_session": _Session()})())
+
+    result = _sandbox_replace_in_files_impl(
+        ctx,
+        files=["a.txt", "b.txt"],
+        pattern="old",
+        replacement="new",
+    )
+
+    assert calls == [
+        (
+            [
+                "/workspace/a.txt",
+                "/workspace/b.txt",
+            ],
+            "old",
+            "new",
+        )
+    ]
+    assert result == {
+        "status": "ok",
+        "files": ["/workspace/a.txt", "/workspace/b.txt"],
+        "pattern": "old",
+        "result": {"updated": 2},
     }

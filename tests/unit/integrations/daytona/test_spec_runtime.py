@@ -3,15 +3,15 @@ from __future__ import annotations
 import datetime as dt
 from types import SimpleNamespace
 
-from fleet_rlm.integrations.daytona.runtime import (
-    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
-    DaytonaSandboxRuntime,
-)
-from fleet_rlm.integrations.daytona.sandbox_spec import (
+from fleet_rlm.integrations.daytona.models import (
     DEFAULT_SANDBOX_LABELS,
     build_sandbox_spec,
     default_sandbox_name,
     merge_sandbox_labels,
+)
+from fleet_rlm.integrations.daytona.runtime import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    DaytonaSandboxRuntime,
 )
 
 

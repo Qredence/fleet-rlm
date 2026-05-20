@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from types import SimpleNamespace
@@ -12,12 +12,14 @@ from fleet_rlm.integrations.daytona.diagnostics import (
     DaytonaDiagnosticError,
     VolumeNotReadyError,
 )
-from fleet_rlm.integrations.daytona.volume_runtime import (
-    await_volume_ready as _await_volume_ready,
-)
-from fleet_rlm.integrations.daytona.volume_runtime import (
+from fleet_rlm.integrations.daytona.sdk_ops import (
+    alist_daytona_volume_tree,
+    aread_daytona_volume_file_text,
     list_daytona_volume_tree,
     read_daytona_volume_file_text,
+)
+from fleet_rlm.integrations.daytona.sdk_ops import (
+    await_volume_ready as _await_volume_ready,
 )
 
 
@@ -83,13 +85,13 @@ def test_list_daytona_volume_tree_uses_native_fs_listing(
                 return []
             raise AssertionError(f"unexpected list path: {path}")
 
-    @asynccontextmanager
-    async def _fake_mounted_daytona_volume(volume_name: str):
+    @contextmanager
+    def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.sdk_ops._mounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -139,13 +141,13 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
             calls.append(path)
             return b"abcdefghij"
 
-    @asynccontextmanager
-    async def _fake_mounted_daytona_volume(volume_name: str):
+    @contextmanager
+    def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.sdk_ops._mounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
@@ -178,18 +180,82 @@ def test_read_daytona_volume_file_text_preserves_native_errors(
             _ = path
             raise RuntimeError("Is a directory")
 
-    @asynccontextmanager
-    async def _fake_mounted_daytona_volume(volume_name: str):
+    @contextmanager
+    def _fake_mounted_daytona_volume(volume_name: str):
         assert volume_name == "tenant-a"
         yield SimpleNamespace(fs=_FakeFs())
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.volume_runtime._amounted_daytona_volume",
+        "fleet_rlm.integrations.daytona.sdk_ops._mounted_daytona_volume",
         _fake_mounted_daytona_volume,
     )
 
     with pytest.raises(RuntimeError, match="Is a directory"):
         read_daytona_volume_file_text("tenant-a", "/artifacts/docs")
+
+
+def test_alist_daytona_volume_tree_runs_sync_impl_off_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_list_daytona_volume_tree(
+        volume_name: str,
+        root_path: str = "/",
+        max_depth: int = 4,
+    ) -> dict[str, object]:
+        calls.append((volume_name, root_path, max_depth))
+        return {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "nodes": [],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.list_daytona_volume_tree",
+        _fake_list_daytona_volume_tree,
+    )
+
+    payload = asyncio.run(alist_daytona_volume_tree("tenant-a", root_path="/docs", max_depth=2))
+
+    assert calls == [("tenant-a", "/docs", 2)]
+    assert payload["volume_name"] == "tenant-a"
+    assert payload["root_path"] == "/docs"
+
+
+def test_aread_daytona_volume_file_text_runs_sync_impl_off_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_read_daytona_volume_file_text(
+        volume_name: str,
+        path: str,
+        max_bytes: int = 200_000,
+    ) -> dict[str, object]:
+        calls.append((volume_name, path, max_bytes))
+        return {
+            "path": path,
+            "mime": "text/plain",
+            "size": 5,
+            "content": "hello",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.read_daytona_volume_file_text",
+        _fake_read_daytona_volume_file_text,
+    )
+
+    payload = asyncio.run(aread_daytona_volume_file_text("tenant-a", "/docs/readme.txt", max_bytes=5))
+
+    assert calls == [("tenant-a", "/docs/readme.txt", 5)]
+    assert payload == {
+        "path": "/docs/readme.txt",
+        "mime": "text/plain",
+        "size": 5,
+        "content": "hello",
+        "truncated": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +303,7 @@ def test_await_volume_ready_returns_immediately_when_ready() -> None:
     volume = SimpleNamespace(id="vol-1", state="ready")
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -246,7 +312,7 @@ def test_await_volume_ready_accepts_id_only_handles_without_state() -> None:
     volume = SimpleNamespace(id="vol-1")
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -256,7 +322,7 @@ def test_await_volume_ready_accepts_enum_like_ready_strings(state: str) -> None:
     volume = SimpleNamespace(id="vol-1", state=state)
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -265,7 +331,7 @@ def test_await_volume_ready_accepts_enum_value_objects() -> None:
     volume = SimpleNamespace(id="vol-1", state=_VolumeStateEnum.READY)
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -274,7 +340,7 @@ def test_await_volume_ready_accepts_value_only_objects() -> None:
     volume = SimpleNamespace(id="vol-1", state=_ValueOnlyState())
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -283,7 +349,7 @@ def test_await_volume_ready_accepts_name_only_objects() -> None:
     volume = SimpleNamespace(id="vol-1", state=_NameOnlyState())
     client = _FakeVolumeClient([])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume))
+    result = _await_volume_ready(client, "test-vol", volume)
     assert result is volume
     assert client._call_count == 0
 
@@ -293,7 +359,7 @@ def test_await_volume_ready_polls_until_ready() -> None:
     volume = SimpleNamespace(id="vol-1", state="creating")
     client = _FakeVolumeClient(["pending_create", "ready"])
 
-    result = asyncio.run(_await_volume_ready(client, "test-vol", volume, timeout=30.0))
+    result = _await_volume_ready(client, "test-vol", volume, timeout=30.0)
     assert result.state == "ready"
     assert client._call_count == 2
 
@@ -304,7 +370,7 @@ def test_await_volume_ready_timeout_raises_volume_not_ready_error() -> None:
     client = _FakeVolumeClient(["pending_create"] * 50)
 
     with pytest.raises(VolumeNotReadyError, match="pending_create") as exc_info:
-        asyncio.run(_await_volume_ready(client, "test-vol", volume, timeout=0.1))
+        (_await_volume_ready(client, "test-vol", volume, timeout=0.1))
     err = exc_info.value
     assert err.volume_name == "test-vol"
     assert err.volume_state == "pending_create"
@@ -317,7 +383,7 @@ def test_await_volume_ready_timeout_error_includes_raw_and_normalized_states() -
     client = _FakeVolumeClient(["VolumeState.PENDING_CREATE"] * 50)
 
     with pytest.raises(VolumeNotReadyError, match="raw='VolumeState.PENDING_CREATE'"):
-        asyncio.run(_await_volume_ready(client, "test-vol", volume, timeout=0.1))
+        (_await_volume_ready(client, "test-vol", volume, timeout=0.1))
 
 
 def test_await_volume_ready_error_state_raises_diagnostic_error() -> None:
@@ -326,7 +392,7 @@ def test_await_volume_ready_error_state_raises_diagnostic_error() -> None:
     client = _FakeVolumeClient([])
 
     with pytest.raises(DaytonaDiagnosticError, match="error state"):
-        asyncio.run(_await_volume_ready(client, "test-vol", volume))
+        (_await_volume_ready(client, "test-vol", volume))
 
 
 def test_await_volume_ready_error_during_polling_raises() -> None:
@@ -335,4 +401,4 @@ def test_await_volume_ready_error_during_polling_raises() -> None:
     client = _FakeVolumeClient(["pending_create", "failed"])
 
     with pytest.raises(DaytonaDiagnosticError, match="error state"):
-        asyncio.run(_await_volume_ready(client, "test-vol", volume, timeout=30.0))
+        (_await_volume_ready(client, "test-vol", volume, timeout=30.0))

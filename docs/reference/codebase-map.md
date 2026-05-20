@@ -69,8 +69,8 @@ Key files:
 - `runtime/models/*` contains runtime model assembly and registry code
 - `runtime/quality/*` is the offline evaluation and optimization layer
 - `integrations/daytona/interpreter.py` is the public Daytona interpreter facade
-- `integrations/daytona/workspace_manager.py`, `sandbox_executor.py`, and `child_delegation.py` own workspace/session state, sandbox execution, and recursive child construction behind that facade
-- `integrations/daytona/runtime.py` owns workspace bootstrap, context staging, and Daytona SDK runtime helpers
+- `integrations/daytona/workspace_manager.py`, `sandbox_executor.py`, and `isolation.py` own workspace/session state, sandbox execution, and recursive child/evidence/context policy behind that facade
+- `integrations/daytona/runtime.py`, `workspace_runtime.py`, and `sdk_ops.py` own workspace bootstrap, repo/session reconciliation, and Daytona SDK runtime helpers
 
 ### `src/fleet_rlm/cli/`
 
@@ -97,8 +97,8 @@ Key files:
 | Session/history change | `api/routers/sessions.py`, `integrations/local_store.py`, `api/runtime_services/chat_persistence.py` |
 | Runtime settings or diagnostics | `api/routers/runtime.py`, `api/runtime_services/settings.py`, `api/runtime_services/diagnostics.py` |
 | Daytona execution change | `runtime/factory.py`, `runtime/agent/agent.py`, `integrations/daytona/interpreter.py`, `integrations/daytona/sandbox_executor.py`, `integrations/daytona/runtime.py` |
-| Daytona workspace/session change | `integrations/daytona/interpreter.py`, `integrations/daytona/workspace_manager.py`, `integrations/daytona/workspace_config.py` |
-| Recursive child sandbox change | `runtime/tools/rlm_delegate.py`, `integrations/daytona/child_delegation.py`, `integrations/daytona/child_isolation.py` |
+| Daytona workspace/session change | `integrations/daytona/interpreter.py`, `integrations/daytona/workspace_manager.py`, `integrations/daytona/models.py` |
+| Recursive child sandbox change | `runtime/tools/rlm_delegate.py`, `integrations/daytona/isolation.py` |
 | Offline optimization change | `runtime/quality/module_registry.py`, `runtime/quality/optimization_runner.py` |
 
 ## Historical Note

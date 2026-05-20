@@ -133,8 +133,8 @@ ReAct + `dspy.RLM` agent with the Daytona interpreter/backend.
 3. **Backend runtime prep** — `routers/ws/endpoint.py` authenticates the
    socket, prepares planner/delegate models, and builds the canonical chat
    agent through the shared runtime factory path.
-4. **Turn prep** — `routers/ws/types.py` and `routers/ws/turn_setup.py`
-   normalize Daytona workspace options and apply them through the interpreter's
+4. **Turn prep** — `routers/ws/turn_setup.py` normalizes Daytona workspace
+   options and applies them through the interpreter's
    native workspace/session API.
 5. **Execution stream** — the same `/api/v1/ws/execution` socket carries live
    chat events and workbench execution summaries.

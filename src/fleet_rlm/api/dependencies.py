@@ -99,18 +99,30 @@ class DiagnosticsDeps:
     optional_startup_task: asyncio.Task[None] | None = None
 
 
-# ---------------------------------------------------------------------------
-# Backward-compatible ServerState container
-# ---------------------------------------------------------------------------
+_SERVER_STATE_PROXY_ATTRS: dict[str, tuple[str, str]] = {
+    "config": ("config_deps", "config"),
+    "planner_lm": ("lm_deps", "planner_lm"),
+    "delegate_lm": ("lm_deps", "delegate_lm"),
+    "runtime_model_lock": ("lm_deps", "runtime_model_lock"),
+    "auth_provider": ("auth_deps", "auth_provider"),
+    "sessions": ("session_cache_deps", "sessions"),
+    "db_manager": ("persistence_deps", "db_manager"),
+    "repository": ("persistence_deps", "repository"),
+    "local_store": ("persistence_deps", "local_store"),
+    "events_event_emitter": ("diagnostics_deps", "events_event_emitter"),
+    "runtime_test_results": ("diagnostics_deps", "runtime_test_results"),
+    "optional_service_status": ("diagnostics_deps", "optional_service_status"),
+    "optional_service_errors": ("diagnostics_deps", "optional_service_errors"),
+    "mlflow_server_process": ("diagnostics_deps", "mlflow_server_process"),
+    "optional_startup_task": ("diagnostics_deps", "optional_startup_task"),
+}
 
 
 class ServerState:
     """Shared server state, set during lifespan.
 
-    This class is kept as a backward-compatible container that composes the
-    focused dependency slices.  New code should import the focused types
-    directly; legacy code and tests can continue to use the flat attribute
-    API provided by the property accessors below.
+    New code should depend on focused dependency slices. The flat attributes
+    remain as mapped compatibility accessors for tests and older internals.
     """
 
     def __init__(
@@ -118,141 +130,43 @@ class ServerState:
         *,
         config: ServerRuntimeConfig | None = None,
         execution_event_emitter: ExecutionEventEmitter | None = None,
+        config_deps: ConfigDeps | None = None,
+        lm_deps: LmDeps | None = None,
+        auth_deps: AuthDeps | None = None,
+        session_cache_deps: SessionCacheDeps | None = None,
+        persistence_deps: PersistenceDeps | None = None,
+        diagnostics_deps: DiagnosticsDeps | None = None,
     ) -> None:
-        self.config_deps = ConfigDeps(config=config or ServerRuntimeConfig())
-        self.lm_deps = LmDeps()
-        self.auth_deps = AuthDeps()
-        self.session_cache_deps = SessionCacheDeps()
-        self.persistence_deps = PersistenceDeps()
-        self.diagnostics_deps = DiagnosticsDeps(
+        self.config_deps = config_deps or ConfigDeps(config=config or ServerRuntimeConfig())
+        self.lm_deps = lm_deps or LmDeps()
+        self.auth_deps = auth_deps or AuthDeps()
+        self.session_cache_deps = session_cache_deps or SessionCacheDeps()
+        self.persistence_deps = persistence_deps or PersistenceDeps()
+        self.diagnostics_deps = diagnostics_deps or DiagnosticsDeps(
             events_event_emitter=execution_event_emitter or ExecutionEventEmitter(),
         )
 
-    # -- ConfigDeps proxies --
+    def __getattr__(self, name: str) -> Any:
+        if target := _SERVER_STATE_PROXY_ATTRS.get(name):
+            deps_name, attr_name = target
+            return getattr(getattr(self, deps_name), attr_name)
+        raise AttributeError(name)
 
-    @property
-    def config(self) -> ServerRuntimeConfig:
-        return self.config_deps.config
-
-    @config.setter
-    def config(self, value: ServerRuntimeConfig) -> None:
-        self.config_deps.config = value
-
-    # -- LmDeps proxies --
-
-    @property
-    def planner_lm(self) -> Any | None:
-        return self.lm_deps.planner_lm
-
-    @planner_lm.setter
-    def planner_lm(self, value: Any | None) -> None:
-        self.lm_deps.planner_lm = value
-
-    @property
-    def delegate_lm(self) -> Any | None:
-        return self.lm_deps.delegate_lm
-
-    @delegate_lm.setter
-    def delegate_lm(self, value: Any | None) -> None:
-        self.lm_deps.delegate_lm = value
-
-    @property
-    def runtime_model_lock(self) -> asyncio.Lock:
-        return self.lm_deps.runtime_model_lock
-
-    # -- AuthDeps proxies --
-
-    @property
-    def auth_provider(self) -> AuthProvider | None:
-        return self.auth_deps.auth_provider
-
-    @auth_provider.setter
-    def auth_provider(self, value: AuthProvider | None) -> None:
-        self.auth_deps.auth_provider = value
-
-    # -- SessionCacheDeps proxies --
-
-    @property
-    def sessions(self) -> dict[str, dict[str, Any]]:
-        return self.session_cache_deps.sessions
-
-    @sessions.setter
-    def sessions(self, value: dict[str, dict[str, Any]]) -> None:
-        self.session_cache_deps.sessions = value
-
-    # -- PersistenceDeps proxies --
-
-    @property
-    def db_manager(self) -> DatabaseManager | None:
-        return self.persistence_deps.db_manager
-
-    @db_manager.setter
-    def db_manager(self, value: DatabaseManager | None) -> None:
-        self.persistence_deps.db_manager = value
-
-    @property
-    def repository(self) -> FleetRepository | None:
-        return self.persistence_deps.repository
-
-    @repository.setter
-    def repository(self, value: FleetRepository | None) -> None:
-        self.persistence_deps.repository = value
-
-    # -- DiagnosticsDeps proxies --
-
-    @property
-    def events_event_emitter(self) -> ExecutionEventEmitter:
-        return self.diagnostics_deps.events_event_emitter
-
-    @events_event_emitter.setter
-    def events_event_emitter(self, value: ExecutionEventEmitter) -> None:
-        self.diagnostics_deps.events_event_emitter = value
-
-    @property
-    def runtime_test_results(self) -> dict[str, dict[str, Any]]:
-        return self.diagnostics_deps.runtime_test_results
-
-    @runtime_test_results.setter
-    def runtime_test_results(self, value: dict[str, dict[str, Any]]) -> None:
-        self.diagnostics_deps.runtime_test_results = value
-
-    @property
-    def optional_service_status(self) -> dict[str, str]:
-        return self.diagnostics_deps.optional_service_status
-
-    @optional_service_status.setter
-    def optional_service_status(self, value: dict[str, str]) -> None:
-        self.diagnostics_deps.optional_service_status = value
-
-    @property
-    def optional_service_errors(self) -> dict[str, str]:
-        return self.diagnostics_deps.optional_service_errors
-
-    @optional_service_errors.setter
-    def optional_service_errors(self, value: dict[str, str]) -> None:
-        self.diagnostics_deps.optional_service_errors = value
-
-    @property
-    def mlflow_server_process(self) -> Any | None:
-        return self.diagnostics_deps.mlflow_server_process
-
-    @mlflow_server_process.setter
-    def mlflow_server_process(self, value: Any | None) -> None:
-        self.diagnostics_deps.mlflow_server_process = value
-
-    @property
-    def optional_startup_task(self) -> asyncio.Task[None] | None:
-        return self.diagnostics_deps.optional_startup_task
-
-    @optional_startup_task.setter
-    def optional_startup_task(self, value: asyncio.Task[None] | None) -> None:
-        self.diagnostics_deps.optional_startup_task = value
+    def __setattr__(self, name: str, value: Any) -> None:
+        if target := _SERVER_STATE_PROXY_ATTRS.get(name):
+            deps_name, attr_name = target
+            setattr(getattr(self, deps_name), attr_name, value)
+            return
+        super().__setattr__(name, value)
 
     @property
     def is_ready(self) -> bool:
         """Return whether critical server dependencies are ready to serve requests."""
-        db_ready = not self.config.database_required or self.repository is not None
-        planner_ready = self.planner_lm is not None or self.optional_service_status.get("planner_lm") == "ready"
+        db_ready = not self.config_deps.config.database_required or self.persistence_deps.repository is not None
+        planner_ready = (
+            self.lm_deps.planner_lm is not None
+            or self.diagnostics_deps.optional_service_status.get("planner_lm") == "ready"
+        )
         return db_ready and planner_ready
 
 
@@ -504,14 +418,14 @@ def compose_server_state(
     diagnostics_deps: DiagnosticsDeps,
 ) -> ServerState:
     """Assemble a backward-compatible ServerState from focused dependency slices."""
-    state = ServerState.__new__(ServerState)
-    state.config_deps = config_deps
-    state.lm_deps = lm_deps
-    state.auth_deps = auth_deps
-    state.session_cache_deps = session_cache_deps
-    state.persistence_deps = persistence_deps
-    state.diagnostics_deps = diagnostics_deps
-    return state
+    return ServerState(
+        config_deps=config_deps,
+        lm_deps=lm_deps,
+        auth_deps=auth_deps,
+        session_cache_deps=session_cache_deps,
+        persistence_deps=persistence_deps,
+        diagnostics_deps=diagnostics_deps,
+    )
 
 
 def session_key(

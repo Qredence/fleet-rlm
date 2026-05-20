@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
+from fleet_rlm.integrations.daytona.models import SandboxSpec
 from fleet_rlm.integrations.daytona.workspace_runtime import (
     WorkspaceSessionCreateRequest,
     WorkspaceSessionReconcileRequest,

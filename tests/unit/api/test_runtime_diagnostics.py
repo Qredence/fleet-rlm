@@ -61,11 +61,11 @@ async def test_run_daytona_connection_test_caches_success(
             self.closed = False
             _FakeAsyncDaytona.instances.append(self)
 
-        async def list(self, limit: int = 1):
+        def list(self, limit: int = 1):
             _ = limit
             return SimpleNamespace(items=[object(), object()])
 
-        async def close(self) -> None:
+        def close(self) -> None:
             self.closed = True
 
     monkeypatch.setattr(

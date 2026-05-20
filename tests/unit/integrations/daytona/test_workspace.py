@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-import fleet_rlm.integrations.daytona.context_staging as context_staging_module
+import fleet_rlm.integrations.daytona.isolation as context_staging_module
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
 
 # ---------------------------------------------------------------------------
-# Minimal fake sandbox that satisfies _astage_context_paths
+# Minimal fake sandbox that satisfies stage_context_paths
 # ---------------------------------------------------------------------------
 
 
@@ -20,10 +19,10 @@ class _FakeFs:
         self.created_folders: list[str] = []
         self.uploaded: dict[str, bytes] = {}
 
-    async def create_folder(self, path: str, mode: str) -> None:
+    def create_folder(self, path: str, mode: str) -> None:
         self.created_folders.append(path)
 
-    async def upload_file(self, content: bytes, path: str) -> None:
+    def upload_file(self, content: bytes, path: str) -> None:
         self.uploaded[path] = content
 
 
@@ -42,12 +41,10 @@ def test_stage_context_paths_raises_for_nonexistent_path(tmp_path) -> None:
     missing_path = tmp_path / "missing.txt"
 
     with pytest.raises(DaytonaDiagnosticError, match="Context path does not exist"):
-        asyncio.run(
-            context_staging_module._astage_context_paths(
-                sandbox=sandbox,
-                workspace_path="/workspace/ws",
-                context_paths=[str(missing_path)],
-            )
+        context_staging_module._astage_context_paths(
+            sandbox=sandbox,
+            workspace_path="/workspace/ws",
+            context_paths=[str(missing_path)],
         )
     assert sandbox.fs.uploaded == {}
 
@@ -55,12 +52,10 @@ def test_stage_context_paths_raises_for_nonexistent_path(tmp_path) -> None:
 def test_stage_context_paths_skips_url_paths() -> None:
     """URL-form context paths (http/https) are silently filtered before staging."""
     sandbox = _make_sandbox()
-    result = asyncio.run(
-        context_staging_module._astage_context_paths(
-            sandbox=sandbox,
-            workspace_path="/workspace/ws",
-            context_paths=["http://localhost:3000/health", "https://example.com/doc"],
-        )
+    result = context_staging_module._astage_context_paths(
+        sandbox=sandbox,
+        workspace_path="/workspace/ws",
+        context_paths=["http://localhost:3000/health", "https://example.com/doc"],
     )
     assert result == []
 
@@ -80,12 +75,10 @@ def test_stage_context_paths_wraps_unexpected_resolution_errors(
         DaytonaDiagnosticError,
         match="Failed to stage context path 'bad-path': boom",
     ) as exc_info:
-        asyncio.run(
-            context_staging_module._astage_context_paths(
-                sandbox=sandbox,
-                workspace_path="/workspace/ws",
-                context_paths=["bad-path"],
-            )
+        context_staging_module._astage_context_paths(
+            sandbox=sandbox,
+            workspace_path="/workspace/ws",
+            context_paths=["bad-path"],
         )
 
     assert exc_info.value.category == "context_stage_error"
@@ -95,12 +88,10 @@ def test_stage_context_paths_wraps_unexpected_resolution_errors(
 
 def test_stage_context_paths_empty_returns_empty() -> None:
     sandbox = _make_sandbox()
-    result = asyncio.run(
-        context_staging_module._astage_context_paths(
-            sandbox=sandbox,
-            workspace_path="/workspace/ws",
-            context_paths=[],
-        )
+    result = context_staging_module._astage_context_paths(
+        sandbox=sandbox,
+        workspace_path="/workspace/ws",
+        context_paths=[],
     )
     assert result == []
 
@@ -111,12 +102,10 @@ def test_stage_context_paths_stages_valid_file(tmp_path) -> None:
     test_file.write_text("hello context")
 
     sandbox = _make_sandbox()
-    result = asyncio.run(
-        context_staging_module._astage_context_paths(
-            sandbox=sandbox,
-            workspace_path="/workspace/ws",
-            context_paths=[str(test_file)],
-        )
+    result = context_staging_module._astage_context_paths(
+        sandbox=sandbox,
+        workspace_path="/workspace/ws",
+        context_paths=[str(test_file)],
     )
     assert len(result) == 1
     assert result[0].kind == "file"

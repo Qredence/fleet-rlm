@@ -189,6 +189,30 @@ class TestRuntimeHoldsState:
         rt = AgentRuntime(interpreter=fake_interp)
         assert rt.interpreter is fake_interp
 
+    def test_shutdown_runs_async_interpreter_cleanup(
+        self,
+        mock_react,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.agent.runtime.discover_tools",
+            lambda: [],
+        )
+
+        class _AsyncOnlyInterpreter:
+            def __init__(self) -> None:
+                self.shutdown_called = False
+
+            async def ashutdown(self) -> None:
+                self.shutdown_called = True
+
+        interpreter = _AsyncOnlyInterpreter()
+        runtime = AgentRuntime(interpreter=interpreter)
+
+        runtime.shutdown()
+
+        assert interpreter.shutdown_called is True
+
 
 # ---------------------------------------------------------------------------
 # VAL-AGENT-008: Runtime initialises agent with discovered tools

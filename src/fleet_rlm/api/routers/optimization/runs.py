@@ -158,7 +158,7 @@ def _resolve_blocking_output_path(output_path: str | None) -> Path | None:
     base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
     safe_root = os.path.join(base_root, "")
     resolved_output = os.path.realpath(os.path.join(safe_root, output_path))
-    if not resolved_output.startswith(safe_root):
+    if resolved_output != base_root and not resolved_output.startswith(safe_root):
         raise HTTPException(
             status_code=400,
             detail="Path escapes the allowed data directory.",
@@ -471,48 +471,14 @@ async def create_optimization_run(
     )
     _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
 
-    # Resolve program spec
-    effective_program_spec = request.program_spec
-    if request.module_slug:
-        spec = module_registry.get_module_spec(request.module_slug)
-        if spec is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unknown module slug: {request.module_slug!r}",
-            )
-        effective_program_spec = spec.program_spec
-    elif not request.program_spec:
-        raise HTTPException(
-            status_code=400,
-            detail="Either module_slug or program_spec must be provided.",
-        )
-
-    # Path validation
+    effective_program_spec = _resolve_effective_program_spec(request)
     dataset, dataset_ref = await _resolve_dataset_request(
         request,
         persistence=persistence,
         persisted_identity=persisted_identity,
     )
-    base_root = os.path.realpath(os.fspath(OPTIMIZATION_DATA_ROOT))
-    safe_root = os.path.join(base_root, "")
+    output_path = _resolve_blocking_output_path(request.output_path)
 
-    output_path: Path | None = None
-    if request.output_path:
-        if os.path.isabs(request.output_path):
-            raise HTTPException(
-                status_code=400,
-                detail="Absolute paths are not allowed. Use a relative path.",
-            )
-        resolved_output = os.path.realpath(os.path.join(safe_root, request.output_path))
-        try:
-            stays_under_data_root = os.path.commonpath([base_root, resolved_output]) == base_root
-        except ValueError:
-            stays_under_data_root = False
-        if not stays_under_data_root:
-            raise HTTPException(status_code=400, detail="Path escapes the allowed data directory.")
-        output_path = Path(resolved_output)
-
-    # Create DB record
     db_row = await persistence.create_optimization_run(
         OptimizationRunCreateRequest(
             tenant_id=persisted_identity.tenant_id,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import shlex
@@ -14,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .async_compat import _await_if_needed, _run_async_compat
 from .config import (
     daytona_import_error as _daytona_import_error,
 )
@@ -22,18 +20,18 @@ from .config import (
     format_daytona_sdk_error as _format_daytona_sdk_error,
 )
 from .diagnostics import DaytonaDiagnosticError
-from .sandbox_spec import SandboxSpec
-from .snapshot_runtime import aresolve_sandbox_spec_snapshot
-from .volume_runtime import (
+from .models import SandboxSpec
+from .sdk_ops import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+    aresolve_sandbox_spec_snapshot,
 )
-from .volume_runtime import (
+from .sdk_ops import (
     aensure_daytona_volume_layout as _aensure_daytona_volume_layout,
 )
-from .volume_runtime import (
+from .sdk_ops import (
     aensure_remote_directory as _aensure_remote_directory,
 )
-from .volume_runtime import (
+from .sdk_ops import (
     await_volume_ready as _await_volume_ready,
 )
 
@@ -66,21 +64,21 @@ def _safe_workspace_name(repo_url: str | None) -> str:
     return _safe_repo_name(repo_url) if repo_url else "daytona-workspace"
 
 
-async def _aget_work_dir(sandbox: Any) -> str:
+def _aget_work_dir(sandbox: Any) -> str:
     if hasattr(sandbox, "get_work_dir"):
-        return str(await _await_if_needed(sandbox.get_work_dir()))
+        return str(sandbox.get_work_dir())
     return "/workspace"
 
 
-async def _abuild_workspace_path(sandbox: Any, repo_url: str | None) -> str:
-    work_dir = await _aget_work_dir(sandbox)
+def _abuild_workspace_path(sandbox: Any, repo_url: str | None) -> str:
+    work_dir = _aget_work_dir(sandbox)
     workspace_name = _safe_workspace_name(repo_url)
     return str(PurePosixPath(work_dir) / "workspace" / workspace_name)
 
 
-async def _aensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
+def _aensure_workspace_root(*, sandbox: Any, workspace_path: str) -> None:
     try:
-        await _aensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path))
+        _aensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path))
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona workspace create failure: {exc}",
@@ -146,8 +144,8 @@ def _resolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
     return normalized
 
 
-async def _aresolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
-    return await asyncio.to_thread(_resolve_clone_ref, repo_url, ref)
+def _aresolve_clone_ref(repo_url: str, ref: str | None) -> str | None:
+    return _resolve_clone_ref(repo_url, ref)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +168,7 @@ def _build_clone_kwargs(
     return clone_kwargs
 
 
-async def _aclone_repo(
+def _aclone_repo(
     *,
     sandbox: Any,
     repo_url: str,
@@ -178,17 +176,15 @@ async def _aclone_repo(
     workspace_path: str,
 ) -> None:
     try:
-        await _aensure_remote_directory(
+        _aensure_remote_directory(
             sandbox.fs,
             PurePosixPath(workspace_path).parent,
         )
-        await _await_if_needed(
-            sandbox.git.clone(
-                **_build_clone_kwargs(
-                    repo_url=repo_url,
-                    ref=ref,
-                    workspace_path=workspace_path,
-                )
+        sandbox.git.clone(
+            **_build_clone_kwargs(
+                repo_url=repo_url,
+                ref=ref,
+                workspace_path=workspace_path,
             )
         )
     except Exception as exc:
@@ -199,7 +195,7 @@ async def _aclone_repo(
         ) from exc
 
 
-async def _areconcile_repo_checkout(
+def _areconcile_repo_checkout(
     *,
     sandbox: Any,
     repo_url: str | None,
@@ -207,23 +203,14 @@ async def _areconcile_repo_checkout(
     workspace_path: str,
 ) -> None:
     if repo_url is None:
-        await _aensure_workspace_root(
+        _aensure_workspace_root(
             sandbox=sandbox,
             workspace_path=workspace_path,
         )
         return
 
-    if not await _apath_exists(sandbox=sandbox, path=workspace_path):
-        await _aclone_repo(
-            sandbox=sandbox,
-            repo_url=repo_url,
-            ref=ref,
-            workspace_path=workspace_path,
-        )
-        return
-
-    if not await _apath_has_git_metadata(sandbox=sandbox, path=workspace_path):
-        await _areplace_repo_checkout(
+    if not _apath_exists(sandbox=sandbox, path=workspace_path):
+        _aclone_repo(
             sandbox=sandbox,
             repo_url=repo_url,
             ref=ref,
@@ -231,9 +218,18 @@ async def _areconcile_repo_checkout(
         )
         return
 
-    remote_url = await _agit_remote_url(sandbox=sandbox, workspace_path=workspace_path)
+    if not _apath_has_git_metadata(sandbox=sandbox, path=workspace_path):
+        _areplace_repo_checkout(
+            sandbox=sandbox,
+            repo_url=repo_url,
+            ref=ref,
+            workspace_path=workspace_path,
+        )
+        return
+
+    remote_url = _agit_remote_url(sandbox=sandbox, workspace_path=workspace_path)
     if remote_url != repo_url:
-        await _areplace_repo_checkout(
+        _areplace_repo_checkout(
             sandbox=sandbox,
             repo_url=repo_url,
             ref=ref,
@@ -242,11 +238,11 @@ async def _areconcile_repo_checkout(
         return
 
     if ref is None:
-        await _apull_repo_checkout(sandbox=sandbox, workspace_path=workspace_path)
+        _apull_repo_checkout(sandbox=sandbox, workspace_path=workspace_path)
         return
 
     if _looks_like_commit(ref):
-        await _aforce_checkout_ref(
+        _aforce_checkout_ref(
             sandbox=sandbox,
             workspace_path=workspace_path,
             ref=ref,
@@ -254,14 +250,14 @@ async def _areconcile_repo_checkout(
         )
         return
 
-    if await _acheckout_branch_with_sdk(
+    if _acheckout_branch_with_sdk(
         sandbox=sandbox,
         workspace_path=workspace_path,
         ref=ref,
     ):
         logger.debug("Checked out Daytona repo branch via SDK before force reconcile")
 
-    await _aforce_checkout_ref(
+    _aforce_checkout_ref(
         sandbox=sandbox,
         workspace_path=workspace_path,
         ref=ref,
@@ -269,7 +265,7 @@ async def _areconcile_repo_checkout(
     )
 
 
-async def _areplace_repo_checkout(
+def _areplace_repo_checkout(
     *,
     sandbox: Any,
     repo_url: str,
@@ -277,13 +273,13 @@ async def _areplace_repo_checkout(
     workspace_path: str,
 ) -> None:
     """Replace a mismatched or non-git checkout before SDK cloning."""
-    await _aexec_sandbox_command(
+    _aexec_sandbox_command(
         sandbox=sandbox,
         command=shlex.join(["rm", "-rf", "--", workspace_path]),
         phase="repo_clone",
         error_prefix="Daytona repo replace failure",
     )
-    await _aclone_repo(
+    _aclone_repo(
         sandbox=sandbox,
         repo_url=repo_url,
         ref=ref,
@@ -291,8 +287,8 @@ async def _areplace_repo_checkout(
     )
 
 
-async def _apath_exists(*, sandbox: Any, path: str) -> bool:
-    result = await _aexec_sandbox_command(
+def _apath_exists(*, sandbox: Any, path: str) -> bool:
+    result = _aexec_sandbox_command(
         sandbox=sandbox,
         command=f"test -e {shlex.quote(path)}",
         phase="repo_clone",
@@ -302,8 +298,8 @@ async def _apath_exists(*, sandbox: Any, path: str) -> bool:
     return _sandbox_exec_exit_code(result) == 0
 
 
-async def _apath_has_git_metadata(*, sandbox: Any, path: str) -> bool:
-    result = await _aexec_sandbox_command(
+def _apath_has_git_metadata(*, sandbox: Any, path: str) -> bool:
+    result = _aexec_sandbox_command(
         sandbox=sandbox,
         command=f"test -d {shlex.quote(str(PurePosixPath(path) / '.git'))}",
         phase="repo_clone",
@@ -313,8 +309,8 @@ async def _apath_has_git_metadata(*, sandbox: Any, path: str) -> bool:
     return _sandbox_exec_exit_code(result) == 0
 
 
-async def _agit_remote_url(*, sandbox: Any, workspace_path: str) -> str | None:
-    result = await _aexec_git_command(
+def _agit_remote_url(*, sandbox: Any, workspace_path: str) -> str | None:
+    result = _aexec_git_command(
         sandbox=sandbox,
         workspace_path=workspace_path,
         args=("remote", "get-url", "origin"),
@@ -325,11 +321,11 @@ async def _agit_remote_url(*, sandbox: Any, workspace_path: str) -> str | None:
     return _sandbox_exec_stdout(result).strip() or None
 
 
-async def _apull_repo_checkout(*, sandbox: Any, workspace_path: str) -> None:
+def _apull_repo_checkout(*, sandbox: Any, workspace_path: str) -> None:
     try:
         with suppress(Exception):
-            await _await_if_needed(sandbox.git.status(workspace_path))
-        await _await_if_needed(sandbox.git.pull(workspace_path))
+            sandbox.git.status(workspace_path)
+        sandbox.git.pull(workspace_path)
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona repo pull failure: {exc}",
@@ -338,18 +334,18 @@ async def _apull_repo_checkout(*, sandbox: Any, workspace_path: str) -> None:
         ) from exc
 
 
-async def _acheckout_branch_with_sdk(
+def _acheckout_branch_with_sdk(
     *,
     sandbox: Any,
     workspace_path: str,
     ref: str,
 ) -> bool:
     try:
-        branches = await _await_if_needed(sandbox.git.branches(workspace_path))
+        branches = sandbox.git.branches(workspace_path)
         branch_names = _extract_sdk_branch_names(branches)
         if branch_names and ref not in branch_names:
             return False
-        await _await_if_needed(sandbox.git.checkout_branch(workspace_path, ref))
+        sandbox.git.checkout_branch(workspace_path, ref)
         return True
     except Exception:
         return False
@@ -366,20 +362,20 @@ def _extract_sdk_branch_names(branches: Any) -> set[str]:
     return names
 
 
-async def _aforce_checkout_ref(
+def _aforce_checkout_ref(
     *,
     sandbox: Any,
     workspace_path: str,
     ref: str,
     detached: bool,
 ) -> None:
-    await _aexec_git_command(
+    _aexec_git_command(
         sandbox=sandbox,
         workspace_path=workspace_path,
         args=("fetch", "--all", "--tags", "--prune"),
     )
     if detached:
-        await _aexec_git_command(
+        _aexec_git_command(
             sandbox=sandbox,
             workspace_path=workspace_path,
             args=("checkout", "--force", ref),
@@ -387,36 +383,36 @@ async def _aforce_checkout_ref(
         return
 
     remote_ref = f"refs/remotes/origin/{ref}"
-    remote_probe = await _agit_ref_probe(
+    remote_probe = _agit_ref_probe(
         sandbox=sandbox,
         workspace_path=workspace_path,
         ref=remote_ref,
     )
-    local_probe = await _agit_ref_probe(
+    local_probe = _agit_ref_probe(
         sandbox=sandbox,
         workspace_path=workspace_path,
         ref=ref,
     )
     if remote_probe:
-        branch_exists = await _agit_ref_probe(
+        branch_exists = _agit_ref_probe(
             sandbox=sandbox,
             workspace_path=workspace_path,
             ref=f"refs/heads/{ref}",
             verify_arg="show-ref",
         )
         if branch_exists:
-            await _aexec_git_command(
+            _aexec_git_command(
                 sandbox=sandbox,
                 workspace_path=workspace_path,
                 args=("checkout", "--force", ref),
             )
         else:
-            await _aexec_git_command(
+            _aexec_git_command(
                 sandbox=sandbox,
                 workspace_path=workspace_path,
                 args=("checkout", "--force", "-B", ref, remote_ref),
             )
-        await _aexec_git_command(
+        _aexec_git_command(
             sandbox=sandbox,
             workspace_path=workspace_path,
             args=("reset", "--hard", remote_ref),
@@ -424,7 +420,7 @@ async def _aforce_checkout_ref(
         return
 
     if local_probe:
-        await _aexec_git_command(
+        _aexec_git_command(
             sandbox=sandbox,
             workspace_path=workspace_path,
             args=("checkout", "--force", ref),
@@ -438,7 +434,7 @@ async def _aforce_checkout_ref(
     )
 
 
-async def _agit_ref_probe(
+def _agit_ref_probe(
     *,
     sandbox: Any,
     workspace_path: str,
@@ -446,7 +442,7 @@ async def _agit_ref_probe(
     verify_arg: str = "rev-parse",
 ) -> bool:
     args = ("show-ref", "--verify", ref) if verify_arg == "show-ref" else ("rev-parse", "--verify", ref)
-    result = await _aexec_git_command(
+    result = _aexec_git_command(
         sandbox=sandbox,
         workspace_path=workspace_path,
         args=args,
@@ -455,14 +451,14 @@ async def _agit_ref_probe(
     return _sandbox_exec_exit_code(result) == 0
 
 
-async def _aexec_git_command(
+def _aexec_git_command(
     *,
     sandbox: Any,
     workspace_path: str,
     args: tuple[str, ...],
     check: bool = True,
 ) -> Any:
-    return await _aexec_sandbox_command(
+    return _aexec_sandbox_command(
         sandbox=sandbox,
         command=shlex.join(["git", "-C", workspace_path, *args]),
         phase="repo_clone",
@@ -471,7 +467,7 @@ async def _aexec_git_command(
     )
 
 
-async def _aexec_sandbox_command(
+def _aexec_sandbox_command(
     *,
     sandbox: Any,
     command: str,
@@ -481,7 +477,7 @@ async def _aexec_sandbox_command(
     check: bool = True,
 ) -> Any:
     try:
-        result = await _await_if_needed(sandbox.process.exec(command))
+        result = sandbox.process.exec(command)
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"{error_prefix}: {exc}",
@@ -580,16 +576,16 @@ def _ignore_snapshot_create_logs(_message: Any) -> None:
     return None
 
 
-async def _aresolve_volume_id(*, runtime: Any, spec: SandboxSpec) -> str | None:
+def _aresolve_volume_id(*, runtime: Any, spec: SandboxSpec) -> str | None:
     if not spec.volume_name:
         return None
-    client = await runtime._aget_client()
-    volume = await _await_if_needed(client.volume.get(spec.volume_name, create=True))
-    volume = await _await_volume_ready(client, spec.volume_name, volume)
+    client = runtime._get_client()
+    volume = client.volume.get(spec.volume_name, create=True)
+    volume = _await_volume_ready(client, spec.volume_name, volume)
     return str(volume.id)
 
 
-async def acreate_sandbox_from_spec(
+def acreate_sandbox_from_spec(
     *,
     runtime: Any,
     spec: SandboxSpec,
@@ -605,8 +601,8 @@ async def acreate_sandbox_from_spec(
     except ImportError as exc:  # pragma: no cover - environment specific
         raise _daytona_import_error(exc) from exc
 
-    client = await runtime._aget_client()
-    volume_id = await _aresolve_volume_id(runtime=runtime, spec=spec)
+    client = runtime._get_client()
+    volume_id = _aresolve_volume_id(runtime=runtime, spec=spec)
     params = spec.to_daytona_create_params(
         volume_id=volume_id,
         create_image_params_cls=CreateSandboxFromImageParams,
@@ -616,18 +612,16 @@ async def acreate_sandbox_from_spec(
     )
 
     if spec.uses_declarative_image:
-        return await _await_if_needed(
-            client.create(
-                params,
-                timeout=0,
-                on_snapshot_create_logs=_ignore_snapshot_create_logs,
-            )
+        return client.create(
+            params,
+            timeout=0,
+            on_snapshot_create_logs=_ignore_snapshot_create_logs,
         )
 
-    return await _await_if_needed(client.create(params))
+    return client.create(params)
 
 
-async def acreate_sandbox(
+def acreate_sandbox(
     *,
     runtime: Any,
     volume_name: str | None = None,
@@ -636,11 +630,11 @@ async def acreate_sandbox(
     """Create a sandbox, falling back from inactive snapshots when needed."""
     try:
         resolved_spec = spec or runtime.build_sandbox_spec(volume_name=volume_name)
-        resolved_spec = await aresolve_sandbox_spec_snapshot(
+        resolved_spec = aresolve_sandbox_spec_snapshot(
             resolved_spec,
             config=runtime._resolved_config,
         )
-        return await acreate_sandbox_from_spec(runtime=runtime, spec=resolved_spec)
+        return acreate_sandbox_from_spec(runtime=runtime, spec=resolved_spec)
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona sandbox create failure: {_format_daytona_sdk_error(exc)}",
@@ -649,34 +643,34 @@ async def acreate_sandbox(
         ) from exc
 
 
-async def acreate_workspace_session(
+def acreate_workspace_session(
     *,
     runtime: Any,
     request: WorkspaceSessionCreateRequest,
 ) -> DaytonaSandboxSession:
     """Create a fully prepared workspace session inside a Daytona sandbox."""
-    from .context_staging import _astage_context_paths
+    from .isolation import _astage_context_paths
 
     timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
     sandbox: Any | None = None
     resolved_spec = request.spec or runtime.build_sandbox_spec(volume_name=request.volume_name)
     try:
         create_started = time.perf_counter()
-        sandbox = await acreate_sandbox(runtime=runtime, spec=resolved_spec)
+        sandbox = acreate_sandbox(runtime=runtime, spec=resolved_spec)
         timings["sandbox_create"] = int((time.perf_counter() - create_started) * 1000)
 
         effective_volume = resolved_spec.volume_name or request.volume_name
         if effective_volume:
-            await _aensure_daytona_volume_layout(
+            _aensure_daytona_volume_layout(
                 sandbox=sandbox,
                 mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             )
 
-        workspace_path = await _abuild_workspace_path(sandbox, request.repo_url)
-        resolved_ref = await _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
+        workspace_path = _abuild_workspace_path(sandbox, request.repo_url)
+        resolved_ref = _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
         if request.repo_url:
             clone_started = time.perf_counter()
-            await _aclone_repo(
+            _aclone_repo(
                 sandbox=sandbox,
                 repo_url=request.repo_url,
                 ref=resolved_ref,
@@ -684,13 +678,13 @@ async def acreate_workspace_session(
             )
             timings["repo_clone"] = int((time.perf_counter() - clone_started) * 1000)
         else:
-            await _aensure_workspace_root(
+            _aensure_workspace_root(
                 sandbox=sandbox,
                 workspace_path=workspace_path,
             )
 
         context_started = time.perf_counter()
-        context_sources = await _astage_context_paths(
+        context_sources = _astage_context_paths(
             sandbox=sandbox,
             workspace_path=workspace_path,
             context_paths=request.context_paths or None,
@@ -709,34 +703,26 @@ async def acreate_workspace_session(
     except Exception:
         if sandbox is not None:
             with suppress(Exception):
-                await _await_if_needed(sandbox.delete())
+                sandbox.delete()
         raise
 
 
-def create_workspace_session(
-    *,
-    runtime: Any,
-    request: WorkspaceSessionCreateRequest,
-) -> DaytonaSandboxSession:
-    return _run_async_compat(
-        acreate_workspace_session,
-        runtime=runtime,
-        request=request,
-    )
+# Backward-compat alias
+create_workspace_session = acreate_workspace_session
 
 
-async def areconcile_workspace_session(
+def areconcile_workspace_session(
     *,
     session: DaytonaSandboxSession,
     request: WorkspaceSessionReconcileRequest,
 ) -> DaytonaSandboxSession:
     """Reconcile an existing workspace session to new repo/context inputs."""
-    from .context_staging import _astage_context_paths
+    from .isolation import _astage_context_paths
 
     workspace_started = time.perf_counter()
-    workspace_path = await _abuild_workspace_path(session.sandbox, request.repo_url)
-    resolved_ref = await _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
-    await _areconcile_repo_checkout(
+    workspace_path = _abuild_workspace_path(session.sandbox, request.repo_url)
+    resolved_ref = _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
+    _areconcile_repo_checkout(
         sandbox=session.sandbox,
         repo_url=request.repo_url,
         ref=resolved_ref,
@@ -745,7 +731,7 @@ async def areconcile_workspace_session(
     session.phase_timings_ms["workspace_reconcile"] = int((time.perf_counter() - workspace_started) * 1000)
 
     context_started = time.perf_counter()
-    context_sources = await _astage_context_paths(
+    context_sources = _astage_context_paths(
         sandbox=session.sandbox,
         workspace_path=workspace_path,
         context_paths=request.context_paths or None,
@@ -760,16 +746,8 @@ async def areconcile_workspace_session(
     return session
 
 
-def reconcile_workspace_session(
-    *,
-    session: DaytonaSandboxSession,
-    request: WorkspaceSessionReconcileRequest,
-) -> DaytonaSandboxSession:
-    return _run_async_compat(
-        areconcile_workspace_session,
-        session=session,
-        request=request,
-    )
+# Backward-compat alias
+reconcile_workspace_session = areconcile_workspace_session
 
 
 __all__ = [

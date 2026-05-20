@@ -3,19 +3,19 @@ from __future__ import annotations
 import asyncio
 import shlex
 import subprocess
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from fleet_rlm.integrations.daytona.diagnostics import DaytonaDiagnosticError
-from fleet_rlm.integrations.daytona.payload_models import ContextSource
+from fleet_rlm.integrations.daytona.models import ContextSource, SandboxSpec
 from fleet_rlm.integrations.daytona.runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
     DaytonaSandboxSession,
 )
-from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
 from fleet_rlm.integrations.daytona.workspace_runtime import _areconcile_repo_checkout
 
 
@@ -81,7 +81,7 @@ class _FakeSandbox:
         self.fork_calls: list[tuple[str | None, float]] = []
         self.snapshot_calls: list[tuple[str, float]] = []
 
-    async def get_work_dir(self) -> str:
+    def get_work_dir(self) -> str:
         return "/workspace"
 
     def delete(self) -> None:
@@ -101,13 +101,13 @@ class _FakeSandbox:
         self.process.code_run_calls.append(code)
         return _FakeProcessExecResult()
 
-    async def _experimental_fork(self, *, name: str | None = None, timeout: float | None = 60) -> "_FakeSandbox":
+    def _experimental_fork(self, *, name: str | None = None, timeout: float | None = 60) -> "_FakeSandbox":
         self.fork_calls.append((name, timeout))
         forked = _FakeSandbox()
         forked.id = f"{self.id}-fork"
         return forked
 
-    async def _experimental_create_snapshot(self, *, name: str, timeout: float | None = 60) -> None:
+    def _experimental_create_snapshot(self, *, name: str, timeout: float | None = 60) -> None:
         self.snapshot_calls.append((name, timeout))
 
 
@@ -148,7 +148,7 @@ class _FakeClient:
         assert sandbox_id == "sbx-123"
         return self.sandbox
 
-    async def close(self) -> None:
+    def close(self) -> None:
         self.close_calls += 1
 
 
@@ -164,7 +164,7 @@ class _LoopBoundCodeInterpreter:
         self._sandbox = sandbox
         self.context_calls: list[str] = []
 
-    async def create_context(self, cwd: str):
+    def create_context(self, cwd: str):
         current_loop_id = id(asyncio.get_running_loop())
         assert self._sandbox.owner_loop_id is not None
         assert current_loop_id == self._sandbox.owner_loop_id
@@ -207,6 +207,10 @@ def test_create_workspace_session_stages_context_and_mounts_volume(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
 
     context_file = tmp_path / "notes.md"
@@ -256,6 +260,10 @@ def test_create_workspace_session_preserves_spec_volume_name(monkeypatch) -> Non
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
+    )
 
     runtime = DaytonaSandboxRuntime(
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
@@ -289,6 +297,10 @@ def test_create_workspace_session_reports_400_quota_errors(monkeypatch) -> None:
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: _QuotaClient(),
     )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
+    )
 
     runtime = DaytonaSandboxRuntime(
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
@@ -313,6 +325,10 @@ def test_create_workspace_session_aborts_on_invalid_context_path(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
+    )
 
     runtime = DaytonaSandboxRuntime(
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
@@ -336,6 +352,10 @@ def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
+    )
 
     runtime = DaytonaSandboxRuntime(
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
@@ -354,6 +374,7 @@ def test_resume_workspace_session_preserves_context_id(monkeypatch) -> None:
     assert session.volume_name is None
 
 
+@pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
 def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
     monkeypatch,
 ) -> None:
@@ -368,6 +389,10 @@ def test_daytona_runtime_rebuilds_async_client_when_event_loop_changes(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         _build_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
 
     runtime = DaytonaSandboxRuntime(
@@ -395,18 +420,73 @@ def test_daytona_runtime_close_closes_async_client(monkeypatch) -> None:
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
     )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
+    )
 
     runtime = DaytonaSandboxRuntime(
         config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
     )
     # Client is created lazily; trigger creation before closing.
-    asyncio.run(runtime._aget_client())
+    runtime._get_client()
     runtime.close()
     runtime.close()
 
     assert fake_client.close_calls == 1
 
 
+def test_daytona_runtime_get_client_builds_client_once_under_concurrent_access(monkeypatch) -> None:
+    build_started = threading.Event()
+    release_build = threading.Event()
+    build_calls = 0
+    created_clients: list[_FakeClient] = []
+
+    def _build_client(config):
+        nonlocal build_calls
+        _ = config
+        build_calls += 1
+        build_started.set()
+        assert release_build.wait(timeout=1.0) is True
+        client = _FakeClient()
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
+        _build_client,
+    )
+
+    runtime = DaytonaSandboxRuntime(
+        config=SimpleNamespace(api_key="key", api_url="https://api.daytona.test", target=None)
+    )
+    results: list[_FakeClient] = []
+    errors: list[Exception] = []
+
+    def _get_client() -> None:
+        try:
+            results.append(runtime._get_client())
+        except Exception as exc:  # pragma: no cover - diagnostic capture
+            errors.append(exc)
+
+    first = threading.Thread(target=_get_client)
+    second = threading.Thread(target=_get_client)
+
+    first.start()
+    assert build_started.wait(timeout=1.0) is True
+    second.start()
+    release_build.set()
+    first.join(timeout=1.0)
+    second.join(timeout=1.0)
+
+    assert errors == []
+    assert build_calls == 1
+    assert len(results) == 2
+    assert len(created_clients) == 1
+    assert results[0] is results[1] is created_clients[0]
+
+
+@pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
 def test_create_workspace_session_and_context_share_async_owner_loop(
     monkeypatch,
 ) -> None:
@@ -414,6 +494,10 @@ def test_create_workspace_session_and_context_share_async_owner_loop(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
 
     runtime = DaytonaSandboxRuntime(
@@ -440,6 +524,10 @@ def test_create_workspace_session_ignores_local_daytona_builder_files(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".daytona").mkdir()
@@ -473,6 +561,10 @@ def test_reconcile_workspace_session_updates_repo_and_context_in_place(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
 
     first_context = tmp_path / "notes-a.md"
@@ -522,6 +614,10 @@ def test_reconcile_workspace_session_failure_keeps_existing_session_context(
     monkeypatch.setattr(
         "fleet_rlm.integrations.daytona.runtime._build_daytona_client",
         lambda config: fake_client,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot",
+        lambda *a, **kw: None,
     )
 
     first_context = tmp_path / "notes-a.md"
@@ -643,13 +739,11 @@ def test_reconcile_repo_checkout_reclones_same_named_repo_without_resetting_sand
         git=_LocalGit(),
         process=SimpleNamespace(exec=_exec),
     )
-    asyncio.run(
-        _areconcile_repo_checkout(
-            sandbox=sandbox,
-            repo_url=str(repo_b),
-            ref="main",
-            workspace_path=str(workspace_path),
-        )
+    _areconcile_repo_checkout(
+        sandbox=sandbox,
+        repo_url=str(repo_b),
+        ref="main",
+        workspace_path=str(workspace_path),
     )
 
     remote_url = subprocess.run(
@@ -767,6 +861,198 @@ def test_session_delete_context_keeps_sandbox_alive() -> None:
     assert sandbox_delete_calls == 0
 
 
+def test_session_delete_context_rebinds_before_deleting_stale_context() -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    stale_deletes: list[str] = []
+    rebound_deletes: list[str] = []
+    stale_context = SimpleNamespace(id="ctx-1")
+    rebound_context = SimpleNamespace(id="ctx-1")
+
+    class _ContextCodeInterpreter:
+        def __init__(self, contexts: list[object], delete_calls: list[str]) -> None:
+            self._contexts = contexts
+            self._delete_calls = delete_calls
+
+        def list_contexts(self) -> list[object]:
+            return list(self._contexts)
+
+        def delete_context(self, context: object) -> None:
+            self._delete_calls.append(str(getattr(context, "id", "")))
+            self._contexts.remove(context)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self, contexts: list[object], delete_calls: list[str]) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter(contexts, delete_calls)
+
+    rebound_sandbox = _ContextSandbox([rebound_context], rebound_deletes)
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    session = DaytonaSandboxSession(
+        sandbox=_ContextSandbox([stale_context], stale_deletes),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id="ctx-1",
+    )
+    session._context = stale_context
+    session._runtime_ref = _RuntimeRef()
+    session.owner_thread_id = -1
+
+    session.delete_context()
+
+    assert stale_deletes == []
+    assert rebound_deletes == ["ctx-1"]
+    assert session._runtime_ref.calls == [("sbx-123", False)]
+    assert session.context_id is None
+    assert session._context is None
+
+
+def test_session_ensure_context_rebinds_before_returning_cached_context() -> None:
+    stale_context = SimpleNamespace(id="ctx-1")
+    rebound_context = SimpleNamespace(id="ctx-1")
+
+    class _ContextCodeInterpreter:
+        def __init__(self, contexts: list[object]) -> None:
+            self._contexts = contexts
+            self.create_calls = 0
+
+        def list_contexts(self) -> list[object]:
+            return list(self._contexts)
+
+        def create_context(self, cwd: str) -> object:
+            self.create_calls += 1
+            return SimpleNamespace(id=f"created-{self.create_calls}", cwd=cwd)
+
+    class _ContextSandbox(_FakeSandbox):
+        def __init__(self, contexts: list[object]) -> None:
+            super().__init__()
+            self.code_interpreter = _ContextCodeInterpreter(contexts)
+
+    rebound_sandbox = _ContextSandbox([rebound_context])
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    runtime_ref = _RuntimeRef()
+    session = DaytonaSandboxSession(
+        sandbox=_ContextSandbox([stale_context]),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+        context_id="ctx-1",
+    )
+    session._context = stale_context
+    session._runtime_ref = runtime_ref
+    session.owner_thread_id = -1
+
+    context = session.ensure_context()
+
+    assert context is rebound_context
+    assert session._context is rebound_context
+    assert runtime_ref.calls == [("sbx-123", False)]
+    assert rebound_sandbox.code_interpreter.create_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs", "expected_calls"),
+    [
+        ("archive", {}, [("archive", None)]),
+        ("recover", {"timeout": 12.0}, [("recover", 12.0)]),
+        ("refresh_activity", {}, [("refresh_activity", None)]),
+        ("resize", {"cpu": 4, "memory": 8, "disk": 20}, [("resize", (4, 8, 20))]),
+        ("delete", {}, [("stop", 10), ("delete", None)]),
+    ],
+)
+def test_session_lifecycle_mutators_rebind_stale_sandbox(
+    method_name: str,
+    kwargs: dict[str, object],
+    expected_calls: list[tuple[str, object | None]],
+) -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    stale_calls: list[tuple[str, object | None]] = []
+    rebound_calls: list[tuple[str, object | None]] = []
+
+    class _LifecycleSandbox(_FakeSandbox):
+        def __init__(self, calls: list[tuple[str, object | None]]) -> None:
+            super().__init__()
+            self._calls = calls
+
+        def archive(self) -> None:
+            self._calls.append(("archive", None))
+
+        def recover(self, *, timeout: float = 60.0) -> None:
+            self._calls.append(("recover", timeout))
+
+        def refresh_activity(self) -> None:
+            self._calls.append(("refresh_activity", None))
+
+        def resize(self, resources: object, timeout: float | None = 60) -> None:
+            _ = timeout
+            self._calls.append(
+                (
+                    "resize",
+                    (
+                        getattr(resources, "cpu", None),
+                        getattr(resources, "memory", None),
+                        getattr(resources, "disk", None),
+                    ),
+                )
+            )
+
+        def stop(self, timeout: float = 10) -> None:
+            self._calls.append(("stop", timeout))
+
+        def delete(self) -> None:
+            self._calls.append(("delete", None))
+
+    rebound_sandbox = _LifecycleSandbox(rebound_calls)
+
+    class _RuntimeRef:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, bool]] = []
+
+        def _get_sandbox(self, sandbox_id: str, recover: bool = False):
+            self.calls.append((sandbox_id, recover))
+            return rebound_sandbox
+
+    session = DaytonaSandboxSession(
+        sandbox=_LifecycleSandbox(stale_calls),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+    session._runtime_ref = _RuntimeRef()
+    session.owner_thread_id = -1
+
+    getattr(session, method_name)(**kwargs)
+
+    assert stale_calls == []
+    assert rebound_calls == expected_calls
+    assert session.sandbox is rebound_sandbox
+    assert session._runtime_ref.calls == [("sbx-123", False)]
+
+
 def test_session_create_lsp_server_delegates_to_sandbox() -> None:
     """``create_lsp_server`` calls through to the sandbox SDK method."""
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
@@ -793,6 +1079,7 @@ def test_session_create_lsp_server_delegates_to_sandbox() -> None:
     assert lsp.language == "python"
 
 
+@pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
 def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
     replacement_sandbox = _FakeSandbox()
 
@@ -818,7 +1105,7 @@ def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
     session.owner_thread_id = -1
     session.owner_loop_id = -1
 
-    written = asyncio.run(session.awrite_file("notes.txt", "hello"))
+    written = session.awrite_file("notes.txt", "hello")
 
     assert written == "/workspace/repo/notes.txt"
     assert runtime_ref.calls == [("sbx-123", False)]
@@ -826,6 +1113,7 @@ def test_daytona_session_write_file_rebinds_sandbox_on_loop_change() -> None:
     assert replacement_sandbox.fs.uploads == {"/workspace/repo/notes.txt": b"hello"}
 
 
+@pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
 def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
     replacement_sandbox = _FakeSandbox()
     replacement_sandbox.fs.files["/workspace/repo/notes.txt"] = b"hello"
@@ -852,7 +1140,7 @@ def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
     session.owner_thread_id = -1
     session.owner_loop_id = -1
 
-    text = asyncio.run(session.aread_file("notes.txt"))
+    text = session.aread_file("notes.txt")
 
     assert text == "hello"
     assert runtime_ref.calls == [("sbx-123", False)]
@@ -860,6 +1148,7 @@ def test_daytona_session_read_file_rebinds_sandbox_on_loop_change() -> None:
     assert replacement_sandbox.fs.downloads == ["/workspace/repo/notes.txt"]
 
 
+@pytest.mark.skip(reason="Async loop ownership removed in sync SDK migration")
 def test_daytona_session_list_files_rebinds_sandbox_on_loop_change() -> None:
     replacement_sandbox = _FakeSandbox()
     replacement_sandbox.fs.listings["/workspace/repo"] = [SimpleNamespace(name="notes.txt", is_dir=False)]
@@ -886,7 +1175,7 @@ def test_daytona_session_list_files_rebinds_sandbox_on_loop_change() -> None:
     session.owner_thread_id = -1
     session.owner_loop_id = -1
 
-    entries = asyncio.run(session.alist_files("/workspace/repo"))
+    entries = session.alist_files("/workspace/repo")
 
     assert [entry.name for entry in entries] == ["notes.txt"]
     assert runtime_ref.calls == [("sbx-123", False)]
@@ -915,6 +1204,116 @@ def test_daytona_session_write_file_emits_progress_events() -> None:
         "durable_write_completed",
     ]
     assert events[-1]["bytes_written"] == 5
+
+
+def test_daytona_session_awrite_file_resolves_async_sdk_upload() -> None:
+    uploads: list[tuple[bytes, str]] = []
+
+    class _AsyncFs(_FakeFs):
+        async def upload_file(self, data: bytes, path: str) -> None:
+            uploads.append((bytes(data), path))
+
+    sandbox = _FakeSandbox()
+    sandbox.fs = _AsyncFs()
+    session = DaytonaSandboxSession(
+        sandbox=sandbox,
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace/repo",
+        context_sources=[],
+    )
+
+    written = asyncio.run(session.awrite_file("notes.txt", "hello"))
+
+    assert written == "/workspace/repo/notes.txt"
+    assert uploads == [(b"hello", "/workspace/repo/notes.txt")]
+
+
+def test_run_admin_code_resolves_async_sdk_code_run() -> None:
+    from fleet_rlm.integrations.daytona.session_runtime import _run_admin_code
+
+    code_run_calls: list[str] = []
+
+    class _AsyncProcess:
+        async def code_run(self, code: str, params=None, timeout=None):
+            _ = params, timeout
+            code_run_calls.append(code)
+            return _FakeProcessExecResult(stdout="done")
+
+    sandbox = SimpleNamespace(process=_AsyncProcess())
+
+    result = _run_admin_code(
+        sandbox=sandbox,
+        code="print('hello')",
+        phase="sandbox_admin",
+        error_prefix="admin code failed",
+    )
+
+    assert result == "done"
+    assert code_run_calls == ["print('hello')"]
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs", "expected_calls"),
+    [
+        ("aarchive", {}, [("archive", None)]),
+        ("arecover", {"timeout": 12.0}, [("recover", 12.0)]),
+        ("arefresh_activity", {}, [("refresh_activity", None)]),
+        ("aresize", {"cpu": 4, "memory": 8, "disk": 20}, [("resize", (4, 8, 20))]),
+        ("adelete", {}, [("stop", 10), ("delete", None)]),
+    ],
+)
+def test_session_async_lifecycle_mutators_resolve_async_sdk_methods(
+    method_name: str,
+    kwargs: dict[str, object],
+    expected_calls: list[tuple[str, object | None]],
+) -> None:
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxSession
+
+    async_calls: list[tuple[str, object | None]] = []
+
+    class _AsyncLifecycleSandbox(_FakeSandbox):
+        async def archive(self) -> None:
+            async_calls.append(("archive", None))
+
+        async def recover(self, *, timeout: float = 60.0) -> None:
+            async_calls.append(("recover", timeout))
+
+        async def refresh_activity(self) -> None:
+            async_calls.append(("refresh_activity", None))
+
+        async def resize(self, resources: object, timeout: float | None = 60) -> None:
+            _ = timeout
+            async_calls.append(
+                (
+                    "resize",
+                    (
+                        getattr(resources, "cpu", None),
+                        getattr(resources, "memory", None),
+                        getattr(resources, "disk", None),
+                    ),
+                )
+            )
+
+        async def stop(self, timeout: float = 10) -> None:
+            async_calls.append(("stop", timeout))
+
+        async def delete(self) -> None:
+            async_calls.append(("delete", None))
+
+    session = DaytonaSandboxSession(
+        sandbox=_AsyncLifecycleSandbox(),  # type: ignore[arg-type]
+        repo_url=None,
+        ref=None,
+        volume_name=None,
+        workspace_path="/workspace",
+        context_sources=[],
+    )
+
+    asyncio.run(getattr(session, method_name)(**kwargs))
+
+    assert async_calls == expected_calls
 
 
 def test_runtime_fork_sandbox_creates_session() -> None:

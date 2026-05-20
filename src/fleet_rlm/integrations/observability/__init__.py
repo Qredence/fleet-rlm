@@ -9,44 +9,8 @@ if TYPE_CHECKING:
     from .posthog_callback import PostHogLLMCallback
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "MlflowConfig": (".config", "MlflowConfig"),
-    "PostHogConfig": (".config", "PostHogConfig"),
-    "flush_posthog_client": (".client", "flush_posthog_client"),
-    "shutdown_posthog_client": (".client", "shutdown_posthog_client"),
-    "FleetMlflowTraceCallback": (".mlflow_runtime", "FleetMlflowTraceCallback"),
-    "MlflowTraceRequestContext": (".mlflow_runtime", "MlflowTraceRequestContext"),
-    "capture_last_active_trace_id": (
-        ".mlflow_runtime",
-        "capture_last_active_trace_id",
-    ),
-    "current_request_context": (".mlflow_runtime", "current_request_context"),
-    "flush_mlflow_traces": (".mlflow_runtime", "flush_mlflow_traces"),
-    "get_mlflow_config": (".mlflow_runtime", "get_mlflow_config"),
-    "initialize_mlflow": (".mlflow_runtime", "initialize_mlflow"),
-    "merge_trace_result_metadata": (
-        ".mlflow_runtime",
-        "merge_trace_result_metadata",
-    ),
-    "mlflow_request_context": (".mlflow_runtime", "mlflow_request_context"),
-    "new_client_request_id": (".mlflow_runtime", "new_client_request_id"),
-    "shutdown_mlflow": (".mlflow_runtime", "shutdown_mlflow"),
-    "trace_result_metadata": (".mlflow_runtime", "trace_result_metadata"),
-    "update_current_mlflow_trace": (
-        ".mlflow_runtime",
-        "update_current_mlflow_trace",
-    ),
     "log_trace_feedback": (".mlflow_traces", "log_trace_feedback"),
     "resolve_trace": (".mlflow_traces", "resolve_trace"),
-    "resolve_trace_by_client_request_id": (
-        ".mlflow_traces",
-        "resolve_trace_by_client_request_id",
-    ),
-    "search_annotated_trace_rows": (".mlflow_traces", "search_annotated_trace_rows"),
-    "trace_to_dataset_row": (".mlflow_traces", "trace_to_dataset_row"),
-    "PostHogLLMCallback": (".posthog_callback", "PostHogLLMCallback"),
-    "configure_auto_assessment": (".auto_assessment", "configure_auto_assessment"),
-    "fleet_metadata_processor": (".span_processors", "fleet_metadata_processor"),
-    "build_span_processors": (".span_processors", "build_span_processors"),
 }
 
 __all__ = sorted([*_EXPORTS, "configure_analytics"])

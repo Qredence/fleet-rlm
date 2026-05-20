@@ -11,15 +11,8 @@ from dotenv import dotenv_values
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
-from .diagnostics import DaytonaDiagnosticError
-from .payload_models import SandboxLmRuntimeConfig
-
-
-class DaytonaConfigError(DaytonaDiagnosticError):
-    """Raised when Daytona runtime configuration is incomplete or invalid."""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, category="config_error", phase="config")
+from .errors import DaytonaConfigError
+from .models import SandboxLmRuntimeConfig
 
 
 @dataclass(slots=True)
@@ -159,12 +152,12 @@ def daytona_import_error(exc: ImportError) -> RuntimeError:
 
 
 def build_daytona_client(config: ResolvedDaytonaConfig) -> Any:
-    """Build an AsyncDaytona client lazily to keep imports light."""
+    """Build a sync Daytona client lazily to keep imports light."""
     try:
-        from daytona import AsyncDaytona, DaytonaConfig
+        from daytona import Daytona, DaytonaConfig
     except ImportError as exc:  # pragma: no cover - environment specific
         raise daytona_import_error(exc) from exc
-    return AsyncDaytona(
+    return Daytona(
         DaytonaConfig(
             api_key=config.api_key,
             api_url=config.api_url.rstrip("/"),

@@ -8,7 +8,7 @@ from typing import AbstractSet, Any, Callable
 
 from dspy.primitives import CodeInterpreterError
 
-from .interpreter_assets import (
+from ._sandbox_constants import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
 )
@@ -52,7 +52,7 @@ def bridge_tools(
 
         tools["fetch_document_text"] = fetch_document_text
 
-    from .evidence_bridge import (
+    from .isolation import (
         fetch_evidence,
         list_evidence,
         store_evidence,
@@ -107,7 +107,7 @@ def invoke_tool(
 
             value = fetch_document_text(*args, **kwargs)
         elif name in ("store_evidence", "fetch_evidence", "list_evidence"):
-            from .evidence_bridge import (
+            from .isolation import (
                 fetch_evidence,
                 list_evidence,
                 store_evidence,

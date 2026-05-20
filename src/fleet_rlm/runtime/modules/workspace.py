@@ -76,7 +76,7 @@ class RecursiveWorkspaceModule(dspy.Module):
     Pass ``evidence_sink=None`` (the default) to skip persistence — this
     matches the behaviour of runs without a host repository attached.  The
     production adapter is
-    ``fleet_rlm.integrations.daytona.evidence_bridge.DaytonaEvidenceSink``.
+    ``fleet_rlm.integrations.daytona.isolation.DaytonaEvidenceSink``.
     """
 
     def __init__(

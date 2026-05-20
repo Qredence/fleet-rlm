@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
+from fleet_rlm.integrations.daytona.models import SandboxSpec
 
 
 class _FakeImage:

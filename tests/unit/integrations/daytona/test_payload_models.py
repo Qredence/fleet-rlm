@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.integrations.daytona.payload_models import (
+from fleet_rlm.integrations.daytona.models import (
     ContextSource,
     SandboxLmRuntimeConfig,
     normalized_context_sources,

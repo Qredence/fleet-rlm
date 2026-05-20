@@ -2,42 +2,27 @@
 
 from __future__ import annotations
 
-import asyncio
 import threading
-from contextlib import suppress
 from typing import Any
 
-from .async_compat import (
-    _await_if_needed,
-    _run_async_compat,
-)
+from .async_compat import _run_sync_in_thread
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import build_daytona_client as _build_daytona_client
-from .payload_models import ContextSource
-from .sandbox_lifecycle import (
-    afork_sandbox as _afork_sandbox,
-)
-from .sandbox_lifecycle import (
-    aget_sandbox as _aget_sandbox_helper,
-)
-from .sandbox_lifecycle import (
-    aresume_workspace_session as _aresume_workspace_session,
-)
-from .sandbox_spec import (
-    DEFAULT_SANDBOX_LABELS,
+from .models import (
+    ContextSource,
     SandboxSpec,
 )
-from .sandbox_spec import (
+from .models import (
     build_sandbox_spec as _build_sandbox_spec_helper,
 )
-from .sandbox_spec import (
+from .models import (
     default_sandbox_name as _default_sandbox_name_helper,
 )
-from .sandbox_spec import (
+from .models import (
     merge_sandbox_labels as _merge_sandbox_labels_helper,
 )
-from .session_runtime import DaytonaSandboxSession
-from .snapshot_runtime import (
+from .sdk_ops import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DEFAULT_SNAPSHOT_NAME,
     DEFAULT_SNAPSHOT_PACKAGES,
     acreate_snapshot,
@@ -45,16 +30,25 @@ from .snapshot_runtime import (
     alist_snapshots,
     aresolve_snapshot,
 )
-from .snapshot_runtime import (
+from .sdk_ops import (
     acreate_sandbox_snapshot as _acreate_sandbox_snapshot_helper,
 )
-from .snapshot_runtime import (
+from .sdk_ops import (
+    afork_sandbox as _afork_sandbox,
+)
+from .sdk_ops import (
+    aget_sandbox as _aget_sandbox_helper,
+)
+from .sdk_ops import (
+    aresume_workspace_session as _aresume_workspace_session,
+)
+from .sdk_ops import (
     fallback_to_declarative_image as _fallback_to_declarative_image,
 )
-from .snapshot_runtime import (
+from .sdk_ops import (
     resolve_default_snapshot as _resolve_default_snapshot,
 )
-from .volume_runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
+from .session_runtime import DaytonaSandboxSession
 from .workspace_runtime import (
     WorkspaceSessionCreateRequest,
     WorkspaceSessionReconcileRequest,
@@ -81,53 +75,38 @@ class DaytonaSandboxRuntime:
     """Factory for Daytona sandboxes used by the pilot."""
 
     # Default labels applied to all sandboxes created by this runtime
-    DEFAULT_LABELS: dict[str, str] = dict(DEFAULT_SANDBOX_LABELS)
+    DEFAULT_LABELS: dict[str, str] = dict({"managed-by": "fleet-rlm"})
 
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
         self._client: Any | None = None
-        self._client_owner: tuple[int, int] | None = None
+        self._client_lock = threading.Lock()
         self._closed = False
 
-    async def _aget_client(self) -> Any:
-        if self._closed:
-            raise RuntimeError("Daytona runtime client is closed")
-        owner = (threading.get_ident(), id(asyncio.get_running_loop()))
-        client = self._client
-        if client is None:
-            client = _build_daytona_client(self._resolved_config)
-            self._client = client
-            self._client_owner = owner
-            return client
-        if self._client_owner is None:
-            self._client_owner = owner
-            return client
-        if self._client_owner == owner:
-            return client
-        close = getattr(client, "close", None)
-        if close is not None and callable(close):
-            with suppress(Exception):
-                await _await_if_needed(close())
-        rebuilt = _build_daytona_client(self._resolved_config)
-        self._client = rebuilt
-        self._client_owner = owner
-        return rebuilt
-
-    async def aclose(self) -> None:
-        self._closed = True
-        client = self._client
-        self._client = None
-        self._client_owner = None
-        if client is None:
-            return
-        close = getattr(client, "close", None)
-        if close is None or not callable(close):
-            return
-        await _await_if_needed(close())
+    def _get_client(self) -> Any:
+        """Return the cached sync Daytona client, building one if needed."""
+        with self._client_lock:
+            if self._closed:
+                raise RuntimeError("Daytona runtime client is closed")
+            if self._client is None:
+                self._client = _build_daytona_client(self._resolved_config)
+            return self._client
 
     def close(self) -> None:
-        _run_async_compat(self.aclose)
+        """Close the runtime and release the underlying client."""
+        with self._client_lock:
+            self._closed = True
+            client = self._client
+            self._client = None
+        if client is None:
+            return
+        close = getattr(client, "close", None)
+        if close is not None and callable(close):
+            close()
+
+    async def aclose(self) -> None:
+        await _run_sync_in_thread(self.close)
 
     @staticmethod
     def _default_sandbox_name() -> str:
@@ -172,16 +151,16 @@ class DaytonaSandboxRuntime:
         start with pre-installed core packages (dspy-ai, numpy, pandas,
         httpx, pydantic).  If the snapshot has not been created yet, the
         runtime falls back to a declarative image build at sandbox
-        creation time (see ``_acreate_sandbox``).
+        creation time (see ``_create_sandbox``).
 
         Cost-saving lifecycle defaults:
 
-        * ``auto_stop_interval`` — minutes of inactivity before the
+        * ``auto_stop_interval`` -- minutes of inactivity before the
           sandbox is automatically stopped (default 30).
           ``refresh_activity()`` resets the timer.
-        * ``auto_archive_interval`` — minutes after stop before the
+        * ``auto_archive_interval`` -- minutes after stop before the
           sandbox is archived to cold storage (default 60).
-        * ``auto_delete_interval`` — minutes after archive before
+        * ``auto_delete_interval`` -- minutes after archive before
           permanent deletion (default ``None`` = never auto-delete).
 
         A human-readable ``name`` is generated automatically when not
@@ -207,7 +186,7 @@ class DaytonaSandboxRuntime:
             network_allow_list=network_allow_list,
         )
 
-    async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
+    def _create_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
         """Create a sandbox using a declarative ``SandboxSpec``.
 
         When the spec carries a ``daytona.Image`` declarative builder,
@@ -215,9 +194,12 @@ class DaytonaSandboxRuntime:
         Daytona caches the built image for 24 hours.  Otherwise a
         snapshot-based sandbox is created.
         """
-        return await _acreate_sandbox_from_spec_helper(runtime=self, spec=spec)
+        return _acreate_sandbox_from_spec_helper(runtime=self, spec=spec)
 
-    async def _acreate_sandbox(
+    async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
+        return await _run_sync_in_thread(self._create_sandbox_from_spec, spec)
+
+    def _create_sandbox(
         self,
         volume_name: str | None = None,
         *,
@@ -231,24 +213,35 @@ class DaytonaSandboxRuntime:
         using ``DEFAULT_SNAPSHOT_PACKAGES`` so the sandbox still starts
         with the expected packages pre-installed.
         """
-        return await _acreate_sandbox_helper(
+        return _acreate_sandbox_helper(
             runtime=self,
             volume_name=volume_name,
             spec=spec,
         )
+
+    async def _acreate_sandbox(
+        self,
+        volume_name: str | None = None,
+        *,
+        spec: SandboxSpec | None = None,
+    ) -> Any:
+        return await _run_sync_in_thread(self._create_sandbox, volume_name, spec=spec)
 
     @staticmethod
     def _fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
         """Replace a snapshot-based spec with a declarative image build."""
         return _fallback_to_declarative_image(spec)
 
-    async def _aget_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
+    def _get_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
         """Get an existing sandbox by ID, recovering from archive if needed."""
-        return await _aget_sandbox_helper(
+        return _aget_sandbox_helper(
             runtime=self,
             sandbox_id=sandbox_id,
             recover=recover,
         )
+
+    async def _aget_sandbox(self, sandbox_id: str, *, recover: bool = True) -> Any:
+        return await _run_sync_in_thread(self._get_sandbox, sandbox_id, recover=recover)
 
     def _build_workspace_session(
         self,
@@ -274,28 +267,7 @@ class DaytonaSandboxRuntime:
         )
         session._runtime_ref = self
         session.phase_timings_ms.update(timings)
-        session.bind_current_async_owner()
         return session
-
-    async def acreate_workspace_session(
-        self,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-        volume_name: str | None = None,
-        spec: SandboxSpec | None = None,
-    ) -> DaytonaSandboxSession:
-        return await _acreate_workspace_session_helper(
-            runtime=self,
-            request=WorkspaceSessionCreateRequest(
-                repo_url=repo_url,
-                ref=ref,
-                context_paths=context_paths or [],
-                volume_name=volume_name,
-                spec=spec,
-            ),
-        )
 
     def create_workspace_session(
         self,
@@ -306,35 +278,33 @@ class DaytonaSandboxRuntime:
         volume_name: str | None = None,
         spec: SandboxSpec | None = None,
     ) -> DaytonaSandboxSession:
-        return _run_async_compat(
-            self.acreate_workspace_session,
+        return _acreate_workspace_session_helper(
+            runtime=self,
+            request=WorkspaceSessionCreateRequest(
+                repo_url=repo_url,
+                ref=ref,
+                context_paths=context_paths or [],
+                volume_name=volume_name,
+                spec=spec,
+            ),
+        )
+
+    async def acreate_workspace_session(
+        self,
+        *,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+        volume_name: str | None = None,
+        spec: SandboxSpec | None = None,
+    ) -> DaytonaSandboxSession:
+        return await _run_sync_in_thread(
+            self.create_workspace_session,
             repo_url=repo_url,
             ref=ref,
             context_paths=context_paths,
             volume_name=volume_name,
             spec=spec,
-        )
-
-    async def aresume_workspace_session(
-        self,
-        *,
-        sandbox_id: str,
-        repo_url: str | None,
-        ref: str | None,
-        volume_name: str | None = None,
-        workspace_path: str,
-        context_sources: list[ContextSource] | None = None,
-        context_id: str | None = None,
-    ) -> DaytonaSandboxSession:
-        return await _aresume_workspace_session(
-            runtime=self,
-            sandbox_id=sandbox_id,
-            repo_url=repo_url,
-            ref=ref,
-            volume_name=volume_name,
-            workspace_path=workspace_path,
-            context_sources=context_sources,
-            context_id=context_id,
         )
 
     def resume_workspace_session(
@@ -348,8 +318,8 @@ class DaytonaSandboxRuntime:
         context_sources: list[ContextSource] | None = None,
         context_id: str | None = None,
     ) -> DaytonaSandboxSession:
-        return _run_async_compat(
-            self.aresume_workspace_session,
+        return _aresume_workspace_session(
+            runtime=self,
             sandbox_id=sandbox_id,
             repo_url=repo_url,
             ref=ref,
@@ -359,7 +329,29 @@ class DaytonaSandboxRuntime:
             context_id=context_id,
         )
 
-    async def afork_sandbox(
+    async def aresume_workspace_session(
+        self,
+        *,
+        sandbox_id: str,
+        repo_url: str | None,
+        ref: str | None,
+        volume_name: str | None = None,
+        workspace_path: str,
+        context_sources: list[ContextSource] | None = None,
+        context_id: str | None = None,
+    ) -> DaytonaSandboxSession:
+        return await _run_sync_in_thread(
+            self.resume_workspace_session,
+            sandbox_id=sandbox_id,
+            repo_url=repo_url,
+            ref=ref,
+            volume_name=volume_name,
+            workspace_path=workspace_path,
+            context_sources=context_sources,
+            context_id=context_id,
+        )
+
+    def fork_sandbox(
         self,
         session: DaytonaSandboxSession,
         *,
@@ -370,22 +362,35 @@ class DaytonaSandboxRuntime:
 
         Wraps the Daytona SDK's experimental ``_experimental_fork`` method.
         """
-        return await _afork_sandbox(
+        return _afork_sandbox(
             runtime=self,
             session=session,
             name=name,
             timeout=timeout,
         )
 
-    def fork_sandbox(
+    async def afork_sandbox(
         self,
         session: DaytonaSandboxSession,
         *,
         name: str | None = None,
         timeout: float = 60.0,
     ) -> DaytonaSandboxSession:
-        return _run_async_compat(
-            self.afork_sandbox,
+        return await _run_sync_in_thread(self.fork_sandbox, session, name=name, timeout=timeout)
+
+    def create_sandbox_snapshot(
+        self,
+        session: DaytonaSandboxSession,
+        *,
+        name: str,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """Create a snapshot from the current state of a sandbox session.
+
+        Wraps the Daytona SDK's experimental ``_experimental_create_snapshot``
+        method.
+        """
+        return _acreate_sandbox_snapshot_helper(
             session,
             name=name,
             timeout=timeout,
@@ -398,29 +403,23 @@ class DaytonaSandboxRuntime:
         name: str,
         timeout: float = 60.0,
     ) -> dict[str, Any]:
-        """Create a snapshot from the current state of a sandbox session.
+        return await _run_sync_in_thread(self.create_sandbox_snapshot, session, name=name, timeout=timeout)
 
-        Wraps the Daytona SDK's experimental ``_experimental_create_snapshot``
-        method.
-        """
-        return await _acreate_sandbox_snapshot_helper(
-            session,
-            name=name,
-            timeout=timeout,
-        )
-
-    def create_sandbox_snapshot(
+    def reconcile_workspace_session(
         self,
         session: DaytonaSandboxSession,
         *,
-        name: str,
-        timeout: float = 60.0,
-    ) -> dict[str, Any]:
-        return _run_async_compat(
-            self.acreate_sandbox_snapshot,
-            session,
-            name=name,
-            timeout=timeout,
+        repo_url: str | None,
+        ref: str | None,
+        context_paths: list[str] | None = None,
+    ) -> DaytonaSandboxSession:
+        return _areconcile_workspace_session_helper(
+            session=session,
+            request=WorkspaceSessionReconcileRequest(
+                repo_url=repo_url,
+                ref=ref,
+                context_paths=context_paths or [],
+            ),
         )
 
     async def areconcile_workspace_session(
@@ -431,25 +430,8 @@ class DaytonaSandboxRuntime:
         ref: str | None,
         context_paths: list[str] | None = None,
     ) -> DaytonaSandboxSession:
-        return await _areconcile_workspace_session_helper(
-            session=session,
-            request=WorkspaceSessionReconcileRequest(
-                repo_url=repo_url,
-                ref=ref,
-                context_paths=context_paths or [],
-            ),
-        )
-
-    def reconcile_workspace_session(
-        self,
-        session: DaytonaSandboxSession,
-        *,
-        repo_url: str | None,
-        ref: str | None,
-        context_paths: list[str] | None = None,
-    ) -> DaytonaSandboxSession:
-        return _run_async_compat(
-            self.areconcile_workspace_session,
+        return await _run_sync_in_thread(
+            self.reconcile_workspace_session,
             session,
             repo_url=repo_url,
             ref=ref,

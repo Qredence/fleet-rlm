@@ -1,14 +1,14 @@
-"""Tests for snapshot helpers in ``fleet_rlm.integrations.daytona.snapshot_runtime``."""
+"""Tests for snapshot helpers in ``fleet_rlm.integrations.daytona.sdk_ops``."""
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.integrations.daytona.sandbox_spec import SandboxSpec
-from fleet_rlm.integrations.daytona.snapshot_runtime import (
+from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+from fleet_rlm.integrations.daytona.models import SandboxSpec
+from fleet_rlm.integrations.daytona.sdk_ops import (
     abootstrap_snapshot,
     aget_snapshot,
     alist_snapshots,
@@ -52,7 +52,7 @@ class _FakeClient:
         self.snapshot = _FakeSnapshotService(snapshots)
         self.close_calls = 0
 
-    async def close(self) -> None:
+    def close(self) -> None:
         self.close_calls += 1
 
 
@@ -60,14 +60,21 @@ def _make_snapshot(name: str, *, state: str = "ACTIVE", snap_id: str = "snap-1")
     return SimpleNamespace(name=name, id=snap_id, state=state, image_name="python:3.12-slim")
 
 
+class _FakeDaytonaApiError(Exception):
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = message
+
+
 def test_alist_snapshots_returns_summaries(monkeypatch) -> None:
     snaps = [_make_snapshot("base"), _make_snapshot("extra", snap_id="snap-2")]
     fake_client = _FakeClient(snaps)
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
-    result = asyncio.run(alist_snapshots(config=SimpleNamespace(api_key="k", api_url="u", target=None)))
+    result = alist_snapshots(config=SimpleNamespace(api_key="k", api_url="u", target=None))
     assert len(result) == 2
     assert result[0]["name"] == "base"
     assert result[1]["id"] == "snap-2"
@@ -76,14 +83,12 @@ def test_alist_snapshots_returns_summaries(monkeypatch) -> None:
 def test_aget_snapshot_found(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
-    result = asyncio.run(
-        aget_snapshot(
-            "fleet-rlm-base",
-            config=SimpleNamespace(api_key="k", api_url="u", target=None),
-        )
+    result = aget_snapshot(
+        "fleet-rlm-base",
+        config=SimpleNamespace(api_key="k", api_url="u", target=None),
     )
     assert result is not None
     assert result["name"] == "fleet-rlm-base"
@@ -92,30 +97,47 @@ def test_aget_snapshot_found(monkeypatch) -> None:
 def test_aget_snapshot_missing(monkeypatch) -> None:
     fake_client = _FakeClient([])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
-    result = asyncio.run(aget_snapshot("nonexistent", config=SimpleNamespace(api_key="k", api_url="u", target=None)))
+    result = aget_snapshot("nonexistent", config=SimpleNamespace(api_key="k", api_url="u", target=None))
     assert result is None
+
+
+def test_aget_snapshot_reraises_provider_failures(monkeypatch) -> None:
+    fake_client = _FakeClient([])
+
+    def _boom(name: str):
+        _ = name
+        raise _FakeDaytonaApiError("provider unavailable", status=503)
+
+    fake_client.snapshot.get = _boom
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
+        lambda config: fake_client,
+    )
+
+    with pytest.raises(DaytonaDiagnosticError, match="snapshot lookup failure"):
+        aget_snapshot("fleet-rlm-base", config=SimpleNamespace(api_key="k", api_url="u", target=None))
 
 
 def test_aresolve_snapshot_active(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base", state="ACTIVE")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
-    result = asyncio.run(aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None)))
+    result = aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None))
     assert result == "fleet-rlm-base"
 
 
 def test_aresolve_snapshot_inactive(monkeypatch) -> None:
     fake_client = _FakeClient([_make_snapshot("fleet-rlm-base", state="BUILDING")])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
-    result = asyncio.run(aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None)))
+    result = aresolve_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None))
     assert result is None
 
 
@@ -159,27 +181,27 @@ def test_fallback_to_declarative_image_uses_shared_builder() -> None:
 
 
 def test_aresolve_sandbox_spec_snapshot_keeps_active_snapshot(monkeypatch) -> None:
-    async def _active_snapshot(name: str, *, config=None):
+    def _active_snapshot(name: str, *, config=None):
         _ = config
         return name
 
-    monkeypatch.setattr("fleet_rlm.integrations.daytona.snapshot_runtime.aresolve_snapshot", _active_snapshot)
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot", _active_snapshot)
     spec = SandboxSpec(snapshot="fleet-rlm-base")
 
-    resolved = asyncio.run(aresolve_sandbox_spec_snapshot(spec, config=SimpleNamespace()))
+    resolved = aresolve_sandbox_spec_snapshot(spec, config=SimpleNamespace())
 
     assert resolved is spec
 
 
 def test_aresolve_sandbox_spec_snapshot_falls_back_when_inactive(monkeypatch) -> None:
-    async def _inactive_snapshot(name: str, *, config=None):
+    def _inactive_snapshot(name: str, *, config=None):
         _ = name, config
         return None
 
-    monkeypatch.setattr("fleet_rlm.integrations.daytona.snapshot_runtime.aresolve_snapshot", _inactive_snapshot)
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops.resolve_snapshot", _inactive_snapshot)
     spec = SandboxSpec(snapshot="fleet-rlm-base")
 
-    resolved = asyncio.run(aresolve_sandbox_spec_snapshot(spec, config=SimpleNamespace()))
+    resolved = aresolve_sandbox_spec_snapshot(spec, config=SimpleNamespace())
 
     assert resolved is not spec
     assert resolved.snapshot is None
@@ -190,11 +212,11 @@ def test_abootstrap_snapshot_reuses_existing_snapshot(monkeypatch) -> None:
     existing = _make_snapshot("fleet-rlm-base")
     fake_client = _FakeClient([existing])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
 
-    result = asyncio.run(abootstrap_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None)))
+    result = abootstrap_snapshot(config=SimpleNamespace(api_key="k", api_url="u", target=None))
 
     assert result["name"] == "fleet-rlm-base"
     assert result["created"] is False
@@ -207,15 +229,13 @@ def test_abootstrap_snapshot_refreshes_existing_snapshot(monkeypatch) -> None:
     existing = _make_snapshot("fleet-rlm-base", snap_id="old-snap")
     fake_client = _FakeClient([existing])
     monkeypatch.setattr(
-        "fleet_rlm.integrations.daytona.snapshot_runtime._build_daytona_client",
+        "fleet_rlm.integrations.daytona.sdk_ops._build_daytona_client",
         lambda config: fake_client,
     )
 
-    result = asyncio.run(
-        abootstrap_snapshot(
-            refresh=True,
-            config=SimpleNamespace(api_key="k", api_url="u", target=None),
-        )
+    result = abootstrap_snapshot(
+        refresh=True,
+        config=SimpleNamespace(api_key="k", api_url="u", target=None),
     )
 
     assert result["name"] == "fleet-rlm-base"
@@ -224,3 +244,90 @@ def test_abootstrap_snapshot_refreshes_existing_snapshot(monkeypatch) -> None:
     assert result["refreshed"] is True
     assert [snapshot.id for snapshot in fake_client.snapshot.delete_calls] == ["old-snap"]
     assert len(fake_client.snapshot.create_calls) == 1
+
+
+def test_abootstrap_snapshot_waits_for_old_snapshot_to_clear_before_recreate(monkeypatch) -> None:
+    existing = {"name": "fleet-rlm-base", "id": "old-snap", "state": "ACTIVE"}
+    lookup_results = [existing, existing, None]
+    calls: list[object] = []
+
+    def _get_snapshot(name: str, *, config=None):
+        _ = config
+        calls.append(("get", name))
+        return lookup_results.pop(0)
+
+    def _delete_snapshot(name: str, *, config=None) -> None:
+        _ = config
+        calls.append(("delete", name))
+
+    def _create_snapshot(
+        name: str = "fleet-rlm-base",
+        *,
+        base_image: str,
+        config=None,
+        on_logs=None,
+    ) -> dict[str, str]:
+        _ = base_image, config, on_logs
+        calls.append(("create", name))
+        return {"name": name, "id": "created-snap", "state": "ACTIVE"}
+
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops.get_snapshot", _get_snapshot)
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops.delete_snapshot", _delete_snapshot)
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops.create_snapshot", _create_snapshot)
+    monkeypatch.setattr("fleet_rlm.integrations.daytona.sdk_ops._time.sleep", lambda _seconds: None)
+
+    result = abootstrap_snapshot(
+        refresh=True,
+        config=SimpleNamespace(api_key="k", api_url="u", target=None),
+    )
+
+    assert result == {
+        "name": "fleet-rlm-base",
+        "id": "created-snap",
+        "state": "ACTIVE",
+        "created": True,
+        "refreshed": True,
+    }
+    assert calls == [
+        ("get", "fleet-rlm-base"),
+        ("delete", "old-snap"),
+        ("get", "fleet-rlm-base"),
+        ("get", "fleet-rlm-base"),
+        ("create", "fleet-rlm-base"),
+    ]
+
+
+def test_abootstrap_snapshot_reuses_concurrent_replacement(monkeypatch) -> None:
+    existing = {"name": "fleet-rlm-base", "id": "old-snap", "state": "ACTIVE"}
+    replacement = {"name": "fleet-rlm-base", "id": "new-snap", "state": "ACTIVE"}
+    lookup_results = [existing, replacement]
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.get_snapshot",
+        lambda name, *, config=None: lookup_results.pop(0),
+    )
+    delete_calls: list[str] = []
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.delete_snapshot",
+        lambda name, *, config=None: delete_calls.append(name),
+    )
+    create_calls: list[str] = []
+
+    def _create_snapshot(name: str = "fleet-rlm-base", **kwargs):
+        _ = kwargs
+        create_calls.append(name)
+        return {"name": name}
+
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.daytona.sdk_ops.create_snapshot",
+        _create_snapshot,
+    )
+
+    result = abootstrap_snapshot(
+        refresh=True,
+        config=SimpleNamespace(api_key="k", api_url="u", target=None),
+    )
+
+    assert result == {**replacement, "created": False, "refreshed": True}
+    assert delete_calls == ["old-snap"]
+    assert create_calls == []

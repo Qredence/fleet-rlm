@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
+from fleet_rlm.integrations.daytona import async_compat as async_compat_module
 from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.integrations.daytona.config import (
     classify_daytona_sdk_error,
@@ -24,6 +27,23 @@ async def test_run_async_compat_reraises_exception_inside_running_loop() -> None
 
     with pytest.raises(ValueError, match="boom"):
         _run_async_compat(_raises_error)
+
+
+@pytest.mark.asyncio
+async def test_run_async_compat_reuses_persistent_background_runner() -> None:
+    async def _thread_id() -> int:
+        return threading.get_ident()
+
+    first = _run_async_compat(_thread_id)
+    runner_thread = async_compat_module._BACKGROUND_ASYNC_RUNNER._thread
+
+    assert runner_thread is not None
+    assert runner_thread.is_alive() is True
+
+    second = _run_async_compat(_thread_id)
+
+    assert async_compat_module._BACKGROUND_ASYNC_RUNNER._thread is runner_thread
+    assert first == second == runner_thread.ident
 
 
 class _FakeDaytonaApiError(Exception):
@@ -60,3 +80,43 @@ def test_format_daytona_sdk_error_includes_status_and_provider_message() -> None
     assert "resource/quota/precondition failure" in message
     assert "HTTP 400" in message
     assert "resource unavailable" in message
+
+
+def test_background_async_runner_does_not_spawn_duplicate_startup_threads(monkeypatch) -> None:
+    runner = async_compat_module._BackgroundAsyncRunner()
+    startup_gate = threading.Event()
+    startup_entered = threading.Event()
+    startup_calls = 0
+    startup_calls_lock = threading.Lock()
+    original_thread_main = runner._thread_main
+
+    def _gated_thread_main(ready: threading.Event) -> None:
+        nonlocal startup_calls
+        with startup_calls_lock:
+            startup_calls += 1
+        startup_entered.set()
+        startup_gate.wait(timeout=1.0)
+        original_thread_main(ready)
+
+    monkeypatch.setattr(runner, "_thread_main", _gated_thread_main)
+
+    errors: list[Exception] = []
+
+    def _ensure() -> None:
+        try:
+            runner.ensure_loop()
+        except Exception as exc:  # pragma: no cover - diagnostic capture
+            errors.append(exc)
+
+    first = threading.Thread(target=_ensure)
+    second = threading.Thread(target=_ensure)
+    first.start()
+    assert startup_entered.wait(timeout=1.0) is True
+    second.start()
+    startup_gate.set()
+    first.join(timeout=1.0)
+    second.join(timeout=1.0)
+
+    assert errors == []
+    assert startup_calls == 1
+    runner.close()

@@ -9,12 +9,10 @@ from typing import Any
 
 from fleet_rlm.utils.paths import dedupe_paths
 
-from .async_compat import _run_async_compat
-from .payload_models import normalized_context_sources
+from .async_compat import _await_if_needed, _run_async_compat
+from .models import ReconfigureOutcome, SandboxSpec, WorkspaceConfig, normalized_context_sources
 from .runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH, DaytonaSandboxRuntime
-from .sandbox_spec import SandboxSpec
 from .session_runtime import DaytonaSandboxSession
-from .workspace_config import ReconfigureOutcome, WorkspaceConfig
 
 
 class WorkspaceManager:
@@ -111,6 +109,10 @@ class WorkspaceManager:
             return True
         return any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
 
+    @staticmethod
+    async def _call_maybe_async(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return await _await_if_needed(func(*args, **kwargs))
+
     async def _aresume_workspace_session(
         self: Any,
         *,
@@ -121,7 +123,9 @@ class WorkspaceManager:
         context_sources: list[Any],
         context_id: str | None,
     ) -> DaytonaSandboxSession:
-        resume_workspace_session = self.runtime.aresume_workspace_session
+        resume_workspace_session = (
+            getattr(self.runtime, "aresume_workspace_session", None) or self.runtime.resume_workspace_session
+        )
         resume_kwargs: dict[str, Any] = {
             "sandbox_id": sandbox_id,
             "repo_url": repo_url,
@@ -132,16 +136,19 @@ class WorkspaceManager:
         }
         if self._callable_accepts_kwarg(resume_workspace_session, "volume_name"):
             resume_kwargs["volume_name"] = self._persisted_volume_name or self.volume_name
-        return await resume_workspace_session(**resume_kwargs)
+        return await self._call_maybe_async(resume_workspace_session, **resume_kwargs)
 
     async def _areconcile_workspace_session(
         self,
         session: DaytonaSandboxSession,
     ) -> DaytonaSandboxSession:
-        reconcile_workspace_session = getattr(self.runtime, "areconcile_workspace_session", None)
+        reconcile_workspace_session = getattr(self.runtime, "areconcile_workspace_session", None) or getattr(
+            self.runtime, "reconcile_workspace_session", None
+        )
         if not callable(reconcile_workspace_session):
             raise RuntimeError("Runtime does not support workspace reconciliation")
-        return await reconcile_workspace_session(
+        return await self._call_maybe_async(
+            reconcile_workspace_session,
             session,
             repo_url=self.repo_url,
             ref=self.repo_ref,
@@ -340,7 +347,11 @@ class WorkspaceManager:
         source_key: tuple[str | None, str | None, tuple[str, ...], str | None],
         should_report_recreated: bool,
     ) -> DaytonaSandboxSession:
-        session = await self.runtime.acreate_workspace_session(
+        create_workspace_session = (
+            getattr(self.runtime, "acreate_workspace_session", None) or self.runtime.create_workspace_session
+        )
+        session = await self._call_maybe_async(
+            create_workspace_session,
             repo_url=self.repo_url,
             ref=self.repo_ref,
             context_paths=list(self.context_paths),
@@ -402,11 +413,14 @@ class WorkspaceManager:
         await self._aclose_bridge()
         try:
             if delete:
-                await active_session.adelete()
+                delete_fn = getattr(active_session, "adelete", None) or active_session.delete
+                await self._call_maybe_async(delete_fn)
             elif self.delete_context_on_shutdown:
-                await active_session.adelete_context()
+                delete_context_fn = getattr(active_session, "adelete_context", None) or active_session.delete_context
+                await self._call_maybe_async(delete_context_fn)
             else:
-                await active_session.aclose_driver()
+                close_driver_fn = getattr(active_session, "aclose_driver", None) or active_session.close_driver
+                await self._call_maybe_async(close_driver_fn)
         finally:
             if delete:
                 self._clear_persisted_session()
@@ -425,7 +439,8 @@ class WorkspaceManager:
     async def _aclose_runtime(self: Any) -> None:
         if not self._owns_runtime or self._runtime_closed:
             return
-        await self.runtime.aclose()
+        close_fn = getattr(self.runtime, "aclose", None) or self.runtime.close
+        await self._call_maybe_async(close_fn)
         self._runtime_closed = True
 
     def _ensure_runtime_available(self: Any) -> None:

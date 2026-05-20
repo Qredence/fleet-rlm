@@ -61,26 +61,24 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `interpreter.py` is the public `DaytonaInterpreter` facade used by `dspy.RLM`, runtime services, and callers
   - `workspace_manager.py` owns workspace config, session lifecycle, persisted Daytona state, runtime metadata, and session import/export
   - `sandbox_executor.py` owns code execution, code sanitization, bridge/setup state, tool callback dispatch, and result finalization
-  - `child_delegation.py` owns the concrete interpreter hooks for recursive child creation and delegates policy decisions to `child_isolation.py`
-  - `workspace_config.py` owns the normalized immutable workspace configuration boundary
-  - `runtime.py` owns workspace bootstrap, context staging, and snapshot helpers
+  - `isolation.py` owns recursive child policy/delegation, host-mediated evidence persistence, and local context staging
+  - `models.py` owns sandbox specs, workspace config, staged-context records, smoke results, and chat/session normalization contracts
+  - `runtime.py` owns the runtime facade around workspace bootstrap and session creation
+  - `workspace_runtime.py` owns workspace path, repo checkout, and session reconciliation helpers
+  - `sdk_ops.py` owns volume, snapshot, lifecycle, and lower-level Daytona SDK helpers
   - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
   - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
-  - `types.py` owns provider-local configuration, staged-context, smoke-result, and chat/session normalization contracts
-  - `volumes.py` owns provider-specific volume browsing helpers
 - Daytona collaborator boundaries are intentionally typed with small internal
   Protocols rather than mixin-style dynamic forwarding. Pydantic v2 is used for
   normalized configuration/state inputs such as `WorkspaceConfig`; hot
   execution-path carriers such as `DaytonaExecutionResponse` remain lightweight
   dataclasses/functions.
 - Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
-- The provider is now async-first internally:
-  - `AsyncDaytona` drives sandbox/session lifecycle
-  - host-side volume browsing uses async Daytona helpers directly
-  - async sandbox helpers such as `get_work_dir()` and `get_preview_link()` must be awaited before their values are used
-  - owned `AsyncDaytona` clients should be closed when an interpreter/runtime is discarded to avoid leaking HTTP sessions
-  - sync helper methods remain only as public compatibility shims over the async implementation
-  - internal Daytona interpreter flow assumes the canonical async provider contract and does not probe for older sync-only runtime/session shapes
+- The Fleet-facing provider contract is async-first:
+  - `DaytonaInterpreter.astart()`, `ashutdown()`, `aexecute()`, `aconfigure_workspace()`, and `aimport_session_state()` are real coroutines
+  - `DaytonaSandboxSession` file/lifecycle `a*` methods are real coroutines for API services that await them
+  - sync helper methods remain public compatibility shims for notebooks, tests, and direct Python API users
+  - internal workspace manager code prefers async collaborators and can fall back to sync compatibility methods at test or adapter boundaries
 - Sandbox creation prefers the reusable `fleet-rlm-base` Daytona snapshot. That
   snapshot is an environment template built from a declarative image containing
   fleet-rlm's default Python runtime packages (`dspy-ai`, `numpy`, `pandas`,

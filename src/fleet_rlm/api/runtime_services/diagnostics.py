@@ -313,16 +313,13 @@ async def run_daytona_connection_test(
         client = None
         try:
             from fleet_rlm.integrations.daytona import resolve_daytona_config
-            from fleet_rlm.integrations.daytona.async_compat import _await_if_needed
-            from fleet_rlm.integrations.daytona.config import (
-                build_daytona_client,
-            )
+            from fleet_rlm.integrations.daytona.config import build_daytona_client
 
             config = resolve_daytona_config()
             client = build_daytona_client(config)
 
             response = await asyncio.wait_for(
-                _await_if_needed(client.list(limit=1)),
+                asyncio.to_thread(lambda: client.list(limit=1)),
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
             items = getattr(response, "items", [])
@@ -335,7 +332,7 @@ async def run_daytona_connection_test(
                 close = getattr(client, "close", None)
                 if callable(close):
                     with suppress(Exception):
-                        await _await_if_needed(close())
+                        await asyncio.to_thread(close)
 
     return await run_connectivity_test(
         diagnostics=diagnostics_deps,
