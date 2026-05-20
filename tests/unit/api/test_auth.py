@@ -42,6 +42,12 @@ def _make_fake_entra_token(claims: dict) -> str:
     return f"{header}.{payload}.fakesig"
 
 
+def _make_fake_entra_token_with_payload(payload_obj: object) -> str:
+    header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(payload_obj).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.fakesig"
+
+
 class _FakeToken:
     """Minimal stand-in for a joserfc Token returned by jwt.decode."""
 
@@ -277,6 +283,22 @@ async def test_entra_auth_rejects_missing_tid_before_issuer_resolution(
 
     assert exc.value.status_code == 401
     assert "tid" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_entra_auth_rejects_non_object_payload_as_malformed_client_token():
+    provider = EntraAuthProvider(
+        jwks_url="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        issuer_template="https://login.microsoftonline.com/{tenantid}/v2.0",
+        audience="api://fleet-rlm",
+    )
+    token = _make_fake_entra_token_with_payload(["not", "a", "mapping"])
+
+    with pytest.raises(AuthError) as exc:
+        await provider.authenticate_http(_FakeRequest({"authorization": f"Bearer {token}"}))
+
+    assert exc.value.status_code == 401
+    assert "payload" in exc.value.message
 
 
 @pytest.mark.asyncio

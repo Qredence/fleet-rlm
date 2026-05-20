@@ -155,6 +155,8 @@ class EntraAuthProvider:
                 padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
                 payload_bytes = base64.urlsafe_b64decode(padded)
                 unverified_claims = json.loads(payload_bytes.decode("utf-8"))
+                if not isinstance(unverified_claims, dict):
+                    raise AuthError("Token payload must be a JSON object", status_code=401)
             except AuthError:
                 raise
             except Exception as exc:

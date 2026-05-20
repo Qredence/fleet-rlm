@@ -115,18 +115,18 @@ async def test_execution_event_emitter_filters_by_subscription():
 
 
 @pytest.mark.asyncio
-async def test_execution_event_emitter_allows_workspace_user_subscription():
+async def test_execution_event_emitter_requires_exact_session_match():
     emitter = ExecutionEventEmitter()
     ws_match = _FakeWebSocket()
     ws_other = _FakeWebSocket()
 
     await emitter.connect(
         ws_match,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id=""),
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-new"),
     )
     await emitter.connect(
         ws_other,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="bob", session_id=""),
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-other"),
     )
 
     await emitter.emit(
@@ -145,6 +145,46 @@ async def test_execution_event_emitter_allows_workspace_user_subscription():
     assert ws_other.sent == []
     await emitter.disconnect(ws_match)  # type: ignore[arg-type]
     await emitter.disconnect(ws_other)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_execution_event_emitter_updates_subscription_for_existing_socket():
+    emitter = ExecutionEventEmitter()
+    ws = _FakeWebSocket()
+
+    await emitter.connect(
+        ws,  # type: ignore[arg-type]
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-a"),
+    )
+    await emitter.update_subscription(
+        ws,  # type: ignore[arg-type]
+        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-b"),
+    )
+    await emitter.emit(
+        ExecutionEvent(
+            type="execution_started",
+            run_id="default:alice:session-a:1",
+            workspace_id="default",
+            user_id="alice",
+            session_id="session-a",
+            step=None,
+        )
+    )
+    await emitter.emit(
+        ExecutionEvent(
+            type="execution_started",
+            run_id="default:alice:session-b:1",
+            workspace_id="default",
+            user_id="alice",
+            session_id="session-b",
+            step=None,
+        )
+    )
+    await asyncio.sleep(0.01)
+
+    assert len(ws.sent) == 1
+    assert ws.sent[0]["session_id"] == "session-b"
+    await emitter.disconnect(ws)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

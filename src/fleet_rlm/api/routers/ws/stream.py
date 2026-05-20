@@ -24,7 +24,12 @@ from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_even
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
-from ...events import ExecutionEventEmitter, ExecutionStep, ExecutionStepBuilder
+from ...events import (
+    ExecutionEventEmitter,
+    ExecutionStep,
+    ExecutionStepBuilder,
+    ExecutionSubscription,
+)
 from ...events.event_adapter import (
     adapt_stream_event,
     build_chat_event_payload,
@@ -1115,6 +1120,14 @@ class _ExecutionConnectionLoop:
                     msg=msg,
                     workspace_id=self.session.canonical_workspace_id,
                     user_id=self.session.canonical_user_id,
+                )
+                await self.execution_emitter.update_subscription(
+                    self.websocket,
+                    ExecutionSubscription(
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        session_id=sess_id,
+                    ),
                 )
                 self.stream_task = asyncio.create_task(
                     _background_execution_task(

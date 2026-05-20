@@ -165,6 +165,9 @@ class FleetAgent(dspy.Module):
             last_tool_name = tool_name
             last_thought = pred.next_thought
 
+            if not tool_name:
+                break
+
             try:
                 tool = self.tools[tool_name]
                 if hasattr(tool, "func"):

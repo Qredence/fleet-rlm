@@ -70,6 +70,24 @@ def test_fleet_agent_forward_prediction_has_response_field(react_records):
     assert result.response == "fake_thought"
 
 
+def test_fleet_agent_forward_treats_empty_tool_name_as_terminal(monkeypatch: pytest.MonkeyPatch):
+    class _FakePredict:
+        def __init__(self, signature, **kwargs):
+            _ = signature, kwargs
+
+        def __call__(self, **kwargs):
+            _ = kwargs
+            return dspy.Prediction(next_thought="done", next_tool_name="", next_tool_args={})
+
+    monkeypatch.setattr("fleet_rlm.runtime.agent.agent.dspy.Predict", _FakePredict)
+    agent = FleetAgent(tools=[])
+
+    result = agent.forward(chat_history=dspy.History(messages=[]), user_message="hello")
+
+    assert result.response == "done"
+    assert "observation_0" not in result.trajectory
+
+
 def test_build_chat_agent_returns_agent_runtime(monkeypatch: pytest.MonkeyPatch):
     from fleet_rlm.runtime import factory as _factory
     from fleet_rlm.runtime.agent.runtime import AgentRuntime

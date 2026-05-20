@@ -117,7 +117,7 @@ class ExecutionSubscription(BaseModel):
         return (
             self.workspace_id == event.workspace_id
             and self.user_id == event.user_id
-            and (not self.session_id or self.session_id == event.session_id)
+            and self.session_id == event.session_id
         )
 
 
@@ -191,6 +191,17 @@ class ExecutionEventEmitter:
                 logger.exception(
                     "Unexpected error while awaiting sender_task during disconnect teardown",
                 )
+
+    async def update_subscription(
+        self,
+        websocket: WebSocket,
+        subscription: ExecutionSubscription,
+    ) -> None:
+        """Retarget an existing connection without restarting its sender queue."""
+        async with self._lock:
+            state = self._connections.get(websocket)
+            if state is not None:
+                state.subscription = subscription
 
     async def _sender_loop(self, websocket: WebSocket) -> None:
         state: ExecutionEventEmitter._ConnectionState | None = None
